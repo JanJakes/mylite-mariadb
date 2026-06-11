@@ -4665,6 +4665,17 @@ subsystems that this mode needs:
   record bytes plus ownerless autocommit per-insert byte averages, keeping the
   production timing evidence tied to full-page WAL volume before a future WAL
   format or native redo/checkpoint proof attempts to reduce it. The
+  ownerless page-log zero-range payload slice is the first such WAL-format
+  reduction: it stores either a one-pass sparse nonzero-run payload for
+  zero-heavy pages or the nonzero prefix for pages whose tail is all zero,
+  flags the record, reconstructs the full page before checksum validation, and
+  keeps all page-version records present for active readers, history-proof
+  handoff, and no-live `.shm` rebuild. Tail-only encoding was neutral in the
+  hot sample, while the sparse encoder reduced page-log payload bytes from
+  `49479.680` to `7967.610` per simple ownerless autocommit insert without a
+  measured append-time regression. This is intentionally not a native
+  redo/checkpoint proof and does not skip the rollback-segment or undo-header
+  history-proof records. The
   write-history page-write handoff now uses a rollback-segment-space target-LSN
   wait instead of a global dirty-page wait,
   preserving native proof for the history page while avoiding unrelated

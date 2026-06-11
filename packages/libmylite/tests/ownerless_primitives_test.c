@@ -126,6 +126,7 @@ static void test_directory_probe_records_required_primitives(void);
 static void test_page_log_reads_latest_visible_page(void);
 static void test_page_log_uses_payload_offset(void);
 static void test_page_log_append_reports_write_volume(void);
+static void test_page_log_encodes_sparse_zero_payloads(void);
 static void test_page_log_initialized_append_uses_existing_header(void);
 static void test_page_log_initialized_sync_uses_existing_header(void);
 static void test_page_log_reads_under_existing_read_lock(void);
@@ -308,6 +309,7 @@ int main(void) {
     test_page_log_reads_latest_visible_page();
     test_page_log_uses_payload_offset();
     test_page_log_append_reports_write_volume();
+    test_page_log_encodes_sparse_zero_payloads();
     test_page_log_initialized_append_uses_existing_header();
     test_page_log_initialized_sync_uses_existing_header();
     test_page_log_reads_under_existing_read_lock();
@@ -1092,6 +1094,188 @@ static void test_page_log_append_reports_write_volume(void) {
     assert(
         stats[PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_BYTES] ==
         2U * MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE
+    );
+
+    assert(close(fd) == 0);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_encodes_sparse_zero_payloads(void) {
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "trimmed-payload-page-log.bin");
+    int fd = open_file(log_path);
+    uint8_t full_page[128];
+    uint8_t sparse_page[128];
+    uint8_t zero_page[128];
+    uint8_t out_page[128];
+    uint64_t first_record_offset = 0;
+    uint64_t sparse_record_offset = 0;
+    uint64_t zero_record_offset = 0;
+    uint64_t page_lsn = 0;
+    uint64_t commit_lsn = 0;
+    uint32_t out_page_size = 0;
+    uint64_t stats[PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
+    mylite_ownerless_page_log_append_session session = {0};
+    struct stat log_stat = {0};
+    const size_t sparse_payload_size = 40U;
+
+    memset(full_page, 0x44, sizeof(full_page));
+    memset(sparse_page, 0, sizeof(sparse_page));
+    memset(zero_page, 0, sizeof(zero_page));
+    sparse_page[0] = 0x31;
+    sparse_page[7] = 0x32;
+    sparse_page[32] = 0x33;
+    sparse_page[sizeof(sparse_page) - 1U] = 0x34;
+    memset(out_page, 0xEE, sizeof(out_page));
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    mylite_ownerless_page_log_reset_append_perf_stats();
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            9U,
+            1U,
+            80U,
+            80U,
+            full_page,
+            sizeof(full_page),
+            &first_record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append_session_begin_initialized_at(fd, 0U, &session) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append_session_append(
+            fd,
+            &session,
+            9U,
+            1U,
+            120U,
+            120U,
+            sparse_page,
+            sizeof(sparse_page),
+            &sparse_record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append_session_append(
+            fd,
+            &session,
+            9U,
+            1U,
+            140U,
+            140U,
+            zero_page,
+            sizeof(zero_page),
+            &zero_record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    mylite_ownerless_page_log_append_session_end(fd, &session);
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(0);
+    mylite_ownerless_page_log_read_append_perf_stats(stats, PAGE_LOG_APPEND_PERF_STAT_COUNT);
+
+    assert(first_record_offset == MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE);
+    assert(
+        sparse_record_offset ==
+        first_record_offset + MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE + sizeof(full_page)
+    );
+    assert(
+        zero_record_offset ==
+        sparse_record_offset + MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE + sparse_payload_size
+    );
+    assert(fstat(fd, &log_stat) == 0);
+    assert(
+        log_stat.st_size ==
+        (off_t)(zero_record_offset + MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE)
+    );
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_CALLS] == 3U);
+    assert(
+        stats[PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_BYTES] == sizeof(full_page) + sparse_payload_size
+    );
+    assert(
+        stats[PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_BYTES] ==
+        3U * MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE
+    );
+
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            9U,
+            1U,
+            120U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(sparse_page));
+    assert(page_lsn == 120U);
+    assert(commit_lsn == 120U);
+    assert(memcmp(out_page, sparse_page, sizeof(sparse_page)) == 0);
+
+    memset(out_page, 0xEE, sizeof(out_page));
+    assert(
+        mylite_ownerless_page_log_read_record_at(
+            fd,
+            0U,
+            zero_record_offset,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(zero_page));
+    assert(page_lsn == 140U);
+    assert(commit_lsn == 140U);
+    assert(memcmp(out_page, zero_page, sizeof(zero_page)) == 0);
+
+    assert(
+        mylite_ownerless_page_log_checkpoint(fd, 120U, NULL, NULL) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(fstat(fd, &log_stat) == 0);
+    assert(
+        log_stat.st_size == (off_t)(MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE +
+                                    MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE)
+    );
+    memset(out_page, 0xEE, sizeof(out_page));
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            9U,
+            1U,
+            140U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(zero_page));
+    assert(page_lsn == 140U);
+    assert(commit_lsn == 140U);
+    assert(memcmp(out_page, zero_page, sizeof(zero_page)) == 0);
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            9U,
+            1U,
+            120U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_NOT_FOUND
     );
 
     assert(close(fd) == 0);

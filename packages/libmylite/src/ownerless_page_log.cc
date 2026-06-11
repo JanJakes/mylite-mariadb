@@ -68,6 +68,10 @@ constexpr std::size_t k_record_page_lsn_offset = 24;
 constexpr std::size_t k_record_commit_lsn_offset = 32;
 constexpr std::size_t k_record_payload_size_offset = 40;
 constexpr std::size_t k_record_payload_checksum_offset = 48;
+constexpr std::uint32_t k_record_flag_trailing_zero_payload = 1U;
+constexpr std::uint32_t k_record_flag_sparse_zero_payload = 2U;
+constexpr std::uint32_t k_record_flags_known_mask =
+    k_record_flag_trailing_zero_payload | k_record_flag_sparse_zero_payload;
 constexpr std::size_t k_innodb_fil_page_type_offset = 24;
 constexpr std::uint16_t k_innodb_fil_page_type_allocated = 0;
 constexpr std::uint16_t k_innodb_fil_page_undo_log = 2;
@@ -87,6 +91,7 @@ struct PageRecordHeader {
     std::uint32_t space_id = 0;
     std::uint32_t page_no = 0;
     std::uint32_t page_size = 0;
+    std::uint32_t flags = 0;
     std::uint64_t page_lsn = 0;
     std::uint64_t commit_lsn = 0;
     std::uint64_t payload_size = 0;
@@ -222,7 +227,8 @@ int append_record_at_locked(
     std::uint64_t commit_lsn,
     const void *page,
     std::uint32_t page_size,
-    std::uint64_t *out_record_offset
+    std::uint64_t *out_record_offset,
+    std::uint64_t *out_next_record_offset
 );
 int snapshot_locked(int fd, off_t log_offset, std::uint64_t *out_snapshot_end_offset);
 int snapshot_locked_with_generation(
@@ -343,7 +349,35 @@ bool sync_file(int fd);
 bool sync_file_data(int fd);
 bool next_io_offset(off_t offset, std::size_t progress, off_t *out_offset);
 bool offset_adds(off_t offset, std::uint64_t length, off_t *out_offset);
-bool record_payload_too_large(std::uint64_t payload_size, std::size_t page_capacity);
+std::uint64_t encoded_payload_size_for_page(
+    const void *page,
+    std::uint32_t page_size,
+    std::uint32_t *out_flags,
+    std::vector<unsigned char> *out_payload
+);
+bool record_uses_trailing_zero_payload(const PageRecordHeader &record);
+bool record_uses_sparse_zero_payload(const PageRecordHeader &record);
+bool record_payload_shape_valid(const PageRecordHeader &record);
+bool record_page_too_large(const PageRecordHeader &record, std::size_t page_capacity);
+bool read_record_page_payload(
+    int fd,
+    off_t payload_offset,
+    const PageRecordHeader &record,
+    void *out_page,
+    std::size_t page_capacity
+);
+bool read_record_page_type(
+    int fd,
+    off_t payload_offset,
+    const PageRecordHeader &record,
+    std::uint16_t *out_page_type
+);
+std::uint64_t trailing_zero_payload_size_for_page(const void *page, std::uint32_t page_size);
+bool build_sparse_zero_payload(
+    const void *page,
+    std::uint32_t page_size,
+    std::vector<unsigned char> *out_payload
+);
 PayloadStatus record_payload_status(int fd, off_t payload_offset, const PageRecordHeader &record);
 bool record_requires_oldest_snapshot_boundary(
     int fd,
@@ -351,7 +385,7 @@ bool record_requires_oldest_snapshot_boundary(
     const PageRecordHeader &record
 );
 bool record_page_type_is_native_support_state(std::uint16_t page_type);
-bool record_checksum_matches(const void *page, std::uint64_t payload_size, std::uint64_t checksum);
+bool record_checksum_matches(const void *page, std::uint64_t page_size, std::uint64_t checksum);
 bool record_is_better(const PageRecordHeader &candidate, const PageRecordHeader &current);
 std::uint64_t checksum_bytes(const void *buffer, std::size_t size);
 std::uint64_t legacy_checksum_bytes(const void *buffer, std::size_t size);
@@ -642,17 +676,7 @@ int mylite_ownerless_page_log_append_session_append(
     }
 
     const auto record_offset = static_cast<off_t>(session->next_record_offset);
-    off_t payload_offset = 0;
-    off_t end_offset = 0;
-    if (!offset_adds(
-            record_offset,
-            MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE,
-            &payload_offset
-        ) ||
-        !offset_adds(payload_offset, page_size, &end_offset)) {
-        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
-    }
-
+    std::uint64_t next_record_offset = 0;
     const int result = append_record_at_locked(
         fd,
         record_offset,
@@ -662,10 +686,11 @@ int mylite_ownerless_page_log_append_session_append(
         commit_lsn,
         page,
         page_size,
-        out_record_offset
+        out_record_offset,
+        &next_record_offset
     );
     if (result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
-        session->next_record_offset = static_cast<std::uint64_t>(end_offset);
+        session->next_record_offset = next_record_offset;
     }
     return result;
 }
@@ -1469,7 +1494,8 @@ int append_locked(
         commit_lsn,
         page,
         page_size,
-        out_record_offset
+        out_record_offset,
+        nullptr
     );
 }
 
@@ -1482,7 +1508,8 @@ int append_record_at_locked(
     std::uint64_t commit_lsn,
     const void *page,
     std::uint32_t page_size,
-    std::uint64_t *out_record_offset
+    std::uint64_t *out_record_offset,
+    std::uint64_t *out_next_record_offset
 ) {
     off_t payload_offset = 0;
     if (!offset_adds(
@@ -1493,7 +1520,17 @@ int append_record_at_locked(
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
     off_t end_offset = 0;
-    if (!offset_adds(payload_offset, page_size, &end_offset)) {
+    std::uint32_t record_flags = 0;
+    std::uint64_t encoded_payload_size = 0;
+    thread_local std::vector<unsigned char> encoded_payload;
+    encoded_payload.clear();
+    try {
+        encoded_payload_size =
+            encoded_payload_size_for_page(page, page_size, &record_flags, &encoded_payload);
+    } catch (const std::bad_alloc &) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if (!offset_adds(payload_offset, encoded_payload_size, &end_offset)) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
 
@@ -1501,21 +1538,24 @@ int append_record_at_locked(
     record.space_id = space_id;
     record.page_no = page_no;
     record.page_size = page_size;
+    record.flags = record_flags;
     record.page_lsn = page_lsn;
     record.commit_lsn = commit_lsn;
-    record.payload_size = page_size;
+    record.payload_size = encoded_payload_size;
     std::uint64_t stage_start_ns =
         page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
     record.checksum = checksum_bytes(page, page_size);
     page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_CHECKSUM_NS, stage_start_ns);
 
     stage_start_ns = page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
-    const bool payload_written = write_exact_at(fd, page, page_size, payload_offset);
+    const void *payload = encoded_payload.empty() ? page : encoded_payload.data();
+    const bool payload_written =
+        write_exact_at(fd, payload, static_cast<std::size_t>(encoded_payload_size), payload_offset);
     page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_PAYLOAD_WRITE_NS, stage_start_ns);
     if (!payload_written) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
-    page_log_append_perf_add(PAGE_LOG_APPEND_PERF_PAYLOAD_BYTES, page_size);
+    page_log_append_perf_add(PAGE_LOG_APPEND_PERF_PAYLOAD_BYTES, encoded_payload_size);
 
     stage_start_ns = page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
     const bool record_header_written = write_record_header(fd, record_offset, record);
@@ -1529,6 +1569,9 @@ int append_record_at_locked(
     );
     if (out_record_offset != nullptr) {
         *out_record_offset = static_cast<std::uint64_t>(record_offset);
+    }
+    if (out_next_record_offset != nullptr) {
+        *out_next_record_offset = static_cast<std::uint64_t>(end_offset);
     }
     return MYLITE_OWNERLESS_PAGE_LOG_OK;
 }
@@ -1740,30 +1783,23 @@ int find_latest_in_snapshot_range(
         best_payload_offset = payload_offset;
         record_offset = next_record_offset;
     }
-    if (best.payload_size == 0U) {
+    if (best.commit_lsn == 0U) {
         publish_scan_perf(
             scanned_page_records == 0U ? PAGE_LOG_SCAN_PERF_NOT_FOUND_NO_PAGE_RECORD
                                        : PAGE_LOG_SCAN_PERF_NOT_FOUND_PAGE_RECORD_NOT_VISIBLE
         );
         return MYLITE_OWNERLESS_PAGE_LOG_NOT_FOUND;
     }
-    if (best.payload_size > page_capacity ||
-        best.payload_size > std::numeric_limits<std::uint32_t>::max()) {
+    if (record_page_too_large(best, page_capacity)) {
         publish_scan_perf(PAGE_LOG_SCAN_PERF_ERRORS);
         return MYLITE_OWNERLESS_PAGE_LOG_FULL;
     }
-    if (!read_exact_at(
-            fd,
-            out_page,
-            static_cast<std::size_t>(best.payload_size),
-            best_payload_offset
-        ) ||
-        !record_checksum_matches(out_page, best.payload_size, best.checksum)) {
+    if (!read_record_page_payload(fd, best_payload_offset, best, out_page, page_capacity)) {
         publish_scan_perf(PAGE_LOG_SCAN_PERF_ERRORS);
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
 
-    *out_page_size = static_cast<std::uint32_t>(best.payload_size);
+    *out_page_size = best.page_size;
     *out_page_lsn = best.page_lsn;
     *out_commit_lsn = best.commit_lsn;
     publish_scan_perf(PAGE_LOG_SCAN_PERF_FOUND);
@@ -1811,20 +1847,14 @@ int read_record_at_locked(
     if (require_page_identity && (record.space_id != space_id || record.page_no != page_no)) {
         return MYLITE_OWNERLESS_PAGE_LOG_NOT_FOUND;
     }
-    if (record_payload_too_large(record.payload_size, page_capacity)) {
+    if (record_page_too_large(record, page_capacity)) {
         return MYLITE_OWNERLESS_PAGE_LOG_FULL;
     }
-    if (!read_exact_at(
-            fd,
-            out_page,
-            static_cast<std::size_t>(record.payload_size),
-            payload_offset
-        ) ||
-        !record_checksum_matches(out_page, record.payload_size, record.checksum)) {
+    if (!read_record_page_payload(fd, payload_offset, record, out_page, page_capacity)) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
 
-    *out_page_size = static_cast<std::uint32_t>(record.payload_size);
+    *out_page_size = record.page_size;
     *out_page_lsn = record.page_lsn;
     *out_commit_lsn = record.commit_lsn;
     return MYLITE_OWNERLESS_PAGE_LOG_OK;
@@ -1951,16 +1981,21 @@ int checkpoint_locked(
                     return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
                 }
             }
-            const std::size_t payload_size = static_cast<std::size_t>(record.payload_size);
-            std::unique_ptr<unsigned char[]> page(new (std::nothrow) unsigned char[payload_size]);
-            if (page == nullptr) {
+            const PayloadStatus payload_status = record_payload_status(fd, payload_offset, record);
+            if (payload_status == PayloadStatus::Mismatch &&
+                next_record_offset == file_stat.st_size) {
+                break;
+            }
+            if (payload_status != PayloadStatus::Ok) {
                 return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
             }
-            if (!read_exact_at(fd, page.get(), payload_size, payload_offset) ||
-                !record_checksum_matches(page.get(), record.payload_size, record.checksum)) {
-                if (next_record_offset == file_stat.st_size) {
-                    break;
-                }
+            const std::size_t payload_size = static_cast<std::size_t>(record.payload_size);
+            std::unique_ptr<unsigned char[]> payload(new (std::nothrow) unsigned char[payload_size]
+            );
+            if (payload == nullptr) {
+                return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+            }
+            if (!read_exact_at(fd, payload.get(), payload_size, payload_offset)) {
                 return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
             }
 
@@ -1971,7 +2006,7 @@ int checkpoint_locked(
                     &write_payload_offset
                 ) ||
                 !write_record_header(fd, write_offset, record) ||
-                !write_exact_at(fd, page.get(), payload_size, write_payload_offset)) {
+                !write_exact_at(fd, payload.get(), payload_size, write_payload_offset)) {
                 return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
             }
             if (retained_record_callback != nullptr) {
@@ -2123,12 +2158,11 @@ int checkpoint_preserving_oldest_snapshot_locked(
             }
         }
         const std::size_t payload_size = static_cast<std::size_t>(record.payload_size);
-        std::unique_ptr<unsigned char[]> page(new (std::nothrow) unsigned char[payload_size]);
-        if (page == nullptr) {
+        std::unique_ptr<unsigned char[]> payload(new (std::nothrow) unsigned char[payload_size]);
+        if (payload == nullptr) {
             return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
         }
-        if (!read_exact_at(fd, page.get(), payload_size, scanned.payload_offset) ||
-            !record_checksum_matches(page.get(), record.payload_size, record.checksum)) {
+        if (!read_exact_at(fd, payload.get(), payload_size, scanned.payload_offset)) {
             return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
         }
 
@@ -2139,7 +2173,7 @@ int checkpoint_preserving_oldest_snapshot_locked(
                 &write_payload_offset
             ) ||
             !write_record_header(fd, write_offset, record) ||
-            !write_exact_at(fd, page.get(), payload_size, write_payload_offset)) {
+            !write_exact_at(fd, payload.get(), payload_size, write_payload_offset)) {
             return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
         }
         if (retained_record_callback != nullptr) {
@@ -2374,12 +2408,12 @@ bool read_record_header(int fd, off_t offset, PageRecordHeader &header) {
     header.space_id = load32(bytes.data(), k_record_space_id_offset);
     header.page_no = load32(bytes.data(), k_record_page_no_offset);
     header.page_size = load32(bytes.data(), k_record_page_size_offset);
+    header.flags = load32(bytes.data(), k_record_flags_offset);
     header.page_lsn = load64(bytes.data(), k_record_page_lsn_offset);
     header.commit_lsn = load64(bytes.data(), k_record_commit_lsn_offset);
     header.payload_size = load64(bytes.data(), k_record_payload_size_offset);
     header.checksum = load64(bytes.data(), k_record_payload_checksum_offset);
-    return header.page_size != 0U && header.page_size == header.payload_size &&
-           header.commit_lsn != 0U;
+    return record_payload_shape_valid(header) && header.commit_lsn != 0U;
 }
 
 bool write_record_header(int fd, off_t offset, const PageRecordHeader &header) {
@@ -2388,7 +2422,7 @@ bool write_record_header(int fd, off_t offset, const PageRecordHeader &header) {
     store32(bytes.data(), k_record_space_id_offset, header.space_id);
     store32(bytes.data(), k_record_page_no_offset, header.page_no);
     store32(bytes.data(), k_record_page_size_offset, header.page_size);
-    store32(bytes.data(), k_record_flags_offset, 0U);
+    store32(bytes.data(), k_record_flags_offset, header.flags);
     store64(bytes.data(), k_record_page_lsn_offset, header.page_lsn);
     store64(bytes.data(), k_record_commit_lsn_offset, header.commit_lsn);
     store64(bytes.data(), k_record_payload_size_offset, header.payload_size);
@@ -2482,28 +2516,312 @@ bool offset_adds(off_t offset, std::uint64_t length, off_t *out_offset) {
     return true;
 }
 
-bool record_payload_too_large(std::uint64_t payload_size, std::size_t page_capacity) {
-    return payload_size > page_capacity || payload_size > std::numeric_limits<std::uint32_t>::max();
+std::uint64_t encoded_payload_size_for_page(
+    const void *page,
+    std::uint32_t page_size,
+    std::uint32_t *out_flags,
+    std::vector<unsigned char> *out_payload
+) {
+    const std::uint64_t trailing_size = trailing_zero_payload_size_for_page(page, page_size);
+
+    std::uint32_t flags = 0;
+    std::uint64_t encoded_size = page_size;
+    if (out_payload != nullptr && build_sparse_zero_payload(page, page_size, out_payload) &&
+        out_payload->size() < trailing_size) {
+        flags |= k_record_flag_sparse_zero_payload;
+        encoded_size = out_payload->size();
+    } else if (trailing_size < page_size) {
+        flags |= k_record_flag_trailing_zero_payload;
+        encoded_size = trailing_size;
+        if (out_payload != nullptr) {
+            out_payload->clear();
+        }
+    } else if (out_payload != nullptr) {
+        out_payload->clear();
+    }
+    if (out_flags != nullptr) {
+        *out_flags = flags;
+    }
+    return encoded_size;
 }
 
-PayloadStatus record_payload_status(int fd, off_t payload_offset, const PageRecordHeader &record) {
+std::uint64_t trailing_zero_payload_size_for_page(const void *page, std::uint32_t page_size) {
+    const auto *bytes = static_cast<const unsigned char *>(page);
+    std::uint64_t encoded_size = page_size;
+    while (encoded_size > 0U && bytes[encoded_size - 1U] == 0U) {
+        --encoded_size;
+    }
+    return encoded_size;
+}
+
+bool build_sparse_zero_payload(
+    const void *page,
+    std::uint32_t page_size,
+    std::vector<unsigned char> *out_payload
+) {
+    if (out_payload == nullptr) {
+        return false;
+    }
+    const auto *bytes = static_cast<const unsigned char *>(page);
+    out_payload->clear();
+    out_payload->reserve(page_size);
+    out_payload->resize(sizeof(std::uint32_t));
+    std::uint32_t run_count = 0;
+
+    for (std::uint32_t offset = 0; offset < page_size;) {
+        while (offset < page_size && bytes[offset] == 0U) {
+            ++offset;
+        }
+        if (offset == page_size) {
+            break;
+        }
+        const std::uint32_t run_start = offset;
+        while (offset < page_size && bytes[offset] != 0U) {
+            ++offset;
+        }
+        const std::uint32_t run_size = offset - run_start;
+        const std::size_t cursor = out_payload->size();
+        const std::size_t encoded_run_size = (2U * sizeof(std::uint32_t)) + run_size;
+        if (cursor + encoded_run_size >= page_size) {
+            out_payload->clear();
+            return false;
+        }
+        out_payload->resize(cursor + encoded_run_size);
+        store32(out_payload->data(), cursor, run_start);
+        store32(out_payload->data(), cursor + sizeof(std::uint32_t), run_size);
+        std::memcpy(
+            out_payload->data() + cursor + (2U * sizeof(std::uint32_t)),
+            bytes + run_start,
+            run_size
+        );
+        ++run_count;
+    }
+
+    if (run_count == 0U) {
+        out_payload->clear();
+        return false;
+    }
+    store32(out_payload->data(), 0U, run_count);
+    return true;
+}
+
+bool record_uses_trailing_zero_payload(const PageRecordHeader &record) {
+    return (record.flags & k_record_flag_trailing_zero_payload) != 0U;
+}
+
+bool record_uses_sparse_zero_payload(const PageRecordHeader &record) {
+    return (record.flags & k_record_flag_sparse_zero_payload) != 0U;
+}
+
+bool record_payload_shape_valid(const PageRecordHeader &record) {
+    if (record.page_size == 0U || (record.flags & ~k_record_flags_known_mask) != 0U) {
+        return false;
+    }
+    if (record_uses_trailing_zero_payload(record) && record_uses_sparse_zero_payload(record)) {
+        return false;
+    }
+    if (record_uses_sparse_zero_payload(record)) {
+        return record.payload_size >= sizeof(std::uint32_t) &&
+               record.payload_size < record.page_size;
+    }
+    if (record_uses_trailing_zero_payload(record)) {
+        return record.payload_size < record.page_size;
+    }
+    return record.flags == 0U && record.payload_size == record.page_size;
+}
+
+bool record_page_too_large(const PageRecordHeader &record, std::size_t page_capacity) {
+    return record.page_size > page_capacity ||
+           record.page_size > std::numeric_limits<std::uint32_t>::max();
+}
+
+bool read_record_page_payload(
+    int fd,
+    off_t payload_offset,
+    const PageRecordHeader &record,
+    void *out_page,
+    std::size_t page_capacity
+) {
+    if (!record_payload_shape_valid(record) || record_page_too_large(record, page_capacity)) {
+        return false;
+    }
     if constexpr (sizeof(std::size_t) < sizeof(record.payload_size)) {
         if (record.payload_size > std::numeric_limits<std::size_t>::max()) {
-            return PayloadStatus::Error;
+            return false;
+        }
+    }
+    const std::size_t page_size = static_cast<std::size_t>(record.page_size);
+    const std::size_t payload_size = static_cast<std::size_t>(record.payload_size);
+    if (record_uses_sparse_zero_payload(record)) {
+        std::unique_ptr<unsigned char[]> payload(new (std::nothrow) unsigned char[payload_size]);
+        if (payload == nullptr || !read_exact_at(fd, payload.get(), payload_size, payload_offset)) {
+            return false;
+        }
+        std::memset(out_page, 0, page_size);
+        if (payload_size < sizeof(std::uint32_t)) {
+            return false;
+        }
+        const std::uint32_t run_count = load32(payload.get(), 0U);
+        if (run_count == 0U) {
+            return false;
+        }
+        std::size_t cursor = sizeof(std::uint32_t);
+        bool has_previous_run = false;
+        std::uint32_t previous_run_end = 0;
+        for (std::uint32_t run_index = 0; run_index < run_count; ++run_index) {
+            if (cursor + (2U * sizeof(std::uint32_t)) > payload_size) {
+                return false;
+            }
+            const std::uint32_t run_offset = load32(payload.get(), cursor);
+            cursor += sizeof(std::uint32_t);
+            const std::uint32_t run_size = load32(payload.get(), cursor);
+            cursor += sizeof(std::uint32_t);
+            if (run_size == 0U || (has_previous_run && run_offset <= previous_run_end) ||
+                run_offset > record.page_size || run_size > record.page_size - run_offset ||
+                run_size > payload_size - cursor) {
+                return false;
+            }
+            std::memcpy(
+                static_cast<unsigned char *>(out_page) + run_offset,
+                payload.get() + cursor,
+                run_size
+            );
+            cursor += run_size;
+            previous_run_end = run_offset + run_size;
+            has_previous_run = true;
+        }
+        if (cursor != payload_size) {
+            return false;
+        }
+    } else if (record_uses_trailing_zero_payload(record)) {
+        std::memset(out_page, 0, page_size);
+        if (!read_exact_at(fd, out_page, payload_size, payload_offset)) {
+            return false;
+        }
+    } else {
+        if (!read_exact_at(fd, out_page, payload_size, payload_offset)) {
+            return false;
+        }
+    }
+    return record_checksum_matches(out_page, record.page_size, record.checksum);
+}
+
+bool read_record_page_type(
+    int fd,
+    off_t payload_offset,
+    const PageRecordHeader &record,
+    std::uint16_t *out_page_type
+) {
+    if (out_page_type == nullptr || !record_payload_shape_valid(record) ||
+        record.page_size < k_innodb_fil_page_type_offset + sizeof(std::uint16_t)) {
+        return false;
+    }
+    if constexpr (sizeof(std::size_t) < sizeof(record.payload_size)) {
+        if (record.payload_size > std::numeric_limits<std::size_t>::max()) {
+            return false;
         }
     }
     const std::size_t payload_size = static_cast<std::size_t>(record.payload_size);
-    std::unique_ptr<unsigned char[]> page(new (std::nothrow) unsigned char[payload_size]);
-    if (page == nullptr || !read_exact_at(fd, page.get(), payload_size, payload_offset)) {
-        return PayloadStatus::Error;
+    unsigned char page_type_bytes[2] = {};
+
+    if (record_uses_sparse_zero_payload(record)) {
+        unsigned char run_count_bytes[4] = {};
+        if (!read_exact_at(fd, run_count_bytes, sizeof(run_count_bytes), payload_offset)) {
+            return false;
+        }
+        if (payload_size < sizeof(std::uint32_t)) {
+            return false;
+        }
+        const std::uint32_t run_count = load32(run_count_bytes, 0U);
+        if (run_count == 0U) {
+            return false;
+        }
+        std::size_t cursor = sizeof(std::uint32_t);
+        bool has_previous_run = false;
+        std::uint32_t previous_run_end = 0;
+        for (std::uint32_t run_index = 0; run_index < run_count; ++run_index) {
+            if (cursor + (2U * sizeof(std::uint32_t)) > payload_size) {
+                return false;
+            }
+            off_t run_header_offset = 0;
+            unsigned char run_header[8] = {};
+            if (!offset_adds(payload_offset, cursor, &run_header_offset) ||
+                !read_exact_at(fd, run_header, sizeof(run_header), run_header_offset)) {
+                return false;
+            }
+            const std::uint32_t run_offset = load32(run_header, 0U);
+            const std::uint32_t run_size = load32(run_header, sizeof(std::uint32_t));
+            cursor += 2U * sizeof(std::uint32_t);
+            if (run_size == 0U || (has_previous_run && run_offset <= previous_run_end) ||
+                run_offset > record.page_size || run_size > record.page_size - run_offset ||
+                run_size > payload_size - cursor) {
+                return false;
+            }
+            for (std::size_t byte_index = 0; byte_index < sizeof(page_type_bytes); ++byte_index) {
+                const std::uint32_t target_offset =
+                    static_cast<std::uint32_t>(k_innodb_fil_page_type_offset + byte_index);
+                if (target_offset >= run_offset && target_offset < run_offset + run_size) {
+                    off_t target_file_offset = 0;
+                    if (!offset_adds(
+                            payload_offset,
+                            cursor + (target_offset - run_offset),
+                            &target_file_offset
+                        ) ||
+                        !read_exact_at(fd, &page_type_bytes[byte_index], 1U, target_file_offset)) {
+                        return false;
+                    }
+                }
+            }
+            cursor += run_size;
+            previous_run_end = run_offset + run_size;
+            has_previous_run = true;
+        }
+        if (cursor != payload_size) {
+            return false;
+        }
+    } else if (record_uses_trailing_zero_payload(record)) {
+        if (record.payload_size > k_innodb_fil_page_type_offset) {
+            off_t page_type_offset = 0;
+            if (!offset_adds(payload_offset, k_innodb_fil_page_type_offset, &page_type_offset)) {
+                return false;
+            }
+            const std::uint64_t available = record.payload_size - k_innodb_fil_page_type_offset;
+            const std::size_t bytes_to_read =
+                static_cast<std::size_t>(std::min<std::uint64_t>(sizeof(page_type_bytes), available)
+                );
+            if (!read_exact_at(fd, page_type_bytes, bytes_to_read, page_type_offset)) {
+                return false;
+            }
+        }
+    } else {
+        off_t page_type_offset = 0;
+        if (record.payload_size < k_innodb_fil_page_type_offset + sizeof(page_type_bytes) ||
+            !offset_adds(payload_offset, k_innodb_fil_page_type_offset, &page_type_offset) ||
+            !read_exact_at(fd, page_type_bytes, sizeof(page_type_bytes), page_type_offset)) {
+            return false;
+        }
     }
-    return record_checksum_matches(page.get(), record.payload_size, record.checksum)
-               ? PayloadStatus::Ok
-               : PayloadStatus::Mismatch;
+
+    *out_page_type = load_be16(page_type_bytes);
+    return true;
 }
 
-bool record_checksum_matches(const void *page, std::uint64_t payload_size, std::uint64_t checksum) {
-    const std::size_t size = static_cast<std::size_t>(payload_size);
+PayloadStatus record_payload_status(int fd, off_t payload_offset, const PageRecordHeader &record) {
+    if (!record_payload_shape_valid(record)) {
+        return PayloadStatus::Error;
+    }
+    std::unique_ptr<unsigned char[]> page(new (std::nothrow) unsigned char[record.page_size]);
+    if (page == nullptr) {
+        return PayloadStatus::Error;
+    }
+    if (!read_record_page_payload(fd, payload_offset, record, page.get(), record.page_size)) {
+        return PayloadStatus::Mismatch;
+    }
+    return PayloadStatus::Ok;
+}
+
+bool record_checksum_matches(const void *page, std::uint64_t page_size, std::uint64_t checksum) {
+    const std::size_t size = static_cast<std::size_t>(page_size);
     return checksum_bytes(page, size) == checksum || legacy_checksum_bytes(page, size) == checksum;
 }
 
@@ -2512,17 +2830,10 @@ bool record_requires_oldest_snapshot_boundary(
     off_t payload_offset,
     const PageRecordHeader &record
 ) {
-    off_t page_type_offset = 0;
-    if (record.payload_size < k_innodb_fil_page_type_offset + sizeof(std::uint16_t) ||
-        !offset_adds(payload_offset, k_innodb_fil_page_type_offset, &page_type_offset)) {
+    std::uint16_t page_type = 0;
+    if (!read_record_page_type(fd, payload_offset, record, &page_type)) {
         return true;
     }
-
-    unsigned char page_type_bytes[2] = {};
-    if (!read_exact_at(fd, page_type_bytes, sizeof(page_type_bytes), page_type_offset)) {
-        return true;
-    }
-    const std::uint16_t page_type = load_be16(page_type_bytes);
     return !record_page_type_is_native_support_state(page_type);
 }
 
@@ -2544,7 +2855,7 @@ bool record_page_type_is_native_support_state(std::uint16_t page_type) {
 }
 
 bool record_is_better(const PageRecordHeader &candidate, const PageRecordHeader &current) {
-    return current.payload_size == 0U || candidate.commit_lsn > current.commit_lsn ||
+    return current.commit_lsn == 0U || candidate.commit_lsn > current.commit_lsn ||
            (candidate.commit_lsn == current.commit_lsn && candidate.page_lsn > current.page_lsn);
 }
 

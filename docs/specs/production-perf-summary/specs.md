@@ -585,6 +585,27 @@ inserts at `837.62 ops/s`, and ownerless active-runtime reconnect at
 the history-proof page-version evidence, not blind elision of the current proof
 pages.
 
+A follow-up ownerless page-log payload slice keeps those history-proof records
+but encodes zero-heavy page images in the page-version WAL record format. The
+record header keeps the full page size and either a sparse-zero or trailing-zero
+flag, while the stored payload contains a nonzero-run list or nonzero prefix
+and the checksum still covers the reconstructed full page image. Tail-only
+encoding was effectively neutral in the hot sample (`4947967` payload bytes
+versus `4947968` before the slice), because InnoDB page trailers stayed
+nonzero. The final sparse encoder reduced the same 100-insert stats-enabled
+sample to `796761` page-log payload bytes total, `7967.610` payload bytes per
+insert, and `8160.890` total page-log bytes per insert, while page-log append
+time stayed near the previous sample (`0.083 ms/insert` versus
+`0.085 ms/insert`). Primitive coverage verifies sparse zero-range,
+tail-prefix, and zero-byte page payload readback, append-session offset
+advancement by encoded payload size, and checkpoint compaction of encoded
+retained records. A 500-insert stats-enabled sample showed later table pages
+becoming less sparse, with page-log payload at `17375.654` bytes per insert,
+page-log append at `0.120 ms/insert`, and ownerless autocommit at
+`1034.69 ops/s` versus ordinary autocommit at `2072.58 ops/s`; broader
+end-to-end write-throughput claims still need the remaining unaccounted
+prepared-step time instrumented.
+
 ## Acceptance Criteria
 
 - CI and local production probes emit compact summary keys for startup,

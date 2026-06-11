@@ -589,6 +589,15 @@ The WordPress mysqli adapter also skips redundant native parameter clearing for
 fully-bound prepared statement execution, preserving partial-binding behavior
 while reducing adapter work in prepared DML loops.
 
+Ownerless page-version WAL records can now encode zero-heavy page images by
+storing either a sparse nonzero-run list or a nonzero prefix plus a record flag,
+while retaining the full page size and verifying checksums over the
+reconstructed full page image. Primitive coverage verifies sparse zero-range,
+tail-prefix, and zero-byte payload readback, append-session offset advancement
+by encoded payload size, and checkpoint compaction of encoded retained records.
+This reduces WAL byte volume without skipping the history-proof records or
+changing page-visible publication semantics.
+
 ## Public API
 
 | Capability | MyLite status | Compatibility target |
