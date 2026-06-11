@@ -78,8 +78,9 @@ the end of the probes:
   - when detailed ownerless stats are enabled, row-insert subphase summaries
     for transaction start, prebuilt handling, row conversion, row-step
     execution, post-processing, row graph, index-entry, clustered/secondary
-    entry, clustered/secondary low-level insertion, and clustered pessimistic
-    B-tree insertion,
+    entry, clustered/secondary low-level insertion, clustered-low search,
+    duplicate-check, modify-record, instant-root, row-level MTR commit, and
+    big-record follow-up phases, and clustered pessimistic B-tree insertion,
   - when detailed ownerless stats are enabled, ownerless autocommit per-insert
     summaries for MTR-published page-version volume, total MyLite
     page-publish hook calls, page-log append calls, transaction-image,
@@ -203,9 +204,16 @@ throughput signal and runs a second reduced
 `MYLITE_PERF_OWNERLESS_PAGE_PUBLISH_STATS=1` attribution probe so CI logs also
 include the ownerless autocommit phase summaries and ordinary-versus-ownerless
 deep InnoDB deltas without conflating them with the stats-off throughput
-sample. The attribution summaries now include row-insert subphase deltas, which
-keeps the next optimization choice tied to measured InnoDB row graph and B-tree
-cost instead of the broad `row_insert_for_mysql()` total.
+sample. The attribution summaries now include row-insert subphase deltas,
+including clustered-low search, duplicate-check, row-level MTR commit, and
+rare fallback paths, which keeps the next optimization choice tied to measured
+InnoDB row graph and B-tree cost instead of the broad
+`row_insert_for_mysql()` total.
+The latest reduced local production rerun with this split reported a
+`0.472 ms/insert` ownerless-minus-ordinary clustered-low delta, with
+`0.378 ms/insert` in clustered optimistic B-tree insertion,
+`0.084 ms/insert` in row-level MTR commit, `0.010 ms/insert` in
+`btr_pcur_open()` search, and zero duplicate-check or rare fallback deltas.
 
 The ownerless attribution probe now preserves the historical
 `native_support_*_type_trx_system` aggregate while also exposing
@@ -550,7 +558,7 @@ pages.
 - Stats-enabled ownerless autocommit probes emit per-insert phase summaries
   derived from existing detailed counters, including separate MTR-published
   page-version, total page-publish hook-call, page-log append-call, and
-  non-MTR page-publish source rates.
+  non-MTR page-publish source rates, plus clustered-low row-insert subphases.
 - CI timing-sensitive jobs remain production-build based and test-only
   WordPress PHPUnit steps remain separated from build/setup phases.
 - CI embedded non-ownerless CTest coverage runs serially so production timing

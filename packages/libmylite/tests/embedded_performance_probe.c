@@ -378,6 +378,12 @@ enum innodb_deep_perf_stat_index {
     INNODB_DEEP_PERF_STAT_ROW_INS_SEC_ENTRY_TOTAL_NS,
     INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_CALLS,
     INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_TOTAL_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_BTR_PCUR_OPEN_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_DUPLICATE_CHECK_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_MODIFY_REC_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_INSTANT_ROOT_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_MTR_COMMIT_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_BIG_REC_NS,
     INNODB_DEEP_PERF_STAT_ROW_INS_SEC_LOW_CALLS,
     INNODB_DEEP_PERF_STAT_ROW_INS_SEC_LOW_TOTAL_NS,
     INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_CALLS,
@@ -1480,6 +1486,70 @@ static void emit_autocommit_deep_comparison_summary(
         "mylite_perf_summary_ordinary_autocommit_row_ins_clust_low_ms_per_insert",
         "mylite_perf_summary_ownerless_autocommit_row_ins_clust_low_ms_per_insert",
         "mylite_perf_summary_ownerless_minus_ordinary_autocommit_row_ins_clust_low_"
+        "ms_per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_ms_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_BTR_PCUR_OPEN_NS,
+        "mylite_perf_summary_ordinary_autocommit_row_ins_clust_low_btr_pcur_open_ms_"
+        "per_insert",
+        "mylite_perf_summary_ownerless_autocommit_row_ins_clust_low_btr_pcur_open_ms_"
+        "per_insert",
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_row_ins_clust_low_btr_"
+        "pcur_open_ms_per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_ms_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_DUPLICATE_CHECK_NS,
+        "mylite_perf_summary_ordinary_autocommit_row_ins_clust_low_duplicate_check_ms_"
+        "per_insert",
+        "mylite_perf_summary_ownerless_autocommit_row_ins_clust_low_duplicate_check_ms_"
+        "per_insert",
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_row_ins_clust_low_"
+        "duplicate_check_ms_per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_ms_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_MODIFY_REC_NS,
+        "mylite_perf_summary_ordinary_autocommit_row_ins_clust_low_modify_rec_ms_per_insert",
+        "mylite_perf_summary_ownerless_autocommit_row_ins_clust_low_modify_rec_ms_per_insert",
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_row_ins_clust_low_modify_"
+        "rec_ms_per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_ms_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_INSTANT_ROOT_NS,
+        "mylite_perf_summary_ordinary_autocommit_row_ins_clust_low_instant_root_ms_per_insert",
+        "mylite_perf_summary_ownerless_autocommit_row_ins_clust_low_instant_root_ms_per_insert",
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_row_ins_clust_low_instant_"
+        "root_ms_per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_ms_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_MTR_COMMIT_NS,
+        "mylite_perf_summary_ordinary_autocommit_row_ins_clust_low_mtr_commit_ms_per_insert",
+        "mylite_perf_summary_ownerless_autocommit_row_ins_clust_low_mtr_commit_ms_per_insert",
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_row_ins_clust_low_mtr_"
+        "commit_ms_per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_ms_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_BIG_REC_NS,
+        "mylite_perf_summary_ordinary_autocommit_row_ins_clust_low_big_rec_ms_per_insert",
+        "mylite_perf_summary_ownerless_autocommit_row_ins_clust_low_big_rec_ms_per_insert",
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_row_ins_clust_low_big_rec_"
         "ms_per_insert",
         insert_iterations
     );
@@ -4836,6 +4906,36 @@ static void emit_innodb_deep_perf_stats(const char *prefix) {
         prefix,
         "row_ins_clust_low_total",
         values[INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_TOTAL_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_ins_clust_low_btr_pcur_open",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_BTR_PCUR_OPEN_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_ins_clust_low_duplicate_check",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_DUPLICATE_CHECK_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_ins_clust_low_modify_rec",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_MODIFY_REC_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_ins_clust_low_instant_root",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_INSTANT_ROOT_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_ins_clust_low_mtr_commit",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_MTR_COMMIT_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_ins_clust_low_big_rec",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_BIG_REC_NS]
     );
     emit_innodb_deep_perf_value(
         prefix,

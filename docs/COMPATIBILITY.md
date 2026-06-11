@@ -158,6 +158,15 @@ row insertion down into transaction-start, prebuilt, conversion, row-step,
 post-processing, row graph, index-entry, clustered/secondary entry, clustered
 and secondary low-level insert, and clustered pessimistic B-tree deltas, while
 preserving the existing total row-insert and clustered optimistic B-tree keys.
+A follow-up clustered-low attribution split separates index search,
+duplicate-key checking, modify-record fallback, instant-root update, row-level
+mini-transaction commit, and big-record follow-up from the existing clustered
+optimistic and pessimistic B-tree timers.
+The latest reduced local production rerun reported a
+`0.472 ms/insert` ownerless-minus-ordinary clustered-low delta, split mostly
+between clustered optimistic B-tree insertion at `0.378 ms/insert` and the
+row-level mini-transaction commit at `0.084 ms/insert`; index search accounted
+for `0.010 ms/insert`, and duplicate/fallback phases stayed at zero.
 A follow-up slice now
 allows MariaDB's existing cached-undo reuse only while the runtime remains in
 the same continuous single-owner epoch already used for external-refresh skip

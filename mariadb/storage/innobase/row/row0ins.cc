@@ -2817,6 +2817,7 @@ row_ins_clust_index_entry_low(
 	mtr_t		mtr{trx};
 	buf_block_t*	block;
 	uint64_t	mylite_deep_btr_start = 0;
+	uint64_t	mylite_deep_stage_start = 0;
 
 	DBUG_ENTER("row_ins_clust_index_entry_low");
 	mylite_ownerless_innodb_deep_perf_count(
@@ -2888,11 +2889,21 @@ row_ins_clust_index_entry_low(
 	the function will return in both low_match and up_match of the
 	cursor sensible values */
 	pcur.btr_cur.page_cur.index = index;
+	mylite_deep_stage_start =
+		mylite_ownerless_innodb_deep_perf_start_ns();
 	err = btr_pcur_open(entry, PAGE_CUR_LE, mode, &pcur, &mtr);
+	mylite_ownerless_innodb_deep_perf_add_elapsed(
+		MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_CLUST_LOW_BTR_PCUR_OPEN_NS,
+		mylite_deep_stage_start);
 	if (err != DB_SUCCESS) {
 		index->table->file_unreadable = true;
 err_exit:
+		mylite_deep_stage_start =
+			mylite_ownerless_innodb_deep_perf_start_ns();
 		mtr.commit();
+		mylite_ownerless_innodb_deep_perf_add_elapsed(
+			MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_CLUST_LOW_MTR_COMMIT_NS,
+			mylite_deep_stage_start);
 		goto func_exit;
 	}
 
@@ -3039,9 +3050,14 @@ row_level_insert:
 			| BTR_NO_UNDO_LOG_FLAG | BTR_KEEP_SYS_FLAG)) {
 			/* Set no locks when applying log
 			in online table rebuild. Only check for duplicates. */
+			mylite_deep_stage_start =
+				mylite_ownerless_innodb_deep_perf_start_ns();
 			err = row_ins_duplicate_error_in_clust_online(
 				n_uniq, entry, &pcur.btr_cur,
 				&offsets, &offsets_heap);
+			mylite_ownerless_innodb_deep_perf_add_elapsed(
+				MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_CLUST_LOW_DUPLICATE_CHECK_NS,
+				mylite_deep_stage_start);
 
 			switch (err) {
 			case DB_SUCCESS:
@@ -3057,8 +3073,13 @@ row_level_insert:
 			/* Note that the following may return also
 			DB_LOCK_WAIT */
 
+			mylite_deep_stage_start =
+				mylite_ownerless_innodb_deep_perf_start_ns();
 			err = row_ins_duplicate_error_in_clust(
 				flags, &pcur.btr_cur, entry, thr);
+			mylite_ownerless_innodb_deep_perf_add_elapsed(
+				MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_CLUST_LOW_DUPLICATE_CHECK_NS,
+				mylite_deep_stage_start);
 		}
 
 		if (err != DB_SUCCESS) {
@@ -3074,11 +3095,21 @@ row_level_insert:
 		existing record */
 		mem_heap_t*	entry_heap	= mem_heap_create(1024);
 
+		mylite_deep_stage_start =
+			mylite_ownerless_innodb_deep_perf_start_ns();
 		err = row_ins_clust_index_entry_by_modify(
 			&pcur, flags, mode, &offsets, &offsets_heap,
 			entry_heap, entry, thr, &mtr);
+		mylite_ownerless_innodb_deep_perf_add_elapsed(
+			MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_CLUST_LOW_MODIFY_REC_NS,
+			mylite_deep_stage_start);
 
+		mylite_deep_stage_start =
+			mylite_ownerless_innodb_deep_perf_start_ns();
 		mtr_commit(&mtr);
+		mylite_ownerless_innodb_deep_perf_add_elapsed(
+			MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_CLUST_LOW_MTR_COMMIT_NS,
+			mylite_deep_stage_start);
 		mem_heap_free(entry_heap);
 	} else {
 		if (index->is_instant()) entry->trim(*index);
@@ -3138,6 +3169,8 @@ do_insert:
 		}
 
 		if (err == DB_SUCCESS && entry->info_bits) {
+			mylite_deep_stage_start =
+				mylite_ownerless_innodb_deep_perf_start_ns();
 			if (buf_block_t* root
 			    = btr_root_block_get(index, RW_X_LATCH, &mtr,
 						 &err)) {
@@ -3145,9 +3178,17 @@ do_insert:
 			} else {
 				ut_ad("cannot find root page" == 0);
 			}
+			mylite_ownerless_innodb_deep_perf_add_elapsed(
+				MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_CLUST_LOW_INSTANT_ROOT_NS,
+				mylite_deep_stage_start);
 		}
 
+		mylite_deep_stage_start =
+			mylite_ownerless_innodb_deep_perf_start_ns();
 		mtr.commit();
+		mylite_ownerless_innodb_deep_perf_add_elapsed(
+			MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_CLUST_LOW_MTR_COMMIT_NS,
+			mylite_deep_stage_start);
 
 		if (big_rec) {
 			ut_ad(err == DB_SUCCESS);
@@ -3159,9 +3200,14 @@ do_insert:
 			DBUG_EXECUTE_IF(
 				"row_ins_extern_checkpoint",
 				log_write_up_to(mtr.commit_lsn(), true););
+			mylite_deep_stage_start =
+				mylite_ownerless_innodb_deep_perf_start_ns();
 			err = row_ins_index_entry_big_rec(
 				entry, big_rec, offsets, &offsets_heap, index,
 				trx);
+			mylite_ownerless_innodb_deep_perf_add_elapsed(
+				MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_CLUST_LOW_BIG_REC_NS,
+				mylite_deep_stage_start);
 			dtuple_convert_back_big_rec(index, entry, big_rec);
 		}
 	}

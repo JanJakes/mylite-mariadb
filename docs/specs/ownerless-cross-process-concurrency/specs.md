@@ -4619,10 +4619,16 @@ subsystems that this mode needs:
   autocommit baselines plus ownerless-minus-ordinary per-insert deltas for the
   commit, write-history, history-list, commit-in-memory, ownerless visibility,
   row-insert, row-insert subphases, row graph/index-entry subphases, and
-  clustered optimistic or pessimistic B-tree phases. That keeps the next
+  clustered low-level search, duplicate-check, row-level MTR commit, rare
+  fallback, and optimistic or pessimistic B-tree phases. That keeps the next
   performance target tied to measured ownerless-specific deltas instead of
-  shared MariaDB/InnoDB insert cost. The generic InnoDB read-complete ownerless
-  overlay now runs only for MyLite-classified plain `SELECT`/`WITH`
+  shared MariaDB/InnoDB insert cost. The latest reduced local production rerun
+  after the clustered-low split reported ownerless-minus-ordinary deltas of
+  `0.472 ms/insert` in clustered-low total, `0.378 ms/insert` in clustered
+  optimistic B-tree insertion, `0.084 ms/insert` in row-level MTR commit, and
+  `0.010 ms/insert` in `btr_pcur_open()` search, while duplicate-check and
+  rare fallback deltas stayed at zero. The generic InnoDB read-complete
+  ownerless overlay now runs only for MyLite-classified plain `SELECT`/`WITH`
   page-version reads; non-SELECT DDL and DML rely on explicit page-write
   refresh and publication paths. The current reduced stats-enabled autocommit
   sample therefore reports zero non-SELECT ownerless page-read probes, while
