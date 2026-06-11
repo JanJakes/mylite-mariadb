@@ -75,6 +75,33 @@ expect_true($result instanceof MyLite\MySQLiResult, 'third SELECT did not return
 $row = $result->fetch_array();
 expect_true($row['body'] === 'third' && $row[0] === 'third', 'fetch_array row mismatch');
 
+$interleavedOne = 'SELECT body FROM profile_notes WHERE id IN (1, 3) ORDER BY id';
+$interleavedTwo = 'SELECT id FROM profile_notes WHERE id IN (2, 3) ORDER BY id';
+$result = $db->query($interleavedOne);
+expect_true($result instanceof MyLite\MySQLiResult, 'first interleaved SELECT failed');
+expect_true(
+    $result->fetch_all(2) === [['body' => 'first'], ['body' => 'third']],
+    'first interleaved SELECT row mismatch'
+);
+$result = $db->query($interleavedTwo);
+expect_true($result instanceof MyLite\MySQLiResult, 'second interleaved SELECT failed');
+expect_true(
+    $result->fetch_all(2) === [['id' => '2'], ['id' => '3']],
+    'second interleaved SELECT row mismatch'
+);
+$result = $db->query($interleavedOne);
+expect_true($result instanceof MyLite\MySQLiResult, 'first repeated interleaved SELECT failed');
+expect_true(
+    $result->fetch_all(2) === [['body' => 'first'], ['body' => 'third']],
+    'first repeated interleaved SELECT row mismatch'
+);
+$result = $db->query($interleavedTwo);
+expect_true($result instanceof MyLite\MySQLiResult, 'second repeated interleaved SELECT failed');
+expect_true(
+    $result->fetch_all(2) === [['id' => '2'], ['id' => '3']],
+    'second repeated interleaved SELECT row mismatch'
+);
+
 $result = $db->query('SELECT body FROM profile_notes ORDER BY id');
 expect_true($result instanceof MyLite\MySQLiResult, 'fourth SELECT did not return a result');
 $rows = $result->fetch_all(2);

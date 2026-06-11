@@ -151,6 +151,23 @@ The CI-shaped production WordPress performance probe reported
 `select1_ops_per_second=829.69`; the earlier production probe before this
 fast path reported about `383.57`.
 
+The mysqli adapter result-query cache is now a bounded exact-SQL LRU instead
+of a single entry. This keeps prepared result metadata for interleaved repeated
+queries while retaining the same conservative invalidation points for DDL,
+schema, transaction, lock, `SET`, `USE`, `CALL`, explicit prepared statements,
+reconnect, close, and error paths. The profile test covers non-consecutive
+exact SELECT reuse in addition to DML-preserved current-row visibility. The
+focused production `Tests_DB` profile after this LRU slice reported
+`query_cache_hits=13`, `query_cache_misses=1602`,
+`query_prepare_calls=1602`, `query_cache_clear_finalize_calls=1602`,
+`query_ms_total=11354.274`, and `wordpress_phpunit_reported_seconds=14.692`;
+the pre-LRU fast-reset profile reported `query_cache_hits=3`,
+`query_cache_misses=1612`, `query_prepare_calls=1612`,
+`query_cache_clear_finalize_calls=1612`, `query_ms_total=13141.702`, and
+`wordpress_phpunit_reported_seconds=16.442`. The remaining profile still shows
+mostly unique result SQL and no-result execution cost rather than cache lookup
+overhead.
+
 The same non-isolated step now also enables
 `MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE=1`, which opens one harness-owned mysqli
 connection after WordPress bootstrap and closes it at process shutdown. The

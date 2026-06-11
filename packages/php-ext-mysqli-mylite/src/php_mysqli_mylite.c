@@ -19,12 +19,19 @@
 #include <unistd.h>
 
 #define PHP_MYSQLI_MYLITE_EXT_VERSION "0.1.0"
+#define PHP_MYLITE_MYSQLI_QUERY_CACHE_CAPACITY 8U
+
+typedef struct php_mylite_mysqli_query_cache_entry {
+    mylite_stmt *stmt;
+    zend_string *sql;
+    uint64_t last_used;
+} php_mylite_mysqli_query_cache_entry;
 
 typedef struct php_mylite_mysqli_link {
     mylite_db *db;
     zend_string *charset;
-    mylite_stmt *query_cache_stmt;
-    zend_string *query_cache_sql;
+    php_mylite_mysqli_query_cache_entry query_cache[PHP_MYLITE_MYSQLI_QUERY_CACHE_CAPACITY];
+    uint64_t query_cache_clock;
     zend_object std;
 } php_mylite_mysqli_link;
 
@@ -224,11 +231,18 @@ static void php_mylite_mysqli_set_error(
 );
 static void php_mylite_mysqli_sync_status(php_mylite_mysqli_link *link, zend_object *object);
 static void php_mylite_mysqli_clear_query_cache(php_mylite_mysqli_link *link);
-static bool php_mylite_mysqli_query_cache_matches(
+static php_mylite_mysqli_query_cache_entry *php_mylite_mysqli_query_cache_find(
     php_mylite_mysqli_link *link,
     const char *sql,
     size_t sql_len
 );
+static php_mylite_mysqli_query_cache_entry *php_mylite_mysqli_query_cache_store(
+    php_mylite_mysqli_link *link,
+    const char *sql,
+    size_t sql_len,
+    mylite_stmt *stmt
+);
+static void php_mylite_mysqli_query_cache_clear_entry(php_mylite_mysqli_query_cache_entry *entry);
 static void php_mylite_mysqli_update_property_long_if_changed(
     zend_object *object,
     const char *name,
@@ -1961,8 +1975,8 @@ static zend_object *php_mylite_mysqli_link_create(zend_class_entry *class_entry)
     php_mylite_mysqli_link *link = zend_object_alloc(sizeof(php_mylite_mysqli_link), class_entry);
     link->db = NULL;
     link->charset = zend_string_init("utf8mb4", sizeof("utf8mb4") - 1, false);
-    link->query_cache_stmt = NULL;
-    link->query_cache_sql = NULL;
+    memset(link->query_cache, 0, sizeof(link->query_cache));
+    link->query_cache_clock = 0U;
     zend_object_std_init(&link->std, class_entry);
     object_properties_init(&link->std, class_entry);
     link->std.handlers = &php_mylite_mysqli_link_handlers;
@@ -2781,16 +2795,8 @@ static void php_mylite_mysqli_clear_query_cache(php_mylite_mysqli_link *link) {
         ++php_mylite_mysqli_profile.query_cache_clear_calls;
     }
     const uint64_t clear_start = php_mylite_mysqli_profile_start();
-    if (link->query_cache_stmt != NULL) {
-        if (php_mylite_mysqli_profile_enabled) {
-            ++php_mylite_mysqli_profile.query_cache_clear_finalize_calls;
-        }
-        (void)mylite_finalize(link->query_cache_stmt);
-        link->query_cache_stmt = NULL;
-    }
-    if (link->query_cache_sql != NULL) {
-        zend_string_release(link->query_cache_sql);
-        link->query_cache_sql = NULL;
+    for (size_t index = 0; index < PHP_MYLITE_MYSQLI_QUERY_CACHE_CAPACITY; ++index) {
+        php_mylite_mysqli_query_cache_clear_entry(&link->query_cache[index]);
     }
     php_mylite_mysqli_profile_add_elapsed(
         &php_mylite_mysqli_profile.query_cache_clear_ns,
@@ -2798,14 +2804,65 @@ static void php_mylite_mysqli_clear_query_cache(php_mylite_mysqli_link *link) {
     );
 }
 
-static bool php_mylite_mysqli_query_cache_matches(
+static php_mylite_mysqli_query_cache_entry *php_mylite_mysqli_query_cache_find(
     php_mylite_mysqli_link *link,
     const char *sql,
     size_t sql_len
 ) {
-    return link != NULL && link->query_cache_stmt != NULL && link->query_cache_sql != NULL &&
-           ZSTR_LEN(link->query_cache_sql) == sql_len &&
-           memcmp(ZSTR_VAL(link->query_cache_sql), sql, sql_len) == 0;
+    if (link == NULL) {
+        return NULL;
+    }
+    for (size_t index = 0; index < PHP_MYLITE_MYSQLI_QUERY_CACHE_CAPACITY; ++index) {
+        php_mylite_mysqli_query_cache_entry *entry = &link->query_cache[index];
+        if (entry->stmt != NULL && entry->sql != NULL && ZSTR_LEN(entry->sql) == sql_len &&
+            memcmp(ZSTR_VAL(entry->sql), sql, sql_len) == 0) {
+            return entry;
+        }
+    }
+    return NULL;
+}
+
+static php_mylite_mysqli_query_cache_entry *php_mylite_mysqli_query_cache_store(
+    php_mylite_mysqli_link *link,
+    const char *sql,
+    size_t sql_len,
+    mylite_stmt *stmt
+) {
+    php_mylite_mysqli_query_cache_entry *target = NULL;
+    for (size_t index = 0; index < PHP_MYLITE_MYSQLI_QUERY_CACHE_CAPACITY; ++index) {
+        php_mylite_mysqli_query_cache_entry *entry = &link->query_cache[index];
+        if (entry->stmt == NULL) {
+            target = entry;
+            break;
+        }
+        if (target == NULL || entry->last_used < target->last_used) {
+            target = entry;
+        }
+    }
+
+    php_mylite_mysqli_query_cache_clear_entry(target);
+    target->stmt = stmt;
+    target->sql = zend_string_init(sql, sql_len, false);
+    target->last_used = ++link->query_cache_clock;
+    return target;
+}
+
+static void php_mylite_mysqli_query_cache_clear_entry(php_mylite_mysqli_query_cache_entry *entry) {
+    if (entry == NULL) {
+        return;
+    }
+    if (entry->stmt != NULL) {
+        if (php_mylite_mysqli_profile_enabled) {
+            ++php_mylite_mysqli_profile.query_cache_clear_finalize_calls;
+        }
+        (void)mylite_finalize(entry->stmt);
+        entry->stmt = NULL;
+    }
+    if (entry->sql != NULL) {
+        zend_string_release(entry->sql);
+        entry->sql = NULL;
+    }
+    entry->last_used = 0U;
 }
 
 static void php_mylite_mysqli_update_property_long_if_changed(
@@ -2939,13 +2996,13 @@ static int php_mylite_mysqli_query_impl(
     }
     subphase_start = php_mylite_mysqli_profile_start();
     bool from_cache = false;
-    const bool cache_matches = php_mylite_mysqli_query_cache_matches(link, sql, sql_len);
-    if (link->query_cache_stmt != NULL && !cache_matches) {
-        php_mylite_mysqli_clear_query_cache(link);
-    } else if (cache_matches) {
-        const int reset_result = mylite_reset(link->query_cache_stmt);
+    php_mylite_mysqli_query_cache_entry *cache_entry =
+        php_mylite_mysqli_query_cache_find(link, sql, sql_len);
+    if (cache_entry != NULL) {
+        const int reset_result = mylite_reset(cache_entry->stmt);
         if (reset_result == MYLITE_OK) {
             from_cache = true;
+            cache_entry->last_used = ++link->query_cache_clock;
             if (php_mylite_mysqli_profile_enabled) {
                 ++php_mylite_mysqli_profile.query_cache_hits;
             }
@@ -2954,6 +3011,7 @@ static int php_mylite_mysqli_query_impl(
                 ++php_mylite_mysqli_profile.query_cache_reset_failures;
             }
             php_mylite_mysqli_clear_query_cache(link);
+            cache_entry = NULL;
         }
     }
     php_mylite_mysqli_profile_add_elapsed(
@@ -2964,7 +3022,7 @@ static int php_mylite_mysqli_query_impl(
         ++php_mylite_mysqli_profile.query_cache_misses;
     }
 
-    if (link->query_cache_stmt == NULL) {
+    if (cache_entry == NULL) {
         mylite_stmt *stmt = NULL;
         if (php_mylite_mysqli_profile_enabled) {
             ++php_mylite_mysqli_profile.query_prepare_calls;
@@ -2984,15 +3042,14 @@ static int php_mylite_mysqli_query_impl(
             );
             return php_mylite_mysqli_profile_finish_query(FAILURE, query_start);
         }
-        link->query_cache_stmt = stmt;
-        link->query_cache_sql = zend_string_init(sql, sql_len, false);
+        cache_entry = php_mylite_mysqli_query_cache_store(link, sql, sql_len, stmt);
     }
 
     int query_result = MYLITE_OK;
     if (php_mylite_mysqli_execute_result_stmt(
             link,
             link_object,
-            link->query_cache_stmt,
+            cache_entry->stmt,
             return_value,
             &query_result
         ) == SUCCESS) {
@@ -3020,12 +3077,11 @@ static int php_mylite_mysqli_query_impl(
             );
             return php_mylite_mysqli_profile_finish_query(FAILURE, query_start);
         }
-        link->query_cache_stmt = stmt;
-        link->query_cache_sql = zend_string_init(sql, sql_len, false);
+        cache_entry = php_mylite_mysqli_query_cache_store(link, sql, sql_len, stmt);
         if (php_mylite_mysqli_execute_result_stmt(
                 link,
                 link_object,
-                link->query_cache_stmt,
+                cache_entry->stmt,
                 return_value,
                 &query_result
             ) == SUCCESS) {

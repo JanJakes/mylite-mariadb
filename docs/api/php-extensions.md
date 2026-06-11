@@ -84,15 +84,15 @@ prepared-statement execution, result stepping, row and field materialization,
 status synchronization, result-object creation, and result-fetch counts plus
 fetch elapsed time. Normal runs leave this disabled.
 
-The adapter keeps one prepared result statement cached per mysqli link for
-exact repeated result queries. Ordinary no-result `INSERT`, `UPDATE`,
-`DELETE`, and `REPLACE` statements without `RETURNING` preserve that cache so
-the repeated result query can be reset and re-executed against current rows.
-DDL, schema, transaction, lock, `SET`, `USE`, `CALL`, and error paths clear the
-cache conservatively. Completed cached result statements use libmylite's
-fully-drained reset fast path, so the adapter does not send a MariaDB statement
-reset round trip or recreate result metadata before re-executing an
-already-consumed cached query.
+The adapter keeps a small bounded LRU of prepared result statements cached per
+mysqli link for exact repeated result queries. Ordinary no-result `INSERT`,
+`UPDATE`, `DELETE`, and `REPLACE` statements without `RETURNING` preserve that
+cache so repeated result queries can be reset and re-executed against current
+rows. DDL, schema, transaction, lock, `SET`, `USE`, `CALL`, and error paths
+clear the cache conservatively. Completed cached result statements use
+libmylite's fully-drained reset fast path, so the adapter does not send a
+MariaDB statement reset round trip or recreate result metadata before
+re-executing an already-consumed cached query.
 
 The WordPress PHPUnit harness also has an opt-in
 `MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE=1` mode for production timing runs. That
