@@ -1696,7 +1696,7 @@ echo "wordpress_perf_php_process_start_ms_avg=${php_process_ms}"
 
 connect_process_start_ns="$(date +%s%N)"
 i=0
-while [ "${i}" -lt "${perf_process_iterations}" ]; do
+while [ "${i}" -lt "${perf_connect_iterations}" ]; do
   "${php_wrapper}" -r '
 $db = mysqli_connect($argv[1]);
 if (!$db) {
@@ -1707,16 +1707,18 @@ mysqli_close($db);
 ' "${MYLITE_WORDPRESS_DB_DIR}"
   i=$((i + 1))
 done
-php_connect_process_ms="$(elapsed_ms_average "${connect_process_start_ns}" "${perf_process_iterations}")"
+php_connect_process_ms="$(elapsed_ms_average "${connect_process_start_ns}" "${perf_connect_iterations}")"
 echo "wordpress_perf_php_connect_process_ms_avg=${php_connect_process_ms}"
 php_extension_process_overhead_ms="$(nonnegative_delta_ms "${php_process_ms}" "${stock_php_process_ms}")"
 php_connect_process_delta_ms="$(nonnegative_delta_ms "${php_connect_process_ms}" "${php_process_ms}")"
+echo "wordpress_perf_php_connect_process_iterations=${perf_connect_iterations}"
 echo "wordpress_perf_php_connect_process_delta_ms_avg=${php_connect_process_delta_ms}"
 echo "wordpress_perf_summary_stock_php_process_start_ms_avg=${stock_php_process_ms}"
 echo "wordpress_perf_summary_php_process_start_ms_avg=${php_process_ms}"
 echo "wordpress_perf_summary_php_extension_process_overhead_ms_avg=${php_extension_process_overhead_ms}"
 echo "wordpress_perf_summary_php_connect_process_ms_avg=${php_connect_process_ms}"
 echo "wordpress_perf_summary_php_connect_process_delta_ms_avg=${php_connect_process_delta_ms}"
+echo "wordpress_perf_summary_php_process_connect_close_iterations=${perf_connect_iterations}"
 echo "wordpress_perf_summary_php_process_connect_close_ms_avg=${php_connect_process_ms}"
 echo "wordpress_perf_summary_php_process_connect_close_delta_ms_avg=${php_connect_process_delta_ms}"
 

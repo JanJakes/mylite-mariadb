@@ -381,8 +381,11 @@ warm open/close sample so the one-time database-directory primitive proof does
 not get averaged into recurring ownerless startup cost; the WordPress CI
 performance probe uses five process/connect samples so PHP startup and
 mysqli-connect averages are less load-sensitive while keeping SQL/write
-iteration counts bounded, and its summary keys include the requested Release
-build type plus the process, connect, SQL, and write iteration counts;
+iteration counts bounded, honors the separate connect-iteration control for
+both process-plus-connect and in-process connect/reconnect samples, emits a
+dedicated process-plus-connect iteration key next to that startup average, and
+its summary keys include the requested Release build type plus the process,
+connect, SQL, and write iteration counts;
 stats-enabled ownerless autocommit probes add per-insert summaries for
 MTR-published page-version volume, total MyLite page-publish hook calls,
 page-log append calls and bytes, transaction-image, transaction-buffer,
@@ -520,11 +523,14 @@ dedicated `^Tests_DB` database shard and preventing database-prefix tests such
 as `Tests_DB_Charset`, `Tests_DB_dbDelta`, and `Tests_DB_RealEscape` from
 being timed twice.
 The same production WordPress PHPUnit job keeps harness-owned JUnit timing
-disabled by default after a completed production branch run without JUnit
-reported the long non-isolated shard at `1156.633s` shell real and the full
-test-only PHPUnit set at about `22.8` minutes, comfortably below main's
-`28:21.227` all-in PHPUnit body. The harness-owned JUnit slowest-class and
-slowest-method report remains available through
+disabled by default after completed production branch runs without JUnit
+reported the long non-isolated shard at `1156.633s` shell real in an earlier
+run and `691.743s` shell real in the latest post-compressed-BLOB-size-matrix
+run, while the latest split test-only PHPUnit steps summed to about
+`14.1` minutes and the whole WordPress job completed in `21m52s`, below main's
+`28:21.227` all-in PHPUnit body from the comparable one-shot harness run. The
+harness-owned JUnit slowest-class and slowest-method report remains available
+through
 `MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1` for targeted diagnostics, but it is not
 enabled on the critical CI timing path. The CI timing path also sets
 `MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING=1`, causing the harness to pass

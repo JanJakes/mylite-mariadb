@@ -723,3 +723,18 @@ with `3` skips; the harness reported shell real `27.582s` and
 in the documented parity band. The remaining full-suite risk is repeated
 process-isolated PHP/MariaDB embedded startup and shutdown, not ownerless hook
 leakage into ordinary SQL execution.
+
+A 2026-06-11 production CI run at ownerless head `d3b308eb` kept the split
+timing signal visible after the BLOB pressure matrix slices. The WordPress
+mysqli probe reported stock PHP startup `17.513 ms`, MyLite-extension PHP
+startup `24.430 ms`, process plus MyLite connect/close `345.127 ms`,
+in-process connect/close `313.520 ms`, active-runtime reconnect `2.035 ms`,
+`SELECT 1` `1541.10 ops/s`, point selects `1394.55 ops/s`, transactional
+inserts `1471.33 ops/s`, prepared autocommit inserts `1121.88 ops/s`, and
+direct-string autocommit inserts `1180.44 ops/s`. The test-only shards reported
+`^Tests_DB` shell real `9.468s`, deferred process-isolated shell real
+`84.358s`, eager process-isolated shell real `60.579s`, and non-isolated
+remaining shell real `691.743s`, for about `14.1` minutes across test-only
+PHPUnit steps. The full WordPress CI job completed in `21m52s`; this remains
+below the comparable main one-shot job that reported PHPUnit `28:21.227` and
+`wordpress_phpunit_seconds=1706`.
