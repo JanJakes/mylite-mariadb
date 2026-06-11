@@ -105,6 +105,25 @@ jobs:
       - name: Build
         run: cmake --build --preset php-embedded-prod
 
+      - name: Run embedded performance probe
+        run: |
+          set -euo pipefail
+          tools/require-cmake-build-type MinSizeRel build/mariadb-embedded
+          tools/require-cmake-release-build build/php-embedded-prod
+          build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe
+
+      - name: Run embedded ownerless attribution probe
+        env:
+          MYLITE_PERF_OPEN_CLOSE_ITERATIONS: "1"
+          MYLITE_PERF_SELECT_ITERATIONS: "100"
+          MYLITE_PERF_INSERT_ITERATIONS: "100"
+          MYLITE_PERF_OWNERLESS_PAGE_PUBLISH_STATS: "1"
+        run: |
+          set -euo pipefail
+          tools/require-cmake-build-type MinSizeRel build/mariadb-embedded
+          tools/require-cmake-release-build build/php-embedded-prod
+          build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe
+
       - name: Run embedded non-ownerless tests
         run: |
           set -euo pipefail
@@ -125,25 +144,6 @@ jobs:
             rm -rf /tmp/mylite-ownerless-sql.*
             "$ownerless_sql_test" sql-case "$case_index"
           done
-
-      - name: Run embedded performance probe
-        run: |
-          set -euo pipefail
-          tools/require-cmake-build-type MinSizeRel build/mariadb-embedded
-          tools/require-cmake-release-build build/php-embedded-prod
-          build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe
-
-      - name: Run embedded ownerless attribution probe
-        env:
-          MYLITE_PERF_OPEN_CLOSE_ITERATIONS: "1"
-          MYLITE_PERF_SELECT_ITERATIONS: "100"
-          MYLITE_PERF_INSERT_ITERATIONS: "100"
-          MYLITE_PERF_OWNERLESS_PAGE_PUBLISH_STATS: "1"
-        run: |
-          set -euo pipefail
-          tools/require-cmake-build-type MinSizeRel build/mariadb-embedded
-          tools/require-cmake-release-build build/php-embedded-prod
-          build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe
 
   wordpress-phpunit:
     name: wordpress-phpunit-mysqli-mylite

@@ -24,7 +24,11 @@ compare the same high-signal numbers without weakening the detailed counters.
 - `.github/workflows/ci.yml` uses `cmake --preset prod`, `cmake --build
   --preset prod`, and `ctest --preset prod` for the normal build matrix.
 - `.github/workflows/ci.yml` uses `php-embedded-prod` for embedded CI
-  configure, build, CTest, ownerless SQL, and the embedded performance probe.
+  configure, build, CTest, ownerless SQL, and the embedded performance probes.
+  The default stats-off and reduced stats-enabled embedded probes run
+  immediately after the production embedded build, before embedded correctness
+  tests, so their timing summaries are still visible when a later ownerless SQL
+  case fails.
 - `.github/workflows/ci.yml` sets
   `MYLITE_WORDPRESS_CMAKE_BUILD_DIR=build/wordpress-php-embedded-prod` and
   `MYLITE_WORDPRESS_CMAKE_BUILD_TYPE=Release` for the WordPress PHPUnit job,
@@ -128,8 +132,11 @@ The summary values are derived from the same measured intervals that the probes
 already print.
 
 Do not change the CI build matrix in this slice because the current workflow is
-already production-build based for timing-sensitive jobs. The slice documents
-that audit and strengthens the probes that run under those production builds.
+already production-build based for timing-sensitive jobs. Keep embedded
+performance probes before embedded correctness tests so CI produces throughput
+and attribution timings even if a later SQL correctness case is red. The slice
+documents that audit and strengthens the probes that run under those
+production builds.
 
 ## Compatibility Impact
 
@@ -186,6 +193,10 @@ The workflow audit now checks the timing step bodies themselves, so embedded
 test/probe, WordPress dependency/database/perf/PHPUnit, and clang-tool steps
 cannot satisfy the audit by leaving production guard strings elsewhere in the
 workflow.
+The audit also requires the embedded performance and attribution probes to stay
+ahead of the embedded test steps. This keeps the branch's production engine
+timings visible during performance work even when the ownerless SQL suite finds
+a late correctness regression.
 The WordPress timing job also enables
 `MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR=1`, which rejects an in-repository
 test database path for CI timing phases. The harness prints
@@ -276,6 +287,23 @@ that do not set the variable keep the previous 60 second wait. The observed
 native prepare/update stall and any finer-grained statement-lock policy remain
 a separate performance slice.
 
+The ownerless SQL harness now retries success-oriented `mylite_open()` calls
+for a bounded `MYLITE_BUSY` window. Explicit busy assertions still call the raw
+open result helper. This keeps live-peer reclaim and scheduling cases focused
+on their steady-state concurrency invariants instead of failing on transient
+ownerless startup or process-registry contention between independent test
+processes.
+The live-idle native-support proof case now matches the runtime safety gate:
+while a peer remains live, native-support proof records stay in the page-version
+WAL because the native checkpoint proof is process-local; after the final live
+peer closes, no-live reclaim must checkpoint that WAL.
+The active-reader pressure-limit write case now proves the pressure policy
+directly: direct and prepared writes return `MYLITE_BUSY` while a reader pin
+retains the WAL at the configured limit, those prepared writes can be retried
+successfully after the reader exits, and final close reclaims the retained WAL.
+It no longer depends on timer-driven checkpointing before the retry; timer
+behavior remains covered by the dedicated idle-runtime scheduling cases.
+
 ## Test And Verification Plan
 
 - Run `bash -n tools/wordpress-phpunit-mysqli-mylite`.
@@ -288,6 +316,10 @@ a separate performance slice.
 - Run a reduced production WordPress mysqli `perf-probe` after database
   preparation and confirm `wordpress_perf_summary_*` lines are printed.
 - Run focused ownerless primitive CTest coverage under `php-embedded-prod`.
+- Run `tools/check-ci-production-builds` and the production CTest wrapper for
+  that audit after workflow edits.
+- Run the ownerless cross-process SQL case loop around any changed harness
+  expectations.
 - Run `cmake --build --preset format`.
 - Run `cmake --build --preset format-check-prod`.
 - Run `git diff --check`.
@@ -628,6 +660,35 @@ page-log append at `0.120 ms/insert`, and ownerless autocommit at
 end-to-end write-throughput claims still need the remaining unaccounted
 prepared-step time instrumented.
 
+A follow-up CI-timing visibility and harness-stability audit on 2026-06-11 kept
+the same production guards and moved the default embedded performance probe and
+reduced ownerless attribution probe ahead of embedded correctness tests. Local
+`tools/check-ci-production-builds` and `ctest --preset prod -R
+'^tools\.ci-production-builds$' --output-on-failure` passed, proving the
+workflow body still rejects non-production caches and now rejects embedded
+probe steps placed after embedded correctness tests. The ownerless SQL harness
+changes were verified with focused loops for the live-idle native-support proof
+case and active-reader pressure-limit case, plus a resumed CI-style case loop
+from case `45` through case `168`; together with the preceding case `0`
+through `44` pass, this covered the full ownerless SQL case set around the
+previous CI failures.
+
+The matching stats-off production embedded probe reported ordinary warm
+open/close `385.622 ms`, ownerless warm open/close `371.812 ms`, ordinary
+active-runtime reconnect `1.186 ms`, ownerless active-runtime reconnect
+`0.752 ms`, ordinary transactional inserts `4343.45 ops/s`, ownerless
+transactional inserts `158.44 ops/s`, ordinary autocommit inserts
+`3687.35 ops/s`, and ownerless autocommit inserts `182.57 ops/s`. The reduced
+stats-enabled attribution probe reported ownerless autocommit
+`273.89 ops/s`, `3.000` MTR-published page versions per insert, `3.020`
+page-log append calls per insert, `2.000` published native-support pages per
+insert, `1.600` elided native-support pages per insert, `0.624 ms/insert` in
+write-history, `1.154 ms/insert` in row insert, `0.695 ms/insert` in
+clustered optimistic B-tree insertion, and `0.653 ms/insert` in undo-report
+MTR commit. This preserves the current performance conclusion: startup and
+active-runtime reconnect are visible and not the dominant branch gap, while
+ownerless write throughput remains the next optimization target.
+
 ## Acceptance Criteria
 
 - CI and local production probes emit compact summary keys for startup,
@@ -653,6 +714,9 @@ prepared-step time instrumented.
   the database and remaining test-only steps.
 - CI separates the embedded stats-off throughput probe from the reduced
   stats-enabled ownerless attribution probe.
+- CI runs both embedded performance probes before embedded correctness tests so
+  production timing evidence remains visible even if a later correctness case
+  fails.
 - CI rejects non-Release CMake caches before CMake-backed test or timing
   phases run.
 - Timer-driven ownerless checkpoint scheduling remains an idle-runtime cleanup

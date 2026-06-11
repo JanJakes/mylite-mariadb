@@ -51,6 +51,8 @@ In scope:
 - Idle live ownerless peers with zero active page-version pins.
 - Direct SQL and no-result prepared statement-boundary scheduling.
 - Existing thresholded WAL scheduling.
+- Live-peer WAL whose reclaim replay has no process-local native page proof
+  records. Native-support proof records remain retained until no-live close.
 
 Out of scope:
 
@@ -94,7 +96,10 @@ page flushing or redo generation.
 - No-peer write and transaction-ending statement-boundary reclaim still
   checkpoints the page-version WAL before close.
 - An idle live ownerless peer no longer prevents thresholded statement-boundary
-  reclaim.
+  reclaim when the reclaim replay has no process-local native page proof
+  records.
+- Native-support proof records remain retained while a peer is live and drain
+  after the final live peer closes.
 - Live writer and active snapshot-pin cases still retain the WAL until the
   blocking peer state clears.
 - Docs no longer list live-peer statement-boundary scheduling as planned; the

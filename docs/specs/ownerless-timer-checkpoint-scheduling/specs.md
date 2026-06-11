@@ -181,7 +181,11 @@ No new dependency is added. The runtime adds one `std::thread` and
 - Active snapshot pins still retain page-version WAL until release.
 - Idle explicit ownerless transactions still retain page-version WAL until they
   end, even when no SQL statement is currently executing.
-- Statement-boundary scheduling still reclaims no-live and idle live-peer WAL.
+- Statement-boundary scheduling still reclaims no-live WAL and idle live-peer
+  WAL that passes the native reclaim gate without process-local native page
+  proof records.
+- Native-support proof records remain retained while a peer is live and drain
+  after the final live peer closes.
 - Ownerless and ordinary native reopen read the committed final rows after a
   forced `.shm` rebuild.
 

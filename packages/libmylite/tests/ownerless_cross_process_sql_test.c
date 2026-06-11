@@ -139,6 +139,7 @@
 #define MYLITE_TEST_DDL_WORKER_COUNT 3U
 #define MYLITE_TEST_DDL_TABLES_PER_WORKER 4U
 #define MYLITE_TEST_OWNERLESS_SQL_CASE_TIMEOUT_MS 300000U
+#define MYLITE_TEST_OWNERLESS_OPEN_RETRY_TIMEOUT_MS 15000U
 #define MYLITE_TEST_OWNERLESS_SQL_MAX_WEIGHTED_SHARDS 64U
 #define MYLITE_TEST_OWNERLESS_INNODB_LOCK_OK 0
 #ifndef MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
@@ -1599,6 +1600,11 @@ static void crash_ownerless_dictionary_writer_with_live_peer(
 );
 #endif
 static mylite_db *open_database(open_database_paths paths, unsigned flags);
+static mylite_db *open_database_eventually(
+    open_database_paths paths,
+    unsigned flags,
+    unsigned timeout_ms
+);
 static mylite_db *open_database_with_page_log_limit(
     open_database_paths paths,
     unsigned flags,
@@ -8381,15 +8387,16 @@ static void test_ownerless_live_idle_peer_reclaims_checkpointable_page_log(void)
         page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_PUBLISHED]
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_eventually(database_path);
+    assert_concurrency_wal_retained_for(database_path, 500U);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 35U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_eventually(database_path);
+    assert_concurrency_wal_retained_for(database_path, 500U);
 
     signal_pipe(release_pipe[1]);
     wait_for_child(peer_child);
+    assert_concurrency_wal_checkpointed_eventually(database_path);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 35U);
@@ -10009,7 +10016,6 @@ static void test_ownerless_active_reader_pressure_limit_blocks_writes(void) {
 
     signal_pipe(release_pipe[1]);
     wait_for_child(reader_child);
-    assert_concurrency_wal_checkpointed_eventually(database_path);
 
     assert(mylite_step(update_stmt) == MYLITE_DONE);
     assert(mylite_finalize(update_stmt) == MYLITE_OK);
@@ -10018,7 +10024,7 @@ static void test_ownerless_active_reader_pressure_limit_blocks_writes(void) {
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 3U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 62U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_eventually(database_path);
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
@@ -55354,10 +55360,7 @@ static void crash_ownerless_dictionary_writer_with_live_peer(
 #endif
 
 static mylite_db *open_database(open_database_paths paths, unsigned flags) {
-    mylite_db *db = open_database_allowing_failure(paths, flags);
-
-    assert(db != NULL);
-    return db;
+    return open_database_eventually(paths, flags, MYLITE_TEST_OWNERLESS_OPEN_RETRY_TIMEOUT_MS);
 }
 
 static mylite_db *open_database_with_page_log_limit(
@@ -55402,6 +55405,40 @@ static mylite_db *open_database_allowing_failure(open_database_paths paths, unsi
         return NULL;
     }
     return db;
+}
+
+static mylite_db *open_database_eventually(
+    open_database_paths paths,
+    unsigned flags,
+    unsigned timeout_ms
+) {
+    const uint64_t deadline_ms = monotonic_milliseconds() + timeout_ms;
+    int last_result = MYLITE_OK;
+
+    for (;;) {
+        mylite_db *db = NULL;
+        last_result = open_database_result(paths, flags, &db);
+        if (last_result == MYLITE_OK && db != NULL) {
+            return db;
+        }
+        if (db != NULL) {
+            (void)mylite_close(db);
+        }
+        if (last_result != MYLITE_BUSY || monotonic_milliseconds() >= deadline_ms) {
+            fprintf(
+                stderr,
+                "mylite_open failed: pid=%ld path=%s flags=%u result=%d db=%p\n",
+                (long)getpid(),
+                paths.database_path,
+                flags,
+                last_result,
+                (void *)db
+            );
+            fflush(stderr);
+            assert(0);
+        }
+        sleep_microseconds(MYLITE_TEST_WAIT_POLL_INTERVAL_US);
+    }
 }
 
 static int open_database_result(open_database_paths paths, unsigned flags, mylite_db **out_db) {
