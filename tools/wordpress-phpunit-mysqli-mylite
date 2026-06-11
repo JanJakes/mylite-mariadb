@@ -17,6 +17,7 @@ phpunit_log_junit="${MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT:-0}"
 phpunit_no_logging="${MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING:-0}"
 phpunit_profile_child_processes="${MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES:-0}"
 phpunit_profile_mysqli="${MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI:-0}"
+phpunit_keepalive="${MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE:-0}"
 phpunit_static_wpdb_scan="${MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN:-0}"
 phpunit_reconnect_after_child="${MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD:-1}"
 require_release_build="${MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD:-0}"
@@ -99,6 +100,14 @@ case "${phpunit_profile_mysqli}" in
     ;;
   *)
     echo "MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI must be 0 or 1" >&2
+    exit 1
+    ;;
+esac
+case "${phpunit_keepalive}" in
+  0 | 1)
+    ;;
+  *)
+    echo "MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE must be 0 or 1" >&2
     exit 1
     ;;
 esac
@@ -229,6 +238,7 @@ run_suite() {
     -e MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING="${phpunit_no_logging}" \
     -e MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES="${phpunit_profile_child_processes}" \
     -e MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI="${phpunit_profile_mysqli}" \
+    -e MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE="${phpunit_keepalive}" \
     -e MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN="${phpunit_static_wpdb_scan}" \
     -e MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD="${phpunit_reconnect_after_child}" \
     -e MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD="${require_release_build}" \
@@ -397,6 +407,7 @@ echo "wordpress_phpunit_log_junit=${MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT}"
 echo "wordpress_phpunit_no_logging=${MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING}"
 echo "wordpress_phpunit_profile_child_processes=${MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES}"
 echo "wordpress_phpunit_profile_mysqli=${MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI}"
+echo "wordpress_phpunit_keepalive=${MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE}"
 echo "wordpress_phpunit_static_wpdb_scan=${MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN}"
 echo "wordpress_phpunit_reconnect_after_child=${MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD}"
 echo "wordpress_require_release_build=${MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD}"
@@ -505,6 +516,8 @@ $childProcessAverageMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_PROCESS_AVERAGES';
 $staticCacheMarker = 'MYLITE_WORDPRESS_STATIC_WPDB_REFLECTION_CACHE';
 $staticTypeFilterMarker = 'MYLITE_WORDPRESS_STATIC_WPDB_TYPE_FILTER';
 $staticScanGuardMarker = 'MYLITE_WORDPRESS_STATIC_WPDB_SCAN_GUARD';
+$keepaliveMarker = 'MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE_LOCK_RELEASE';
+$keepaliveReconnectMarker = 'myliteWordPressReopenKeepaliveForChild();';
 $reconnectAfterChildMarker = '// MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD';
 $legacyReconnectGuardMarker = '// MYLITE_WORDPRESS_PHPUNIT_RECONNECT_GUARD';
 
@@ -513,6 +526,8 @@ $hasChildProcessAverageMarker = str_contains($source, $childProcessAverageMarker
 $hasStaticCacheMarker = str_contains($source, $staticCacheMarker);
 $hasStaticTypeFilterMarker = str_contains($source, $staticTypeFilterMarker);
 $hasStaticScanGuardMarker = str_contains($source, $staticScanGuardMarker);
+$hasKeepaliveMarker = str_contains($source, $keepaliveMarker);
+$hasKeepaliveReconnectMarker = str_contains($source, $keepaliveReconnectMarker);
 $hasReconnectAfterChildMarker = str_contains($source, $reconnectAfterChildMarker);
 $hasChildRuntimeTiming =
     str_contains($source, "\$myliteWordPressChildStats['child_process_seconds'] +=");
@@ -524,6 +539,8 @@ if ($hasTimingMarker &&
     $hasStaticCacheMarker &&
     $hasStaticTypeFilterMarker &&
     $hasStaticScanGuardMarker &&
+    $hasKeepaliveMarker &&
+    $hasKeepaliveReconnectMarker &&
     $hasReconnectAfterChildMarker &&
     $hasChildRuntimeTiming &&
     $hasChildReconnectTiming) {
@@ -869,6 +886,45 @@ $closeWpdbs = <<<'PATCH'
             }
         };
         $myliteWordPressCloseWpdb($GLOBALS['wpdb'] ?? null);
+        // MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE_LOCK_RELEASE
+        $myliteWordPressKeepaliveClosedForChild = false;
+        $myliteWordPressCloseKeepaliveForChild = static function () use (&$myliteWordPressKeepaliveClosedForChild): void {
+            $link = $GLOBALS['myliteWordPressMysqliKeepalive'] ?? null;
+            if (!$link instanceof \mysqli) {
+                return;
+            }
+
+            $myliteWordPressKeepaliveClosedForChild = \mysqli_close($link);
+            unset($GLOBALS['myliteWordPressMysqliKeepalive']);
+            if ($myliteWordPressKeepaliveClosedForChild) {
+                \fprintf(\STDERR, "wordpress_phpunit_keepalive_child_release=1\n");
+            }
+        };
+        $myliteWordPressReopenKeepaliveForChild = static function () use (&$myliteWordPressKeepaliveClosedForChild): void {
+            if (!$myliteWordPressKeepaliveClosedForChild ||
+                \getenv('MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE') === '0') {
+                return;
+            }
+
+            $path = \getenv('MYLITE_WORDPRESS_DB_DIR');
+            if (!\is_string($path) || $path === '') {
+                throw new \RuntimeException('MYLITE_WORDPRESS_DB_DIR is required to reopen the PHPUnit keepalive.');
+            }
+
+            $link = \mysqli_connect($path);
+            if (!$link instanceof \mysqli) {
+                $errno = \function_exists('mysqli_connect_errno') ? \mysqli_connect_errno() : 0;
+                $error = \function_exists('mysqli_connect_error') ? (\mysqli_connect_error() ?? '') : '';
+                throw new \RuntimeException(
+                    \sprintf('Could not reopen the PHPUnit keepalive after child process execution: errno=%d error=%s', $errno, $error)
+                );
+            }
+
+            $GLOBALS['myliteWordPressMysqliKeepalive'] = $link;
+            $myliteWordPressKeepaliveClosedForChild = false;
+            \fprintf(\STDERR, "wordpress_phpunit_keepalive_child_reopen=1\n");
+        };
+        $myliteWordPressCloseKeepaliveForChild();
         // MYLITE_WORDPRESS_STATIC_WPDB_REFLECTION_CACHE
         // MYLITE_WORDPRESS_STATIC_WPDB_TYPE_FILTER
         // MYLITE_WORDPRESS_STATIC_WPDB_SCAN_GUARD
@@ -946,6 +1002,48 @@ $closeWpdbs = <<<'PATCH'
 
 PATCH;
 
+$keepaliveLockRelease = <<<'PATCH'
+        // MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE_LOCK_RELEASE
+        $myliteWordPressKeepaliveClosedForChild = false;
+        $myliteWordPressCloseKeepaliveForChild = static function () use (&$myliteWordPressKeepaliveClosedForChild): void {
+            $link = $GLOBALS['myliteWordPressMysqliKeepalive'] ?? null;
+            if (!$link instanceof \mysqli) {
+                return;
+            }
+
+            $myliteWordPressKeepaliveClosedForChild = \mysqli_close($link);
+            unset($GLOBALS['myliteWordPressMysqliKeepalive']);
+            if ($myliteWordPressKeepaliveClosedForChild) {
+                \fprintf(\STDERR, "wordpress_phpunit_keepalive_child_release=1\n");
+            }
+        };
+        $myliteWordPressReopenKeepaliveForChild = static function () use (&$myliteWordPressKeepaliveClosedForChild): void {
+            if (!$myliteWordPressKeepaliveClosedForChild ||
+                \getenv('MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE') === '0') {
+                return;
+            }
+
+            $path = \getenv('MYLITE_WORDPRESS_DB_DIR');
+            if (!\is_string($path) || $path === '') {
+                throw new \RuntimeException('MYLITE_WORDPRESS_DB_DIR is required to reopen the PHPUnit keepalive.');
+            }
+
+            $link = \mysqli_connect($path);
+            if (!$link instanceof \mysqli) {
+                $errno = \function_exists('mysqli_connect_errno') ? \mysqli_connect_errno() : 0;
+                $error = \function_exists('mysqli_connect_error') ? (\mysqli_connect_error() ?? '') : '';
+                throw new \RuntimeException(
+                    \sprintf('Could not reopen the PHPUnit keepalive after child process execution: errno=%d error=%s', $errno, $error)
+                );
+            }
+
+            $GLOBALS['myliteWordPressMysqliKeepalive'] = $link;
+            $myliteWordPressKeepaliveClosedForChild = false;
+            \fprintf(\STDERR, "wordpress_phpunit_keepalive_child_reopen=1\n");
+        };
+        $myliteWordPressCloseKeepaliveForChild();
+PATCH;
+
 if ($hasTimingMarker) {
     if ($hasStaticScanGuardMarker) {
         $patched = $source;
@@ -972,6 +1070,20 @@ if ($hasTimingMarker) {
         $closeWpdbs . "        \$process = proc_open(\n",
         $source
     );
+}
+
+if (!str_contains($patched, $keepaliveMarker)) {
+    $keepaliveInsertAfter = "        \$myliteWordPressCloseWpdb(\$GLOBALS['wpdb'] ?? null);\n";
+    $patchedWithKeepalive = str_replace(
+        $keepaliveInsertAfter,
+        $keepaliveInsertAfter . $keepaliveLockRelease,
+        $patched
+    );
+    if ($patchedWithKeepalive === $patched) {
+        fwrite(STDERR, "Could not add PHPUnit child process keepalive lock release patch.\n");
+        exit(1);
+    }
+    $patched = $patchedWithKeepalive;
 }
 
 $oldFailureReconnect = <<<'PATCH'
@@ -1129,6 +1241,32 @@ if (str_contains($patched, $legacyReconnectGuardMarker)) {
     $patched = $patchedWithLegacyFailureRestored;
 }
 
+if (!str_contains($patched, $keepaliveReconnectMarker)) {
+    $reconnectWpdbs = <<<'PATCH'
+            foreach ($myliteWordPressClosedWpdbs as $myliteWordPressWpdb) {
+                $myliteWordPressWpdb->db_connect(false);
+            }
+PATCH;
+
+    $reconnectWpdbsAndKeepalive = <<<'PATCH'
+            foreach ($myliteWordPressClosedWpdbs as $myliteWordPressWpdb) {
+                $myliteWordPressWpdb->db_connect(false);
+            }
+            $myliteWordPressReopenKeepaliveForChild();
+PATCH;
+
+    $patchedWithKeepaliveReconnect = str_replace(
+        $reconnectWpdbs,
+        $reconnectWpdbsAndKeepalive,
+        $patched
+    );
+    if ($patchedWithKeepaliveReconnect === $patched) {
+        fwrite(STDERR, "Could not add PHPUnit child process keepalive reconnect patch.\n");
+        exit(1);
+    }
+    $patched = $patchedWithKeepaliveReconnect;
+}
+
 if (!str_contains($patched, $childProcessAverageMarker)) {
     $oldChildProcessTotals = <<<'PATCH'
                     \fprintf(
@@ -1240,6 +1378,7 @@ set +e
   phpunit_has_junit=0
   phpunit_has_logging=0
   phpunit_has_no_logging=0
+  phpunit_has_bootstrap=0
   phpunit_junit_path=
   for phpunit_arg in "${phpunit_args[@]}"; do
     case "${phpunit_arg}" in
@@ -1252,6 +1391,9 @@ set +e
         ;;
       --no-logging )
         phpunit_has_no_logging=1
+        ;;
+      --bootstrap | --bootstrap=* )
+        phpunit_has_bootstrap=1
         ;;
     esac
   done
@@ -1294,10 +1436,73 @@ set +e
   if [ "${MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI}" = "1" ]; then
     phpunit_env+=(MYLITE_MYSQLI_PROFILE=1)
   fi
+  phpunit_keepalive_file=
+  if [ "${MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE}" = "1" ]; then
+    if [ "${phpunit_has_bootstrap}" -eq 1 ]; then
+      echo "MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE=1 cannot run with an explicit PHPUnit --bootstrap argument" >&2
+      exit 1
+    fi
+    if ! phpunit_keepalive_file="$(mktemp "${TMPDIR:-/tmp}/mylite-wordpress-phpunit-keepalive.XXXXXX.php")"; then
+      echo "Could not create temporary PHPUnit keepalive bootstrap file" >&2
+      exit 1
+    fi
+    cat > "${phpunit_keepalive_file}" <<'PHP_KEEPALIVE'
+<?php
+declare(strict_types=1);
+
+$myliteWordPressOriginalBootstrap = getenv('MYLITE_WORDPRESS_PHPUNIT_ORIGINAL_BOOTSTRAP');
+if (!is_string($myliteWordPressOriginalBootstrap) || $myliteWordPressOriginalBootstrap === '') {
+    fwrite(STDERR, "MYLITE_WORDPRESS_PHPUNIT_ORIGINAL_BOOTSTRAP is required for PHPUnit keepalive\n");
+    exit(1);
+}
+require $myliteWordPressOriginalBootstrap;
+
+$myliteWordPressKeepalivePath = getenv('MYLITE_WORDPRESS_DB_DIR');
+if (!is_string($myliteWordPressKeepalivePath) || $myliteWordPressKeepalivePath === '') {
+    fwrite(STDERR, "MYLITE_WORDPRESS_DB_DIR is required for PHPUnit keepalive\n");
+    exit(1);
+}
+
+if (function_exists('mysqli_report') && defined('MYSQLI_REPORT_OFF')) {
+    mysqli_report(MYSQLI_REPORT_OFF);
+}
+
+$myliteWordPressKeepalive = mysqli_connect($myliteWordPressKeepalivePath);
+if (!$myliteWordPressKeepalive instanceof mysqli) {
+    $errno = function_exists('mysqli_connect_errno') ? mysqli_connect_errno() : 0;
+    $error = function_exists('mysqli_connect_error') ? (mysqli_connect_error() ?? '') : '';
+    fprintf(
+        STDERR,
+        "wordpress_phpunit_keepalive_opened=0 errno=%d error=%s\n",
+        $errno,
+        $error
+    );
+    exit(1);
+}
+
+$GLOBALS['myliteWordPressMysqliKeepalive'] = $myliteWordPressKeepalive;
+fwrite(STDERR, "wordpress_phpunit_keepalive_opened=1\n");
+register_shutdown_function(static function (): void {
+    $link = $GLOBALS['myliteWordPressMysqliKeepalive'] ?? null;
+    if ($link instanceof mysqli) {
+        $closed = mysqli_close($link);
+        unset($GLOBALS['myliteWordPressMysqliKeepalive']);
+        fprintf(STDERR, "wordpress_phpunit_keepalive_closed=%d\n", $closed ? 1 : 0);
+    }
+});
+PHP_KEEPALIVE
+    phpunit_args=(--bootstrap "${phpunit_keepalive_file}" "${phpunit_args[@]}")
+    phpunit_env+=(
+      "MYLITE_WORDPRESS_PHPUNIT_ORIGINAL_BOOTSTRAP=${MYLITE_WORDPRESS_DIR}/tests/phpunit/includes/bootstrap.php"
+    )
+  fi
   TIMEFORMAT=$'wordpress_phpunit_shell_real_seconds=%3R\nwordpress_phpunit_shell_user_seconds=%3U\nwordpress_phpunit_shell_sys_seconds=%3S'
   { time env "${phpunit_env[@]}" "${php_wrapper}" "${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}/vendor/bin/phpunit" "${phpunit_args[@]}"; } 2>&1 |
     tee "${phpunit_output}"
   phpunit_status="${PIPESTATUS[0]}"
+  if [ -n "${phpunit_keepalive_file}" ]; then
+    rm -f "${phpunit_keepalive_file}"
+  fi
   phpunit_shell_real_seconds="$(
     sed -n 's/^wordpress_phpunit_shell_real_seconds=//p' "${phpunit_output}" |
       tail -n 1
@@ -1722,6 +1927,7 @@ echo "wordpress_host_db_dir=${db_dir}"
 echo "wordpress_container_db_dir=${container_db_dir}"
 echo "wordpress_host_phpunit_reconnect_after_child=${phpunit_reconnect_after_child}"
 echo "wordpress_host_phpunit_profile_mysqli=${phpunit_profile_mysqli}"
+echo "wordpress_host_phpunit_keepalive=${phpunit_keepalive}"
 echo "wordpress_host_require_release_build=${require_release_build}"
 echo "wordpress_host_require_external_db_dir=${require_external_db_dir}"
 if [[ "${skip_docker_build}" == "1" ]]; then

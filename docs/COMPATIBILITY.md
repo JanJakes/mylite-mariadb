@@ -112,6 +112,14 @@ The slow non-isolated WordPress PHPUnit CI step now enables
 prepared-statement, and fetch counters from the production-built mysqli
 adapter. Other WordPress CI timing steps keep that profile disabled unless a
 diagnostic run explicitly opts in.
+The same non-isolated step now also enables
+`MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE=1`, which opens one harness-owned mysqli
+connection after WordPress bootstrap and closes it at process shutdown. The
+existing PHPUnit child-process lock-release patch also closes and reopens the
+keepalive around child execution. This keeps the embedded runtime active across
+short-lived WordPress mysqli objects while preserving ordinary `wpdb::close()`
+and `mysqli_close()` behavior for application-visible handles; the database and
+process-isolated shards keep the keepalive disabled.
 The workflow now runs `tools/check-ci-production-builds`, also registered as
 `tools.ci-production-builds` under production CTest, so CI fails if a CMake
 timing path is moved back to developer presets, old developer build

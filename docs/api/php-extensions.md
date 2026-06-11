@@ -82,6 +82,14 @@ environment. The summary is printed at module shutdown with
 `mysqli_query()` paths, prepared-statement execution, and result-fetch counts.
 Normal runs leave this disabled.
 
+The WordPress PHPUnit harness also has an opt-in
+`MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE=1` mode for production timing runs. That
+mode opens one harness-owned mysqli connection after WordPress bootstrap and
+closes it during process shutdown so short-lived WordPress mysqli objects do
+not repeatedly cold-shutdown the embedded runtime. The harness also releases
+and reopens that connection around PHPUnit child processes. It is harness-only
+and does not change `mysqli_close()` or `mylite_close()` semantics.
+
 ## PDO Driver
 
 `pdo_mylite` registers the PDO driver name `mylite`:
