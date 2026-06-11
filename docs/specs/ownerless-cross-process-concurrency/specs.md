@@ -296,7 +296,10 @@ Roles:
   `SELECT`/`WITH` statements at a live page-version read LSN, while the
   page-visible LSN remains the durable recovery/checkpoint boundary. Eligible
   handles keep that read LSN monotonic and publish a shared page-version pin
-  before clean-page refresh. Successful direct `mylite_exec()` reads keep the
+  before clean-page refresh. When no page-visible LSN exists yet, the baseline
+  read pin is still enough to classify eligible statements as ownerless plain
+  reads, but it does not expose an external page boundary. Successful direct
+  `mylite_exec()` reads keep the
   handle pin after returning until a replacement read, non-read/current-read
   statement, error, close, or dead-owner cleanup releases it, while prepared
   result cursors keep the handle pin until the result is exhausted, reset, or
@@ -490,19 +493,21 @@ into that index. Guarded ownerless SQL allows page-version reads for direct or
 prepared `SELECT`/`WITH` statements at a live page-version read LSN while the
 page-visible LSN remains the durable recovery/checkpoint boundary. Eligible
 handles keep the page-version read LSN monotonic and open a shared read pin
-before clean-page refresh. Successful direct reads keep that pin until a
-replacement read, non-read/current-read statement, error, or close; autocommit
-live raw-latest promotion is disabled while another active native transaction
-or an active redo reservation is present. A separate repeatable-read snapshot
-pin only retains WAL for that reader, and can permit unrelated autocommit plain
-reads to use the newer page-version boundary once native transaction state is
-idle. Autocommit writes also advance a local-native read boundary that is not a
-page-version read. During a continuous single-owner epoch that did not start
-with retained page-version WAL and has not consumed page-version WAL, eligible
-same-runtime reads covered by that boundary skip shared page-version pins and
-the InnoDB file-read overlay. Outside that proof, the same autocommit write also
-advances the real page-version read LSN so peer-era reads keep the existing
-page-version pin and retained-refresh path.
+before clean-page refresh. The zero-boundary path also opens the baseline read
+pin and enables the plain-read scope for eligible `SELECT`/`WITH` statements
+without enabling external page visibility. Successful direct reads keep that
+pin until a replacement read, non-read/current-read statement, error, or close;
+autocommit live raw-latest promotion is disabled while another active native
+transaction or an active redo reservation is present. A separate repeatable-read
+snapshot pin only retains WAL for that reader, and can permit unrelated
+autocommit plain reads to use the newer page-version boundary once native
+transaction state is idle. Autocommit writes also advance a local-native read
+boundary that is not a page-version read. During a continuous single-owner
+epoch that did not start with retained page-version WAL and has not consumed
+page-version WAL, eligible same-runtime reads covered by that boundary skip
+shared page-version pins and the InnoDB file-read overlay. Outside that proof,
+the same autocommit write also advances the real page-version read LSN so
+peer-era reads keep the existing page-version pin and retained-refresh path.
 Pressure-limit `MYLITE_BUSY` write rejections release the handle's transient
 autocommit read pin before returning, so blocked writers do not keep retained
 page-version WAL alive after the reader that caused the pressure exits.

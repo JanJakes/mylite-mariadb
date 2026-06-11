@@ -10519,6 +10519,11 @@ int refresh_ownerless_external_pages_before_statement(
             if (baseline_pin_result != MYLITE_OK) {
                 return baseline_pin_result;
             }
+            // The baseline pin has no external page boundary, but it still
+            // marks this statement as an ownerless plain read.
+            if (out_page_version_reads_enabled != nullptr) {
+                *out_page_version_reads_enabled = true;
+            }
         }
         return refresh_ownerless_dictionary_before_statement(db, allow_global_refresh);
     }

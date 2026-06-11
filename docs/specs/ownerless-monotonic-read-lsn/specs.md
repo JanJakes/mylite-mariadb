@@ -58,6 +58,12 @@ proven:
   error path, or close, matching the prepared-statement retention model closely
   enough for live-peer reclamation to see stale process-local pages between
   statements.
+- When the shared redo-visible state has no page-visible LSN and the handle has
+  no page-version read LSN yet, an eligible plain read still opens the baseline
+  read pin and enters the ownerless plain-read scope. The baseline pin does not
+  expose an external page boundary, but it keeps the statement out of ownerless
+  page-write ownership while peer explicit transactions hold uncommitted
+  page-write locks.
 - When an eligible read has a retained page-version read LSN, statement
   visible-boundary refresh and file-read overlay keep user data/index/blob
   pages from being replaced by lower visible-boundary images based only on
@@ -237,6 +243,10 @@ still stopped before the ownerless table-wait callback.
 - Run repeated production `sql-case 13`
   (`test_ownerless_independent_table_stress`) loops to cover direct
   `mylite_exec()` live readers over independent writer tables.
+- Run production `sql-case 6`
+  (`test_ownerless_savepoint_rollback_is_peer_visible_after_commit`) to cover
+  the zero-page-visible-LSN baseline plain-read path while a peer explicit
+  transaction holds page-write locks before commit.
 - Run repeated production `sql-case 46`
   (`test_ownerless_active_reader_pressure_limit_blocks_write_classes`) loops to
   cover a direct same-runtime AUTO_INCREMENT read before later pressure-guarded
@@ -252,6 +262,9 @@ still stopped before the ownerless table-wait callback.
 
 - A single ownerless handle never lowers the page-version read LSN used for
   eligible plain `SELECT`/`WITH` statements.
+- Eligible plain reads with no page-visible or page-version read LSN enter the
+  ownerless plain-read scope through a baseline pin without exposing external
+  page visibility, so they do not wait behind peer uncommitted page-write locks.
 - Random transaction stress readers no longer observe decreasing positive row
   aggregates under repeated production stress runs.
 - Final ownerless/native reopen oracles for random transaction stress continue
