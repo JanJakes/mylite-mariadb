@@ -128,11 +128,29 @@ focused production `Tests_DB` sample after this cache-retention slice reported
 `query_cache_preserved_no_result_calls=111`, `query_cache_hits=3`,
 `query_prepare_calls=1612`, `query_cache_clear_finalize_calls=1612`,
 `query_ms_total=15296.434`, and
+`exec_no_result_ms_total=6775.758`, with
 `wordpress_phpunit_reported_seconds=19.314`; the previous focused attribution
 sample reported `query_cache_hits=0`, `query_prepare_calls=1615`,
 `query_cache_clear_finalize_calls=1615`, `query_ms_total=19084.516`, and
 `wordpress_phpunit_reported_seconds=26.509`. Full non-isolated shard timings
 remain the authority for suite-wide impact.
+
+`mylite_reset()` now skips MariaDB's `mysql_stmt_reset()` only when a prepared
+statement has been fully drained to `MYLITE_DONE`; partial results and active
+server cursor state still use the conservative MariaDB reset path. The fully
+drained path also retains result metadata and bind buffers for reuse on the
+same prepared SQL. MariaDB client tests in the imported 11.8.6 source
+re-execute prepared statements after `MYSQL_NO_DATA`, and the focused libmylite
+prepared-statement test covers both fully-drained result re-execution and
+partial-result reset. This fast path is the current mitigation for repeated
+mysqli cached result-query cost. A production focused profile over 1000 cached
+`mysqli_query('SELECT 1')` calls after the fast path reported
+`query_cache_hits=999`, `query_prepare_calls=1`,
+`query_cache_lookup_ms_total=0.371`, and `php_select1_ops_per_second=789.52`.
+The CI-shaped production WordPress performance probe reported
+`select1_ops_per_second=829.69`; the earlier production probe before this
+fast path reported about `383.57`.
+
 The same non-isolated step now also enables
 `MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE=1`, which opens one harness-owned mysqli
 connection after WordPress bootstrap and closes it at process shutdown. The

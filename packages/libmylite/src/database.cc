@@ -2811,11 +2811,9 @@ int mylite_reset(mylite_stmt *stmt) {
         ownerless_reset_start =
             ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     }
-    const bool can_skip_mariadb_reset = stmt->executed && !stmt->has_result && !stmt->has_row &&
-                                        stmt->metadata == nullptr && stmt->columns.empty();
-    release_statement_results(*stmt);
-    clear_statement_ownerless_page_visibility(*stmt);
+    const bool can_skip_mariadb_reset = stmt->executed && !stmt->has_result && !stmt->has_row;
     if (can_skip_mariadb_reset) {
+        clear_statement_ownerless_page_visibility(*stmt);
         stmt->executed = false;
         stmt->has_result = false;
         stmt->has_row = false;
@@ -2825,6 +2823,8 @@ int mylite_reset(mylite_stmt *stmt) {
         );
         return MYLITE_OK;
     }
+    release_statement_results(*stmt);
+    clear_statement_ownerless_page_visibility(*stmt);
     if (ownerless_reset_perf) {
         ownerless_reset_mysql_start =
             ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
@@ -5905,6 +5905,17 @@ void restore_error(mylite_db &db, const ErrorSnapshot &snapshot) {
 }
 
 int initialize_statement_results(mylite_stmt &stmt, bool release_existing_results) {
+    if (release_existing_results && stmt.metadata != nullptr && !stmt.columns.empty()) {
+        if (stmt.result_binds_dirty) {
+            const int bind_result = refresh_dirty_result_binds(stmt);
+            if (bind_result != MYLITE_OK) {
+                return bind_result;
+            }
+        }
+        stmt.has_result = true;
+        return MYLITE_OK;
+    }
+
     if (release_existing_results) {
         release_statement_results(stmt);
     }

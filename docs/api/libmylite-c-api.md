@@ -33,6 +33,10 @@ durable directory for read/write access also returns `MYLITE_BUSY` while the
 directory lock is held.
 
 `mylite_stmt` owns one prepared statement.
+After a result statement has returned `MYLITE_DONE`, `mylite_reset()` releases
+the current row state and allows the same prepared statement to execute again
+without requiring callers to finalize and reprepare it. Reset before a result
+is fully consumed remains supported and discards the active result.
 
 ## Result Codes
 

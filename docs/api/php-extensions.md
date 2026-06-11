@@ -89,7 +89,10 @@ exact repeated result queries. Ordinary no-result `INSERT`, `UPDATE`,
 `DELETE`, and `REPLACE` statements without `RETURNING` preserve that cache so
 the repeated result query can be reset and re-executed against current rows.
 DDL, schema, transaction, lock, `SET`, `USE`, `CALL`, and error paths clear the
-cache conservatively.
+cache conservatively. Completed cached result statements use libmylite's
+fully-drained reset fast path, so the adapter does not send a MariaDB statement
+reset round trip or recreate result metadata before re-executing an
+already-consumed cached query.
 
 The WordPress PHPUnit harness also has an opt-in
 `MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE=1` mode for production timing runs. That

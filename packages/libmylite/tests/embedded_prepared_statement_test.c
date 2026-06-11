@@ -24,6 +24,7 @@ typedef struct open_database_paths {
 
 static void test_prepared_statement_bindings_and_columns(void);
 static void test_prepared_call_is_rejected_after_routine_creation(void);
+static void test_prepared_result_reset_reexecution(void);
 static void test_ownerless_prepared_dml_reset_reexecution(void);
 static mylite_db *open_database(open_database_paths paths, unsigned flags);
 static void create_prepared_schema(mylite_db *db);
@@ -53,6 +54,7 @@ static int remove_tree_entry(
 int main(void) {
     test_prepared_statement_bindings_and_columns();
     test_prepared_call_is_rejected_after_routine_creation();
+    test_prepared_result_reset_reexecution();
     test_ownerless_prepared_dml_reset_reexecution();
     return 0;
 }
@@ -165,6 +167,67 @@ static void test_prepared_call_is_rejected_after_routine_creation(void) {
     assert(mylite_finalize(select_stmt) == MYLITE_OK);
 
     exec_ok(db, "DROP PROCEDURE IF EXISTS app.select_stored_value");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_prepared_result_reset_reexecution(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "prepared-result-reset.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db = NULL;
+    mylite_stmt *sum_stmt = NULL;
+    mylite_stmt *range_stmt = NULL;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE);
+    exec_ok(db, "CREATE DATABASE app");
+    exec_ok(
+        db,
+        "CREATE TABLE app.reset_values ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.reset_values VALUES (1, 10), (2, 20), (3, 30)");
+
+    sum_stmt = prepare_statement(db, "SELECT SUM(value) FROM app.reset_values");
+    assert(mylite_step(sum_stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(sum_stmt, 0) == 60);
+    assert(mylite_step(sum_stmt) == MYLITE_DONE);
+    assert(mylite_reset(sum_stmt) == MYLITE_OK);
+
+    exec_ok(db, "UPDATE app.reset_values SET value = value + 1 WHERE id = 3");
+    assert(mylite_step(sum_stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(sum_stmt, 0) == 61);
+    assert(mylite_step(sum_stmt) == MYLITE_DONE);
+    assert(mylite_reset(sum_stmt) == MYLITE_OK);
+
+    range_stmt = prepare_statement(db, "SELECT id, value FROM app.reset_values ORDER BY id");
+    assert(mylite_step(range_stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(range_stmt, 0) == 1);
+    assert(mylite_column_int64(range_stmt, 1) == 10);
+    assert(mylite_reset(range_stmt) == MYLITE_OK);
+
+    assert(mylite_step(range_stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(range_stmt, 0) == 1);
+    assert(mylite_column_int64(range_stmt, 1) == 10);
+    assert(mylite_step(range_stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(range_stmt, 0) == 2);
+    assert(mylite_column_int64(range_stmt, 1) == 20);
+    assert(mylite_step(range_stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(range_stmt, 0) == 3);
+    assert(mylite_column_int64(range_stmt, 1) == 31);
+    assert(mylite_step(range_stmt) == MYLITE_DONE);
+
+    assert(mylite_finalize(range_stmt) == MYLITE_OK);
+    assert(mylite_finalize(sum_stmt) == MYLITE_OK);
     assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);
