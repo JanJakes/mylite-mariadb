@@ -2136,7 +2136,9 @@ Tasks:
    pin, checkpoint after release, and ownerless/native reopen before and after
    forced `.shm` rebuild. The `ownerless-blob-page-size-matrix` slice broadens
    the same dynamic-row-format lifecycle evidence to bounded 12 KiB, 24 KiB,
-   and 48 KiB `LONGBLOB` payload sizes under one live snapshot pin. The
+   48 KiB, 96 KiB, and 192 KiB `LONGBLOB` payload sizes under one live snapshot
+   pin. The `ownerless-blob-page-wide-size-matrix` slice records the widened
+   local evidence while leaving exhaustive long-value limits to later stress. The
    `ownerless-compressed-blob-page-pressure` slice
    adds the same lifecycle evidence for `ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8`
    `LONGBLOB` values that create native `FIL_PAGE_TYPE_ZBLOB`/`ZBLOB2` pages,

@@ -101,6 +101,7 @@
 #define MYLITE_TEST_PAGE_LOG_RECORD_PAYLOAD_SIZE_OFFSET 40
 #define MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS 128U
 #define MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES 24000U
+#define MYLITE_TEST_BLOB_PAGE_SIZE_MATRIX_ROWS 5U
 #define MYLITE_TEST_COMPRESSED_BLOB_KEY_BLOCK_MATRIX_ROWS 2U
 #define MYLITE_TEST_STRESS_WRITER_COUNT 4U
 #define MYLITE_TEST_STRESS_ITERATIONS 24U
@@ -12731,7 +12732,7 @@ static void test_ownerless_blob_page_size_matrix_reclaims_after_release(void) {
         "payload LONGBLOB NOT NULL"
         ") ENGINE=InnoDB ROW_FORMAT=DYNAMIC"
     );
-    for (unsigned row = 1U; row <= 3U; ++row) {
+    for (unsigned row = 1U; row <= MYLITE_TEST_BLOB_PAGE_SIZE_MATRIX_ROWS; ++row) {
         assert(
             snprintf(
                 sql,
@@ -12744,8 +12745,14 @@ static void test_ownerless_blob_page_size_matrix_reclaims_after_release(void) {
         );
         exec_ok(db, sql);
     }
-    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_blob_size_matrix") == 3U);
-    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_blob_size_matrix") == 3U);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_blob_size_matrix") ==
+        MYLITE_TEST_BLOB_PAGE_SIZE_MATRIX_ROWS
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_blob_size_matrix") ==
+        MYLITE_TEST_BLOB_PAGE_SIZE_MATRIX_ROWS
+    );
     assert(
         query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_blob_size_matrix") ==
         expected_payload_bytes
@@ -12775,8 +12782,8 @@ static void test_ownerless_blob_page_size_matrix_reclaims_after_release(void) {
     close(release_pipe[0]);
     wait_for_pipe(ready_pipe[0]);
 
-    for (unsigned row = 1U; row <= 3U; ++row) {
-        const unsigned expected_sum = 3U + row;
+    for (unsigned row = 1U; row <= MYLITE_TEST_BLOB_PAGE_SIZE_MATRIX_ROWS; ++row) {
+        const unsigned expected_sum = MYLITE_TEST_BLOB_PAGE_SIZE_MATRIX_ROWS + row;
         const char payload_byte = (char)('b' + row);
 
         expected_first_byte_sum += (unsigned long long)(unsigned char)payload_byte;
@@ -48311,8 +48318,14 @@ static void hold_blob_size_matrix_snapshot_until_released(
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ");
     exec_ok(db, "START TRANSACTION WITH CONSISTENT SNAPSHOT");
-    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_blob_size_matrix") == 3U);
-    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_blob_size_matrix") == 3U);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_blob_size_matrix") ==
+        MYLITE_TEST_BLOB_PAGE_SIZE_MATRIX_ROWS
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_blob_size_matrix") ==
+        MYLITE_TEST_BLOB_PAGE_SIZE_MATRIX_ROWS
+    );
     assert(
         query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_blob_size_matrix") ==
         expected_payload_bytes
@@ -48322,12 +48335,18 @@ static void hold_blob_size_matrix_snapshot_until_released(
             db,
             "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
             "FROM app.ownerless_blob_size_matrix"
-        ) == 3U * (unsigned)'a'
+        ) == MYLITE_TEST_BLOB_PAGE_SIZE_MATRIX_ROWS * (unsigned)'a'
     );
     signal_pipe(pipes.ready_write_fd);
     wait_for_pipe(pipes.release_read_fd);
-    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_blob_size_matrix") == 3U);
-    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_blob_size_matrix") == 3U);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_blob_size_matrix") ==
+        MYLITE_TEST_BLOB_PAGE_SIZE_MATRIX_ROWS
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_blob_size_matrix") ==
+        MYLITE_TEST_BLOB_PAGE_SIZE_MATRIX_ROWS
+    );
     assert(
         query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_blob_size_matrix") ==
         expected_payload_bytes
@@ -48337,7 +48356,7 @@ static void hold_blob_size_matrix_snapshot_until_released(
             db,
             "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
             "FROM app.ownerless_blob_size_matrix"
-        ) == 3U * (unsigned)'a'
+        ) == MYLITE_TEST_BLOB_PAGE_SIZE_MATRIX_ROWS * (unsigned)'a'
     );
     exec_ok(db, "COMMIT");
     assert(mylite_close(db) == MYLITE_OK);
@@ -56342,8 +56361,14 @@ static void assert_ownerless_blob_size_matrix_state(
         ownerless_blob_size_matrix_total_payload_bytes();
     mylite_db *db = open_database(paths, flags);
 
-    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_blob_size_matrix") == 3U);
-    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_blob_size_matrix") == 6U);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_blob_size_matrix") ==
+        MYLITE_TEST_BLOB_PAGE_SIZE_MATRIX_ROWS
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_blob_size_matrix") ==
+        2ULL * MYLITE_TEST_BLOB_PAGE_SIZE_MATRIX_ROWS
+    );
     assert(
         query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_blob_size_matrix") ==
         expected_payload_bytes
@@ -71341,6 +71366,10 @@ static unsigned ownerless_blob_size_matrix_payload_bytes(unsigned row) {
         return MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES;
     case 3U:
         return 48000U;
+    case 4U:
+        return 96000U;
+    case 5U:
+        return 192000U;
     default:
         assert(0);
         return 0U;
@@ -71350,7 +71379,7 @@ static unsigned ownerless_blob_size_matrix_payload_bytes(unsigned row) {
 static unsigned long long ownerless_blob_size_matrix_total_payload_bytes(void) {
     unsigned long long total = 0U;
 
-    for (unsigned row = 1U; row <= 3U; ++row) {
+    for (unsigned row = 1U; row <= MYLITE_TEST_BLOB_PAGE_SIZE_MATRIX_ROWS; ++row) {
         total += ownerless_blob_size_matrix_payload_bytes(row);
     }
     return total;

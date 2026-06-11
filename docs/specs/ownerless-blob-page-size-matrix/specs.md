@@ -32,8 +32,8 @@ value sizes.
 In scope:
 
 - Add a focused ownerless SQL selector, `blob-page-size-matrix`.
-- Create one `ROW_FORMAT=DYNAMIC` InnoDB table with three `LONGBLOB` payload
-  sizes: 12 KiB, 24 KiB, and 48 KiB.
+- Create one `ROW_FORMAT=DYNAMIC` InnoDB table with five `LONGBLOB` payload
+  sizes: 12 KiB, 24 KiB, 48 KiB, 96 KiB, and 192 KiB.
 - Verify native BLOB page types exist in the closed `.ibd` file.
 - Hold a repeatable-read ownerless snapshot over the original payloads.
 - Update every row's payload through separate ownerless writer opens while the
@@ -56,7 +56,8 @@ matrix:
 
 1. Create `app.ownerless_blob_size_matrix` with `id`, `value`, and
    `payload LONGBLOB NOT NULL`, `ENGINE=InnoDB ROW_FORMAT=DYNAMIC`.
-2. Insert three rows with 12 KiB, 24 KiB, and 48 KiB payloads.
+2. Insert five rows with 12 KiB, 24 KiB, 48 KiB, 96 KiB, and 192 KiB
+   payloads.
 3. Close the database and scan
    `datadir/app/ownerless_blob_size_matrix.ibd` for native BLOB page types.
 4. Fork a reader that starts `START TRANSACTION WITH CONSISTENT SNAPSHOT` and
