@@ -19,4 +19,13 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/mysqli_api_test.php"
     -d "extension=$<TARGET_FILE:mylite_mysqli_php_extension>"
   )
+  mylite_add_php_test(
+    php-ext-mysqli-mylite.profile
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/mysqli_profile_test.php"
+    -d "extension=$<TARGET_FILE:mylite_mysqli_php_extension>"
+  )
+  set_tests_properties(php-ext-mysqli-mylite.profile PROPERTIES
+    ENVIRONMENT "MYLITE_MYSQLI_PROFILE=1"
+    PASS_REGULAR_EXPRESSION "mylite_mysqli_profile_enabled=1"
+  )
 endif()

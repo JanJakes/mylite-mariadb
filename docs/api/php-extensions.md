@@ -75,6 +75,13 @@ The mysqli host argument is interpreted as the MyLite database directory path.
 User, password, port, socket, and server authentication parameters do not start
 a network connection.
 
+For performance attribution runs, `mysqli_mylite` can emit process-local
+adapter counters when `MYLITE_MYSQLI_PROFILE=1` is present in the PHP process
+environment. The summary is printed at module shutdown with
+`mylite_mysqli_profile_*` keys covering open/close calls, direct
+`mysqli_query()` paths, prepared-statement execution, and result-fetch counts.
+Normal runs leave this disabled.
+
 ## PDO Driver
 
 `pdo_mylite` registers the PDO driver name `mylite`:

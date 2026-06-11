@@ -185,6 +185,7 @@ require_literal 'MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR: "1"'
 require_literal 'MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT: "0"'
 require_literal 'MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING: "1"'
 require_literal 'MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES: "0"'
+require_literal 'MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI: "0"'
 require_literal 'MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN: "0"'
 require_literal "MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_FILTER:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_EAGER_RECONNECT_FILTER:"
@@ -235,6 +236,9 @@ require_wordpress_timing_step_guards \
 require_wordpress_timing_step_guards \
   "Run WordPress PHPUnit process-isolated eager-reconnect suite (test only)"
 require_wordpress_timing_step_guards "Run WordPress PHPUnit non-isolated remaining suite (test only)"
+require_step_literal \
+  "Run WordPress PHPUnit non-isolated remaining suite (test only)" \
+  'MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI: "1"'
 require_step_literal "Check formatting" "tools/require-cmake-release-build build/prod"
 require_step_literal "Run clang-tidy" "tools/require-cmake-release-build build/prod"
 

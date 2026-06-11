@@ -16,6 +16,7 @@ phpunit_report_dir="${MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR:-${root_dir}/build/wor
 phpunit_log_junit="${MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT:-0}"
 phpunit_no_logging="${MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING:-0}"
 phpunit_profile_child_processes="${MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES:-0}"
+phpunit_profile_mysqli="${MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI:-0}"
 phpunit_static_wpdb_scan="${MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN:-0}"
 phpunit_reconnect_after_child="${MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD:-1}"
 require_release_build="${MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD:-0}"
@@ -90,6 +91,14 @@ case "${phpunit_profile_child_processes}" in
     ;;
   *)
     echo "MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES must be 0 or 1" >&2
+    exit 1
+    ;;
+esac
+case "${phpunit_profile_mysqli}" in
+  0 | 1)
+    ;;
+  *)
+    echo "MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI must be 0 or 1" >&2
     exit 1
     ;;
 esac
@@ -219,6 +228,7 @@ run_suite() {
     -e MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT="${phpunit_log_junit}" \
     -e MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING="${phpunit_no_logging}" \
     -e MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES="${phpunit_profile_child_processes}" \
+    -e MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI="${phpunit_profile_mysqli}" \
     -e MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN="${phpunit_static_wpdb_scan}" \
     -e MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD="${phpunit_reconnect_after_child}" \
     -e MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD="${require_release_build}" \
@@ -386,6 +396,7 @@ echo "wordpress_phpunit_report_dir=${MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR}"
 echo "wordpress_phpunit_log_junit=${MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT}"
 echo "wordpress_phpunit_no_logging=${MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING}"
 echo "wordpress_phpunit_profile_child_processes=${MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES}"
+echo "wordpress_phpunit_profile_mysqli=${MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI}"
 echo "wordpress_phpunit_static_wpdb_scan=${MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN}"
 echo "wordpress_phpunit_reconnect_after_child=${MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD}"
 echo "wordpress_require_release_build=${MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD}"
@@ -1279,8 +1290,12 @@ set +e
     echo "Could not create temporary PHPUnit output capture" >&2
     exit 1
   fi
+  phpunit_env=()
+  if [ "${MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI}" = "1" ]; then
+    phpunit_env+=(MYLITE_MYSQLI_PROFILE=1)
+  fi
   TIMEFORMAT=$'wordpress_phpunit_shell_real_seconds=%3R\nwordpress_phpunit_shell_user_seconds=%3U\nwordpress_phpunit_shell_sys_seconds=%3S'
-  { time "${php_wrapper}" "${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}/vendor/bin/phpunit" "${phpunit_args[@]}"; } 2>&1 |
+  { time env "${phpunit_env[@]}" "${php_wrapper}" "${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}/vendor/bin/phpunit" "${phpunit_args[@]}"; } 2>&1 |
     tee "${phpunit_output}"
   phpunit_status="${PIPESTATUS[0]}"
   phpunit_shell_real_seconds="$(
@@ -1706,6 +1721,7 @@ echo "wordpress_host_phpunit_report_dir=${phpunit_report_dir}"
 echo "wordpress_host_db_dir=${db_dir}"
 echo "wordpress_container_db_dir=${container_db_dir}"
 echo "wordpress_host_phpunit_reconnect_after_child=${phpunit_reconnect_after_child}"
+echo "wordpress_host_phpunit_profile_mysqli=${phpunit_profile_mysqli}"
 echo "wordpress_host_require_release_build=${require_release_build}"
 echo "wordpress_host_require_external_db_dir=${require_external_db_dir}"
 if [[ "${skip_docker_build}" == "1" ]]; then

@@ -105,6 +105,13 @@ child mode used by CI: parent child-process profiling and defensive static
 `wpdb` scanning are off unless a diagnostic run explicitly sets
 `MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES=1` or
 `MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN=1`.
+The slow non-isolated WordPress PHPUnit CI step now enables
+`MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI=1`, which sets
+`MYLITE_MYSQLI_PROFILE=1` only for that PHPUnit process and emits
+`mylite_mysqli_profile_*` open/close, direct-query, result-query,
+prepared-statement, and fetch counters from the production-built mysqli
+adapter. Other WordPress CI timing steps keep that profile disabled unless a
+diagnostic run explicitly opts in.
 The workflow now runs `tools/check-ci-production-builds`, also registered as
 `tools.ci-production-builds` under production CTest, so CI fails if a CMake
 timing path is moved back to developer presets, old developer build
