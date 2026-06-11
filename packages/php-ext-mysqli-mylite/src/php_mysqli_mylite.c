@@ -80,16 +80,34 @@ typedef struct php_mylite_mysqli_profile_stats {
     uint64_t query_call_exec_calls;
     uint64_t query_cache_hits;
     uint64_t query_cache_misses;
+    uint64_t query_classify_calls;
+    uint64_t query_classify_ns;
+    uint64_t query_cache_lookup_calls;
+    uint64_t query_cache_lookup_ns;
+    uint64_t query_cache_clear_calls;
+    uint64_t query_cache_clear_finalize_calls;
+    uint64_t query_cache_clear_ns;
     uint64_t query_cache_reset_failures;
     uint64_t query_prepare_calls;
     uint64_t query_prepare_ns;
     uint64_t query_result_execute_calls;
     uint64_t query_result_execute_ns;
+    uint64_t query_result_step_calls;
+    uint64_t query_result_step_ns;
+    uint64_t query_result_row_materialize_calls;
+    uint64_t query_result_row_materialize_ns;
+    uint64_t query_result_field_calls;
+    uint64_t query_result_field_ns;
+    uint64_t query_result_object_calls;
+    uint64_t query_result_object_ns;
+    uint64_t query_status_sync_calls;
+    uint64_t query_status_sync_ns;
     uint64_t query_result_rows;
     uint64_t query_ns;
     uint64_t exec_result_calls;
     uint64_t exec_result_ns;
     uint64_t exec_result_rows;
+    uint64_t exec_result_callback_ns;
     uint64_t exec_no_result_calls;
     uint64_t exec_no_result_ns;
     uint64_t explicit_prepare_calls;
@@ -108,9 +126,13 @@ typedef struct php_mylite_mysqli_profile_stats {
     uint64_t stmt_step_ns;
     uint64_t stmt_rows;
     uint64_t fetch_assoc_calls;
+    uint64_t fetch_assoc_ns;
     uint64_t fetch_array_calls;
+    uint64_t fetch_array_ns;
     uint64_t fetch_object_calls;
+    uint64_t fetch_object_ns;
     uint64_t fetch_all_calls;
+    uint64_t fetch_all_ns;
 } php_mylite_mysqli_profile_stats;
 
 static zend_class_entry *php_mylite_mysqli_link_ce;
@@ -796,11 +818,17 @@ PHP_FUNCTION(mylite_mysqli_fetch_assoc) {
     if (php_mylite_mysqli_profile_enabled) {
         ++php_mylite_mysqli_profile.fetch_assoc_calls;
     }
+    const uint64_t fetch_start = php_mylite_mysqli_profile_start();
     zval *row = zend_hash_index_find(Z_ARRVAL(result->rows), result->position);
     if (row == NULL) {
+        php_mylite_mysqli_profile_add_elapsed(
+            &php_mylite_mysqli_profile.fetch_assoc_ns,
+            fetch_start
+        );
         RETURN_NULL();
     }
     ++result->position;
+    php_mylite_mysqli_profile_add_elapsed(&php_mylite_mysqli_profile.fetch_assoc_ns, fetch_start);
     RETURN_COPY(row);
 }
 
@@ -824,12 +852,18 @@ PHP_FUNCTION(mylite_mysqli_fetch_array) {
     if (php_mylite_mysqli_profile_enabled) {
         ++php_mylite_mysqli_profile.fetch_array_calls;
     }
+    const uint64_t fetch_start = php_mylite_mysqli_profile_start();
     zval *row = zend_hash_index_find(Z_ARRVAL(result->rows), result->position);
     if (row == NULL) {
+        php_mylite_mysqli_profile_add_elapsed(
+            &php_mylite_mysqli_profile.fetch_array_ns,
+            fetch_start
+        );
         RETURN_NULL();
     }
     ++result->position;
     php_mylite_mysqli_fetch_array_row(result, row, mode, return_value);
+    php_mylite_mysqli_profile_add_elapsed(&php_mylite_mysqli_profile.fetch_array_ns, fetch_start);
 }
 
 PHP_FUNCTION(mylite_mysqli_fetch_object) {
@@ -849,12 +883,18 @@ PHP_FUNCTION(mylite_mysqli_fetch_object) {
     if (php_mylite_mysqli_profile_enabled) {
         ++php_mylite_mysqli_profile.fetch_object_calls;
     }
+    const uint64_t fetch_start = php_mylite_mysqli_profile_start();
     zval *row = zend_hash_index_find(Z_ARRVAL(result->rows), result->position);
     if (row == NULL) {
+        php_mylite_mysqli_profile_add_elapsed(
+            &php_mylite_mysqli_profile.fetch_object_ns,
+            fetch_start
+        );
         RETURN_NULL();
     }
     ++result->position;
     php_mylite_mysqli_fetch_object_row(row, return_value);
+    php_mylite_mysqli_profile_add_elapsed(&php_mylite_mysqli_profile.fetch_object_ns, fetch_start);
 }
 
 PHP_FUNCTION(mylite_mysqli_fetch_all) {
@@ -877,7 +917,9 @@ PHP_FUNCTION(mylite_mysqli_fetch_all) {
     if (php_mylite_mysqli_profile_enabled) {
         ++php_mylite_mysqli_profile.fetch_all_calls;
     }
+    const uint64_t fetch_start = php_mylite_mysqli_profile_start();
     php_mylite_mysqli_fetch_all_rows(result, mode, return_value);
+    php_mylite_mysqli_profile_add_elapsed(&php_mylite_mysqli_profile.fetch_all_ns, fetch_start);
 }
 
 PHP_FUNCTION(mylite_mysqli_num_rows) {
@@ -1421,11 +1463,20 @@ PHP_METHOD(MyLite_MySQLiResult, fetch_assoc) {
 
     ZEND_PARSE_PARAMETERS_NONE();
 
+    if (php_mylite_mysqli_profile_enabled) {
+        ++php_mylite_mysqli_profile.fetch_assoc_calls;
+    }
+    const uint64_t fetch_start = php_mylite_mysqli_profile_start();
     zval *row = zend_hash_index_find(Z_ARRVAL(result->rows), result->position);
     if (row == NULL) {
+        php_mylite_mysqli_profile_add_elapsed(
+            &php_mylite_mysqli_profile.fetch_assoc_ns,
+            fetch_start
+        );
         RETURN_NULL();
     }
     ++result->position;
+    php_mylite_mysqli_profile_add_elapsed(&php_mylite_mysqli_profile.fetch_assoc_ns, fetch_start);
     RETURN_COPY(row);
 }
 
@@ -1438,12 +1489,21 @@ PHP_METHOD(MyLite_MySQLiResult, fetch_array) {
     Z_PARAM_LONG(mode)
     ZEND_PARSE_PARAMETERS_END();
 
+    if (php_mylite_mysqli_profile_enabled) {
+        ++php_mylite_mysqli_profile.fetch_array_calls;
+    }
+    const uint64_t fetch_start = php_mylite_mysqli_profile_start();
     zval *row = zend_hash_index_find(Z_ARRVAL(result->rows), result->position);
     if (row == NULL) {
+        php_mylite_mysqli_profile_add_elapsed(
+            &php_mylite_mysqli_profile.fetch_array_ns,
+            fetch_start
+        );
         RETURN_NULL();
     }
     ++result->position;
     php_mylite_mysqli_fetch_array_row(result, row, mode, return_value);
+    php_mylite_mysqli_profile_add_elapsed(&php_mylite_mysqli_profile.fetch_array_ns, fetch_start);
 }
 
 PHP_METHOD(MyLite_MySQLiResult, fetch_object) {
@@ -1451,12 +1511,21 @@ PHP_METHOD(MyLite_MySQLiResult, fetch_object) {
 
     ZEND_PARSE_PARAMETERS_NONE();
 
+    if (php_mylite_mysqli_profile_enabled) {
+        ++php_mylite_mysqli_profile.fetch_object_calls;
+    }
+    const uint64_t fetch_start = php_mylite_mysqli_profile_start();
     zval *row = zend_hash_index_find(Z_ARRVAL(result->rows), result->position);
     if (row == NULL) {
+        php_mylite_mysqli_profile_add_elapsed(
+            &php_mylite_mysqli_profile.fetch_object_ns,
+            fetch_start
+        );
         RETURN_NULL();
     }
     ++result->position;
     php_mylite_mysqli_fetch_object_row(row, return_value);
+    php_mylite_mysqli_profile_add_elapsed(&php_mylite_mysqli_profile.fetch_object_ns, fetch_start);
 }
 
 PHP_METHOD(MyLite_MySQLiResult, fetch_all) {
@@ -1468,7 +1537,12 @@ PHP_METHOD(MyLite_MySQLiResult, fetch_all) {
     Z_PARAM_LONG(mode)
     ZEND_PARSE_PARAMETERS_END();
 
+    if (php_mylite_mysqli_profile_enabled) {
+        ++php_mylite_mysqli_profile.fetch_all_calls;
+    }
+    const uint64_t fetch_start = php_mylite_mysqli_profile_start();
     php_mylite_mysqli_fetch_all_rows(result, mode, return_value);
+    php_mylite_mysqli_profile_add_elapsed(&php_mylite_mysqli_profile.fetch_all_ns, fetch_start);
 }
 
 PHP_METHOD(MyLite_MySQLiStmt, bind_param) {
@@ -2146,6 +2220,34 @@ static void php_mylite_mysqli_profile_print(void) {
         php_mylite_mysqli_profile.query_cache_misses
     );
     php_mylite_mysqli_profile_print_counter(
+        "query_classify_calls",
+        php_mylite_mysqli_profile.query_classify_calls
+    );
+    php_mylite_mysqli_profile_print_millis(
+        "query_classify_ms_total",
+        php_mylite_mysqli_profile.query_classify_ns
+    );
+    php_mylite_mysqli_profile_print_counter(
+        "query_cache_lookup_calls",
+        php_mylite_mysqli_profile.query_cache_lookup_calls
+    );
+    php_mylite_mysqli_profile_print_millis(
+        "query_cache_lookup_ms_total",
+        php_mylite_mysqli_profile.query_cache_lookup_ns
+    );
+    php_mylite_mysqli_profile_print_counter(
+        "query_cache_clear_calls",
+        php_mylite_mysqli_profile.query_cache_clear_calls
+    );
+    php_mylite_mysqli_profile_print_counter(
+        "query_cache_clear_finalize_calls",
+        php_mylite_mysqli_profile.query_cache_clear_finalize_calls
+    );
+    php_mylite_mysqli_profile_print_millis(
+        "query_cache_clear_ms_total",
+        php_mylite_mysqli_profile.query_cache_clear_ns
+    );
+    php_mylite_mysqli_profile_print_counter(
         "query_cache_reset_failures",
         php_mylite_mysqli_profile.query_cache_reset_failures
     );
@@ -2164,6 +2266,46 @@ static void php_mylite_mysqli_profile_print(void) {
     php_mylite_mysqli_profile_print_millis(
         "query_result_execute_ms_total",
         php_mylite_mysqli_profile.query_result_execute_ns
+    );
+    php_mylite_mysqli_profile_print_counter(
+        "query_result_step_calls",
+        php_mylite_mysqli_profile.query_result_step_calls
+    );
+    php_mylite_mysqli_profile_print_millis(
+        "query_result_step_ms_total",
+        php_mylite_mysqli_profile.query_result_step_ns
+    );
+    php_mylite_mysqli_profile_print_counter(
+        "query_result_row_materialize_calls",
+        php_mylite_mysqli_profile.query_result_row_materialize_calls
+    );
+    php_mylite_mysqli_profile_print_millis(
+        "query_result_row_materialize_ms_total",
+        php_mylite_mysqli_profile.query_result_row_materialize_ns
+    );
+    php_mylite_mysqli_profile_print_counter(
+        "query_result_field_calls",
+        php_mylite_mysqli_profile.query_result_field_calls
+    );
+    php_mylite_mysqli_profile_print_millis(
+        "query_result_field_ms_total",
+        php_mylite_mysqli_profile.query_result_field_ns
+    );
+    php_mylite_mysqli_profile_print_counter(
+        "query_result_object_calls",
+        php_mylite_mysqli_profile.query_result_object_calls
+    );
+    php_mylite_mysqli_profile_print_millis(
+        "query_result_object_ms_total",
+        php_mylite_mysqli_profile.query_result_object_ns
+    );
+    php_mylite_mysqli_profile_print_counter(
+        "query_status_sync_calls",
+        php_mylite_mysqli_profile.query_status_sync_calls
+    );
+    php_mylite_mysqli_profile_print_millis(
+        "query_status_sync_ms_total",
+        php_mylite_mysqli_profile.query_status_sync_ns
     );
     php_mylite_mysqli_profile_print_counter(
         "query_result_rows",
@@ -2186,6 +2328,10 @@ static void php_mylite_mysqli_profile_print(void) {
     php_mylite_mysqli_profile_print_counter(
         "exec_result_rows",
         php_mylite_mysqli_profile.exec_result_rows
+    );
+    php_mylite_mysqli_profile_print_millis(
+        "exec_result_callback_ms_total",
+        php_mylite_mysqli_profile.exec_result_callback_ns
     );
     php_mylite_mysqli_profile_print_counter(
         "exec_no_result_calls",
@@ -2266,16 +2412,52 @@ static void php_mylite_mysqli_profile_print(void) {
         "fetch_assoc_calls",
         php_mylite_mysqli_profile.fetch_assoc_calls
     );
+    php_mylite_mysqli_profile_print_millis(
+        "fetch_assoc_ms_total",
+        php_mylite_mysqli_profile.fetch_assoc_ns
+    );
+    php_mylite_mysqli_profile_print_average_millis(
+        "fetch_assoc_ms_avg",
+        php_mylite_mysqli_profile.fetch_assoc_ns,
+        php_mylite_mysqli_profile.fetch_assoc_calls
+    );
     php_mylite_mysqli_profile_print_counter(
         "fetch_array_calls",
+        php_mylite_mysqli_profile.fetch_array_calls
+    );
+    php_mylite_mysqli_profile_print_millis(
+        "fetch_array_ms_total",
+        php_mylite_mysqli_profile.fetch_array_ns
+    );
+    php_mylite_mysqli_profile_print_average_millis(
+        "fetch_array_ms_avg",
+        php_mylite_mysqli_profile.fetch_array_ns,
         php_mylite_mysqli_profile.fetch_array_calls
     );
     php_mylite_mysqli_profile_print_counter(
         "fetch_object_calls",
         php_mylite_mysqli_profile.fetch_object_calls
     );
+    php_mylite_mysqli_profile_print_millis(
+        "fetch_object_ms_total",
+        php_mylite_mysqli_profile.fetch_object_ns
+    );
+    php_mylite_mysqli_profile_print_average_millis(
+        "fetch_object_ms_avg",
+        php_mylite_mysqli_profile.fetch_object_ns,
+        php_mylite_mysqli_profile.fetch_object_calls
+    );
     php_mylite_mysqli_profile_print_counter(
         "fetch_all_calls",
+        php_mylite_mysqli_profile.fetch_all_calls
+    );
+    php_mylite_mysqli_profile_print_millis(
+        "fetch_all_ms_total",
+        php_mylite_mysqli_profile.fetch_all_ns
+    );
+    php_mylite_mysqli_profile_print_average_millis(
+        "fetch_all_ms_avg",
+        php_mylite_mysqli_profile.fetch_all_ns,
         php_mylite_mysqli_profile.fetch_all_calls
     );
 }
@@ -2589,7 +2771,14 @@ static void php_mylite_mysqli_clear_query_cache(php_mylite_mysqli_link *link) {
     if (link == NULL) {
         return;
     }
+    if (php_mylite_mysqli_profile_enabled) {
+        ++php_mylite_mysqli_profile.query_cache_clear_calls;
+    }
+    const uint64_t clear_start = php_mylite_mysqli_profile_start();
     if (link->query_cache_stmt != NULL) {
+        if (php_mylite_mysqli_profile_enabled) {
+            ++php_mylite_mysqli_profile.query_cache_clear_finalize_calls;
+        }
         (void)mylite_finalize(link->query_cache_stmt);
         link->query_cache_stmt = NULL;
     }
@@ -2597,6 +2786,10 @@ static void php_mylite_mysqli_clear_query_cache(php_mylite_mysqli_link *link) {
         zend_string_release(link->query_cache_sql);
         link->query_cache_sql = NULL;
     }
+    php_mylite_mysqli_profile_add_elapsed(
+        &php_mylite_mysqli_profile.query_cache_clear_ns,
+        clear_start
+    );
 }
 
 static bool php_mylite_mysqli_query_cache_matches(
@@ -2693,7 +2886,19 @@ static int php_mylite_mysqli_query_impl(
         return php_mylite_mysqli_profile_finish_query(FAILURE, query_start);
     }
 
-    if (php_mylite_mysqli_is_call_query(sql, sql_len)) {
+    if (php_mylite_mysqli_profile_enabled) {
+        ++php_mylite_mysqli_profile.query_classify_calls;
+    }
+    uint64_t subphase_start = php_mylite_mysqli_profile_start();
+    const bool is_call_query = php_mylite_mysqli_is_call_query(sql, sql_len);
+    const bool is_no_result_query =
+        !is_call_query && php_mylite_mysqli_is_no_result_query(sql, sql_len);
+    php_mylite_mysqli_profile_add_elapsed(
+        &php_mylite_mysqli_profile.query_classify_ns,
+        subphase_start
+    );
+
+    if (is_call_query) {
         if (php_mylite_mysqli_profile_enabled) {
             ++php_mylite_mysqli_profile.query_call_exec_calls;
         }
@@ -2703,7 +2908,7 @@ static int php_mylite_mysqli_query_impl(
             query_start
         );
     }
-    if (php_mylite_mysqli_is_no_result_query(sql, sql_len)) {
+    if (is_no_result_query) {
         if (php_mylite_mysqli_profile_enabled) {
             ++php_mylite_mysqli_profile.query_no_result_calls;
         }
@@ -2716,7 +2921,9 @@ static int php_mylite_mysqli_query_impl(
 
     if (php_mylite_mysqli_profile_enabled) {
         ++php_mylite_mysqli_profile.query_result_calls;
+        ++php_mylite_mysqli_profile.query_cache_lookup_calls;
     }
+    subphase_start = php_mylite_mysqli_profile_start();
     bool from_cache = false;
     const bool cache_matches = php_mylite_mysqli_query_cache_matches(link, sql, sql_len);
     if (link->query_cache_stmt != NULL && !cache_matches) {
@@ -2735,6 +2942,10 @@ static int php_mylite_mysqli_query_impl(
             php_mylite_mysqli_clear_query_cache(link);
         }
     }
+    php_mylite_mysqli_profile_add_elapsed(
+        &php_mylite_mysqli_profile.query_cache_lookup_ns,
+        subphase_start
+    );
     if (!from_cache && php_mylite_mysqli_profile_enabled) {
         ++php_mylite_mysqli_profile.query_cache_misses;
     }
@@ -2829,11 +3040,35 @@ static int php_mylite_mysqli_execute_result_stmt(
     array_init(&rows);
     array_init(&fields);
     uint64_t row_count = 0;
+    uint64_t subphase_start = php_mylite_mysqli_profile_start();
     int step_result = mylite_step(stmt);
+    php_mylite_mysqli_profile_add_elapsed(
+        &php_mylite_mysqli_profile.query_result_step_ns,
+        subphase_start
+    );
+    if (php_mylite_mysqli_profile_enabled) {
+        ++php_mylite_mysqli_profile.query_result_step_calls;
+    }
     while (step_result == MYLITE_ROW) {
+        subphase_start = php_mylite_mysqli_profile_start();
         (void)php_mylite_mysqli_add_current_row(stmt, &rows);
+        php_mylite_mysqli_profile_add_elapsed(
+            &php_mylite_mysqli_profile.query_result_row_materialize_ns,
+            subphase_start
+        );
+        if (php_mylite_mysqli_profile_enabled) {
+            ++php_mylite_mysqli_profile.query_result_row_materialize_calls;
+        }
         ++row_count;
+        subphase_start = php_mylite_mysqli_profile_start();
         step_result = mylite_step(stmt);
+        php_mylite_mysqli_profile_add_elapsed(
+            &php_mylite_mysqli_profile.query_result_step_ns,
+            subphase_start
+        );
+        if (php_mylite_mysqli_profile_enabled) {
+            ++php_mylite_mysqli_profile.query_result_step_calls;
+        }
     }
     if (step_result != MYLITE_DONE) {
         zval_ptr_dtor(&rows);
@@ -2848,10 +3083,26 @@ static int php_mylite_mysqli_execute_result_stmt(
         return FAILURE;
     }
 
+    subphase_start = php_mylite_mysqli_profile_start();
     const unsigned column_count = mylite_column_count(stmt);
     php_mylite_mysqli_fields_from_stmt(stmt, &fields);
+    php_mylite_mysqli_profile_add_elapsed(
+        &php_mylite_mysqli_profile.query_result_field_ns,
+        subphase_start
+    );
+    if (php_mylite_mysqli_profile_enabled) {
+        ++php_mylite_mysqli_profile.query_result_field_calls;
+    }
+    if (php_mylite_mysqli_profile_enabled) {
+        ++php_mylite_mysqli_profile.query_status_sync_calls;
+    }
+    subphase_start = php_mylite_mysqli_profile_start();
     php_mylite_mysqli_clear_error(link_object);
     php_mylite_mysqli_sync_status(link, link_object);
+    php_mylite_mysqli_profile_add_elapsed(
+        &php_mylite_mysqli_profile.query_status_sync_ns,
+        subphase_start
+    );
     if (column_count == 0U) {
         zval_ptr_dtor(&rows);
         zval_ptr_dtor(&fields);
@@ -2867,11 +3118,19 @@ static int php_mylite_mysqli_execute_result_stmt(
         return SUCCESS;
     }
 
+    if (php_mylite_mysqli_profile_enabled) {
+        ++php_mylite_mysqli_profile.query_result_object_calls;
+    }
+    subphase_start = php_mylite_mysqli_profile_start();
     php_mylite_mysqli_result_from_rows(
         return_value,
         &rows,
         &fields,
         php_mylite_mysqli_result_class_for_link(link_object)
+    );
+    php_mylite_mysqli_profile_add_elapsed(
+        &php_mylite_mysqli_profile.query_result_object_ns,
+        subphase_start
     );
     php_mylite_mysqli_profile_add_elapsed(
         &php_mylite_mysqli_profile.query_result_execute_ns,
@@ -2915,8 +3174,16 @@ static int php_mylite_mysqli_exec_query_impl(
         return FAILURE;
     }
 
+    if (php_mylite_mysqli_profile_enabled) {
+        ++php_mylite_mysqli_profile.query_status_sync_calls;
+    }
+    uint64_t subphase_start = php_mylite_mysqli_profile_start();
     php_mylite_mysqli_clear_error(link_object);
     php_mylite_mysqli_sync_status(link, link_object);
+    php_mylite_mysqli_profile_add_elapsed(
+        &php_mylite_mysqli_profile.query_status_sync_ns,
+        subphase_start
+    );
     if (!ctx.fields_initialized) {
         zval_ptr_dtor(&rows);
         zval_ptr_dtor(&fields);
@@ -2924,11 +3191,19 @@ static int php_mylite_mysqli_exec_query_impl(
         return SUCCESS;
     }
 
+    if (php_mylite_mysqli_profile_enabled) {
+        ++php_mylite_mysqli_profile.query_result_object_calls;
+    }
+    subphase_start = php_mylite_mysqli_profile_start();
     php_mylite_mysqli_result_from_rows(
         return_value,
         &rows,
         &fields,
         php_mylite_mysqli_result_class_for_link(link_object)
+    );
+    php_mylite_mysqli_profile_add_elapsed(
+        &php_mylite_mysqli_profile.query_result_object_ns,
+        subphase_start
     );
     return SUCCESS;
 }
@@ -2952,8 +3227,16 @@ static int php_mylite_mysqli_exec_no_result_query_impl(
         return FAILURE;
     }
 
+    if (php_mylite_mysqli_profile_enabled) {
+        ++php_mylite_mysqli_profile.query_status_sync_calls;
+    }
+    const uint64_t subphase_start = php_mylite_mysqli_profile_start();
     php_mylite_mysqli_clear_error(link_object);
     php_mylite_mysqli_sync_status(link, link_object);
+    php_mylite_mysqli_profile_add_elapsed(
+        &php_mylite_mysqli_profile.query_status_sync_ns,
+        subphase_start
+    );
     ZVAL_TRUE(return_value);
     return SUCCESS;
 }
@@ -2965,6 +3248,7 @@ static int php_mylite_mysqli_exec_result_callback(
     char **values,
     char **column_names
 ) {
+    const uint64_t callback_start = php_mylite_mysqli_profile_start();
     php_mylite_mysqli_exec_result_context *result_ctx =
         (php_mylite_mysqli_exec_result_context *)ctx;
     if (!result_ctx->fields_initialized) {
@@ -2995,6 +3279,10 @@ static int php_mylite_mysqli_exec_result_callback(
     if (php_mylite_mysqli_profile_enabled) {
         ++php_mylite_mysqli_profile.exec_result_rows;
     }
+    php_mylite_mysqli_profile_add_elapsed(
+        &php_mylite_mysqli_profile.exec_result_callback_ns,
+        callback_start
+    );
     return 0;
 }
 

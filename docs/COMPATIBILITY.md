@@ -109,9 +109,17 @@ The slow non-isolated WordPress PHPUnit CI step now enables
 `MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI=1`, which sets
 `MYLITE_MYSQLI_PROFILE=1` only for that PHPUnit process and emits
 `mylite_mysqli_profile_*` open/close, direct-query, result-query,
-prepared-statement, and fetch counters from the production-built mysqli
-adapter. Other WordPress CI timing steps keep that profile disabled unless a
-diagnostic run explicitly opts in.
+prepared-statement, cache, result-step, row-materialization,
+status-synchronization, result-object, and fetch counters plus fetch elapsed
+time from the production-built mysqli adapter. A focused production
+`Tests_DB` run after the keepalive slice reported `fetch_object_calls=76626`
+but only `fetch_object_ms_total=122.798`, while `query_ms_total=19084.516`,
+`exec_no_result_ms_total=6329.991`, `query_result_step_ms_total=4828.470`,
+`query_prepare_ms_total=4327.226`, and `query_cache_clear_ms_total=3530.218`
+remained much larger. The current WordPress performance target is therefore
+MariaDB/libmylite query execution and prepared-statement lifecycle cost, not
+PHP fetch-object conversion. Other WordPress CI timing steps keep that profile
+disabled unless a diagnostic run explicitly opts in.
 The same non-isolated step now also enables
 `MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE=1`, which opens one harness-owned mysqli
 connection after WordPress bootstrap and closes it at process shutdown. The

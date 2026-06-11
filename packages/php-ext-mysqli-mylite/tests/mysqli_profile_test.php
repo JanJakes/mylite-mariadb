@@ -50,5 +50,23 @@ $body = 'second';
 expect_true($stmt->bind_param('is', $id, $body), 'bind_param failed');
 expect_true($stmt->execute(), 'execute failed');
 
+$result = $db->query('SELECT body FROM profile_notes WHERE id = 2');
+expect_true($result instanceof MyLite\MySQLiResult, 'second SELECT did not return a result');
+$row = $result->fetch_object();
+expect_true(is_object($row) && $row->body === 'second', 'fetch_object row mismatch');
+
+$result = $db->query('SELECT body FROM profile_notes WHERE id = 2');
+expect_true($result instanceof MyLite\MySQLiResult, 'third SELECT did not return a result');
+$row = $result->fetch_array();
+expect_true($row['body'] === 'second' && $row[0] === 'second', 'fetch_array row mismatch');
+
+$result = $db->query('SELECT body FROM profile_notes ORDER BY id');
+expect_true($result instanceof MyLite\MySQLiResult, 'fourth SELECT did not return a result');
+$rows = $result->fetch_all(2);
+expect_true(
+    $rows === [['body' => 'first'], ['body' => 'second']],
+    'fetch_all row mismatch'
+);
+
 unset($result, $stmt);
 expect_true($db->close(), 'close failed');

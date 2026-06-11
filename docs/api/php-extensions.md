@@ -79,8 +79,10 @@ For performance attribution runs, `mysqli_mylite` can emit process-local
 adapter counters when `MYLITE_MYSQLI_PROFILE=1` is present in the PHP process
 environment. The summary is printed at module shutdown with
 `mylite_mysqli_profile_*` keys covering open/close calls, direct
-`mysqli_query()` paths, prepared-statement execution, and result-fetch counts.
-Normal runs leave this disabled.
+`mysqli_query()` paths, query classification, result-statement cache handling,
+prepared-statement execution, result stepping, row and field materialization,
+status synchronization, result-object creation, and result-fetch counts plus
+fetch elapsed time. Normal runs leave this disabled.
 
 The WordPress PHPUnit harness also has an opt-in
 `MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE=1` mode for production timing runs. That
