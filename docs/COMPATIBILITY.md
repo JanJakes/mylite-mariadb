@@ -162,11 +162,21 @@ A follow-up clustered-low attribution split separates index search,
 duplicate-key checking, modify-record fallback, instant-root update, row-level
 mini-transaction commit, and big-record follow-up from the existing clustered
 optimistic and pessimistic B-tree timers.
-The latest reduced local production rerun reported a
-`0.472 ms/insert` ownerless-minus-ordinary clustered-low delta, split mostly
-between clustered optimistic B-tree insertion at `0.378 ms/insert` and the
-row-level mini-transaction commit at `0.084 ms/insert`; index search accounted
-for `0.010 ms/insert`, and duplicate/fallback phases stayed at zero.
+The `e6efccff` production CI run reported a `0.249 ms/insert`
+ownerless-minus-ordinary clustered-low delta, split between clustered
+optimistic B-tree insertion at `0.116 ms/insert` and the row-level
+mini-transaction commit at `0.129 ms/insert`; index search accounted for
+`0.004 ms/insert`, and duplicate/fallback/pessimistic phases stayed at zero.
+A follow-up optimistic B-tree attribution split now separates preflight,
+lock/undo, tuple insertion, reorganization, adaptive-hash update, lock update,
+and result counts within the clustered optimistic B-tree bucket. Row-level MTR
+commit remains a separate nonzero performance target. The final reduced local
+production sample with this split reported a `0.480 ms/insert`
+ownerless-minus-ordinary clustered optimistic B-tree delta, with
+`0.476 ms/insert` in `btr_cur_ins_lock_and_undo()`, `0.002 ms/insert` in
+tuple insertion, `0.001 ms/insert` in preflight, zero
+reorg/adaptive-hash/lock-update deltas, one successful optimistic insert per
+row, and no fallback/error counts.
 A follow-up slice now
 allows MariaDB's existing cached-undo reuse only while the runtime remains in
 the same continuous single-owner epoch already used for external-refresh skip

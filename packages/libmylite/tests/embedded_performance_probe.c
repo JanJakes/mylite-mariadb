@@ -388,6 +388,19 @@ enum innodb_deep_perf_stat_index {
     INNODB_DEEP_PERF_STAT_ROW_INS_SEC_LOW_TOTAL_NS,
     INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_CALLS,
     INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_TOTAL_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_PREFLIGHT_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_LOCK_UNDO_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_TUPLE_INSERT_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_REORG_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_REORG_TUPLE_INSERT_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_AHI_UPDATE_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_LOCK_UPDATE_NS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_SUCCESS,
+    INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_DB_FAIL,
+    INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_LOCK_WAIT,
+    INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_TOO_BIG_RECORD,
+    INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_OTHER_ERROR,
+    INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_REORG_ATTEMPTS,
     INNODB_DEEP_PERF_STAT_ROW_INS_BTR_PESSIMISTIC_CALLS,
     INNODB_DEEP_PERF_STAT_ROW_INS_BTR_PESSIMISTIC_TOTAL_NS,
     INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_PAGES,
@@ -567,6 +580,12 @@ static void emit_summary_rate(const char *name, double value);
 static void emit_summary_ratio(const char *name, double numerator, double denominator);
 static void emit_summary_u64(const char *name, uint64_t value);
 static void emit_summary_count_per_iteration(const char *name, uint64_t count, unsigned iterations);
+static void emit_summary_count_per_iteration_delta(
+    const char *name,
+    uint64_t left,
+    uint64_t right,
+    unsigned iterations
+);
 static void emit_summary_ms_per_iteration(const char *name, uint64_t value_ns, unsigned iterations);
 static void emit_summary_ms_per_iteration_delta(
     const char *name,
@@ -1222,6 +1241,17 @@ static void emit_summary_count_per_iteration(
     printf("%s=%.3f\n", name, average);
 }
 
+static void emit_summary_count_per_iteration_delta(
+    const char *name,
+    uint64_t left,
+    uint64_t right,
+    unsigned iterations
+) {
+    const double total = (double)left - (double)right;
+    const double average = iterations > 0U ? total / (double)iterations : 0.0;
+    printf("%s=%.3f\n", name, average);
+}
+
 static void emit_summary_ms_per_iteration(
     const char *name,
     uint64_t value_ns,
@@ -1261,6 +1291,31 @@ static void emit_autocommit_deep_ms_comparison(
     }
     if (delta_name != NULL) {
         emit_summary_ms_per_iteration_delta(
+            delta_name,
+            ownerless_deep[index],
+            ordinary_deep[index],
+            insert_iterations
+        );
+    }
+}
+
+static void emit_autocommit_deep_count_comparison(
+    const uint64_t *ordinary_deep,
+    const uint64_t *ownerless_deep,
+    size_t index,
+    const char *ordinary_name,
+    const char *ownerless_name,
+    const char *delta_name,
+    unsigned insert_iterations
+) {
+    if (ordinary_name != NULL) {
+        emit_summary_count_per_iteration(ordinary_name, ordinary_deep[index], insert_iterations);
+    }
+    if (ownerless_name != NULL) {
+        emit_summary_count_per_iteration(ownerless_name, ownerless_deep[index], insert_iterations);
+    }
+    if (delta_name != NULL) {
+        emit_summary_count_per_iteration_delta(
             delta_name,
             ownerless_deep[index],
             ordinary_deep[index],
@@ -1570,6 +1625,158 @@ static void emit_autocommit_deep_comparison_summary(
         NULL,
         "mylite_perf_summary_ownerless_minus_ordinary_autocommit_clustered_btree_optimistic_"
         "ms_per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_ms_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_PREFLIGHT_NS,
+        "mylite_perf_summary_ordinary_autocommit_clustered_btree_optimistic_preflight_ms_"
+        "per_insert",
+        "mylite_perf_summary_ownerless_autocommit_clustered_btree_optimistic_preflight_ms_"
+        "per_insert",
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_clustered_btree_optimistic_"
+        "preflight_ms_per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_ms_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_LOCK_UNDO_NS,
+        "mylite_perf_summary_ordinary_autocommit_clustered_btree_optimistic_lock_undo_ms_"
+        "per_insert",
+        "mylite_perf_summary_ownerless_autocommit_clustered_btree_optimistic_lock_undo_ms_"
+        "per_insert",
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_clustered_btree_optimistic_"
+        "lock_undo_ms_per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_ms_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_TUPLE_INSERT_NS,
+        "mylite_perf_summary_ordinary_autocommit_clustered_btree_optimistic_tuple_insert_ms_"
+        "per_insert",
+        "mylite_perf_summary_ownerless_autocommit_clustered_btree_optimistic_tuple_insert_ms_"
+        "per_insert",
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_clustered_btree_optimistic_"
+        "tuple_insert_ms_per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_ms_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_REORG_NS,
+        "mylite_perf_summary_ordinary_autocommit_clustered_btree_optimistic_reorg_ms_per_insert",
+        "mylite_perf_summary_ownerless_autocommit_clustered_btree_optimistic_reorg_ms_per_insert",
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_clustered_btree_optimistic_"
+        "reorg_ms_per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_ms_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_REORG_TUPLE_INSERT_NS,
+        "mylite_perf_summary_ordinary_autocommit_clustered_btree_optimistic_reorg_tuple_"
+        "insert_ms_per_insert",
+        "mylite_perf_summary_ownerless_autocommit_clustered_btree_optimistic_reorg_tuple_"
+        "insert_ms_per_insert",
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_clustered_btree_optimistic_"
+        "reorg_tuple_insert_ms_per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_ms_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_AHI_UPDATE_NS,
+        "mylite_perf_summary_ordinary_autocommit_clustered_btree_optimistic_ahi_update_ms_"
+        "per_insert",
+        "mylite_perf_summary_ownerless_autocommit_clustered_btree_optimistic_ahi_update_ms_"
+        "per_insert",
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_clustered_btree_optimistic_"
+        "ahi_update_ms_per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_ms_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_LOCK_UPDATE_NS,
+        "mylite_perf_summary_ordinary_autocommit_clustered_btree_optimistic_lock_update_ms_"
+        "per_insert",
+        "mylite_perf_summary_ownerless_autocommit_clustered_btree_optimistic_lock_update_ms_"
+        "per_insert",
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_clustered_btree_optimistic_"
+        "lock_update_ms_per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_count_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_SUCCESS,
+        "mylite_perf_summary_ordinary_autocommit_clustered_btree_optimistic_successes_per_"
+        "insert",
+        "mylite_perf_summary_ownerless_autocommit_clustered_btree_optimistic_successes_per_"
+        "insert",
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_clustered_btree_optimistic_"
+        "successes_per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_count_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_DB_FAIL,
+        "mylite_perf_summary_ordinary_autocommit_clustered_btree_optimistic_db_fail_per_insert",
+        "mylite_perf_summary_ownerless_autocommit_clustered_btree_optimistic_db_fail_per_insert",
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_clustered_btree_optimistic_"
+        "db_fail_per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_count_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_LOCK_WAIT,
+        "mylite_perf_summary_ordinary_autocommit_clustered_btree_optimistic_lock_waits_per_"
+        "insert",
+        "mylite_perf_summary_ownerless_autocommit_clustered_btree_optimistic_lock_waits_per_"
+        "insert",
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_clustered_btree_optimistic_"
+        "lock_waits_per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_count_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_TOO_BIG_RECORD,
+        "mylite_perf_summary_ordinary_autocommit_clustered_btree_optimistic_too_big_records_"
+        "per_insert",
+        "mylite_perf_summary_ownerless_autocommit_clustered_btree_optimistic_too_big_records_"
+        "per_insert",
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_clustered_btree_optimistic_"
+        "too_big_records_per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_count_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_OTHER_ERROR,
+        "mylite_perf_summary_ordinary_autocommit_clustered_btree_optimistic_other_errors_per_"
+        "insert",
+        "mylite_perf_summary_ownerless_autocommit_clustered_btree_optimistic_other_errors_per_"
+        "insert",
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_clustered_btree_optimistic_"
+        "other_errors_per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_count_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_REORG_ATTEMPTS,
+        "mylite_perf_summary_ordinary_autocommit_clustered_btree_optimistic_reorg_attempts_"
+        "per_insert",
+        "mylite_perf_summary_ownerless_autocommit_clustered_btree_optimistic_reorg_attempts_"
+        "per_insert",
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_clustered_btree_optimistic_"
+        "reorg_attempts_per_insert",
         insert_iterations
     );
     emit_autocommit_deep_ms_comparison(
@@ -4956,6 +5163,71 @@ static void emit_innodb_deep_perf_stats(const char *prefix) {
         prefix,
         "row_ins_btr_optimistic_total",
         values[INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_TOTAL_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_ins_btr_optimistic_preflight",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_PREFLIGHT_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_ins_btr_optimistic_lock_undo",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_LOCK_UNDO_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_ins_btr_optimistic_tuple_insert",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_TUPLE_INSERT_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_ins_btr_optimistic_reorg",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_REORG_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_ins_btr_optimistic_reorg_tuple_insert",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_REORG_TUPLE_INSERT_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_ins_btr_optimistic_ahi_update",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_AHI_UPDATE_NS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "row_ins_btr_optimistic_lock_update",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_LOCK_UPDATE_NS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "row_ins_btr_optimistic_success",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_SUCCESS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "row_ins_btr_optimistic_db_fail",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_DB_FAIL]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "row_ins_btr_optimistic_lock_wait",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_LOCK_WAIT]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "row_ins_btr_optimistic_too_big_record",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_TOO_BIG_RECORD]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "row_ins_btr_optimistic_other_error",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_OTHER_ERROR]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "row_ins_btr_optimistic_reorg_attempts",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_REORG_ATTEMPTS]
     );
     emit_innodb_deep_perf_value(
         prefix,

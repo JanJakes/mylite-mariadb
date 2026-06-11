@@ -81,6 +81,9 @@ the end of the probes:
     entry, clustered/secondary low-level insertion, clustered-low search,
     duplicate-check, modify-record, instant-root, row-level MTR commit, and
     big-record follow-up phases, and clustered pessimistic B-tree insertion,
+  - when detailed ownerless stats are enabled, clustered optimistic B-tree
+    summaries for preflight, lock/undo, tuple insertion, reorganization,
+    adaptive-hash update, lock update, success and fallback/error counts,
   - when detailed ownerless stats are enabled, ownerless autocommit per-insert
     summaries for MTR-published page-version volume, total MyLite
     page-publish hook calls, page-log append calls, transaction-image,
@@ -209,11 +212,19 @@ including clustered-low search, duplicate-check, row-level MTR commit, and
 rare fallback paths, which keeps the next optimization choice tied to measured
 InnoDB row graph and B-tree cost instead of the broad
 `row_insert_for_mysql()` total.
-The latest reduced local production rerun with this split reported a
-`0.472 ms/insert` ownerless-minus-ordinary clustered-low delta, with
-`0.378 ms/insert` in clustered optimistic B-tree insertion,
-`0.084 ms/insert` in row-level MTR commit, `0.010 ms/insert` in
-`btr_pcur_open()` search, and zero duplicate-check or rare fallback deltas.
+The `e6efccff` production CI run reported a `0.249 ms/insert`
+ownerless-minus-ordinary clustered-low delta, with `0.116 ms/insert` in
+clustered optimistic B-tree insertion, `0.129 ms/insert` in row-level MTR
+commit, `0.004 ms/insert` in `btr_pcur_open()` search, and zero
+duplicate-check, rare fallback, or pessimistic B-tree deltas. A follow-up
+optimistic B-tree attribution split now separates preflight, lock/undo, tuple
+insert, reorganization, adaptive-hash update, lock update, and result counts.
+The final reduced local production sample with that split reported a
+`0.480 ms/insert` ownerless-minus-ordinary clustered optimistic B-tree delta,
+with `0.476 ms/insert` in `btr_cur_ins_lock_and_undo()`, `0.002 ms/insert`
+in tuple insertion, `0.001 ms/insert` in preflight, zero
+reorg/adaptive-hash/lock-update deltas, one successful optimistic insert per
+row, and no fallback/error counts.
 
 The ownerless attribution probe now preserves the historical
 `native_support_*_type_trx_system` aggregate while also exposing

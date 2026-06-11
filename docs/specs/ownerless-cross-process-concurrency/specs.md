@@ -4620,14 +4620,22 @@ subsystems that this mode needs:
   commit, write-history, history-list, commit-in-memory, ownerless visibility,
   row-insert, row-insert subphases, row graph/index-entry subphases, and
   clustered low-level search, duplicate-check, row-level MTR commit, rare
-  fallback, and optimistic or pessimistic B-tree phases. That keeps the next
-  performance target tied to measured ownerless-specific deltas instead of
-  shared MariaDB/InnoDB insert cost. The latest reduced local production rerun
-  after the clustered-low split reported ownerless-minus-ordinary deltas of
-  `0.472 ms/insert` in clustered-low total, `0.378 ms/insert` in clustered
-  optimistic B-tree insertion, `0.084 ms/insert` in row-level MTR commit, and
-  `0.010 ms/insert` in `btr_pcur_open()` search, while duplicate-check and
-  rare fallback deltas stayed at zero. The generic InnoDB read-complete
+  fallback, and optimistic or pessimistic B-tree phases. Optimistic B-tree
+  attribution now further separates preflight, lock/undo, tuple insertion,
+  reorganization, adaptive-hash update, lock update, and result counts. That
+  keeps the next performance target tied to measured ownerless-specific deltas
+  instead of shared MariaDB/InnoDB insert cost. The `e6efccff` production CI
+  run after the clustered-low split reported ownerless-minus-ordinary deltas of
+  `0.249 ms/insert` in clustered-low total, `0.116 ms/insert` in clustered
+  optimistic B-tree insertion, `0.129 ms/insert` in row-level MTR commit, and
+  `0.004 ms/insert` in `btr_pcur_open()` search, while duplicate-check, rare
+  fallback, and pessimistic B-tree deltas stayed at zero. The final reduced
+  local production sample after the optimistic B-tree split reported a
+  `0.480 ms/insert` optimistic B-tree delta, with `0.476 ms/insert` in
+  `btr_cur_ins_lock_and_undo()`, `0.002 ms/insert` in tuple insertion,
+  `0.001 ms/insert` in preflight, zero reorg/adaptive-hash/lock-update deltas,
+  one successful optimistic insert per row, and no fallback/error counts. The
+  generic InnoDB read-complete
   ownerless overlay now runs only for MyLite-classified plain `SELECT`/`WITH`
   page-version reads; non-SELECT DDL and DML rely on explicit page-write
   refresh and publication paths. The current reduced stats-enabled autocommit

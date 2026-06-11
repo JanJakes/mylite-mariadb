@@ -61,6 +61,7 @@ Created 10/16/1994 Heikki Tuuri
 #include "mysql_com.h"
 #include "dict0stats.h"
 #include "row0ins.h"
+#include "mylite_ownerless_innodb_deep_perf.h"
 #ifdef WITH_WSREP
 #include "mysql/service_wsrep.h"
 #endif /* WITH_WSREP */
@@ -2327,8 +2328,12 @@ btr_cur_optimistic_insert(
 	bool		leaf;
 	bool		reorg __attribute__((unused));
 	bool		inherit = true;
+	bool		mylite_deep_preflight_active = true;
 	ulint		rec_size;
 	dberr_t		err;
+	uint64_t	mylite_deep_preflight_start =
+		mylite_ownerless_innodb_deep_perf_start_ns();
+	uint64_t	mylite_deep_stage_start = 0;
 
 	ut_ad(thr || !(~flags & (BTR_NO_LOCKING_FLAG | BTR_NO_UNDO_LOG_FLAG)));
 	*big_rec = NULL;
@@ -2369,19 +2374,16 @@ convert_big_rec:
 		big_rec_vec = dtuple_convert_big_rec(index, 0, entry, &n_ext);
 
 		if (UNIV_UNLIKELY(big_rec_vec == NULL)) {
-
-			return(DB_TOO_BIG_RECORD);
+			err = DB_TOO_BIG_RECORD;
+			goto fail_err;
 		}
 
 		rec_size = rec_get_converted_size(index, entry, n_ext);
 	}
 
 	if (block->page.zip.data && page_zip_is_too_big(index, entry)) {
-		if (big_rec_vec != NULL) {
-			dtuple_convert_back_big_rec(index, entry, big_rec_vec);
-		}
-
-		return(DB_TOO_BIG_RECORD);
+		err = DB_TOO_BIG_RECORD;
+		goto fail_err;
 	}
 
 	LIMIT_OPTIMISTIC_INSERT_DEBUG(page_get_n_recs(page), goto fail);
@@ -2402,9 +2404,33 @@ fail:
 			btr_cur_prefetch_siblings(block, index, mtr->trx);
 		}
 fail_err:
+		if (mylite_deep_preflight_active) {
+			mylite_ownerless_innodb_deep_perf_add_elapsed(
+				MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_OPTIMISTIC_PREFLIGHT_NS,
+				mylite_deep_preflight_start);
+			mylite_deep_preflight_active = false;
+		}
 
 		if (big_rec_vec) {
 			dtuple_convert_back_big_rec(index, entry, big_rec_vec);
+		}
+
+		switch (err) {
+		case DB_FAIL:
+			mylite_ownerless_innodb_deep_perf_count(
+				MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_OPTIMISTIC_DB_FAIL);
+			break;
+		case DB_LOCK_WAIT:
+			mylite_ownerless_innodb_deep_perf_count(
+				MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_OPTIMISTIC_LOCK_WAIT);
+			break;
+		case DB_TOO_BIG_RECORD:
+			mylite_ownerless_innodb_deep_perf_count(
+				MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_OPTIMISTIC_TOO_BIG_RECORD);
+			break;
+		default:
+			mylite_ownerless_innodb_deep_perf_count(
+				MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_OPTIMISTIC_OTHER_ERROR);
 		}
 
 		return(err);
@@ -2443,6 +2469,10 @@ fail_err:
 		goto fail;
 	}
 
+	mylite_ownerless_innodb_deep_perf_add_elapsed(
+		MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_OPTIMISTIC_PREFLIGHT_NS,
+		mylite_deep_preflight_start);
+	mylite_deep_preflight_active = false;
 	page_cursor = btr_cur_get_page_cur(cursor);
 
 	DBUG_LOG("ib_cur",
@@ -2459,8 +2489,13 @@ fail_err:
 
 		/* Check locks and write to the undo log,
 		if specified */
+		mylite_deep_stage_start =
+			mylite_ownerless_innodb_deep_perf_start_ns();
 		err = btr_cur_ins_lock_and_undo(flags, cursor, entry,
 						thr, mtr, &inherit);
+		mylite_ownerless_innodb_deep_perf_add_elapsed(
+			MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_OPTIMISTIC_LOCK_UNDO_NS,
+			mylite_deep_stage_start);
 		if (err != DB_SUCCESS) {
 			goto fail_err;
 		}
@@ -2493,8 +2528,13 @@ fail_err:
 		}
 #endif
 
-		*rec = page_cur_tuple_insert(page_cursor, entry, offsets, heap,
-					     n_ext, mtr);
+		mylite_deep_stage_start =
+			mylite_ownerless_innodb_deep_perf_start_ns();
+		*rec = page_cur_tuple_insert(
+			page_cursor, entry, offsets, heap, n_ext, mtr);
+		mylite_ownerless_innodb_deep_perf_add_elapsed(
+			MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_OPTIMISTIC_TUPLE_INSERT_NS,
+			mylite_deep_stage_start);
 
 		reorg = page_cursor_rec != page_cur_get_rec(page_cursor);
 	}
@@ -2508,12 +2548,28 @@ fail_err:
 		reorg = true;
 
 		/* If the record did not fit, reorganize */
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_OPTIMISTIC_REORG_ATTEMPTS);
+		mylite_deep_stage_start =
+			mylite_ownerless_innodb_deep_perf_start_ns();
 		err = btr_page_reorganize(page_cursor, mtr);
+		mylite_ownerless_innodb_deep_perf_add_elapsed(
+			MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_OPTIMISTIC_REORG_NS,
+			mylite_deep_stage_start);
 		if (err != DB_SUCCESS
-		    || page_get_max_insert_size(page, 1) != max_size
-		    || !(*rec = page_cur_tuple_insert(page_cursor, entry,
-						      offsets, heap, n_ext,
-						      mtr))) {
+		    || page_get_max_insert_size(page, 1) != max_size) {
+			err = DB_CORRUPTION;
+			goto fail_err;
+		}
+
+		mylite_deep_stage_start =
+			mylite_ownerless_innodb_deep_perf_start_ns();
+		*rec = page_cur_tuple_insert(
+			page_cursor, entry, offsets, heap, n_ext, mtr);
+		mylite_ownerless_innodb_deep_perf_add_elapsed(
+			MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_OPTIMISTIC_REORG_TUPLE_INSERT_NS,
+			mylite_deep_stage_start);
+		if (!*rec) {
 			err = DB_CORRUPTION;
 			goto fail_err;
 		}
@@ -2526,17 +2582,28 @@ fail_err:
 		ut_ad(index->is_instant());
 		ut_ad(flags == BTR_NO_LOCKING_FLAG);
 	} else if (!index->table->is_temporary()) {
+		mylite_deep_stage_start =
+			mylite_ownerless_innodb_deep_perf_start_ns();
 		btr_search_update_hash_on_insert(cursor, reorg);
+		mylite_ownerless_innodb_deep_perf_add_elapsed(
+			MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_OPTIMISTIC_AHI_UPDATE_NS,
+			mylite_deep_stage_start);
 	}
 #endif /* BTR_CUR_HASH_ADAPT */
 
 	if (!(flags & BTR_NO_LOCKING_FLAG) && inherit) {
-
+		mylite_deep_stage_start =
+			mylite_ownerless_innodb_deep_perf_start_ns();
 		lock_update_insert(block, *rec);
+		mylite_ownerless_innodb_deep_perf_add_elapsed(
+			MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_OPTIMISTIC_LOCK_UPDATE_NS,
+			mylite_deep_stage_start);
 	}
 
 	*big_rec = big_rec_vec;
 
+	mylite_ownerless_innodb_deep_perf_count(
+		MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_OPTIMISTIC_SUCCESS);
 	return(DB_SUCCESS);
 }
 
