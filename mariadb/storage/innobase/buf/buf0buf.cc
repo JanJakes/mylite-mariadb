@@ -3971,13 +3971,15 @@ dberr_t buf_page_t::read_complete(const fil_node_t &node,
                   0 &&
                 read_frame_usable &&
                 mylite_ownerless_retained_user_page(read_id, read_frame);
+            const bool retained_lower_boundary_page=
+                retained_user_page && !ownerless_current_visibility;
             const bool copy_ownerless=
                 !current_trx_modified_page &&
                 (!read_frame_usable || ownerless_lsn > read_lsn ||
                  read_frame_newer_than_visibility ||
-                 (!retained_user_page &&
+                 (!retained_lower_boundary_page &&
                   same_lsn_different_ownerless_image) ||
-                 (!retained_user_page &&
+                 (!retained_lower_boundary_page &&
                   ownerless_boundary_newer_than_frame));
             if (copy_ownerless)
               memcpy(read_frame, ownerless_page, page_size);

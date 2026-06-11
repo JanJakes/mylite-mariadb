@@ -696,8 +696,10 @@ reproduction showed a direct `mylite_exec()` reader could observe a lower
 per-table aggregate after seeing a newer page-version state. The follow-up
 runtime fix keeps successful direct-read handle pins across statements and
 prevents retained reads from replacing user data/index/blob pages with lower
-visible-boundary images during clean-page refresh or file-read overlay, while
-native support pages still refresh normally. The same `sql-case 13` loop that
+visible-boundary images during visible-boundary external refresh, clean-page
+refresh, or file-read overlay while still accepting current ownerless page
+images that advance a page; native support pages still refresh normally. The
+same `sql-case 13` loop that
 reproduced the failure passed `30/30` locally after the fix, and focused
 active-pin and active-reader pressure diagnostics remained passing. The loop
 still emitted intermittent non-fatal InnoDB undo-page warnings during local
@@ -705,6 +707,21 @@ verification, so undo/checkpoint reconciliation remains separate follow-up
 evidence rather than a performance-timing conclusion. This keeps the production
 timing split useful: correctness failures are still visible, but they no
 longer hide whether the job used optimized artifacts.
+
+The first CI run after that fix exposed the narrower current-boundary case in
+`sql-case 3` (`test_ownerless_concurrent_transaction_commits`): a verifier
+handle that retained an earlier direct read could reject current ownerless page
+images for other independent tables when the final read was already using the
+live boundary. Retained-read overlay protection therefore distinguishes
+current ownerless page images from lower visible-boundary overlays instead of
+turning protection off for current reads. The same local production loop then
+exposed a second
+commit-race invariant: no-live close-time reclaim could advance durable
+`mylite-concurrency.ckpt` past the still-existing volatile `.shm` redo-visible
+state, leaving `.shm` stale until a rebuild. No-live reclaim now reseeds the
+runtime redo state from the durable checkpoint whenever it advances the visible
+LSN, keeping the timing-visible production job from failing on a volatile
+metadata lag after correctness has already been made durable.
 
 ## Acceptance Criteria
 

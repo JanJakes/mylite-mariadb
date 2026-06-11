@@ -58,12 +58,14 @@ proven:
   error path, or close, matching the prepared-statement retention model closely
   enough for live-peer reclamation to see stale process-local pages between
   statements.
-- When an eligible read has a retained page-version read LSN, statement refresh
-  and file-read overlay keep user data/index/blob pages from being replaced by
-  lower visible-boundary images based only on durable-boundary commit LSN
-  evidence. Native undo, system, allocation, and recovery pages still refresh
-  through the visible boundary, avoiding the broad retained-read refresh skip
-  that can disturb native support state.
+- When an eligible read has a retained page-version read LSN, statement
+  visible-boundary refresh and file-read overlay keep user data/index/blob
+  pages from being replaced by lower visible-boundary images based only on
+  durable-boundary commit LSN evidence. Current live reads still accept current
+  ownerless page images that advance the page.
+  Native undo, system, allocation, and recovery pages still refresh through the
+  visible boundary, avoiding the broad retained-read refresh skip that can
+  disturb native support state.
 - No-live reclaim does not let a runtime that only consumed the current visible
   page-version WAL truncate that WAL on final close. Writer runtimes keep the
   normal statement/timer reclaim path, no-live writer close still needs native

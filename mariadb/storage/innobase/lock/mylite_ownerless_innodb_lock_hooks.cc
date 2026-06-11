@@ -1733,6 +1733,23 @@ extern "C" void mylite_ownerless_innodb_refresh_external_pages(uint64_t latest_l
   refresh_replaceable_buffer_pool_pages();
 }
 
+extern "C" void
+mylite_ownerless_innodb_refresh_external_pages_retained(uint64_t latest_lsn)
+{
+  if (!mylite_ownerless_innodb_lock_has_hooks() || latest_lsn == 0)
+    return;
+
+  advance_external_lsn(latest_lsn);
+  buf_flush_sync_batch(static_cast<lsn_t>(latest_lsn));
+  const uint64_t previous_visible_lsn= page_visible_lsn;
+  const bool previous_current= page_visible_lsn_is_current;
+  page_visible_lsn= latest_lsn;
+  page_visible_lsn_is_current= true;
+  refresh_buffer_pool_pages(true, true, true, true, true);
+  page_visible_lsn= previous_visible_lsn;
+  page_visible_lsn_is_current= previous_current;
+}
+
 extern "C" void mylite_ownerless_innodb_refresh_buffer_pool_pages(uint64_t visible_lsn)
 {
   if (!mylite_ownerless_innodb_lock_has_hooks() || visible_lsn == 0)
@@ -2955,7 +2972,8 @@ int refresh_page_for_write(const buf_block_t &block,
           page_version_commit_lsn != 0 &&
           page_version_commit_lsn <= page_visible_lsn;
       const bool boundary_newer_than_local=
-          allow_boundary_newer && !retained_user_page &&
+          allow_boundary_newer &&
+          (!retained_user_page || page_visible_lsn_is_current) &&
           page_version_commit_lsn > local_lsn;
       if (page_version_lsn < local_lsn &&
           !boundary_newer_than_local && !visible_boundary_allowed)

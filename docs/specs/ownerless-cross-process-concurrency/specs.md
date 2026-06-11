@@ -303,12 +303,13 @@ Roles:
   finalized; active result pins block live-peer and single-owner checkpointing
   so WAL cannot be discarded while the handle may still have stale clean pages.
   Eligible retained reads reject lower visible-boundary overlays for user
-  data/index/blob pages during clean-page refresh and file-read overlay, while
-  native undo, system, allocation, and recovery pages still use ordinary
-  visible-boundary refresh. A new ownerless process generation or an advancing
-  handle pin forces clean-page refresh without the single-owner skip, because
-  peer commits may already be native-checkpointed and reclaimed from the
-  page-version WAL. Live raw-latest
+  data/index/blob pages during visible-boundary external refresh, clean-page
+  refresh, and file-read overlay, while current live reads still accept current
+  ownerless page images that advance the page. Native undo, system,
+  allocation, and recovery pages still use ordinary visible-boundary refresh. A
+  new ownerless process generation or an advancing handle pin forces clean-page
+  refresh without the single-owner skip, because peer commits may already be
+  native-checkpointed and reclaimed from the page-version WAL. Live raw-latest
   promotion is used
   only when no other active native transaction or active redo reservation can
   prove a lower or uncommitted page image still matters and the older durable
@@ -342,7 +343,10 @@ Roles:
   a `FIL_PAGE_LSN` newer than the record page LSN, or the same `FIL_PAGE_LSN`
   plus a byte-for-byte match with the retained payload. Live-peer reclaim keeps
   checkpointable user data/index page records in WAL until no-live reclaim can
-  make the native data file authoritative.
+  make the native data file authoritative. When no-live reclaim advances the
+  durable checkpoint-visible LSN, the still-existing volatile redo state is
+  reseeded from that checkpoint so readers do not observe `.shm` metadata
+  behind `.ckpt` before a later `.shm` rebuild.
   Transactions that already performed local writes or locking reads avoid
   global refresh, and clean-page refresh skips locally dirty buffer pages.
   DML/DDL, recovery, checkpointing, and tablespace replay still use the
@@ -1993,7 +1997,8 @@ Tasks:
    Eligible retained reads keep native clean-page refresh active but reject
    lower visible-boundary overlays for user data/index/blob pages when the
    overlay would downgrade the handle below its retained page-version read LSN;
-   native support pages continue to refresh through the visible boundary.
+   current live ownerless page images can still advance those pages, and native
+   support pages continue to refresh through the visible boundary.
    Live-peer reclaim also stays disabled for a writer runtime that has local
    writes but has not consumed the current visible page-version WAL after those
    writes, avoiding an immediate cleanup race with a peer's native page

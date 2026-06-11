@@ -1408,6 +1408,11 @@ bool ownerless_page_log_has_uncheckpointed_records(RuntimeState &runtime);
 bool ownerless_page_log_has_payload_records(RuntimeState &runtime);
 bool ownerless_runtime_has_live_shared_readonly_peer(RuntimeState &runtime);
 bool clear_ownerless_native_file_op_checkpoint_without_page_log(RuntimeState &runtime);
+bool seed_ownerless_runtime_redo_state_checkpoint(
+    RuntimeState &runtime,
+    std::uint64_t latest_lsn,
+    std::uint64_t visible_lsn
+);
 int seed_ownerless_native_checkpoint_baseline(
     RuntimeState &runtime,
     std::uint64_t *out_baseline_lsn
@@ -8229,6 +8234,10 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
             &visible_lsn,
             native_file_op_checkpoint_needed || retained_page_log_records
         ));
+        latest_lsn = std::max(latest_lsn, visible_lsn);
+        static_cast<void>(
+            seed_ownerless_runtime_redo_state_checkpoint(runtime, latest_lsn, visible_lsn)
+        );
     }
 
     OwnerlessStatementLocks live_reclaim_statement_locks;
@@ -8288,6 +8297,10 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
             ) &&
             refreshed_visible_lsn > visible_lsn) {
             visible_lsn = refreshed_visible_lsn;
+            latest_lsn = std::max(latest_lsn, visible_lsn);
+            static_cast<void>(
+                seed_ownerless_runtime_redo_state_checkpoint(runtime, latest_lsn, visible_lsn)
+            );
         }
     }
     if (native_file_op_checkpoint_needed) {
@@ -8323,6 +8336,13 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
                 &refreshed_visible_lsn
             ) &&
             refreshed_visible_lsn > visible_lsn) {
+            const std::uint64_t refreshed_latest =
+                std::max(refreshed_latest_lsn, refreshed_visible_lsn);
+            static_cast<void>(seed_ownerless_runtime_redo_state_checkpoint(
+                runtime,
+                refreshed_latest,
+                refreshed_visible_lsn
+            ));
             static_cast<void>(checkpoint_page_log_at_visible_lsn(refreshed_visible_lsn));
         }
     }
@@ -8417,6 +8437,28 @@ bool clear_ownerless_native_file_op_checkpoint_without_page_log(RuntimeState &ru
         return false;
     }
     return clear_concurrency_native_file_op_checkpoint_needed(runtime.concurrency_checkpoint_fd);
+}
+
+bool seed_ownerless_runtime_redo_state_checkpoint(
+    RuntimeState &runtime,
+    std::uint64_t latest_lsn,
+    std::uint64_t visible_lsn
+) {
+    if (runtime.ownerless_innodb_lock_hook.redo_state == nullptr ||
+        runtime.ownerless_innodb_lock_hook.redo_state_size <
+            k_concurrency_redo_state_segment_size ||
+        (latest_lsn == 0U && visible_lsn == 0U)) {
+        return false;
+    }
+    if (visible_lsn > latest_lsn) {
+        latest_lsn = visible_lsn;
+    }
+    return mylite_ownerless_redo_state_seed_checkpoint(
+               runtime.ownerless_innodb_lock_hook.redo_state,
+               runtime.ownerless_innodb_lock_hook.redo_state_size,
+               latest_lsn,
+               visible_lsn
+           ) == MYLITE_OWNERLESS_REDO_STATE_OK;
 }
 
 int seed_ownerless_native_checkpoint_baseline(
@@ -10470,6 +10512,9 @@ int refresh_ownerless_external_pages_before_statement(
         no_other_active_transactions &&
         ((no_live_explicit_transactions && no_other_live_explicit_transactions) ||
          external_page_version_pin_retains_visible_boundary);
+    const bool retained_page_version_read =
+        allow_page_version_reads && db.ownerless_page_version_read_lsn != 0U &&
+        db.ownerless_page_version_read_lsn <= page_version_read_lsn;
     if (allow_page_version_reads && page_version_read_lsn != 0U &&
         (page_version_read_lsn > db.ownerless_clean_pages_evicted_lsn ||
          process_generation_changed || visible_generation_changed ||
@@ -10489,6 +10534,8 @@ int refresh_ownerless_external_pages_before_statement(
     } else if (allow_global_refresh && refresh_lsn > db.ownerless_observed_lsn) {
         if (!allow_page_version_reads && !force_native_flush) {
             mylite_ownerless_innodb_refresh_buffer_pool_pages_preserve(refresh_lsn);
+        } else if (retained_page_version_read) {
+            mylite_ownerless_innodb_refresh_external_pages_retained(refresh_lsn);
         } else {
             mylite_ownerless_innodb_refresh_external_pages(refresh_lsn);
         }
@@ -10505,9 +10552,6 @@ int refresh_ownerless_external_pages_before_statement(
     if (allow_page_version_reads && page_version_read_lsn != 0U &&
         (page_version_read_lsn > db.ownerless_clean_pages_evicted_lsn ||
          process_generation_changed || visible_generation_changed)) {
-        const bool retained_page_version_read =
-            db.ownerless_page_version_read_lsn != 0U &&
-            db.ownerless_page_version_read_lsn <= page_version_read_lsn;
         if (!explicit_transaction && allow_global_refresh) {
             if (process_generation_changed || visible_generation_changed ||
                 handle_page_version_pin_advancing) {
@@ -10547,9 +10591,6 @@ int refresh_ownerless_external_pages_before_statement(
     }
 
     if (allow_page_version_reads && page_version_read_lsn != 0U) {
-        const bool retained_page_version_read =
-            db.ownerless_page_version_read_lsn != 0U &&
-            db.ownerless_page_version_read_lsn <= page_version_read_lsn;
         if (current_page_version_read) {
             mylite_ownerless_innodb_enable_current_external_page_visibility(page_version_read_lsn);
         } else {
