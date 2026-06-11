@@ -177,6 +177,14 @@ ownerless-minus-ordinary clustered optimistic B-tree delta, with
 tuple insertion, `0.001 ms/insert` in preflight, zero
 reorg/adaptive-hash/lock-update deltas, one successful optimistic insert per
 row, and no fallback/error counts.
+A follow-up lock/undo attribution split now separates setup, lock checking,
+predicate/record lock checks, undo reporting, system-field writes, skip counts,
+success counts, and error counts within `btr_cur_ins_lock_and_undo()`. The
+first reduced local production sample with this split reported a
+`0.158 ms/insert` ownerless-minus-ordinary optimistic lock/undo delta, with
+`0.156 ms/insert` in `trx_undo_report_row_operation()`, `0.002 ms/insert` in
+record lock checking, zero setup/system-field-write deltas, one primary-leaf
+success per row, and no skip/error counts.
 A follow-up slice now
 allows MariaDB's existing cached-undo reuse only while the runtime remains in
 the same continuous single-owner epoch already used for external-refresh skip

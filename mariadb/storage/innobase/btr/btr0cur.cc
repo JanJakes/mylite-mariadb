@@ -2140,6 +2140,24 @@ btr_cur_insert_if_possible(
 	return(rec);
 }
 
+static inline void
+mylite_btr_lock_undo_count_error(dberr_t err)
+{
+	switch (err) {
+	case DB_FAIL:
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_LOCK_UNDO_DB_FAIL);
+		break;
+	case DB_LOCK_WAIT:
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_LOCK_UNDO_LOCK_WAIT);
+		break;
+	default:
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_LOCK_UNDO_OTHER_ERROR);
+	}
+}
+
 /*************************************************************//**
 For an insert, checks the locks and does the undo logging if desired.
 @return DB_SUCCESS, DB_LOCK_WAIT, DB_FAIL, or error number */
@@ -2159,14 +2177,21 @@ btr_cur_ins_lock_and_undo(
 				successor record */
 {
 	if (!(~flags | (BTR_NO_UNDO_LOG_FLAG | BTR_KEEP_SYS_FLAG))) {
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_LOCK_UNDO_FAST_SKIP);
 		return DB_SUCCESS;
 	}
 
 	/* Check if we have to wait for a lock: enqueue an explicit lock
 	request if yes */
 
+	uint64_t mylite_deep_stage_start =
+		mylite_ownerless_innodb_deep_perf_start_ns();
 	rec_t* rec = btr_cur_get_rec(cursor);
 	dict_index_t* index = cursor->index();
+	mylite_ownerless_innodb_deep_perf_add_elapsed(
+		MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_LOCK_UNDO_SETUP_NS,
+		mylite_deep_stage_start);
 
 	ut_ad(!dict_index_is_online_ddl(index)
 	      || dict_index_is_clust(index)
@@ -2178,6 +2203,8 @@ btr_cur_ins_lock_and_undo(
 
 	/* Check if there is predicate or GAP lock preventing the insertion */
 	if (!(flags & BTR_NO_LOCKING_FLAG)) {
+		const uint64_t mylite_deep_lock_check_start =
+			mylite_ownerless_innodb_deep_perf_start_ns();
 		const unsigned type = index->type;
 		if (UNIV_UNLIKELY(type & DICT_SPATIAL)) {
 			lock_prdt_t	prdt;
@@ -2190,11 +2217,23 @@ btr_cur_ins_lock_and_undo(
 			from lock heap in lock_prdt_insert_check_and_lock() */
 			lock_init_prdt_from_mbr(&prdt, &mbr, 0, nullptr);
 
+			mylite_deep_stage_start =
+				mylite_ownerless_innodb_deep_perf_start_ns();
 			if (dberr_t err = lock_prdt_insert_check_and_lock(
 				    rec, btr_cur_get_block(cursor),
 				    index, thr, mtr, &prdt)) {
+				mylite_ownerless_innodb_deep_perf_add_elapsed(
+					MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_LOCK_UNDO_PREDICATE_LOCK_NS,
+					mylite_deep_stage_start);
+				mylite_ownerless_innodb_deep_perf_add_elapsed(
+					MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_LOCK_UNDO_LOCK_CHECK_NS,
+					mylite_deep_lock_check_start);
+				mylite_btr_lock_undo_count_error(err);
 				return err;
 			}
+			mylite_ownerless_innodb_deep_perf_add_elapsed(
+				MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_LOCK_UNDO_PREDICATE_LOCK_NS,
+				mylite_deep_stage_start);
 			*inherit = false;
 		} else {
 			ut_ad(!dict_index_is_online_ddl(index)
@@ -2218,15 +2257,34 @@ btr_cur_ins_lock_and_undo(
 				trx->wsrep = 3;
 			}
 #endif /* WITH_WSREP */
+			mylite_deep_stage_start =
+				mylite_ownerless_innodb_deep_perf_start_ns();
 			if (dberr_t err = lock_rec_insert_check_and_lock(
 				    rec, btr_cur_get_block(cursor),
 				    index, thr, mtr, inherit)) {
+				mylite_ownerless_innodb_deep_perf_add_elapsed(
+					MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_LOCK_UNDO_REC_LOCK_NS,
+					mylite_deep_stage_start);
+				mylite_ownerless_innodb_deep_perf_add_elapsed(
+					MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_LOCK_UNDO_LOCK_CHECK_NS,
+					mylite_deep_lock_check_start);
+				mylite_btr_lock_undo_count_error(err);
 				return err;
 			}
+			mylite_ownerless_innodb_deep_perf_add_elapsed(
+				MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_LOCK_UNDO_REC_LOCK_NS,
+				mylite_deep_stage_start);
 		}
+		mylite_ownerless_innodb_deep_perf_add_elapsed(
+			MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_LOCK_UNDO_LOCK_CHECK_NS,
+			mylite_deep_lock_check_start);
 	}
 
 	if (!index->is_primary() || !page_is_leaf(btr_cur_get_page(cursor))) {
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_LOCK_UNDO_NON_PRIMARY_OR_NON_LEAF_SKIP);
+		mylite_ownerless_innodb_deep_perf_count(
+			MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_LOCK_UNDO_SUCCESS_NON_PRIMARY_OR_NON_LEAF);
 		return DB_SUCCESS;
 	}
 
@@ -2235,27 +2293,48 @@ btr_cur_ins_lock_and_undo(
 	roll_ptr_t roll_ptr = dummy_roll_ptr;
 
 	if (!(flags & BTR_NO_UNDO_LOG_FLAG)) {
+		mylite_deep_stage_start =
+			mylite_ownerless_innodb_deep_perf_start_ns();
 		if (dberr_t err = trx_undo_report_row_operation(
 			    thr, index, entry, NULL, 0, NULL, NULL,
 			    &roll_ptr)) {
+			mylite_ownerless_innodb_deep_perf_add_elapsed(
+				MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_LOCK_UNDO_UNDO_REPORT_NS,
+				mylite_deep_stage_start);
+			mylite_btr_lock_undo_count_error(err);
 			return err;
 		}
+		mylite_ownerless_innodb_deep_perf_add_elapsed(
+			MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_LOCK_UNDO_UNDO_REPORT_NS,
+			mylite_deep_stage_start);
 
 		if (roll_ptr != dummy_roll_ptr) {
+			mylite_deep_stage_start =
+				mylite_ownerless_innodb_deep_perf_start_ns();
 			dfield_t* r = dtuple_get_nth_field(entry,
 							   index->db_trx_id());
 			trx_write_trx_id(static_cast<byte*>(r->data),
 					 thr_get_trx(thr)->id);
+			mylite_ownerless_innodb_deep_perf_add_elapsed(
+				MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_LOCK_UNDO_TRX_ID_WRITE_NS,
+				mylite_deep_stage_start);
 		}
 	}
 
 	if (!(flags & BTR_KEEP_SYS_FLAG)) {
+		mylite_deep_stage_start =
+			mylite_ownerless_innodb_deep_perf_start_ns();
 		dfield_t* r = dtuple_get_nth_field(
 			entry, index->db_roll_ptr());
 		ut_ad(r->len == DATA_ROLL_PTR_LEN);
 		trx_write_roll_ptr(static_cast<byte*>(r->data), roll_ptr);
+		mylite_ownerless_innodb_deep_perf_add_elapsed(
+			MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_LOCK_UNDO_ROLL_PTR_WRITE_NS,
+			mylite_deep_stage_start);
 	}
 
+	mylite_ownerless_innodb_deep_perf_count(
+		MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_LOCK_UNDO_SUCCESS_PRIMARY_LEAF);
 	return DB_SUCCESS;
 }
 

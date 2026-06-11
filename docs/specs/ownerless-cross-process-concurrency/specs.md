@@ -4634,8 +4634,15 @@ subsystems that this mode needs:
   `0.480 ms/insert` optimistic B-tree delta, with `0.476 ms/insert` in
   `btr_cur_ins_lock_and_undo()`, `0.002 ms/insert` in tuple insertion,
   `0.001 ms/insert` in preflight, zero reorg/adaptive-hash/lock-update deltas,
-  one successful optimistic insert per row, and no fallback/error counts. The
-  generic InnoDB read-complete
+  one successful optimistic insert per row, and no fallback/error counts. A
+  follow-up lock/undo split now separates setup, lock checking,
+  predicate/record lock checks, undo reporting, system-field writes, skip
+  counts, success counts, and error counts inside `btr_cur_ins_lock_and_undo()`.
+  The first reduced local production sample with that split reported a
+  `0.158 ms/insert` optimistic lock/undo delta, with `0.156 ms/insert` in
+  `trx_undo_report_row_operation()`, `0.002 ms/insert` in record lock
+  checking, zero setup/system-field-write deltas, one primary-leaf success per
+  row, and no skip/error counts. The generic InnoDB read-complete
   ownerless overlay now runs only for MyLite-classified plain `SELECT`/`WITH`
   page-version reads; non-SELECT DDL and DML rely on explicit page-write
   refresh and publication paths. The current reduced stats-enabled autocommit

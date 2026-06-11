@@ -84,6 +84,9 @@ the end of the probes:
   - when detailed ownerless stats are enabled, clustered optimistic B-tree
     summaries for preflight, lock/undo, tuple insertion, reorganization,
     adaptive-hash update, lock update, success and fallback/error counts,
+  - when detailed ownerless stats are enabled, B-tree lock/undo summaries for
+    setup, lock checking, predicate/record lock checks, undo reporting,
+    system-field writes, skip counts, success counts, and error counts,
   - when detailed ownerless stats are enabled, ownerless autocommit per-insert
     summaries for MTR-published page-version volume, total MyLite
     page-publish hook calls, page-log append calls, transaction-image,
@@ -225,6 +228,12 @@ with `0.476 ms/insert` in `btr_cur_ins_lock_and_undo()`, `0.002 ms/insert`
 in tuple insertion, `0.001 ms/insert` in preflight, zero
 reorg/adaptive-hash/lock-update deltas, one successful optimistic insert per
 row, and no fallback/error counts.
+The first reduced local production sample after splitting
+`btr_cur_ins_lock_and_undo()` reported a `0.158 ms/insert`
+ownerless-minus-ordinary optimistic lock/undo delta, with `0.156 ms/insert` in
+`trx_undo_report_row_operation()`, `0.002 ms/insert` in record lock checking,
+zero setup/system-field-write deltas, one primary-leaf success per row, and no
+skip/error counts.
 
 The ownerless attribution probe now preserves the historical
 `native_support_*_type_trx_system` aggregate while also exposing
