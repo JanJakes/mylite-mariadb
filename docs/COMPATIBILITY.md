@@ -119,8 +119,16 @@ page-publication write-volume work; it does not yet reduce page-version append
 volume. The same stats-enabled probe now reports page-log payload bytes,
 record-header bytes, and total record bytes, plus ownerless autocommit
 per-insert byte averages, so CI production timings can distinguish append time
-from full-page WAL write volume. This does not complete native
-redo/checkpoint reconciliation. The same
+from full-page WAL write volume. The prepared DML reset path now avoids
+`mysql_stmt_reset()` only after successful no-result statements with no result
+metadata; the post-change reduced production attribution sample reported 500
+ownerless autocommit resets with `0.064 ms` total reset time and
+`0.000 ms` inside `mysql_stmt_reset()`, down from the previous `120.397 ms`
+server-reset interval. The companion stats-off production sample reported
+ownerless autocommit at `1520.62 ops/s` and ownerless transactional inserts at
+`1567.77 ops/s`, while still showing that native page publication and InnoDB
+commit/row mini-transaction costs remain the larger gap. This does not
+complete native redo/checkpoint reconciliation. The same
 stats-enabled probe also classifies ownerless rollback-segment history flushes
 by page type and by unique versus duplicate page identity, with accounting
 guards that fail if the attribution no longer matches the existing flush total.

@@ -24,6 +24,7 @@ typedef struct open_database_paths {
 
 static void test_prepared_statement_bindings_and_columns(void);
 static void test_prepared_call_is_rejected_after_routine_creation(void);
+static void test_ownerless_prepared_dml_reset_reexecution(void);
 static mylite_db *open_database(open_database_paths paths, unsigned flags);
 static void create_prepared_schema(mylite_db *db);
 static mylite_stmt *prepare_statement(mylite_db *db, const char *sql);
@@ -52,6 +53,7 @@ static int remove_tree_entry(
 int main(void) {
     test_prepared_statement_bindings_and_columns();
     test_prepared_call_is_rejected_after_routine_creation();
+    test_ownerless_prepared_dml_reset_reexecution();
     return 0;
 }
 
@@ -163,6 +165,92 @@ static void test_prepared_call_is_rejected_after_routine_creation(void) {
     assert(mylite_finalize(select_stmt) == MYLITE_OK);
 
     exec_ok(db, "DROP PROCEDURE IF EXISTS app.select_stored_value");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_prepared_dml_reset_reexecution(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-prepared.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db = NULL;
+    mylite_stmt *insert_stmt = NULL;
+    mylite_stmt *select_stmt = NULL;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+
+    db =
+        open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "CREATE DATABASE app");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_prepared_values ("
+        "id BIGINT NOT NULL PRIMARY KEY, "
+        "label VARCHAR(32) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+
+    insert_stmt = prepare_statement(
+        db,
+        "INSERT INTO app.ownerless_prepared_values (id, label) VALUES (?, ?)"
+    );
+    assert(mylite_bind_int64(insert_stmt, 1, 10) == MYLITE_OK);
+    assert(
+        mylite_bind_text(insert_stmt, 2, "first", MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK
+    );
+    assert(mylite_step(insert_stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_reset(insert_stmt) == MYLITE_OK);
+
+    assert(mylite_clear_bindings(insert_stmt) == MYLITE_OK);
+    assert(mylite_bind_int64(insert_stmt, 1, 20) == MYLITE_OK);
+    assert(
+        mylite_bind_text(insert_stmt, 2, "second", MYLITE_NUL_TERMINATED, MYLITE_STATIC) ==
+        MYLITE_OK
+    );
+    assert(mylite_step(insert_stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_reset(insert_stmt) == MYLITE_OK);
+
+    assert(mylite_clear_bindings(insert_stmt) == MYLITE_OK);
+    assert(mylite_bind_int64(insert_stmt, 1, 20) == MYLITE_OK);
+    assert(
+        mylite_bind_text(insert_stmt, 2, "duplicate", MYLITE_NUL_TERMINATED, MYLITE_STATIC) ==
+        MYLITE_OK
+    );
+    assert(mylite_step(insert_stmt) == MYLITE_ERROR);
+    assert(mylite_reset(insert_stmt) == MYLITE_OK);
+
+    assert(mylite_clear_bindings(insert_stmt) == MYLITE_OK);
+    assert(mylite_bind_int64(insert_stmt, 1, 30) == MYLITE_OK);
+    assert(
+        mylite_bind_text(insert_stmt, 2, "third", MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK
+    );
+    assert(mylite_step(insert_stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_reset(insert_stmt) == MYLITE_OK);
+
+    select_stmt =
+        prepare_statement(db, "SELECT id, label FROM app.ownerless_prepared_values ORDER BY id");
+    assert(mylite_step(select_stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(select_stmt, 0) == 10);
+    assert(strcmp(mylite_column_text(select_stmt, 1), "first") == 0);
+    assert(mylite_step(select_stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(select_stmt, 0) == 20);
+    assert(strcmp(mylite_column_text(select_stmt, 1), "second") == 0);
+    assert(mylite_step(select_stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(select_stmt, 0) == 30);
+    assert(strcmp(mylite_column_text(select_stmt, 1), "third") == 0);
+    assert(mylite_step(select_stmt) == MYLITE_DONE);
+    assert(mylite_reset(select_stmt) == MYLITE_OK);
+
+    assert(mylite_finalize(select_stmt) == MYLITE_OK);
+    assert(mylite_finalize(insert_stmt) == MYLITE_OK);
     assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);

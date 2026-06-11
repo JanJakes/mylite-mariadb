@@ -2800,8 +2800,20 @@ int mylite_reset(mylite_stmt *stmt) {
         ownerless_reset_start =
             ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     }
+    const bool can_skip_mariadb_reset = stmt->executed && !stmt->has_result && !stmt->has_row &&
+                                        stmt->metadata == nullptr && stmt->columns.empty();
     release_statement_results(*stmt);
     clear_statement_ownerless_page_visibility(*stmt);
+    if (can_skip_mariadb_reset) {
+        stmt->executed = false;
+        stmt->has_result = false;
+        stmt->has_row = false;
+        ownerless_database_perf_add_elapsed(
+            OWNERLESS_DATABASE_PERF_PREPARED_RESET_TOTAL_NS,
+            ownerless_reset_start
+        );
+        return MYLITE_OK;
+    }
     if (ownerless_reset_perf) {
         ownerless_reset_mysql_start =
             ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;

@@ -4675,7 +4675,15 @@ subsystems that this mode needs:
   `49479.680` to `7967.610` per simple ownerless autocommit insert without a
   measured append-time regression. This is intentionally not a native
   redo/checkpoint proof and does not skip the rollback-segment or undo-header
-  history-proof records. The
+  history-proof records. A prepared DML reset fast path then removed a
+  non-storage cost from the same production probe: 500 ownerless autocommit
+  resets fell from `120.489 ms` total with `120.397 ms` in
+  `mysql_stmt_reset()` to `0.064 ms` total with `0.000 ms` in
+  `mysql_stmt_reset()`. The companion stats-off production sample reported
+  ownerless autocommit at `1520.62 ops/s` and ownerless transactional inserts
+  at `1567.77 ops/s`, but the stats-enabled run still showed the larger
+  remaining costs in page-log append, commit-MTR page publication,
+  write-history, and row-level MTR commit. The
   write-history page-write handoff now uses a rollback-segment-space target-LSN
   wait instead of a global dirty-page wait,
   preserving native proof for the history page while avoiding unrelated

@@ -333,9 +333,11 @@ text on successful single-statement prepares. `mylite_close()` returns
 `MYLITE_BUSY` while statements are active. Ownerless non-locking prepared
 `SELECT` execution uses the same committed page-version visibility setup as
 direct `mylite_exec()` statements for autocommit reads and active
-transactions. Prepared `CALL` statements are
-currently rejected; use direct execution for the covered result-returning
-stored-procedure path.
+transactions. `mylite_reset()` preserves the MariaDB reset/drain path for
+result-bearing or failed statements; completed no-result statements may be made
+ready for re-execution through MyLite's local statement state when no result
+metadata remains. Prepared `CALL` statements are currently rejected; use direct
+execution for the covered result-returning stored-procedure path.
 
 ## Bindings
 

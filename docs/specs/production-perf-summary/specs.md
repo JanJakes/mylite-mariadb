@@ -209,6 +209,15 @@ when no explicit logging argument is present. That keeps WordPress'
 `phpunit.xml.dist` JUnit logger out of the default timing path; diagnostic
 JUnit runs must set `MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING=0`.
 
+The prepared DML reset fast path removes the measured server-side
+`mysql_stmt_reset()` cost after successful no-result statements. MariaDB's
+result-bearing, failed, and metadata-retaining statement reset behavior remains
+the authority for those cases. The reduced production attribution sample before
+the change reported 500 ownerless autocommit resets taking `120.489 ms` total
+with `120.397 ms` in `mysql_stmt_reset()`. The post-change sample reported
+500 ownerless autocommit resets taking `0.064 ms` total with `0.000 ms` in
+`mysql_stmt_reset()`.
+
 The embedded job keeps the default stats-off performance probe as the
 throughput signal and runs a second reduced
 `MYLITE_PERF_OWNERLESS_PAGE_PUBLISH_STATS=1` attribution probe so CI logs also
@@ -338,6 +347,19 @@ at `977.08 ops/s` versus ordinary autocommit at `1537.18 ops/s`, ownerless
 transactional inserts at `1243.59 ops/s` versus ordinary transactional inserts
 at `1751.70 ops/s`, ordinary active-runtime reconnect at `0.743 ms`, and
 ownerless active-runtime reconnect at `0.787 ms`.
+
+The local stats-off production probe after the prepared DML reset fast path
+reported ownerless autocommit at `1520.62 ops/s` versus ordinary autocommit at
+`3756.37 ops/s`, ownerless transactional inserts at `1567.77 ops/s` versus
+ordinary transactional inserts at `4039.43 ops/s`, ownerless direct
+`SELECT 1` at `3740.93 ops/s`, ownerless prepared `SELECT 1` at
+`1421.40 ops/s`, ordinary warm open/close at `342.713 ms`, ownerless warm
+open/close at `378.241 ms`, ordinary active-runtime reconnect at `1.895 ms`,
+and ownerless active-runtime reconnect at `1.070 ms`. The stats-enabled sample
+still reported about `0.243 ms/insert` in page-log append,
+`0.326 ms/insert` in commit-MTR page publication, `0.231 ms/insert` in
+write-history, and `0.145 ms/insert` in row-level MTR commit, keeping the next
+performance target in native ownerless page publication and commit proof.
 
 A follow-up SYS identity attribution sample, also under production
 `MinSizeRel`/`Release` artifacts, reported that the measured SYS pages were
