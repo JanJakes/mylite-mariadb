@@ -306,7 +306,15 @@ Roles:
   data/index/blob pages during visible-boundary external refresh, clean-page
   refresh, and file-read overlay, while current live reads still accept current
   ownerless page images that advance the page. Native undo, system,
-  allocation, and recovery pages still use ordinary visible-boundary refresh. A
+  allocation, and recovery pages still use ordinary visible-boundary refresh.
+  Same-runtime reads covered by the handle's local-native autocommit write
+  boundary do not publish a page-version pin or enable the file-read overlay
+  while the runtime remains in a continuous single-owner epoch and has not
+  started with or consumed retained page-version WAL. That keeps ordinary local
+  verification reads on native InnoDB pages and reserves page-version read state
+  for handles that actually consume ownerless page WAL. Autocommit writes
+  outside that proof still seed the handle's page-version read LSN, preserving
+  multi-process read-your-writes and retained-overlay behavior. A
   new ownerless process generation or an advancing handle pin forces clean-page
   refresh without the single-owner skip, because peer commits may already be
   native-checkpointed and reclaimed from the page-version WAL. Live raw-latest
@@ -488,7 +496,13 @@ live raw-latest promotion is disabled while another active native transaction
 or an active redo reservation is present. A separate repeatable-read snapshot
 pin only retains WAL for that reader, and can permit unrelated autocommit plain
 reads to use the newer page-version boundary once native transaction state is
-idle.
+idle. Autocommit writes also advance a local-native read boundary that is not a
+page-version read. During a continuous single-owner epoch that did not start
+with retained page-version WAL and has not consumed page-version WAL, eligible
+same-runtime reads covered by that boundary skip shared page-version pins and
+the InnoDB file-read overlay. Outside that proof, the same autocommit write also
+advances the real page-version read LSN so peer-era reads keep the existing
+page-version pin and retained-refresh path.
 Pressure-limit `MYLITE_BUSY` write rejections release the handle's transient
 autocommit read pin before returning, so blocked writers do not keep retained
 page-version WAL alive after the reader that caused the pressure exits.

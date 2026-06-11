@@ -723,6 +723,35 @@ runtime redo state from the durable checkpoint whenever it advances the visible
 LSN, keeping the timing-visible production job from failing on a volatile
 metadata lag after correctness has already been made durable.
 
+The next production ownerless SQL run exposed `sql-case 46`
+(`test_ownerless_active_reader_pressure_limit_blocks_write_classes`) during a
+same-runtime direct read after a local AUTO_INCREMENT insert and before later
+pressure-guarded DDL. The fix keeps autocommit write visibility in a separate
+local-native read boundary. During a continuous single-owner epoch that neither
+started with nor consumed page-version WAL, eligible same-runtime reads covered
+by that boundary stay on native InnoDB pages and do not publish page-version
+pins or enable the file-read overlay. This removes avoidable per-page WAL hook
+cost from local verification reads. Autocommit writes outside that strict local
+proof still advance the real page-version read LSN, keeping multi-process
+same-handle read-your-writes and retained-overlay semantics for cases such as
+`sql-case 13`.
+
+Local production verification on 2026-06-11 rebuilt
+`mylite_ownerless_cross_process_sql_test` under `php-embedded-prod`, then
+passed repeated direct loops for `sql-case 13`, `sql-case 46`, and
+`sql-case 3` at `20/20` each with `/tmp` ownerless cleanup between iterations.
+The `sql-case 13` loop still printed two non-fatal InnoDB undo-page warnings,
+matching the existing undo/checkpoint follow-up risk, but its stress oracles
+and final reopen checks passed. Focused ownerless primitive/single-owner CTest
+coverage and embedded ownerless hook CTest coverage passed under
+`php-embedded-prod`, and `tools/check-ci-production-builds` plus its production
+CTest wrapper passed. A reduced production embedded performance probe with
+`20` read/write iterations printed the expected summary keys, including
+ownerless direct `SELECT 1` at `614.31 ops/s`, ownerless prepared `SELECT 1` at
+`363.79 ops/s`, ownerless transactional inserts at `1335.56 ops/s`, and
+ownerless autocommit inserts at `1344.07 ops/s`; those small-sample throughput
+values are timing smoke evidence, not a replacement for CI-sized samples.
+
 ## Acceptance Criteria
 
 - CI and local production probes emit compact summary keys for startup,
@@ -732,7 +761,7 @@ metadata lag after correctness has already been made durable.
   derived from existing detailed counters, including separate MTR-published
   page-version, total page-publish hook-call, page-log append-call, and
   non-MTR page-publish source rates, plus clustered-low row-insert subphases.
-- CI timing-sensitive jobs remain production-build based and test-only
+- CI timing-sensitive jobs remain production-build based, and test-only
   WordPress PHPUnit steps remain separated from build/setup phases.
 - CI embedded non-ownerless CTest coverage runs serially so production timing
   evidence is not distorted by concurrent MariaDB embedded runtime startup.

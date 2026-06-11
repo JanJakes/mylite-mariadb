@@ -66,6 +66,15 @@ proven:
   Native undo, system, allocation, and recovery pages still refresh through the
   visible boundary, avoiding the broad retained-read refresh skip that can
   disturb native support state.
+- Autocommit writes advance a separate local-native read boundary. In a
+  continuous single-owner epoch, when the runtime did not start with retained
+  page-version WAL and has not consumed page-version WAL, eligible
+  direct/prepared reads covered by that local native LSN do not publish
+  page-version pins or enable the InnoDB file-read page-version overlay. The
+  page-version read LSN advances only after real page-version reads in this
+  local-only path. Autocommit writes outside that proof still seed the real
+  page-version read LSN so multi-process same-handle reads keep read-your-writes
+  and retained-overlay behavior.
 - No-live reclaim does not let a runtime that only consumed the current visible
   page-version WAL truncate that WAL on final close. Writer runtimes keep the
   normal statement/timer reclaim path, no-live writer close still needs native
@@ -205,6 +214,13 @@ non-SELECT ownerless page-read probes after read-complete overlay gating, with
 remaining ownerless cost concentrated in page-version append and commit-MTR
 publication. That keeps the monotonic read overlay attached to the statements
 that need it instead of charging DDL/DML rebuild paths.
+Same-runtime local read-after-write statements now stay on native InnoDB pages
+when the local-native boundary proves the requested read LSN under the strict
+single-owner proof. That avoids per-page WAL hook and pin pressure on ordinary
+autocommit verification reads, including the active-reader pressure case that
+reads an AUTO_INCREMENT table before later DDL. Multi-process writes retain the
+older page-version read-LSN seeding behavior so independent-table stress keeps
+read-your-writes semantics.
 Ordinary non-ownerless opens and fresh WordPress CI build steps remain on
 production Release or MinSizeRel build modes and are not changed by this slice.
 
@@ -221,6 +237,10 @@ still stopped before the ownerless table-wait callback.
 - Run repeated production `sql-case 13`
   (`test_ownerless_independent_table_stress`) loops to cover direct
   `mylite_exec()` live readers over independent writer tables.
+- Run repeated production `sql-case 46`
+  (`test_ownerless_active_reader_pressure_limit_blocks_write_classes`) loops to
+  cover a direct same-runtime AUTO_INCREMENT read before later pressure-guarded
+  DDL.
 - Run focused CTest ownerless page-version, primitive, hook, and random
   transaction selectors affected by the visibility fences.
 - Run adjacent ownerless stress cases that use explicit transactions,
@@ -242,6 +262,10 @@ still stopped before the ownerless table-wait callback.
   checkpointable user tablespace page-version record while the native data-file
   page still has an older `FIL_PAGE_LSN`, or the same `FIL_PAGE_LSN` with
   different page bytes.
+- Same-runtime local read-after-write statements covered by the local-native
+  boundary under the strict single-owner proof do not publish page-version read
+  pins or enable the file-read overlay, while multi-process local writes still
+  seed page-version reads for read-your-writes.
 - CI timing-bearing jobs continue to use production MyLite builds and
   `MinSizeRel` MariaDB embedded archives, with PHPUnit test-only phases
   separated from build phases for visible timings.

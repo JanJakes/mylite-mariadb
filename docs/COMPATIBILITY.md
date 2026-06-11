@@ -113,6 +113,14 @@ that timing-bearing embedded, WordPress, and clang-tool step bodies retain
 their production cache guards instead of merely carrying those guard strings
 elsewhere in the workflow, and that embedded performance probes stay ahead of
 embedded test steps.
+Guarded ownerless SQL page-version reads are now enabled only when statement
+refresh actually needs page-version WAL. In a continuous single-owner epoch,
+local autocommit writes advance a separate local-native read boundary; eligible
+same-runtime reads covered by that boundary avoid shared page-version pins and
+the InnoDB file-read overlay. Autocommit writes outside that proof still seed
+the real page-version read LSN for multi-process read-your-writes and retained
+refresh. The active-reader pressure case covers the direct AUTO_INCREMENT
+read-before-DDL shape that exposed the accidental overlay.
 The stats-enabled
 embedded performance probe classifies page-version publish append attempts by
 InnoDB page type and by native-support versus non-native-support class, while
