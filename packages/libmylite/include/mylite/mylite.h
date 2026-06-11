@@ -110,6 +110,21 @@ typedef int (*mylite_exec_callback)(
     char **column_names
 );
 
+typedef struct mylite_exec_column {
+    const char *name;
+    const char *org_name;
+    const char *table;
+    const char *org_table;
+} mylite_exec_column;
+
+typedef int (*mylite_exec_result_callback)(
+    void *ctx,
+    int column_count,
+    char **values,
+    const size_t *value_lengths,
+    const mylite_exec_column *columns
+);
+
 MYLITE_API const char *mylite_version(void);
 MYLITE_API int mylite_open(
     const char *path,
@@ -127,6 +142,13 @@ MYLITE_API int mylite_exec(
     mylite_db *db,
     const char *sql,
     mylite_exec_callback callback,
+    void *ctx,
+    char **errmsg
+);
+MYLITE_API int mylite_exec_result(
+    mylite_db *db,
+    const char *sql,
+    mylite_exec_result_callback callback,
     void *ctx,
     char **errmsg
 );

@@ -16,12 +16,24 @@ typedef struct select_context {
     int rows;
 } select_context;
 
+typedef struct metadata_context {
+    int rows;
+} metadata_context;
+
 static void test_select_callback(void);
+static void test_result_metadata_callback(void);
 static void test_ordinary_write_does_not_publish_ownerless_page_log(void);
 static void test_stored_procedure_call_callback(void);
 static void test_callback_abort(void);
 static void test_syntax_error_diagnostics(void);
 static int select_callback(void *ctx, int column_count, char **values, char **column_names);
+static int metadata_callback(
+    void *ctx,
+    int column_count,
+    char **values,
+    const size_t *value_lengths,
+    const mylite_exec_column *columns
+);
 static int stored_procedure_callback(
     void *ctx,
     int column_count,
@@ -46,6 +58,7 @@ static int remove_tree_entry(
 
 int main(void) {
     test_select_callback();
+    test_result_metadata_callback();
     test_ordinary_write_does_not_publish_ownerless_page_log();
     test_stored_procedure_call_callback();
     test_callback_abort();
@@ -65,6 +78,38 @@ static void test_select_callback(void) {
     assert(ctx.rows == 1);
     assert(mylite_changes(db) == 0);
     assert(mylite_last_insert_id(db) == 0U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(database_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_result_metadata_callback(void) {
+    char *root = make_temp_root();
+    char *database_path = NULL;
+    mylite_db *db = open_database(root, &database_path);
+    metadata_context ctx = {.rows = 0};
+
+    exec_ok(db, "CREATE DATABASE app");
+    exec_ok(
+        db,
+        "CREATE TABLE app.metadata_probe ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "payload VARBINARY(8) NOT NULL"
+        ") ENGINE=MyISAM"
+    );
+    exec_ok(db, "INSERT INTO app.metadata_probe VALUES (1, 0x410042)");
+    assert(
+        mylite_exec_result(
+            db,
+            "SELECT id AS alias_id, payload FROM app.metadata_probe WHERE id = 1",
+            metadata_callback,
+            &ctx,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(ctx.rows == 1);
 
     assert(mylite_close(db) == MYLITE_OK);
     free(database_path);
@@ -197,6 +242,38 @@ static int select_callback(void *ctx, int column_count, char **values, char **co
     ++select_ctx->rows;
     return 0;
 }
+
+// NOLINTBEGIN(bugprone-easily-swappable-parameters): required callback signature.
+static int metadata_callback(
+    void *ctx,
+    int column_count,
+    char **values,
+    const size_t *value_lengths,
+    const mylite_exec_column *columns
+) {
+    static const char expected_payload[] = {'A', '\0', 'B'};
+    metadata_context *metadata_ctx = (metadata_context *)ctx;
+
+    assert(column_count == 2);
+    assert(strcmp(columns[0].name, "alias_id") == 0);
+    assert(strcmp(columns[0].org_name, "id") == 0);
+    assert(strcmp(columns[0].table, "metadata_probe") == 0);
+    assert(strcmp(columns[0].org_table, "metadata_probe") == 0);
+    assert(strcmp(columns[1].name, "payload") == 0);
+    assert(strcmp(columns[1].org_name, "payload") == 0);
+    assert(strcmp(columns[1].table, "metadata_probe") == 0);
+    assert(strcmp(columns[1].org_table, "metadata_probe") == 0);
+    assert(values[0] != NULL);
+    assert(value_lengths[0] == 1U);
+    assert(memcmp(values[0], "1", value_lengths[0]) == 0);
+    assert(values[1] != NULL);
+    assert(value_lengths[1] == sizeof(expected_payload));
+    assert(memcmp(values[1], expected_payload, sizeof(expected_payload)) == 0);
+    ++metadata_ctx->rows;
+    return 0;
+}
+
+// NOLINTEND(bugprone-easily-swappable-parameters)
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters): required callback signature.
 static int stored_procedure_callback(

@@ -274,17 +274,41 @@ typedef int (*mylite_exec_callback)(
     char **values,
     char **column_names);
 
+typedef struct mylite_exec_column {
+    const char *name;
+    const char *org_name;
+    const char *table;
+    const char *org_table;
+} mylite_exec_column;
+
+typedef int (*mylite_exec_result_callback)(
+    void *ctx,
+    int column_count,
+    char **values,
+    const size_t *value_lengths,
+    const mylite_exec_column *columns);
+
 int mylite_exec(
     mylite_db *db,
     const char *sql,
     mylite_exec_callback callback,
     void *ctx,
     char **errmsg);
+
+int mylite_exec_result(
+    mylite_db *db,
+    const char *sql,
+    mylite_exec_result_callback callback,
+    void *ctx,
+    char **errmsg);
 ```
 
 `mylite_exec()` is a convenience API for one-shot SQL. Result values are textual
 like SQLite's `sqlite3_exec()` callback; production code that needs repeated
-execution or binary-safe values uses prepared statements.
+execution can use prepared statements. Code that needs one-shot result metadata
+or binary-safe values can use `mylite_exec_result()`, which follows the same
+direct execution path while passing explicit value byte lengths and display,
+original-column, table, and original-table names for each result column.
 
 If `errmsg` is non-NULL and an error string is returned, the caller releases it
 with `mylite_free()`.
@@ -292,7 +316,8 @@ with `mylite_free()`.
 Initial implementation status: `mylite_exec()` runs through the embedded
 MariaDB connection in `embedded-dev` builds, returns text result rows, preserves
 SQL `NULL` values as `NULL` callback entries, and populates MariaDB diagnostics
-on query failure. Native-storage smoke coverage verifies controlled
+on query failure. `mylite_exec_result()` adds binary-safe value lengths and
+field metadata from MariaDB stored results. Native-storage smoke coverage verifies controlled
 `ENGINE=MyISAM` DDL and DML persist across close and reopen. Explicit
 `ENGINE=InnoDB` coverage verifies commit, rollback, savepoints, clean reopen,
 and child-process recovery through SQL transaction statements. Additional engine

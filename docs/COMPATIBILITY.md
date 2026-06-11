@@ -120,7 +120,7 @@ remained much larger. The current WordPress performance target is therefore
 MariaDB/libmylite query execution and prepared-statement lifecycle cost, not
 PHP fetch-object conversion. Other WordPress CI timing steps keep that profile
 disabled unless a diagnostic run explicitly opts in.
-The mysqli adapter now preserves its single cached prepared result statement
+The mysqli adapter can preserve prepared result statements
 across ordinary no-result `INSERT`, `UPDATE`, `DELETE`, and `REPLACE`
 statements without `RETURNING`, while retaining conservative cache clears for
 DDL, schema, transaction, lock, `SET`, `USE`, `CALL`, and error paths. The
@@ -151,8 +151,8 @@ The CI-shaped production WordPress performance probe reported
 `select1_ops_per_second=829.69`; the earlier production probe before this
 fast path reported about `383.57`.
 
-The mysqli adapter result-query cache is now a bounded exact-SQL LRU instead
-of a single entry. This keeps prepared result metadata for interleaved repeated
+The diagnostic prepared-result route uses a bounded exact-SQL LRU instead of a
+single entry. This keeps prepared result metadata for interleaved repeated
 queries while retaining the same conservative invalidation points for DDL,
 schema, transaction, lock, `SET`, `USE`, `CALL`, explicit prepared statements,
 reconnect, close, and error paths. The profile test covers non-consecutive
@@ -167,6 +167,15 @@ the pre-LRU fast-reset profile reported `query_cache_hits=3`,
 `wordpress_phpunit_reported_seconds=16.442`. The remaining profile still shows
 mostly unique result SQL and no-result execution cost rather than cache lookup
 overhead.
+
+The default mysqli result-query path now uses libmylite's binary-safe
+text-result callback for first-seen and non-repeated result SQL, with immediate
+exact repeats promoted to the prepared LRU. This preserves display/original
+field and table metadata from `mysql_store_result()` while removing prepare and
+statement-finalize cost for ordinary unique `mysqli_query()` result misses.
+`MYLITE_MYSQLI_PREPARED_QUERY_RESULTS=1` keeps the always-prepared route
+available for diagnostics. Focused API coverage verifies `mysqli_fetch_field()`
+metadata, embedded-NUL result values, and text-query placeholder rejection.
 
 The same non-isolated step now also enables
 `MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE=1`, which opens one harness-owned mysqli
@@ -451,12 +460,10 @@ isolated class except `Tests_Formatting_Emoji` failed with 170 parent-side
 `Tests_Sitemaps_Sitemaps`; the final focused production trials for that set
 passed as `20` tests in `88.635s` and `30` tests in `114.782s`, the combined
 CI-shaped deferred shard passed `50` tests in `199.583s`, and the complementary
-eager reconnect shard passed `271` tests in `199.256s`. The mysqli adapter now
-keeps a one-entry link-local prepared-statement cache for repeated exact
-result-producing direct `mysqli_query()` SQL after rows and metadata have been
-materialized into PHP result objects; the cache is cleared before direct
-no-result statements, `CALL`, explicit prepared statements, schema/charset
-helpers, reconnect, and close. The final CI-sized production WordPress
+eager reconnect shard passed `271` tests in `199.256s`. An earlier mysqli
+adapter slice kept a one-entry link-local prepared-statement cache for repeated
+exact result-producing direct `mysqli_query()` SQL after rows and metadata had
+been materialized into PHP result objects. The final CI-sized production WordPress
 `perf-probe` after this change reported `SELECT 1` at `396.98 ops/s`, compared
 with the earlier documented branch range around `260-290 ops/s`; process plus
 connect/close remained `604.162 ms`, in-process connect/close `441.568 ms`,
@@ -703,9 +710,9 @@ changing page-visible publication semantics.
 | Open and close a database directory | 🟡&nbsp;Partial | Implemented for read/write local directory paths with one active database directory per process, a `.mylite/` naming convention, validated format-1 metadata, an advisory directory lock, a native-storage baseline layout under the database directory, ownerless startup serialization, final no-live ownerless native DDL file-operation checkpoint evidence, and final no-live ownerless shutdown redo-prefix repair using MariaDB-valid checkpoint-page backups |
 | Capability reporting | 🟡&nbsp;Partial | `mylite_capabilities()` reports build/profile-available concurrency modes; the embedded backend currently exposes same-process multi-handle support, ownerless shared read-only support, and ownerless read/write support, while each ownerless open still performs database-directory platform validation before runtime startup; `MYLITE_CAP_SHARED_READONLY` means MariaDB server `@@read_only=ON` plus user-visible read-only SQL through ownerless coordination, not InnoDB `innodb_read_only` startup |
 | Read-only opens | 🟡&nbsp;Partial | `MYLITE_OPEN_READONLY \| MYLITE_OPEN_SHARED_READONLY` opens an existing directory through ownerless coordination, starts MariaDB with server `read_only=ON`, observes committed ownerless writer changes, rejects user-visible writes with `MYLITE_READONLY`, and rejects same-process ownerless read/write attachment while the read-only runtime is live; bare `MYLITE_OPEN_READONLY` remains reserved until native storage can enforce read-only engine access |
-| Direct SQL execution | 🟡&nbsp;Partial | `mylite_exec()` executes controlled one-shot SQL with textual result callbacks in embedded builds; native-storage coverage verifies MyISAM DDL/DML, row/index operations, and explicit InnoDB transaction/recovery behavior across reopen |
+| Direct SQL execution | 🟡&nbsp;Partial | `mylite_exec()` executes controlled one-shot SQL with textual result callbacks in embedded builds, while `mylite_exec_result()` exposes byte lengths plus display/original field and table metadata for one-shot result sets; native-storage coverage verifies MyISAM DDL/DML, row/index operations, and explicit InnoDB transaction/recovery behavior across reopen |
 | Prepared statements | 🟡&nbsp;Partial | Reusable MariaDB prepared statements are exposed through `mylite_prepare()`, `mylite_step()`, `mylite_reset()`, and `mylite_finalize()` with 1-based parameter binding |
-| Binary-safe values | 🟡&nbsp;Partial | Prepared text/blob bindings and column accessors use explicit byte counts; embedded NUL blob values are covered |
+| Binary-safe values | 🟡&nbsp;Partial | Prepared text/blob bindings and column accessors use explicit byte counts; `mylite_exec_result()` and the default mysqli result-query path copy result values with explicit byte lengths; embedded NUL blob values are covered |
 | Diagnostics | 🟡&nbsp;Partial | Open handles expose stable MyLite result codes, MariaDB errno, SQLSTATE, and message text; the default embedded profile keeps common MariaDB messages but may use compact generic text for uncommon inherited server errors |
 | Ownerless pressure diagnostics | 🟡&nbsp;Partial | `mylite_ownerless_pressure_status()` reports the active page-version snapshot pin count, oldest pinned read LSN, raw ownerless page-version WAL bytes, configured soft limit, and whether the configured write throttle is currently reached for live ownerless handles; ordinary non-ownerless handles report zero ownerless pressure, thresholded ownerless write/DDL/transaction-end statement-boundary checkpoint scheduling is covered when no peer process is live; live-idle coverage proves native-support checkpoint proof WAL is retained while a peer remains live and then checkpointed after that peer closes, while active-pin/live-writer coverage retains user page-version WAL; single-owner foreground statement reclaim uses a larger internal WAL budget when no native file-operation marker is pending while timer and close reclaim keep the normal threshold, and timer-driven checkpoint scheduling is covered when an idle open writer observes retained WAL after a shared read-only snapshot pin releases without another SQL statement or close |
 | Warnings | 🟡&nbsp;Partial | MariaDB warning counts and indexed warning lookup expose level, code, and message text after statement execution |

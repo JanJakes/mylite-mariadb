@@ -2035,10 +2035,10 @@ void clear_runtime_state(RuntimeState &runtime);
 void remove_directory_if_empty(const std::filesystem::path &directory);
 void close_connection(mylite_db &db);
 void release_runtime(void);
-int exec_impl(
+int exec_result_impl(
     mylite_db *db,
     const char *sql,
-    mylite_exec_callback callback,
+    mylite_exec_result_callback callback,
     void *ctx,
     char **errmsg
 );
@@ -2049,10 +2049,44 @@ int prepare_impl(
     mylite_stmt **out_stmt,
     const char **tail
 );
+
+struct LegacyExecCallbackContext {
+    mylite_exec_callback callback = nullptr;
+    void *ctx = nullptr;
+    std::vector<char *> column_names;
+};
+
+int legacy_exec_result_callback(
+    void *ctx,
+    int column_count,
+    char **values,
+    const std::size_t *value_lengths,
+    const mylite_exec_column *columns
+) {
+    (void)value_lengths;
+    LegacyExecCallbackContext *legacy_context = static_cast<LegacyExecCallbackContext *>(ctx);
+    if (legacy_context == nullptr || legacy_context->callback == nullptr) {
+        return 0;
+    }
+
+    legacy_context->column_names.clear();
+    legacy_context->column_names.reserve(static_cast<std::size_t>(column_count));
+    for (int column = 0; column < column_count; ++column) {
+        const char *name = columns[column].name != nullptr ? columns[column].name : "";
+        legacy_context->column_names.push_back(const_cast<char *>(name));
+    }
+    mylite_exec_callback legacy_callback = legacy_context->callback;
+    return legacy_callback(
+        legacy_context->ctx,
+        column_count,
+        values,
+        legacy_context->column_names.data()
+    );
+}
 #if MYLITE_WITH_MARIADB_EMBEDDED
 int store_and_emit_result(
     mylite_db &db,
-    mylite_exec_callback callback,
+    mylite_exec_result_callback callback,
     void *ctx,
     bool *has_result
 );
@@ -2450,7 +2484,26 @@ int mylite_exec(
     void *ctx,
     char **errmsg
 ) {
-    return exec_impl(db, sql, callback, ctx, errmsg);
+    LegacyExecCallbackContext legacy_context;
+    legacy_context.callback = callback;
+    legacy_context.ctx = ctx;
+    return exec_result_impl(
+        db,
+        sql,
+        callback != nullptr ? legacy_exec_result_callback : nullptr,
+        &legacy_context,
+        errmsg
+    );
+}
+
+int mylite_exec_result(
+    mylite_db *db,
+    const char *sql,
+    mylite_exec_result_callback callback,
+    void *ctx,
+    char **errmsg
+) {
+    return exec_result_impl(db, sql, callback, ctx, errmsg);
 }
 
 int mylite_prepare(
@@ -3677,10 +3730,10 @@ int write_ownerless_platform_probe_proof(
 }
 #endif
 
-int exec_impl(
+int exec_result_impl(
     mylite_db *db,
     const char *sql,
-    mylite_exec_callback callback,
+    mylite_exec_result_callback callback,
     void *ctx,
     char **errmsg
 ) {
@@ -5796,7 +5849,7 @@ int validate_runtime_database_path(mylite_db &db) {
 
 int store_and_emit_result(
     mylite_db &db,
-    mylite_exec_callback callback,
+    mylite_exec_result_callback callback,
     void *ctx,
     bool *has_result
 ) {
@@ -5817,20 +5870,46 @@ int store_and_emit_result(
         return MYLITE_ERROR;
     }
 
-    std::vector<char *> column_names;
-    column_names.reserve(field_count);
+    std::vector<mylite_exec_column> columns;
+    columns.reserve(field_count);
     const MYSQL_FIELD *fields = mysql_fetch_fields(result);
     for (unsigned i = 0; i < field_count; ++i) {
-        column_names.push_back(fields[i].name);
+        mylite_exec_column column = {};
+        column.name = fields[i].name;
+        column.org_name = fields[i].org_name;
+        column.table = fields[i].table;
+        column.org_table = fields[i].org_table;
+        columns.push_back(column);
     }
 
+    std::vector<std::size_t> value_lengths;
+    if (callback != nullptr) {
+        value_lengths.resize(field_count);
+    }
     for (MYSQL_ROW row = mysql_fetch_row(result); row != nullptr; row = mysql_fetch_row(result)) {
-        if (callback != nullptr &&
-            callback(ctx, static_cast<int>(field_count), row, column_names.data()) != 0) {
-            mysql_free_result(result);
-            static_cast<void>(drain_remaining_query_results(db));
-            set_error(db, MYLITE_ERROR, "query callback requested abort");
-            return MYLITE_ERROR;
+        if (callback != nullptr) {
+            const unsigned long *lengths = mysql_fetch_lengths(result);
+            if (lengths == nullptr) {
+                mysql_free_result(result);
+                static_cast<void>(drain_remaining_query_results(db));
+                set_mariadb_error(db);
+                return MYLITE_ERROR;
+            }
+            for (unsigned i = 0; i < field_count; ++i) {
+                value_lengths[i] = static_cast<std::size_t>(lengths[i]);
+            }
+            if (callback(
+                    ctx,
+                    static_cast<int>(field_count),
+                    row,
+                    value_lengths.data(),
+                    columns.data()
+                ) != 0) {
+                mysql_free_result(result);
+                static_cast<void>(drain_remaining_query_results(db));
+                set_error(db, MYLITE_ERROR, "query callback requested abort");
+                return MYLITE_ERROR;
+            }
         }
     }
 

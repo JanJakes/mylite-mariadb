@@ -71,6 +71,13 @@ expect_true($result instanceof MyLite\MySQLiResult, 'query did not return MySQLi
 expect_true($result->num_rows === 1, 'num_rows property mismatch');
 expect_true($result->fetch_assoc() === ['id' => '1', 'name' => 'Ada'], 'fetch_assoc row mismatch');
 expect_true($result->fetch_assoc() === null, 'result should be exhausted');
+$fieldResult = $db->query('SELECT id AS alias_id, name FROM people ORDER BY id');
+expect_true($fieldResult instanceof MyLite\MySQLiResult, 'field query did not return MySQLiResult');
+$field = $fieldResult->fetch_field();
+expect_true($field->name === 'alias_id', 'field alias name mismatch');
+expect_true($field->orgname === 'id', 'field original name mismatch');
+expect_true($field->table === 'people', 'field table mismatch');
+expect_true($field->orgtable === 'people', 'field original table mismatch');
 $result = $db->query('CALL select_person()');
 expect_true($result instanceof MyLite\MySQLiResult, 'CALL did not return MySQLiResult');
 expect_true($result->fetch_assoc() === ['id' => '1', 'name' => 'Ada'], 'CALL row mismatch');
@@ -94,9 +101,18 @@ $result = $db->query('SELECT body FROM large_notes');
 expect_true($result instanceof MyLite\MySQLiResult, 'large result SELECT did not return MySQLiResult');
 expect_true($result->fetch_assoc() === ['body' => $largeBody], 'large truncated result body mismatch');
 expect_true(
+    $db->query('CREATE TABLE binary_notes (body VARBINARY(8)) ENGINE=MyISAM') === true,
+    'binary result CREATE TABLE failed'
+);
+expect_true($db->query('INSERT INTO binary_notes VALUES (0x410042)') === true, 'binary INSERT failed');
+$result = $db->query('SELECT body FROM binary_notes');
+expect_true($result instanceof MyLite\MySQLiResult, 'binary result SELECT did not return MySQLiResult');
+expect_true($result->fetch_assoc() === ['body' => "A\0B"], 'binary result body mismatch');
+expect_true(
     $db->query('SELECT id FROM people WHERE id = 1')->fetch_assoc() === ['id' => '1'],
     'query after large result failed'
 );
+expect_true($db->query('SELECT ? AS placeholder') === false, 'mysqli query should not prepare placeholders');
 expect_true(
     $db->query('CREATE TABLE query_cache_probe (id INT PRIMARY KEY, value VARCHAR(32)) ENGINE=MyISAM') === true,
     'query cache probe CREATE TABLE failed'
