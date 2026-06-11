@@ -2142,9 +2142,11 @@ Tasks:
    `ownerless-compressed-blob-page-pressure` slice
    adds the same lifecycle evidence for `ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8`
    `LONGBLOB` values that create native `FIL_PAGE_TYPE_ZBLOB`/`ZBLOB2` pages,
-   and `ownerless-compressed-blob-key-block-matrix` broadens that evidence to
-   a bounded 1 KiB / 2 KiB / 4 KiB / 8 KiB / 16 KiB compressed key-block
-   matrix.
+   `ownerless-compressed-blob-page-size-matrix` broadens the compressed
+   long-value size evidence to bounded 12 KiB, 24 KiB, 48 KiB, 96 KiB, and
+   192 KiB payloads at `KEY_BLOCK_SIZE=8`, and
+   `ownerless-compressed-blob-key-block-matrix` broadens that evidence to a
+   bounded 1 KiB / 2 KiB / 4 KiB / 8 KiB / 16 KiB compressed key-block matrix.
 5. Add power-fail style crash tests with fault injection.
    The current unsafe-hook SQL coverage kills a writer before page-version WAL
    append and after page-version WAL append but before shared-index
