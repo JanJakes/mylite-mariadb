@@ -363,7 +363,16 @@ Roles:
   DML/DDL, recovery, checkpointing, and tablespace replay still use the
   conservative native-file bridge until broader recovery is implemented.
 - `mylite-concurrency.ckpt`: durable checkpoint/progress metadata for rebuilding
-  shared coordination state.
+  shared coordination state. Hook-driven raw-latest and page-visible checkpoint
+  writes use the already-published shared redo state as the monotonic source
+  while holding the checkpoint byte-range lock, so they avoid rereading the
+  `.ckpt` payload without moving latest or visible LSNs backward. Startup
+  baseline seeding and no-live native checkpoint promotion still merge against
+  the `.ckpt` payload directly because their proof can come from native
+  checkpoint state rather than a just-published redo-state pair. The current
+  latest/visible pair still lacks a generation or checksum, so lazy or
+  unsynced checkpoint publication remains out of scope until a torn-write-safe
+  durable record is designed.
 - `process/*.heartbeat`: process-liveness evidence for crash detection. These
   are hints only; correctness must come from OS locks and durable recovery.
 

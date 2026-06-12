@@ -198,6 +198,7 @@ enum database_perf_stat_index {
     DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_GENERATION,
     DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_PINS,
     DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_BASELINE,
+    DATABASE_PERF_STAT_CHECKPOINT_UPDATE_FILE_READ_ELIDED,
     DATABASE_PERF_STAT_COUNT
 };
 
@@ -2842,6 +2843,11 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         database_perf[DATABASE_PERF_STAT_CHECKPOINT_UPDATE_READ_NS],
         insert_iterations
     );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_checkpoint_update_file_read_elided_per_insert",
+        database_perf[DATABASE_PERF_STAT_CHECKPOINT_UPDATE_FILE_READ_ELIDED],
+        insert_iterations
+    );
     emit_summary_ms_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_checkpoint_update_write_ms_per_insert",
         database_perf[DATABASE_PERF_STAT_CHECKPOINT_UPDATE_WRITE_NS],
@@ -4029,6 +4035,11 @@ static void emit_database_perf_stats(const char *prefix) {
         "%s_checkpoint_update_read_ms=%.3f\n",
         prefix,
         (double)values[DATABASE_PERF_STAT_CHECKPOINT_UPDATE_READ_NS] / 1000000.0
+    );
+    printf(
+        "%s_checkpoint_update_file_read_elided=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_CHECKPOINT_UPDATE_FILE_READ_ELIDED]
     );
     printf(
         "%s_checkpoint_update_write_ms=%.3f\n",
