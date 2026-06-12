@@ -4900,7 +4900,15 @@ subsystems that this mode needs:
   `1761.200` index bytes. The next proof-representation optimization therefore
   needs to address history-proof identity churn or broader redo/checkpoint
   proof semantics, not just a last-image delta for an immediately repeated
-  proof page. The
+  proof page. A follow-up history-proof identity attribution slice added
+  larger per-role fingerprint tables without storing full page images. The
+  reduced stats-enabled production sample reported `1.000` unique
+  rollback-segment proof identity and `1.000` unique undo-header proof identity
+  per insert, with zero duplicate identities and zero table overflows for both
+  roles. The bulk insert phase saw `24` unique identities and `1` duplicate
+  for each role across `25` proof samples. The simple autocommit proof payload
+  is therefore dominated by fresh identity churn, not same-page proof reuse
+  hidden by the four-slot byte-diff cache. The
   post-boundary production sample before this proof fast path reported stats-off
   ownerless warm open/close at `359.230 ms` versus ordinary `375.478 ms`,
   active-runtime reconnect overhead at `0.211 ms`, ownerless direct/prepared

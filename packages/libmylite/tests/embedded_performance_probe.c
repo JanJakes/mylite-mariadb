@@ -113,6 +113,12 @@ enum page_publish_stat_index {
     PAGE_PUBLISH_STAT_HISTORY_PROOF_UNDO_CHANGED_BYTES,
     PAGE_PUBLISH_STAT_HISTORY_PROOF_UNDO_FIL_HEADER_CHANGED_BYTES,
     PAGE_PUBLISH_STAT_HISTORY_PROOF_UNDO_BODY_CHANGED_BYTES,
+    PAGE_PUBLISH_STAT_HISTORY_PROOF_RSEG_IDENTITY_UNIQUE,
+    PAGE_PUBLISH_STAT_HISTORY_PROOF_RSEG_IDENTITY_DUPLICATE,
+    PAGE_PUBLISH_STAT_HISTORY_PROOF_RSEG_IDENTITY_TABLE_OVERFLOW,
+    PAGE_PUBLISH_STAT_HISTORY_PROOF_UNDO_IDENTITY_UNIQUE,
+    PAGE_PUBLISH_STAT_HISTORY_PROOF_UNDO_IDENTITY_DUPLICATE,
+    PAGE_PUBLISH_STAT_HISTORY_PROOF_UNDO_IDENTITY_TABLE_OVERFLOW,
     PAGE_PUBLISH_STAT_COUNT
 };
 
@@ -2831,6 +2837,40 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         insert_iterations
     );
     emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_history_proof_rseg_identity_unique_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_HISTORY_PROOF_RSEG_IDENTITY_UNIQUE],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_history_proof_rseg_identity_duplicate_per_"
+        "insert",
+        page_publish[PAGE_PUBLISH_STAT_HISTORY_PROOF_RSEG_IDENTITY_DUPLICATE],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_history_proof_rseg_identity_table_overflow_per_"
+        "insert",
+        page_publish[PAGE_PUBLISH_STAT_HISTORY_PROOF_RSEG_IDENTITY_TABLE_OVERFLOW],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_history_proof_undo_identity_unique_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_HISTORY_PROOF_UNDO_IDENTITY_UNIQUE],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_history_proof_undo_identity_duplicate_per_"
+        "insert",
+        page_publish[PAGE_PUBLISH_STAT_HISTORY_PROOF_UNDO_IDENTITY_DUPLICATE],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_history_proof_undo_identity_table_overflow_per_"
+        "insert",
+        page_publish[PAGE_PUBLISH_STAT_HISTORY_PROOF_UNDO_IDENTITY_TABLE_OVERFLOW],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_native_support_elided_undo_pages_per_insert",
         page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_UNDO],
         insert_iterations
@@ -4072,6 +4112,36 @@ static void emit_page_publish_stats(const char *prefix) {
         "%s_page_publish_history_proof_undo_body_changed_bytes=%" PRIu64 "\n",
         prefix,
         values[PAGE_PUBLISH_STAT_HISTORY_PROOF_UNDO_BODY_CHANGED_BYTES]
+    );
+    printf(
+        "%s_page_publish_history_proof_rseg_identity_unique=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_HISTORY_PROOF_RSEG_IDENTITY_UNIQUE]
+    );
+    printf(
+        "%s_page_publish_history_proof_rseg_identity_duplicate=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_HISTORY_PROOF_RSEG_IDENTITY_DUPLICATE]
+    );
+    printf(
+        "%s_page_publish_history_proof_rseg_identity_table_overflow=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_HISTORY_PROOF_RSEG_IDENTITY_TABLE_OVERFLOW]
+    );
+    printf(
+        "%s_page_publish_history_proof_undo_identity_unique=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_HISTORY_PROOF_UNDO_IDENTITY_UNIQUE]
+    );
+    printf(
+        "%s_page_publish_history_proof_undo_identity_duplicate=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_HISTORY_PROOF_UNDO_IDENTITY_DUPLICATE]
+    );
+    printf(
+        "%s_page_publish_history_proof_undo_identity_table_overflow=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_PUBLISH_STAT_HISTORY_PROOF_UNDO_IDENTITY_TABLE_OVERFLOW]
     );
     printf(
         "%s_page_publish_native_support_published_type_sys=%" PRIu64 "\n",

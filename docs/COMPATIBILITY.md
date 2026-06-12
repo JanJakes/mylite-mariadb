@@ -733,7 +733,16 @@ bytes per insert, while the page-log still carried `6077.410` payload bytes per
 insert, including `4152.330` SYS bytes and `1761.200` index bytes. That keeps
 the next proof-representation work focused on history-proof identity churn and
 broader redo/checkpoint proof design rather than a simple last-image delta
-against the immediately previous proof page.
+against the immediately previous proof page. A follow-up identity-attribution
+slice then added low-memory per-role fingerprint tables. The reduced
+stats-enabled production sample reported `1.000` rollback-segment proof
+sample and `1.000` undo-header proof sample per insert, with `1.000` unique
+identity, `0.000` duplicate identities, and `0.000` table overflows per insert
+for each role. The bulk insert phase saw `24` unique identities and `1`
+duplicate for each role across `25` proof samples. That proves the simple
+autocommit path's history-proof payload is fresh identity churn, not repeated
+same-page proof images hidden by the small byte-diff cache; a simple same-page
+delta WAL format is therefore not the next runtime optimization for that path.
 Ownerless page-version reads now validate the WAL tail after a direct
 page-index hit because the shared page index is an acceleration cache updated
 after the append stream, not an authoritative visibility boundary by itself.
