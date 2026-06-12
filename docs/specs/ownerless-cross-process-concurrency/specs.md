@@ -4425,7 +4425,16 @@ visibility surface, including prepared `SELECT` execution, read-only
 transaction first-read/repeatable-snapshot behavior, reads inside transactions
 after local writes, and no-live-process page-version replay; true
 InnoDB `innodb_read_only` startup, ownerless cross-process dirty reads, and full
-live-peer DDL/file-lifecycle tablespace crash recovery remain planned. Current
+live-peer DDL/file-lifecycle tablespace crash recovery remain planned.
+Ownerless no-result prepared `INSERT`, `UPDATE`, `DELETE`, and `REPLACE`
+defer native MariaDB `MYSQL_STMT` creation from public `mylite_prepare()` to
+the protected `mylite_step()` execution boundary. MyLite counts `?` parameter
+markers for that subset with its SQL tokenizer, so native syntax/table/column
+diagnostics can be reported at first step instead of prepare time in ownerless
+read/write mode. This keeps native InnoDB prepared-DML table and dictionary
+state from remaining live across independent-process readiness or wait
+barriers; prepared reads and result-returning DML keep the existing native
+prepare path. Current
 product no-live replay skips retained page-version records for tablespaces no
 longer present during dirty recovery, no-live final ownerless close publishes
 native checkpoint evidence for completed DDL file operations before shutdown,

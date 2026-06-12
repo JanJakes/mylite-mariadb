@@ -1277,6 +1277,7 @@ struct mylite_stmt {
     bool ownerless_policy_tokens_valid = false;
     bool ownerless_page_visibility_enabled = false;
     bool ownerless_runtime_statement_active = false;
+    bool ownerless_native_prepare_per_step = false;
 #endif
     bool executed = false;
     bool has_result = false;
@@ -1284,6 +1285,24 @@ struct mylite_stmt {
 };
 
 namespace {
+
+#if MYLITE_WITH_MARIADB_EMBEDDED
+void close_ownerless_ephemeral_native_statement(mylite_stmt &stmt);
+
+struct ScopedOwnerlessEphemeralNativeStatement {
+    explicit ScopedOwnerlessEphemeralNativeStatement(mylite_stmt &stmt_arg)
+        : stmt(stmt_arg), active(stmt_arg.ownerless_native_prepare_per_step) {}
+
+    ~ScopedOwnerlessEphemeralNativeStatement() {
+        if (active) {
+            close_ownerless_ephemeral_native_statement(stmt);
+        }
+    }
+
+    mylite_stmt &stmt;
+    bool active = false;
+};
+#endif
 
 int open_impl(
     const char *path,
@@ -2134,6 +2153,8 @@ void release_statement_results(mylite_stmt &stmt);
 void clear_statement_ownerless_runtime_activity(mylite_stmt &stmt);
 void enable_statement_ownerless_page_visibility(mylite_stmt &stmt, bool enabled);
 void clear_statement_ownerless_page_visibility(mylite_stmt &stmt);
+int prepare_ownerless_ephemeral_native_statement(mylite_stmt &stmt);
+void close_ownerless_ephemeral_native_statement(mylite_stmt &stmt);
 ParameterBinding *parameter_at(mylite_stmt &stmt, unsigned index);
 int bind_null_value(mylite_stmt &stmt, unsigned index);
 int bind_bytes(
@@ -2159,6 +2180,12 @@ bool is_unsupported_server_surface_sql(
 );
 bool is_readonly_rejected_sql_statement(const mylite_db &db, const SqlPolicyTokens &tokens);
 bool sql_statement_requires_write(const SqlPolicyTokens &tokens);
+bool ownerless_prepared_write_defers_native_prepare(
+    std::string_view sql,
+    const SqlPolicyTokens &tokens
+);
+bool count_sql_parameter_markers(std::string_view sql, std::size_t *out_count);
+bool sql_contains_identifier_token(std::string_view sql, const char *keyword);
 bool ownerless_statement_allows_visible_fast_path(const SqlPolicyTokens &tokens);
 bool sql_statement_requests_write_transaction(const SqlPolicyTokens &tokens);
 bool sql_statement_uses_locking_read(const SqlPolicyTokens &tokens);
@@ -2688,6 +2715,17 @@ int mylite_step(mylite_stmt *stmt) {
             }
             return refresh_result;
         }
+        ScopedOwnerlessEphemeralNativeStatement ephemeral_native_statement(*stmt);
+        const int ephemeral_prepare_result = prepare_ownerless_ephemeral_native_statement(*stmt);
+        if (ephemeral_prepare_result != MYLITE_OK) {
+            if (page_version_reads_enabled) {
+                release_ownerless_completed_statement_page_visibility(
+                    *stmt->db,
+                    !ownerless_connection_is_in_explicit_transaction(*stmt->db)
+                );
+            }
+            return ephemeral_prepare_result;
+        }
         enable_statement_ownerless_page_visibility(*stmt, page_version_reads_enabled);
         ownerless_stage_start =
             ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
@@ -2918,6 +2956,17 @@ int mylite_reset(mylite_stmt *stmt) {
     }
     release_statement_results(*stmt);
     clear_statement_ownerless_page_visibility(*stmt);
+    if (stmt->ownerless_native_prepare_per_step && stmt->stmt == nullptr && !stmt->executed &&
+        !stmt->has_result && !stmt->has_row) {
+        stmt->executed = false;
+        stmt->has_result = false;
+        stmt->has_row = false;
+        ownerless_database_perf_add_elapsed(
+            OWNERLESS_DATABASE_PERF_PREPARED_RESET_TOTAL_NS,
+            ownerless_reset_start
+        );
+        return MYLITE_OK;
+    }
     if (ownerless_reset_perf) {
         ownerless_reset_mysql_start =
             ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
@@ -4110,6 +4159,32 @@ int prepare_impl(
             collect_sql_policy_tokens(*statement->ownerless_sql_text);
         statement->ownerless_policy_tokens_valid = true;
     }
+    if (statement->ownerless_policy_tokens_valid && ownerless_prepared_write_defers_native_prepare(
+                                                        sql_view,
+                                                        statement->ownerless_policy_tokens
+                                                    )) {
+        std::size_t parameter_count = 0;
+        if (!count_sql_parameter_markers(sql_view, &parameter_count)) {
+            set_error(*db, MYLITE_ERROR, "prepared statement has too many parameter markers");
+            return MYLITE_ERROR;
+        }
+        statement->ownerless_native_prepare_per_step = true;
+        statement->parameters.resize(parameter_count);
+        for (unsigned index = 1; index <= statement->parameters.size(); ++index) {
+            const int result = bind_null_value(*statement, index);
+            if (result != MYLITE_OK) {
+                return result;
+            }
+        }
+        if (tail != nullptr) {
+            *tail = sql + resolved_len;
+        }
+        ++db->active_statement_count;
+        *out_stmt = statement.release();
+        set_ok(*db);
+        return MYLITE_OK;
+    }
+
     statement->stmt = mysql_stmt_init(&db->mysql);
     if (statement->stmt == nullptr) {
         set_error(*db, MYLITE_NOMEM, "statement could not be allocated");
@@ -4346,6 +4421,49 @@ bool sql_statement_requires_write(const SqlPolicyTokens &tokens) {
 
     for (std::size_t index = 1; index < tokens.count; ++index) {
         if (token_in(identifier_token_at(tokens, index), "DELETE", "INSERT", "REPLACE", "UPDATE")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool ownerless_prepared_write_defers_native_prepare(
+    std::string_view sql,
+    const SqlPolicyTokens &tokens
+) {
+    const std::string_view first = identifier_token_at(tokens, 0);
+    if (!token_in(first, "DELETE", "INSERT", "REPLACE") && !token_equals(first, "UPDATE")) {
+        return false;
+    }
+    return !sql_contains_identifier_token(sql, "RETURNING");
+}
+
+bool count_sql_parameter_markers(std::string_view sql, std::size_t *out_count) {
+    if (out_count == nullptr) {
+        return false;
+    }
+
+    std::size_t offset = 0;
+    std::string_view token;
+    std::size_t count = 0;
+    while (next_sql_token(sql, offset, token)) {
+        if (!token_equals(token, "?")) {
+            continue;
+        }
+        if (count == static_cast<std::size_t>(UINT_MAX)) {
+            return false;
+        }
+        ++count;
+    }
+    *out_count = count;
+    return true;
+}
+
+bool sql_contains_identifier_token(std::string_view sql, const char *keyword) {
+    std::size_t offset = 0;
+    std::string_view token;
+    while (next_sql_token(sql, offset, token)) {
+        if (identifier_token_equals(token, keyword)) {
             return true;
         }
     }
@@ -6369,6 +6487,64 @@ void bind_parameter_buffer(ParameterBinding &parameter) {
     parameter.bind.length = &parameter.length;
     parameter.bind.is_null = &parameter.is_null;
     parameter.bind.error = &parameter.error;
+}
+
+int prepare_ownerless_ephemeral_native_statement(mylite_stmt &stmt) {
+    if (!stmt.ownerless_native_prepare_per_step) {
+        return MYLITE_OK;
+    }
+    if (stmt.stmt != nullptr) {
+        return MYLITE_OK;
+    }
+    if (stmt.db == nullptr || stmt.ownerless_sql_text == nullptr) {
+        return MYLITE_MISUSE;
+    }
+
+    stmt.stmt = mysql_stmt_init(&stmt.db->mysql);
+    if (stmt.stmt == nullptr) {
+        set_error(*stmt.db, MYLITE_NOMEM, "statement could not be allocated");
+        return MYLITE_NOMEM;
+    }
+
+    my_bool update_max_length = 1;
+    static_cast<void>(
+        mysql_stmt_attr_set(stmt.stmt, STMT_ATTR_UPDATE_MAX_LENGTH, &update_max_length)
+    );
+
+    const std::string &sql = *stmt.ownerless_sql_text;
+    if (mysql_stmt_prepare(stmt.stmt, sql.c_str(), static_cast<unsigned long>(sql.size())) != 0) {
+        set_mariadb_statement_error(stmt);
+        close_ownerless_ephemeral_native_statement(stmt);
+        return MYLITE_ERROR;
+    }
+
+    if (mysql_stmt_param_count(stmt.stmt) != stmt.parameters.size()) {
+        close_ownerless_ephemeral_native_statement(stmt);
+        set_error(
+            *stmt.db,
+            MYLITE_ERROR,
+            "ownerless prepared statement parameter metadata changed during execution"
+        );
+        return MYLITE_ERROR;
+    }
+    if (mysql_stmt_field_count(stmt.stmt) != 0U) {
+        close_ownerless_ephemeral_native_statement(stmt);
+        set_error(
+            *stmt.db,
+            MYLITE_ERROR,
+            "ownerless ephemeral prepared write unexpectedly returned result metadata"
+        );
+        return MYLITE_ERROR;
+    }
+
+    return MYLITE_OK;
+}
+
+void close_ownerless_ephemeral_native_statement(mylite_stmt &stmt) {
+    if (stmt.ownerless_native_prepare_per_step && stmt.stmt != nullptr) {
+        static_cast<void>(mysql_stmt_close(stmt.stmt));
+        stmt.stmt = nullptr;
+    }
 }
 
 int bind_parameters(mylite_stmt &stmt) {

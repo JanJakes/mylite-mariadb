@@ -121,6 +121,8 @@
 #define MYLITE_TEST_TX_STRESS_ROUNDS 12U
 #define MYLITE_TEST_TX_STRESS_ROUNDS_MAX 5000U
 #define MYLITE_TEST_CHECKSUM_STRESS_WORKER_COUNT 4U
+#define MYLITE_TEST_CHECKSUM_STRESS_PREPARED_WRITER_COUNT                                          \
+    (MYLITE_TEST_CHECKSUM_STRESS_WORKER_COUNT / 2U)
 #define MYLITE_TEST_CHECKSUM_STRESS_ROWS_PER_WORKER 8U
 #define MYLITE_TEST_CHECKSUM_STRESS_ROUNDS 48U
 #define MYLITE_TEST_CHECKSUM_STRESS_ROUNDS_MAX 5000U
@@ -1803,6 +1805,7 @@ static unsigned ownerless_ddl_stress_rounds(void);
 static unsigned ownerless_temp_stress_rounds(void);
 static unsigned ownerless_tx_stress_rounds(void);
 static unsigned ownerless_checksum_stress_rounds(void);
+static unsigned ownerless_checksum_stress_prepared_writer_count(void);
 static unsigned ownerless_random_tx_stress_rounds(void);
 static unsigned ownerless_fk_graph_stress_rounds(void);
 static unsigned long long ownerless_tx_stress_delta(unsigned worker_id, unsigned round);
@@ -6913,6 +6916,8 @@ static void test_ownerless_checksum_stress(void) {
     mylite_db *db;
     char sql[256];
     const unsigned rounds = ownerless_checksum_stress_rounds();
+    const unsigned prepared_writer_count = ownerless_checksum_stress_prepared_writer_count();
+    unsigned prepared_writers_started = 0U;
     unsigned long long expected_sum = 0U;
     unsigned long long expected_versions = 0U;
     unsigned long long expected_weighted_sum = 0U;
@@ -6964,6 +6969,11 @@ static void test_ownerless_checksum_stress(void) {
     }
 
     for (unsigned index = 0U; index < MYLITE_TEST_CHECKSUM_STRESS_WORKER_COUNT; ++index) {
+        const int use_prepared_writer =
+            index % 2U != 0U && prepared_writers_started < prepared_writer_count;
+        if (use_prepared_writer) {
+            ++prepared_writers_started;
+        }
         children[index] = fork();
         assert(children[index] >= 0);
         if (children[index] == 0) {
@@ -6973,10 +6983,10 @@ static void test_ownerless_checksum_stress(void) {
                 .ready_write_fd = ready_pipe[index][1],
                 .release_read_fd = release_pipe[index][0],
             };
-            if (index % 2U == 0U) {
-                run_ownerless_checksum_stress_writer(paths, index + 1U, pipes);
-            } else {
+            if (use_prepared_writer) {
                 run_ownerless_prepared_checksum_stress_writer(paths, index + 1U, pipes);
+            } else {
+                run_ownerless_checksum_stress_writer(paths, index + 1U, pipes);
             }
         }
     }
@@ -47473,10 +47483,26 @@ static void run_ownerless_prepared_checksum_stress_writer(
     for (unsigned round = 1U; round <= rounds; ++round) {
         const unsigned row_id = ownerless_checksum_stress_row_id(worker_id, round);
         const unsigned long long delta = ownerless_checksum_stress_delta(worker_id, round);
+        int step_result;
 
         assert(mylite_bind_uint64(stmt, 1, delta) == MYLITE_OK);
         assert(mylite_bind_int64(stmt, 2, (long long)row_id) == MYLITE_OK);
-        assert(mylite_step(stmt) == MYLITE_DONE);
+        step_result = mylite_step(stmt);
+        if (step_result != MYLITE_DONE) {
+            fprintf(
+                stderr,
+                "ownerless prepared checksum stress step failed: "
+                "worker=%u round=%u result=%d errcode=%d mariadb_errno=%u message=%s\n",
+                worker_id,
+                round,
+                step_result,
+                mylite_errcode(db),
+                mylite_mariadb_errno(db),
+                mylite_errmsg(db)
+            );
+            fflush(stderr);
+        }
+        assert(step_result == MYLITE_DONE);
         assert(mylite_changes(db) == 1);
         assert(mylite_reset(stmt) == MYLITE_OK);
 
@@ -48075,6 +48101,33 @@ static unsigned ownerless_checksum_stress_rounds(void) {
         MYLITE_TEST_CHECKSUM_STRESS_ROUNDS,
         MYLITE_TEST_CHECKSUM_STRESS_ROUNDS_MAX
     );
+}
+
+static unsigned ownerless_checksum_stress_prepared_writer_count(void) {
+    const char *name = "MYLITE_OWNERLESS_CHECKSUM_STRESS_PREPARED_WRITERS";
+    const char *value = getenv(name);
+    char *end = NULL;
+    unsigned long parsed;
+
+    if (value == NULL || value[0] == '\0') {
+        return MYLITE_TEST_CHECKSUM_STRESS_PREPARED_WRITER_COUNT;
+    }
+
+    errno = 0;
+    parsed = strtoul(value, &end, 10);
+    if (errno != 0 || end == value || *end != '\0' ||
+        parsed > MYLITE_TEST_CHECKSUM_STRESS_PREPARED_WRITER_COUNT) {
+        fprintf(
+            stderr,
+            "invalid %s=%s; expected 0..%u\n",
+            name,
+            value,
+            MYLITE_TEST_CHECKSUM_STRESS_PREPARED_WRITER_COUNT
+        );
+        fflush(stderr);
+        assert(0);
+    }
+    return (unsigned)parsed;
 }
 
 static unsigned ownerless_random_tx_stress_rounds(void) {

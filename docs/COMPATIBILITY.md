@@ -227,7 +227,17 @@ server-reset interval. The companion stats-off production sample reported
 ownerless autocommit at `1520.62 ops/s` and ownerless transactional inserts at
 `1567.77 ops/s`, while still showing that native page publication and InnoDB
 commit/row mini-transaction costs remain the larger gap. This does not
-complete native redo/checkpoint reconciliation. The same
+complete native redo/checkpoint reconciliation. Ownerless no-result prepared
+`INSERT`, `UPDATE`, `DELETE`, and `REPLACE` now defer native MariaDB
+`MYSQL_STMT` creation until each protected `mylite_step()` execution. Public
+`mylite_prepare()` still returns a MyLite parameter count for that subset by
+tokenizing `?` markers, but native syntax/table/column validation can move to
+first step in ownerless read/write mode. The tradeoff prevents a prepared DML
+process from keeping unsafe native InnoDB table/dictionary state live while
+peer ownerless writers wait at a readiness or statement boundary. The reduced
+checksum-stress proof runs all-direct, one-prepared, and two-prepared writer
+shapes with `MYLITE_OWNERLESS_CHECKSUM_STRESS_PREPARED_WRITERS`, while the
+registered checksum stress preserves the default two prepared writers. The same
 stats-enabled probe also classifies ownerless rollback-segment history flushes
 by page type and by unique versus duplicate page identity, with accounting
 guards that fail if the attribution no longer matches the existing flush total.
