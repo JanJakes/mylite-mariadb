@@ -1070,6 +1070,13 @@ struct OwnerlessPressureState {
     std::uint64_t page_log_limit_bytes = 0;
     bool page_log_limit_reached = false;
 };
+
+struct OwnerlessPageLogSyncAnchor {
+    int fd = -1;
+    std::uint64_t log_offset = 0;
+    std::uint64_t end_offset = 0;
+    std::uint64_t generation = 0;
+};
 #endif
 
 struct ConcurrencyShmFileIdentity {
@@ -1121,6 +1128,8 @@ struct RuntimeState {
 RuntimeState g_runtime;
 #if MYLITE_WITH_MARIADB_EMBEDDED
 std::mutex g_system_table_mutex;
+std::mutex g_ownerless_page_log_sync_anchor_mutex;
+OwnerlessPageLogSyncAnchor g_ownerless_page_log_sync_anchor;
 #endif
 
 } // namespace
@@ -1654,6 +1663,8 @@ void reset_ownerless_runtime_hooks(RuntimeState &runtime);
 void reset_ownerless_native_shutdown_hooks(RuntimeState &runtime);
 void advance_ownerless_local_trx_horizon(RuntimeState &runtime);
 void clear_ownerless_native_hook_contexts(RuntimeState &runtime);
+void reset_ownerless_page_log_sync_anchor();
+int sync_ownerless_page_log_if_changed(OwnerlessInnoDBLockHookContext *hook);
 void release_concurrency_owner_state(RuntimeState &runtime);
 void release_concurrency_process_slot(RuntimeState &runtime);
 int ownerless_mdl_acquire_hook(
@@ -10113,6 +10124,7 @@ int map_concurrency_shared_memory_for_runtime(
         runtime.ownerless_trx_hook = {};
         runtime.ownerless_read_view_hook = {};
         runtime.ownerless_innodb_lock_hook = {};
+        reset_ownerless_page_log_sync_anchor();
         runtime.concurrency_shm_mapping = nullptr;
         runtime.concurrency_shm_mapping_size = 0;
         runtime.concurrency_shm_fd = -1;
@@ -10146,6 +10158,7 @@ int open_concurrency_page_log_for_runtime(
     runtime.concurrency_wal_fd = wal_fd;
     runtime.ownerless_innodb_lock_hook.page_log_fd = wal_fd;
     runtime.ownerless_innodb_lock_hook.page_log_offset = k_concurrency_recovery_header_size;
+    reset_ownerless_page_log_sync_anchor();
     return MYLITE_OK;
 }
 
@@ -12300,10 +12313,52 @@ void advance_ownerless_local_trx_horizon(RuntimeState &runtime) {
 }
 
 void clear_ownerless_native_hook_contexts(RuntimeState &runtime) {
+    reset_ownerless_page_log_sync_anchor();
     runtime.ownerless_innodb_lock_hook = {};
     runtime.ownerless_read_view_hook = {};
     runtime.ownerless_trx_hook = {};
     runtime.ownerless_mdl_hook = {};
+}
+
+void reset_ownerless_page_log_sync_anchor() {
+    std::lock_guard<std::mutex> guard(g_ownerless_page_log_sync_anchor_mutex);
+    g_ownerless_page_log_sync_anchor = {};
+}
+
+int sync_ownerless_page_log_if_changed(OwnerlessInnoDBLockHookContext *hook) {
+    if (hook == nullptr || hook->page_log_fd < 0 || hook->page_log_offset == 0U) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    std::lock_guard<std::mutex> guard(g_ownerless_page_log_sync_anchor_mutex);
+    std::uint64_t known_synced_end_offset = 0;
+    std::uint64_t known_synced_generation = 0;
+    if (g_ownerless_page_log_sync_anchor.fd == hook->page_log_fd &&
+        g_ownerless_page_log_sync_anchor.log_offset == hook->page_log_offset) {
+        known_synced_end_offset = g_ownerless_page_log_sync_anchor.end_offset;
+        known_synced_generation = g_ownerless_page_log_sync_anchor.generation;
+    }
+
+    std::uint64_t current_end_offset = 0;
+    std::uint64_t current_generation = 0;
+    int synced = 0;
+    const int result = mylite_ownerless_page_log_sync_initialized_if_changed_at(
+        hook->page_log_fd,
+        hook->page_log_offset,
+        known_synced_end_offset,
+        known_synced_generation,
+        &current_end_offset,
+        &current_generation,
+        &synced
+    );
+    (void)synced;
+    if (result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        g_ownerless_page_log_sync_anchor.fd = hook->page_log_fd;
+        g_ownerless_page_log_sync_anchor.log_offset = hook->page_log_offset;
+        g_ownerless_page_log_sync_anchor.end_offset = current_end_offset;
+        g_ownerless_page_log_sync_anchor.generation = current_generation;
+    }
+    return result;
 }
 
 void release_concurrency_owner_state(RuntimeState &runtime) {
@@ -13612,12 +13667,7 @@ void ownerless_innodb_pages_visible_hook(std::uint64_t visible_lsn, void *ctx) {
     }
     std::uint64_t stage_start_ns =
         ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
-    const int sync_result = hook->page_log_fd < 0 || hook->page_log_offset == 0U
-                                ? MYLITE_OWNERLESS_PAGE_LOG_ERROR
-                                : mylite_ownerless_page_log_sync_initialized_at(
-                                      hook->page_log_fd,
-                                      hook->page_log_offset
-                                  );
+    const int sync_result = sync_ownerless_page_log_if_changed(hook);
     ownerless_database_perf_add_elapsed(
         OWNERLESS_DATABASE_PERF_PAGES_VISIBLE_SYNC_NS,
         stage_start_ns

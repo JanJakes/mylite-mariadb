@@ -735,7 +735,10 @@ The design must be fast in the common case:
 - Latches should spin briefly only when the owner is running on CPU, then park
   with futex or the platform wait backend.
 - Log append should reserve ranges with atomics where possible and batch fsyncs
-  through group commit.
+  through group commit. Current page-visible publication still syncs changed
+  page-version WAL before publishing visibility, but may skip the clean sync
+  when the current WAL size and page-log header generation exactly match a
+  process-local already-synced anchor.
 - Page-version lookup should be O(1) average by `(space_id, page_no)` with a
   short version chain filtered by reader end mark.
 - Ordinary exclusive opens must stay on the native MariaDB embedded hot path:
@@ -1913,10 +1916,14 @@ Tasks:
    monotonically from that durable record, so shared-memory rebuild or stale
    clean shared memory cannot reset peer redo/page-visibility progress to zero.
    Page-visible publication now first durably syncs the page-version WAL under a
-   safe serialized sync point, and the stats-enabled performance probe splits
+   safe serialized sync point, except that a process-local clean-sync anchor may
+   elide the filesystem sync when both the WAL size and page-log header
+   generation are unchanged from an already-synced image. The stats-enabled
+   performance probe splits
    that visible-anchor path into page-log sync lock/header/data-sync costs plus
    durable `.ckpt` update lock/read/write/data-sync costs before any later
-   batching or deferral is considered. The redo segment bookkeeping now lives
+   batching or deferral is considered and reports clean-sync skips separately.
+   The redo segment bookkeeping now lives
    in a first-party primitive that owns latch/refcount handling, latest/visible LSN
    publication, reserved-LSN counters, contiguous written-LSN tracking,
    coalescing for out-of-order completed ranges, snapshot reads, and dead-owner

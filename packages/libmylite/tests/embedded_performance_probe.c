@@ -549,6 +549,7 @@ enum page_log_sync_perf_stat_index {
     PAGE_LOG_SYNC_PERF_STAT_LOCK_NS,
     PAGE_LOG_SYNC_PERF_STAT_HEADER_NS,
     PAGE_LOG_SYNC_PERF_STAT_DATA_SYNC_NS,
+    PAGE_LOG_SYNC_PERF_STAT_SKIPPED_CLEAN,
     PAGE_LOG_SYNC_PERF_STAT_COUNT
 };
 
@@ -2814,6 +2815,11 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
     emit_summary_ms_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_visible_page_log_sync_data_sync_ms_per_insert",
         page_log_sync[PAGE_LOG_SYNC_PERF_STAT_DATA_SYNC_NS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_visible_page_log_sync_skipped_clean_per_insert",
+        page_log_sync[PAGE_LOG_SYNC_PERF_STAT_SKIPPED_CLEAN],
         insert_iterations
     );
     emit_summary_count_per_iteration(
@@ -6424,6 +6430,11 @@ static void emit_page_log_sync_perf_stats(const char *prefix) {
         "%s_page_log_sync_data_sync_ms=%.3f\n",
         prefix,
         (double)values[PAGE_LOG_SYNC_PERF_STAT_DATA_SYNC_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_log_sync_skipped_clean=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_LOG_SYNC_PERF_STAT_SKIPPED_CLEAN]
     );
 }
 

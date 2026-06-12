@@ -138,6 +138,7 @@ enum page_log_sync_perf_stat_index {
     PAGE_LOG_SYNC_PERF_STAT_LOCK_NS,
     PAGE_LOG_SYNC_PERF_STAT_HEADER_NS,
     PAGE_LOG_SYNC_PERF_STAT_DATA_SYNC_NS,
+    PAGE_LOG_SYNC_PERF_STAT_SKIPPED_CLEAN,
     PAGE_LOG_SYNC_PERF_STAT_COUNT
 };
 
@@ -1521,6 +1522,11 @@ static void test_page_log_initialized_sync_uses_existing_header(void) {
     const uint64_t log_offset = 256U;
     uint8_t page[16];
     uint64_t stats[PAGE_LOG_SYNC_PERF_STAT_COUNT] = {0};
+    uint64_t current_end_offset = 0;
+    uint64_t current_generation = 0;
+    uint64_t previous_end_offset = 0;
+    uint64_t previous_generation = 0;
+    int synced = 0;
 
     memset(page, 0x43, sizeof(page));
     truncate_file(fd, (off_t)log_offset);
@@ -1534,9 +1540,38 @@ static void test_page_log_initialized_sync_uses_existing_header(void) {
     mylite_ownerless_page_log_reset_sync_perf_stats();
     mylite_ownerless_page_log_set_sync_perf_stats_enabled(1);
     assert(
-        mylite_ownerless_page_log_sync_initialized_at(fd, log_offset) ==
-        MYLITE_OWNERLESS_PAGE_LOG_OK
+        mylite_ownerless_page_log_sync_initialized_if_changed_at(
+            fd,
+            log_offset,
+            0U,
+            0U,
+            &current_end_offset,
+            &current_generation,
+            &synced
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
     );
+    assert(synced == 1);
+    assert(current_end_offset >= log_offset + MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE);
+    assert(current_generation != 0U);
+    previous_end_offset = current_end_offset;
+    previous_generation = current_generation;
+
+    synced = 1;
+    assert(
+        mylite_ownerless_page_log_sync_initialized_if_changed_at(
+            fd,
+            log_offset,
+            previous_end_offset,
+            previous_generation,
+            &current_end_offset,
+            &current_generation,
+            &synced
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(synced == 0);
+    assert(current_end_offset == previous_end_offset);
+    assert(current_generation == previous_generation);
+
     assert(
         mylite_ownerless_page_log_append_initialized_at(
             fd,
@@ -1550,14 +1585,26 @@ static void test_page_log_initialized_sync_uses_existing_header(void) {
             NULL
         ) == MYLITE_OWNERLESS_PAGE_LOG_OK
     );
+    synced = 0;
     assert(
-        mylite_ownerless_page_log_sync_initialized_at(fd, log_offset) ==
-        MYLITE_OWNERLESS_PAGE_LOG_OK
+        mylite_ownerless_page_log_sync_initialized_if_changed_at(
+            fd,
+            log_offset,
+            previous_end_offset,
+            previous_generation,
+            &current_end_offset,
+            &current_generation,
+            &synced
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
     );
+    assert(synced == 1);
+    assert(current_end_offset > previous_end_offset);
+    assert(current_generation == previous_generation);
     assert(mylite_ownerless_page_log_sync_at(fd, log_offset) == MYLITE_OWNERLESS_PAGE_LOG_OK);
     mylite_ownerless_page_log_set_sync_perf_stats_enabled(0);
     mylite_ownerless_page_log_read_sync_perf_stats(stats, PAGE_LOG_SYNC_PERF_STAT_COUNT);
-    assert(stats[PAGE_LOG_SYNC_PERF_STAT_CALLS] == 3U);
+    assert(stats[PAGE_LOG_SYNC_PERF_STAT_CALLS] == 4U);
+    assert(stats[PAGE_LOG_SYNC_PERF_STAT_SKIPPED_CLEAN] == 1U);
     assert(stats[PAGE_LOG_SYNC_PERF_STAT_DATA_SYNC_NS] <= stats[PAGE_LOG_SYNC_PERF_STAT_TOTAL_NS]);
 
     assert(close(fd) == 0);

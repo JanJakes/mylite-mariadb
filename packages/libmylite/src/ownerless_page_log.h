@@ -90,6 +90,15 @@ void mylite_ownerless_page_log_append_session_end(
 int mylite_ownerless_page_log_sync(int fd);
 int mylite_ownerless_page_log_sync_at(int fd, uint64_t log_offset);
 int mylite_ownerless_page_log_sync_initialized_at(int fd, uint64_t log_offset);
+int mylite_ownerless_page_log_sync_initialized_if_changed_at(
+    int fd,
+    uint64_t log_offset,
+    uint64_t known_synced_end_offset,
+    uint64_t known_synced_generation,
+    uint64_t *out_current_end_offset,
+    uint64_t *out_current_generation,
+    int *out_synced
+);
 int mylite_ownerless_page_log_snapshot(int fd, uint64_t *out_snapshot_end_offset);
 int mylite_ownerless_page_log_snapshot_at(
     int fd,
