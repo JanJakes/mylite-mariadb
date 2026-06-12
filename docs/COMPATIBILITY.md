@@ -96,6 +96,13 @@ and test-only phases so PHPUnit wall timings are not hidden inside build work.
 The embedded performance and attribution probes run before embedded correctness
 tests, so production throughput and attribution numbers remain visible even
 when a later ownerless SQL case fails.
+The probe also reports direct multi-row `INSERT ... VALUES` row-list timing
+with `mylite_perf_bulk_insert_rows_per_statement`,
+ordinary/ownerless bulk row and statement throughput, ownerless/ordinary bulk
+ratios, and stats-enabled per-row/per-statement ownerless attribution for page
+versions, page-log appends, native-support publication, and commit-visibility
+choices. This separates the single-row prepared autocommit cost from the
+multi-row fast-path SQL shape that ownerless concurrency now admits.
 Ownerless page-version publication now skips synthesized snapshot-boundary
 probes for native-support page classes and returns before the page-pin registry
 latch when no active pins exist; normal page-version publication, history-proof
