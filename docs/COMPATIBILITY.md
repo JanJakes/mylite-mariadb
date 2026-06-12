@@ -389,9 +389,10 @@ connect, SQL, and write iteration counts;
 stats-enabled ownerless autocommit probes add per-insert summaries for
 MTR-published page-version volume, total MyLite page-publish hook calls,
 page-log append calls and bytes, page-log encoding time, full/trailing-zero/
-sparse-zero encoded record counts and bytes, page-log payload counts and bytes
-for index, undo-log, SYS, TRX_SYS, allocation/space-metadata, BLOB, and other
-page classes, transaction-image, transaction-buffer, dirty-scan, and
+sparse-zero encoded record counts and bytes, compact-sparse subset record
+counts and bytes, page-log payload counts and bytes for index, undo-log, SYS,
+TRX_SYS, allocation/space-metadata, BLOB, and other page classes,
+transaction-image, transaction-buffer, dirty-scan, and
 buffer-pool-scan page-publish sources, native-support page ratio,
 page-publish and page-log append time, page-write refresh/publish time,
 commit-MTR publish time, InnoDB write-history time split by ownerless history-page lock, ownerless post-wait
@@ -619,6 +620,20 @@ reduced production sample reported all ownerless autocommit page-version WAL
 records as sparse-zero encoded, with about `7969.470` payload bytes per insert:
 `4225.950` SYS bytes, `3388.500` index bytes, `354.370` undo-log bytes,
 `0.650` allocation/space-metadata bytes, and no TRX_SYS/BLOB/other payload.
+The compact sparse page-log slice then added a 16-bit sparse metadata encoding
+while preserving full-page checksum validation and the existing 32-bit sparse
+fallback. In the reduced 100-row production attribution sample, all `3.020`
+ownerless autocommit page-log records per insert used the compact sparse path
+and page-log payload fell to `6701.670` bytes per insert: `4174.940` SYS
+bytes, `2302.290` index bytes, `223.980` undo-log bytes, and `0.460`
+allocation/space-metadata bytes. Longer 1000-row local production samples
+reported ownerless autocommit at `1374.23` ops/s stats-off and `1434.30`
+ops/s stats-enabled versus ordinary autocommit at `4031.68` and `4008.89`
+ops/s; the stats-enabled 1000-row payload mix also included occasional full
+index records and therefore reported `14903.235` payload bytes per insert
+despite `2.875` compact sparse records per insert. Treat the compact encoding
+as a WAL byte-reduction for zero-heavy page images, not as proof that the
+history-proof page count or native commit cost is solved.
 The next write-throughput target is therefore the rollback-segment SYS proof
 representation and user/index page payload; the undo-header proof page is not
 the byte-volume driver in the simple insert sample.
@@ -713,13 +728,14 @@ fully-bound prepared statement execution, preserving partial-binding behavior
 while reducing adapter work in prepared DML loops.
 
 Ownerless page-version WAL records can now encode zero-heavy page images by
-storing either a sparse nonzero-run list or a nonzero prefix plus a record flag,
-while retaining the full page size and verifying checksums over the
-reconstructed full page image. Primitive coverage verifies sparse zero-range,
+storing a compact 16-bit sparse nonzero-run list, the original 32-bit sparse
+nonzero-run list, or a nonzero prefix plus a record flag, while retaining the
+full page size and verifying checksums over the reconstructed full page image.
+Primitive coverage verifies compact sparse zero-range, legacy sparse fallback,
 tail-prefix, and zero-byte payload readback, append-session offset advancement
 by encoded payload size, and checkpoint compaction of encoded retained records.
-This reduces WAL byte volume without skipping the history-proof records or
-changing page-visible publication semantics.
+This reduces WAL byte volume for zero-heavy page images without skipping the
+history-proof records or changing page-visible publication semantics.
 
 ## Public API
 

@@ -113,6 +113,8 @@ enum page_log_append_perf_stat_index {
     PAGE_LOG_APPEND_PERF_STAT_FULL_PAYLOAD_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_TRAILING_ZERO_PAYLOAD_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_SPARSE_ZERO_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_COMPACT_SPARSE_ZERO_RECORDS,
+    PAGE_LOG_APPEND_PERF_STAT_COMPACT_SPARSE_ZERO_PAYLOAD_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_INDEX_RECORDS,
     PAGE_LOG_APPEND_PERF_STAT_INDEX_PAYLOAD_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_UNDO_LOG_RECORDS,
@@ -148,6 +150,7 @@ static void test_page_log_reads_latest_visible_page(void);
 static void test_page_log_uses_payload_offset(void);
 static void test_page_log_append_reports_write_volume(void);
 static void test_page_log_encodes_sparse_zero_payloads(void);
+static void test_page_log_falls_back_to_legacy_sparse_zero_payloads(void);
 static void test_page_log_initialized_append_uses_existing_header(void);
 static void test_page_log_initialized_sync_uses_existing_header(void);
 static void test_page_log_reads_under_existing_read_lock(void);
@@ -331,6 +334,7 @@ int main(void) {
     test_page_log_uses_payload_offset();
     test_page_log_append_reports_write_volume();
     test_page_log_encodes_sparse_zero_payloads();
+    test_page_log_falls_back_to_legacy_sparse_zero_payloads();
     test_page_log_initialized_append_uses_existing_header();
     test_page_log_initialized_sync_uses_existing_header();
     test_page_log_reads_under_existing_read_lock();
@@ -1150,7 +1154,7 @@ static void test_page_log_encodes_sparse_zero_payloads(void) {
     uint64_t stats[PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
     mylite_ownerless_page_log_append_session session = {0};
     struct stat log_stat = {0};
-    const size_t sparse_payload_size = 40U;
+    const size_t sparse_payload_size = 22U;
 
     memset(full_page, 0x44, sizeof(full_page));
     memset(sparse_page, 0, sizeof(sparse_page));
@@ -1236,6 +1240,10 @@ static void test_page_log_encodes_sparse_zero_payloads(void) {
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_FULL_PAYLOAD_BYTES] == sizeof(full_page));
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_SPARSE_ZERO_RECORDS] == 1U);
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_SPARSE_ZERO_PAYLOAD_BYTES] == sparse_payload_size);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_COMPACT_SPARSE_ZERO_RECORDS] == 1U);
+    assert(
+        stats[PAGE_LOG_APPEND_PERF_STAT_COMPACT_SPARSE_ZERO_PAYLOAD_BYTES] == sparse_payload_size
+    );
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_TRAILING_ZERO_RECORDS] == 1U);
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_TRAILING_ZERO_PAYLOAD_BYTES] == 0U);
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_SPACE_METADATA_RECORDS] == 2U);
@@ -1320,6 +1328,84 @@ static void test_page_log_encodes_sparse_zero_payloads(void) {
     );
 
     assert(close(fd) == 0);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_falls_back_to_legacy_sparse_zero_payloads(void) {
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "legacy-sparse-payload-page-log.bin");
+    int fd = open_file(log_path);
+    const size_t page_size = 70000U;
+    const size_t nonzero_offset = 66000U;
+    const size_t sparse_payload_size = sizeof(uint32_t) + (2U * sizeof(uint32_t)) + 1U;
+    uint8_t *page = calloc(page_size, 1U);
+    uint8_t *out_page = malloc(page_size);
+    uint64_t record_offset = 0;
+    uint64_t page_lsn = 0;
+    uint64_t commit_lsn = 0;
+    uint32_t out_page_size = 0;
+    uint64_t stats[PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
+    struct stat log_stat = {0};
+
+    assert(page != NULL);
+    assert(out_page != NULL);
+    page[nonzero_offset] = 0x5A;
+    memset(out_page, 0xEE, page_size);
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    mylite_ownerless_page_log_reset_append_perf_stats();
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            11U,
+            1U,
+            180U,
+            180U,
+            page,
+            (uint32_t)page_size,
+            &record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(0);
+    mylite_ownerless_page_log_read_append_perf_stats(stats, PAGE_LOG_APPEND_PERF_STAT_COUNT);
+
+    assert(record_offset == MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE);
+    assert(fstat(fd, &log_stat) == 0);
+    assert(
+        log_stat.st_size ==
+        (off_t)(record_offset + MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE + sparse_payload_size)
+    );
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_CALLS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_SPARSE_ZERO_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_SPARSE_ZERO_PAYLOAD_BYTES] == sparse_payload_size);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_COMPACT_SPARSE_ZERO_RECORDS] == 0U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_SPACE_METADATA_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_SPACE_METADATA_PAYLOAD_BYTES] == sparse_payload_size);
+
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            11U,
+            1U,
+            180U,
+            out_page,
+            page_size,
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == (uint32_t)page_size);
+    assert(page_lsn == 180U);
+    assert(commit_lsn == 180U);
+    assert(memcmp(out_page, page, page_size) == 0);
+
+    assert(close(fd) == 0);
+    free(out_page);
+    free(page);
     free(log_path);
     remove_tree(root);
     free(root);

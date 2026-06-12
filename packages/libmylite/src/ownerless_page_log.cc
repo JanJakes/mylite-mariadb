@@ -70,8 +70,10 @@ constexpr std::size_t k_record_payload_size_offset = 40;
 constexpr std::size_t k_record_payload_checksum_offset = 48;
 constexpr std::uint32_t k_record_flag_trailing_zero_payload = 1U;
 constexpr std::uint32_t k_record_flag_sparse_zero_payload = 2U;
-constexpr std::uint32_t k_record_flags_known_mask =
-    k_record_flag_trailing_zero_payload | k_record_flag_sparse_zero_payload;
+constexpr std::uint32_t k_record_flag_compact_sparse_zero_payload = 4U;
+constexpr std::uint32_t k_record_flags_known_mask = k_record_flag_trailing_zero_payload |
+                                                    k_record_flag_sparse_zero_payload |
+                                                    k_record_flag_compact_sparse_zero_payload;
 constexpr std::size_t k_innodb_fil_page_type_offset = 24;
 constexpr std::uint16_t k_innodb_fil_page_index = 17855;
 constexpr std::uint16_t k_innodb_fil_page_type_allocated = 0;
@@ -136,6 +138,8 @@ enum PageLogAppendPerfStatIndex : std::size_t {
     PAGE_LOG_APPEND_PERF_FULL_PAYLOAD_BYTES,
     PAGE_LOG_APPEND_PERF_TRAILING_ZERO_PAYLOAD_BYTES,
     PAGE_LOG_APPEND_PERF_SPARSE_ZERO_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_COMPACT_SPARSE_ZERO_RECORDS,
+    PAGE_LOG_APPEND_PERF_COMPACT_SPARSE_ZERO_PAYLOAD_BYTES,
     PAGE_LOG_APPEND_PERF_INDEX_RECORDS,
     PAGE_LOG_APPEND_PERF_INDEX_PAYLOAD_BYTES,
     PAGE_LOG_APPEND_PERF_UNDO_LOG_RECORDS,
@@ -382,6 +386,8 @@ std::uint64_t encoded_payload_size_for_page(
 );
 bool record_uses_trailing_zero_payload(const PageRecordHeader &record);
 bool record_uses_sparse_zero_payload(const PageRecordHeader &record);
+bool record_uses_compact_sparse_zero_payload(const PageRecordHeader &record);
+bool record_uses_any_sparse_zero_payload(const PageRecordHeader &record);
 bool record_payload_shape_valid(const PageRecordHeader &record);
 void record_append_payload_encoding_stats(std::uint32_t flags, std::uint64_t payload_size);
 void record_append_page_type_stats(
@@ -409,6 +415,11 @@ bool build_sparse_zero_payload(
     std::uint32_t page_size,
     std::vector<unsigned char> *out_payload
 );
+bool build_compact_sparse_zero_payload(
+    const void *page,
+    std::uint32_t page_size,
+    std::vector<unsigned char> *out_payload
+);
 PayloadStatus record_payload_status(int fd, off_t payload_offset, const PageRecordHeader &record);
 bool record_requires_oldest_snapshot_boundary(
     int fd,
@@ -421,8 +432,10 @@ bool record_is_better(const PageRecordHeader &candidate, const PageRecordHeader 
 std::uint64_t checksum_bytes(const void *buffer, std::size_t size);
 std::uint64_t legacy_checksum_bytes(const void *buffer, std::size_t size);
 std::uint16_t load_be16(const unsigned char *bytes);
+std::uint16_t load16(const unsigned char *bytes, std::size_t offset);
 std::uint32_t load32(const unsigned char *bytes, std::size_t offset);
 std::uint64_t load64(const unsigned char *bytes, std::size_t offset);
+void store16(unsigned char *bytes, std::size_t offset, std::uint16_t value);
 void store32(unsigned char *bytes, std::size_t offset, std::uint32_t value);
 void store64(unsigned char *bytes, std::size_t offset, std::uint64_t value);
 
@@ -2562,8 +2575,12 @@ std::uint64_t encoded_payload_size_for_page(
 
     std::uint32_t flags = 0;
     std::uint64_t encoded_size = page_size;
-    if (out_payload != nullptr && build_sparse_zero_payload(page, page_size, out_payload) &&
+    if (out_payload != nullptr && build_compact_sparse_zero_payload(page, page_size, out_payload) &&
         out_payload->size() < trailing_size) {
+        flags |= k_record_flag_compact_sparse_zero_payload;
+        encoded_size = out_payload->size();
+    } else if (out_payload != nullptr && build_sparse_zero_payload(page, page_size, out_payload) &&
+               out_payload->size() < trailing_size) {
         flags |= k_record_flag_sparse_zero_payload;
         encoded_size = out_payload->size();
     } else if (trailing_size < page_size) {
@@ -2641,6 +2658,68 @@ bool build_sparse_zero_payload(
     return true;
 }
 
+bool build_compact_sparse_zero_payload(
+    const void *page,
+    std::uint32_t page_size,
+    std::vector<unsigned char> *out_payload
+) {
+    if (out_payload == nullptr) {
+        return false;
+    }
+    const auto *bytes = static_cast<const unsigned char *>(page);
+    out_payload->clear();
+    out_payload->reserve(page_size);
+    out_payload->resize(sizeof(std::uint16_t));
+    std::uint32_t run_count = 0;
+
+    for (std::uint32_t offset = 0; offset < page_size;) {
+        while (offset < page_size && bytes[offset] == 0U) {
+            ++offset;
+        }
+        if (offset == page_size) {
+            break;
+        }
+        const std::uint32_t run_start = offset;
+        while (offset < page_size && bytes[offset] != 0U) {
+            ++offset;
+        }
+        const std::uint32_t run_size = offset - run_start;
+        if (run_start > std::numeric_limits<std::uint16_t>::max() ||
+            run_size > std::numeric_limits<std::uint16_t>::max() ||
+            run_count == std::numeric_limits<std::uint16_t>::max()) {
+            out_payload->clear();
+            return false;
+        }
+
+        const std::size_t cursor = out_payload->size();
+        const std::size_t encoded_run_size = (2U * sizeof(std::uint16_t)) + run_size;
+        if (cursor + encoded_run_size >= page_size) {
+            out_payload->clear();
+            return false;
+        }
+        out_payload->resize(cursor + encoded_run_size);
+        store16(out_payload->data(), cursor, static_cast<std::uint16_t>(run_start));
+        store16(
+            out_payload->data(),
+            cursor + sizeof(std::uint16_t),
+            static_cast<std::uint16_t>(run_size)
+        );
+        std::memcpy(
+            out_payload->data() + cursor + (2U * sizeof(std::uint16_t)),
+            bytes + run_start,
+            run_size
+        );
+        ++run_count;
+    }
+
+    if (run_count == 0U) {
+        out_payload->clear();
+        return false;
+    }
+    store16(out_payload->data(), 0U, static_cast<std::uint16_t>(run_count));
+    return true;
+}
+
 bool record_uses_trailing_zero_payload(const PageRecordHeader &record) {
     return (record.flags & k_record_flag_trailing_zero_payload) != 0U;
 }
@@ -2649,13 +2728,30 @@ bool record_uses_sparse_zero_payload(const PageRecordHeader &record) {
     return (record.flags & k_record_flag_sparse_zero_payload) != 0U;
 }
 
+bool record_uses_compact_sparse_zero_payload(const PageRecordHeader &record) {
+    return (record.flags & k_record_flag_compact_sparse_zero_payload) != 0U;
+}
+
+bool record_uses_any_sparse_zero_payload(const PageRecordHeader &record) {
+    return record_uses_sparse_zero_payload(record) ||
+           record_uses_compact_sparse_zero_payload(record);
+}
+
 void record_append_payload_encoding_stats(std::uint32_t flags, std::uint64_t payload_size) {
     if (!page_log_append_perf_stats_are_enabled()) {
         return;
     }
-    if ((flags & k_record_flag_sparse_zero_payload) != 0U) {
+    if ((flags & (k_record_flag_sparse_zero_payload | k_record_flag_compact_sparse_zero_payload)) !=
+        0U) {
         page_log_append_perf_add(PAGE_LOG_APPEND_PERF_SPARSE_ZERO_RECORDS, 1U);
         page_log_append_perf_add(PAGE_LOG_APPEND_PERF_SPARSE_ZERO_PAYLOAD_BYTES, payload_size);
+        if ((flags & k_record_flag_compact_sparse_zero_payload) != 0U) {
+            page_log_append_perf_add(PAGE_LOG_APPEND_PERF_COMPACT_SPARSE_ZERO_RECORDS, 1U);
+            page_log_append_perf_add(
+                PAGE_LOG_APPEND_PERF_COMPACT_SPARSE_ZERO_PAYLOAD_BYTES,
+                payload_size
+            );
+        }
         return;
     }
     if ((flags & k_record_flag_trailing_zero_payload) != 0U) {
@@ -2725,11 +2821,18 @@ bool record_payload_shape_valid(const PageRecordHeader &record) {
     if (record.page_size == 0U || (record.flags & ~k_record_flags_known_mask) != 0U) {
         return false;
     }
-    if (record_uses_trailing_zero_payload(record) && record_uses_sparse_zero_payload(record)) {
+    const std::uint32_t encoding_flags =
+        record.flags & (k_record_flag_trailing_zero_payload | k_record_flag_sparse_zero_payload |
+                        k_record_flag_compact_sparse_zero_payload);
+    if ((encoding_flags & (encoding_flags - 1U)) != 0U) {
         return false;
     }
     if (record_uses_sparse_zero_payload(record)) {
         return record.payload_size >= sizeof(std::uint32_t) &&
+               record.payload_size < record.page_size;
+    }
+    if (record_uses_compact_sparse_zero_payload(record)) {
+        return record.payload_size >= sizeof(std::uint16_t) &&
                record.payload_size < record.page_size;
     }
     if (record_uses_trailing_zero_payload(record)) {
@@ -2760,30 +2863,38 @@ bool read_record_page_payload(
     }
     const std::size_t page_size = static_cast<std::size_t>(record.page_size);
     const std::size_t payload_size = static_cast<std::size_t>(record.payload_size);
-    if (record_uses_sparse_zero_payload(record)) {
+    if (record_uses_any_sparse_zero_payload(record)) {
+        const bool compact_sparse = record_uses_compact_sparse_zero_payload(record);
+        const std::size_t run_count_size =
+            compact_sparse ? sizeof(std::uint16_t) : sizeof(std::uint32_t);
+        const std::size_t run_header_size =
+            compact_sparse ? 2U * sizeof(std::uint16_t) : 2U * sizeof(std::uint32_t);
         std::unique_ptr<unsigned char[]> payload(new (std::nothrow) unsigned char[payload_size]);
         if (payload == nullptr || !read_exact_at(fd, payload.get(), payload_size, payload_offset)) {
             return false;
         }
         std::memset(out_page, 0, page_size);
-        if (payload_size < sizeof(std::uint32_t)) {
+        if (payload_size < run_count_size) {
             return false;
         }
-        const std::uint32_t run_count = load32(payload.get(), 0U);
+        const std::uint32_t run_count =
+            compact_sparse ? load16(payload.get(), 0U) : load32(payload.get(), 0U);
         if (run_count == 0U) {
             return false;
         }
-        std::size_t cursor = sizeof(std::uint32_t);
+        std::size_t cursor = run_count_size;
         bool has_previous_run = false;
         std::uint32_t previous_run_end = 0;
         for (std::uint32_t run_index = 0; run_index < run_count; ++run_index) {
-            if (cursor + (2U * sizeof(std::uint32_t)) > payload_size) {
+            if (cursor + run_header_size > payload_size) {
                 return false;
             }
-            const std::uint32_t run_offset = load32(payload.get(), cursor);
-            cursor += sizeof(std::uint32_t);
-            const std::uint32_t run_size = load32(payload.get(), cursor);
-            cursor += sizeof(std::uint32_t);
+            const std::uint32_t run_offset =
+                compact_sparse ? load16(payload.get(), cursor) : load32(payload.get(), cursor);
+            cursor += run_header_size / 2U;
+            const std::uint32_t run_size =
+                compact_sparse ? load16(payload.get(), cursor) : load32(payload.get(), cursor);
+            cursor += run_header_size / 2U;
             if (run_size == 0U || (has_previous_run && run_offset <= previous_run_end) ||
                 run_offset > record.page_size || run_size > record.page_size - run_offset ||
                 run_size > payload_size - cursor) {
@@ -2832,34 +2943,43 @@ bool read_record_page_type(
     const std::size_t payload_size = static_cast<std::size_t>(record.payload_size);
     unsigned char page_type_bytes[2] = {};
 
-    if (record_uses_sparse_zero_payload(record)) {
-        unsigned char run_count_bytes[4] = {};
-        if (!read_exact_at(fd, run_count_bytes, sizeof(run_count_bytes), payload_offset)) {
+    if (record_uses_any_sparse_zero_payload(record)) {
+        const bool compact_sparse = record_uses_compact_sparse_zero_payload(record);
+        const std::size_t run_count_size =
+            compact_sparse ? sizeof(std::uint16_t) : sizeof(std::uint32_t);
+        const std::size_t run_header_size =
+            compact_sparse ? 2U * sizeof(std::uint16_t) : 2U * sizeof(std::uint32_t);
+        unsigned char run_count_bytes[sizeof(std::uint32_t)] = {};
+        if (!read_exact_at(fd, run_count_bytes, run_count_size, payload_offset)) {
             return false;
         }
-        if (payload_size < sizeof(std::uint32_t)) {
+        if (payload_size < run_count_size) {
             return false;
         }
-        const std::uint32_t run_count = load32(run_count_bytes, 0U);
+        const std::uint32_t run_count =
+            compact_sparse ? load16(run_count_bytes, 0U) : load32(run_count_bytes, 0U);
         if (run_count == 0U) {
             return false;
         }
-        std::size_t cursor = sizeof(std::uint32_t);
+        std::size_t cursor = run_count_size;
         bool has_previous_run = false;
         std::uint32_t previous_run_end = 0;
         for (std::uint32_t run_index = 0; run_index < run_count; ++run_index) {
-            if (cursor + (2U * sizeof(std::uint32_t)) > payload_size) {
+            if (cursor + run_header_size > payload_size) {
                 return false;
             }
             off_t run_header_offset = 0;
-            unsigned char run_header[8] = {};
+            unsigned char run_header[2U * sizeof(std::uint32_t)] = {};
             if (!offset_adds(payload_offset, cursor, &run_header_offset) ||
-                !read_exact_at(fd, run_header, sizeof(run_header), run_header_offset)) {
+                !read_exact_at(fd, run_header, run_header_size, run_header_offset)) {
                 return false;
             }
-            const std::uint32_t run_offset = load32(run_header, 0U);
-            const std::uint32_t run_size = load32(run_header, sizeof(std::uint32_t));
-            cursor += 2U * sizeof(std::uint32_t);
+            const std::uint32_t run_offset =
+                compact_sparse ? load16(run_header, 0U) : load32(run_header, 0U);
+            const std::uint32_t run_size = compact_sparse
+                                               ? load16(run_header, sizeof(std::uint16_t))
+                                               : load32(run_header, sizeof(std::uint32_t));
+            cursor += run_header_size;
             if (run_size == 0U || (has_previous_run && run_offset <= previous_run_end) ||
                 run_offset > record.page_size || run_size > record.page_size - run_offset ||
                 run_size > payload_size - cursor) {
@@ -2998,6 +3118,14 @@ std::uint16_t load_be16(const unsigned char *bytes) {
     );
 }
 
+std::uint16_t load16(const unsigned char *bytes, std::size_t offset) {
+    std::uint16_t value = 0;
+    for (std::size_t index = 0; index < sizeof(value); ++index) {
+        value |= static_cast<std::uint16_t>(bytes[offset + index]) << (index * 8U);
+    }
+    return value;
+}
+
 std::uint32_t load32(const unsigned char *bytes, std::size_t offset) {
     std::uint32_t value = 0;
     for (std::size_t index = 0; index < sizeof(value); ++index) {
@@ -3012,6 +3140,12 @@ std::uint64_t load64(const unsigned char *bytes, std::size_t offset) {
         value |= static_cast<std::uint64_t>(bytes[offset + index]) << (index * 8U);
     }
     return value;
+}
+
+void store16(unsigned char *bytes, std::size_t offset, std::uint16_t value) {
+    for (std::size_t index = 0; index < sizeof(value); ++index) {
+        bytes[offset + index] = static_cast<unsigned char>((value >> (index * 8U)) & 0xffU);
+    }
 }
 
 void store32(unsigned char *bytes, std::size_t offset, std::uint32_t value) {
