@@ -573,6 +573,11 @@ enum page_log_append_perf_stat_index {
     PAGE_LOG_APPEND_PERF_STAT_OTHER_COMPACT_SPARSE_DATA_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_VARINT_COMPACT_SPARSE_ZERO_RECORDS,
     PAGE_LOG_APPEND_PERF_STAT_VARINT_COMPACT_SPARSE_ZERO_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_ZERO_RECORDS,
+    PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_ZERO_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_METADATA_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_RAW_DATA_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_FILL_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
@@ -1564,6 +1569,29 @@ static void emit_ownerless_bulk_autocommit_phase_summary(
     emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_bulk_page_log_append_calls_per_statement",
         page_log_append[PAGE_LOG_APPEND_PERF_STAT_CALLS],
+        insert_statements
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_bulk_page_log_fill_sparse_zero_records_per_row",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_ZERO_RECORDS],
+        insert_rows
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_bulk_page_log_fill_sparse_zero_records_per_"
+        "statement",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_ZERO_RECORDS],
+        insert_statements
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_bulk_page_log_fill_sparse_zero_payload_bytes_"
+        "per_row",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_ZERO_PAYLOAD_BYTES],
+        insert_rows
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_bulk_page_log_fill_sparse_zero_payload_bytes_"
+        "per_statement",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_ZERO_PAYLOAD_BYTES],
         insert_statements
     );
     emit_summary_count_per_iteration(
@@ -3346,6 +3374,32 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         "bytes_"
         "per_insert",
         page_log_append[PAGE_LOG_APPEND_PERF_STAT_VARINT_COMPACT_SPARSE_ZERO_PAYLOAD_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_fill_sparse_zero_records_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_ZERO_RECORDS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_fill_sparse_zero_payload_bytes_per_"
+        "insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_ZERO_PAYLOAD_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_fill_sparse_metadata_bytes_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_METADATA_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_fill_sparse_raw_data_bytes_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_RAW_DATA_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_fill_sparse_fill_bytes_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_FILL_BYTES],
         insert_iterations
     );
     emit_summary_count_per_iteration(
@@ -6850,6 +6904,31 @@ static void emit_page_log_append_perf_stats(const char *prefix) {
         prefix,
         "varint_compact_sparse_zero_payload",
         values[PAGE_LOG_APPEND_PERF_STAT_VARINT_COMPACT_SPARSE_ZERO_PAYLOAD_BYTES]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "fill_sparse_zero_records",
+        values[PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_ZERO_RECORDS]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "fill_sparse_zero_payload",
+        values[PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_ZERO_PAYLOAD_BYTES]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "fill_sparse_metadata",
+        values[PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_METADATA_BYTES]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "fill_sparse_raw_data",
+        values[PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_RAW_DATA_BYTES]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "fill_sparse_fill",
+        values[PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_FILL_BYTES]
     );
     emit_page_log_append_perf_bytes(
         prefix,

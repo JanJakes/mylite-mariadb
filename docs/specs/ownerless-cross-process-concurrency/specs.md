@@ -4908,7 +4908,24 @@ subsystems that this mode needs:
   roles. The bulk insert phase saw `24` unique identities and `1` duplicate
   for each role across `25` proof samples. The simple autocommit proof payload
   is therefore dominated by fresh identity churn, not same-page proof reuse
-  hidden by the four-slot byte-diff cache. The
+  hidden by the four-slot byte-diff cache. A follow-up fill-sparse page-log
+  slice records repeated nonzero fill runs for `FIL_PAGE_TYPE_SYS` pages while
+  preserving the full-page checksum and page-version proof contract. The
+  reduced 100-row stats-enabled production sample reported the same `3.020`
+  page-log append calls per ownerless autocommit insert, but total page-log
+  payload fell to `2010.720` bytes per insert and SYS proof payload fell from
+  the prior `4152.330` bytes to `72.010` bytes per insert. The new fill-sparse
+  bucket accounted for `1.000` record per insert and split those SYS bytes into
+  `46.030` metadata bytes, `23.980` raw-data bytes, and `2.000` fill bytes.
+  Remaining payload is now dominated by `1779.030` index bytes and `159.340`
+  undo-log bytes per insert, with page-log append at `0.084 ms/insert` and
+  append encode at `5.386 ms` for the `302` records in the reduced sample. A
+  100-row stats-off sample reported ownerless autocommit at `1518.08 ops/s`
+  versus ordinary autocommit at `3834.32 ops/s`, while a 500-row stats-off
+  sample reported ownerless autocommit at `1110.33 ops/s` versus ordinary at
+  `3873.31 ops/s`; short throughput samples remain noisy, but the next
+  write-throughput target has clearly moved to user/index payload and native
+  commit/page-publication cost rather than SYS proof byte volume. The
   post-boundary production sample before this proof fast path reported stats-off
   ownerless warm open/close at `359.230 ms` versus ordinary `375.478 ms`,
   active-runtime reconnect overhead at `0.211 ms`, ownerless direct/prepared

@@ -55,6 +55,7 @@
 #define MYLITE_TEST_INNODB_PAGE_LSN_OFFSET 16U
 #define MYLITE_TEST_INNODB_PAGE_TYPE_OFFSET 24U
 #define MYLITE_TEST_INNODB_PAGE_SPACE_ID_OFFSET 34U
+#define MYLITE_TEST_INNODB_PAGE_TYPE_SYS 6U
 #define MYLITE_TEST_INNODB_PAGE_TYPE_FSP_HEADER 8U
 #define MYLITE_TEST_INNODB_PAGE_TYPE_RTREE 17854U
 #define MYLITE_TEST_PAGE_LOG_RECORD_PAYLOAD_CHECKSUM_OFFSET 48U
@@ -147,6 +148,11 @@ enum page_log_append_perf_stat_index {
     PAGE_LOG_APPEND_PERF_STAT_OTHER_COMPACT_SPARSE_DATA_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_VARINT_COMPACT_SPARSE_ZERO_RECORDS,
     PAGE_LOG_APPEND_PERF_STAT_VARINT_COMPACT_SPARSE_ZERO_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_ZERO_RECORDS,
+    PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_ZERO_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_METADATA_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_RAW_DATA_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_FILL_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
@@ -181,6 +187,7 @@ static void test_page_log_reads_latest_visible_page(void);
 static void test_page_log_uses_payload_offset(void);
 static void test_page_log_append_reports_write_volume(void);
 static void test_page_log_encodes_sparse_zero_payloads(void);
+static void test_page_log_encodes_fill_sparse_zero_payloads(void);
 static void test_page_log_falls_back_to_compact_sparse_zero_payloads(void);
 static void test_page_log_falls_back_to_legacy_sparse_zero_payloads(void);
 static void test_page_log_initialized_append_uses_existing_header(void);
@@ -366,6 +373,7 @@ int main(void) {
     test_page_log_uses_payload_offset();
     test_page_log_append_reports_write_volume();
     test_page_log_encodes_sparse_zero_payloads();
+    test_page_log_encodes_fill_sparse_zero_payloads();
     test_page_log_falls_back_to_compact_sparse_zero_payloads();
     test_page_log_falls_back_to_legacy_sparse_zero_payloads();
     test_page_log_initialized_append_uses_existing_header();
@@ -1433,6 +1441,136 @@ static void test_page_log_encodes_sparse_zero_payloads(void) {
     free(root);
 }
 
+static void test_page_log_encodes_fill_sparse_zero_payloads(void) {
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "fill-sparse-payload-page-log.bin");
+    int fd = open_file(log_path);
+    uint8_t page[256];
+    uint8_t out_page[256];
+    uint64_t record_offset = 0;
+    uint64_t page_lsn = 0;
+    uint64_t commit_lsn = 0;
+    uint32_t out_page_size = 0;
+    uint64_t stats[PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
+    page_log_checkpoint_index_context checkpoint_context = {0};
+    struct stat log_stat = {0};
+    const size_t fill_sparse_payload_size = 24U;
+    const size_t fill_sparse_metadata_size = 18U;
+    const size_t fill_sparse_raw_data_size = 5U;
+    const size_t fill_sparse_fill_size = 1U;
+
+    memset(page, 0, sizeof(page));
+    memset(out_page, 0xEE, sizeof(out_page));
+    store_test_be16(page, MYLITE_TEST_INNODB_PAGE_TYPE_OFFSET, MYLITE_TEST_INNODB_PAGE_TYPE_SYS);
+    page[32] = 0x11U;
+    page[33] = 0x22U;
+    page[63] = 0x44U;
+    memset(page + 64U, 0xFF, 128U);
+    page[220] = 0x33U;
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    mylite_ownerless_page_log_reset_append_perf_stats();
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            12U,
+            1U,
+            200U,
+            200U,
+            page,
+            sizeof(page),
+            &record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(0);
+    mylite_ownerless_page_log_read_append_perf_stats(stats, PAGE_LOG_APPEND_PERF_STAT_COUNT);
+
+    assert(record_offset == MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE);
+    assert(fstat(fd, &log_stat) == 0);
+    assert(
+        log_stat.st_size == (off_t)(record_offset + MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE +
+                                    fill_sparse_payload_size)
+    );
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_CALLS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_BYTES] == fill_sparse_payload_size);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_SPARSE_ZERO_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_SPARSE_ZERO_PAYLOAD_BYTES] == fill_sparse_payload_size);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_COMPACT_SPARSE_ZERO_RECORDS] == 0U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_VARINT_COMPACT_SPARSE_ZERO_RECORDS] == 0U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_ZERO_RECORDS] == 1U);
+    assert(
+        stats[PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_ZERO_PAYLOAD_BYTES] == fill_sparse_payload_size
+    );
+    assert(
+        stats[PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_METADATA_BYTES] == fill_sparse_metadata_size
+    );
+    assert(
+        stats[PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_RAW_DATA_BYTES] == fill_sparse_raw_data_size
+    );
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_FILL_BYTES] == fill_sparse_fill_size);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_SYS_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_SYS_PAYLOAD_BYTES] == fill_sparse_payload_size);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_SYS_COMPACT_SPARSE_METADATA_BYTES] == 0U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_SYS_COMPACT_SPARSE_DATA_BYTES] == 0U);
+
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            12U,
+            1U,
+            200U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page));
+    assert(page_lsn == 200U);
+    assert(commit_lsn == 200U);
+    assert(memcmp(out_page, page, sizeof(page)) == 0);
+
+    memset(out_page, 0xEE, sizeof(out_page));
+    assert(
+        mylite_ownerless_page_log_read_record_at(
+            fd,
+            0U,
+            record_offset,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page));
+    assert(page_lsn == 200U);
+    assert(commit_lsn == 200U);
+    assert(memcmp(out_page, page, sizeof(page)) == 0);
+
+    assert(
+        mylite_ownerless_page_log_checkpoint_preserving_oldest_snapshot_at(
+            fd,
+            0U,
+            200U,
+            150U,
+            capture_page_log_record_for_checkpoint_index,
+            prepare_page_log_checkpoint,
+            NULL,
+            &checkpoint_context
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(checkpoint_context.prepare_count == 1U);
+    assert(checkpoint_context.retained.count == 0U);
+
+    assert(close(fd) == 0);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_page_log_falls_back_to_compact_sparse_zero_payloads(void) {
     char *root = make_temp_root();
     char *log_path = path_join(root, "compact-sparse-fallback-page-log.bin");
@@ -1454,7 +1592,9 @@ static void test_page_log_falls_back_to_compact_sparse_zero_payloads(void) {
 
     assert(page != NULL);
     assert(out_page != NULL);
-    memset(page + nonzero_offset, 0x5A, nonzero_size);
+    for (size_t i = 0; i < nonzero_size; ++i) {
+        page[nonzero_offset + i] = (uint8_t)(0x40U + (i % 63U));
+    }
     memset(out_page, 0xEE, page_size);
 
     assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
