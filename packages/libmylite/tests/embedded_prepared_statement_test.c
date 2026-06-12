@@ -244,6 +244,8 @@ static void test_ownerless_prepared_dml_reset_reexecution(void) {
     mylite_db *db = NULL;
     mylite_stmt *insert_stmt = NULL;
     mylite_stmt *select_stmt = NULL;
+    static const unsigned char first_payload[] = {'A', '\0', 'Z'};
+    static const unsigned char third_payload[] = {0, 1, 0x1A, '\''};
 
     assert(mkdir(runtime_root, 0700) == 0);
 
@@ -254,17 +256,35 @@ static void test_ownerless_prepared_dml_reset_reexecution(void) {
         db,
         "CREATE TABLE app.ownerless_prepared_values ("
         "id BIGINT NOT NULL PRIMARY KEY, "
-        "label VARCHAR(32) NOT NULL"
+        "unsigned_value BIGINT UNSIGNED NOT NULL, "
+        "ratio DOUBLE NOT NULL, "
+        "label VARCHAR(128) NOT NULL, "
+        "payload LONGBLOB NOT NULL, "
+        "optional_text VARCHAR(128) NULL"
         ") ENGINE=InnoDB"
     );
+    exec_ok(db, "SET sql_mode='NO_BACKSLASH_ESCAPES'");
 
     insert_stmt = prepare_statement(
         db,
-        "INSERT INTO app.ownerless_prepared_values (id, label) VALUES (?, ?)"
+        "INSERT INTO app.ownerless_prepared_values "
+        "(id, unsigned_value, ratio, label, payload, optional_text) "
+        "VALUES (?, ?, ?, ?, ?, CONCAT('literal ? ', ?)) /* ordinary ? comment */"
     );
+    assert(mylite_bind_parameter_count(insert_stmt) == 6U);
     assert(mylite_bind_int64(insert_stmt, 1, 10) == MYLITE_OK);
+    assert(mylite_bind_uint64(insert_stmt, 2, 9223372036854775810ULL) == MYLITE_OK);
+    assert(mylite_bind_double(insert_stmt, 3, k_first_ratio) == MYLITE_OK);
     assert(
-        mylite_bind_text(insert_stmt, 2, "first", MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK
+        mylite_bind_text(insert_stmt, 4, "fi'\\\\rst", MYLITE_NUL_TERMINATED, MYLITE_STATIC) ==
+        MYLITE_OK
+    );
+    assert(
+        mylite_bind_blob(insert_stmt, 5, first_payload, sizeof(first_payload), MYLITE_STATIC) ==
+        MYLITE_OK
+    );
+    assert(
+        mylite_bind_text(insert_stmt, 6, "first", MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK
     );
     assert(mylite_step(insert_stmt) == MYLITE_DONE);
     assert(mylite_changes(db) == 1);
@@ -272,8 +292,15 @@ static void test_ownerless_prepared_dml_reset_reexecution(void) {
 
     assert(mylite_clear_bindings(insert_stmt) == MYLITE_OK);
     assert(mylite_bind_int64(insert_stmt, 1, 20) == MYLITE_OK);
+    assert(mylite_bind_uint64(insert_stmt, 2, 42U) == MYLITE_OK);
+    assert(mylite_bind_double(insert_stmt, 3, k_second_ratio) == MYLITE_OK);
     assert(
-        mylite_bind_text(insert_stmt, 2, "second", MYLITE_NUL_TERMINATED, MYLITE_STATIC) ==
+        mylite_bind_text(insert_stmt, 4, "second", MYLITE_NUL_TERMINATED, MYLITE_STATIC) ==
+        MYLITE_OK
+    );
+    assert(mylite_bind_blob(insert_stmt, 5, NULL, 0, MYLITE_STATIC) == MYLITE_OK);
+    assert(
+        mylite_bind_text(insert_stmt, 6, "second", MYLITE_NUL_TERMINATED, MYLITE_STATIC) ==
         MYLITE_OK
     );
     assert(mylite_step(insert_stmt) == MYLITE_DONE);
@@ -282,8 +309,15 @@ static void test_ownerless_prepared_dml_reset_reexecution(void) {
 
     assert(mylite_clear_bindings(insert_stmt) == MYLITE_OK);
     assert(mylite_bind_int64(insert_stmt, 1, 20) == MYLITE_OK);
+    assert(mylite_bind_uint64(insert_stmt, 2, 7U) == MYLITE_OK);
+    assert(mylite_bind_double(insert_stmt, 3, 1.25) == MYLITE_OK);
     assert(
-        mylite_bind_text(insert_stmt, 2, "duplicate", MYLITE_NUL_TERMINATED, MYLITE_STATIC) ==
+        mylite_bind_text(insert_stmt, 4, "duplicate", MYLITE_NUL_TERMINATED, MYLITE_STATIC) ==
+        MYLITE_OK
+    );
+    assert(mylite_bind_blob(insert_stmt, 5, NULL, 0, MYLITE_STATIC) == MYLITE_OK);
+    assert(
+        mylite_bind_text(insert_stmt, 6, "duplicate", MYLITE_NUL_TERMINATED, MYLITE_STATIC) ==
         MYLITE_OK
     );
     assert(mylite_step(insert_stmt) == MYLITE_ERROR);
@@ -291,24 +325,46 @@ static void test_ownerless_prepared_dml_reset_reexecution(void) {
 
     assert(mylite_clear_bindings(insert_stmt) == MYLITE_OK);
     assert(mylite_bind_int64(insert_stmt, 1, 30) == MYLITE_OK);
+    assert(mylite_bind_uint64(insert_stmt, 2, 0U) == MYLITE_OK);
+    assert(mylite_bind_double(insert_stmt, 3, 0.0) == MYLITE_OK);
+    assert(mylite_bind_text(insert_stmt, 4, "", MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK);
     assert(
-        mylite_bind_text(insert_stmt, 2, "third", MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK
+        mylite_bind_blob(insert_stmt, 5, third_payload, sizeof(third_payload), MYLITE_STATIC) ==
+        MYLITE_OK
     );
+    assert(mylite_bind_null(insert_stmt, 6) == MYLITE_OK);
     assert(mylite_step(insert_stmt) == MYLITE_DONE);
     assert(mylite_changes(db) == 1);
     assert(mylite_reset(insert_stmt) == MYLITE_OK);
 
-    select_stmt =
-        prepare_statement(db, "SELECT id, label FROM app.ownerless_prepared_values ORDER BY id");
+    select_stmt = prepare_statement(
+        db,
+        "SELECT id, unsigned_value, ratio, label, payload, optional_text "
+        "FROM app.ownerless_prepared_values ORDER BY id"
+    );
     assert(mylite_step(select_stmt) == MYLITE_ROW);
     assert(mylite_column_int64(select_stmt, 0) == 10);
-    assert(strcmp(mylite_column_text(select_stmt, 1), "first") == 0);
+    assert(mylite_column_uint64(select_stmt, 1) == 9223372036854775810ULL);
+    assert(mylite_column_double(select_stmt, 2) == k_first_ratio);
+    assert(strcmp(mylite_column_text(select_stmt, 3), "fi'\\\\rst") == 0);
+    assert(mylite_column_bytes(select_stmt, 4) == sizeof(first_payload));
+    assert(memcmp(mylite_column_blob(select_stmt, 4), first_payload, sizeof(first_payload)) == 0);
+    assert(strcmp(mylite_column_text(select_stmt, 5), "literal ? first") == 0);
     assert(mylite_step(select_stmt) == MYLITE_ROW);
     assert(mylite_column_int64(select_stmt, 0) == 20);
-    assert(strcmp(mylite_column_text(select_stmt, 1), "second") == 0);
+    assert(mylite_column_uint64(select_stmt, 1) == 42U);
+    assert(mylite_column_double(select_stmt, 2) == k_second_ratio);
+    assert(strcmp(mylite_column_text(select_stmt, 3), "second") == 0);
+    assert(mylite_column_bytes(select_stmt, 4) == 0U);
+    assert(strcmp(mylite_column_text(select_stmt, 5), "literal ? second") == 0);
     assert(mylite_step(select_stmt) == MYLITE_ROW);
     assert(mylite_column_int64(select_stmt, 0) == 30);
-    assert(strcmp(mylite_column_text(select_stmt, 1), "third") == 0);
+    assert(mylite_column_uint64(select_stmt, 1) == 0U);
+    assert(mylite_column_double(select_stmt, 2) == 0.0);
+    assert(strcmp(mylite_column_text(select_stmt, 3), "") == 0);
+    assert(mylite_column_bytes(select_stmt, 4) == sizeof(third_payload));
+    assert(memcmp(mylite_column_blob(select_stmt, 4), third_payload, sizeof(third_payload)) == 0);
+    assert(mylite_column_text(select_stmt, 5) == NULL);
     assert(mylite_step(select_stmt) == MYLITE_DONE);
     assert(mylite_reset(select_stmt) == MYLITE_OK);
 

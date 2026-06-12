@@ -124,7 +124,11 @@ The stats-enabled embedded performance probe now also reports ownerless
 prepared-DML native `mysql_stmt_prepare()` and `mysql_stmt_close()` call counts
 and elapsed time, plus per-insert summaries, so the remaining prepared-write
 cost can be separated from startup, reconnect, page-version publication, and
-PHP adapter overhead before choosing a cache or text-protocol optimization.
+PHP adapter overhead. Ownerless prepared no-result DML now executes eligible
+`INSERT`, `UPDATE`, `DELETE`, and `REPLACE` statements without `RETURNING`
+through MariaDB's length-aware text query path after rendering bound values as
+SQL literals, avoiding per-step native prepare/close while keeping the native
+prepared-handle cache blocked until a directory-owned peer-join barrier exists.
 The mysqli adapter can preserve prepared result statements
 across ordinary no-result `INSERT`, `UPDATE`, `DELETE`, and `REPLACE`
 statements without `RETURNING`, while retaining conservative cache clears for

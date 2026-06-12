@@ -21,9 +21,11 @@
 #include <cerrno>
 #include <chrono>
 #include <climits>
+#include <cmath>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -2159,6 +2161,18 @@ void enable_statement_ownerless_page_visibility(mylite_stmt &stmt, bool enabled)
 void clear_statement_ownerless_page_visibility(mylite_stmt &stmt);
 int prepare_ownerless_ephemeral_native_statement(mylite_stmt &stmt);
 void close_ownerless_ephemeral_native_statement(mylite_stmt &stmt);
+int build_ownerless_prepared_text_sql(mylite_stmt &stmt, std::string &out_sql);
+int append_ownerless_prepared_parameter_sql(
+    mylite_stmt &stmt,
+    const ParameterBinding &parameter,
+    std::string &out_sql
+);
+int append_ownerless_prepared_text_literal(
+    mylite_stmt &stmt,
+    const ParameterBinding &parameter,
+    std::string &out_sql
+);
+int append_ownerless_prepared_blob_literal(const ParameterBinding &parameter, std::string &out_sql);
 ParameterBinding *parameter_at(mylite_stmt &stmt, unsigned index);
 int bind_null_value(mylite_stmt &stmt, unsigned index);
 int bind_bytes(
@@ -2720,38 +2734,61 @@ int mylite_step(mylite_stmt *stmt) {
             return refresh_result;
         }
         ScopedOwnerlessEphemeralNativeStatement ephemeral_native_statement(*stmt);
-        const int ephemeral_prepare_result = prepare_ownerless_ephemeral_native_statement(*stmt);
-        if (ephemeral_prepare_result != MYLITE_OK) {
-            if (page_version_reads_enabled) {
-                release_ownerless_completed_statement_page_visibility(
-                    *stmt->db,
-                    !ownerless_connection_is_in_explicit_transaction(*stmt->db)
-                );
+        std::string ownerless_prepared_text_sql;
+        if (stmt->ownerless_native_prepare_per_step) {
+            ownerless_stage_start =
+                ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
+            const int text_sql_result =
+                build_ownerless_prepared_text_sql(*stmt, ownerless_prepared_text_sql);
+            ownerless_database_perf_add_elapsed(
+                OWNERLESS_DATABASE_PERF_PREPARED_STEP_BIND_NS,
+                ownerless_stage_start
+            );
+            if (text_sql_result != MYLITE_OK) {
+                if (page_version_reads_enabled) {
+                    release_ownerless_completed_statement_page_visibility(
+                        *stmt->db,
+                        !ownerless_connection_is_in_explicit_transaction(*stmt->db)
+                    );
+                }
+                return text_sql_result;
             }
-            return ephemeral_prepare_result;
-        }
-        enable_statement_ownerless_page_visibility(*stmt, page_version_reads_enabled);
-        ownerless_stage_start =
-            ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
-        const int bind_result = bind_parameters(*stmt);
-        ownerless_database_perf_add_elapsed(
-            OWNERLESS_DATABASE_PERF_PREPARED_STEP_BIND_NS,
-            ownerless_stage_start
-        );
-        if (bind_result != MYLITE_OK) {
-            clear_statement_ownerless_page_visibility(*stmt);
-            return bind_result;
-        }
-        ownerless_stage_start =
-            ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
-        const int initial_result_setup = initialize_statement_results(*stmt, true);
-        ownerless_database_perf_add_elapsed(
-            OWNERLESS_DATABASE_PERF_PREPARED_STEP_RESULT_SETUP_NS,
-            ownerless_stage_start
-        );
-        if (initial_result_setup != MYLITE_OK) {
-            clear_statement_ownerless_page_visibility(*stmt);
-            return initial_result_setup;
+            enable_statement_ownerless_page_visibility(*stmt, page_version_reads_enabled);
+        } else {
+            const int ephemeral_prepare_result =
+                prepare_ownerless_ephemeral_native_statement(*stmt);
+            if (ephemeral_prepare_result != MYLITE_OK) {
+                if (page_version_reads_enabled) {
+                    release_ownerless_completed_statement_page_visibility(
+                        *stmt->db,
+                        !ownerless_connection_is_in_explicit_transaction(*stmt->db)
+                    );
+                }
+                return ephemeral_prepare_result;
+            }
+            enable_statement_ownerless_page_visibility(*stmt, page_version_reads_enabled);
+            ownerless_stage_start =
+                ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
+            const int bind_result = bind_parameters(*stmt);
+            ownerless_database_perf_add_elapsed(
+                OWNERLESS_DATABASE_PERF_PREPARED_STEP_BIND_NS,
+                ownerless_stage_start
+            );
+            if (bind_result != MYLITE_OK) {
+                clear_statement_ownerless_page_visibility(*stmt);
+                return bind_result;
+            }
+            ownerless_stage_start =
+                ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
+            const int initial_result_setup = initialize_statement_results(*stmt, true);
+            ownerless_database_perf_add_elapsed(
+                OWNERLESS_DATABASE_PERF_PREPARED_STEP_RESULT_SETUP_NS,
+                ownerless_stage_start
+            );
+            if (initial_result_setup != MYLITE_OK) {
+                clear_statement_ownerless_page_visibility(*stmt);
+                return initial_result_setup;
+            }
         }
         bool dictionary_ddl_started = false;
         ownerless_stage_start =
@@ -2802,29 +2839,98 @@ int mylite_step(mylite_stmt *stmt) {
         );
         ownerless_stage_start =
             ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
-        if (mysql_stmt_execute(stmt->stmt) != 0) {
-            ownerless_database_perf_add_elapsed(
-                OWNERLESS_DATABASE_PERF_PREPARED_STEP_MYSQL_EXECUTE_NS,
-                ownerless_stage_start
-            );
-            set_mariadb_statement_error(*stmt);
-            const int dictionary_finish_result =
-                ownerless_finish_dictionary_ddl(*stmt->db, dictionary_ddl_started);
-            if (dictionary_finish_result != MYLITE_OK) {
-                set_error(
-                    *stmt->db,
-                    dictionary_finish_result,
-                    "ownerless dictionary change could not finish after failed statement"
+        my_ulonglong ownerless_prepared_affected_rows = static_cast<my_ulonglong>(-1);
+        if (stmt->ownerless_native_prepare_per_step) {
+            if (mysql_real_query(
+                    &stmt->db->mysql,
+                    ownerless_prepared_text_sql.data(),
+                    static_cast<unsigned long>(ownerless_prepared_text_sql.size())
+                ) != 0) {
+                ownerless_database_perf_add_elapsed(
+                    OWNERLESS_DATABASE_PERF_PREPARED_STEP_MYSQL_EXECUTE_NS,
+                    ownerless_stage_start
                 );
+                set_mariadb_error(*stmt->db);
+                const int dictionary_finish_result =
+                    ownerless_finish_dictionary_ddl(*stmt->db, dictionary_ddl_started);
+                if (dictionary_finish_result != MYLITE_OK) {
+                    set_error(
+                        *stmt->db,
+                        dictionary_finish_result,
+                        "ownerless dictionary change could not finish after failed statement"
+                    );
+                    clear_statement_ownerless_page_visibility(*stmt);
+                    return dictionary_finish_result;
+                }
+                if (consistent_snapshot_start_pin_registered) {
+                    release_ownerless_transaction_page_version_pin(*stmt->db);
+                }
+                rollback_active_transaction_after_deadlock(*stmt->db);
                 clear_statement_ownerless_page_visibility(*stmt);
-                return dictionary_finish_result;
+                return MYLITE_ERROR;
             }
-            if (consistent_snapshot_start_pin_registered) {
-                release_ownerless_transaction_page_version_pin(*stmt->db);
+            bool has_text_result = false;
+            const int drain_result =
+                store_and_emit_result(*stmt->db, nullptr, nullptr, nullptr, &has_text_result);
+            if (drain_result != MYLITE_OK || has_text_result) {
+                ownerless_database_perf_add_elapsed(
+                    OWNERLESS_DATABASE_PERF_PREPARED_STEP_MYSQL_EXECUTE_NS,
+                    ownerless_stage_start
+                );
+                if (has_text_result) {
+                    set_error(
+                        *stmt->db,
+                        MYLITE_ERROR,
+                        "ownerless prepared text write unexpectedly returned result metadata"
+                    );
+                }
+                const int dictionary_finish_result =
+                    ownerless_finish_dictionary_ddl(*stmt->db, dictionary_ddl_started);
+                if (dictionary_finish_result != MYLITE_OK) {
+                    set_error(
+                        *stmt->db,
+                        dictionary_finish_result,
+                        "ownerless dictionary change could not finish after failed statement"
+                    );
+                    clear_statement_ownerless_page_visibility(*stmt);
+                    return dictionary_finish_result;
+                }
+                if (consistent_snapshot_start_pin_registered) {
+                    release_ownerless_transaction_page_version_pin(*stmt->db);
+                }
+                clear_statement_ownerless_page_visibility(*stmt);
+                return MYLITE_ERROR;
             }
-            rollback_active_transaction_after_deadlock(*stmt->db);
-            clear_statement_ownerless_page_visibility(*stmt);
-            return MYLITE_ERROR;
+            ownerless_prepared_affected_rows = mysql_affected_rows(&stmt->db->mysql);
+            stmt->db->last_insert_id =
+                static_cast<unsigned long long>(mysql_insert_id(&stmt->db->mysql));
+        } else {
+            if (mysql_stmt_execute(stmt->stmt) != 0) {
+                ownerless_database_perf_add_elapsed(
+                    OWNERLESS_DATABASE_PERF_PREPARED_STEP_MYSQL_EXECUTE_NS,
+                    ownerless_stage_start
+                );
+                set_mariadb_statement_error(*stmt);
+                const int dictionary_finish_result =
+                    ownerless_finish_dictionary_ddl(*stmt->db, dictionary_ddl_started);
+                if (dictionary_finish_result != MYLITE_OK) {
+                    set_error(
+                        *stmt->db,
+                        dictionary_finish_result,
+                        "ownerless dictionary change could not finish after failed statement"
+                    );
+                    clear_statement_ownerless_page_visibility(*stmt);
+                    return dictionary_finish_result;
+                }
+                if (consistent_snapshot_start_pin_registered) {
+                    release_ownerless_transaction_page_version_pin(*stmt->db);
+                }
+                rollback_active_transaction_after_deadlock(*stmt->db);
+                clear_statement_ownerless_page_visibility(*stmt);
+                return MYLITE_ERROR;
+            }
+            stmt->db->last_insert_id =
+                static_cast<unsigned long long>(mysql_stmt_insert_id(stmt->stmt));
         }
         ownerless_database_perf_add_elapsed(
             OWNERLESS_DATABASE_PERF_PREPARED_STEP_MYSQL_EXECUTE_NS,
@@ -2832,8 +2938,6 @@ int mylite_step(mylite_stmt *stmt) {
         );
         refresh_ownerless_pending_post_open_clean_pages(*stmt->db);
         stmt->db->changes = 0;
-        stmt->db->last_insert_id =
-            static_cast<unsigned long long>(mysql_stmt_insert_id(stmt->stmt));
         stmt->executed = true;
         ownerless_stage_start =
             ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
@@ -2889,7 +2993,8 @@ int mylite_step(mylite_stmt *stmt) {
             statement_started_in_explicit_transaction
         );
 
-        if (!stmt->has_result && mysql_stmt_field_count(stmt->stmt) != 0U) {
+        if (!stmt->ownerless_native_prepare_per_step && !stmt->has_result &&
+            mysql_stmt_field_count(stmt->stmt) != 0U) {
             const int result_setup = initialize_statement_results(*stmt, false);
             if (result_setup != MYLITE_OK) {
                 clear_statement_ownerless_page_visibility(*stmt);
@@ -2899,7 +3004,9 @@ int mylite_step(mylite_stmt *stmt) {
         if (!stmt->has_result) {
             ownerless_stage_start =
                 ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
-            const my_ulonglong affected_rows = mysql_stmt_affected_rows(stmt->stmt);
+            const my_ulonglong affected_rows = stmt->ownerless_native_prepare_per_step
+                                                   ? ownerless_prepared_affected_rows
+                                                   : mysql_stmt_affected_rows(stmt->stmt);
             stmt->db->changes = affected_rows == static_cast<my_ulonglong>(-1)
                                     ? 0
                                     : static_cast<long long>(std::min<my_ulonglong>(
@@ -6580,6 +6687,167 @@ void close_ownerless_ephemeral_native_statement(mylite_stmt &stmt) {
         );
         stmt.stmt = nullptr;
     }
+}
+
+int build_ownerless_prepared_text_sql(mylite_stmt &stmt, std::string &out_sql) {
+    if (stmt.db == nullptr || stmt.ownerless_sql_text == nullptr) {
+        return MYLITE_MISUSE;
+    }
+
+    try {
+        const std::string_view sql(*stmt.ownerless_sql_text);
+        out_sql.clear();
+        out_sql.reserve(sql.size() + (stmt.parameters.size() * 16U));
+
+        std::size_t offset = 0;
+        std::size_t append_offset = 0;
+        std::size_t parameter_index = 0;
+        std::string_view token;
+        while (next_sql_token(sql, offset, token)) {
+            if (token.size() != 1U || token[0] != '?') {
+                continue;
+            }
+            if (parameter_index >= stmt.parameters.size()) {
+                set_error(
+                    *stmt.db,
+                    MYLITE_ERROR,
+                    "ownerless prepared statement has too many parameter markers"
+                );
+                return MYLITE_ERROR;
+            }
+            const std::size_t token_start = static_cast<std::size_t>(token.data() - sql.data());
+            out_sql.append(sql.data() + append_offset, token_start - append_offset);
+            const int append_result = append_ownerless_prepared_parameter_sql(
+                stmt,
+                stmt.parameters[parameter_index],
+                out_sql
+            );
+            if (append_result != MYLITE_OK) {
+                return append_result;
+            }
+            append_offset = token_start + token.size();
+            ++parameter_index;
+        }
+
+        if (parameter_index != stmt.parameters.size()) {
+            set_error(
+                *stmt.db,
+                MYLITE_ERROR,
+                "ownerless prepared statement has too few parameter markers"
+            );
+            return MYLITE_ERROR;
+        }
+        out_sql.append(sql.data() + append_offset, sql.size() - append_offset);
+        if (out_sql.size() > ULONG_MAX) {
+            set_error(*stmt.db, MYLITE_MISUSE, "ownerless prepared SQL is too large");
+            return MYLITE_MISUSE;
+        }
+        return MYLITE_OK;
+    } catch (const std::bad_alloc &) {
+        set_error(*stmt.db, MYLITE_NOMEM, "ownerless prepared statement SQL could not be built");
+        return MYLITE_NOMEM;
+    }
+}
+
+int append_ownerless_prepared_parameter_sql(
+    mylite_stmt &stmt,
+    const ParameterBinding &parameter,
+    std::string &out_sql
+) {
+    if (stmt.db == nullptr) {
+        return MYLITE_MISUSE;
+    }
+    if (parameter.is_null != 0 || parameter.bind.buffer_type == MYSQL_TYPE_NULL) {
+        out_sql.append("NULL");
+        return MYLITE_OK;
+    }
+
+    switch (parameter.bind.buffer_type) {
+    case MYSQL_TYPE_LONGLONG:
+        if (parameter.bind.is_unsigned != 0) {
+            out_sql.append(std::to_string(parameter.uint64_value));
+        } else {
+            out_sql.append(std::to_string(parameter.int64_value));
+        }
+        return MYLITE_OK;
+    case MYSQL_TYPE_DOUBLE: {
+        if (!std::isfinite(parameter.double_value)) {
+            set_error(
+                *stmt.db,
+                MYLITE_MISUSE,
+                "ownerless prepared text execution does not support non-finite double values"
+            );
+            return MYLITE_MISUSE;
+        }
+        std::array<char, 64> buffer = {};
+        const int length =
+            std::snprintf(buffer.data(), buffer.size(), "%.17g", parameter.double_value);
+        if (length <= 0 || static_cast<std::size_t>(length) >= buffer.size()) {
+            set_error(*stmt.db, MYLITE_ERROR, "ownerless prepared double value could not be built");
+            return MYLITE_ERROR;
+        }
+        out_sql.append(buffer.data(), static_cast<std::size_t>(length));
+        return MYLITE_OK;
+    }
+    case MYSQL_TYPE_STRING:
+    case MYSQL_TYPE_VAR_STRING:
+    case MYSQL_TYPE_VARCHAR:
+        return append_ownerless_prepared_text_literal(stmt, parameter, out_sql);
+    case MYSQL_TYPE_TINY_BLOB:
+    case MYSQL_TYPE_MEDIUM_BLOB:
+    case MYSQL_TYPE_LONG_BLOB:
+    case MYSQL_TYPE_BLOB:
+        return append_ownerless_prepared_blob_literal(parameter, out_sql);
+    default:
+        set_error(
+            *stmt.db,
+            MYLITE_ERROR,
+            "ownerless prepared text execution does not support this parameter type"
+        );
+        return MYLITE_ERROR;
+    }
+}
+
+int append_ownerless_prepared_text_literal(
+    mylite_stmt &stmt,
+    const ParameterBinding &parameter,
+    std::string &out_sql
+) {
+    if (stmt.db == nullptr) {
+        return MYLITE_MISUSE;
+    }
+    const std::size_t input_length = static_cast<std::size_t>(parameter.length);
+    if (input_length > (std::numeric_limits<std::size_t>::max() - 1U) / 2U) {
+        set_error(*stmt.db, MYLITE_NOMEM, "ownerless prepared text value is too large");
+        return MYLITE_NOMEM;
+    }
+
+    std::vector<char> escaped((input_length * 2U) + 1U);
+    const char empty_source = '\0';
+    const char *source = parameter.bytes.empty()
+                             ? &empty_source
+                             : reinterpret_cast<const char *>(parameter.bytes.data());
+    const unsigned long escaped_length =
+        mysql_real_escape_string(&stmt.db->mysql, escaped.data(), source, parameter.length);
+    out_sql.push_back('\'');
+    out_sql.append(escaped.data(), static_cast<std::size_t>(escaped_length));
+    out_sql.push_back('\'');
+    return MYLITE_OK;
+}
+
+int append_ownerless_prepared_blob_literal(
+    const ParameterBinding &parameter,
+    std::string &out_sql
+) {
+    static constexpr char k_hex_digits[] = "0123456789ABCDEF";
+    out_sql.append("X'");
+    for (std::size_t index = 0; index < static_cast<std::size_t>(parameter.length); ++index) {
+        const unsigned char value = parameter.bytes[index];
+        out_sql.push_back(k_hex_digits[value >> 4U]);
+        out_sql.push_back(k_hex_digits[value & 0x0FU]);
+    }
+    out_sql.push_back('\'');
+    return MYLITE_OK;
 }
 
 int bind_parameters(mylite_stmt &stmt) {

@@ -4427,14 +4427,15 @@ after local writes, and no-live-process page-version replay; true
 InnoDB `innodb_read_only` startup, ownerless cross-process dirty reads, and full
 live-peer DDL/file-lifecycle tablespace crash recovery remain planned.
 Ownerless no-result prepared `INSERT`, `UPDATE`, `DELETE`, and `REPLACE`
-defer native MariaDB `MYSQL_STMT` creation from public `mylite_prepare()` to
-the protected `mylite_step()` execution boundary. MyLite counts `?` parameter
-markers for that subset with its SQL tokenizer, so native syntax/table/column
-diagnostics can be reported at first step instead of prepare time in ownerless
-read/write mode. This keeps native InnoDB prepared-DML table and dictionary
-state from remaining live across independent-process readiness or wait
-barriers; prepared reads and result-returning DML keep the existing native
-prepare path. Current
+now avoid native MariaDB `MYSQL_STMT` creation in ownerless read/write mode.
+MyLite counts `?` parameter markers for that subset with its SQL tokenizer at
+public `mylite_prepare()` time, then renders bound values into SQL literals and
+executes the statement through MariaDB's length-aware text query path inside
+the protected `mylite_step()` execution boundary. This keeps native InnoDB
+prepared-DML table and dictionary state from remaining live across
+independent-process readiness or wait barriers without blocking peer joins on a
+native statement-cache lease; prepared reads and result-returning DML keep the
+existing native prepare path. Current
 product no-live replay skips retained page-version records for tablespaces no
 longer present during dirty recovery, no-live final ownerless close publishes
 native checkpoint evidence for completed DDL file operations before shutdown,
@@ -4758,7 +4759,13 @@ subsystems that this mode needs:
   ownerless autocommit at `1520.62 ops/s` and ownerless transactional inserts
   at `1567.77 ops/s`, but the stats-enabled run still showed the larger
   remaining costs in page-log append, commit-MTR page publication,
-  write-history, and row-level MTR commit. The
+  write-history, and row-level MTR commit. A later text-execution slice removed
+  the per-step native prepare/close path for eligible ownerless prepared
+  no-result DML; the stats-enabled production probe then reported zero native
+  prepare/close calls for ownerless autocommit prepared inserts, while the
+  stats-off sample reported ownerless autocommit prepared inserts at
+  `1349.90 ops/s` and ownerless transactional prepared inserts at
+  `1506.99 ops/s` in that run. The
   write-history page-write handoff now uses a rollback-segment-space target-LSN
   wait instead of a global dirty-page wait,
   preserving native proof for the history page while avoiding unrelated
