@@ -38,6 +38,14 @@ the page-version WAL already contains a record for that page at or before the
 oldest pin. If it does not, MyLite tries to read the current native tablespace
 page at the same `space_id` and `page_no`.
 
+The hook only attempts this synthesized boundary path for
+snapshot-sensitive page images. InnoDB native-support state pages still publish
+normal ownerless page-version records when the history/native checkpoint proof
+requires them, but they do not require oldest-snapshot boundary records during
+page-log checkpointing and now skip the auxiliary native-boundary probe. When
+the shared page-version pin registry reports zero active pins, the helper also
+returns before taking the registry latch.
+
 The native page becomes a synthesized boundary record only if:
 
 - the tablespace can be resolved uniquely by InnoDB page-0 space id,
@@ -60,6 +68,8 @@ In scope:
 - Page-publish-time boundary synthesis for active page-version pins.
 - SQL coverage proving a live repeatable-read snapshot causes an old native
   boundary record to be retained while a peer writer commits.
+- Boundary-synthesis pruning for no-active-pin publication and native-support
+  state page classes.
 
 Out of scope:
 
@@ -68,6 +78,7 @@ Out of scope:
 - Background checkpoint pressure, user-visible checkpoint diagnostics, or group
   commit.
 - Treating failed boundary synthesis as a commit failure.
+- Replacing the ownerless history-proof/native-support page representation.
 
 ## Compatibility Impact
 
@@ -117,3 +128,6 @@ when the page LSN proves it is visible to the oldest active snapshot.
 - Boundary synthesis is opportunistic. If the native page has already advanced
   beyond the oldest snapshot LSN, MyLite keeps the existing safe behavior and
   retains the WAL until the active pin releases.
+- Boundary-synthesis pruning does not reduce the remaining history-proof
+  native-support page publication volume; that remains a separate write-path
+  performance target.

@@ -1501,6 +1501,7 @@ bool ownerless_page_log_record_is_native_support_state(
     std::uint64_t commit_lsn,
     std::uint64_t record_offset
 );
+bool ownerless_page_image_is_native_support_state(const void *page, std::uint32_t page_size);
 bool ownerless_native_page_checkpoint_record_is_better(
     const OwnerlessNativePageCheckpointRecord &candidate,
     const OwnerlessNativePageCheckpointRecord &current
@@ -9687,11 +9688,20 @@ bool ownerless_page_log_record_is_native_support_state(
         return false;
     }
 
+    return ownerless_page_image_is_native_support_state(page.data(), page_size);
+}
+
+bool ownerless_page_image_is_native_support_state(const void *page, std::uint32_t page_size) {
+    if (page == nullptr || page_size < k_innodb_fil_page_type_offset + sizeof(std::uint16_t)) {
+        return false;
+    }
+
+    const auto *bytes = static_cast<const unsigned char *>(page);
     const std::uint16_t page_type =
         static_cast<std::uint16_t>(
-            static_cast<std::uint16_t>(page[k_innodb_fil_page_type_offset]) << 8U
+            static_cast<std::uint16_t>(bytes[k_innodb_fil_page_type_offset]) << 8U
         ) |
-        static_cast<std::uint16_t>(page[k_innodb_fil_page_type_offset + 1]);
+        static_cast<std::uint16_t>(bytes[k_innodb_fil_page_type_offset + 1]);
     switch (page_type) {
     case k_innodb_fil_page_type_allocated:
     case k_innodb_fil_page_undo_log:
@@ -14349,6 +14359,9 @@ void publish_ownerless_snapshot_boundary_if_needed(
         visible_lsn == 0U || page_size == 0U || page_size > k_innodb_page_size_max) {
         return;
     }
+    if (mylite_ownerless_page_pin_registry_active_count(hook->page_pin_registry) == 0U) {
+        return;
+    }
     std::uint32_t active_pin_count = 0;
     std::uint64_t oldest_pin_lsn = 0;
     const int pin_result = mylite_ownerless_page_pin_registry_snapshot_oldest(
@@ -14554,7 +14567,15 @@ int ownerless_innodb_page_publish_hook(
     std::uint64_t record_offset = 0;
     std::uint64_t stage_start_ns =
         ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
-    publish_ownerless_snapshot_boundary_if_needed(hook, space_id, page_no, visible_lsn, page_size);
+    if (!ownerless_page_image_is_native_support_state(page, page_size)) {
+        publish_ownerless_snapshot_boundary_if_needed(
+            hook,
+            space_id,
+            page_no,
+            visible_lsn,
+            page_size
+        );
+    }
     ownerless_database_perf_add_elapsed(
         OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_BOUNDARY_NS,
         stage_start_ns

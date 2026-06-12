@@ -96,6 +96,13 @@ and test-only phases so PHPUnit wall timings are not hidden inside build work.
 The embedded performance and attribution probes run before embedded correctness
 tests, so production throughput and attribution numbers remain visible even
 when a later ownerless SQL case fails.
+Ownerless page-version publication now skips synthesized snapshot-boundary
+probes for native-support page classes and returns before the page-pin registry
+latch when no active pins exist; normal page-version publication, history-proof
+native-support records, active-reader retention, and boundary synthesis for
+snapshot-sensitive pages remain unchanged. This is a bounded hot-path pruning
+slice, while replacing or shrinking the remaining history-proof page
+publication remains a planned performance target.
 The timing-producing WordPress dependency, database-prep, performance-probe,
 and PHPUnit test-only steps repeat `Release` MyLite and `MinSizeRel` MariaDB
 embedded cache guards inside the step body, so a stale build directory fails
