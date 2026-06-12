@@ -646,9 +646,17 @@ index records and therefore reported `14903.235` payload bytes per insert
 despite `2.875` compact sparse records per insert. Treat the compact encoding
 as a WAL byte-reduction for zero-heavy page images, not as proof that the
 history-proof page count or native commit cost is solved.
-The next write-throughput target is therefore the rollback-segment SYS proof
-representation and user/index page payload; the undo-header proof page is not
-the byte-volume driver in the simple insert sample.
+A follow-up compact-sparse composition attribution slice keeps the same WAL
+format and splits those compact payload bytes into run metadata versus nonzero
+page data. Its reduced 100-row production attribution sample reported
+`6701.610` compact-sparse payload bytes per ownerless autocommit insert:
+`1266.080` metadata bytes and `5435.530` data bytes. The SYS history-proof
+bucket was strongly data-dominated at `51.200` metadata bytes and `4123.730`
+data bytes per insert, while the index bucket was roughly split at `1086.220`
+metadata bytes and `1216.060` data bytes per insert. The next write-throughput
+target is therefore the rollback-segment SYS proof representation and
+user/index page payload; the undo-header proof page and compact sparse run
+metadata are not the primary byte-volume drivers in the simple insert sample.
 Ownerless page-version reads now validate the WAL tail after a direct
 page-index hit because the shared page index is an acceleration cache updated
 after the append stream, not an authoritative visibility boundary by itself.

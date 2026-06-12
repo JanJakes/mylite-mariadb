@@ -529,6 +529,22 @@ enum page_log_append_perf_stat_index {
     PAGE_LOG_APPEND_PERF_STAT_BLOB_PAYLOAD_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_OTHER_RECORDS,
     PAGE_LOG_APPEND_PERF_STAT_OTHER_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_COMPACT_SPARSE_METADATA_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_COMPACT_SPARSE_DATA_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_INDEX_COMPACT_SPARSE_METADATA_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_INDEX_COMPACT_SPARSE_DATA_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_UNDO_LOG_COMPACT_SPARSE_METADATA_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_UNDO_LOG_COMPACT_SPARSE_DATA_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_SYS_COMPACT_SPARSE_METADATA_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_SYS_COMPACT_SPARSE_DATA_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_TRX_SYS_COMPACT_SPARSE_METADATA_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_TRX_SYS_COMPACT_SPARSE_DATA_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_SPACE_METADATA_COMPACT_SPARSE_METADATA_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_SPACE_METADATA_COMPACT_SPARSE_DATA_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_BLOB_COMPACT_SPARSE_METADATA_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_BLOB_COMPACT_SPARSE_DATA_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_OTHER_COMPACT_SPARSE_METADATA_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_OTHER_COMPACT_SPARSE_DATA_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
@@ -2974,6 +2990,17 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         insert_iterations
     );
     emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_compact_sparse_metadata_bytes_per_"
+        "insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_COMPACT_SPARSE_METADATA_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_compact_sparse_data_bytes_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_COMPACT_SPARSE_DATA_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_page_log_index_records_per_insert",
         page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_RECORDS],
         insert_iterations
@@ -2981,6 +3008,18 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
     emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_page_log_index_payload_bytes_per_insert",
         page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_PAYLOAD_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_index_compact_sparse_metadata_bytes_per_"
+        "insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_COMPACT_SPARSE_METADATA_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_index_compact_sparse_data_bytes_per_"
+        "insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_COMPACT_SPARSE_DATA_BYTES],
         insert_iterations
     );
     emit_summary_count_per_iteration(
@@ -3001,6 +3040,18 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
     emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_page_log_sys_payload_bytes_per_insert",
         page_log_append[PAGE_LOG_APPEND_PERF_STAT_SYS_PAYLOAD_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_sys_compact_sparse_metadata_bytes_per_"
+        "insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_SYS_COMPACT_SPARSE_METADATA_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_sys_compact_sparse_data_bytes_per_"
+        "insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_SYS_COMPACT_SPARSE_DATA_BYTES],
         insert_iterations
     );
     emit_summary_count_per_iteration(
@@ -6311,6 +6362,16 @@ static void emit_page_log_append_perf_stats(const char *prefix) {
         "compact_sparse_zero_payload",
         values[PAGE_LOG_APPEND_PERF_STAT_COMPACT_SPARSE_ZERO_PAYLOAD_BYTES]
     );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "compact_sparse_metadata",
+        values[PAGE_LOG_APPEND_PERF_STAT_COMPACT_SPARSE_METADATA_BYTES]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "compact_sparse_data",
+        values[PAGE_LOG_APPEND_PERF_STAT_COMPACT_SPARSE_DATA_BYTES]
+    );
     emit_page_log_append_perf_count(
         prefix,
         "index_records",
@@ -6320,6 +6381,16 @@ static void emit_page_log_append_perf_stats(const char *prefix) {
         prefix,
         "index_payload",
         values[PAGE_LOG_APPEND_PERF_STAT_INDEX_PAYLOAD_BYTES]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "index_compact_sparse_metadata",
+        values[PAGE_LOG_APPEND_PERF_STAT_INDEX_COMPACT_SPARSE_METADATA_BYTES]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "index_compact_sparse_data",
+        values[PAGE_LOG_APPEND_PERF_STAT_INDEX_COMPACT_SPARSE_DATA_BYTES]
     );
     emit_page_log_append_perf_count(
         prefix,
@@ -6331,6 +6402,16 @@ static void emit_page_log_append_perf_stats(const char *prefix) {
         "undo_log_payload",
         values[PAGE_LOG_APPEND_PERF_STAT_UNDO_LOG_PAYLOAD_BYTES]
     );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "undo_log_compact_sparse_metadata",
+        values[PAGE_LOG_APPEND_PERF_STAT_UNDO_LOG_COMPACT_SPARSE_METADATA_BYTES]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "undo_log_compact_sparse_data",
+        values[PAGE_LOG_APPEND_PERF_STAT_UNDO_LOG_COMPACT_SPARSE_DATA_BYTES]
+    );
     emit_page_log_append_perf_count(
         prefix,
         "sys_records",
@@ -6340,6 +6421,16 @@ static void emit_page_log_append_perf_stats(const char *prefix) {
         prefix,
         "sys_payload",
         values[PAGE_LOG_APPEND_PERF_STAT_SYS_PAYLOAD_BYTES]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "sys_compact_sparse_metadata",
+        values[PAGE_LOG_APPEND_PERF_STAT_SYS_COMPACT_SPARSE_METADATA_BYTES]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "sys_compact_sparse_data",
+        values[PAGE_LOG_APPEND_PERF_STAT_SYS_COMPACT_SPARSE_DATA_BYTES]
     );
     emit_page_log_append_perf_count(
         prefix,
@@ -6351,6 +6442,16 @@ static void emit_page_log_append_perf_stats(const char *prefix) {
         "trx_sys_payload",
         values[PAGE_LOG_APPEND_PERF_STAT_TRX_SYS_PAYLOAD_BYTES]
     );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "trx_sys_compact_sparse_metadata",
+        values[PAGE_LOG_APPEND_PERF_STAT_TRX_SYS_COMPACT_SPARSE_METADATA_BYTES]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "trx_sys_compact_sparse_data",
+        values[PAGE_LOG_APPEND_PERF_STAT_TRX_SYS_COMPACT_SPARSE_DATA_BYTES]
+    );
     emit_page_log_append_perf_count(
         prefix,
         "space_metadata_records",
@@ -6360,6 +6461,16 @@ static void emit_page_log_append_perf_stats(const char *prefix) {
         prefix,
         "space_metadata_payload",
         values[PAGE_LOG_APPEND_PERF_STAT_SPACE_METADATA_PAYLOAD_BYTES]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "space_metadata_compact_sparse_metadata",
+        values[PAGE_LOG_APPEND_PERF_STAT_SPACE_METADATA_COMPACT_SPARSE_METADATA_BYTES]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "space_metadata_compact_sparse_data",
+        values[PAGE_LOG_APPEND_PERF_STAT_SPACE_METADATA_COMPACT_SPARSE_DATA_BYTES]
     );
     emit_page_log_append_perf_count(
         prefix,
@@ -6371,6 +6482,16 @@ static void emit_page_log_append_perf_stats(const char *prefix) {
         "blob_payload",
         values[PAGE_LOG_APPEND_PERF_STAT_BLOB_PAYLOAD_BYTES]
     );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "blob_compact_sparse_metadata",
+        values[PAGE_LOG_APPEND_PERF_STAT_BLOB_COMPACT_SPARSE_METADATA_BYTES]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "blob_compact_sparse_data",
+        values[PAGE_LOG_APPEND_PERF_STAT_BLOB_COMPACT_SPARSE_DATA_BYTES]
+    );
     emit_page_log_append_perf_count(
         prefix,
         "other_records",
@@ -6380,6 +6501,16 @@ static void emit_page_log_append_perf_stats(const char *prefix) {
         prefix,
         "other_payload",
         values[PAGE_LOG_APPEND_PERF_STAT_OTHER_PAYLOAD_BYTES]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "other_compact_sparse_metadata",
+        values[PAGE_LOG_APPEND_PERF_STAT_OTHER_COMPACT_SPARSE_METADATA_BYTES]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "other_compact_sparse_data",
+        values[PAGE_LOG_APPEND_PERF_STAT_OTHER_COMPACT_SPARSE_DATA_BYTES]
     );
 }
 

@@ -119,6 +119,12 @@ struct PageRetentionState {
     PageRecordHeader boundary_record = {};
 };
 
+struct CompactSparsePayloadComposition {
+    bool valid = false;
+    std::uint64_t metadata_bytes = 0;
+    std::uint64_t data_bytes = 0;
+};
+
 enum PageLogAppendPerfStatIndex : std::size_t {
     PAGE_LOG_APPEND_PERF_CALLS = 0,
     PAGE_LOG_APPEND_PERF_TOTAL_NS,
@@ -154,6 +160,22 @@ enum PageLogAppendPerfStatIndex : std::size_t {
     PAGE_LOG_APPEND_PERF_BLOB_PAYLOAD_BYTES,
     PAGE_LOG_APPEND_PERF_OTHER_RECORDS,
     PAGE_LOG_APPEND_PERF_OTHER_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_COMPACT_SPARSE_METADATA_BYTES,
+    PAGE_LOG_APPEND_PERF_COMPACT_SPARSE_DATA_BYTES,
+    PAGE_LOG_APPEND_PERF_INDEX_COMPACT_SPARSE_METADATA_BYTES,
+    PAGE_LOG_APPEND_PERF_INDEX_COMPACT_SPARSE_DATA_BYTES,
+    PAGE_LOG_APPEND_PERF_UNDO_LOG_COMPACT_SPARSE_METADATA_BYTES,
+    PAGE_LOG_APPEND_PERF_UNDO_LOG_COMPACT_SPARSE_DATA_BYTES,
+    PAGE_LOG_APPEND_PERF_SYS_COMPACT_SPARSE_METADATA_BYTES,
+    PAGE_LOG_APPEND_PERF_SYS_COMPACT_SPARSE_DATA_BYTES,
+    PAGE_LOG_APPEND_PERF_TRX_SYS_COMPACT_SPARSE_METADATA_BYTES,
+    PAGE_LOG_APPEND_PERF_TRX_SYS_COMPACT_SPARSE_DATA_BYTES,
+    PAGE_LOG_APPEND_PERF_SPACE_METADATA_COMPACT_SPARSE_METADATA_BYTES,
+    PAGE_LOG_APPEND_PERF_SPACE_METADATA_COMPACT_SPARSE_DATA_BYTES,
+    PAGE_LOG_APPEND_PERF_BLOB_COMPACT_SPARSE_METADATA_BYTES,
+    PAGE_LOG_APPEND_PERF_BLOB_COMPACT_SPARSE_DATA_BYTES,
+    PAGE_LOG_APPEND_PERF_OTHER_COMPACT_SPARSE_METADATA_BYTES,
+    PAGE_LOG_APPEND_PERF_OTHER_COMPACT_SPARSE_DATA_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
@@ -435,11 +457,20 @@ bool record_uses_sparse_zero_payload(const PageRecordHeader &record);
 bool record_uses_compact_sparse_zero_payload(const PageRecordHeader &record);
 bool record_uses_any_sparse_zero_payload(const PageRecordHeader &record);
 bool record_payload_shape_valid(const PageRecordHeader &record);
-void record_append_payload_encoding_stats(std::uint32_t flags, std::uint64_t payload_size);
+CompactSparsePayloadComposition compact_sparse_payload_composition(
+    std::uint32_t flags,
+    const std::vector<unsigned char> &payload
+);
+CompactSparsePayloadComposition record_append_payload_encoding_stats(
+    std::uint32_t flags,
+    std::uint64_t payload_size,
+    const std::vector<unsigned char> &payload
+);
 void record_append_page_type_stats(
     const void *page,
     std::uint32_t page_size,
-    std::uint64_t payload_size
+    std::uint64_t payload_size,
+    const CompactSparsePayloadComposition &compact_sparse
 );
 bool record_page_too_large(const PageRecordHeader &record, std::size_t page_capacity);
 bool read_record_page_payload(
@@ -1740,8 +1771,9 @@ int append_record_at_locked(
     } catch (const std::bad_alloc &) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
-    record_append_payload_encoding_stats(record_flags, encoded_payload_size);
-    record_append_page_type_stats(page, page_size, encoded_payload_size);
+    const CompactSparsePayloadComposition compact_sparse =
+        record_append_payload_encoding_stats(record_flags, encoded_payload_size, encoded_payload);
+    record_append_page_type_stats(page, page_size, encoded_payload_size, compact_sparse);
     if (!offset_adds(payload_offset, encoded_payload_size, &end_offset)) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
@@ -2962,36 +2994,78 @@ bool record_uses_any_sparse_zero_payload(const PageRecordHeader &record) {
            record_uses_compact_sparse_zero_payload(record);
 }
 
-void record_append_payload_encoding_stats(std::uint32_t flags, std::uint64_t payload_size) {
+CompactSparsePayloadComposition compact_sparse_payload_composition(
+    std::uint32_t flags,
+    const std::vector<unsigned char> &payload
+) {
+    CompactSparsePayloadComposition composition;
+    if ((flags & k_record_flag_compact_sparse_zero_payload) == 0U ||
+        payload.size() < sizeof(std::uint16_t)) {
+        return composition;
+    }
+
+    const std::uint16_t run_count = load16(payload.data(), 0U);
+    const std::uint64_t metadata_bytes =
+        sizeof(std::uint16_t) +
+        (static_cast<std::uint64_t>(run_count) * 2U * sizeof(std::uint16_t));
+    if (metadata_bytes > payload.size()) {
+        return composition;
+    }
+
+    composition.valid = true;
+    composition.metadata_bytes = metadata_bytes;
+    composition.data_bytes = static_cast<std::uint64_t>(payload.size()) - metadata_bytes;
+    return composition;
+}
+
+CompactSparsePayloadComposition record_append_payload_encoding_stats(
+    std::uint32_t flags,
+    std::uint64_t payload_size,
+    const std::vector<unsigned char> &payload
+) {
+    CompactSparsePayloadComposition compact_sparse;
     if (!page_log_append_perf_stats_are_enabled()) {
-        return;
+        return compact_sparse;
     }
     if ((flags & (k_record_flag_sparse_zero_payload | k_record_flag_compact_sparse_zero_payload)) !=
         0U) {
         page_log_append_perf_add(PAGE_LOG_APPEND_PERF_SPARSE_ZERO_RECORDS, 1U);
         page_log_append_perf_add(PAGE_LOG_APPEND_PERF_SPARSE_ZERO_PAYLOAD_BYTES, payload_size);
         if ((flags & k_record_flag_compact_sparse_zero_payload) != 0U) {
+            compact_sparse = compact_sparse_payload_composition(flags, payload);
             page_log_append_perf_add(PAGE_LOG_APPEND_PERF_COMPACT_SPARSE_ZERO_RECORDS, 1U);
             page_log_append_perf_add(
                 PAGE_LOG_APPEND_PERF_COMPACT_SPARSE_ZERO_PAYLOAD_BYTES,
                 payload_size
             );
+            if (compact_sparse.valid) {
+                page_log_append_perf_add(
+                    PAGE_LOG_APPEND_PERF_COMPACT_SPARSE_METADATA_BYTES,
+                    compact_sparse.metadata_bytes
+                );
+                page_log_append_perf_add(
+                    PAGE_LOG_APPEND_PERF_COMPACT_SPARSE_DATA_BYTES,
+                    compact_sparse.data_bytes
+                );
+            }
         }
-        return;
+        return compact_sparse;
     }
     if ((flags & k_record_flag_trailing_zero_payload) != 0U) {
         page_log_append_perf_add(PAGE_LOG_APPEND_PERF_TRAILING_ZERO_RECORDS, 1U);
         page_log_append_perf_add(PAGE_LOG_APPEND_PERF_TRAILING_ZERO_PAYLOAD_BYTES, payload_size);
-        return;
+        return compact_sparse;
     }
     page_log_append_perf_add(PAGE_LOG_APPEND_PERF_FULL_RECORDS, 1U);
     page_log_append_perf_add(PAGE_LOG_APPEND_PERF_FULL_PAYLOAD_BYTES, payload_size);
+    return compact_sparse;
 }
 
 void record_append_page_type_stats(
     const void *page,
     std::uint32_t page_size,
-    std::uint64_t payload_size
+    std::uint64_t payload_size,
+    const CompactSparsePayloadComposition &compact_sparse
 ) {
     if (!page_log_append_perf_stats_are_enabled()) {
         return;
@@ -2999,24 +3073,36 @@ void record_append_page_type_stats(
 
     PageLogAppendPerfStatIndex record_index = PAGE_LOG_APPEND_PERF_OTHER_RECORDS;
     PageLogAppendPerfStatIndex byte_index = PAGE_LOG_APPEND_PERF_OTHER_PAYLOAD_BYTES;
+    PageLogAppendPerfStatIndex compact_metadata_index =
+        PAGE_LOG_APPEND_PERF_OTHER_COMPACT_SPARSE_METADATA_BYTES;
+    PageLogAppendPerfStatIndex compact_data_index =
+        PAGE_LOG_APPEND_PERF_OTHER_COMPACT_SPARSE_DATA_BYTES;
     if (page != nullptr && page_size >= k_innodb_fil_page_type_offset + sizeof(std::uint16_t)) {
         const auto *bytes = static_cast<const unsigned char *>(page);
         switch (load_be16(bytes + k_innodb_fil_page_type_offset)) {
         case k_innodb_fil_page_index:
             record_index = PAGE_LOG_APPEND_PERF_INDEX_RECORDS;
             byte_index = PAGE_LOG_APPEND_PERF_INDEX_PAYLOAD_BYTES;
+            compact_metadata_index = PAGE_LOG_APPEND_PERF_INDEX_COMPACT_SPARSE_METADATA_BYTES;
+            compact_data_index = PAGE_LOG_APPEND_PERF_INDEX_COMPACT_SPARSE_DATA_BYTES;
             break;
         case k_innodb_fil_page_undo_log:
             record_index = PAGE_LOG_APPEND_PERF_UNDO_LOG_RECORDS;
             byte_index = PAGE_LOG_APPEND_PERF_UNDO_LOG_PAYLOAD_BYTES;
+            compact_metadata_index = PAGE_LOG_APPEND_PERF_UNDO_LOG_COMPACT_SPARSE_METADATA_BYTES;
+            compact_data_index = PAGE_LOG_APPEND_PERF_UNDO_LOG_COMPACT_SPARSE_DATA_BYTES;
             break;
         case k_innodb_fil_page_type_sys:
             record_index = PAGE_LOG_APPEND_PERF_SYS_RECORDS;
             byte_index = PAGE_LOG_APPEND_PERF_SYS_PAYLOAD_BYTES;
+            compact_metadata_index = PAGE_LOG_APPEND_PERF_SYS_COMPACT_SPARSE_METADATA_BYTES;
+            compact_data_index = PAGE_LOG_APPEND_PERF_SYS_COMPACT_SPARSE_DATA_BYTES;
             break;
         case k_innodb_fil_page_type_trx_sys:
             record_index = PAGE_LOG_APPEND_PERF_TRX_SYS_RECORDS;
             byte_index = PAGE_LOG_APPEND_PERF_TRX_SYS_PAYLOAD_BYTES;
+            compact_metadata_index = PAGE_LOG_APPEND_PERF_TRX_SYS_COMPACT_SPARSE_METADATA_BYTES;
+            compact_data_index = PAGE_LOG_APPEND_PERF_TRX_SYS_COMPACT_SPARSE_DATA_BYTES;
             break;
         case k_innodb_fil_page_type_allocated:
         case k_innodb_fil_page_inode:
@@ -3026,12 +3112,17 @@ void record_append_page_type_stats(
         case k_innodb_fil_page_type_xdes:
             record_index = PAGE_LOG_APPEND_PERF_SPACE_METADATA_RECORDS;
             byte_index = PAGE_LOG_APPEND_PERF_SPACE_METADATA_PAYLOAD_BYTES;
+            compact_metadata_index =
+                PAGE_LOG_APPEND_PERF_SPACE_METADATA_COMPACT_SPARSE_METADATA_BYTES;
+            compact_data_index = PAGE_LOG_APPEND_PERF_SPACE_METADATA_COMPACT_SPARSE_DATA_BYTES;
             break;
         case k_innodb_fil_page_type_blob:
         case k_innodb_fil_page_type_zblob:
         case k_innodb_fil_page_type_zblob2:
             record_index = PAGE_LOG_APPEND_PERF_BLOB_RECORDS;
             byte_index = PAGE_LOG_APPEND_PERF_BLOB_PAYLOAD_BYTES;
+            compact_metadata_index = PAGE_LOG_APPEND_PERF_BLOB_COMPACT_SPARSE_METADATA_BYTES;
+            compact_data_index = PAGE_LOG_APPEND_PERF_BLOB_COMPACT_SPARSE_DATA_BYTES;
             break;
         default:
             break;
@@ -3040,6 +3131,10 @@ void record_append_page_type_stats(
 
     page_log_append_perf_add(record_index, 1U);
     page_log_append_perf_add(byte_index, payload_size);
+    if (compact_sparse.valid) {
+        page_log_append_perf_add(compact_metadata_index, compact_sparse.metadata_bytes);
+        page_log_append_perf_add(compact_data_index, compact_sparse.data_bytes);
+    }
 }
 
 bool record_payload_shape_valid(const PageRecordHeader &record) {

@@ -4660,7 +4660,8 @@ subsystems that this mode needs:
   Stats-enabled
   ownerless autocommit probes now also emit per-insert summary keys for
   page-version volume, native-support page ratio, page-publish and page-log
-  append time, page-log payload/header byte volume, page-write
+  append time, page-log payload/header byte volume, compact-sparse metadata
+  versus nonzero data bytes for the total, index, and SYS buckets, page-write
   refresh/publish time, commit-MTR publish time,
   InnoDB write-history time split by ownerless history-page lock, post-wait
   refresh, rollback-segment latch, history-list mutation, write-history MTR
@@ -4827,7 +4828,15 @@ subsystems that this mode needs:
   `1.000` published `FIL_PAGE_UNDO_LOG` page per insert, with both pages also
   counted as blocked from blind native-support elision by the active
   history-proof gate. A future optimization must replace or compress that proof
-  evidence rather than simply eliding these page images. The
+  evidence rather than simply eliding these page images. A follow-up
+  compact-sparse composition attribution sample reported `6701.610`
+  compact-sparse payload bytes per ownerless autocommit insert, split into
+  `1266.080` metadata bytes and `5435.530` nonzero data bytes; the SYS
+  history-proof bucket was data-dominated at `51.200` metadata bytes and
+  `4123.730` data bytes per insert, while the index bucket was roughly split at
+  `1086.220` metadata bytes and `1216.060` data bytes per insert. That keeps
+  the next write-throughput target on rollback-segment SYS proof representation
+  and user/index page payload rather than compact sparse run metadata. The
   post-boundary production sample before this proof fast path reported stats-off
   ownerless warm open/close at `359.230 ms` versus ordinary `375.478 ms`,
   active-runtime reconnect overhead at `0.211 ms`, ownerless direct/prepared
