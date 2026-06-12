@@ -665,6 +665,8 @@ public:
   bool mylite_ownerless_page_write_publish_failed;
   /** Whether an ownerless MTR page-write image was published. */
   bool mylite_ownerless_page_write_published_page;
+  /** Whether ownerless transaction-deferred page images were published. */
+  bool mylite_ownerless_page_write_deferred_pages_published;
   /** Whether the current ownerless MTR should prove history pages by WAL. */
   bool mylite_ownerless_history_proof_active;
   /** Whether the expected rollback-segment page image was published. */

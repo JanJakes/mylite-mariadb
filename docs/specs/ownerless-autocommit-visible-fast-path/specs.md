@@ -69,17 +69,23 @@ proved. This avoids waiting below dirty page LSNs while also avoiding an
 unsupported visible-LSN advance.
 
 For MTR page-write release, keep transaction-deferred page handling for
-autocommit statements outside the proven one-row insert shape. The immediate
-MTR publish path is reserved for the same narrow statement class that can take
-the visible-only commit path; CTAS, multi-row inserts, INSERT SELECT, UPDATE,
-DELETE, and broader DDL keep transaction-scoped page evidence.
+autocommit statements outside the proven pure `INSERT ... VALUES` row-list
+shape. The immediate MTR publish path remains available for the same narrow
+statement class that can take the visible-only commit path. Pure multi-row
+inserts may still retain transaction-owned page-write locks; their dirtied
+page images are published at commit and record a transaction-deferred page
+proof without clearing the lock-ownership vectors needed for cleanup. CTAS,
+`INSERT ... SELECT`, `INSERT ... ON DUPLICATE KEY UPDATE`,
+`INSERT ... RETURNING`, `UPDATE`, `DELETE`, and broader DDL keep conservative
+transaction-scoped page evidence.
 
 In `trx_t::commit_in_memory()`, use the visible-only path only when all of the
 following are true:
 
 - ownerless hooks are active and this transaction is already in the ownerless
   commit bridge,
-- the SQL statement is the currently proven one-row `SQLCOM_INSERT` shape,
+- the SQL statement is the currently proven pure autocommit
+  `INSERT ... VALUES` row-list shape,
 - the transaction had ownerless page-write ownership,
 - the commit has a nonzero ownerless commit LSN,
 - the transaction is not rollback/deadlock cleanup,
@@ -87,7 +93,8 @@ following are true:
   command (`CREATE TABLE`, `ALTER TABLE`, `CREATE INDEX`, `DROP TABLE`,
   `DROP INDEX`, `RENAME TABLE`, or `TRUNCATE`) that already requires
   buffer-pool dirty-page publication,
-- no non-gate transaction-deferred ownerless modified pages remain,
+- no transaction-deferred ownerless dirty pages remain unproved by page-version
+  WAL publication,
 - at least one real MTR page image was published for the transaction,
 - no MTR page-publish skip or failure was recorded.
 
@@ -109,9 +116,10 @@ No SQL, public C API, PHP API, storage format, or directory layout changes. The
 observable compatibility goal is unchanged: committed ownerless autocommit
 writes must be visible to peers and recoverable after process death. The fast
 path changes the implementation from native-page flush proof to page-version
-WAL proof only when the current transaction is the proven one-row insert shape,
-can prove every MTR page-write candidate was published, and published at least
-one real page image.
+WAL proof only when the current transaction is the proven pure
+`INSERT ... VALUES` row-list shape, can prove every MTR page-write candidate
+and transaction-deferred dirty page was published, and published at least one
+real page image.
 
 ## Directory And Lifecycle Impact
 
@@ -124,18 +132,20 @@ Native InnoDB dirty pages may remain dirty after a fast-path autocommit commit.
 Peer readers and no-live recovery must therefore continue to rely on the
 page-version WAL for the published visible LSN until a later native checkpoint
 or close-time reclamation proves the native files cover it. DDL/index
-operations, multi-row inserts, insert-select statements, updates, deletes,
-explicit transaction-deferred page sets, synthetic gate-only transactions, and
-any unproven page class keep the existing native flush wait.
+operations, insert-select statements, `INSERT ... ON DUPLICATE KEY UPDATE`,
+`INSERT ... RETURNING`, updates, deletes, explicit or unproved
+transaction-deferred dirty page sets, synthetic gate-only transactions, and any
+unproven page class keep the existing native flush wait.
 
 ## Build And Performance Impact
 
-Ownerless one-row autocommit `INSERT` statements that fully publish real page
-images through MTR avoid a per-commit `buf_flush_wait_flushed()` wait. The
-default non-ownerless path is unchanged. The ownerless MTR hot path adds one
-transaction-local failure-bit write only on skip/failure branches; opt-in
-timing counters add work only when the performance probe enables them. The
-success bit is written only after a page-version append succeeds.
+Ownerless one-row and pure multi-row autocommit `INSERT ... VALUES` statements
+that fully publish real page images through MTR avoid a per-commit
+`buf_flush_wait_flushed()` wait. The default non-ownerless path is unchanged.
+The ownerless MTR hot path adds one transaction-local failure-bit write only on
+skip/failure branches; opt-in timing counters add work only when the
+performance probe enables them. The success bit is written only after a
+page-version append succeeds.
 
 Measured evidence after the narrowed fast-path gate shows `199/200` ownerless
 autocommit commits using the visible-only path with one deferred-page flush

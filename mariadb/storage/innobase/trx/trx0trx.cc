@@ -370,6 +370,7 @@ trx_init(
 	trx->mylite_ownerless_page_write_trx_id = 0;
 	trx->mylite_ownerless_page_write_publish_failed = false;
 	trx->mylite_ownerless_page_write_published_page = false;
+	trx->mylite_ownerless_page_write_deferred_pages_published = false;
 	trx->mylite_ownerless_history_proof_active = false;
 	trx->mylite_ownerless_history_proof_rseg_published = false;
 	trx->mylite_ownerless_history_proof_undo_published = false;
@@ -726,6 +727,7 @@ void trx_t::free() noexcept
   mylite_ownerless_page_write_trx_id= 0;
   mylite_ownerless_page_write_publish_failed= false;
   mylite_ownerless_page_write_published_page= false;
+  mylite_ownerless_page_write_deferred_pages_published= false;
   mylite_ownerless_history_proof_active= false;
   mylite_ownerless_history_proof_rseg_published= false;
   mylite_ownerless_history_proof_undo_published= false;
@@ -788,6 +790,8 @@ void trx_t::free() noexcept
                sizeof mylite_ownerless_page_write_publish_failed);
   MEM_NOACCESS(&mylite_ownerless_page_write_published_page,
                sizeof mylite_ownerless_page_write_published_page);
+  MEM_NOACCESS(&mylite_ownerless_page_write_deferred_pages_published,
+               sizeof mylite_ownerless_page_write_deferred_pages_published);
   MEM_NOACCESS(&read_only, sizeof read_only);
   MEM_NOACCESS(&auto_commit, sizeof auto_commit);
   MEM_NOACCESS(&will_lock, sizeof will_lock);
@@ -1261,6 +1265,7 @@ trx_start_low(
 
 	trx->mylite_ownerless_page_write_publish_failed = false;
 	trx->mylite_ownerless_page_write_published_page = false;
+	trx->mylite_ownerless_page_write_deferred_pages_published = false;
 	trx->mylite_ownerless_history_proof_active = false;
 	trx->mylite_ownerless_history_proof_rseg_published = false;
 	trx->mylite_ownerless_history_proof_undo_published = false;
@@ -2105,12 +2110,15 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
           ownerless_stage_start);
       const bool ownerless_has_deferred_page_writes=
         ownerless_transaction_has_deferred_page_writes(this);
+      const bool ownerless_deferred_page_writes_proved=
+        !ownerless_has_deferred_page_writes ||
+        mylite_ownerless_page_write_deferred_pages_published;
       const bool publish_ownerless_visible_without_flush=
         !ownerless_commit_needs_recovery_lsn &&
         !publish_ownerless_dirty_pages &&
         ownerless_statement_allows_visible_fast_path &&
         mylite_ownerless_page_write_trx_id != 0 &&
-        !ownerless_has_deferred_page_writes &&
+        ownerless_deferred_page_writes_proved &&
         !mylite_ownerless_page_write_publish_failed &&
         mylite_ownerless_page_write_published_page;
       if (publish_ownerless_visible_without_flush)
@@ -2127,7 +2135,7 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
         if (mylite_ownerless_page_write_trx_id == 0)
           ownerless_commit_visibility_count(
               ownerless_commit_visibility_flush_no_page_write_trx);
-        if (ownerless_has_deferred_page_writes)
+        if (!ownerless_deferred_page_writes_proved)
           ownerless_commit_visibility_count(
               ownerless_commit_visibility_flush_deferred_pages);
         if (mylite_ownerless_page_write_publish_failed)
@@ -2257,6 +2265,7 @@ bool trx_t::commit_cleanup() noexcept
   *detailed_error= '\0';
   mylite_ownerless_page_write_publish_failed= false;
   mylite_ownerless_page_write_published_page= false;
+  mylite_ownerless_page_write_deferred_pages_published= false;
   mylite_ownerless_history_proof_active= false;
   mylite_ownerless_history_proof_rseg_published= false;
   mylite_ownerless_history_proof_undo_published= false;

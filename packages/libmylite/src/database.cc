@@ -4612,12 +4612,14 @@ bool ownerless_statement_allows_visible_fast_path(const SqlPolicyTokens &tokens)
     }
 
     bool saw_row = false;
+    bool expect_row = true;
     paren_depth = 0;
     for (std::size_t index = values_index + 1U; index < tokens.count; ++index) {
         const std::string_view token = tokens.values[index];
-        if (!saw_row) {
+        if (expect_row) {
             if (token_equals(token, "(")) {
                 saw_row = true;
+                expect_row = false;
                 paren_depth = 1;
                 continue;
             }
@@ -4639,18 +4641,16 @@ bool ownerless_statement_allows_visible_fast_path(const SqlPolicyTokens &tokens)
             continue;
         }
         if (token_equals(token, ",")) {
-            return false;
+            expect_row = true;
+            continue;
         }
         if (token_equals(token, ";")) {
-            return true;
-        }
-        if (identifier_token_equals(token, "ON") || identifier_token_equals(token, "RETURNING")) {
-            return true;
+            return saw_row && !expect_row;
         }
         return false;
     }
 
-    return saw_row && paren_depth == 0;
+    return saw_row && !expect_row && paren_depth == 0;
 }
 
 bool sql_statement_requests_write_transaction(const SqlPolicyTokens &tokens) {

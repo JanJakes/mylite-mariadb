@@ -1520,9 +1520,10 @@ Tasks:
    Ownerless write commits now publish transaction-owned dirty page images
    before releasing shared lock-registry entries. MTR-proven autocommit commits
    can publish the page-visible LSN directly from the durably synced
-   page-version WAL, while DDL, transaction-deferred pages, rollback/deadlock
-   cleanup, and any MTR publish skip or failure still flush dirty pages through
-   the current native InnoDB log LSN before page-visible publication. Because
+   page-version WAL, while DDL, unproved transaction-deferred dirty pages,
+   rollback/deadlock cleanup, and any MTR publish skip or failure still flush
+   dirty pages through the current native InnoDB log LSN before page-visible
+   publication. Because
    the current implementation
    still uses one InnoDB buffer pool per process, the shared registry still has a
    page-level physical X resource for native lock records that have no record,
@@ -1780,13 +1781,14 @@ Tasks:
    LSN used to keep peer InnoDB redo state monotonic, but the page-visible LSN
    advances only after transaction-owned dirty pages up to that commit LSN have
    been published into the page-version log and the page-version log has been
-   durably synced under the append range; MTR-proven autocommit commits can
-   skip the native dirty-page flush, while DDL, transaction-deferred pages,
-   rollback/deadlock cleanup, and any MTR publish skip or failure still use the
-   conservative native bridge. The slow path flushes native dirty pages through
-   the current InnoDB log LSN before publishing that higher visible boundary,
-   so peer refresh can use durable disk state instead of an ownerless WAL
-   image.
+   durably synced under the append range; MTR-proven autocommit commits and
+   transaction-deferred dirty pages proven by transaction-page publication can
+   skip the native dirty-page flush, while DDL, unproved
+   transaction-deferred dirty pages, rollback/deadlock cleanup, and any MTR
+   publish skip or failure still use the conservative native bridge. The slow
+   path flushes native dirty pages through the current InnoDB log LSN before
+   publishing that higher visible boundary, so peer refresh can use durable
+   disk state instead of an ownerless WAL image.
    Page-visible publication is skipped while
    another live ownerless process is inside an explicit transaction, the shared
    transaction registry still has active read-write transactions owned by
@@ -4819,10 +4821,11 @@ subsystems that this mode needs:
   after the wait per insert while exact flush pages remained `2.000` per
   insert, so the bottleneck did not look like unrelated global queue drain. A
   bounded history WAL proof fast path now marks a transaction-local proof window
-  for autocommit single-row `INSERT`, disables native-support page WAL elision
-  only for the expected rollback-segment and undo-header pages, and skips the
-  native exact history flush only when both expected page images are published
-  successfully through the ownerless page WAL. The reduced production
+  for pure autocommit `INSERT ... VALUES` statements, disables native-support
+  page WAL elision only for the expected rollback-segment and undo-header
+  pages, and skips the native exact history flush only when both expected page
+  images are published successfully through the ownerless page WAL. The reduced
+  production
   attribution sample after this change reported `0.000` ownerless history flush
   pages and `0.000` exact history flush pages per insert while keeping `3.570`
   native-support pages per insert and `1.570` native-support elided pages per

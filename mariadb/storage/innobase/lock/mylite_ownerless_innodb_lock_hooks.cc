@@ -1433,6 +1433,31 @@ static void collect_transaction_page_write_pages(
   pages.erase(std::unique(pages.begin(), pages.end()), pages.end());
 }
 
+static void collect_transaction_dirty_page_write_pages(
+    const trx_t *trx, std::vector<uint64_t> &pages)
+{
+  if (trx == nullptr)
+    return;
+
+  const trx_t::mylite_ownerless_page_vector *trx_pages=
+      trx->mylite_ownerless_dirty_pages_for_read();
+  if (trx_pages == nullptr)
+    return;
+
+  for (const uint64_t packed_page : *trx_pages)
+  {
+    if (packed_page_write_transaction_gate(packed_page))
+      continue;
+    const uint32_t space_id= static_cast<uint32_t>(packed_page >> 32);
+    if (space_id >= SRV_TMP_SPACE_ID)
+      continue;
+    pages.push_back(packed_page);
+  }
+
+  std::sort(pages.begin(), pages.end());
+  pages.erase(std::unique(pages.begin(), pages.end()), pages.end());
+}
+
 static lsn_t ownerless_flush_wait_lsn(uint64_t flush_lsn)
 {
   const lsn_t lsn= static_cast<lsn_t>(flush_lsn);
@@ -1442,12 +1467,16 @@ static lsn_t ownerless_flush_wait_lsn(uint64_t flush_lsn)
 extern "C" uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
     trx_t *trx, uint64_t visible_lsn)
 {
+  if (trx != nullptr)
+    trx->mylite_ownerless_page_write_deferred_pages_published= false;
   if (trx == nullptr || visible_lsn == 0 ||
       !mylite_ownerless_innodb_lock_has_hooks())
     return visible_lsn;
 
   std::vector<uint64_t> pages;
-  collect_transaction_page_write_pages(trx, pages, false);
+  collect_transaction_page_write_pages(trx, pages, true);
+  std::vector<uint64_t> dirty_pages;
+  collect_transaction_dirty_page_write_pages(trx, dirty_pages);
   const trx_t::mylite_ownerless_page_image_vector *images=
       trx->mylite_ownerless_page_images_for_read();
   if (pages.empty() && (images == nullptr || images->empty()))
@@ -1517,9 +1546,12 @@ extern "C" uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
         space_id, page_no, static_cast<lsn_t>(visible_lsn), false,
         &published_pages);
     if (published_pages != 0)
+    {
       mylite_ownerless_innodb_deep_perf_add(
           MYLITE_OWNERLESS_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_BUFFER_PUBLISHED,
           published_pages);
+      successful_image_pages.push_back(packed_page);
+    }
     if (observed_lsn > maximum_observed_lsn)
       maximum_observed_lsn= observed_lsn;
     if (observed_lsn > visible_lsn)
@@ -1530,12 +1562,31 @@ extern "C" uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
       const lsn_t second_observed_lsn= buf_flush_publish_ownerless_page_to_lsn(
           space_id, page_no, observed_lsn, false, &published_pages);
       if (published_pages != 0)
+      {
         mylite_ownerless_innodb_deep_perf_add(
             MYLITE_OWNERLESS_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_BUFFER_RETRY_PUBLISHED,
             published_pages);
+        successful_image_pages.push_back(packed_page);
+      }
       if (second_observed_lsn > maximum_observed_lsn)
         maximum_observed_lsn= second_observed_lsn;
     }
+  }
+  if (dirty_pages.empty())
+    trx->mylite_ownerless_page_write_deferred_pages_published= true;
+  else if (!successful_image_pages.empty())
+  {
+    std::sort(successful_image_pages.begin(), successful_image_pages.end());
+    successful_image_pages.erase(std::unique(successful_image_pages.begin(),
+                                             successful_image_pages.end()),
+                                 successful_image_pages.end());
+    trx->mylite_ownerless_page_write_deferred_pages_published=
+        std::all_of(dirty_pages.begin(), dirty_pages.end(),
+                    [&successful_image_pages](uint64_t packed_page) {
+                      return std::binary_search(successful_image_pages.begin(),
+                                                successful_image_pages.end(),
+                                                packed_page);
+                    });
   }
 
   return maximum_observed_lsn;

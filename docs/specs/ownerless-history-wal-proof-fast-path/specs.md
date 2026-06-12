@@ -28,10 +28,11 @@ cheaper proof for those same pages, not broader checkpoint or doublewrite policy
   record for each published page image, while
   `ownerless_innodb_pages_visible_hook()` syncs the ownerless page WAL before
   advancing the visible page LSN.
-- The existing ownerless visible-fast-path proof is limited to autocommit
-  single-row `INSERT` statements. Native-support page WAL elision already uses
-  that statement class and leaves dictionary, explicit transaction, and broader
-  DML paths conservative.
+- The existing ownerless visible-fast-path proof now covers pure autocommit
+  `INSERT ... VALUES` row-list statements. Native-support page WAL elision uses
+  that statement class and leaves dictionary, explicit transaction,
+  `INSERT ... SELECT`, `INSERT ... ON DUPLICATE KEY UPDATE`,
+  `INSERT ... RETURNING`, and broader DML paths conservative.
 
 ## Design
 
@@ -44,7 +45,7 @@ number, and undo-header page number only when all of these are true:
 - the rollback-segment page-write lock was acquired;
 - the undo-header page is known;
 - the transaction is not read-only or dictionary DDL;
-- the SQL statement is autocommit single-row `INSERT`.
+- the SQL statement is a pure autocommit `INSERT ... VALUES` row-list.
 
 During `mtr_t::ownerless_page_write_publish()`, native-support page WAL elision
 is disabled only for those exact expected history pages while the proof window
@@ -64,7 +65,8 @@ Every other path keeps the existing native flush fallback.
 
 In scope:
 
-- A bounded fast path for ownerless autocommit single-row insert history pages.
+- A bounded fast path for ownerless autocommit pure `INSERT ... VALUES`
+  history pages.
 - Focused SQL coverage proving the native history flush is skipped only after
   page WAL proof while native-support page publication remains active.
 - Production attribution and stats-off throughput samples.
@@ -72,8 +74,8 @@ In scope:
 Out of scope:
 
 - Broader redo/checkpoint reconciliation for native-support pages.
-- DDL, dictionary, explicit transaction, multi-row DML, rollback, or recovery
-  fast paths.
+- DDL, dictionary, explicit transaction, insert-select, upsert, returning,
+  broader DML, rollback, or recovery fast paths.
 - SQL-level table-lock fault injection or external MariaDB/RQG stress.
 
 ## Compatibility Impact
@@ -194,8 +196,8 @@ Local verification on 2026-06-09 used production artifacts:
 
 ## Acceptance Criteria
 
-- Autocommit single-row insert coverage proves ownerless history native flush
-  pages drop to zero.
+- Autocommit pure `INSERT ... VALUES` coverage proves ownerless history native
+  flush pages drop to zero.
 - Native-support page WAL elision coverage still proves non-history support
   pages can elide while the exact history proof pages are published.
 - The optimization is unavailable for unproven statement classes and all page

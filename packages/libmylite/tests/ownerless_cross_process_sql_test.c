@@ -334,7 +334,13 @@ enum ownerless_test_innodb_deep_perf_stat_index {
     OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_PAGES = 87,
     OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_FALLBACK_ROUNDS =
         88,
-    OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT = 104
+    OWNERLESS_TEST_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_IMAGE_ATTEMPTS = 178,
+    OWNERLESS_TEST_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_IMAGE_PUBLISHED,
+    OWNERLESS_TEST_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_BUFFER_ATTEMPTS,
+    OWNERLESS_TEST_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_BUFFER_PUBLISHED,
+    OWNERLESS_TEST_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_BUFFER_RETRY_ATTEMPTS,
+    OWNERLESS_TEST_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_BUFFER_RETRY_PUBLISHED,
+    OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT = 188
 };
 
 typedef struct open_database_paths {
@@ -501,6 +507,7 @@ static void test_ownerless_single_owner_page_write_refresh_skips_external_reads(
 static void test_ownerless_single_owner_external_refresh_skips_page_reads(void);
 static void test_ownerless_single_owner_history_wal_proof(void);
 static void test_ownerless_single_owner_native_support_page_wal_elision(void);
+static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void);
 static void test_ownerless_single_owner_foreground_reclaim_budget_defers_to_timer(void);
 static void test_ownerless_peer_history_disables_foreground_reclaim_budget(void);
 static void test_ownerless_peer_history_blocks_single_owner_skip_proof(void);
@@ -3413,6 +3420,10 @@ int main(int argc, char **argv) {
         test_ownerless_single_owner_native_support_page_wal_elision();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "single-owner-multi-row-insert-visible-fast-path") == 0) {
+        test_ownerless_single_owner_multi_row_insert_visible_fast_path();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "single-owner-foreground-reclaim-budget") == 0) {
         test_ownerless_single_owner_foreground_reclaim_budget_defers_to_timer();
         return 0;
@@ -4434,6 +4445,7 @@ int main(int argc, char **argv) {
             "statement-checkpoint-scheduling|single-owner-page-write-refresh-skip|"
             "single-owner-external-refresh-skip|single-owner-history-wal-proof|"
             "single-owner-native-support-page-wal-elision|"
+            "single-owner-multi-row-insert-visible-fast-path|"
             "single-owner-foreground-reclaim-budget|"
             "single-owner-foreground-reclaim-peer-history|single-owner-skip-peer-history|"
             "timer-checkpoint-scheduling|"
@@ -4606,6 +4618,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_external_refresh_skips_page_reads),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_history_wal_proof),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_native_support_page_wal_elision),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_multi_row_insert_visible_fast_path),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_foreground_reclaim_budget_defers_to_timer),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_peer_history_disables_foreground_reclaim_budget),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_peer_history_blocks_single_owner_skip_proof),
@@ -9199,6 +9212,164 @@ static void test_ownerless_single_owner_native_support_page_wal_elision(void) {
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_native_support_elision") == rows);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-single-owner-multi-row-insert.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    uint64_t deep_stats[OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT] = {0};
+    uint64_t page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT] = {0};
+    uint64_t commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT] = {0};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_multi_row_insert_fast_path ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "payload VARBINARY(4000) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+
+    mylite_ownerless_innodb_set_commit_visibility_stats_enabled(1);
+    mylite_ownerless_innodb_set_page_publish_stats_enabled(1);
+    mylite_ownerless_innodb_deep_set_perf_stats_enabled(1);
+    mylite_ownerless_innodb_reset_commit_visibility_stats();
+    mylite_ownerless_innodb_reset_page_publish_stats();
+    mylite_ownerless_innodb_deep_reset_perf_stats();
+
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_multi_row_insert_fast_path VALUES "
+        "(1, 10, REPEAT('m', 4000)),"
+        "(2, 20, REPEAT('n', 4000)),"
+        "(3, 30, REPEAT('o', 4000))"
+    );
+
+    mylite_ownerless_innodb_read_commit_visibility_stats(
+        commit_stats,
+        OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT
+    );
+    mylite_ownerless_innodb_deep_read_perf_stats(
+        deep_stats,
+        OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT
+    );
+    mylite_ownerless_innodb_read_page_publish_stats(
+        page_stats,
+        OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT
+    );
+
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FAST] > 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH] == 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_DEFERRED_PAGES] == 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_UNPROVEN_STATEMENT] == 0U);
+    assert(
+        deep_stats
+            [OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES] ==
+        0U
+    );
+    assert(
+        deep_stats
+            [OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_PAGES] ==
+        0U
+    );
+    assert(
+        deep_stats
+            [OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_FALLBACK_ROUNDS] ==
+        0U
+    );
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_CANDIDATES] > 0U);
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_PUBLISHED] > 0U);
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_FAILED] == 0U);
+    assert(
+        deep_stats[OWNERLESS_TEST_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_IMAGE_ATTEMPTS] +
+            deep_stats[OWNERLESS_TEST_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_BUFFER_ATTEMPTS] >
+        0U
+    );
+    assert(
+        deep_stats[OWNERLESS_TEST_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_IMAGE_PUBLISHED] +
+            deep_stats[OWNERLESS_TEST_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_BUFFER_PUBLISHED] +
+            deep_stats[OWNERLESS_TEST_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_BUFFER_RETRY_PUBLISHED] >
+        0U
+    );
+    assert(
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_RSEG] >
+        0U
+    );
+    assert(
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO] >
+        0U
+    );
+
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_multi_row_insert_fast_path") == 3U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_row_insert_fast_path") == 60U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(LENGTH(payload)) FROM app.ownerless_multi_row_insert_fast_path"
+        ) == 12000U
+    );
+
+    mylite_ownerless_innodb_reset_commit_visibility_stats();
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_multi_row_insert_fast_path VALUES "
+        "(2, 21, REPEAT('u', 4000)) "
+        "ON DUPLICATE KEY UPDATE value = value + VALUES(value)"
+    );
+    mylite_ownerless_innodb_read_commit_visibility_stats(
+        commit_stats,
+        OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT
+    );
+    mylite_ownerless_innodb_set_commit_visibility_stats_enabled(0);
+    mylite_ownerless_innodb_set_page_publish_stats_enabled(0);
+    mylite_ownerless_innodb_deep_set_perf_stats_enabled(0);
+
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FAST] == 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH] > 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_UNPROVEN_STATEMENT] > 0U);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_multi_row_insert_fast_path") == 3U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_row_insert_fast_path") == 81U
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_multi_row_insert_fast_path") == 3U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_row_insert_fast_path") == 81U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_multi_row_insert_fast_path") == 3U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_row_insert_fast_path") == 81U
+    );
     assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);
