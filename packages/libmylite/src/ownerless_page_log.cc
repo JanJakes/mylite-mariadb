@@ -2256,8 +2256,7 @@ int checkpoint_locked(
                 return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
             }
             const std::size_t payload_size = static_cast<std::size_t>(record.payload_size);
-            std::unique_ptr<unsigned char[]> payload(
-                new (std::nothrow) unsigned char[payload_size]
+            std::unique_ptr<unsigned char[]> payload(new (std::nothrow) unsigned char[payload_size]
             );
             if (payload == nullptr) {
                 return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
@@ -3583,9 +3582,9 @@ bool read_record_page_type(
                 return false;
             }
             const std::uint64_t available = record.payload_size - k_innodb_fil_page_type_offset;
-            const std::size_t bytes_to_read = static_cast<std::size_t>(
-                std::min<std::uint64_t>(sizeof(page_type_bytes), available)
-            );
+            const std::size_t bytes_to_read =
+                static_cast<std::size_t>(std::min<std::uint64_t>(sizeof(page_type_bytes), available)
+                );
             if (!read_exact_at(fd, page_type_bytes, bytes_to_read, page_type_offset)) {
                 return false;
             }

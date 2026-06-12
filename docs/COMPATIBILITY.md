@@ -120,6 +120,11 @@ remained much larger. The current WordPress performance target is therefore
 MariaDB/libmylite query execution and prepared-statement lifecycle cost, not
 PHP fetch-object conversion. Other WordPress CI timing steps keep that profile
 disabled unless a diagnostic run explicitly opts in.
+The stats-enabled embedded performance probe now also reports ownerless
+prepared-DML native `mysql_stmt_prepare()` and `mysql_stmt_close()` call counts
+and elapsed time, plus per-insert summaries, so the remaining prepared-write
+cost can be separated from startup, reconnect, page-version publication, and
+PHP adapter overhead before choosing a cache or text-protocol optimization.
 The mysqli adapter can preserve prepared result statements
 across ordinary no-result `INSERT`, `UPDATE`, `DELETE`, and `REPLACE`
 statements without `RETURNING`, while retaining conservative cache clears for

@@ -127,6 +127,10 @@ enum OwnerlessDatabasePerfStatIndex : std::size_t {
     OWNERLESS_DATABASE_PERF_PREPARED_STEP_DICTIONARY_FINISH_NS,
     OWNERLESS_DATABASE_PERF_PREPARED_STEP_AFFECTED_ROWS_NS,
     OWNERLESS_DATABASE_PERF_PREPARED_STEP_RECLAIM_NS,
+    OWNERLESS_DATABASE_PERF_PREPARED_STEP_NATIVE_PREPARE_CALLS,
+    OWNERLESS_DATABASE_PERF_PREPARED_STEP_NATIVE_PREPARE_NS,
+    OWNERLESS_DATABASE_PERF_PREPARED_STEP_NATIVE_CLOSE_CALLS,
+    OWNERLESS_DATABASE_PERF_PREPARED_STEP_NATIVE_CLOSE_NS,
     OWNERLESS_DATABASE_PERF_PREPARED_RESET_CALLS,
     OWNERLESS_DATABASE_PERF_PREPARED_RESET_TOTAL_NS,
     OWNERLESS_DATABASE_PERF_PREPARED_RESET_MYSQL_NS,
@@ -6500,8 +6504,16 @@ int prepare_ownerless_ephemeral_native_statement(mylite_stmt &stmt) {
         return MYLITE_MISUSE;
     }
 
+    ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_PREPARED_STEP_NATIVE_PREPARE_CALLS, 1U);
+    const std::uint64_t native_prepare_start =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
+
     stmt.stmt = mysql_stmt_init(&stmt.db->mysql);
     if (stmt.stmt == nullptr) {
+        ownerless_database_perf_add_elapsed(
+            OWNERLESS_DATABASE_PERF_PREPARED_STEP_NATIVE_PREPARE_NS,
+            native_prepare_start
+        );
         set_error(*stmt.db, MYLITE_NOMEM, "statement could not be allocated");
         return MYLITE_NOMEM;
     }
@@ -6513,12 +6525,20 @@ int prepare_ownerless_ephemeral_native_statement(mylite_stmt &stmt) {
 
     const std::string &sql = *stmt.ownerless_sql_text;
     if (mysql_stmt_prepare(stmt.stmt, sql.c_str(), static_cast<unsigned long>(sql.size())) != 0) {
+        ownerless_database_perf_add_elapsed(
+            OWNERLESS_DATABASE_PERF_PREPARED_STEP_NATIVE_PREPARE_NS,
+            native_prepare_start
+        );
         set_mariadb_statement_error(stmt);
         close_ownerless_ephemeral_native_statement(stmt);
         return MYLITE_ERROR;
     }
 
     if (mysql_stmt_param_count(stmt.stmt) != stmt.parameters.size()) {
+        ownerless_database_perf_add_elapsed(
+            OWNERLESS_DATABASE_PERF_PREPARED_STEP_NATIVE_PREPARE_NS,
+            native_prepare_start
+        );
         close_ownerless_ephemeral_native_statement(stmt);
         set_error(
             *stmt.db,
@@ -6528,6 +6548,10 @@ int prepare_ownerless_ephemeral_native_statement(mylite_stmt &stmt) {
         return MYLITE_ERROR;
     }
     if (mysql_stmt_field_count(stmt.stmt) != 0U) {
+        ownerless_database_perf_add_elapsed(
+            OWNERLESS_DATABASE_PERF_PREPARED_STEP_NATIVE_PREPARE_NS,
+            native_prepare_start
+        );
         close_ownerless_ephemeral_native_statement(stmt);
         set_error(
             *stmt.db,
@@ -6537,12 +6561,23 @@ int prepare_ownerless_ephemeral_native_statement(mylite_stmt &stmt) {
         return MYLITE_ERROR;
     }
 
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_PREPARED_STEP_NATIVE_PREPARE_NS,
+        native_prepare_start
+    );
     return MYLITE_OK;
 }
 
 void close_ownerless_ephemeral_native_statement(mylite_stmt &stmt) {
     if (stmt.ownerless_native_prepare_per_step && stmt.stmt != nullptr) {
+        ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_PREPARED_STEP_NATIVE_CLOSE_CALLS, 1U);
+        const std::uint64_t native_close_start =
+            ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
         static_cast<void>(mysql_stmt_close(stmt.stmt));
+        ownerless_database_perf_add_elapsed(
+            OWNERLESS_DATABASE_PERF_PREPARED_STEP_NATIVE_CLOSE_NS,
+            native_close_start
+        );
         stmt.stmt = nullptr;
     }
 }

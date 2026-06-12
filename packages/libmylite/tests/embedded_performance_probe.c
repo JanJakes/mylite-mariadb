@@ -202,6 +202,10 @@ enum database_perf_stat_index {
     DATABASE_PERF_STAT_PREPARED_STEP_DICTIONARY_FINISH_NS,
     DATABASE_PERF_STAT_PREPARED_STEP_AFFECTED_ROWS_NS,
     DATABASE_PERF_STAT_PREPARED_STEP_RECLAIM_NS,
+    DATABASE_PERF_STAT_PREPARED_STEP_NATIVE_PREPARE_CALLS,
+    DATABASE_PERF_STAT_PREPARED_STEP_NATIVE_PREPARE_NS,
+    DATABASE_PERF_STAT_PREPARED_STEP_NATIVE_CLOSE_CALLS,
+    DATABASE_PERF_STAT_PREPARED_STEP_NATIVE_CLOSE_NS,
     DATABASE_PERF_STAT_PREPARED_RESET_CALLS,
     DATABASE_PERF_STAT_PREPARED_RESET_TOTAL_NS,
     DATABASE_PERF_STAT_PREPARED_RESET_MYSQL_NS,
@@ -2485,6 +2489,26 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         insert_iterations
     );
     emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_prepared_native_prepare_calls_per_insert",
+        database_perf[DATABASE_PERF_STAT_PREPARED_STEP_NATIVE_PREPARE_CALLS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_prepared_native_prepare_ms_per_insert",
+        database_perf[DATABASE_PERF_STAT_PREPARED_STEP_NATIVE_PREPARE_NS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_prepared_native_close_calls_per_insert",
+        database_perf[DATABASE_PERF_STAT_PREPARED_STEP_NATIVE_CLOSE_CALLS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_prepared_native_close_ms_per_insert",
+        database_perf[DATABASE_PERF_STAT_PREPARED_STEP_NATIVE_CLOSE_NS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_native_support_pages_per_insert",
         page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT],
         insert_iterations
@@ -4520,6 +4544,26 @@ static void emit_database_perf_stats(const char *prefix) {
         "%s_prepared_step_reclaim_ms=%.3f\n",
         prefix,
         (double)values[DATABASE_PERF_STAT_PREPARED_STEP_RECLAIM_NS] / 1000000.0
+    );
+    printf(
+        "%s_prepared_step_native_prepare_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_PREPARED_STEP_NATIVE_PREPARE_CALLS]
+    );
+    printf(
+        "%s_prepared_step_native_prepare_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PREPARED_STEP_NATIVE_PREPARE_NS] / 1000000.0
+    );
+    printf(
+        "%s_prepared_step_native_close_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_PREPARED_STEP_NATIVE_CLOSE_CALLS]
+    );
+    printf(
+        "%s_prepared_step_native_close_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PREPARED_STEP_NATIVE_CLOSE_NS] / 1000000.0
     );
     printf(
         "%s_prepared_reset_calls=%" PRIu64 "\n",
