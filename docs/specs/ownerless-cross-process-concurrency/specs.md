@@ -4552,8 +4552,16 @@ subsystems that this mode needs:
   refresh checks. A no-live final close by a
   runtime that only consumed the current visible page-version WAL leaves that
   WAL for no-live recovery instead of truncating it without writer-owned native
-  page evidence, and a writer runtime cannot reclaim with live peers until it
-  has consumed the current visible page-version WAL after its local writes.
+  page evidence. Read/write runtime shutdown with live peers, or when no-live
+  status cannot be proven, now refreshes the local InnoDB buffer pool to the
+  latest ownerless external LSN and waits for local dirty pages through the max
+  of that ownerless LSN and the local native LSN before MariaDB embedded
+  teardown, so a worker that exits after explicit-transaction writes cannot
+  leave a stale process-local clustered page for `mysql_server_end()` to flush
+  after peer commits. Proven no-live final close keeps the existing native
+  checkpoint/reclaim path. A writer runtime cannot reclaim with live peers
+  until it has consumed the current visible page-version WAL after its local
+  writes.
   No-live writer reclaim still requires native page proof before truncating
   retained WAL. Explicit transaction-end statements with local writes serialize
   on the global ownerless write statement lock before current-state refresh;

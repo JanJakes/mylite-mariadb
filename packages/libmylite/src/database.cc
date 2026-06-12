@@ -16714,6 +16714,16 @@ void release_runtime(void) {
     }
     no_live_ownerless_shutdown =
         startup_lock_fd >= 0 && ownerless_runtime_has_no_live_peers(g_runtime);
+    if (g_runtime.ownerless_rw_mode && !no_live_ownerless_shutdown) {
+        static_cast<void>(mylite_ownerless_innodb_refresh_to_latest_external_lsn());
+        std::uint64_t latest_lsn = 0;
+        if (mylite_ownerless_innodb_redo_observe(&latest_lsn) == MYLITE_OWNERLESS_INNODB_LOCK_OK &&
+            latest_lsn != 0U) {
+            const std::uint64_t flush_lsn =
+                std::max(latest_lsn, mylite_ownerless_innodb_current_lsn());
+            mylite_ownerless_innodb_flush_dirty_pages_for_page_writes(flush_lsn);
+        }
+    }
     stage_start_ns = embedded_open_perf_start_ns();
     reclaim_ownerless_page_log_after_native_checkpoint(g_runtime);
     embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_RELEASE_RECLAIM_NS, stage_start_ns);

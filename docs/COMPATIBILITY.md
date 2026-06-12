@@ -731,6 +731,14 @@ Ordinary exclusive read/write reopen with retained ownerless page-version WAL
 or a nonzero ownerless checkpoint-visible boundary also refreshes clean
 process-local InnoDB buffer-pool pages from that boundary before SQL can reuse
 stale pages from an earlier embedded runtime in the same process.
+Ownerless read/write runtime shutdown with live peers, or when no-live status
+cannot be proven, now also refreshes to the latest ownerless external LSN and
+waits for local dirty InnoDB pages through the max of that ownerless LSN and
+the local InnoDB LSN before native teardown. This covers explicit transaction
+stress where a process-local dirty page could otherwise survive until
+`mysql_server_end()` and make native shutdown flush a stale clustered-page
+image after peer commits, while proven no-live final close keeps the existing
+native checkpoint/reclaim path.
 Before a new explicit transaction writes a data/index page, MyLite
 force-refreshes dirty process-local pages left by earlier work under the
 ownerless page-write lock unless the same transaction already modified that
