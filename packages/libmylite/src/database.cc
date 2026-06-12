@@ -5944,14 +5944,14 @@ int store_and_emit_result(
 }
 
 int drain_remaining_query_results(mylite_db &db) {
-    for (;;) {
+    while (mysql_more_results(&db.mysql) != 0) {
         const int next_result = mysql_next_result(&db.mysql);
-        if (next_result < 0) {
-            return MYLITE_OK;
-        }
         if (next_result > 0) {
             set_mariadb_error(db);
             return MYLITE_ERROR;
+        }
+        if (next_result < 0) {
+            return MYLITE_OK;
         }
 
         MYSQL_RES *result = mysql_store_result(&db.mysql);

@@ -14,6 +14,7 @@
 
 typedef struct select_context {
     int rows;
+    const char *expected_label;
 } select_context;
 
 typedef struct metadata_context {
@@ -171,7 +172,11 @@ static void test_stored_procedure_call_callback(void) {
     );
     assert(ctx.rows == 1);
 
+    exec_ok(db, "UPDATE app.stored_values SET label = 'stored-after-call' WHERE id = 7");
+    assert(mylite_changes(db) == 1);
+
     ctx.rows = 0;
+    ctx.expected_label = "stored-after-call";
     assert(
         mylite_exec(
             db,
@@ -289,7 +294,12 @@ static int stored_procedure_callback(
     assert(values[0] != NULL);
     assert(strcmp(values[0], "7") == 0);
     assert(values[1] != NULL);
-    assert(strcmp(values[1], "stored") == 0);
+    assert(
+        strcmp(
+            values[1],
+            select_ctx->expected_label != NULL ? select_ctx->expected_label : "stored"
+        ) == 0
+    );
     ++select_ctx->rows;
     return 0;
 }

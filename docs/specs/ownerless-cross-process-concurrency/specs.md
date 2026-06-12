@@ -4850,7 +4850,14 @@ subsystems that this mode needs:
   probe as the stats-off throughput signal and runs a separate reduced
   stats-enabled ownerless attribution probe under the same `php-embedded-prod`
   production build, including the ordinary-versus-ownerless deep-counter
-  deltas.
+  deltas. A later embedded text-query drain fast path removes a redundant
+  `mysql_next_result()` no-more-results probe from ordinary single-result
+  `mylite_exec()` and `mylite_exec_result()` calls while keeping the
+  `mysql_more_results()`-guarded stored-procedure/multi-result drain path;
+  focused embedded exec, PHP mysqli, ownerless read/commit selectors, and a
+  reduced ownerless stress pass cover the change. This is a broad query
+  plumbing cleanup for WordPress-shaped text SQL, not a replacement for the
+  remaining ownerless redo/checkpoint and page-publication performance work.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.
