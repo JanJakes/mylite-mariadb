@@ -4661,8 +4661,9 @@ subsystems that this mode needs:
   ownerless autocommit probes now also emit per-insert summary keys for
   page-version volume, native-support page ratio, page-publish and page-log
   append time, page-log payload/header byte volume, compact-sparse metadata
-  versus nonzero data bytes for the total, index, and SYS buckets, page-write
-  refresh/publish time, commit-MTR publish time,
+  versus nonzero data bytes for the total, index, and SYS buckets,
+  varint-compact sparse record and byte counts, page-write refresh/publish
+  time, commit-MTR publish time,
   InnoDB write-history time split by ownerless history-page lock, post-wait
   refresh, rollback-segment latch, history-list mutation, write-history MTR
   commit, ownerless rollback-segment-space dirty-page flush, page-type buckets
@@ -4836,7 +4837,18 @@ subsystems that this mode needs:
   `4123.730` data bytes per insert, while the index bucket was roughly split at
   `1086.220` metadata bytes and `1216.060` data bytes per insert. That keeps
   the next write-throughput target on rollback-segment SYS proof representation
-  and user/index page payload rather than compact sparse run metadata. The
+  and user/index page payload rather than compact sparse run metadata. A
+  follow-up varint compact sparse page-log slice reduced the remaining compact
+  metadata by encoding compact sparse run headers as varuint16 gaps and run
+  sizes when that was smaller than the 16-bit compact form. Its reduced 100-row
+  production attribution sample selected the varint format for all `3.020`
+  compact-sparse records per ownerless autocommit insert, reduced page-log
+  payload to `6078.160` bytes per insert, and cut compact-sparse metadata to
+  `642.200` bytes per insert. Index payload fell to `1761.180` bytes per
+  insert with `545.110` metadata bytes and `1216.070` data bytes, while SYS
+  payload remained data-dominated at `4152.270` bytes per insert with only
+  `28.560` metadata bytes. The larger remaining throughput target therefore
+  stays on SYS proof data and remaining user/index nonzero payload. The
   post-boundary production sample before this proof fast path reported stats-off
   ownerless warm open/close at `359.230 ms` versus ordinary `375.478 ms`,
   active-runtime reconnect overhead at `0.211 ms`, ownerless direct/prepared

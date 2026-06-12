@@ -71,9 +71,10 @@ constexpr std::size_t k_record_payload_checksum_offset = 48;
 constexpr std::uint32_t k_record_flag_trailing_zero_payload = 1U;
 constexpr std::uint32_t k_record_flag_sparse_zero_payload = 2U;
 constexpr std::uint32_t k_record_flag_compact_sparse_zero_payload = 4U;
-constexpr std::uint32_t k_record_flags_known_mask = k_record_flag_trailing_zero_payload |
-                                                    k_record_flag_sparse_zero_payload |
-                                                    k_record_flag_compact_sparse_zero_payload;
+constexpr std::uint32_t k_record_flag_varint_compact_sparse_zero_payload = 8U;
+constexpr std::uint32_t k_record_flags_known_mask =
+    k_record_flag_trailing_zero_payload | k_record_flag_sparse_zero_payload |
+    k_record_flag_compact_sparse_zero_payload | k_record_flag_varint_compact_sparse_zero_payload;
 constexpr std::size_t k_innodb_fil_page_type_offset = 24;
 constexpr std::uint16_t k_innodb_fil_page_index = 17855;
 constexpr std::uint16_t k_innodb_fil_page_type_allocated = 0;
@@ -176,6 +177,8 @@ enum PageLogAppendPerfStatIndex : std::size_t {
     PAGE_LOG_APPEND_PERF_BLOB_COMPACT_SPARSE_DATA_BYTES,
     PAGE_LOG_APPEND_PERF_OTHER_COMPACT_SPARSE_METADATA_BYTES,
     PAGE_LOG_APPEND_PERF_OTHER_COMPACT_SPARSE_DATA_BYTES,
+    PAGE_LOG_APPEND_PERF_VARINT_COMPACT_SPARSE_ZERO_RECORDS,
+    PAGE_LOG_APPEND_PERF_VARINT_COMPACT_SPARSE_ZERO_PAYLOAD_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
@@ -455,6 +458,7 @@ std::uint64_t encoded_payload_size_for_page(
 bool record_uses_trailing_zero_payload(const PageRecordHeader &record);
 bool record_uses_sparse_zero_payload(const PageRecordHeader &record);
 bool record_uses_compact_sparse_zero_payload(const PageRecordHeader &record);
+bool record_uses_varint_compact_sparse_zero_payload(const PageRecordHeader &record);
 bool record_uses_any_sparse_zero_payload(const PageRecordHeader &record);
 bool record_payload_shape_valid(const PageRecordHeader &record);
 CompactSparsePayloadComposition compact_sparse_payload_composition(
@@ -500,6 +504,24 @@ bool build_compact_sparse_zero_payload(
     std::vector<unsigned char> *out_payload,
     std::uint64_t *out_trailing_size,
     bool *out_trailing_size_known
+);
+bool build_varint_compact_sparse_zero_payload(
+    const std::vector<unsigned char> &compact_payload,
+    std::vector<unsigned char> *out_payload
+);
+bool append_varuint16(std::vector<unsigned char> *out_payload, std::uint32_t value);
+bool read_varuint16(
+    const unsigned char *payload,
+    std::size_t payload_size,
+    std::size_t *inout_cursor,
+    std::uint32_t *out_value
+);
+bool read_varuint16_at(
+    int fd,
+    off_t payload_offset,
+    std::size_t payload_size,
+    std::size_t *inout_cursor,
+    std::uint32_t *out_value
 );
 PayloadStatus record_payload_status(int fd, off_t payload_offset, const PageRecordHeader &record);
 bool record_requires_oldest_snapshot_boundary(
@@ -2783,7 +2805,17 @@ std::uint64_t encoded_payload_size_for_page(
             trailing_size = compact_trailing_size;
             trailing_size_known = true;
             if (out_payload->size() < trailing_size) {
-                flags |= k_record_flag_compact_sparse_zero_payload;
+                thread_local std::vector<unsigned char> varint_compact_payload;
+                if (build_varint_compact_sparse_zero_payload(
+                        *out_payload,
+                        &varint_compact_payload
+                    ) &&
+                    varint_compact_payload.size() < out_payload->size()) {
+                    out_payload->swap(varint_compact_payload);
+                    flags |= k_record_flag_varint_compact_sparse_zero_payload;
+                } else {
+                    flags |= k_record_flag_compact_sparse_zero_payload;
+                }
                 encoded_size = out_payload->size();
             }
         } else if (compact_trailing_size_known) {
@@ -2977,6 +3009,144 @@ bool build_compact_sparse_zero_payload(
     return true;
 }
 
+bool append_varuint16(std::vector<unsigned char> *out_payload, std::uint32_t value) {
+    if (out_payload == nullptr || value > std::numeric_limits<std::uint16_t>::max()) {
+        return false;
+    }
+    do {
+        unsigned char byte = static_cast<unsigned char>(value & 0x7FU);
+        value >>= 7U;
+        if (value != 0U) {
+            byte = static_cast<unsigned char>(byte | 0x80U);
+        }
+        out_payload->push_back(byte);
+    } while (value != 0U);
+    return true;
+}
+
+bool read_varuint16(
+    const unsigned char *payload,
+    std::size_t payload_size,
+    std::size_t *inout_cursor,
+    std::uint32_t *out_value
+) {
+    if (payload == nullptr || inout_cursor == nullptr || out_value == nullptr) {
+        return false;
+    }
+    std::uint32_t value = 0;
+    std::uint32_t shift = 0;
+    for (unsigned byte_index = 0; byte_index < 3U; ++byte_index) {
+        if (*inout_cursor >= payload_size) {
+            return false;
+        }
+        const unsigned char byte = payload[*inout_cursor];
+        ++(*inout_cursor);
+        value |= static_cast<std::uint32_t>(byte & 0x7FU) << shift;
+        if ((byte & 0x80U) == 0U) {
+            if (value > std::numeric_limits<std::uint16_t>::max()) {
+                return false;
+            }
+            *out_value = value;
+            return true;
+        }
+        shift += 7U;
+    }
+    return false;
+}
+
+bool read_varuint16_at(
+    int fd,
+    off_t payload_offset,
+    std::size_t payload_size,
+    std::size_t *inout_cursor,
+    std::uint32_t *out_value
+) {
+    if (inout_cursor == nullptr || out_value == nullptr) {
+        return false;
+    }
+    std::uint32_t value = 0;
+    std::uint32_t shift = 0;
+    for (unsigned byte_index = 0; byte_index < 3U; ++byte_index) {
+        if (*inout_cursor >= payload_size) {
+            return false;
+        }
+        off_t byte_offset = 0;
+        unsigned char byte = 0;
+        if (!offset_adds(payload_offset, *inout_cursor, &byte_offset) ||
+            !read_exact_at(fd, &byte, sizeof(byte), byte_offset)) {
+            return false;
+        }
+        ++(*inout_cursor);
+        value |= static_cast<std::uint32_t>(byte & 0x7FU) << shift;
+        if ((byte & 0x80U) == 0U) {
+            if (value > std::numeric_limits<std::uint16_t>::max()) {
+                return false;
+            }
+            *out_value = value;
+            return true;
+        }
+        shift += 7U;
+    }
+    return false;
+}
+
+bool build_varint_compact_sparse_zero_payload(
+    const std::vector<unsigned char> &compact_payload,
+    std::vector<unsigned char> *out_payload
+) {
+    if (out_payload == nullptr || compact_payload.size() < sizeof(std::uint16_t)) {
+        return false;
+    }
+    const std::uint16_t run_count = load16(compact_payload.data(), 0U);
+    if (run_count == 0U) {
+        out_payload->clear();
+        return false;
+    }
+
+    out_payload->clear();
+    out_payload->reserve(compact_payload.size());
+    out_payload->resize(sizeof(std::uint16_t));
+    store16(out_payload->data(), 0U, run_count);
+
+    std::size_t cursor = sizeof(std::uint16_t);
+    bool has_previous_run = false;
+    std::uint32_t previous_run_end = 0;
+    for (std::uint32_t run_index = 0; run_index < run_count; ++run_index) {
+        if (cursor + (2U * sizeof(std::uint16_t)) > compact_payload.size()) {
+            out_payload->clear();
+            return false;
+        }
+        const std::uint32_t run_offset = load16(compact_payload.data(), cursor);
+        cursor += sizeof(std::uint16_t);
+        const std::uint32_t run_size = load16(compact_payload.data(), cursor);
+        cursor += sizeof(std::uint16_t);
+        if (run_size == 0U || (has_previous_run && run_offset <= previous_run_end) ||
+            run_offset < previous_run_end || run_size > compact_payload.size() - cursor) {
+            out_payload->clear();
+            return false;
+        }
+
+        if (!append_varuint16(out_payload, run_offset - previous_run_end) ||
+            !append_varuint16(out_payload, run_size)) {
+            out_payload->clear();
+            return false;
+        }
+        out_payload->insert(
+            out_payload->end(),
+            compact_payload.begin() + static_cast<std::ptrdiff_t>(cursor),
+            compact_payload.begin() + static_cast<std::ptrdiff_t>(cursor + run_size)
+        );
+        cursor += run_size;
+        previous_run_end = run_offset + run_size;
+        has_previous_run = true;
+    }
+    if (cursor != compact_payload.size()) {
+        out_payload->clear();
+        return false;
+    }
+    return true;
+}
+
 bool record_uses_trailing_zero_payload(const PageRecordHeader &record) {
     return (record.flags & k_record_flag_trailing_zero_payload) != 0U;
 }
@@ -2989,9 +3159,14 @@ bool record_uses_compact_sparse_zero_payload(const PageRecordHeader &record) {
     return (record.flags & k_record_flag_compact_sparse_zero_payload) != 0U;
 }
 
+bool record_uses_varint_compact_sparse_zero_payload(const PageRecordHeader &record) {
+    return (record.flags & k_record_flag_varint_compact_sparse_zero_payload) != 0U;
+}
+
 bool record_uses_any_sparse_zero_payload(const PageRecordHeader &record) {
     return record_uses_sparse_zero_payload(record) ||
-           record_uses_compact_sparse_zero_payload(record);
+           record_uses_compact_sparse_zero_payload(record) ||
+           record_uses_varint_compact_sparse_zero_payload(record);
 }
 
 CompactSparsePayloadComposition compact_sparse_payload_composition(
@@ -2999,15 +3174,44 @@ CompactSparsePayloadComposition compact_sparse_payload_composition(
     const std::vector<unsigned char> &payload
 ) {
     CompactSparsePayloadComposition composition;
-    if ((flags & k_record_flag_compact_sparse_zero_payload) == 0U ||
-        payload.size() < sizeof(std::uint16_t)) {
+    const bool compact_sparse = (flags & k_record_flag_compact_sparse_zero_payload) != 0U;
+    const bool varint_compact_sparse =
+        (flags & k_record_flag_varint_compact_sparse_zero_payload) != 0U;
+    if ((!compact_sparse && !varint_compact_sparse) || payload.size() < sizeof(std::uint16_t)) {
         return composition;
     }
 
     const std::uint16_t run_count = load16(payload.data(), 0U);
-    const std::uint64_t metadata_bytes =
-        sizeof(std::uint16_t) +
-        (static_cast<std::uint64_t>(run_count) * 2U * sizeof(std::uint16_t));
+    std::uint64_t metadata_bytes = sizeof(std::uint16_t);
+    if (varint_compact_sparse) {
+        std::size_t cursor = sizeof(std::uint16_t);
+        bool has_previous_run = false;
+        std::uint32_t previous_run_end = 0;
+        for (std::uint32_t run_index = 0; run_index < run_count; ++run_index) {
+            const std::size_t metadata_start = cursor;
+            std::uint32_t zero_gap = 0;
+            std::uint32_t run_size = 0;
+            if (!read_varuint16(payload.data(), payload.size(), &cursor, &zero_gap) ||
+                !read_varuint16(payload.data(), payload.size(), &cursor, &run_size) ||
+                previous_run_end > std::numeric_limits<std::uint32_t>::max() - zero_gap) {
+                return composition;
+            }
+            const std::uint32_t run_offset = previous_run_end + zero_gap;
+            if (run_size == 0U || (has_previous_run && run_offset <= previous_run_end) ||
+                run_size > payload.size() - cursor) {
+                return composition;
+            }
+            metadata_bytes += cursor - metadata_start;
+            cursor += run_size;
+            previous_run_end = run_offset + run_size;
+            has_previous_run = true;
+        }
+        if (cursor != payload.size()) {
+            return composition;
+        }
+    } else {
+        metadata_bytes += static_cast<std::uint64_t>(run_count) * 2U * sizeof(std::uint16_t);
+    }
     if (metadata_bytes > payload.size()) {
         return composition;
     }
@@ -3027,17 +3231,28 @@ CompactSparsePayloadComposition record_append_payload_encoding_stats(
     if (!page_log_append_perf_stats_are_enabled()) {
         return compact_sparse;
     }
-    if ((flags & (k_record_flag_sparse_zero_payload | k_record_flag_compact_sparse_zero_payload)) !=
-        0U) {
+    if ((flags & (k_record_flag_sparse_zero_payload | k_record_flag_compact_sparse_zero_payload |
+                  k_record_flag_varint_compact_sparse_zero_payload)) != 0U) {
         page_log_append_perf_add(PAGE_LOG_APPEND_PERF_SPARSE_ZERO_RECORDS, 1U);
         page_log_append_perf_add(PAGE_LOG_APPEND_PERF_SPARSE_ZERO_PAYLOAD_BYTES, payload_size);
-        if ((flags & k_record_flag_compact_sparse_zero_payload) != 0U) {
+        if ((flags & (k_record_flag_compact_sparse_zero_payload |
+                      k_record_flag_varint_compact_sparse_zero_payload)) != 0U) {
             compact_sparse = compact_sparse_payload_composition(flags, payload);
             page_log_append_perf_add(PAGE_LOG_APPEND_PERF_COMPACT_SPARSE_ZERO_RECORDS, 1U);
             page_log_append_perf_add(
                 PAGE_LOG_APPEND_PERF_COMPACT_SPARSE_ZERO_PAYLOAD_BYTES,
                 payload_size
             );
+            if ((flags & k_record_flag_varint_compact_sparse_zero_payload) != 0U) {
+                page_log_append_perf_add(
+                    PAGE_LOG_APPEND_PERF_VARINT_COMPACT_SPARSE_ZERO_RECORDS,
+                    1U
+                );
+                page_log_append_perf_add(
+                    PAGE_LOG_APPEND_PERF_VARINT_COMPACT_SPARSE_ZERO_PAYLOAD_BYTES,
+                    payload_size
+                );
+            }
             if (compact_sparse.valid) {
                 page_log_append_perf_add(
                     PAGE_LOG_APPEND_PERF_COMPACT_SPARSE_METADATA_BYTES,
@@ -3143,7 +3358,8 @@ bool record_payload_shape_valid(const PageRecordHeader &record) {
     }
     const std::uint32_t encoding_flags =
         record.flags & (k_record_flag_trailing_zero_payload | k_record_flag_sparse_zero_payload |
-                        k_record_flag_compact_sparse_zero_payload);
+                        k_record_flag_compact_sparse_zero_payload |
+                        k_record_flag_varint_compact_sparse_zero_payload);
     if ((encoding_flags & (encoding_flags - 1U)) != 0U) {
         return false;
     }
@@ -3152,6 +3368,10 @@ bool record_payload_shape_valid(const PageRecordHeader &record) {
                record.payload_size < record.page_size;
     }
     if (record_uses_compact_sparse_zero_payload(record)) {
+        return record.payload_size >= sizeof(std::uint16_t) &&
+               record.payload_size < record.page_size;
+    }
+    if (record_uses_varint_compact_sparse_zero_payload(record)) {
         return record.payload_size >= sizeof(std::uint16_t) &&
                record.payload_size < record.page_size;
     }
@@ -3185,8 +3405,10 @@ bool read_record_page_payload(
     const std::size_t payload_size = static_cast<std::size_t>(record.payload_size);
     if (record_uses_any_sparse_zero_payload(record)) {
         const bool compact_sparse = record_uses_compact_sparse_zero_payload(record);
-        const std::size_t run_count_size =
-            compact_sparse ? sizeof(std::uint16_t) : sizeof(std::uint32_t);
+        const bool varint_compact_sparse = record_uses_varint_compact_sparse_zero_payload(record);
+        const std::size_t run_count_size = (compact_sparse || varint_compact_sparse)
+                                               ? sizeof(std::uint16_t)
+                                               : sizeof(std::uint32_t);
         const std::size_t run_header_size =
             compact_sparse ? 2U * sizeof(std::uint16_t) : 2U * sizeof(std::uint32_t);
         std::unique_ptr<unsigned char[]> payload(new (std::nothrow) unsigned char[payload_size]);
@@ -3197,8 +3419,9 @@ bool read_record_page_payload(
         if (payload_size < run_count_size) {
             return false;
         }
-        const std::uint32_t run_count =
-            compact_sparse ? load16(payload.get(), 0U) : load32(payload.get(), 0U);
+        const std::uint32_t run_count = (compact_sparse || varint_compact_sparse)
+                                            ? load16(payload.get(), 0U)
+                                            : load32(payload.get(), 0U);
         if (run_count == 0U) {
             return false;
         }
@@ -3206,15 +3429,27 @@ bool read_record_page_payload(
         bool has_previous_run = false;
         std::uint32_t previous_run_end = 0;
         for (std::uint32_t run_index = 0; run_index < run_count; ++run_index) {
-            if (cursor + run_header_size > payload_size) {
+            if (!varint_compact_sparse && cursor + run_header_size > payload_size) {
                 return false;
             }
-            const std::uint32_t run_offset =
-                compact_sparse ? load16(payload.get(), cursor) : load32(payload.get(), cursor);
-            cursor += run_header_size / 2U;
-            const std::uint32_t run_size =
-                compact_sparse ? load16(payload.get(), cursor) : load32(payload.get(), cursor);
-            cursor += run_header_size / 2U;
+            std::uint32_t run_offset = 0;
+            std::uint32_t run_size = 0;
+            if (varint_compact_sparse) {
+                std::uint32_t zero_gap = 0;
+                if (!read_varuint16(payload.get(), payload_size, &cursor, &zero_gap) ||
+                    !read_varuint16(payload.get(), payload_size, &cursor, &run_size) ||
+                    previous_run_end > std::numeric_limits<std::uint32_t>::max() - zero_gap) {
+                    return false;
+                }
+                run_offset = previous_run_end + zero_gap;
+            } else {
+                run_offset =
+                    compact_sparse ? load16(payload.get(), cursor) : load32(payload.get(), cursor);
+                cursor += run_header_size / 2U;
+                run_size =
+                    compact_sparse ? load16(payload.get(), cursor) : load32(payload.get(), cursor);
+                cursor += run_header_size / 2U;
+            }
             if (run_size == 0U || (has_previous_run && run_offset <= previous_run_end) ||
                 run_offset > record.page_size || run_size > record.page_size - run_offset ||
                 run_size > payload_size - cursor) {
@@ -3265,8 +3500,10 @@ bool read_record_page_type(
 
     if (record_uses_any_sparse_zero_payload(record)) {
         const bool compact_sparse = record_uses_compact_sparse_zero_payload(record);
-        const std::size_t run_count_size =
-            compact_sparse ? sizeof(std::uint16_t) : sizeof(std::uint32_t);
+        const bool varint_compact_sparse = record_uses_varint_compact_sparse_zero_payload(record);
+        const std::size_t run_count_size = (compact_sparse || varint_compact_sparse)
+                                               ? sizeof(std::uint16_t)
+                                               : sizeof(std::uint32_t);
         const std::size_t run_header_size =
             compact_sparse ? 2U * sizeof(std::uint16_t) : 2U * sizeof(std::uint32_t);
         unsigned char run_count_bytes[sizeof(std::uint32_t)] = {};
@@ -3276,8 +3513,9 @@ bool read_record_page_type(
         if (payload_size < run_count_size) {
             return false;
         }
-        const std::uint32_t run_count =
-            compact_sparse ? load16(run_count_bytes, 0U) : load32(run_count_bytes, 0U);
+        const std::uint32_t run_count = (compact_sparse || varint_compact_sparse)
+                                            ? load16(run_count_bytes, 0U)
+                                            : load32(run_count_bytes, 0U);
         if (run_count == 0U) {
             return false;
         }
@@ -3285,21 +3523,31 @@ bool read_record_page_type(
         bool has_previous_run = false;
         std::uint32_t previous_run_end = 0;
         for (std::uint32_t run_index = 0; run_index < run_count; ++run_index) {
-            if (cursor + run_header_size > payload_size) {
+            if (!varint_compact_sparse && cursor + run_header_size > payload_size) {
                 return false;
             }
-            off_t run_header_offset = 0;
-            unsigned char run_header[2U * sizeof(std::uint32_t)] = {};
-            if (!offset_adds(payload_offset, cursor, &run_header_offset) ||
-                !read_exact_at(fd, run_header, run_header_size, run_header_offset)) {
-                return false;
+            std::uint32_t run_offset = 0;
+            std::uint32_t run_size = 0;
+            if (varint_compact_sparse) {
+                std::uint32_t zero_gap = 0;
+                if (!read_varuint16_at(fd, payload_offset, payload_size, &cursor, &zero_gap) ||
+                    !read_varuint16_at(fd, payload_offset, payload_size, &cursor, &run_size) ||
+                    previous_run_end > std::numeric_limits<std::uint32_t>::max() - zero_gap) {
+                    return false;
+                }
+                run_offset = previous_run_end + zero_gap;
+            } else {
+                off_t run_header_offset = 0;
+                unsigned char run_header[2U * sizeof(std::uint32_t)] = {};
+                if (!offset_adds(payload_offset, cursor, &run_header_offset) ||
+                    !read_exact_at(fd, run_header, run_header_size, run_header_offset)) {
+                    return false;
+                }
+                run_offset = compact_sparse ? load16(run_header, 0U) : load32(run_header, 0U);
+                run_size = compact_sparse ? load16(run_header, sizeof(std::uint16_t))
+                                          : load32(run_header, sizeof(std::uint32_t));
+                cursor += run_header_size;
             }
-            const std::uint32_t run_offset =
-                compact_sparse ? load16(run_header, 0U) : load32(run_header, 0U);
-            const std::uint32_t run_size = compact_sparse
-                                               ? load16(run_header, sizeof(std::uint16_t))
-                                               : load32(run_header, sizeof(std::uint32_t));
-            cursor += run_header_size;
             if (run_size == 0U || (has_previous_run && run_offset <= previous_run_end) ||
                 run_offset > record.page_size || run_size > record.page_size - run_offset ||
                 run_size > payload_size - cursor) {

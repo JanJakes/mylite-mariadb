@@ -657,6 +657,18 @@ metadata bytes and `1216.060` data bytes per insert. The next write-throughput
 target is therefore the rollback-segment SYS proof representation and
 user/index page payload; the undo-header proof page and compact sparse run
 metadata are not the primary byte-volume drivers in the simple insert sample.
+A follow-up varint compact sparse page-log slice keeps the same page-version
+record header and checksum contract but encodes compact sparse run metadata as
+varuint16 gaps and run sizes when that is smaller than the 16-bit compact
+header. Its reduced 100-row production attribution sample selected the varint
+format for all `3.020` compact-sparse records per ownerless autocommit insert,
+cutting page-log payload to `6078.160` bytes per insert and compact-sparse
+metadata to `642.200` bytes per insert. Index payload fell to `1761.180` bytes
+per insert with `545.110` metadata bytes and `1216.070` data bytes, while SYS
+payload remained data-dominated at `4152.270` bytes per insert with only
+`28.560` metadata bytes. This is a useful page-log byte reduction, but the
+next larger write-throughput target remains the rollback-segment SYS proof data
+and remaining user/index nonzero payload.
 Ownerless page-version reads now validate the WAL tail after a direct
 page-index hit because the shared page index is an acceleration cache updated
 after the append stream, not an authoritative visibility boundary by itself.

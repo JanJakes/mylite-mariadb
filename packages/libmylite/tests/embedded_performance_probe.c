@@ -545,6 +545,8 @@ enum page_log_append_perf_stat_index {
     PAGE_LOG_APPEND_PERF_STAT_BLOB_COMPACT_SPARSE_DATA_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_OTHER_COMPACT_SPARSE_METADATA_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_OTHER_COMPACT_SPARSE_DATA_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_VARINT_COMPACT_SPARSE_ZERO_RECORDS,
+    PAGE_LOG_APPEND_PERF_STAT_VARINT_COMPACT_SPARSE_ZERO_PAYLOAD_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
@@ -2987,6 +2989,19 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         "mylite_perf_summary_ownerless_autocommit_page_log_compact_sparse_zero_payload_bytes_per_"
         "insert",
         page_log_append[PAGE_LOG_APPEND_PERF_STAT_COMPACT_SPARSE_ZERO_PAYLOAD_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_varint_compact_sparse_zero_records_per_"
+        "insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_VARINT_COMPACT_SPARSE_ZERO_RECORDS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_varint_compact_sparse_zero_payload_"
+        "bytes_"
+        "per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_VARINT_COMPACT_SPARSE_ZERO_PAYLOAD_BYTES],
         insert_iterations
     );
     emit_summary_count_per_iteration(
@@ -6361,6 +6376,16 @@ static void emit_page_log_append_perf_stats(const char *prefix) {
         prefix,
         "compact_sparse_zero_payload",
         values[PAGE_LOG_APPEND_PERF_STAT_COMPACT_SPARSE_ZERO_PAYLOAD_BYTES]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "varint_compact_sparse_zero_records",
+        values[PAGE_LOG_APPEND_PERF_STAT_VARINT_COMPACT_SPARSE_ZERO_RECORDS]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "varint_compact_sparse_zero_payload",
+        values[PAGE_LOG_APPEND_PERF_STAT_VARINT_COMPACT_SPARSE_ZERO_PAYLOAD_BYTES]
     );
     emit_page_log_append_perf_bytes(
         prefix,
