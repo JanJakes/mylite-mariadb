@@ -1913,8 +1913,11 @@ Tasks:
    monotonically from that durable record, so shared-memory rebuild or stale
    clean shared memory cannot reset peer redo/page-visibility progress to zero.
    Page-visible publication now first durably syncs the page-version WAL under a
-   safe serialized sync point. The redo segment bookkeeping now lives in a
-   first-party primitive that owns latch/refcount handling, latest/visible LSN
+   safe serialized sync point, and the stats-enabled performance probe splits
+   that visible-anchor path into page-log sync lock/header/data-sync costs plus
+   durable `.ckpt` update lock/read/write/data-sync costs before any later
+   batching or deferral is considered. The redo segment bookkeeping now lives
+   in a first-party primitive that owns latch/refcount handling, latest/visible LSN
    publication, reserved-LSN counters, contiguous written-LSN tracking,
    coalescing for out-of-order completed ranges, snapshot reads, and dead-owner
    cleanup; the InnoDB mini-transaction append path now reserves its redo byte

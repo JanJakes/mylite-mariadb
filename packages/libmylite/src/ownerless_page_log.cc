@@ -169,10 +169,21 @@ enum PageLogScanPerfStatIndex : std::size_t {
     PAGE_LOG_SCAN_PERF_STAT_COUNT
 };
 
+enum PageLogSyncPerfStatIndex : std::size_t {
+    PAGE_LOG_SYNC_PERF_CALLS = 0,
+    PAGE_LOG_SYNC_PERF_TOTAL_NS,
+    PAGE_LOG_SYNC_PERF_LOCK_NS,
+    PAGE_LOG_SYNC_PERF_HEADER_NS,
+    PAGE_LOG_SYNC_PERF_DATA_SYNC_NS,
+    PAGE_LOG_SYNC_PERF_STAT_COUNT
+};
+
 std::atomic<bool> page_log_append_perf_stats_enabled{false};
 std::atomic<std::uint64_t> page_log_append_perf_stats[PAGE_LOG_APPEND_PERF_STAT_COUNT];
 std::atomic<bool> page_log_scan_perf_stats_enabled{false};
 std::atomic<std::uint64_t> page_log_scan_perf_stats[PAGE_LOG_SCAN_PERF_STAT_COUNT];
+std::atomic<bool> page_log_sync_perf_stats_enabled{false};
+std::atomic<std::uint64_t> page_log_sync_perf_stats[PAGE_LOG_SYNC_PERF_STAT_COUNT];
 
 bool page_log_append_perf_stats_are_enabled() {
     return page_log_append_perf_stats_enabled.load(std::memory_order_relaxed);
@@ -180,6 +191,10 @@ bool page_log_append_perf_stats_are_enabled() {
 
 bool page_log_scan_perf_stats_are_enabled() {
     return page_log_scan_perf_stats_enabled.load(std::memory_order_relaxed);
+}
+
+bool page_log_sync_perf_stats_are_enabled() {
+    return page_log_sync_perf_stats_enabled.load(std::memory_order_relaxed);
 }
 
 std::uint64_t page_log_append_perf_now_ns() {
@@ -207,6 +222,18 @@ void page_log_append_perf_add_elapsed(PageLogAppendPerfStatIndex index, std::uin
     }
 }
 
+void page_log_sync_perf_add(PageLogSyncPerfStatIndex index, std::uint64_t value) {
+    if (page_log_sync_perf_stats_are_enabled()) {
+        page_log_sync_perf_stats[index].fetch_add(value, std::memory_order_relaxed);
+    }
+}
+
+void page_log_sync_perf_add_elapsed(PageLogSyncPerfStatIndex index, std::uint64_t start_ns) {
+    if (start_ns != 0U) {
+        page_log_sync_perf_add(index, page_log_append_perf_now_ns() - start_ns);
+    }
+}
+
 class PageLogAppendPerfScope {
   public:
     explicit PageLogAppendPerfScope(PageLogAppendPerfStatIndex index)
@@ -223,6 +250,24 @@ class PageLogAppendPerfScope {
 
   private:
     PageLogAppendPerfStatIndex index_;
+    std::uint64_t start_ns_;
+};
+
+class PageLogSyncPerfScope {
+  public:
+    explicit PageLogSyncPerfScope(PageLogSyncPerfStatIndex index)
+        : index_(index),
+          start_ns_(page_log_sync_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U) {}
+
+    ~PageLogSyncPerfScope() {
+        page_log_sync_perf_add_elapsed(index_, start_ns_);
+    }
+
+    PageLogSyncPerfScope(const PageLogSyncPerfScope &) = delete;
+    PageLogSyncPerfScope &operator=(const PageLogSyncPerfScope &) = delete;
+
+  private:
+    PageLogSyncPerfStatIndex index_;
     std::uint64_t start_ns_;
 };
 
@@ -490,6 +535,30 @@ extern "C" void mylite_ownerless_page_log_read_scan_perf_stats(
     }
 }
 
+extern "C" void mylite_ownerless_page_log_set_sync_perf_stats_enabled(int enabled) {
+    page_log_sync_perf_stats_enabled.store(enabled != 0, std::memory_order_relaxed);
+}
+
+extern "C" void mylite_ownerless_page_log_reset_sync_perf_stats(void) {
+    for (std::size_t i = 0; i < PAGE_LOG_SYNC_PERF_STAT_COUNT; ++i) {
+        page_log_sync_perf_stats[i].store(0, std::memory_order_relaxed);
+    }
+}
+
+extern "C" void mylite_ownerless_page_log_read_sync_perf_stats(
+    std::uint64_t *out_values,
+    std::size_t value_count
+) {
+    if (out_values == nullptr || value_count == 0U) {
+        return;
+    }
+    const std::size_t copy_count =
+        value_count < PAGE_LOG_SYNC_PERF_STAT_COUNT ? value_count : PAGE_LOG_SYNC_PERF_STAT_COUNT;
+    for (std::size_t i = 0; i < copy_count; ++i) {
+        out_values[i] = page_log_sync_perf_stats[i].load(std::memory_order_relaxed);
+    }
+}
+
 int mylite_ownerless_page_log_initialize(int fd) {
     return mylite_ownerless_page_log_initialize_at(fd, 0U);
 }
@@ -563,22 +632,33 @@ int append_at_common(
 }
 
 int sync_at_common(int fd, std::uint64_t log_offset, bool validate_header) {
+    PageLogSyncPerfScope total_scope(PAGE_LOG_SYNC_PERF_TOTAL_NS);
+    page_log_sync_perf_add(PAGE_LOG_SYNC_PERF_CALLS, 1U);
     if (fd < 0) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
     if (log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
+    std::uint64_t stage_start_ns =
+        page_log_sync_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
     if (!acquire_snapshot_lock(fd)) {
+        page_log_sync_perf_add_elapsed(PAGE_LOG_SYNC_PERF_LOCK_NS, stage_start_ns);
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
+    page_log_sync_perf_add_elapsed(PAGE_LOG_SYNC_PERF_LOCK_NS, stage_start_ns);
 
     const auto offset = static_cast<off_t>(log_offset);
+    stage_start_ns = page_log_sync_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
     int result = validate_header ? validate_existing_header(fd, offset)
                                  : validate_existing_header_size(fd, offset);
+    page_log_sync_perf_add_elapsed(PAGE_LOG_SYNC_PERF_HEADER_NS, stage_start_ns);
     if (result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        stage_start_ns =
+            page_log_sync_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
         result =
             sync_file_data(fd) ? MYLITE_OWNERLESS_PAGE_LOG_OK : MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+        page_log_sync_perf_add_elapsed(PAGE_LOG_SYNC_PERF_DATA_SYNC_NS, stage_start_ns);
     }
 
     release_log_lock(fd, k_append_lock_start);

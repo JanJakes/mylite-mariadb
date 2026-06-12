@@ -71,6 +71,12 @@ enum OwnerlessDatabasePerfStatIndex : std::size_t {
     OWNERLESS_DATABASE_PERF_PAGES_VISIBLE_SYNC_NS,
     OWNERLESS_DATABASE_PERF_PAGES_VISIBLE_REDO_STATE_NS,
     OWNERLESS_DATABASE_PERF_PAGES_VISIBLE_CHECKPOINT_NS,
+    OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_CALLS,
+    OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_TOTAL_NS,
+    OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_LOCK_NS,
+    OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_READ_NS,
+    OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_WRITE_NS,
+    OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_SYNC_NS,
     OWNERLESS_DATABASE_PERF_TABLE_LOCK_ACQUIRE_CALLS,
     OWNERLESS_DATABASE_PERF_TABLE_LOCK_ACQUIRE_NS,
     OWNERLESS_DATABASE_PERF_TABLE_LOCK_RELEASE_CALLS,
@@ -14969,21 +14975,39 @@ bool update_concurrency_checkpoint_lsn(
     std::uint64_t visible_lsn,
     bool durable
 ) {
+    OwnerlessDatabasePerfScope perf_scope(OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_TOTAL_NS);
+    ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_CALLS, 1U);
     if (checkpoint_fd < 0 || (latest_lsn == 0U && visible_lsn == 0U)) {
         return false;
     }
+    std::uint64_t stage_start_ns =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     if (!acquire_fd_write_lock(
             checkpoint_fd,
             k_concurrency_checkpoint_lock_start,
             k_concurrency_checkpoint_lock_length
         )) {
+        ownerless_database_perf_add_elapsed(
+            OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_LOCK_NS,
+            stage_start_ns
+        );
         return false;
     }
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_LOCK_NS,
+        stage_start_ns
+    );
 
     std::uint64_t current_latest_lsn = 0;
     std::uint64_t current_visible_lsn = 0;
+    stage_start_ns =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     bool ok =
         read_concurrency_checkpoint_lsn(checkpoint_fd, &current_latest_lsn, &current_visible_lsn);
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_READ_NS,
+        stage_start_ns
+    );
     if (ok) {
         latest_lsn = std::max(latest_lsn, current_latest_lsn);
         visible_lsn = std::max(visible_lsn, current_visible_lsn);
@@ -14993,13 +15017,27 @@ bool update_concurrency_checkpoint_lsn(
         std::array<unsigned char, 16> payload = {};
         store_le64(payload.data(), 0U, latest_lsn);
         store_le64(payload.data(), sizeof(std::uint64_t), visible_lsn);
+        stage_start_ns =
+            ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
         ok = write_exact_at(
-                 checkpoint_fd,
-                 payload.data(),
-                 payload.size(),
-                 static_cast<off_t>(k_concurrency_checkpoint_latest_lsn_offset)
-             ) &&
-             (!durable || sync_fd_data(checkpoint_fd));
+            checkpoint_fd,
+            payload.data(),
+            payload.size(),
+            static_cast<off_t>(k_concurrency_checkpoint_latest_lsn_offset)
+        );
+        ownerless_database_perf_add_elapsed(
+            OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_WRITE_NS,
+            stage_start_ns
+        );
+        if (ok && durable) {
+            stage_start_ns =
+                ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
+            ok = sync_fd_data(checkpoint_fd);
+            ownerless_database_perf_add_elapsed(
+                OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_SYNC_NS,
+                stage_start_ns
+            );
+        }
     }
 
     release_fd_lock(

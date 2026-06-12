@@ -132,6 +132,12 @@ enum database_perf_stat_index {
     DATABASE_PERF_STAT_PAGES_VISIBLE_SYNC_NS,
     DATABASE_PERF_STAT_PAGES_VISIBLE_REDO_STATE_NS,
     DATABASE_PERF_STAT_PAGES_VISIBLE_CHECKPOINT_NS,
+    DATABASE_PERF_STAT_CHECKPOINT_UPDATE_CALLS,
+    DATABASE_PERF_STAT_CHECKPOINT_UPDATE_TOTAL_NS,
+    DATABASE_PERF_STAT_CHECKPOINT_UPDATE_LOCK_NS,
+    DATABASE_PERF_STAT_CHECKPOINT_UPDATE_READ_NS,
+    DATABASE_PERF_STAT_CHECKPOINT_UPDATE_WRITE_NS,
+    DATABASE_PERF_STAT_CHECKPOINT_UPDATE_SYNC_NS,
     DATABASE_PERF_STAT_TABLE_LOCK_ACQUIRE_CALLS,
     DATABASE_PERF_STAT_TABLE_LOCK_ACQUIRE_NS,
     DATABASE_PERF_STAT_TABLE_LOCK_RELEASE_CALLS,
@@ -537,6 +543,15 @@ enum page_log_scan_perf_stat_index {
     PAGE_LOG_SCAN_PERF_STAT_COUNT
 };
 
+enum page_log_sync_perf_stat_index {
+    PAGE_LOG_SYNC_PERF_STAT_CALLS = 0,
+    PAGE_LOG_SYNC_PERF_STAT_TOTAL_NS,
+    PAGE_LOG_SYNC_PERF_STAT_LOCK_NS,
+    PAGE_LOG_SYNC_PERF_STAT_HEADER_NS,
+    PAGE_LOG_SYNC_PERF_STAT_DATA_SYNC_NS,
+    PAGE_LOG_SYNC_PERF_STAT_COUNT
+};
+
 enum embedded_open_perf_stat_index {
     EMBEDDED_OPEN_PERF_OPEN_CALLS = 0,
     EMBEDDED_OPEN_PERF_OPEN_TOTAL_NS,
@@ -622,6 +637,9 @@ void mylite_ownerless_page_log_read_append_perf_stats(uint64_t *out_values, size
 void mylite_ownerless_page_log_set_scan_perf_stats_enabled(int enabled);
 void mylite_ownerless_page_log_reset_scan_perf_stats(void);
 void mylite_ownerless_page_log_read_scan_perf_stats(uint64_t *out_values, size_t value_count);
+void mylite_ownerless_page_log_set_sync_perf_stats_enabled(int enabled);
+void mylite_ownerless_page_log_reset_sync_perf_stats(void);
+void mylite_ownerless_page_log_read_sync_perf_stats(uint64_t *out_values, size_t value_count);
 void mylite_ownerless_sql_handler_set_perf_stats_enabled(int enabled);
 void mylite_ownerless_sql_handler_reset_perf_stats(void);
 void mylite_ownerless_sql_handler_read_perf_stats(uint64_t *out_values, size_t value_count);
@@ -691,6 +709,7 @@ static void emit_innodb_handler_perf_stats(const char *prefix);
 static void emit_innodb_deep_perf_stats(const char *prefix);
 static void emit_page_log_append_perf_stats(const char *prefix);
 static void emit_page_log_scan_perf_stats(const char *prefix);
+static void emit_page_log_sync_perf_stats(const char *prefix);
 static void check_max_ms(const char *env_name, double seconds, unsigned iterations);
 static void check_min_rate(const char *env_name, double rate);
 static mylite_db *open_database(
@@ -916,6 +935,7 @@ int main(void) {
         mylite_ownerless_database_set_perf_stats_enabled(1);
         mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
         mylite_ownerless_page_log_set_scan_perf_stats_enabled(1);
+        mylite_ownerless_page_log_set_sync_perf_stats_enabled(1);
         mylite_ownerless_sql_handler_set_perf_stats_enabled(1);
         mylite_ownerless_innodb_handler_set_perf_stats_enabled(1);
         mylite_ownerless_innodb_deep_set_perf_stats_enabled(1);
@@ -939,6 +959,7 @@ int main(void) {
         emit_page_write_refresh_stats("mylite_perf_ownerless_insert_txn");
         emit_page_log_append_perf_stats("mylite_perf_ownerless_insert_txn");
         emit_page_log_scan_perf_stats("mylite_perf_ownerless_insert_txn");
+        emit_page_log_sync_perf_stats("mylite_perf_ownerless_insert_txn");
     }
     ownerless_insert_txn_rate = operations_per_second(insert_iterations, seconds);
     rate = ownerless_insert_txn_rate;
@@ -966,6 +987,7 @@ int main(void) {
         emit_page_write_refresh_stats("mylite_perf_ownerless_insert_autocommit");
         emit_page_log_append_perf_stats("mylite_perf_ownerless_insert_autocommit");
         emit_page_log_scan_perf_stats("mylite_perf_ownerless_insert_autocommit");
+        emit_page_log_sync_perf_stats("mylite_perf_ownerless_insert_autocommit");
         emit_ownerless_autocommit_phase_summary(insert_iterations);
         emit_autocommit_deep_comparison_summary(
             ordinary_autocommit_innodb_deep,
@@ -979,6 +1001,7 @@ int main(void) {
         mylite_ownerless_database_set_perf_stats_enabled(0);
         mylite_ownerless_page_log_set_append_perf_stats_enabled(0);
         mylite_ownerless_page_log_set_scan_perf_stats_enabled(0);
+        mylite_ownerless_page_log_set_sync_perf_stats_enabled(0);
         mylite_ownerless_sql_handler_set_perf_stats_enabled(0);
         mylite_ownerless_innodb_handler_set_perf_stats_enabled(0);
         mylite_ownerless_innodb_deep_set_perf_stats_enabled(0);
@@ -2361,6 +2384,7 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
     uint64_t database_perf[DATABASE_PERF_STAT_COUNT] = {0};
     uint64_t page_write[PAGE_WRITE_PERF_STAT_COUNT] = {0};
     uint64_t page_log_append[PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
+    uint64_t page_log_sync[PAGE_LOG_SYNC_PERF_STAT_COUNT] = {0};
     uint64_t innodb_deep[INNODB_DEEP_PERF_STAT_COUNT] = {0};
     uint64_t page_publish_extra_hook_calls;
     uint64_t ownerless_flush_pages;
@@ -2377,6 +2401,7 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         page_log_append,
         PAGE_LOG_APPEND_PERF_STAT_COUNT
     );
+    mylite_ownerless_page_log_read_sync_perf_stats(page_log_sync, PAGE_LOG_SYNC_PERF_STAT_COUNT);
     mylite_ownerless_innodb_deep_read_perf_stats(innodb_deep, INNODB_DEEP_PERF_STAT_COUNT);
     ownerless_flush_pages =
         innodb_deep[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES];
@@ -2744,6 +2769,81 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
     emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_page_log_append_calls_per_insert",
         page_log_append[PAGE_LOG_APPEND_PERF_STAT_CALLS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_visible_hook_ms_per_insert",
+        database_perf[DATABASE_PERF_STAT_PAGES_VISIBLE_TOTAL_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_visible_page_log_sync_ms_per_insert",
+        database_perf[DATABASE_PERF_STAT_PAGES_VISIBLE_SYNC_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_visible_redo_state_ms_per_insert",
+        database_perf[DATABASE_PERF_STAT_PAGES_VISIBLE_REDO_STATE_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_visible_checkpoint_ms_per_insert",
+        database_perf[DATABASE_PERF_STAT_PAGES_VISIBLE_CHECKPOINT_NS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_visible_page_log_sync_calls_per_insert",
+        page_log_sync[PAGE_LOG_SYNC_PERF_STAT_CALLS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_visible_page_log_sync_total_ms_per_insert",
+        page_log_sync[PAGE_LOG_SYNC_PERF_STAT_TOTAL_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_visible_page_log_sync_lock_ms_per_insert",
+        page_log_sync[PAGE_LOG_SYNC_PERF_STAT_LOCK_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_visible_page_log_sync_header_ms_per_insert",
+        page_log_sync[PAGE_LOG_SYNC_PERF_STAT_HEADER_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_visible_page_log_sync_data_sync_ms_per_insert",
+        page_log_sync[PAGE_LOG_SYNC_PERF_STAT_DATA_SYNC_NS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_checkpoint_update_calls_per_insert",
+        database_perf[DATABASE_PERF_STAT_CHECKPOINT_UPDATE_CALLS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_checkpoint_update_total_ms_per_insert",
+        database_perf[DATABASE_PERF_STAT_CHECKPOINT_UPDATE_TOTAL_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_checkpoint_update_lock_ms_per_insert",
+        database_perf[DATABASE_PERF_STAT_CHECKPOINT_UPDATE_LOCK_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_checkpoint_update_read_ms_per_insert",
+        database_perf[DATABASE_PERF_STAT_CHECKPOINT_UPDATE_READ_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_checkpoint_update_write_ms_per_insert",
+        database_perf[DATABASE_PERF_STAT_CHECKPOINT_UPDATE_WRITE_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_checkpoint_update_sync_ms_per_insert",
+        database_perf[DATABASE_PERF_STAT_CHECKPOINT_UPDATE_SYNC_NS],
         insert_iterations
     );
     emit_summary_count_per_iteration(
@@ -3903,6 +4003,36 @@ static void emit_database_perf_stats(const char *prefix) {
         "%s_pages_visible_hook_checkpoint_ms=%.3f\n",
         prefix,
         (double)values[DATABASE_PERF_STAT_PAGES_VISIBLE_CHECKPOINT_NS] / 1000000.0
+    );
+    printf(
+        "%s_checkpoint_update_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_CHECKPOINT_UPDATE_CALLS]
+    );
+    printf(
+        "%s_checkpoint_update_total_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_CHECKPOINT_UPDATE_TOTAL_NS] / 1000000.0
+    );
+    printf(
+        "%s_checkpoint_update_lock_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_CHECKPOINT_UPDATE_LOCK_NS] / 1000000.0
+    );
+    printf(
+        "%s_checkpoint_update_read_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_CHECKPOINT_UPDATE_READ_NS] / 1000000.0
+    );
+    printf(
+        "%s_checkpoint_update_write_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_CHECKPOINT_UPDATE_WRITE_NS] / 1000000.0
+    );
+    printf(
+        "%s_checkpoint_update_sync_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_CHECKPOINT_UPDATE_SYNC_NS] / 1000000.0
     );
     printf(
         "%s_table_lock_acquire_calls=%" PRIu64 "\n",
@@ -6270,6 +6400,33 @@ static void emit_page_log_scan_perf_stats(const char *prefix) {
     printf("%s_page_log_scan_errors=%" PRIu64 "\n", prefix, values[PAGE_LOG_SCAN_PERF_STAT_ERRORS]);
 }
 
+static void emit_page_log_sync_perf_stats(const char *prefix) {
+    uint64_t values[PAGE_LOG_SYNC_PERF_STAT_COUNT] = {0};
+
+    mylite_ownerless_page_log_read_sync_perf_stats(values, PAGE_LOG_SYNC_PERF_STAT_COUNT);
+    printf("%s_page_log_sync_calls=%" PRIu64 "\n", prefix, values[PAGE_LOG_SYNC_PERF_STAT_CALLS]);
+    printf(
+        "%s_page_log_sync_total_ms=%.3f\n",
+        prefix,
+        (double)values[PAGE_LOG_SYNC_PERF_STAT_TOTAL_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_log_sync_lock_ms=%.3f\n",
+        prefix,
+        (double)values[PAGE_LOG_SYNC_PERF_STAT_LOCK_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_log_sync_header_ms=%.3f\n",
+        prefix,
+        (double)values[PAGE_LOG_SYNC_PERF_STAT_HEADER_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_log_sync_data_sync_ms=%.3f\n",
+        prefix,
+        (double)values[PAGE_LOG_SYNC_PERF_STAT_DATA_SYNC_NS] / 1000000.0
+    );
+}
+
 static void check_max_ms(const char *env_name, double seconds, unsigned iterations) {
     double threshold_ms;
     const double average_ms = (seconds * 1000.0) / (double)iterations;
@@ -6473,6 +6630,7 @@ static double measure_transactional_insert(
         mylite_ownerless_database_reset_perf_stats();
         mylite_ownerless_page_log_reset_append_perf_stats();
         mylite_ownerless_page_log_reset_scan_perf_stats();
+        mylite_ownerless_page_log_reset_sync_perf_stats();
         mylite_ownerless_sql_handler_reset_perf_stats();
         mylite_ownerless_innodb_handler_reset_perf_stats();
         mylite_ownerless_innodb_deep_reset_perf_stats();
@@ -6543,6 +6701,7 @@ static double measure_autocommit_insert(
         mylite_ownerless_database_reset_perf_stats();
         mylite_ownerless_page_log_reset_append_perf_stats();
         mylite_ownerless_page_log_reset_scan_perf_stats();
+        mylite_ownerless_page_log_reset_sync_perf_stats();
         mylite_ownerless_sql_handler_reset_perf_stats();
         mylite_ownerless_innodb_handler_reset_perf_stats();
         mylite_ownerless_innodb_deep_reset_perf_stats();

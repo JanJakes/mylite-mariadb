@@ -132,9 +132,21 @@ enum page_log_append_perf_stat_index {
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
+enum page_log_sync_perf_stat_index {
+    PAGE_LOG_SYNC_PERF_STAT_CALLS = 0,
+    PAGE_LOG_SYNC_PERF_STAT_TOTAL_NS,
+    PAGE_LOG_SYNC_PERF_STAT_LOCK_NS,
+    PAGE_LOG_SYNC_PERF_STAT_HEADER_NS,
+    PAGE_LOG_SYNC_PERF_STAT_DATA_SYNC_NS,
+    PAGE_LOG_SYNC_PERF_STAT_COUNT
+};
+
 void mylite_ownerless_page_log_set_append_perf_stats_enabled(int enabled);
 void mylite_ownerless_page_log_reset_append_perf_stats(void);
 void mylite_ownerless_page_log_read_append_perf_stats(uint64_t *out_values, size_t value_count);
+void mylite_ownerless_page_log_set_sync_perf_stats_enabled(int enabled);
+void mylite_ownerless_page_log_reset_sync_perf_stats(void);
+void mylite_ownerless_page_log_read_sync_perf_stats(uint64_t *out_values, size_t value_count);
 
 static void test_mmap_shared_visibility_across_processes(void);
 static void test_fcntl_byte_range_lock_conflict(void);
@@ -1508,6 +1520,7 @@ static void test_page_log_initialized_sync_uses_existing_header(void) {
     int fd = open_file(log_path);
     const uint64_t log_offset = 256U;
     uint8_t page[16];
+    uint64_t stats[PAGE_LOG_SYNC_PERF_STAT_COUNT] = {0};
 
     memset(page, 0x43, sizeof(page));
     truncate_file(fd, (off_t)log_offset);
@@ -1517,6 +1530,9 @@ static void test_page_log_initialized_sync_uses_existing_header(void) {
         MYLITE_OWNERLESS_PAGE_LOG_ERROR
     );
     assert(mylite_ownerless_page_log_initialize_at(fd, log_offset) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+
+    mylite_ownerless_page_log_reset_sync_perf_stats();
+    mylite_ownerless_page_log_set_sync_perf_stats_enabled(1);
     assert(
         mylite_ownerless_page_log_sync_initialized_at(fd, log_offset) ==
         MYLITE_OWNERLESS_PAGE_LOG_OK
@@ -1539,6 +1555,10 @@ static void test_page_log_initialized_sync_uses_existing_header(void) {
         MYLITE_OWNERLESS_PAGE_LOG_OK
     );
     assert(mylite_ownerless_page_log_sync_at(fd, log_offset) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    mylite_ownerless_page_log_set_sync_perf_stats_enabled(0);
+    mylite_ownerless_page_log_read_sync_perf_stats(stats, PAGE_LOG_SYNC_PERF_STAT_COUNT);
+    assert(stats[PAGE_LOG_SYNC_PERF_STAT_CALLS] == 3U);
+    assert(stats[PAGE_LOG_SYNC_PERF_STAT_DATA_SYNC_NS] <= stats[PAGE_LOG_SYNC_PERF_STAT_TOTAL_NS]);
 
     assert(close(fd) == 0);
     free(log_path);

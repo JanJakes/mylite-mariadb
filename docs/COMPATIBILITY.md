@@ -411,7 +411,16 @@ gap can be separated from shared MariaDB/InnoDB insert cost. The total hook and
 page-log append-call summaries are intentionally
 separate from the MTR counters because commit-visible dirty-page publication
 can reach the MyLite page-log path without incrementing the narrower MTR
-publish counters; the write-history handoff
+publish counters; the visible-anchor profile also splits page-visible
+publication into page-log sync lock/header/data-sync costs and durable
+checkpoint update lock/read/write/data-sync costs, so CI can distinguish
+filesystem sync pressure from local checkpoint bookkeeping before any
+correctness-sensitive batching or deferral is attempted. A bounded local
+stats-enabled sample after adding that split reported page-visible hook cost at
+`0.012 ms` per ownerless autocommit insert, while the broader checkpoint update
+primitive ran four times per insert with `0.137 ms` total, mostly current-LSN
+read time, and native clustered/undo mini-transaction deltas remained larger;
+the write-history handoff
 now waits natively only for the
 rollback-segment tablespace through the history MTR LSN while leaving broader
 global dirty-page waits in place for non-history commit fallback and
