@@ -2511,10 +2511,11 @@ Tasks:
    process, and verifies failed writes leave the InnoDB base table unchanged
    through ownerless/native reopen before and after forced `.shm` rebuild.
    Prepared non-updatable view diagnostics coverage now verifies
-   `mylite_prepare()` rejects prepared `INSERT` with MariaDB errno 1471 and
-   prepared `UPDATE`/`DELETE` with errno 1288 for both the original aggregate
-   view and a peer-replaced aggregate view, with no base-table mutation before
-   final ownerless/native reopen checks.
+   `mylite_prepare()` succeeds for eligible ownerless prepared DML and
+   `mylite_step()` reports MariaDB errno 1471 for prepared `INSERT` plus errno
+   1288 for prepared `UPDATE`/`DELETE` against both the original aggregate view
+   and a peer-replaced aggregate view, with no base-table mutation before final
+   ownerless/native reopen checks.
    Invalid view dependency coverage now verifies an already-open peer observes
    a valid view, then observes MariaDB errno 1356 when another ownerless process
    drops the base table while leaving the view definition in place, then sees
@@ -3189,9 +3190,9 @@ Tasks:
    `IS_UPDATABLE = 'NO'` refresh, direct `INSERT` errno 1471, direct
    `UPDATE`/`DELETE` errno 1288, rejected `WITH CHECK OPTION` errno 1368, and
    failed-write immutability checks.
-   Prepared non-updatable diagnostics add prepare-time `INSERT` errno 1471 and
-   `UPDATE`/`DELETE` errno 1288 for the original and peer-replaced aggregate
-   view definitions.
+   Prepared non-updatable diagnostics add ownerless prepared-DML step-time
+   `INSERT` errno 1471 and `UPDATE`/`DELETE` errno 1288 for the original and
+   peer-replaced aggregate view definitions.
    Invalid view dependency diagnostics add ownerless view query errno 1356 after
    peer base-table drop, then recovery of the same view after peer base-table
    recreation.

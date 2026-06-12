@@ -1655,7 +1655,13 @@ static void expect_prepared_mariadb_error(
     mylite_stmt *stmt,
     unsigned expected_errno
 );
-static void expect_prepare_mariadb_error(mylite_db *db, const char *sql, unsigned expected_errno);
+static void expect_prepared_int64_step_mariadb_error(
+    mylite_db *db,
+    const char *sql,
+    const long long *values,
+    unsigned value_count,
+    unsigned expected_errno
+);
 static void expect_exec_busy(mylite_db *db, const char *sql, const char *message_part);
 static void expect_readonly_exec_error(mylite_db *db, const char *sql);
 static unsigned long long query_unsigned(mylite_db *db, const char *sql);
@@ -22998,19 +23004,32 @@ static void test_ownerless_view_non_updatable_diagnostics_refresh_peer_dictionar
         "DELETE FROM app.ownerless_view_nonupd WHERE value = 10",
         MYLITE_TEST_NON_UPDATABLE_TABLE_ERRNO
     );
-    expect_prepare_mariadb_error(
+    static const long long first_insert_values[] = {30, 1, 30};
+    static const long long first_update_values[] = {99, 20};
+    static const long long first_delete_values[] = {10};
+    static const long long replaced_insert_values[] = {3, 1, 30};
+    static const long long replaced_update_values[] = {99, 2};
+    static const long long replaced_delete_values[] = {1};
+
+    expect_prepared_int64_step_mariadb_error(
         db,
         "INSERT INTO app.ownerless_view_nonupd VALUES (?, ?, ?)",
+        first_insert_values,
+        sizeof(first_insert_values) / sizeof(first_insert_values[0]),
         MYLITE_TEST_NON_INSERTABLE_TABLE_ERRNO
     );
-    expect_prepare_mariadb_error(
+    expect_prepared_int64_step_mariadb_error(
         db,
         "UPDATE app.ownerless_view_nonupd SET total = ? WHERE value = ?",
+        first_update_values,
+        sizeof(first_update_values) / sizeof(first_update_values[0]),
         MYLITE_TEST_NON_UPDATABLE_TABLE_ERRNO
     );
-    expect_prepare_mariadb_error(
+    expect_prepared_int64_step_mariadb_error(
         db,
         "DELETE FROM app.ownerless_view_nonupd WHERE value = ?",
+        first_delete_values,
+        sizeof(first_delete_values) / sizeof(first_delete_values[0]),
         MYLITE_TEST_NON_UPDATABLE_TABLE_ERRNO
     );
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_nonupd_base") == 3U);
@@ -23086,19 +23105,25 @@ static void test_ownerless_view_non_updatable_diagnostics_refresh_peer_dictionar
         "DELETE FROM app.ownerless_view_nonupd WHERE bucket = 1",
         MYLITE_TEST_NON_UPDATABLE_TABLE_ERRNO
     );
-    expect_prepare_mariadb_error(
+    expect_prepared_int64_step_mariadb_error(
         db,
         "INSERT INTO app.ownerless_view_nonupd VALUES (?, ?, ?)",
+        replaced_insert_values,
+        sizeof(replaced_insert_values) / sizeof(replaced_insert_values[0]),
         MYLITE_TEST_NON_INSERTABLE_TABLE_ERRNO
     );
-    expect_prepare_mariadb_error(
+    expect_prepared_int64_step_mariadb_error(
         db,
         "UPDATE app.ownerless_view_nonupd SET bucket_total = ? WHERE bucket = ?",
+        replaced_update_values,
+        sizeof(replaced_update_values) / sizeof(replaced_update_values[0]),
         MYLITE_TEST_NON_UPDATABLE_TABLE_ERRNO
     );
-    expect_prepare_mariadb_error(
+    expect_prepared_int64_step_mariadb_error(
         db,
         "DELETE FROM app.ownerless_view_nonupd WHERE bucket = ?",
+        replaced_delete_values,
+        sizeof(replaced_delete_values) / sizeof(replaced_delete_values[0]),
         MYLITE_TEST_NON_UPDATABLE_TABLE_ERRNO
     );
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_nonupd_base") == 3U);
@@ -55983,30 +56008,39 @@ static void expect_prepared_mariadb_error(
     }
 }
 
-static void expect_prepare_mariadb_error(mylite_db *db, const char *sql, unsigned expected_errno) {
+static void expect_prepared_int64_step_mariadb_error(
+    mylite_db *db,
+    const char *sql,
+    const long long *values,
+    unsigned value_count,
+    unsigned expected_errno
+) {
     mylite_stmt *stmt = NULL;
     const char *tail = NULL;
     const int result = mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, &tail);
-    const unsigned mariadb_errno = mylite_mariadb_errno(db);
 
-    if (result != MYLITE_ERROR || mylite_errcode(db) != MYLITE_ERROR ||
-        mariadb_errno != expected_errno) {
-        if (stmt != NULL) {
-            assert(mylite_finalize(stmt) == MYLITE_OK);
-        }
+    if (result != MYLITE_OK || stmt == NULL || tail == NULL || *tail != '\0') {
         fprintf(
             stderr,
-            "expected prepare MariaDB error %u, got result=%d errcode=%d "
-            "mariadb_errno=%u\n",
+            "expected prepare success before step MariaDB error %u, got result=%d "
+            "errcode=%d mariadb_errno=%u sql=%s\n",
             expected_errno,
             result,
             mylite_errcode(db),
-            mariadb_errno
+            mylite_mariadb_errno(db),
+            sql
         );
+        if (stmt != NULL) {
+            assert(mylite_finalize(stmt) == MYLITE_OK);
+        }
         assert(0);
     }
-    assert(stmt == NULL);
-    assert(tail == NULL || *tail == '\0');
+    assert(mylite_bind_parameter_count(stmt) == value_count);
+    for (unsigned i = 0; i < value_count; ++i) {
+        assert(mylite_bind_int64(stmt, i + 1U, values[i]) == MYLITE_OK);
+    }
+    expect_prepared_mariadb_error(db, stmt, expected_errno);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
 }
 
 static void expect_exec_busy(mylite_db *db, const char *sql, const char *message_part) {
