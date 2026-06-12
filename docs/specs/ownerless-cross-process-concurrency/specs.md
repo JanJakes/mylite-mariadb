@@ -4877,6 +4877,17 @@ subsystems that this mode needs:
   payload remained data-dominated at `4152.270` bytes per insert with only
   `28.560` metadata bytes. The larger remaining throughput target therefore
   stays on SYS proof data and remaining user/index nonzero payload. A
+  follow-up direct-varint sparse encode slice keeps the same WAL bytes and
+  record flags but builds selected varint compact sparse payloads directly
+  during the page scan instead of materializing and reparsing discarded 16-bit
+  compact payload bytes. The reduced stats-enabled production sample reported
+  unchanged record counts and payload bytes, while autocommit append encode
+  time moved from the prior `4.312 ms` sample to `3.574 ms` for `302` varint
+  records and bulk append encode time moved from `2.757 ms` to `2.293 ms` for
+  `152` varint records. Short-run total append and row-throughput samples
+  remain noisy because payload-write timing varies; the next larger
+  throughput target therefore still stays on SYS proof data, user/index
+  payload, and native redo/checkpoint proof. A
   follow-up history-proof delta attribution slice appended accepted proof-page
   same-identity counters without changing page-version WAL format. Its reduced
   100-row production attribution sample reported `1.000` rollback-segment

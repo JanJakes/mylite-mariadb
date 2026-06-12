@@ -711,7 +711,17 @@ per insert with `545.110` metadata bytes and `1216.070` data bytes, while SYS
 payload remained data-dominated at `4152.270` bytes per insert with only
 `28.560` metadata bytes. This is a useful page-log byte reduction, but the
 next larger write-throughput target remains the rollback-segment SYS proof data
-and remaining user/index nonzero payload. A follow-up history-proof delta
+and remaining user/index nonzero payload. A follow-up direct-varint encode
+slice keeps those WAL bytes and flags unchanged but builds varint compact
+sparse payloads directly from the page scan instead of first materializing and
+reparsing the 16-bit compact payload. In the reduced stats-enabled production
+probe, autocommit page-log append encode time moved from the prior `4.312 ms`
+sample to `3.574 ms` for the same `302` varint records and `609070` payload
+bytes; the bulk insert phase moved from `2.757 ms` to `2.293 ms` for the same
+`152` varint records and `289499` payload bytes. Total append and throughput
+samples remained noisy because payload-write timing varied, so this is
+evidence for lower encode cost rather than completion of the write-throughput
+work. A follow-up history-proof delta
 attribution slice then measured accepted proof-page identity reuse without
 changing WAL encoding. In the reduced 100-row production attribution sample,
 rollback-segment proof pages and undo-header proof pages were each sampled

@@ -503,11 +503,8 @@ bool build_compact_sparse_zero_payload(
     std::uint32_t page_size,
     std::vector<unsigned char> *out_payload,
     std::uint64_t *out_trailing_size,
-    bool *out_trailing_size_known
-);
-bool build_varint_compact_sparse_zero_payload(
-    const std::vector<unsigned char> &compact_payload,
-    std::vector<unsigned char> *out_payload
+    bool *out_trailing_size_known,
+    bool *out_uses_varint_payload
 );
 bool append_varuint16(std::vector<unsigned char> *out_payload, std::uint32_t value);
 bool read_varuint16(
@@ -2795,23 +2792,19 @@ std::uint64_t encoded_payload_size_for_page(
     if (out_payload != nullptr) {
         std::uint64_t compact_trailing_size = page_size;
         bool compact_trailing_size_known = false;
+        bool compact_uses_varint_payload = false;
         if (build_compact_sparse_zero_payload(
                 page,
                 page_size,
                 out_payload,
                 &compact_trailing_size,
-                &compact_trailing_size_known
+                &compact_trailing_size_known,
+                &compact_uses_varint_payload
             )) {
             trailing_size = compact_trailing_size;
             trailing_size_known = true;
             if (out_payload->size() < trailing_size) {
-                thread_local std::vector<unsigned char> varint_compact_payload;
-                if (build_varint_compact_sparse_zero_payload(
-                        *out_payload,
-                        &varint_compact_payload
-                    ) &&
-                    varint_compact_payload.size() < out_payload->size()) {
-                    out_payload->swap(varint_compact_payload);
+                if (compact_uses_varint_payload) {
                     flags |= k_record_flag_varint_compact_sparse_zero_payload;
                 } else {
                     flags |= k_record_flag_compact_sparse_zero_payload;
@@ -2939,7 +2932,8 @@ bool build_compact_sparse_zero_payload(
     std::uint32_t page_size,
     std::vector<unsigned char> *out_payload,
     std::uint64_t *out_trailing_size,
-    bool *out_trailing_size_known
+    bool *out_trailing_size_known,
+    bool *out_uses_varint_payload
 ) {
     if (out_payload == nullptr) {
         return false;
@@ -2947,12 +2941,19 @@ bool build_compact_sparse_zero_payload(
     if (out_trailing_size_known != nullptr) {
         *out_trailing_size_known = false;
     }
+    if (out_uses_varint_payload != nullptr) {
+        *out_uses_varint_payload = false;
+    }
     const auto *bytes = static_cast<const unsigned char *>(page);
     out_payload->clear();
-    out_payload->reserve(page_size);
-    out_payload->resize(sizeof(std::uint16_t));
+    thread_local std::vector<unsigned char> varint_payload;
+    varint_payload.clear();
+    varint_payload.reserve(page_size);
+    varint_payload.resize(sizeof(std::uint16_t));
     std::uint32_t run_count = 0;
     std::uint64_t trailing_size = 0U;
+    std::uint32_t previous_run_end = 0U;
+    std::size_t compact_payload_size = sizeof(std::uint16_t);
 
     for (std::uint32_t offset = 0; offset < page_size;) {
         while (offset < page_size && bytes[offset] == 0U) {
@@ -2971,16 +2972,64 @@ bool build_compact_sparse_zero_payload(
             run_size > std::numeric_limits<std::uint16_t>::max() ||
             run_count == std::numeric_limits<std::uint16_t>::max()) {
             out_payload->clear();
+            varint_payload.clear();
             return false;
         }
 
-        const std::size_t cursor = out_payload->size();
         const std::size_t encoded_run_size = (2U * sizeof(std::uint16_t)) + run_size;
-        if (cursor + encoded_run_size >= page_size) {
+        if (compact_payload_size + encoded_run_size >= page_size) {
             out_payload->clear();
+            varint_payload.clear();
             return false;
         }
-        out_payload->resize(cursor + encoded_run_size);
+        compact_payload_size += encoded_run_size;
+        if (!append_varuint16(&varint_payload, run_start - previous_run_end) ||
+            !append_varuint16(&varint_payload, run_size)) {
+            out_payload->clear();
+            varint_payload.clear();
+            return false;
+        }
+        varint_payload.insert(varint_payload.end(), bytes + run_start, bytes + offset);
+        ++run_count;
+        previous_run_end = offset;
+    }
+
+    if (out_trailing_size != nullptr) {
+        *out_trailing_size = trailing_size;
+    }
+    if (out_trailing_size_known != nullptr) {
+        *out_trailing_size_known = true;
+    }
+    if (run_count == 0U) {
+        out_payload->clear();
+        varint_payload.clear();
+        return false;
+    }
+    store16(varint_payload.data(), 0U, static_cast<std::uint16_t>(run_count));
+    if (varint_payload.size() < compact_payload_size) {
+        out_payload->swap(varint_payload);
+        if (out_uses_varint_payload != nullptr) {
+            *out_uses_varint_payload = true;
+        }
+        return true;
+    }
+
+    out_payload->reserve(compact_payload_size);
+    out_payload->resize(sizeof(std::uint16_t));
+    for (std::uint32_t offset = 0; offset < page_size;) {
+        while (offset < page_size && bytes[offset] == 0U) {
+            ++offset;
+        }
+        if (offset == page_size) {
+            break;
+        }
+        const std::uint32_t run_start = offset;
+        while (offset < page_size && bytes[offset] != 0U) {
+            ++offset;
+        }
+        const std::uint32_t run_size = offset - run_start;
+        const std::size_t cursor = out_payload->size();
+        out_payload->resize(cursor + (2U * sizeof(std::uint16_t)) + run_size);
         store16(out_payload->data(), cursor, static_cast<std::uint16_t>(run_start));
         store16(
             out_payload->data(),
@@ -2992,18 +3041,6 @@ bool build_compact_sparse_zero_payload(
             bytes + run_start,
             run_size
         );
-        ++run_count;
-    }
-
-    if (out_trailing_size != nullptr) {
-        *out_trailing_size = trailing_size;
-    }
-    if (out_trailing_size_known != nullptr) {
-        *out_trailing_size_known = true;
-    }
-    if (run_count == 0U) {
-        out_payload->clear();
-        return false;
     }
     store16(out_payload->data(), 0U, static_cast<std::uint16_t>(run_count));
     return true;
@@ -3088,63 +3125,6 @@ bool read_varuint16_at(
         shift += 7U;
     }
     return false;
-}
-
-bool build_varint_compact_sparse_zero_payload(
-    const std::vector<unsigned char> &compact_payload,
-    std::vector<unsigned char> *out_payload
-) {
-    if (out_payload == nullptr || compact_payload.size() < sizeof(std::uint16_t)) {
-        return false;
-    }
-    const std::uint16_t run_count = load16(compact_payload.data(), 0U);
-    if (run_count == 0U) {
-        out_payload->clear();
-        return false;
-    }
-
-    out_payload->clear();
-    out_payload->reserve(compact_payload.size());
-    out_payload->resize(sizeof(std::uint16_t));
-    store16(out_payload->data(), 0U, run_count);
-
-    std::size_t cursor = sizeof(std::uint16_t);
-    bool has_previous_run = false;
-    std::uint32_t previous_run_end = 0;
-    for (std::uint32_t run_index = 0; run_index < run_count; ++run_index) {
-        if (cursor + (2U * sizeof(std::uint16_t)) > compact_payload.size()) {
-            out_payload->clear();
-            return false;
-        }
-        const std::uint32_t run_offset = load16(compact_payload.data(), cursor);
-        cursor += sizeof(std::uint16_t);
-        const std::uint32_t run_size = load16(compact_payload.data(), cursor);
-        cursor += sizeof(std::uint16_t);
-        if (run_size == 0U || (has_previous_run && run_offset <= previous_run_end) ||
-            run_offset < previous_run_end || run_size > compact_payload.size() - cursor) {
-            out_payload->clear();
-            return false;
-        }
-
-        if (!append_varuint16(out_payload, run_offset - previous_run_end) ||
-            !append_varuint16(out_payload, run_size)) {
-            out_payload->clear();
-            return false;
-        }
-        out_payload->insert(
-            out_payload->end(),
-            compact_payload.begin() + static_cast<std::ptrdiff_t>(cursor),
-            compact_payload.begin() + static_cast<std::ptrdiff_t>(cursor + run_size)
-        );
-        cursor += run_size;
-        previous_run_end = run_offset + run_size;
-        has_previous_run = true;
-    }
-    if (cursor != compact_payload.size()) {
-        out_payload->clear();
-        return false;
-    }
-    return true;
 }
 
 bool record_uses_trailing_zero_payload(const PageRecordHeader &record) {
