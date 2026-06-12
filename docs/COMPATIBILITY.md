@@ -668,7 +668,19 @@ per insert with `545.110` metadata bytes and `1216.070` data bytes, while SYS
 payload remained data-dominated at `4152.270` bytes per insert with only
 `28.560` metadata bytes. This is a useful page-log byte reduction, but the
 next larger write-throughput target remains the rollback-segment SYS proof data
-and remaining user/index nonzero payload.
+and remaining user/index nonzero payload. A follow-up history-proof delta
+attribution slice then measured accepted proof-page identity reuse without
+changing WAL encoding. In the reduced 100-row production attribution sample,
+rollback-segment proof pages and undo-header proof pages were each sampled
+`1.000` time per ownerless autocommit insert, but the four-slot same-identity
+diagnostic cache saw only `0.010` diff sample per insert for each role and
+`0.950` evictions per insert. The only same-identity rseg diff changed
+`0.110` bytes per insert, and the only same-identity undo diff changed `0.400`
+bytes per insert, while the page-log still carried `6077.410` payload bytes per
+insert, including `4152.330` SYS bytes and `1761.200` index bytes. That keeps
+the next proof-representation work focused on history-proof identity churn and
+broader redo/checkpoint proof design rather than a simple last-image delta
+against the immediately previous proof page.
 Ownerless page-version reads now validate the WAL tail after a direct
 page-index hit because the shared page index is an acceleration cache updated
 after the append stream, not an authoritative visibility boundary by itself.

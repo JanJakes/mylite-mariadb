@@ -4848,7 +4848,20 @@ subsystems that this mode needs:
   insert with `545.110` metadata bytes and `1216.070` data bytes, while SYS
   payload remained data-dominated at `4152.270` bytes per insert with only
   `28.560` metadata bytes. The larger remaining throughput target therefore
-  stays on SYS proof data and remaining user/index nonzero payload. The
+  stays on SYS proof data and remaining user/index nonzero payload. A
+  follow-up history-proof delta attribution slice appended accepted proof-page
+  same-identity counters without changing page-version WAL format. Its reduced
+  100-row production attribution sample reported `1.000` rollback-segment
+  proof sample and `1.000` undo-header proof sample per ownerless autocommit
+  insert, but only `0.010` same-identity diff samples per insert for each role
+  in the four-slot diagnostic cache, with `0.950` evictions per insert. The
+  observed same-identity diffs were tiny, `0.110` rseg changed bytes and
+  `0.400` undo changed bytes per insert, but the page-log still carried
+  `6077.410` payload bytes per insert, including `4152.330` SYS bytes and
+  `1761.200` index bytes. The next proof-representation optimization therefore
+  needs to address history-proof identity churn or broader redo/checkpoint
+  proof semantics, not just a last-image delta for an immediately repeated
+  proof page. The
   post-boundary production sample before this proof fast path reported stats-off
   ownerless warm open/close at `359.230 ms` versus ordinary `375.478 ms`,
   active-runtime reconnect overhead at `0.211 ms`, ownerless direct/prepared

@@ -178,6 +178,34 @@ static std::atomic<uint64_t>
     ownerless_page_publish_native_support_elision_blocked_history_proof_rseg{0};
 static std::atomic<uint64_t>
     ownerless_page_publish_native_support_elision_blocked_history_proof_undo{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_history_proof_rseg_samples{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_history_proof_rseg_first_samples{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_history_proof_rseg_diff_samples{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_history_proof_rseg_evictions{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_history_proof_rseg_changed_bytes{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_history_proof_rseg_fil_header_changed_bytes{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_history_proof_rseg_body_changed_bytes{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_history_proof_undo_samples{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_history_proof_undo_first_samples{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_history_proof_undo_diff_samples{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_history_proof_undo_evictions{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_history_proof_undo_changed_bytes{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_history_proof_undo_fil_header_changed_bytes{0};
+static std::atomic<uint64_t>
+    ownerless_page_publish_history_proof_undo_body_changed_bytes{0};
 static constexpr size_t ownerless_page_publish_identity_slot_count= 16384;
 static constexpr size_t ownerless_page_publish_identity_probe_limit= 8;
 static std::atomic<uint64_t>
@@ -187,6 +215,23 @@ static std::atomic_flag ownerless_page_publish_trx_system_stats_lock=
 static byte ownerless_page_publish_trx_system_previous_page[UNIV_PAGE_SIZE_MAX];
 static ulint ownerless_page_publish_trx_system_previous_page_size= 0;
 static bool ownerless_page_publish_trx_system_previous_page_valid= false;
+static std::atomic_flag ownerless_page_publish_history_proof_stats_lock=
+    ATOMIC_FLAG_INIT;
+static constexpr size_t ownerless_page_publish_history_proof_diff_slot_count= 4;
+struct ownerless_page_publish_history_proof_diff_slot
+{
+  uint32_t space_id= 0;
+  uint32_t page_no= 0;
+  ulint page_size= 0;
+  bool valid= false;
+  byte page[UNIV_PAGE_SIZE_MAX];
+};
+static ownerless_page_publish_history_proof_diff_slot
+    ownerless_page_publish_history_proof_rseg_slots
+        [ownerless_page_publish_history_proof_diff_slot_count];
+static ownerless_page_publish_history_proof_diff_slot
+    ownerless_page_publish_history_proof_undo_slots
+        [ownerless_page_publish_history_proof_diff_slot_count];
 
 enum ownerless_page_write_perf_stat_index {
   OWNERLESS_PAGE_WRITE_PERF_ENTER_CALLS= 0,
@@ -794,6 +839,142 @@ static void ownerless_page_publish_count_trx_system_diff(
   ownerless_page_publish_record_trx_system_diff(counts);
 }
 
+static void ownerless_page_publish_history_proof_lock_stats() noexcept
+{
+  while (ownerless_page_publish_history_proof_stats_lock.test_and_set(
+             std::memory_order_acquire))
+    MY_RELAX_CPU();
+}
+
+static void ownerless_page_publish_history_proof_unlock_stats() noexcept
+{
+  ownerless_page_publish_history_proof_stats_lock.clear(
+      std::memory_order_release);
+}
+
+struct ownerless_page_publish_history_proof_diff_counts
+{
+  uint64_t changed_bytes= 0;
+  uint64_t fil_header_changed_bytes= 0;
+  uint64_t body_changed_bytes= 0;
+};
+
+static void ownerless_page_publish_count_history_proof_diff_byte(
+    ownerless_page_publish_history_proof_diff_counts &counts, ulint offset,
+    ulint page_size) noexcept
+{
+  ++counts.changed_bytes;
+  if (offset < FIL_PAGE_DATA || offset >= page_size - FIL_PAGE_DATA_END)
+  {
+    ++counts.fil_header_changed_bytes;
+    return;
+  }
+  ++counts.body_changed_bytes;
+}
+
+static void ownerless_page_publish_record_history_proof_diff(
+    const ownerless_page_publish_history_proof_diff_counts &counts,
+    std::atomic<uint64_t> &changed_bytes,
+    std::atomic<uint64_t> &fil_header_changed_bytes,
+    std::atomic<uint64_t> &body_changed_bytes) noexcept
+{
+  ownerless_page_publish_add(changed_bytes, counts.changed_bytes);
+  ownerless_page_publish_add(
+      fil_header_changed_bytes, counts.fil_header_changed_bytes);
+  ownerless_page_publish_add(body_changed_bytes, counts.body_changed_bytes);
+}
+
+static size_t ownerless_page_publish_history_proof_diff_slot_index(
+    uint32_t space_id, uint32_t page_no, ulint page_size) noexcept
+{
+  uint64_t identity= ownerless_page_publish_pack_sys_identity(
+      space_id, page_no);
+  identity^= static_cast<uint64_t>(page_size) << 17;
+  return static_cast<size_t>(ownerless_page_publish_mix64(identity)) &
+         (ownerless_page_publish_history_proof_diff_slot_count - 1);
+}
+
+static void ownerless_page_publish_count_history_proof_role_diff(
+    const byte *page, ulint page_size, uint32_t space_id, uint32_t page_no,
+    ownerless_page_publish_history_proof_diff_slot *slots,
+    std::atomic<uint64_t> &samples,
+    std::atomic<uint64_t> &first_samples,
+    std::atomic<uint64_t> &diff_samples,
+    std::atomic<uint64_t> &evictions,
+    std::atomic<uint64_t> &changed_bytes,
+    std::atomic<uint64_t> &fil_header_changed_bytes,
+    std::atomic<uint64_t> &body_changed_bytes) noexcept
+{
+  if (UNIV_UNLIKELY(!ownerless_page_publish_stats_enabled.load(
+          std::memory_order_relaxed)) ||
+      page == nullptr || page_size == 0 || page_size > UNIV_PAGE_SIZE_MAX ||
+      page_size <= FIL_PAGE_DATA_END)
+    return;
+
+  ownerless_page_publish_count(samples);
+
+  const size_t slot_index= ownerless_page_publish_history_proof_diff_slot_index(
+      space_id, page_no, page_size);
+  ownerless_page_publish_history_proof_lock_stats();
+  ownerless_page_publish_history_proof_diff_slot &slot= slots[slot_index];
+  const bool same_page= slot.valid && slot.space_id == space_id &&
+      slot.page_no == page_no && slot.page_size == page_size;
+  if (!same_page)
+  {
+    const bool evicted= slot.valid;
+    slot.space_id= space_id;
+    slot.page_no= page_no;
+    slot.page_size= page_size;
+    slot.valid= true;
+    ::memcpy(slot.page, page, page_size);
+    ownerless_page_publish_history_proof_unlock_stats();
+    ownerless_page_publish_count(first_samples);
+    if (evicted)
+      ownerless_page_publish_count(evictions);
+    return;
+  }
+
+  ownerless_page_publish_history_proof_diff_counts counts;
+  for (ulint offset= 0; offset < page_size; ++offset)
+    if (slot.page[offset] != page[offset])
+      ownerless_page_publish_count_history_proof_diff_byte(
+          counts, offset, page_size);
+  ::memcpy(slot.page, page, page_size);
+  ownerless_page_publish_history_proof_unlock_stats();
+
+  ownerless_page_publish_count(diff_samples);
+  ownerless_page_publish_record_history_proof_diff(
+      counts, changed_bytes, fil_header_changed_bytes, body_changed_bytes);
+}
+
+static void ownerless_page_publish_count_history_proof_diff(
+    unsigned roles, const byte *page, ulint page_size, uint32_t space_id,
+    uint32_t page_no) noexcept
+{
+  if (roles & ownerless_page_write_history_proof_role_rseg)
+    ownerless_page_publish_count_history_proof_role_diff(
+        page, page_size, space_id, page_no,
+        ownerless_page_publish_history_proof_rseg_slots,
+        ownerless_page_publish_history_proof_rseg_samples,
+        ownerless_page_publish_history_proof_rseg_first_samples,
+        ownerless_page_publish_history_proof_rseg_diff_samples,
+        ownerless_page_publish_history_proof_rseg_evictions,
+        ownerless_page_publish_history_proof_rseg_changed_bytes,
+        ownerless_page_publish_history_proof_rseg_fil_header_changed_bytes,
+        ownerless_page_publish_history_proof_rseg_body_changed_bytes);
+  if (roles & ownerless_page_write_history_proof_role_undo)
+    ownerless_page_publish_count_history_proof_role_diff(
+        page, page_size, space_id, page_no,
+        ownerless_page_publish_history_proof_undo_slots,
+        ownerless_page_publish_history_proof_undo_samples,
+        ownerless_page_publish_history_proof_undo_first_samples,
+        ownerless_page_publish_history_proof_undo_diff_samples,
+        ownerless_page_publish_history_proof_undo_evictions,
+        ownerless_page_publish_history_proof_undo_changed_bytes,
+        ownerless_page_publish_history_proof_undo_fil_header_changed_bytes,
+        ownerless_page_publish_history_proof_undo_body_changed_bytes);
+}
+
 static bool ownerless_page_write_perf_enabled() noexcept
 {
   return ownerless_page_write_perf_stats_enabled.load(std::memory_order_relaxed);
@@ -1248,10 +1429,48 @@ extern "C" void mylite_ownerless_innodb_reset_page_publish_stats(void)
       0, std::memory_order_relaxed);
   ownerless_page_publish_native_support_elision_blocked_history_proof_undo.store(
       0, std::memory_order_relaxed);
+  ownerless_page_publish_history_proof_rseg_samples.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_history_proof_rseg_first_samples.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_history_proof_rseg_diff_samples.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_history_proof_rseg_evictions.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_history_proof_rseg_changed_bytes.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_history_proof_rseg_fil_header_changed_bytes.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_history_proof_rseg_body_changed_bytes.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_history_proof_undo_samples.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_history_proof_undo_first_samples.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_history_proof_undo_diff_samples.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_history_proof_undo_evictions.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_history_proof_undo_changed_bytes.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_history_proof_undo_fil_header_changed_bytes.store(
+      0, std::memory_order_relaxed);
+  ownerless_page_publish_history_proof_undo_body_changed_bytes.store(
+      0, std::memory_order_relaxed);
   ownerless_page_publish_trx_system_lock_stats();
   ownerless_page_publish_trx_system_previous_page_size= 0;
   ownerless_page_publish_trx_system_previous_page_valid= false;
   ownerless_page_publish_trx_system_unlock_stats();
+  ownerless_page_publish_history_proof_lock_stats();
+  for (size_t i= 0; i < ownerless_page_publish_history_proof_diff_slot_count;
+       ++i)
+  {
+    ownerless_page_publish_history_proof_rseg_slots[i].valid= false;
+    ownerless_page_publish_history_proof_rseg_slots[i].page_size= 0;
+    ownerless_page_publish_history_proof_undo_slots[i].valid= false;
+    ownerless_page_publish_history_proof_undo_slots[i].page_size= 0;
+  }
+  ownerless_page_publish_history_proof_unlock_stats();
   for (size_t i= 0; i < ownerless_page_publish_identity_slot_count; ++i)
     ownerless_page_publish_identity_slots[i].store(
         0, std::memory_order_relaxed);
@@ -1345,6 +1564,20 @@ extern "C" void mylite_ownerless_innodb_read_page_publish_stats(
       &ownerless_page_publish_native_support_published_history_proof_undo,
       &ownerless_page_publish_native_support_elision_blocked_history_proof_rseg,
       &ownerless_page_publish_native_support_elision_blocked_history_proof_undo,
+      &ownerless_page_publish_history_proof_rseg_samples,
+      &ownerless_page_publish_history_proof_rseg_first_samples,
+      &ownerless_page_publish_history_proof_rseg_diff_samples,
+      &ownerless_page_publish_history_proof_rseg_evictions,
+      &ownerless_page_publish_history_proof_rseg_changed_bytes,
+      &ownerless_page_publish_history_proof_rseg_fil_header_changed_bytes,
+      &ownerless_page_publish_history_proof_rseg_body_changed_bytes,
+      &ownerless_page_publish_history_proof_undo_samples,
+      &ownerless_page_publish_history_proof_undo_first_samples,
+      &ownerless_page_publish_history_proof_undo_diff_samples,
+      &ownerless_page_publish_history_proof_undo_evictions,
+      &ownerless_page_publish_history_proof_undo_changed_bytes,
+      &ownerless_page_publish_history_proof_undo_fil_header_changed_bytes,
+      &ownerless_page_publish_history_proof_undo_body_changed_bytes,
   };
   const size_t stats_count= sizeof stats / sizeof stats[0];
   const size_t copy_count= std::min(value_count, stats_count);
@@ -2399,6 +2632,9 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
   {
     if (ownerless_page_publish_type_has_native_support(page_type))
     {
+      const unsigned history_proof_roles=
+          ownerless_page_write_history_proof_roles(
+              ownerless_trx, id.space(), id.page_no());
       ownerless_page_publish_count(
           ownerless_page_publish_native_support_published);
       ownerless_page_publish_count_native_support_published_page_type(
@@ -2409,10 +2645,11 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
         ownerless_page_publish_count_published_sys_identity(
             id.space(), id.page_no());
       ownerless_page_publish_count_history_proof_roles(
-          ownerless_page_write_history_proof_roles(
-              ownerless_trx, id.space(), id.page_no()),
+          history_proof_roles,
           ownerless_page_publish_native_support_published_history_proof_rseg,
           ownerless_page_publish_native_support_published_history_proof_undo);
+      ownerless_page_publish_count_history_proof_diff(
+          history_proof_roles, page, page_size, id.space(), id.page_no());
     }
     ownerless_page_write_note_publish_success(ownerless_trx);
     ownerless_page_write_note_history_proof_page(
