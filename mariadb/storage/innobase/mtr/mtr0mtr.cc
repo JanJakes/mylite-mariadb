@@ -2371,6 +2371,9 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_leave(
 
   if (!(slot.type & (MTR_MEMO_PAGE_X_FIX | MTR_MEMO_PAGE_SX_FIX)))
     return;
+  if (m_ownerless_page_write_mtr_pages == nullptr ||
+      m_ownerless_page_write_mtr_pages->empty())
+    return;
   const buf_page_t *bpage= static_cast<const buf_page_t*>(slot.object);
   if (ownerless_page_write_lock_only_transaction_page(
           ownerless_page_write_trx(), *bpage))

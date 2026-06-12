@@ -103,6 +103,12 @@ ratios, and stats-enabled per-row/per-statement ownerless attribution for page
 versions, page-log appends, native-support publication, and commit-visibility
 choices. This separates the single-row prepared autocommit cost from the
 multi-row fast-path SQL shape that ownerless concurrency now admits.
+Ownerless mini-transaction page-write release now skips transaction lookup and
+external release policy checks when the current MTR has no ownerless
+page-write pages left to release. In the CI-shaped stats-enabled bulk probe,
+this reduced ownerless bulk `page_write_leave_total_ms` from `3.892` to
+`0.551`, kept bulk commit visibility on the fast path with zero publish
+failures, and preserved native latch/memo release ordering.
 Ownerless page-version publication now skips synthesized snapshot-boundary
 probes for native-support page classes and returns before the page-pin registry
 latch when no active pins exist; normal page-version publication, history-proof
