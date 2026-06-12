@@ -2064,7 +2064,8 @@ void release_runtime(void);
 int exec_result_impl(
     mylite_db *db,
     const char *sql,
-    mylite_exec_result_callback callback,
+    mylite_exec_result_metadata_callback metadata_callback,
+    mylite_exec_result_callback row_callback,
     void *ctx,
     char **errmsg
 );
@@ -2112,6 +2113,7 @@ int legacy_exec_result_callback(
 #if MYLITE_WITH_MARIADB_EMBEDDED
 int store_and_emit_result(
     mylite_db &db,
+    mylite_exec_result_metadata_callback metadata_callback,
     mylite_exec_result_callback callback,
     void *ctx,
     bool *has_result
@@ -2516,6 +2518,7 @@ int mylite_exec(
     return exec_result_impl(
         db,
         sql,
+        nullptr,
         callback != nullptr ? legacy_exec_result_callback : nullptr,
         &legacy_context,
         errmsg
@@ -2529,7 +2532,18 @@ int mylite_exec_result(
     void *ctx,
     char **errmsg
 ) {
-    return exec_result_impl(db, sql, callback, ctx, errmsg);
+    return exec_result_impl(db, sql, nullptr, callback, ctx, errmsg);
+}
+
+int mylite_exec_result_with_metadata(
+    mylite_db *db,
+    const char *sql,
+    mylite_exec_result_metadata_callback metadata_callback,
+    mylite_exec_result_callback row_callback,
+    void *ctx,
+    char **errmsg
+) {
+    return exec_result_impl(db, sql, metadata_callback, row_callback, ctx, errmsg);
 }
 
 int mylite_prepare(
@@ -3759,7 +3773,8 @@ int write_ownerless_platform_probe_proof(
 int exec_result_impl(
     mylite_db *db,
     const char *sql,
-    mylite_exec_result_callback callback,
+    mylite_exec_result_metadata_callback metadata_callback,
+    mylite_exec_result_callback row_callback,
     void *ctx,
     char **errmsg
 ) {
@@ -3772,7 +3787,8 @@ int exec_result_impl(
     }
 
 #if !MYLITE_WITH_MARIADB_EMBEDDED
-    (void)callback;
+    (void)metadata_callback;
+    (void)row_callback;
     (void)ctx;
     set_error(*db, MYLITE_ERROR, "MariaDB embedded backend is not enabled");
     return copy_error_message(*db, errmsg);
@@ -3795,7 +3811,8 @@ int exec_result_impl(
             static_cast<unsigned long long>(mysql_insert_id(&db->mysql));
 
         bool has_result = false;
-        const int result = store_and_emit_result(*db, callback, ctx, &has_result);
+        const int result =
+            store_and_emit_result(*db, metadata_callback, row_callback, ctx, &has_result);
         if (result != MYLITE_OK) {
             return copy_error_message(*db, errmsg);
         }
@@ -3924,7 +3941,8 @@ int exec_result_impl(
         static_cast<unsigned long long>(mysql_insert_id(&db->mysql));
 
     bool has_result = false;
-    const int result = store_and_emit_result(*db, callback, ctx, &has_result);
+    const int result =
+        store_and_emit_result(*db, metadata_callback, row_callback, ctx, &has_result);
     if (result != MYLITE_OK) {
         if (ownerless_finish_dictionary_ddl(*db, dictionary_ddl_started) != MYLITE_OK) {
             set_error(*db, MYLITE_IOERR, "ownerless dictionary change could not finish");
@@ -5875,6 +5893,7 @@ int validate_runtime_database_path(mylite_db &db) {
 
 int store_and_emit_result(
     mylite_db &db,
+    mylite_exec_result_metadata_callback metadata_callback,
     mylite_exec_result_callback callback,
     void *ctx,
     bool *has_result
@@ -5906,6 +5925,14 @@ int store_and_emit_result(
         column.table = fields[i].table;
         column.org_table = fields[i].org_table;
         columns.push_back(column);
+    }
+
+    if (metadata_callback != nullptr &&
+        metadata_callback(ctx, static_cast<int>(field_count), columns.data()) != 0) {
+        mysql_free_result(result);
+        static_cast<void>(drain_remaining_query_results(db));
+        set_error(db, MYLITE_ERROR, "query metadata callback requested abort");
+        return MYLITE_ERROR;
     }
 
     std::vector<std::size_t> value_lengths;

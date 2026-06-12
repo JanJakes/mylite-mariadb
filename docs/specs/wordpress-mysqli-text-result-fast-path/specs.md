@@ -59,6 +59,9 @@ Add a new `libmylite` direct-result callback API alongside the existing
   display name, original name, table, and original table.
 - The legacy `mylite_exec()` callback becomes a thin adapter over the new
   internal metadata callback.
+- A follow-up `mylite_exec_result_with_metadata()` helper emits field metadata
+  before row callbacks so zero-row text result sets can still become mysqli
+  result objects without falling back to prepared statements.
 
 Switch the mysqli adapter's default result-producing `mysqli_query()` path to
 `mylite_exec_result()` for first-seen and non-repeated result SQL. An immediate
@@ -117,6 +120,8 @@ prepared-result lifecycle work from the default `mysqli_query()` result path.
 
 - `mylite_exec()` remains compatible with existing callback callers.
 - `mylite_exec_result()` returns full field metadata and byte lengths.
+- Zero-row text result sets return a result object with field metadata through
+  `mylite_exec_result_with_metadata()`.
 - Default unique mysqli result queries avoid `mylite_prepare()` while
   preserving field metadata and binary result values.
 - `MYLITE_MYSQLI_PREPARED_QUERY_RESULTS=1` can still exercise the old prepared

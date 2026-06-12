@@ -145,6 +145,10 @@ static void assert_exec_validation(void) {
     assert(mylite_exec(db, NULL, NULL, NULL, NULL) == MYLITE_MISUSE);
     assert(mylite_exec_result(NULL, "SELECT 1", NULL, NULL, NULL) == MYLITE_MISUSE);
     assert(mylite_exec_result(db, NULL, NULL, NULL, NULL) == MYLITE_MISUSE);
+    assert(
+        mylite_exec_result_with_metadata(NULL, "SELECT 1", NULL, NULL, NULL, NULL) == MYLITE_MISUSE
+    );
+    assert(mylite_exec_result_with_metadata(db, NULL, NULL, NULL, NULL, NULL) == MYLITE_MISUSE);
 }
 
 static void assert_prepare_validation(void) {

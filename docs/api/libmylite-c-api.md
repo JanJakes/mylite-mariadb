@@ -288,6 +288,11 @@ typedef int (*mylite_exec_result_callback)(
     const size_t *value_lengths,
     const mylite_exec_column *columns);
 
+typedef int (*mylite_exec_result_metadata_callback)(
+    void *ctx,
+    int column_count,
+    const mylite_exec_column *columns);
+
 int mylite_exec(
     mylite_db *db,
     const char *sql,
@@ -301,6 +306,14 @@ int mylite_exec_result(
     mylite_exec_result_callback callback,
     void *ctx,
     char **errmsg);
+
+int mylite_exec_result_with_metadata(
+    mylite_db *db,
+    const char *sql,
+    mylite_exec_result_metadata_callback metadata_callback,
+    mylite_exec_result_callback row_callback,
+    void *ctx,
+    char **errmsg);
 ```
 
 `mylite_exec()` is a convenience API for one-shot SQL. Result values are textual
@@ -309,6 +322,9 @@ execution can use prepared statements. Code that needs one-shot result metadata
 or binary-safe values can use `mylite_exec_result()`, which follows the same
 direct execution path while passing explicit value byte lengths and display,
 original-column, table, and original-table names for each result column.
+Code that also needs field metadata for zero-row result sets can use
+`mylite_exec_result_with_metadata()`. Its metadata callback runs once for each
+result set before row callbacks; no-result statements do not invoke it.
 
 If `errmsg` is non-NULL and an error string is returned, the caller releases it
 with `mylite_free()`.
@@ -317,7 +333,8 @@ Initial implementation status: `mylite_exec()` runs through the embedded
 MariaDB connection in `embedded-dev` builds, returns text result rows, preserves
 SQL `NULL` values as `NULL` callback entries, and populates MariaDB diagnostics
 on query failure. `mylite_exec_result()` adds binary-safe value lengths and
-field metadata from MariaDB stored results. Native-storage smoke coverage verifies controlled
+field metadata from MariaDB stored results. `mylite_exec_result_with_metadata()`
+also reports field metadata for empty result sets. Native-storage smoke coverage verifies controlled
 `ENGINE=MyISAM` DDL and DML persist across close and reopen. Explicit
 `ENGINE=InnoDB` coverage verifies commit, rollback, savepoints, clean reopen,
 and child-process recovery through SQL transaction statements. Additional engine

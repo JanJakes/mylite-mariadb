@@ -307,11 +307,21 @@ static int php_mylite_mysqli_exec_no_result_query_impl(
     const char *sql,
     zval *return_value
 );
+static int php_mylite_mysqli_exec_result_metadata_callback(
+    void *ctx,
+    int column_count,
+    const mylite_exec_column *columns
+);
 static int php_mylite_mysqli_exec_result_callback(
     void *ctx,
     int column_count,
     char **values,
     const size_t *value_lengths,
+    const mylite_exec_column *columns
+);
+static void php_mylite_mysqli_exec_result_init_fields(
+    php_mylite_mysqli_exec_result_context *result_ctx,
+    int column_count,
     const mylite_exec_column *columns
 );
 static int php_mylite_mysqli_prepare_impl(
@@ -3328,8 +3338,14 @@ static int php_mylite_mysqli_exec_query_impl(
         ++php_mylite_mysqli_profile.exec_result_calls;
     }
     const uint64_t exec_start = php_mylite_mysqli_profile_start();
-    const int result =
-        mylite_exec_result(link->db, sql, php_mylite_mysqli_exec_result_callback, &ctx, &errmsg);
+    const int result = mylite_exec_result_with_metadata(
+        link->db,
+        sql,
+        php_mylite_mysqli_exec_result_metadata_callback,
+        php_mylite_mysqli_exec_result_callback,
+        &ctx,
+        &errmsg
+    );
     php_mylite_mysqli_profile_add_elapsed(&php_mylite_mysqli_profile.exec_result_ns, exec_start);
     mylite_free(errmsg);
     if (result != MYLITE_OK) {
@@ -3406,6 +3422,17 @@ static int php_mylite_mysqli_exec_no_result_query_impl(
     return SUCCESS;
 }
 
+static int php_mylite_mysqli_exec_result_metadata_callback(
+    void *ctx,
+    int column_count,
+    const mylite_exec_column *columns
+) {
+    php_mylite_mysqli_exec_result_context *result_ctx =
+        (php_mylite_mysqli_exec_result_context *)ctx;
+    php_mylite_mysqli_exec_result_init_fields(result_ctx, column_count, columns);
+    return 0;
+}
+
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): required libmylite callback signature.
 static int php_mylite_mysqli_exec_result_callback(
     void *ctx,
@@ -3418,17 +3445,7 @@ static int php_mylite_mysqli_exec_result_callback(
     php_mylite_mysqli_exec_result_context *result_ctx =
         (php_mylite_mysqli_exec_result_context *)ctx;
     if (!result_ctx->fields_initialized) {
-        for (int column = 0; column < column_count; ++column) {
-            const mylite_exec_column *metadata = &columns[column];
-            php_mylite_mysqli_add_field(
-                result_ctx->fields,
-                metadata->name,
-                metadata->org_name,
-                metadata->table,
-                metadata->org_table
-            );
-        }
-        result_ctx->fields_initialized = true;
+        php_mylite_mysqli_exec_result_init_fields(result_ctx, column_count, columns);
     }
 
     zval row;
@@ -3453,6 +3470,28 @@ static int php_mylite_mysqli_exec_result_callback(
         callback_start
     );
     return 0;
+}
+
+static void php_mylite_mysqli_exec_result_init_fields(
+    php_mylite_mysqli_exec_result_context *result_ctx,
+    int column_count,
+    const mylite_exec_column *columns
+) {
+    if (result_ctx == NULL || result_ctx->fields_initialized || column_count <= 0 ||
+        columns == NULL) {
+        return;
+    }
+    for (int column = 0; column < column_count; ++column) {
+        const mylite_exec_column *metadata = &columns[column];
+        php_mylite_mysqli_add_field(
+            result_ctx->fields,
+            metadata->name,
+            metadata->org_name,
+            metadata->table,
+            metadata->org_table
+        );
+    }
+    result_ctx->fields_initialized = true;
 }
 
 static int php_mylite_mysqli_prepare_impl(
