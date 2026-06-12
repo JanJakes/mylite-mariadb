@@ -1156,10 +1156,12 @@ static void test_page_log_encodes_sparse_zero_payloads(void) {
     int fd = open_file(log_path);
     uint8_t full_page[128];
     uint8_t sparse_page[128];
+    uint8_t trailing_page[128];
     uint8_t zero_page[128];
     uint8_t out_page[128];
     uint64_t first_record_offset = 0;
     uint64_t sparse_record_offset = 0;
+    uint64_t trailing_record_offset = 0;
     uint64_t zero_record_offset = 0;
     uint64_t page_lsn = 0;
     uint64_t commit_lsn = 0;
@@ -1168,14 +1170,17 @@ static void test_page_log_encodes_sparse_zero_payloads(void) {
     mylite_ownerless_page_log_append_session session = {0};
     struct stat log_stat = {0};
     const size_t sparse_payload_size = 22U;
+    const size_t trailing_payload_size = 16U;
 
     memset(full_page, 0x44, sizeof(full_page));
     memset(sparse_page, 0, sizeof(sparse_page));
+    memset(trailing_page, 0, sizeof(trailing_page));
     memset(zero_page, 0, sizeof(zero_page));
     sparse_page[0] = 0x31;
     sparse_page[7] = 0x32;
     sparse_page[32] = 0x33;
     sparse_page[sizeof(sparse_page) - 1U] = 0x34;
+    memset(trailing_page, 0x55, trailing_payload_size);
     memset(out_page, 0xEE, sizeof(out_page));
 
     assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
@@ -1218,6 +1223,19 @@ static void test_page_log_encodes_sparse_zero_payloads(void) {
             1U,
             140U,
             140U,
+            trailing_page,
+            sizeof(trailing_page),
+            &trailing_record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append_session_append(
+            fd,
+            &session,
+            9U,
+            1U,
+            160U,
+            160U,
             zero_page,
             sizeof(zero_page),
             &zero_record_offset
@@ -1233,7 +1251,12 @@ static void test_page_log_encodes_sparse_zero_payloads(void) {
         first_record_offset + MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE + sizeof(full_page)
     );
     assert(
-        zero_record_offset ==
+        zero_record_offset == trailing_record_offset +
+                                  MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE +
+                                  trailing_payload_size
+    );
+    assert(
+        trailing_record_offset ==
         sparse_record_offset + MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE + sparse_payload_size
     );
     assert(fstat(fd, &log_stat) == 0);
@@ -1241,13 +1264,14 @@ static void test_page_log_encodes_sparse_zero_payloads(void) {
         log_stat.st_size ==
         (off_t)(zero_record_offset + MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE)
     );
-    assert(stats[PAGE_LOG_APPEND_PERF_STAT_CALLS] == 3U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_CALLS] == 4U);
     assert(
-        stats[PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_BYTES] == sizeof(full_page) + sparse_payload_size
+        stats[PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_BYTES] ==
+        sizeof(full_page) + sparse_payload_size + trailing_payload_size
     );
     assert(
         stats[PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_BYTES] ==
-        3U * MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE
+        4U * MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE
     );
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_FULL_RECORDS] == 1U);
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_FULL_PAYLOAD_BYTES] == sizeof(full_page));
@@ -1257,10 +1281,13 @@ static void test_page_log_encodes_sparse_zero_payloads(void) {
     assert(
         stats[PAGE_LOG_APPEND_PERF_STAT_COMPACT_SPARSE_ZERO_PAYLOAD_BYTES] == sparse_payload_size
     );
-    assert(stats[PAGE_LOG_APPEND_PERF_STAT_TRAILING_ZERO_RECORDS] == 1U);
-    assert(stats[PAGE_LOG_APPEND_PERF_STAT_TRAILING_ZERO_PAYLOAD_BYTES] == 0U);
-    assert(stats[PAGE_LOG_APPEND_PERF_STAT_SPACE_METADATA_RECORDS] == 2U);
-    assert(stats[PAGE_LOG_APPEND_PERF_STAT_SPACE_METADATA_PAYLOAD_BYTES] == sparse_payload_size);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_TRAILING_ZERO_RECORDS] == 2U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_TRAILING_ZERO_PAYLOAD_BYTES] == trailing_payload_size);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_SPACE_METADATA_RECORDS] == 3U);
+    assert(
+        stats[PAGE_LOG_APPEND_PERF_STAT_SPACE_METADATA_PAYLOAD_BYTES] ==
+        sparse_payload_size + trailing_payload_size
+    );
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_OTHER_RECORDS] == 1U);
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_OTHER_PAYLOAD_BYTES] == sizeof(full_page));
 
@@ -1287,6 +1314,24 @@ static void test_page_log_encodes_sparse_zero_payloads(void) {
         mylite_ownerless_page_log_read_record_at(
             fd,
             0U,
+            trailing_record_offset,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(trailing_page));
+    assert(page_lsn == 140U);
+    assert(commit_lsn == 140U);
+    assert(memcmp(out_page, trailing_page, sizeof(trailing_page)) == 0);
+
+    memset(out_page, 0xEE, sizeof(out_page));
+    assert(
+        mylite_ownerless_page_log_read_record_at(
+            fd,
+            0U,
             zero_record_offset,
             out_page,
             sizeof(out_page),
@@ -1296,12 +1341,12 @@ static void test_page_log_encodes_sparse_zero_payloads(void) {
         ) == MYLITE_OWNERLESS_PAGE_LOG_OK
     );
     assert(out_page_size == sizeof(zero_page));
-    assert(page_lsn == 140U);
-    assert(commit_lsn == 140U);
+    assert(page_lsn == 160U);
+    assert(commit_lsn == 160U);
     assert(memcmp(out_page, zero_page, sizeof(zero_page)) == 0);
 
     assert(
-        mylite_ownerless_page_log_checkpoint(fd, 120U, NULL, NULL) == MYLITE_OWNERLESS_PAGE_LOG_OK
+        mylite_ownerless_page_log_checkpoint(fd, 140U, NULL, NULL) == MYLITE_OWNERLESS_PAGE_LOG_OK
     );
     assert(fstat(fd, &log_stat) == 0);
     assert(
@@ -1314,7 +1359,7 @@ static void test_page_log_encodes_sparse_zero_payloads(void) {
             fd,
             9U,
             1U,
-            140U,
+            160U,
             out_page,
             sizeof(out_page),
             &out_page_size,
@@ -1323,15 +1368,15 @@ static void test_page_log_encodes_sparse_zero_payloads(void) {
         ) == MYLITE_OWNERLESS_PAGE_LOG_OK
     );
     assert(out_page_size == sizeof(zero_page));
-    assert(page_lsn == 140U);
-    assert(commit_lsn == 140U);
+    assert(page_lsn == 160U);
+    assert(commit_lsn == 160U);
     assert(memcmp(out_page, zero_page, sizeof(zero_page)) == 0);
     assert(
         mylite_ownerless_page_log_find_latest(
             fd,
             9U,
             1U,
-            120U,
+            140U,
             out_page,
             sizeof(out_page),
             &out_page_size,

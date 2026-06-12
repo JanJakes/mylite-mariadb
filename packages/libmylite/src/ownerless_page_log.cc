@@ -459,12 +459,16 @@ std::uint64_t trailing_zero_payload_size_for_page(const void *page, std::uint32_
 bool build_sparse_zero_payload(
     const void *page,
     std::uint32_t page_size,
-    std::vector<unsigned char> *out_payload
+    std::vector<unsigned char> *out_payload,
+    std::uint64_t *out_trailing_size,
+    bool *out_trailing_size_known
 );
 bool build_compact_sparse_zero_payload(
     const void *page,
     std::uint32_t page_size,
-    std::vector<unsigned char> *out_payload
+    std::vector<unsigned char> *out_payload,
+    std::uint64_t *out_trailing_size,
+    bool *out_trailing_size_known
 );
 PayloadStatus record_payload_status(int fd, off_t payload_offset, const PageRecordHeader &record);
 bool record_requires_oldest_snapshot_boundary(
@@ -2730,25 +2734,61 @@ std::uint64_t encoded_payload_size_for_page(
     std::uint32_t *out_flags,
     std::vector<unsigned char> *out_payload
 ) {
-    const std::uint64_t trailing_size = trailing_zero_payload_size_for_page(page, page_size);
-
     std::uint32_t flags = 0;
     std::uint64_t encoded_size = page_size;
-    if (out_payload != nullptr && build_compact_sparse_zero_payload(page, page_size, out_payload) &&
-        out_payload->size() < trailing_size) {
-        flags |= k_record_flag_compact_sparse_zero_payload;
-        encoded_size = out_payload->size();
-    } else if (out_payload != nullptr && build_sparse_zero_payload(page, page_size, out_payload) &&
-               out_payload->size() < trailing_size) {
-        flags |= k_record_flag_sparse_zero_payload;
-        encoded_size = out_payload->size();
-    } else if (trailing_size < page_size) {
+    std::uint64_t trailing_size = page_size;
+    bool trailing_size_known = false;
+    if (out_payload != nullptr) {
+        std::uint64_t compact_trailing_size = page_size;
+        bool compact_trailing_size_known = false;
+        if (build_compact_sparse_zero_payload(
+                page,
+                page_size,
+                out_payload,
+                &compact_trailing_size,
+                &compact_trailing_size_known
+            )) {
+            trailing_size = compact_trailing_size;
+            trailing_size_known = true;
+            if (out_payload->size() < trailing_size) {
+                flags |= k_record_flag_compact_sparse_zero_payload;
+                encoded_size = out_payload->size();
+            }
+        } else if (compact_trailing_size_known) {
+            trailing_size = compact_trailing_size;
+            trailing_size_known = true;
+        } else {
+            std::uint64_t sparse_trailing_size = page_size;
+            bool sparse_trailing_size_known = false;
+            if (build_sparse_zero_payload(
+                    page,
+                    page_size,
+                    out_payload,
+                    &sparse_trailing_size,
+                    &sparse_trailing_size_known
+                )) {
+                trailing_size = sparse_trailing_size;
+                trailing_size_known = true;
+                if (out_payload->size() < trailing_size) {
+                    flags |= k_record_flag_sparse_zero_payload;
+                    encoded_size = out_payload->size();
+                }
+            } else if (sparse_trailing_size_known) {
+                trailing_size = sparse_trailing_size;
+                trailing_size_known = true;
+            }
+        }
+    }
+    if (flags == 0U && !trailing_size_known) {
+        trailing_size = trailing_zero_payload_size_for_page(page, page_size);
+    }
+    if (flags == 0U && trailing_size < page_size) {
         flags |= k_record_flag_trailing_zero_payload;
         encoded_size = trailing_size;
         if (out_payload != nullptr) {
             out_payload->clear();
         }
-    } else if (out_payload != nullptr) {
+    } else if (flags == 0U && out_payload != nullptr) {
         out_payload->clear();
     }
     if (out_flags != nullptr) {
@@ -2769,16 +2809,22 @@ std::uint64_t trailing_zero_payload_size_for_page(const void *page, std::uint32_
 bool build_sparse_zero_payload(
     const void *page,
     std::uint32_t page_size,
-    std::vector<unsigned char> *out_payload
+    std::vector<unsigned char> *out_payload,
+    std::uint64_t *out_trailing_size,
+    bool *out_trailing_size_known
 ) {
     if (out_payload == nullptr) {
         return false;
+    }
+    if (out_trailing_size_known != nullptr) {
+        *out_trailing_size_known = false;
     }
     const auto *bytes = static_cast<const unsigned char *>(page);
     out_payload->clear();
     out_payload->reserve(page_size);
     out_payload->resize(sizeof(std::uint32_t));
     std::uint32_t run_count = 0;
+    std::uint64_t trailing_size = 0U;
 
     for (std::uint32_t offset = 0; offset < page_size;) {
         while (offset < page_size && bytes[offset] == 0U) {
@@ -2791,6 +2837,7 @@ bool build_sparse_zero_payload(
         while (offset < page_size && bytes[offset] != 0U) {
             ++offset;
         }
+        trailing_size = offset;
         const std::uint32_t run_size = offset - run_start;
         const std::size_t cursor = out_payload->size();
         const std::size_t encoded_run_size = (2U * sizeof(std::uint32_t)) + run_size;
@@ -2809,6 +2856,12 @@ bool build_sparse_zero_payload(
         ++run_count;
     }
 
+    if (out_trailing_size != nullptr) {
+        *out_trailing_size = trailing_size;
+    }
+    if (out_trailing_size_known != nullptr) {
+        *out_trailing_size_known = true;
+    }
     if (run_count == 0U) {
         out_payload->clear();
         return false;
@@ -2820,16 +2873,22 @@ bool build_sparse_zero_payload(
 bool build_compact_sparse_zero_payload(
     const void *page,
     std::uint32_t page_size,
-    std::vector<unsigned char> *out_payload
+    std::vector<unsigned char> *out_payload,
+    std::uint64_t *out_trailing_size,
+    bool *out_trailing_size_known
 ) {
     if (out_payload == nullptr) {
         return false;
+    }
+    if (out_trailing_size_known != nullptr) {
+        *out_trailing_size_known = false;
     }
     const auto *bytes = static_cast<const unsigned char *>(page);
     out_payload->clear();
     out_payload->reserve(page_size);
     out_payload->resize(sizeof(std::uint16_t));
     std::uint32_t run_count = 0;
+    std::uint64_t trailing_size = 0U;
 
     for (std::uint32_t offset = 0; offset < page_size;) {
         while (offset < page_size && bytes[offset] == 0U) {
@@ -2842,6 +2901,7 @@ bool build_compact_sparse_zero_payload(
         while (offset < page_size && bytes[offset] != 0U) {
             ++offset;
         }
+        trailing_size = offset;
         const std::uint32_t run_size = offset - run_start;
         if (run_start > std::numeric_limits<std::uint16_t>::max() ||
             run_size > std::numeric_limits<std::uint16_t>::max() ||
@@ -2871,6 +2931,12 @@ bool build_compact_sparse_zero_payload(
         ++run_count;
     }
 
+    if (out_trailing_size != nullptr) {
+        *out_trailing_size = trailing_size;
+    }
+    if (out_trailing_size_known != nullptr) {
+        *out_trailing_size_known = true;
+    }
     if (run_count == 0U) {
         out_payload->clear();
         return false;
