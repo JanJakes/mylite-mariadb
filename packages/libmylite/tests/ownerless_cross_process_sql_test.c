@@ -177,6 +177,12 @@ extern void mylite_ownerless_innodb_read_commit_visibility_stats(
     uint64_t *out_values,
     size_t value_count
 );
+extern void mylite_ownerless_page_log_set_append_perf_stats_enabled(int enabled);
+extern void mylite_ownerless_page_log_reset_append_perf_stats(void);
+extern void mylite_ownerless_page_log_read_append_perf_stats(
+    uint64_t *out_values,
+    size_t value_count
+);
 
 enum ownerless_test_database_perf_stat_index {
     OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_CALLS = 28,
@@ -197,6 +203,81 @@ enum ownerless_test_database_perf_stat_index {
     OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_PINS,
     OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_BASELINE,
     OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT
+};
+
+enum ownerless_test_page_log_append_perf_stat_index {
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_CALLS = 0,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_TOTAL_NS,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_LOCK_NS,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_HEADER_NS,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_BODY_NS,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_FSTAT_NS,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_CHECKSUM_NS,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_WRITE_NS,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_WRITE_NS,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_ENCODE_NS,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_FULL_RECORDS,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_TRAILING_ZERO_RECORDS,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SPARSE_ZERO_RECORDS,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_FULL_PAYLOAD_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_TRAILING_ZERO_PAYLOAD_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SPARSE_ZERO_PAYLOAD_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_COMPACT_SPARSE_ZERO_RECORDS,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_COMPACT_SPARSE_ZERO_PAYLOAD_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_INDEX_RECORDS,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_INDEX_PAYLOAD_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_UNDO_LOG_RECORDS,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_UNDO_LOG_PAYLOAD_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SYS_RECORDS,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SYS_PAYLOAD_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_TRX_SYS_RECORDS,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_TRX_SYS_PAYLOAD_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SPACE_METADATA_RECORDS,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SPACE_METADATA_PAYLOAD_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_BLOB_RECORDS,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_BLOB_PAYLOAD_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_OTHER_RECORDS,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_OTHER_PAYLOAD_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_COMPACT_SPARSE_METADATA_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_COMPACT_SPARSE_DATA_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_INDEX_COMPACT_SPARSE_METADATA_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_INDEX_COMPACT_SPARSE_DATA_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_UNDO_LOG_COMPACT_SPARSE_METADATA_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_UNDO_LOG_COMPACT_SPARSE_DATA_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SYS_COMPACT_SPARSE_METADATA_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SYS_COMPACT_SPARSE_DATA_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_TRX_SYS_COMPACT_SPARSE_METADATA_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_TRX_SYS_COMPACT_SPARSE_DATA_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SPACE_METADATA_COMPACT_SPARSE_METADATA_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SPACE_METADATA_COMPACT_SPARSE_DATA_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_BLOB_COMPACT_SPARSE_METADATA_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_BLOB_COMPACT_SPARSE_DATA_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_OTHER_COMPACT_SPARSE_METADATA_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_OTHER_COMPACT_SPARSE_DATA_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_VARINT_COMPACT_SPARSE_ZERO_RECORDS,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_VARINT_COMPACT_SPARSE_ZERO_PAYLOAD_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_ZERO_RECORDS,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_ZERO_PAYLOAD_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_METADATA_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_RAW_DATA_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_FILL_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_UNIQUE,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_DUPLICATE,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_SIZE_MISMATCH,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_TABLE_OVERFLOW,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_CHANGED_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_FIL_HEADER_CHANGED_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_BODY_CHANGED_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_RECORDS,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_PAYLOAD_BYTES,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_DIRECT_APPEND_CALLS,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_APPEND_CALLS,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_FAST_RECORDS,
+    OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
 enum ownerless_test_page_publish_stat_index {
@@ -9315,6 +9396,7 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
     char *database_path = path_join(root, "ownerless-single-owner-multi-row-insert.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     uint64_t deep_stats[OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT] = {0};
+    uint64_t page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
     uint64_t page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT] = {0};
     uint64_t commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT] = {0};
     mylite_db *db;
@@ -9333,9 +9415,11 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
     );
 
     mylite_ownerless_innodb_set_commit_visibility_stats_enabled(1);
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
     mylite_ownerless_innodb_set_page_publish_stats_enabled(1);
     mylite_ownerless_innodb_deep_set_perf_stats_enabled(1);
     mylite_ownerless_innodb_reset_commit_visibility_stats();
+    mylite_ownerless_page_log_reset_append_perf_stats();
     mylite_ownerless_innodb_reset_page_publish_stats();
     mylite_ownerless_innodb_deep_reset_perf_stats();
 
@@ -9415,7 +9499,65 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
         ) == 12000U
     );
 
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_single_row_insert_fast_path ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "payload VARBINARY(4000) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
     mylite_ownerless_innodb_reset_commit_visibility_stats();
+    mylite_ownerless_page_log_reset_append_perf_stats();
+    mylite_ownerless_innodb_reset_page_publish_stats();
+    mylite_ownerless_innodb_deep_reset_perf_stats();
+
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_single_row_insert_fast_path VALUES "
+        "(1, 10, REPEAT('s', 4000))"
+    );
+
+    mylite_ownerless_innodb_read_commit_visibility_stats(
+        commit_stats,
+        OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT
+    );
+    mylite_ownerless_page_log_read_append_perf_stats(
+        page_log_append_stats,
+        OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_COUNT
+    );
+    mylite_ownerless_innodb_deep_read_perf_stats(
+        deep_stats,
+        OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT
+    );
+    mylite_ownerless_innodb_read_page_publish_stats(
+        page_stats,
+        OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT
+    );
+
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FAST] > 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH] == 0U);
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_PUBLISHED] > 0U);
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_FAILED] == 0U);
+    assert(page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_CALLS] > 0U);
+    assert(
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_APPEND_CALLS] ==
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_CALLS]
+    );
+    assert(
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] == 1U
+    );
+    assert(page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS] == 1U);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_single_row_insert_fast_path") == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_single_row_insert_fast_path") ==
+        10U
+    );
+
+    mylite_ownerless_innodb_reset_commit_visibility_stats();
+    mylite_ownerless_page_log_reset_append_perf_stats();
     exec_ok(
         db,
         "INSERT INTO app.ownerless_multi_row_insert_fast_path VALUES "
@@ -9427,6 +9569,7 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
         OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT
     );
     mylite_ownerless_innodb_set_commit_visibility_stats_enabled(0);
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(0);
     mylite_ownerless_innodb_set_page_publish_stats_enabled(0);
     mylite_ownerless_innodb_deep_set_perf_stats_enabled(0);
 

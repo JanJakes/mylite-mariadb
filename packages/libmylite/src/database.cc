@@ -1223,6 +1223,7 @@ struct mylite_db {
 };
 
 thread_local mylite_db *ownerless_current_statement_db = nullptr;
+thread_local bool ownerless_statement_defers_page_log_append_batch = false;
 
 struct OwnerlessStatementPageWriteTrackingScope {
     explicit OwnerlessStatementPageWriteTrackingScope(mylite_db &db)
@@ -1239,16 +1240,28 @@ struct OwnerlessStatementPageWriteTrackingScope {
 };
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
+namespace {
+void ownerless_page_log_append_batch_release_current();
+}
+
 struct OwnerlessStatementVisibleFastPathScope {
-    explicit OwnerlessStatementVisibleFastPathScope(bool enabled)
-        : previous(mylite_ownerless_innodb_set_statement_visible_fast_path(enabled ? 1 : 0)) {}
+    explicit OwnerlessStatementVisibleFastPathScope(bool enabled, bool defer_page_log_append_batch)
+        : previous(mylite_ownerless_innodb_set_statement_visible_fast_path(enabled ? 1 : 0)),
+          previous_defer_page_log_append_batch(ownerless_statement_defers_page_log_append_batch) {
+        ownerless_statement_defers_page_log_append_batch = defer_page_log_append_batch;
+    }
 
     ~OwnerlessStatementVisibleFastPathScope() {
+        if (ownerless_statement_defers_page_log_append_batch) {
+            ownerless_page_log_append_batch_release_current();
+        }
+        ownerless_statement_defers_page_log_append_batch = previous_defer_page_log_append_batch;
         mylite_ownerless_innodb_set_statement_visible_fast_path(previous);
     }
 
   private:
     int previous = 0;
+    bool previous_defer_page_log_append_batch = false;
 };
 
 struct OwnerlessStatementPlainReadScope {
@@ -1903,6 +1916,7 @@ void ownerless_persist_redo_checkpoint(
 );
 void ownerless_innodb_page_publish_batch_begin_hook(void *ctx);
 void ownerless_innodb_page_publish_batch_end_hook(void *ctx);
+void ownerless_page_log_append_batch_release_for_snapshot(OwnerlessInnoDBLockHookContext *hook);
 int append_ownerless_page_version(
     OwnerlessInnoDBLockHookContext *hook,
     std::uint32_t space_id,
@@ -2226,7 +2240,12 @@ bool ownerless_prepared_write_defers_native_prepare(
 bool count_sql_parameter_markers(std::string_view sql, std::size_t *out_count);
 bool sql_contains_identifier_token(std::string_view sql, const char *keyword);
 bool ownerless_insert_values_statement_allows_visible_fast_path(const SqlPolicyTokens &tokens);
+bool ownerless_insert_values_statement_allows_append_batch_fast_path(const SqlPolicyTokens &tokens);
 bool ownerless_statement_allows_visible_fast_path(mylite_db &db, const SqlPolicyTokens &tokens);
+bool ownerless_statement_allows_append_batch_fast_path(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
 bool ownerless_insert_target_table(
     const mylite_db &db,
     const SqlPolicyTokens &tokens,
@@ -2877,7 +2896,8 @@ int mylite_step(mylite_stmt *stmt) {
         OwnerlessStatementPageWriteTrackingScope page_write_tracking(*stmt->db);
         OwnerlessStatementPlainReadScope plain_read(page_version_reads_enabled);
         OwnerlessStatementVisibleFastPathScope visible_fast_path(
-            ownerless_statement_allows_visible_fast_path(*stmt->db, policy_tokens)
+            ownerless_statement_allows_visible_fast_path(*stmt->db, policy_tokens),
+            ownerless_statement_allows_append_batch_fast_path(*stmt->db, policy_tokens)
         );
         ownerless_stage_start =
             ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
@@ -4120,7 +4140,8 @@ int exec_result_impl(
     OwnerlessStatementPageWriteTrackingScope page_write_tracking(*db);
     OwnerlessStatementPlainReadScope plain_read(page_version_reads_enabled);
     OwnerlessStatementVisibleFastPathScope visible_fast_path(
-        ownerless_statement_allows_visible_fast_path(*db, policy_tokens)
+        ownerless_statement_allows_visible_fast_path(*db, policy_tokens),
+        ownerless_statement_allows_append_batch_fast_path(*db, policy_tokens)
     );
     if (mysql_query(&db->mysql, sql) != 0) {
         set_mariadb_error(*db);
@@ -4635,10 +4656,17 @@ bool sql_contains_identifier_token(std::string_view sql, const char *keyword) {
     return false;
 }
 
-bool ownerless_insert_values_statement_allows_visible_fast_path(const SqlPolicyTokens &tokens) {
+bool ownerless_insert_values_statement_row_count(
+    const SqlPolicyTokens &tokens,
+    std::size_t *out_row_count
+) {
     if (!token_equals(identifier_token_at(tokens, 0), "INSERT")) {
         return false;
     }
+    if (out_row_count == nullptr) {
+        return false;
+    }
+    *out_row_count = 0U;
 
     int paren_depth = 0;
     std::size_t values_index = tokens.count;
@@ -4694,20 +4722,49 @@ bool ownerless_insert_values_statement_allows_visible_fast_path(const SqlPolicyT
             continue;
         }
         if (token_equals(token, ",")) {
+            ++(*out_row_count);
             expect_row = true;
             continue;
         }
         if (token_equals(token, ";")) {
-            return saw_row && !expect_row;
+            if (!saw_row || expect_row) {
+                return false;
+            }
+            ++(*out_row_count);
+            return true;
         }
         return false;
     }
 
-    return saw_row && !expect_row && paren_depth == 0;
+    if (!saw_row || expect_row || paren_depth != 0) {
+        return false;
+    }
+    ++(*out_row_count);
+    return true;
+}
+
+bool ownerless_insert_values_statement_allows_visible_fast_path(const SqlPolicyTokens &tokens) {
+    std::size_t row_count = 0U;
+    return ownerless_insert_values_statement_row_count(tokens, &row_count) && row_count != 0U;
+}
+
+bool ownerless_insert_values_statement_allows_append_batch_fast_path(
+    const SqlPolicyTokens &tokens
+) {
+    std::size_t row_count = 0U;
+    return ownerless_insert_values_statement_row_count(tokens, &row_count) && row_count == 1U;
 }
 
 bool ownerless_statement_allows_visible_fast_path(mylite_db &db, const SqlPolicyTokens &tokens) {
     return ownerless_insert_values_statement_allows_visible_fast_path(tokens) &&
+           !ownerless_insert_target_has_foreign_keys(db, tokens);
+}
+
+bool ownerless_statement_allows_append_batch_fast_path(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    return ownerless_insert_values_statement_allows_append_batch_fast_path(tokens) &&
            !ownerless_insert_target_has_foreign_keys(db, tokens);
 }
 
@@ -13166,6 +13223,7 @@ void advance_ownerless_local_trx_horizon(RuntimeState &runtime) {
 }
 
 void clear_ownerless_native_hook_contexts(RuntimeState &runtime) {
+    ownerless_page_log_append_batch_release_current();
     reset_ownerless_page_log_sync_anchor();
     runtime.ownerless_innodb_lock_hook = {};
     runtime.ownerless_read_view_hook = {};
@@ -14520,6 +14578,7 @@ void ownerless_innodb_pages_visible_hook(std::uint64_t visible_lsn, void *ctx) {
     }
     std::uint64_t stage_start_ns =
         ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
+    ownerless_page_log_append_batch_release_for_snapshot(hook);
     const int sync_result = sync_ownerless_page_log_if_changed(hook);
     ownerless_database_perf_add_elapsed(
         OWNERLESS_DATABASE_PERF_PAGES_VISIBLE_SYNC_NS,
@@ -14605,6 +14664,18 @@ void ownerless_innodb_page_publish_batch_end_hook(void *ctx) {
         ownerless_page_log_append_batch.hook = nullptr;
         return;
     }
+    if (ownerless_page_log_append_batch.hook != nullptr &&
+        ownerless_statement_defers_page_log_append_batch) {
+        return;
+    }
+    ownerless_page_log_append_batch_release_current();
+}
+
+void ownerless_page_log_append_batch_release_current() {
+    if (ownerless_page_log_append_batch.session.active == 0) {
+        ownerless_page_log_append_batch.hook = nullptr;
+        return;
+    }
     OwnerlessInnoDBLockHookContext *hook = ownerless_page_log_append_batch.hook;
     const int fd = hook != nullptr ? hook->page_log_fd : -1;
     mylite_ownerless_page_log_append_session_end(fd, &ownerless_page_log_append_batch.session);
@@ -14620,6 +14691,7 @@ void ownerless_page_log_append_batch_release_for_snapshot(OwnerlessInnoDBLockHoo
         hook->page_log_fd,
         &ownerless_page_log_append_batch.session
     );
+    ownerless_page_log_append_batch.hook = nullptr;
 }
 
 int append_ownerless_page_version(

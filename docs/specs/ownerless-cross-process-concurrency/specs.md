@@ -1702,6 +1702,15 @@ Tasks:
    baseline to `598.580` bytes/insert with `90` delta records, while leaving
    broader redo/checkpoint reconciliation and DDL/file lifecycle recovery as
    planned work.
+   Single-row pure `INSERT ... VALUES` visible-fast-path statements reuse one
+   page-log append session across the statement's ownerless mini-transactions
+   and release it before page-log sync/page-visible LSN publication. Focused
+   SQL coverage keeps the existing native history WAL proof, multi-row
+   visible-fast proof, and conservative upsert fallback checks while asserting
+   that append-session begin/end counts collapse for the successful single-row
+   visible-fast insert. Broader DML, DDL, explicit-transaction, foreign-key,
+   multi-row append-session deferral, and cross-statement group-commit batching
+   remain future work.
    Undo, allocation,
    tablespace-header, extent, transaction-system, change-buffer, and system page
    records remain primitive evidence for future active-pin compaction.
@@ -5011,7 +5020,14 @@ subsystems that this mode needs:
   and page-log append encode time `30.980 ms`, down from the preceding
   `54.815 ms` 500-row sample. The remaining write-throughput targets are
   native commit/page-publication, non-fast page-log encoding, and broader
-  redo/checkpoint recovery work. A follow-up ownerless page-write leave
+  redo/checkpoint recovery work. The visible-fast page-log append-batch slice
+  narrows another measured overhead source by keeping the append session open
+  across the adjacent mini-transactions of a single-row pure
+  `INSERT ... VALUES` visible-fast statement, then releasing it before
+  page-log sync and page-visible LSN publication. The first wider
+  implementation attempt regressed the production bulk-insert phase, so
+  multi-row append-session deferral remains future work. A follow-up
+  ownerless page-write leave
   membership fast path now checks the MTR-owned ownerless page-write vector
   before resolving transaction and deferred-release policy for page latch
   slots. The reduced 500-row production attribution sample kept page-version
