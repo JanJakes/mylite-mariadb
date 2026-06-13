@@ -84,8 +84,8 @@ When appending an index page:
 - skip delta selection for the InnoDB system tablespace (`space_id=0`) because
   DDL/dictionary churn updates those pages in short, correctness-sensitive
   bursts that are not the representative DML hot-page target,
-- if a same-identity base has at least eight standalone observations, build a
-  delta against the full base page,
+- if a same-identity base has a durable standalone record, build a delta
+  against the full base page,
 - if the base remembers a standalone encoded payload size and the delta is
   both less than half that stored size and no larger than the bounded fast-path
   threshold, choose the delta before building a new standalone payload,
@@ -165,10 +165,10 @@ module.
 ## Implementation Evidence
 
 - `test_page_log_encodes_index_delta_payloads()` covers durable delta flag
-  selection, byte-exact direct record reads, byte-exact latest-page reads,
-  short-burst standalone behavior before warm-up, checkpoint rewrite of a
-  retained delta as a standalone record after its base is discarded, and
-  post-checkpoint cache invalidation/fallback.
+  selection after one standalone base, byte-exact direct record reads,
+  byte-exact latest-page reads, checkpoint rewrite of a retained delta as a
+  standalone record after its base is discarded, and post-checkpoint cache
+  invalidation/fallback.
 - The full ownerless primitive CTest selector passed under
   `php-embedded-prod`.
 - A later fast-path slice records the standalone encoded payload size in each
@@ -196,15 +196,14 @@ module.
 
 ## Risks And Open Questions
 
-The process-local base table only helps after a process has written enough
-standalone records for that index identity to pass the warm-up threshold. That
-is acceptable for a bounded slice, because the attribution sample showed
-repeated same-process identities in the embedded write path, while DDL
-dictionary refreshes can produce short bursts that should stay independently
-decodable. The first writer after process restart, table overflow, checkpoint
-generation change, or system-tablespace DDL churn still writes standalone page
-images. The non-chained design keeps decode and checkpoint bounded but
-now refreshes the standalone base after a bounded number of deltas so
-cumulative difference from the full base cannot grow without limit in a
-long-running same-process writer. Delta checkpoint rewrite must remain correct;
-retaining base-dependent records verbatim would be a correctness bug.
+The process-local base table only helps after a process has written a
+standalone record for that index identity. That is acceptable for a bounded
+slice, because deltas still reference a durable standalone base and
+system-tablespace dictionary pages stay independently decodable. The first
+writer after process restart, table overflow, checkpoint generation change, or
+system-tablespace DDL churn still writes standalone page images. The
+non-chained design keeps decode and checkpoint bounded and now refreshes the
+standalone base after a bounded number of deltas so cumulative difference from
+the full base cannot grow without limit in a long-running same-process writer.
+Delta checkpoint rewrite must remain correct; retaining base-dependent records
+verbatim would be a correctness bug.

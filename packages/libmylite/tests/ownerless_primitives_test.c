@@ -2055,24 +2055,9 @@ static void test_page_log_encodes_index_delta_payloads(void) {
     assert(early_delta_record_offset > base_record_offset);
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_CALLS] == 2U);
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_RECORDS] == 2U);
-    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_RECORDS] == 0U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_RECORDS] == 1U);
     early_delta_flags = read_page_log_record_flags(fd, early_delta_record_offset);
-    assert((early_delta_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_INDEX_DELTA) == 0U);
-
-    for (unsigned int warmup = 0; warmup < 8U; ++warmup) {
-        assert(
-            mylite_ownerless_page_log_append(
-                fd,
-                70U,
-                17U,
-                500U,
-                500U,
-                page_base,
-                sizeof(page_base),
-                NULL
-            ) == MYLITE_OWNERLESS_PAGE_LOG_OK
-        );
-    }
+    assert((early_delta_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_INDEX_DELTA) != 0U);
 
     mylite_ownerless_page_log_reset_append_perf_stats();
     mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
@@ -2298,20 +2283,18 @@ static void test_page_log_fast_encodes_small_index_delta_payloads(void) {
     memset(out_page, 0xEE, sizeof(out_page));
 
     assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
-    for (unsigned int warmup = 0; warmup < 8U; ++warmup) {
-        assert(
-            mylite_ownerless_page_log_append(
-                fd,
-                72U,
-                44U,
-                900U,
-                900U,
-                page_base,
-                sizeof(page_base),
-                NULL
-            ) == MYLITE_OWNERLESS_PAGE_LOG_OK
-        );
-    }
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            72U,
+            44U,
+            900U,
+            900U,
+            page_base,
+            sizeof(page_base),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
 
     mylite_ownerless_page_log_reset_append_perf_stats();
     mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
@@ -2411,21 +2394,18 @@ static void test_page_log_refreshes_index_delta_base(void) {
     memset(out_page, 0xEE, sizeof(out_page));
 
     assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
-    for (unsigned int warmup = 0; warmup < 8U; ++warmup) {
-        store_test_be64(page_base, MYLITE_TEST_INNODB_PAGE_LSN_OFFSET, 600U + warmup);
-        assert(
-            mylite_ownerless_page_log_append(
-                fd,
-                71U,
-                33U,
-                600U + warmup,
-                600U + warmup,
-                page_base,
-                sizeof(page_base),
-                NULL
-            ) == MYLITE_OWNERLESS_PAGE_LOG_OK
-        );
-    }
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            71U,
+            33U,
+            600U,
+            600U,
+            page_base,
+            sizeof(page_base),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
 
     mylite_ownerless_page_log_reset_append_perf_stats();
     mylite_ownerless_page_log_set_append_perf_stats_enabled(1);

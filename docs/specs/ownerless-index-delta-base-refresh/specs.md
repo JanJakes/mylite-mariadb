@@ -58,8 +58,7 @@ Track a bounded `delta_records_since_base` counter in each process-local index
 delta base slot.
 
 - A successful standalone index-page append records the page as the current
-  durable base, resets `delta_records_since_base`, and keeps the existing
-  standalone warm-up rule.
+  durable base and resets `delta_records_since_base`.
 - A successful index-delta append increments `delta_records_since_base` for
   the matching base slot.
 - `index_delta_base_snapshot()` refuses to supply a base once the slot has
@@ -133,12 +132,12 @@ that base so the next eligible record is appended through the existing
 standalone encoding path.
 
 `test_page_log_refreshes_index_delta_base()` now proves the refresh boundary:
-after warm-up, the first `32` same-identity records are index deltas; the next
-record is forced standalone and reads back byte-for-byte; the following record
-can use a new delta against the refreshed standalone base. The existing
-`test_page_log_encodes_index_delta_payloads()` still proves direct reads,
-latest-page lookup, checkpoint rewrite of retained deltas as standalone
-records, and post-checkpoint fallback.
+after one standalone base, the first `32` same-identity records are index
+deltas; the next record is forced standalone and reads back byte-for-byte; the
+following record can use a new delta against the refreshed standalone base.
+The existing `test_page_log_encodes_index_delta_payloads()` still proves
+direct reads, latest-page lookup, checkpoint rewrite of retained deltas as
+standalone records, and post-checkpoint fallback.
 
 Local production verification on 2026-06-13:
 
