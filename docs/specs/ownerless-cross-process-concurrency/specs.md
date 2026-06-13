@@ -3442,8 +3442,9 @@ Tasks:
    before `row_upd()` applies the child-table update/delete and proves the same
    rollback, retry, and reopen behavior. Hook-build row-step after-crash
    coverage now uses multi-child ordinary FK action rows and kills parent
-   update/delete writers after one child-side `row_upd()` succeeds, proving
-   no-live recovery rolls back partial child-row action state before retry.
+   update/delete writers after the first or second matching child-side
+   `row_upd()` succeeds, proving no-live recovery rolls back partial child-row
+   action state before retry.
    Deep foreign-key cascade coverage now keeps a four-table
    `root -> level1 -> level2 -> level3` InnoDB chain active while another
    ownerless process updates the root primary key and deletes another root row,
@@ -3619,21 +3620,23 @@ Tasks:
    `ownerless-fk-graph-trace-export` slice adds deterministic SQL trace export
    for external harness input, and its worker trace now includes bounded
    `1205`/`1213` retry procedures so Docker-backed external MariaDB smoke can
-   replay the deterministic FK graph. Long-running external MariaDB/RQG FK graph
-   execution and randomized later-child-row referential-action crash fuzzing
-   remain planned.
+   replay the deterministic FK graph. Hook-build FK action crash coverage now
+   includes deterministic second-child-row row-step-after-update faults, while
+   long-running external MariaDB/RQG FK graph execution and broader randomized
+   later-child-row referential-action crash fuzzing remain planned.
    Hook-build generated-column foreign-key action crash coverage reuses the
    pre-child-action and post-child-action fault points for MariaDB-supported
    stored generated child and generated referenced-column `ON DELETE CASCADE`
    shapes, kills parent delete writers before `row_update_cascade_for_mysql()`
    and after a successful child-side cascade returns before parent statement
    commit, plus a row-step fault inside `row_upd_step()` before `row_upd()`
-   applies the child-table update/delete and after one child-side `row_upd()`
-   succeeds in a multi-child cascade, proves live-peer cleanup remains busy,
-   verifies no-live recovery restores generated FK rows, retries the same
-   deletes successfully, and checks ownerless/native reopen before and after
-   forced `.shm` rebuild. Exhaustive generated-column FK partial child-row
-   modification crash fuzzing remains planned.
+   applies the child-table update/delete and after the first or second matching
+   child-side `row_upd()` succeeds in a multi-child cascade, proves live-peer
+   cleanup remains busy, verifies no-live recovery restores generated FK rows,
+   retries the same deletes successfully, and checks ownerless/native reopen
+   before and after forced `.shm` rebuild. Exhaustive generated-column FK
+   partial child-row modification crash fuzzing beyond the deterministic
+   second-row boundary remains planned.
    CHECK constraint ALTER coverage adds two named table-level CHECK
    constraints from another ownerless process, verifies an already-open peer
    observes them through `INFORMATION_SCHEMA.CHECK_CONSTRAINTS`, rejects

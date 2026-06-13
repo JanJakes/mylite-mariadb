@@ -104,6 +104,7 @@ std::atomic<bool> checkpoint_suppressed{false};
 std::atomic<bool> relative_file_op_redo_paths{false};
 std::atomic<bool> uncheckpointed_file_rename_recovery{false};
 std::atomic<bool> file_rename_redo_logged{false};
+std::atomic<uint64_t> test_fault_match_count{0};
 thread_local uint64_t page_visible_lsn= 0;
 thread_local bool page_visible_lsn_is_current= false;
 thread_local bool page_visible_lsn_is_retained= false;
@@ -538,6 +539,8 @@ extern "C" int mylite_ownerless_innodb_take_file_rename_redo(void)
 
 extern "C" void mylite_ownerless_innodb_set_test_faults_enabled(int enabled)
 {
+  if (enabled != 0)
+    test_fault_match_count.store(0, std::memory_order_release);
   mylite_ownerless_innodb_test_faults_enabled.store(enabled != 0,
                                                     std::memory_order_release);
 }
@@ -551,6 +554,20 @@ extern "C" void mylite_ownerless_innodb_test_fault(const char *fault_name)
 
   const char *configured_fault= std::getenv("MYLITE_OWNERLESS_TEST_FAULT");
   if (configured_fault == nullptr || std::strcmp(configured_fault, fault_name))
+    return;
+
+  uint64_t skip_count= 0;
+  const char *skip_value= std::getenv("MYLITE_OWNERLESS_TEST_FAULT_SKIP");
+  if (skip_value != nullptr)
+  {
+    char *end= nullptr;
+    errno= 0;
+    const unsigned long long parsed_skip= std::strtoull(skip_value, &end, 10);
+    if (end != skip_value && *end == '\0' && errno != ERANGE)
+      skip_count= static_cast<uint64_t>(parsed_skip);
+  }
+  if (test_fault_match_count.fetch_add(1, std::memory_order_acq_rel) <
+      skip_count)
     return;
 
   const char *ready_fd_value=
