@@ -1688,22 +1688,26 @@ Tasks:
    after native page proof. Boundary-preserving page-log primitives remain
    covered as lower-level evidence, but product close-time reclaim avoids native
    checkpoint side effects while a live peer can still need retained WAL.
-   The page-version WAL format also has an internal `FIL_PAGE_INDEX` delta
-   payload for repeated index-page identities. Delta records reference a
+   The page-version WAL format also has internal `FIL_PAGE_INDEX` and
+   `FIL_PAGE_UNDO_LOG` delta payloads for repeated page identities. Delta
+   records reference a
    durable standalone base record in the same page-log file, offset, and
    generation, are selected after one durable standalone base and only when
    they are less than half the standalone payload, and are rewritten as
-   standalone records during checkpoint if retained. The append path snapshots
-   index page bytes before the delta decision, checksum, payload write, and
+   standalone records during checkpoint if retained. The append path uses the
+   stable page image through the delta decision, checksum, payload write, and
    base-cache update, while system-tablespace index pages stay standalone so
    DDL/dictionary churn does not use the DML hot-page optimization. A reduced
    stats-enabled production probe over 100 ownerless autocommit inserts
    reduced index page-log payload from the preceding `1779` bytes/insert
    baseline to `598.580` bytes/insert with `90` delta records, and the later
    first-base warm-up slice reduced the current 500-row attribution shape from
-   `927.956` to `829.066` index bytes per insert while leaving broader
-   redo/checkpoint reconciliation and DDL/file lifecycle recovery as planned
-   work.
+   `927.956` to `829.066` index bytes per insert. A follow-up undo-log delta
+   slice selected `0.752` undo-delta records per insert and reduced undo-log
+   payload from `539.910` to `210.006` bytes per insert while preserving one
+   rollback-segment and one undo history-proof publication per insert. Broader
+   native history-proof replacement, redo/checkpoint reconciliation, and
+   DDL/file lifecycle recovery remain planned work.
    Single-row pure `INSERT ... VALUES` visible-fast-path statements reuse one
    page-log append session across the statement's ownerless mini-transactions
    and release it before page-log sync/page-visible LSN publication. Focused
@@ -5025,9 +5029,17 @@ subsystems that this mode needs:
   reduced 500-row stats-enabled sample reported `0.962` index deltas per
   insert, `0.820` fast-accepted index deltas per insert, and `829.066` index
   payload bytes per insert, down from the preceding same-shape `927.956` index
-  bytes per insert sample. The remaining write-throughput targets are native
-  commit/page-publication, non-fast page-log encoding, undo-log payload, and
-  broader redo/checkpoint recovery work. The visible-fast page-log append-batch slice
+  bytes per insert sample. A follow-up undo-log page-delta slice generalized
+  the same durable non-chained/checkpoint-rewritten delta contract to repeated
+  `FIL_PAGE_UNDO_LOG` records with an undo-specific record flag. Its reduced
+  500-row production attribution sample selected `0.752` undo deltas and
+  `0.728` fast-accepted undo deltas per insert, cut undo-log page-log payload
+  from the preceding same-shape `539.910` bytes per insert to `210.006`, cut
+  total page-log payload from `1442.294` to `1112.380` bytes per insert, and
+  preserved `1.000` rollback-segment plus `1.000` undo history-proof
+  publications per insert. The remaining write-throughput targets are native
+  commit/page-publication, non-fast page-log encoding, the remaining
+  history-proof proof volume, and broader redo/checkpoint recovery work. The visible-fast page-log append-batch slice
   narrows another measured overhead source by keeping the append session open
   across the adjacent mini-transactions of a single-row pure
   `INSERT ... VALUES` visible-fast statement, then releasing it before
