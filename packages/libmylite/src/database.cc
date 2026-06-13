@@ -1597,6 +1597,12 @@ bool ownerless_dictionary_ddl_needs_native_file_op_checkpoint(const SqlPolicyTok
 bool ownerless_temporary_table_ddl_statement(const SqlPolicyTokens &tokens);
 bool ownerless_table_identifier_token(std::string_view token);
 std::string ownerless_normalized_identifier(std::string_view token);
+bool ownerless_tracked_temporary_table_name(const mylite_db &db, std::string_view table_name);
+bool ownerless_table_reference_skip_token(std::string_view token);
+std::string_view ownerless_raw_identifier_token_at(
+    const SqlPolicyTokens &tokens,
+    std::size_t index
+);
 bool ownerless_statement_uses_tracked_temporary_table(
     const mylite_db &db,
     const SqlPolicyTokens &tokens
@@ -2147,6 +2153,10 @@ int store_and_emit_result(
 );
 int drain_remaining_query_results(mylite_db &db);
 void rollback_active_transaction_after_deadlock(mylite_db &db);
+void rollback_failed_ownerless_implicit_statement(
+    mylite_db &db,
+    bool statement_started_in_explicit_transaction
+);
 int rollback_active_transaction(mylite_db &db);
 ErrorSnapshot capture_error(const mylite_db &db);
 void restore_error(mylite_db &db, const ErrorSnapshot &snapshot);
@@ -2206,7 +2216,16 @@ bool ownerless_prepared_write_defers_native_prepare(
 );
 bool count_sql_parameter_markers(std::string_view sql, std::size_t *out_count);
 bool sql_contains_identifier_token(std::string_view sql, const char *keyword);
-bool ownerless_statement_allows_visible_fast_path(const SqlPolicyTokens &tokens);
+bool ownerless_insert_values_statement_allows_visible_fast_path(const SqlPolicyTokens &tokens);
+bool ownerless_statement_allows_visible_fast_path(mylite_db &db, const SqlPolicyTokens &tokens);
+bool ownerless_insert_target_table(
+    const mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::string *out_schema,
+    std::string *out_table
+);
+std::string ownerless_escape_metadata_literal(mylite_db &db, std::string_view value);
+bool ownerless_insert_target_has_foreign_keys(mylite_db &db, const SqlPolicyTokens &tokens);
 bool sql_statement_requests_write_transaction(const SqlPolicyTokens &tokens);
 bool sql_statement_uses_locking_read(const SqlPolicyTokens &tokens);
 bool sql_statement_needs_ownerless_current_read_refresh(const SqlPolicyTokens &tokens);
@@ -2837,7 +2856,7 @@ int mylite_step(mylite_stmt *stmt) {
         OwnerlessStatementPageWriteTrackingScope page_write_tracking(*stmt->db);
         OwnerlessStatementPlainReadScope plain_read(page_version_reads_enabled);
         OwnerlessStatementVisibleFastPathScope visible_fast_path(
-            ownerless_statement_allows_visible_fast_path(policy_tokens)
+            ownerless_statement_allows_visible_fast_path(*stmt->db, policy_tokens)
         );
         ownerless_stage_start =
             ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
@@ -2867,6 +2886,10 @@ int mylite_step(mylite_stmt *stmt) {
                 if (consistent_snapshot_start_pin_registered) {
                     release_ownerless_transaction_page_version_pin(*stmt->db);
                 }
+                rollback_failed_ownerless_implicit_statement(
+                    *stmt->db,
+                    statement_started_in_explicit_transaction
+                );
                 rollback_active_transaction_after_deadlock(*stmt->db);
                 clear_statement_ownerless_page_visibility(*stmt);
                 return MYLITE_ERROR;
@@ -2927,6 +2950,10 @@ int mylite_step(mylite_stmt *stmt) {
                 if (consistent_snapshot_start_pin_registered) {
                     release_ownerless_transaction_page_version_pin(*stmt->db);
                 }
+                rollback_failed_ownerless_implicit_statement(
+                    *stmt->db,
+                    statement_started_in_explicit_transaction
+                );
                 rollback_active_transaction_after_deadlock(*stmt->db);
                 clear_statement_ownerless_page_visibility(*stmt);
                 return MYLITE_ERROR;
@@ -4072,7 +4099,7 @@ int exec_result_impl(
     OwnerlessStatementPageWriteTrackingScope page_write_tracking(*db);
     OwnerlessStatementPlainReadScope plain_read(page_version_reads_enabled);
     OwnerlessStatementVisibleFastPathScope visible_fast_path(
-        ownerless_statement_allows_visible_fast_path(policy_tokens)
+        ownerless_statement_allows_visible_fast_path(*db, policy_tokens)
     );
     if (mysql_query(&db->mysql, sql) != 0) {
         set_mariadb_error(*db);
@@ -4094,6 +4121,10 @@ int exec_result_impl(
                 !statement_started_in_explicit_transaction
             );
         }
+        rollback_failed_ownerless_implicit_statement(
+            *db,
+            statement_started_in_explicit_transaction
+        );
         rollback_active_transaction_after_deadlock(*db);
         return copy_error_message(*db, errmsg);
     }
@@ -4583,7 +4614,7 @@ bool sql_contains_identifier_token(std::string_view sql, const char *keyword) {
     return false;
 }
 
-bool ownerless_statement_allows_visible_fast_path(const SqlPolicyTokens &tokens) {
+bool ownerless_insert_values_statement_allows_visible_fast_path(const SqlPolicyTokens &tokens) {
     if (!token_equals(identifier_token_at(tokens, 0), "INSERT")) {
         return false;
     }
@@ -4652,6 +4683,86 @@ bool ownerless_statement_allows_visible_fast_path(const SqlPolicyTokens &tokens)
     }
 
     return saw_row && !expect_row && paren_depth == 0;
+}
+
+bool ownerless_statement_allows_visible_fast_path(mylite_db &db, const SqlPolicyTokens &tokens) {
+    return ownerless_insert_values_statement_allows_visible_fast_path(tokens) &&
+           !ownerless_insert_target_has_foreign_keys(db, tokens);
+}
+
+bool ownerless_insert_target_table(
+    const mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::string *out_schema,
+    std::string *out_table
+) {
+    if (out_schema == nullptr || out_table == nullptr ||
+        !token_equals(identifier_token_at(tokens, 0), "INSERT")) {
+        return false;
+    }
+    out_schema->clear();
+    out_table->clear();
+
+    std::size_t index = 1U;
+    while (index < tokens.count &&
+           ownerless_table_reference_skip_token(ownerless_raw_identifier_token_at(tokens, index))) {
+        ++index;
+    }
+    if (index >= tokens.count || !ownerless_table_identifier_token(tokens.values[index])) {
+        return false;
+    }
+
+    if (index + 2U < tokens.count && tokens.values[index + 1U] == "." &&
+        ownerless_table_identifier_token(tokens.values[index + 2U])) {
+        *out_schema = ownerless_normalized_identifier(tokens.values[index]);
+        *out_table = ownerless_normalized_identifier(tokens.values[index + 2U]);
+    } else {
+        *out_schema = ownerless_normalized_identifier(db.current_schema);
+        *out_table = ownerless_normalized_identifier(tokens.values[index]);
+    }
+
+    return !out_schema->empty() && !out_table->empty() &&
+           !ownerless_tracked_temporary_table_name(db, *out_table);
+}
+
+std::string ownerless_escape_metadata_literal(mylite_db &db, std::string_view value) {
+    std::string escaped((value.size() * 2U) + 1U, '\0');
+    const unsigned long escaped_size = mysql_real_escape_string(
+        &db.mysql,
+        escaped.data(),
+        value.data(),
+        static_cast<unsigned long>(value.size())
+    );
+    escaped.resize(escaped_size);
+    return escaped;
+}
+
+bool ownerless_insert_target_has_foreign_keys(mylite_db &db, const SqlPolicyTokens &tokens) {
+    std::string schema_name;
+    std::string table_name;
+    if (!ownerless_insert_target_table(db, tokens, &schema_name, &table_name)) {
+        return true;
+    }
+
+    const ErrorSnapshot snapshot = capture_error(db);
+    const std::string escaped_schema = ownerless_escape_metadata_literal(db, schema_name);
+    const std::string escaped_table = ownerless_escape_metadata_literal(db, table_name);
+    const std::string sql = "SELECT COUNT(*) FROM information_schema.referential_constraints "
+                            "WHERE constraint_schema = '" +
+                            escaped_schema + "' AND table_name = '" + escaped_table + "'";
+
+    bool has_foreign_keys = true;
+    if (mysql_query(&db.mysql, sql.c_str()) == 0) {
+        MYSQL_RES *result = mysql_store_result(&db.mysql);
+        if (result != nullptr) {
+            MYSQL_ROW row = mysql_fetch_row(result);
+            has_foreign_keys =
+                row != nullptr && row[0] != nullptr && std::strtoull(row[0], nullptr, 10) != 0U;
+            mysql_free_result(result);
+        }
+    }
+    restore_error(db, snapshot);
+    return has_foreign_keys;
 }
 
 bool sql_statement_requests_write_transaction(const SqlPolicyTokens &tokens) {
@@ -6278,6 +6389,33 @@ void rollback_active_transaction_after_deadlock(mylite_db &db) {
 
     const ErrorSnapshot snapshot = capture_error(db);
     static_cast<void>(rollback_active_transaction(db));
+    restore_error(db, snapshot);
+}
+
+void rollback_failed_ownerless_implicit_statement(
+    mylite_db &db,
+    bool statement_started_in_explicit_transaction
+) {
+    if (!db.ownerless_rw_open || db.mariadb_errno == k_mariadb_lock_deadlock_errno ||
+        statement_started_in_explicit_transaction) {
+        return;
+    }
+
+    const ErrorSnapshot snapshot = capture_error(db);
+    const int rollback_result = rollback_active_transaction(db);
+    if (rollback_result == MYLITE_OK) {
+        mylite_ownerless_innodb_close_current_read_view();
+        std::uint64_t latest_lsn = 0;
+        const int observe_result = mylite_ownerless_innodb_redo_observe(&latest_lsn);
+        if (observe_result == MYLITE_OWNERLESS_INNODB_LOCK_OK && latest_lsn != 0U) {
+            const std::uint64_t boundary_lsn =
+                std::max(latest_lsn, mylite_ownerless_innodb_current_lsn());
+            mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_no_skip(
+                boundary_lsn
+            );
+        }
+        mylite_ownerless_innodb_evict_clean_external_pages();
+    }
     restore_error(db, snapshot);
 }
 

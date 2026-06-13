@@ -3085,8 +3085,9 @@ Tasks:
    metadata, retained rows, and post-recovery writes through ownerless and
    native reopen. Hook-build crash coverage also kills
    `ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY` before ownerless dictionary
-   finish and verifies recovered FK metadata, orphan-row rejection, and valid
-   child writes through ownerless and native reopen. Hook-build crash coverage
+   finish and verifies recovered FK metadata, orphan-row rejection without a
+   pending rejected child row surviving to `COMMIT`, and valid child writes
+   through ownerless and native reopen. Hook-build crash coverage
    also kills
    `ALTER TABLE ... DROP FOREIGN KEY` before ownerless dictionary finish and
    verifies recovered FK metadata absence plus post-drop orphan child writes and

@@ -130,7 +130,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
   `information_schema.referential_constraints` and
   `information_schema.key_column_usage`.
 - Retained parent/child rows and the child parent-id index survive recovery.
-- FK enforcement rejects an orphan child row after recovery and after reopen.
+- FK enforcement rejects an orphan child row after recovery and after reopen,
+  and the rejected row is absent before any later `COMMIT`.
 - Post-recovery valid child writes succeed.
 - Ownerless and ordinary native reopen observe the same FK state before and
   after forced `.shm` rebuild.

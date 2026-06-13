@@ -36939,6 +36939,10 @@ static void test_crashed_foreign_key_dictionary_ddl_recovers_constraint(void) {
     );
     assert(mylite_errcode(db) == MYLITE_ERROR);
     assert(mariadb_errno == MYLITE_TEST_NO_REFERENCED_ROW_ERRNO);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_crash_child WHERE id = 2") == 0U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_crash_child") == 1U);
     exec_ok(db, "COMMIT");
     exec_ok(db, "INSERT INTO app.ownerless_fk_crash_child VALUES (2, 2, 200)");
     exec_ok(db, "COMMIT");
@@ -65918,6 +65922,9 @@ static void assert_ownerless_foreign_key_crash_ddl_state(
     );
     assert(mylite_errcode(db) == MYLITE_ERROR);
     assert(mariadb_errno == MYLITE_TEST_NO_REFERENCED_ROW_ERRNO);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_crash_child WHERE id = 3") == 0U
+    );
     exec_ok(db, "COMMIT");
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_crash_child") == 2U);
     assert(mylite_close(db) == MYLITE_OK);
