@@ -77,20 +77,24 @@ written through the existing standalone encoding and becomes the new base.
 
 When appending an index page:
 
-- copy the index page bytes once before standalone encoding, delta selection,
-  checksum calculation, page-type stats, payload write, and base-cache update,
-  so an expensive delta decision cannot observe a different live buffer-pool
-  image than the durable payload/checksum pair;
-- build the existing standalone encoded payload first,
+- require the ownerless publish caller to pass a stable page image that remains
+  valid until the page-log append returns; current MTR, dirty-scan, disk-replay,
+  and transaction-image publish paths already pass copied, vector-backed, or
+  allocated page buffers;
 - skip delta selection for the InnoDB system tablespace (`space_id=0`) because
   DDL/dictionary churn updates those pages in short, correctness-sensitive
   bursts that are not the representative DML hot-page target,
 - if a same-identity base has at least eight standalone observations, build a
   delta against the full base page,
+- if the base remembers a standalone encoded payload size and the delta is
+  both less than half that stored size and no larger than the bounded fast-path
+  threshold, choose the delta before building a new standalone payload,
+- otherwise build the existing standalone encoded payload and compare the
+  delta against that exact current standalone size,
 - choose the delta only when its payload is less than half the standalone
   payload; marginal deltas are written standalone so the base refreshes,
 - when a standalone index record is written successfully, replace the base
-  slot with that full page and record offset,
+  slot with that full page, record offset, and standalone payload size,
 - when a delta record is written successfully, leave the base slot unchanged
   so delta records do not form recursive chains.
 
@@ -167,6 +171,13 @@ module.
   post-checkpoint cache invalidation/fallback.
 - The full ownerless primitive CTest selector passed under
   `php-embedded-prod`.
+- A later fast-path slice records the standalone encoded payload size in each
+  warmed base slot and fast-accepts small deltas before standalone encoding.
+  `test_page_log_fast_encodes_small_index_delta_payloads()` covers the
+  fast-accepted counter and byte-exact direct/latest readback. A 500-row
+  stats-enabled production sample reported `402` fast-accepted records out of
+  `470` index deltas and reduced page-log append encode time from the
+  preceding `54.815 ms` sample to `30.980 ms`.
 - A reduced stats-enabled production performance probe with
   `MYLITE_PERF_INSERT_ITERATIONS=100` selected `90` index delta records over
   `100` ownerless autocommit inserts. It reported

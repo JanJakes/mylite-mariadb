@@ -119,15 +119,15 @@ publication remains a planned performance target.
 Ownerless page-version WAL now encodes repeated InnoDB `FIL_PAGE_INDEX`
 records as bounded non-chained deltas against a durable standalone base record
 when the page identity has warmed through standalone records and the delta is
-less than half the standalone payload. The append path snapshots index page
-bytes before encoding, delta selection, checksum calculation, and base-cache
-updates so a live buffer-pool page cannot diverge from its durable
-payload/checksum pair during longer delta decisions. DDL-sensitive InnoDB
+less than half the standalone payload. Ownerless publish hook callers pass a
+stable page image until the synchronous page-log append returns; current MTR,
+dirty-scan, disk-replay, and transaction-image paths already pass copied,
+vector-backed, or allocated page buffers. DDL-sensitive InnoDB
 system-tablespace index pages stay on standalone encodings. Checkpoint
 rewrites retained deltas as standalone records, and the process-local base
 cache is scoped by page-log file identity, log offset, and log generation so
 compaction or cross-process checkpoint generation changes cannot reuse stale
-base offsets. The process-local base cache now also forces a standalone base
+base offsets. The process-local base cache also forces a standalone base
 refresh after a bounded delta run so long same-process writers do not keep
 diffing against an old base indefinitely. A reduced stats-enabled production
 probe over 100 ownerless autocommit inserts reported index page-log payload
@@ -136,9 +136,15 @@ bytes/insert, with `90` delta records and `539.870` delta payload bytes/insert;
 the follow-up 200-row base-refresh sample reported `619.275` index payload
 bytes/insert and `496.030` index-delta payload bytes/insert, down from the
 pre-refresh 200-row `217565` total index bytes and `207878` total index-delta
-bytes. Ownerless completion still requires the broader recovery,
-DDL/file-lifecycle, active-reader, and external stress gaps tracked in the
-ownerless concurrency spec.
+bytes. A later fast-path slice records each warmed base's standalone encoded
+payload size and fast-accepts bounded small deltas before building a new
+standalone payload; a 500-row production attribution sample reported `402`
+fast-accepted index deltas out of `470` total index deltas and reduced
+page-log append encode time from the preceding `54.815 ms` sample to
+`30.980 ms` while preserving the same `1506` page-log append calls. Ownerless
+completion still requires the broader recovery, DDL/file-lifecycle,
+active-reader, and external stress gaps tracked in the ownerless concurrency
+spec.
 The timing-producing WordPress dependency, database-prep, performance-probe,
 and PHPUnit test-only steps repeat `Release` MyLite and `MinSizeRel` MariaDB
 embedded cache guards inside the step body, so a stale build directory fails

@@ -105,6 +105,7 @@ constexpr std::size_t k_index_delta_base_probe_limit = 8;
 constexpr std::size_t k_index_delta_base_record_offset_size = sizeof(std::uint64_t);
 constexpr std::uint32_t k_index_delta_base_min_standalone_observations = 8;
 constexpr std::uint32_t k_index_delta_base_max_delta_records = 32;
+constexpr std::uint64_t k_index_delta_fast_payload_size_limit = 1024;
 constexpr off_t k_append_lock_start = 0;
 constexpr off_t k_checkpoint_lock_start = 1;
 
@@ -160,6 +161,7 @@ struct IndexPageDeltaBaseSlot {
     std::uint32_t page_no = 0;
     std::uint32_t page_size = 0;
     std::uint64_t record_offset = 0;
+    std::uint64_t standalone_payload_size = 0;
     std::uint32_t standalone_observations = 0;
     std::uint32_t delta_records_since_base = 0;
     std::vector<unsigned char> page;
@@ -168,6 +170,7 @@ struct IndexPageDeltaBaseSlot {
 struct IndexPageDeltaBaseSnapshot {
     bool found = false;
     std::uint64_t record_offset = 0;
+    std::uint64_t standalone_payload_size = 0;
     std::vector<unsigned char> page;
 };
 
@@ -247,6 +250,7 @@ enum PageLogAppendPerfStatIndex : std::size_t {
     PAGE_LOG_APPEND_PERF_SESSION_BEGIN_CALLS,
     PAGE_LOG_APPEND_PERF_SESSION_APPEND_CALLS,
     PAGE_LOG_APPEND_PERF_SESSION_END_CALLS,
+    PAGE_LOG_APPEND_PERF_INDEX_DELTA_FAST_RECORDS,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
@@ -569,6 +573,15 @@ void record_append_index_page_identity_stats(
 std::uint64_t index_page_identity_fingerprint(std::uint32_t space_id, std::uint32_t page_no);
 std::uint64_t mix64(std::uint64_t value);
 bool maybe_encode_index_delta_payload(
+    const IndexPageDeltaBaseSnapshot &snapshot,
+    const void *page,
+    std::uint32_t page_size,
+    std::uint64_t standalone_payload_size,
+    bool enforce_fast_limit,
+    std::uint32_t *inout_flags,
+    std::vector<unsigned char> *inout_payload
+);
+bool index_delta_base_snapshot_for_page(
     std::uint64_t log_device,
     std::uint64_t log_inode,
     std::uint64_t log_offset,
@@ -577,9 +590,11 @@ bool maybe_encode_index_delta_payload(
     std::uint32_t page_no,
     const void *page,
     std::uint32_t page_size,
-    std::uint64_t standalone_payload_size,
-    std::uint32_t *inout_flags,
-    std::vector<unsigned char> *inout_payload
+    IndexPageDeltaBaseSnapshot *out_snapshot
+);
+bool index_delta_payload_beats_standalone(
+    std::size_t delta_payload_size,
+    std::uint64_t standalone_payload_size
 );
 bool build_index_delta_payload(
     std::uint64_t base_record_offset,
@@ -608,6 +623,7 @@ void note_index_delta_base_after_successful_append(
     const void *page,
     std::uint32_t page_size,
     std::uint64_t record_offset,
+    std::uint64_t record_payload_size,
     std::uint32_t record_flags
 );
 std::uint64_t index_delta_base_fingerprint(
@@ -2018,34 +2034,56 @@ int append_record_at_locked(
     std::uint32_t record_flags = 0;
     std::uint64_t encoded_payload_size = 0;
     const void *record_page = page;
-    thread_local std::vector<unsigned char> stable_index_page;
     thread_local std::vector<unsigned char> encoded_payload;
-    stable_index_page.clear();
     encoded_payload.clear();
     try {
         const std::uint64_t stage_start_ns =
             page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
-        if (page_is_innodb_index_page(page, page_size)) {
-            const auto *bytes = static_cast<const unsigned char *>(page);
-            stable_index_page.assign(bytes, bytes + page_size);
-            record_page = stable_index_page.data();
-        }
-        encoded_payload_size =
-            encoded_payload_size_for_page(record_page, page_size, &record_flags, &encoded_payload);
-        if (maybe_encode_index_delta_payload(
-                log_device,
-                log_inode,
-                static_cast<std::uint64_t>(log_offset),
-                log_generation,
-                space_id,
-                page_no,
+        IndexPageDeltaBaseSnapshot index_delta_snapshot;
+        const bool has_index_delta_snapshot = index_delta_base_snapshot_for_page(
+            log_device,
+            log_inode,
+            static_cast<std::uint64_t>(log_offset),
+            log_generation,
+            space_id,
+            page_no,
+            record_page,
+            page_size,
+            &index_delta_snapshot
+        );
+        const bool fast_index_delta_encoded =
+            has_index_delta_snapshot && maybe_encode_index_delta_payload(
+                                            index_delta_snapshot,
+                                            record_page,
+                                            page_size,
+                                            index_delta_snapshot.standalone_payload_size,
+                                            true,
+                                            &record_flags,
+                                            &encoded_payload
+                                        );
+        if (fast_index_delta_encoded) {
+            encoded_payload_size = encoded_payload.size();
+            page_log_append_perf_add(PAGE_LOG_APPEND_PERF_INDEX_DELTA_FAST_RECORDS, 1U);
+        } else {
+            encoded_payload_size = encoded_payload_size_for_page(
                 record_page,
                 page_size,
-                encoded_payload_size,
                 &record_flags,
                 &encoded_payload
-            )) {
-            encoded_payload_size = encoded_payload.size();
+            );
+            const bool exact_index_delta_encoded =
+                has_index_delta_snapshot && maybe_encode_index_delta_payload(
+                                                index_delta_snapshot,
+                                                record_page,
+                                                page_size,
+                                                encoded_payload_size,
+                                                false,
+                                                &record_flags,
+                                                &encoded_payload
+                                            );
+            if (exact_index_delta_encoded) {
+                encoded_payload_size = encoded_payload.size();
+            }
         }
         page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_ENCODE_NS, stage_start_ns);
     } catch (const std::bad_alloc &) {
@@ -2104,6 +2142,7 @@ int append_record_at_locked(
         record_page,
         page_size,
         static_cast<std::uint64_t>(record_offset),
+        encoded_payload_size,
         record_flags
     );
     page_log_append_perf_add(
@@ -4127,35 +4166,16 @@ bool page_is_innodb_index_page(const void *page, std::uint32_t page_size) {
 }
 
 bool maybe_encode_index_delta_payload(
-    std::uint64_t log_device,
-    std::uint64_t log_inode,
-    std::uint64_t log_offset,
-    std::uint64_t log_generation,
-    std::uint32_t space_id,
-    std::uint32_t page_no,
+    const IndexPageDeltaBaseSnapshot &snapshot,
     const void *page,
     std::uint32_t page_size,
     std::uint64_t standalone_payload_size,
+    bool enforce_fast_limit,
     std::uint32_t *inout_flags,
     std::vector<unsigned char> *inout_payload
 ) {
-    if (inout_flags == nullptr || inout_payload == nullptr ||
-        space_id == k_innodb_system_space_id || !page_is_innodb_index_page(page, page_size) ||
-        page_size > std::numeric_limits<std::uint16_t>::max()) {
-        return false;
-    }
-
-    IndexPageDeltaBaseSnapshot snapshot;
-    if (!index_delta_base_snapshot(
-            log_device,
-            log_inode,
-            log_offset,
-            log_generation,
-            space_id,
-            page_no,
-            page_size,
-            &snapshot
-        )) {
+    if (inout_flags == nullptr || inout_payload == nullptr || !snapshot.found ||
+        snapshot.standalone_payload_size == 0U) {
         return false;
     }
 
@@ -4168,8 +4188,8 @@ bool maybe_encode_index_delta_payload(
             page_size,
             &delta_payload
         ) ||
-        delta_payload.size() >= standalone_payload_size ||
-        static_cast<std::uint64_t>(delta_payload.size()) * 2U >= standalone_payload_size) {
+        (enforce_fast_limit && delta_payload.size() > k_index_delta_fast_payload_size_limit) ||
+        !index_delta_payload_beats_standalone(delta_payload.size(), standalone_payload_size)) {
         delta_payload.clear();
         return false;
     }
@@ -4177,6 +4197,48 @@ bool maybe_encode_index_delta_payload(
     inout_payload->swap(delta_payload);
     *inout_flags = k_record_flag_index_delta_payload;
     return true;
+}
+
+bool index_delta_base_snapshot_for_page(
+    std::uint64_t log_device,
+    std::uint64_t log_inode,
+    std::uint64_t log_offset,
+    std::uint64_t log_generation,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    const void *page,
+    std::uint32_t page_size,
+    IndexPageDeltaBaseSnapshot *out_snapshot
+) {
+    if (out_snapshot == nullptr) {
+        return false;
+    }
+    out_snapshot->found = false;
+    out_snapshot->record_offset = 0U;
+    out_snapshot->standalone_payload_size = 0U;
+    out_snapshot->page.clear();
+    if (space_id == k_innodb_system_space_id || !page_is_innodb_index_page(page, page_size) ||
+        page_size > std::numeric_limits<std::uint16_t>::max()) {
+        return false;
+    }
+    return index_delta_base_snapshot(
+        log_device,
+        log_inode,
+        log_offset,
+        log_generation,
+        space_id,
+        page_no,
+        page_size,
+        out_snapshot
+    );
+}
+
+bool index_delta_payload_beats_standalone(
+    std::size_t delta_payload_size,
+    std::uint64_t standalone_payload_size
+) {
+    return delta_payload_size > 0U &&
+           static_cast<std::uint64_t>(delta_payload_size) * 2U < standalone_payload_size;
 }
 
 bool build_index_delta_payload(
@@ -4268,6 +4330,7 @@ bool index_delta_base_snapshot(
     }
     out_snapshot->found = false;
     out_snapshot->record_offset = 0U;
+    out_snapshot->standalone_payload_size = 0U;
     out_snapshot->page.clear();
 
     const std::uint64_t fingerprint = index_delta_base_fingerprint(
@@ -4304,6 +4367,7 @@ bool index_delta_base_snapshot(
                 return false;
             }
             out_snapshot->record_offset = slot.record_offset;
+            out_snapshot->standalone_payload_size = slot.standalone_payload_size;
             out_snapshot->found = true;
             return true;
         }
@@ -4321,6 +4385,7 @@ void note_index_delta_base_after_successful_append(
     const void *page,
     std::uint32_t page_size,
     std::uint64_t record_offset,
+    std::uint64_t record_payload_size,
     std::uint32_t record_flags
 ) {
     if (space_id == k_innodb_system_space_id || !page_is_innodb_index_page(page, page_size)) {
@@ -4372,6 +4437,7 @@ void note_index_delta_base_after_successful_append(
             slot.page_no = page_no;
             slot.page_size = page_size;
             slot.record_offset = record_offset;
+            slot.standalone_payload_size = record_payload_size;
             if (!matching_page_size) {
                 slot.standalone_observations = 1U;
             } else if (slot.standalone_observations < std::numeric_limits<std::uint32_t>::max()) {
@@ -4385,6 +4451,7 @@ void note_index_delta_base_after_successful_append(
                 slot.valid = false;
                 slot.page_size = 0U;
                 slot.record_offset = 0U;
+                slot.standalone_payload_size = 0U;
                 slot.standalone_observations = 0U;
                 slot.delta_records_since_base = 0U;
                 slot.page.clear();
@@ -4426,6 +4493,7 @@ void invalidate_index_delta_bases_for_log(
             slot.page_no = 0U;
             slot.page_size = 0U;
             slot.record_offset = 0U;
+            slot.standalone_payload_size = 0U;
             slot.standalone_observations = 0U;
             slot.delta_records_since_base = 0U;
             slot.page.clear();

@@ -4958,14 +4958,11 @@ subsystems that this mode needs:
   `0.020` unique index identities per insert, no size mismatches or table
   overflows, and only `39.860` changed bytes per insert while the index page
   WAL still wrote `1779.010` payload bytes per insert. The follow-up index
-  delta page-log slice added a non-chained durable delta format, stable
-  append-time index page snapshots, system-tablespace exclusion, and standalone
+  delta page-log slice added a non-chained durable delta format, a stable
+  publish-hook page image contract, system-tablespace exclusion, and standalone
   warm-up before delta selection. Its reduced 100-row stats-enabled production
   probe selected `90` index deltas and cut index page-log payload to `598.580`
   bytes per insert, compared with the `1779` byte baseline. The next
-  write-throughput target has therefore moved back to native
-  commit/page-publication and broader redo/checkpoint work rather than SYS
-  proof byte volume, fill-run compression, or index delta representation. The
   follow-up bounded index-delta base-refresh slice capped cumulative
   same-base drift, and the later no-dirty publish-batch slice made the MTR
   no-dirty release-loop page-publication path use the same append-session batch
@@ -4973,9 +4970,16 @@ subsystems that this mode needs:
   attribution sample after that batching change reported `602` page-log append
   calls, `600` append-session records, only `2` direct append calls, append
   lock time `0.565 ms`, fstat time `0.561 ms`, and encode time `18.583 ms`.
-  This removes a measurable append-batching inconsistency; it does not replace
-  the remaining native commit, page-log encoding, and redo/checkpoint recovery
-  work. The
+  This removed a measurable append-batching inconsistency but still left
+  page-log encoding as a first-party hot path. The follow-up index-delta fast
+  path records each warmed base's standalone encoded payload size and
+  fast-accepts bounded small deltas before building a new standalone payload.
+  A 500-row production attribution sample after that slice reported `1506`
+  page-log append calls, `470` index deltas, `402` fast-accepted index deltas,
+  and page-log append encode time `30.980 ms`, down from the preceding
+  `54.815 ms` 500-row sample. The remaining write-throughput targets are
+  native commit/page-publication, non-fast page-log encoding, and broader
+  redo/checkpoint recovery work. The
   post-boundary production sample before this proof fast path reported stats-off
   ownerless warm open/close at `359.230 ms` versus ordinary `375.478 ms`,
   active-runtime reconnect overhead at `0.211 ms`, ownerless direct/prepared
