@@ -825,6 +825,16 @@ session begin/end calls, append lock time `0.565 ms`, fstat time `0.561 ms`,
 and encode time `18.583 ms`. That closes the inconsistent unbatched append
 path, but it also confirms the next larger performance targets remain page-log
 encoding and native InnoDB commit/write-history work.
+A follow-up ownerless page-write leave membership fast path now returns from
+the MTR leave hook before ownerless transaction/deferred-release policy
+resolution when the current page latch slot was not recorded in the
+mini-transaction's ownerless page-write vector. The reduced 500-row production
+attribution sample kept page-version and native-support publication counts
+stable at `3.008` page versions and `2.004` published native-support pages per
+insert, while `page_write_leave_total_ms` moved from `5.554` to `4.911` and
+the no-dirty commit-log loop sample moved from `76.541 ms` to `65.279 ms`.
+This is a bounded hook overhead reduction; the larger targets remain page-log
+encoding, native commit/page-publication, and redo/checkpoint reconciliation.
 Ownerless page-version reads now validate the WAL tail after a direct
 page-index hit because the shared page index is an acceleration cache updated
 after the append stream, not an authoritative visibility boundary by itself.

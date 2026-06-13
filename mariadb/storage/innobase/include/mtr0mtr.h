@@ -756,6 +756,10 @@ private:
   /** Track a page-write lock acquired by this mini-transaction. */
   void ownerless_page_write_note_mtr_page(const buf_page_t &bpage) noexcept;
 
+  /** Check whether this mini-transaction acquired a page-write lock. */
+  bool ownerless_page_write_has_mtr_page(const buf_page_t &bpage) const
+    noexcept;
+
   /** Stop tracking a page-write lock acquired by this mini-transaction. */
   bool ownerless_page_write_forget_mtr_page(const buf_page_t &bpage) noexcept;
 

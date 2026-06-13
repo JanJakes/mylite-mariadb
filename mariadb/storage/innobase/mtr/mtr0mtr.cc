@@ -2494,6 +2494,9 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_leave(
       m_ownerless_page_write_mtr_pages->empty())
     return;
   const buf_page_t *bpage= static_cast<const buf_page_t*>(slot.object);
+  if (!ownerless_page_write_has_mtr_page(*bpage))
+    return;
+
   if (ownerless_page_write_lock_only_transaction_page(
           ownerless_page_write_trx(), *bpage))
     return;
@@ -2507,9 +2510,7 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_leave(
       uses_transaction_release && holds_for_transaction &&
       ownerless_page_write_release_deferred(slot);
   if (!mtr_page_acquired)
-  {
     return;
-  }
 
   const page_id_t id{bpage->id()};
   if (deferred_release)
@@ -2954,6 +2955,20 @@ void mtr_t::ownerless_page_write_note_mtr_page(
                 m_ownerless_page_write_mtr_pages->end(),
                 packed_page) == m_ownerless_page_write_mtr_pages->end())
     m_ownerless_page_write_mtr_pages->emplace_back(packed_page);
+}
+
+bool mtr_t::ownerless_page_write_has_mtr_page(
+    const buf_page_t &bpage) const noexcept
+{
+  const page_id_t id{bpage.id()};
+  if (m_ownerless_page_write_mtr_pages == nullptr ||
+      m_ownerless_page_write_mtr_pages->empty())
+    return false;
+  const uint64_t packed_page=
+      ownerless_page_write_pack(id.space(), id.page_no());
+  return std::find(m_ownerless_page_write_mtr_pages->begin(),
+                   m_ownerless_page_write_mtr_pages->end(),
+                   packed_page) != m_ownerless_page_write_mtr_pages->end();
 }
 
 bool mtr_t::ownerless_page_write_forget_mtr_page(

@@ -4979,7 +4979,15 @@ subsystems that this mode needs:
   and page-log append encode time `30.980 ms`, down from the preceding
   `54.815 ms` 500-row sample. The remaining write-throughput targets are
   native commit/page-publication, non-fast page-log encoding, and broader
-  redo/checkpoint recovery work. The
+  redo/checkpoint recovery work. A follow-up ownerless page-write leave
+  membership fast path now checks the MTR-owned ownerless page-write vector
+  before resolving transaction and deferred-release policy for page latch
+  slots. The reduced 500-row production attribution sample kept page-version
+  counts stable at `3.008` per insert and moved
+  `page_write_leave_total_ms` from `5.554` to `4.911`, with the sampled
+  no-dirty commit-log loop moving from `76.541 ms` to `65.279 ms`; this is a
+  bounded hook overhead reduction, not a replacement for the larger native
+  commit/page-publication and redo/checkpoint work. The
   post-boundary production sample before this proof fast path reported stats-off
   ownerless warm open/close at `359.230 ms` versus ordinary `375.478 ms`,
   active-runtime reconnect overhead at `0.211 ms`, ownerless direct/prepared
