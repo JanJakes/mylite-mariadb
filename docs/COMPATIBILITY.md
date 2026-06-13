@@ -810,7 +810,15 @@ ordinary at `2907.78 ops/s`. That finding led to the index-delta page-log
 format and bounded base-refresh slices above. The remaining performance target
 is therefore native commit/page-publication cost and broader redo/checkpoint
 reconciliation, not rollback-segment SYS proof byte volume or fill-run
-compression.
+compression. A follow-up no-dirty publish-batch slice then made the MTR
+no-dirty release-loop publication path use the same page-publish batch contract
+as the made-dirty scan path and added direct-versus-session append counters.
+The reduced 200-row stats-enabled production probe reported `602` page-log
+append calls, only `2` direct append calls, `600` session append calls, `400`
+session begin/end calls, append lock time `0.565 ms`, fstat time `0.561 ms`,
+and encode time `18.583 ms`. That closes the inconsistent unbatched append
+path, but it also confirms the next larger performance targets remain page-log
+encoding and native InnoDB commit/write-history work.
 Ownerless page-version reads now validate the WAL tail after a direct
 page-index hit because the shared page index is an acceleration cache updated
 after the append stream, not an authoritative visibility boundary by itself.

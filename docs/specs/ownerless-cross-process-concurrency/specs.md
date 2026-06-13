@@ -4966,6 +4966,16 @@ subsystems that this mode needs:
   write-throughput target has therefore moved back to native
   commit/page-publication and broader redo/checkpoint work rather than SYS
   proof byte volume, fill-run compression, or index delta representation. The
+  follow-up bounded index-delta base-refresh slice capped cumulative
+  same-base drift, and the later no-dirty publish-batch slice made the MTR
+  no-dirty release-loop page-publication path use the same append-session batch
+  contract as the made-dirty scan path. The reduced 200-row production
+  attribution sample after that batching change reported `602` page-log append
+  calls, `600` append-session records, only `2` direct append calls, append
+  lock time `0.565 ms`, fstat time `0.561 ms`, and encode time `18.583 ms`.
+  This removes a measurable append-batching inconsistency; it does not replace
+  the remaining native commit, page-log encoding, and redo/checkpoint recovery
+  work. The
   post-boundary production sample before this proof fast path reported stats-off
   ownerless warm open/close at `359.230 ms` versus ordinary `375.478 ms`,
   active-runtime reconnect overhead at `0.211 ms`, ownerless direct/prepared

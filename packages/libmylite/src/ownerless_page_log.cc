@@ -243,6 +243,10 @@ enum PageLogAppendPerfStatIndex : std::size_t {
     PAGE_LOG_APPEND_PERF_INDEX_IDENTITY_BODY_CHANGED_BYTES,
     PAGE_LOG_APPEND_PERF_INDEX_DELTA_RECORDS,
     PAGE_LOG_APPEND_PERF_INDEX_DELTA_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_DIRECT_APPEND_CALLS,
+    PAGE_LOG_APPEND_PERF_SESSION_BEGIN_CALLS,
+    PAGE_LOG_APPEND_PERF_SESSION_APPEND_CALLS,
+    PAGE_LOG_APPEND_PERF_SESSION_END_CALLS,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
@@ -856,6 +860,7 @@ int append_at_common(
 ) {
     PageLogAppendPerfScope total_scope(PAGE_LOG_APPEND_PERF_TOTAL_NS);
     page_log_append_perf_add(PAGE_LOG_APPEND_PERF_CALLS, 1U);
+    page_log_append_perf_add(PAGE_LOG_APPEND_PERF_DIRECT_APPEND_CALLS, 1U);
     if (fd < 0 || commit_lsn == 0U || page == nullptr || page_size == 0U) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
@@ -1007,6 +1012,7 @@ int mylite_ownerless_page_log_append_session_begin_initialized_at(
     std::uint64_t log_offset,
     mylite_ownerless_page_log_append_session *session
 ) {
+    page_log_append_perf_add(PAGE_LOG_APPEND_PERF_SESSION_BEGIN_CALLS, 1U);
     if (session == nullptr || fd < 0 || session->active != 0) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
@@ -1059,6 +1065,7 @@ int mylite_ownerless_page_log_append_session_append(
 ) {
     PageLogAppendPerfScope total_scope(PAGE_LOG_APPEND_PERF_TOTAL_NS);
     page_log_append_perf_add(PAGE_LOG_APPEND_PERF_CALLS, 1U);
+    page_log_append_perf_add(PAGE_LOG_APPEND_PERF_SESSION_APPEND_CALLS, 1U);
     if (fd < 0 || session == nullptr || session->active == 0 || commit_lsn == 0U ||
         page == nullptr || page_size == 0U ||
         session->log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) ||
@@ -1095,6 +1102,7 @@ void mylite_ownerless_page_log_append_session_end(
     int fd,
     mylite_ownerless_page_log_append_session *session
 ) {
+    page_log_append_perf_add(PAGE_LOG_APPEND_PERF_SESSION_END_CALLS, 1U);
     if (session == nullptr || session->active == 0) {
         return;
     }

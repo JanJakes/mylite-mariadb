@@ -587,6 +587,10 @@ enum page_log_append_perf_stat_index {
     PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_BODY_CHANGED_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_RECORDS,
     PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_DIRECT_APPEND_CALLS,
+    PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS,
+    PAGE_LOG_APPEND_PERF_STAT_SESSION_APPEND_CALLS,
+    PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
@@ -3204,6 +3208,26 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
     emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_page_log_append_calls_per_insert",
         page_log_append[PAGE_LOG_APPEND_PERF_STAT_CALLS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_direct_append_calls_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_DIRECT_APPEND_CALLS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_session_begin_calls_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_session_append_calls_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_SESSION_APPEND_CALLS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_session_end_calls_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS],
         insert_iterations
     );
     emit_summary_ms_per_iteration(
@@ -6911,6 +6935,26 @@ static void emit_page_log_append_perf_stats(const char *prefix) {
         "%s_page_log_append_calls=%" PRIu64 "\n",
         prefix,
         values[PAGE_LOG_APPEND_PERF_STAT_CALLS]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "direct_append_calls",
+        values[PAGE_LOG_APPEND_PERF_STAT_DIRECT_APPEND_CALLS]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "session_begin_calls",
+        values[PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "session_append_calls",
+        values[PAGE_LOG_APPEND_PERF_STAT_SESSION_APPEND_CALLS]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "session_end_calls",
+        values[PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS]
     );
     emit_page_log_append_perf_ms(prefix, "total", values[PAGE_LOG_APPEND_PERF_STAT_TOTAL_NS]);
     emit_page_log_append_perf_ms(prefix, "lock", values[PAGE_LOG_APPEND_PERF_STAT_LOCK_NS]);
