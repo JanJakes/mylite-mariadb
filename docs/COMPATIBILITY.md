@@ -118,14 +118,19 @@ slice, while replacing or shrinking the remaining history-proof page
 publication remains a planned performance target.
 Ownerless page-version WAL now encodes repeated InnoDB `FIL_PAGE_INDEX`
 records as bounded non-chained deltas against a durable standalone base record
-when the delta is less than half the standalone payload. Checkpoint rewrites
-retained deltas as standalone records, and the process-local base cache is
-scoped by page-log file identity, log offset, and log generation so compaction
-or cross-process checkpoint generation changes cannot reuse stale base
-offsets. A reduced stats-enabled production probe over 100 ownerless
+when the page identity has warmed through standalone records and the delta is
+less than half the standalone payload. The append path snapshots index page
+bytes before encoding, delta selection, checksum calculation, and base-cache
+updates so a live buffer-pool page cannot diverge from its durable
+payload/checksum pair during longer delta decisions. DDL-sensitive InnoDB
+system-tablespace index pages stay on standalone encodings. Checkpoint
+rewrites retained deltas as standalone records, and the process-local base
+cache is scoped by page-log file identity, log offset, and log generation so
+compaction or cross-process checkpoint generation changes cannot reuse stale
+base offsets. A reduced stats-enabled production probe over 100 ownerless
 autocommit inserts reported index page-log payload falling from the preceding
-`1779` bytes/insert baseline to `587.300` bytes/insert, with `95` delta records
-and `545.120` delta payload bytes/insert; ownerless completion still requires
+`1779` bytes/insert baseline to `598.580` bytes/insert, with `90` delta records
+and `539.870` delta payload bytes/insert; ownerless completion still requires
 the broader recovery, DDL/file-lifecycle, active-reader, and external stress
 gaps tracked in the ownerless concurrency spec.
 The timing-producing WordPress dependency, database-prep, performance-probe,

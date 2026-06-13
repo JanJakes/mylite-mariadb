@@ -1687,13 +1687,17 @@ Tasks:
    The page-version WAL format also has an internal `FIL_PAGE_INDEX` delta
    payload for repeated index-page identities. Delta records reference a
    durable standalone base record in the same page-log file, offset, and
-   generation, are selected only when they are less than half the standalone
-   payload, and are rewritten as standalone records during checkpoint if
-   retained. A reduced stats-enabled production probe over 100 ownerless
-   autocommit inserts reduced index page-log payload from the preceding
-   `1779` bytes/insert baseline to `587.300` bytes/insert with `95` delta
-   records, while leaving broader redo/checkpoint reconciliation and DDL/file
-   lifecycle recovery as planned work.
+   generation, are selected only after a standalone warm-up threshold and only
+   when they are less than half the standalone payload, and are rewritten as
+   standalone records during checkpoint if retained. The append path snapshots
+   index page bytes before the delta decision, checksum, payload write, and
+   base-cache update, while system-tablespace index pages stay standalone so
+   DDL/dictionary churn does not use the DML hot-page optimization. A reduced
+   stats-enabled production probe over 100 ownerless autocommit inserts
+   reduced index page-log payload from the preceding `1779` bytes/insert
+   baseline to `598.580` bytes/insert with `90` delta records, while leaving
+   broader redo/checkpoint reconciliation and DDL/file lifecycle recovery as
+   planned work.
    Undo, allocation,
    tablespace-header, extent, transaction-system, change-buffer, and system page
    records remain primitive evidence for future active-pin compaction.
@@ -4953,10 +4957,15 @@ subsystems that this mode needs:
   reported `0.990` duplicate index identities per ownerless autocommit insert,
   `0.020` unique index identities per insert, no size mismatches or table
   overflows, and only `39.860` changed bytes per insert while the index page
-  WAL still wrote `1779.010` payload bytes per insert. The next
-  write-throughput target has therefore moved to native commit/page-publication
-  cost and a bounded index delta representation, rather than SYS proof byte
-  volume or broader fill-run compression. The
+  WAL still wrote `1779.010` payload bytes per insert. The follow-up index
+  delta page-log slice added a non-chained durable delta format, stable
+  append-time index page snapshots, system-tablespace exclusion, and standalone
+  warm-up before delta selection. Its reduced 100-row stats-enabled production
+  probe selected `90` index deltas and cut index page-log payload to `598.580`
+  bytes per insert, compared with the `1779` byte baseline. The next
+  write-throughput target has therefore moved back to native
+  commit/page-publication and broader redo/checkpoint work rather than SYS
+  proof byte volume, fill-run compression, or index delta representation. The
   post-boundary production sample before this proof fast path reported stats-off
   ownerless warm open/close at `359.230 ms` versus ordinary `375.478 ms`,
   active-runtime reconnect overhead at `0.211 ms`, ownerless direct/prepared

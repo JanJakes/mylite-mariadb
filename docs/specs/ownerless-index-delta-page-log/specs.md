@@ -12,7 +12,8 @@ insert.
 ## Non-Goals
 
 - Do not use deltas for native-support pages, SYS proof pages, undo-log pages,
-  BLOB pages, or non-index page classes in this slice.
+  BLOB pages, system-tablespace dictionary/index pages, or non-index page
+  classes in this slice.
 - Do not change SQL, public C API, mysqli, WordPress, or wire-protocol
   behavior.
 - Do not make delta records depend on process-local memory for replay.
@@ -76,9 +77,16 @@ written through the existing standalone encoding and becomes the new base.
 
 When appending an index page:
 
+- copy the index page bytes once before standalone encoding, delta selection,
+  checksum calculation, page-type stats, payload write, and base-cache update,
+  so an expensive delta decision cannot observe a different live buffer-pool
+  image than the durable payload/checksum pair;
 - build the existing standalone encoded payload first,
-- if a same-identity base is available, build a delta against the full base
-  page,
+- skip delta selection for the InnoDB system tablespace (`space_id=0`) because
+  DDL/dictionary churn updates those pages in short, correctness-sensitive
+  bursts that are not the representative DML hot-page target,
+- if a same-identity base has at least eight standalone observations, build a
+  delta against the full base page,
 - choose the delta only when its payload is less than half the standalone
   payload; marginal deltas are written standalone so the base refreshes,
 - when a standalone index record is written successfully, replace the base
@@ -154,28 +162,33 @@ module.
 
 - `test_page_log_encodes_index_delta_payloads()` covers durable delta flag
   selection, byte-exact direct record reads, byte-exact latest-page reads,
-  checkpoint rewrite of a retained delta as a standalone record after its base
-  is discarded, and post-checkpoint cache invalidation/fallback.
+  short-burst standalone behavior before warm-up, checkpoint rewrite of a
+  retained delta as a standalone record after its base is discarded, and
+  post-checkpoint cache invalidation/fallback.
 - The full ownerless primitive CTest selector passed under
   `php-embedded-prod`.
 - A reduced stats-enabled production performance probe with
-  `MYLITE_PERF_INSERT_ITERATIONS=100` selected `95` index delta records over
+  `MYLITE_PERF_INSERT_ITERATIONS=100` selected `90` index delta records over
   `100` ownerless autocommit inserts. It reported
-  `mylite_perf_summary_ownerless_autocommit_page_log_index_payload_bytes_per_insert=587.300`
+  `mylite_perf_summary_ownerless_autocommit_page_log_index_payload_bytes_per_insert=598.580`
   and
-  `mylite_perf_summary_ownerless_autocommit_page_log_index_delta_payload_bytes_per_insert=545.120`,
-  compared with the preceding `1779` index bytes-per-insert baseline. The same
-  run reported ownerless page-log append at `0.159 ms/insert` and encode at
-  `0.099 ms/insert`.
+  `mylite_perf_summary_ownerless_autocommit_page_log_index_delta_payload_bytes_per_insert=539.870`,
+  compared with the preceding `1779` index bytes-per-insert baseline. The
+  timing sample was collected while another PHPUnit workload was active on the
+  host, so the byte/count counters are the evidence from that run rather than
+  the wall-clock throughput.
 
 ## Risks And Open Questions
 
-The process-local base table only helps after a process has written a
-standalone base for that index identity. That is acceptable for a bounded
-slice, because the attribution sample showed repeated same-process identities
-in the embedded write path. The first writer after process restart or table
-overflow still writes a standalone page image. The non-chained design keeps
-decode and checkpoint bounded but requires periodic standalone refreshes when
-the cumulative difference from the full base stops being a large payload win.
-Delta checkpoint rewrite must remain correct; retaining base-dependent records
-verbatim would be a correctness bug.
+The process-local base table only helps after a process has written enough
+standalone records for that index identity to pass the warm-up threshold. That
+is acceptable for a bounded slice, because the attribution sample showed
+repeated same-process identities in the embedded write path, while DDL
+dictionary refreshes can produce short bursts that should stay independently
+decodable. The first writer after process restart, table overflow, checkpoint
+generation change, or system-tablespace DDL churn still writes standalone page
+images. The non-chained design keeps decode and checkpoint bounded but
+requires periodic standalone refreshes when the cumulative difference from the
+full base stops being a large payload win. Delta checkpoint rewrite must
+remain correct; retaining base-dependent records verbatim would be a
+correctness bug.
