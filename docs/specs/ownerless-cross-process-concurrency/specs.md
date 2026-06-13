@@ -328,11 +328,15 @@ Roles:
   snapshot pins retain WAL for those readers without forcing unrelated
   autocommit plain reads down to the durable page-visible boundary.
   Repeatable read and serializable transactions pin that live read LSN on their
-  first consistent read. `START TRANSACTION WITH CONSISTENT SNAPSHOT` publishes
-  its pin before SQL execution; when no ownerless page-visible LSN has been
-  published and the page-version WAL has no payload records, the ownerless
-  writer can seed that pin from the current native InnoDB checkpoint LSN at
-  snapshot start instead of relying on ownerless hooks during ordinary startup.
+  first consistent read. `START TRANSACTION WITH CONSISTENT SNAPSHOT` reads the
+  shared ownerless redo state and publishes its pin before SQL execution; when
+  no ownerless write transaction or redo reservation is active, that pin can use
+  the live ownerless read LSN so later repeatable-read transactions see commits
+  that completed before they started even while older pins retain WAL. When no
+  ownerless page-visible LSN has been published and the page-version WAL has no
+  payload records, the ownerless writer can seed that pin from the current
+  native InnoDB checkpoint LSN at snapshot start instead of relying on ownerless
+  hooks during ordinary startup.
   The shared page-version index is an acceleration cache over the append stream:
   readers that hit the index directly must validate the WAL tail after the
   indexed record before returning, because a peer append can become visible to

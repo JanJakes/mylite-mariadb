@@ -12242,7 +12242,9 @@ int update_ownerless_transaction_state_after_successful_sql(
         db.ownerless_transaction_has_local_write = false;
         db.ownerless_transaction_has_locking_read = false;
         db.ownerless_transaction_snapshot_visible_lsn =
-            consistent_snapshot ? ownerless_handle_observed_read_lsn(db) : 0U;
+            consistent_snapshot && db.ownerless_transaction_snapshot_pin_registered
+                ? db.ownerless_transaction_snapshot_pin_lsn
+                : (consistent_snapshot ? ownerless_handle_observed_read_lsn(db) : 0U);
         db.ownerless_transaction_snapshot_visibility_pinned = consistent_snapshot;
         if (consistent_snapshot) {
             const int pin_result = ensure_ownerless_transaction_page_version_pin(
@@ -12308,6 +12310,39 @@ int ensure_ownerless_consistent_snapshot_start_pin(
     }
 
     std::uint64_t read_lsn = ownerless_handle_observed_read_lsn(db);
+    {
+        const std::lock_guard<std::mutex> guard(g_runtime.mutex);
+        if (g_runtime.ownerless_innodb_lock_hook.redo_state != nullptr) {
+            mylite_ownerless_redo_state_snapshot redo_snapshot = {};
+            if (mylite_ownerless_redo_state_read_snapshot(
+                    g_runtime.ownerless_innodb_lock_hook.redo_state,
+                    g_runtime.ownerless_innodb_lock_hook.redo_state_size,
+                    &redo_snapshot
+                ) != MYLITE_OWNERLESS_REDO_STATE_OK) {
+                set_error(
+                    db,
+                    MYLITE_IOERR,
+                    "database ownerless redo state is unavailable for consistent snapshot"
+                );
+                return MYLITE_IOERR;
+            }
+
+            std::uint64_t active_trx_count = 0;
+            unsigned char *trx_registry = runtime_trx_registry(g_runtime);
+            if (trx_registry != nullptr) {
+                active_trx_count =
+                    load_shared64(trx_registry, k_concurrency_trx_header_active_count_offset);
+            }
+            read_lsn = std::max(read_lsn, redo_snapshot.visible_lsn);
+            if (active_trx_count == 0U && redo_snapshot.active_reservation_count == 0U) {
+                read_lsn = std::max(
+                    read_lsn,
+                    std::max(redo_snapshot.latest_lsn, redo_snapshot.visible_lsn)
+                );
+            }
+        }
+    }
+    read_lsn = ownerless_monotonic_page_version_read_lsn(db, read_lsn);
     if (read_lsn == 0U && !db.readonly_open) {
         std::uint64_t baseline_lsn = 0;
         const int baseline_result =

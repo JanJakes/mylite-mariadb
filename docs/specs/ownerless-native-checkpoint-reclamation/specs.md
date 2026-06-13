@@ -145,7 +145,9 @@ the patch narrow and rebuild the embedded archive before verification.
   checkpoint evidence, followed by ownerless and native exclusive reopen.
 - Unsafe-hook crash coverage killing a process after native checkpoint proof but
   before page-log reclamation, proving retained WAL still recovers the committed
-  update.
+  update. The crash workload must leave enough retained user-page WAL to reach
+  close-time reclaim after the single-owner foreground reclaim budget skips
+  small statement-boundary cleanup.
 - Unsafe-hook race coverage pausing a close after native checkpoint proof,
   committing a newer peer update before the older closer resumes, and proving
   committed updates remain readable and the resumed closer does not grow or

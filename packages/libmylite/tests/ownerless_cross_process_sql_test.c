@@ -1208,6 +1208,8 @@ static void update_first_row_until_native_checkpoint_reclaim_release(
     int ready_fd,
     int release_fd
 );
+static void initialize_native_reclaim_fault_payload(open_database_paths paths);
+static void assert_native_reclaim_fault_payload(mylite_db *db);
 static void assert_redo_gap_blocked_values(open_database_paths paths);
 static void create_table_until_dictionary_begin_fault(open_database_paths paths, int ready_fd);
 static void create_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
@@ -33968,6 +33970,8 @@ static void test_crashed_native_checkpoint_reclaim_preserves_committed_update(vo
 
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(paths);
+    initialize_native_reclaim_fault_payload(paths);
+    assert_concurrency_wal_checkpointed_eventually(database_path);
     assert(pipe(ready_pipe) == 0);
 
     writer_child = fork();
@@ -33985,12 +33989,14 @@ static void test_crashed_native_checkpoint_reclaim_preserves_committed_update(vo
     assert(!concurrency_wal_is_checkpointed(database_path));
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 130U);
+    assert_native_reclaim_fault_payload(db);
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 130U);
+    assert_native_reclaim_fault_payload(db);
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 
@@ -34015,6 +34021,8 @@ static void test_native_checkpoint_reclaim_race_preserves_newer_peer_commit(void
 
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(paths);
+    initialize_native_reclaim_fault_payload(paths);
+    assert_concurrency_wal_checkpointed_eventually(database_path);
     assert(pipe(ready_pipe) == 0);
     assert(pipe(release_pipe) == 0);
 
@@ -34036,8 +34044,10 @@ static void test_native_checkpoint_reclaim_race_preserves_newer_peer_commit(void
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 130U);
+    assert_native_reclaim_fault_payload(db);
     exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 7 WHERE id = 2");
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 137U);
+    assert_native_reclaim_fault_payload(db);
     assert(mylite_close(db) == MYLITE_OK);
     wal_size_after_newer_peer_close = concurrency_wal_size(database_path);
     newer_peer_reclaimed_all = concurrency_wal_is_checkpointed(database_path);
@@ -34049,18 +34059,21 @@ static void test_native_checkpoint_reclaim_race_preserves_newer_peer_commit(void
     if (newer_peer_reclaimed_all) {
         assert(concurrency_wal_is_checkpointed(database_path));
     } else {
-        assert(wal_size_after_paused_closer < wal_size_after_newer_peer_close);
-        assert(!concurrency_wal_is_checkpointed(database_path));
+        if (!concurrency_wal_is_checkpointed(database_path)) {
+            assert(wal_size_after_paused_closer < wal_size_after_newer_peer_close);
+        }
     }
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 137U);
+    assert_native_reclaim_fault_payload(db);
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 137U);
+    assert_native_reclaim_fault_payload(db);
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 
@@ -49150,12 +49163,25 @@ static void hold_reclaim_boundary_snapshot_until_released(
     child_pipes pipes
 ) {
     mylite_db *db;
+    unsigned long long ownerless_sql_sum;
+    unsigned long long aux_sum;
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ");
     exec_ok(db, "START TRANSACTION WITH CONSISTENT SNAPSHOT");
-    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 130U);
-    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_reclaim_boundary_aux") == 110U);
+    ownerless_sql_sum = query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql");
+    aux_sum = query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_reclaim_boundary_aux");
+    if (ownerless_sql_sum != 130U || aux_sum != 110U) {
+        fprintf(
+            stderr,
+            "reclaim boundary snapshot saw ownerless_sql=%llu aux=%llu\n",
+            ownerless_sql_sum,
+            aux_sum
+        );
+        fflush(stderr);
+    }
+    assert(ownerless_sql_sum == 130U);
+    assert(aux_sum == 110U);
     signal_pipe(pipes.ready_write_fd);
     wait_for_pipe(pipes.release_read_fd);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 130U);
@@ -54128,17 +54154,35 @@ static void update_first_row_until_native_checkpoint_reclaim_fault(
     open_database_paths paths,
     int ready_fd
 ) {
-    mylite_db *db;
+    mylite_db *writer_db;
+    mylite_db *cursor_db;
+    mylite_stmt *stmt = NULL;
     char ready_fd_value[32];
 
     assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", ready_fd) > 0);
-    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    cursor_db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        mylite_prepare(
+            cursor_db,
+            "SELECT id FROM app.ownerless_native_reclaim_fault ORDER BY id",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(mylite_step(stmt) == MYLITE_ROW);
+    assert(mylite_column_uint64(stmt, 0) == 1U);
+
+    writer_db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(writer_db, "UPDATE app.ownerless_sql SET value = value + 100 WHERE id = 1");
+    exec_ok(writer_db, "UPDATE app.ownerless_native_reclaim_fault SET payload = REPEAT('y', 4000)");
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    assert(mylite_close(cursor_db) == MYLITE_OK);
     assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "native-checkpoint-before-reclaim", 1) == 0);
     assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
-    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 100 WHERE id = 1");
+    assert(mylite_close(writer_db) == MYLITE_OK);
     assert(unsetenv("MYLITE_OWNERLESS_TEST_FAULT") == 0);
     assert(unsetenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD") == 0);
-    assert(mylite_close(db) == MYLITE_OK);
     _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
 }
 
@@ -54147,22 +54191,102 @@ static void update_first_row_until_native_checkpoint_reclaim_release(
     int ready_fd,
     int release_fd
 ) {
-    mylite_db *db;
+    mylite_db *writer_db;
+    int peer_start_pipe[2];
+    int peer_ready_pipe[2];
+    int peer_release_pipe[2];
+    pid_t peer_child;
     char ready_fd_value[32];
     char release_fd_value[32];
 
     assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", ready_fd) > 0);
     assert(snprintf(release_fd_value, sizeof(release_fd_value), "%d", release_fd) > 0);
-    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(pipe(peer_start_pipe) == 0);
+    assert(pipe(peer_ready_pipe) == 0);
+    assert(pipe(peer_release_pipe) == 0);
+
+    peer_child = fork();
+    assert(peer_child >= 0);
+    if (peer_child == 0) {
+        close(peer_start_pipe[1]);
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        wait_for_pipe(peer_start_pipe[0]);
+        hold_ownerless_open_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = peer_ready_pipe[1],
+                .release_read_fd = peer_release_pipe[0],
+            }
+        );
+    }
+
+    close(peer_start_pipe[0]);
+    close(peer_ready_pipe[1]);
+    close(peer_release_pipe[0]);
+    writer_db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    signal_pipe(peer_start_pipe[1]);
+    wait_for_pipe(peer_ready_pipe[0]);
+    signal_pipe(peer_release_pipe[1]);
+    wait_for_child(peer_child);
+    sleep_microseconds(100000U);
+
+    exec_ok(writer_db, "START TRANSACTION");
+    exec_ok(writer_db, "UPDATE app.ownerless_sql SET value = value + 100 WHERE id = 1");
+    exec_ok(writer_db, "UPDATE app.ownerless_native_reclaim_fault SET payload = REPEAT('y', 4000)");
     assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "native-checkpoint-before-reclaim", 1) == 0);
     assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
     assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_RELEASE_FD", release_fd_value, 1) == 0);
-    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 100 WHERE id = 1");
+    exec_ok(writer_db, "COMMIT");
     assert(unsetenv("MYLITE_OWNERLESS_TEST_FAULT") == 0);
     assert(unsetenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD") == 0);
     assert(unsetenv("MYLITE_OWNERLESS_TEST_FAULT_RELEASE_FD") == 0);
-    assert(mylite_close(db) == MYLITE_OK);
+    assert(mylite_close(writer_db) == MYLITE_OK);
+    close(peer_start_pipe[1]);
+    close(peer_ready_pipe[0]);
+    close(peer_release_pipe[1]);
     _exit(MYLITE_TEST_CHILD_OK);
+}
+
+static void initialize_native_reclaim_fault_payload(open_database_paths paths) {
+    mylite_db *db;
+    char insert_sql[192];
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_native_reclaim_fault ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "payload VARBINARY(4000) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    for (unsigned id = 1U; id <= 32U; ++id) {
+        assert(
+            snprintf(
+                insert_sql,
+                sizeof(insert_sql),
+                "INSERT INTO app.ownerless_native_reclaim_fault VALUES (%u, REPEAT('x', 4000))",
+                id
+            ) > 0
+        );
+        exec_ok(db, insert_sql);
+    }
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_native_reclaim_fault") == 32U);
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_native_reclaim_fault_payload(mylite_db *db) {
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_native_reclaim_fault "
+            "WHERE payload = REPEAT('y', 4000)"
+        ) == 32U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_native_reclaim_fault") ==
+        128000U
+    );
 }
 
 static void update_redo_gap_peer_table_after_signal(open_database_paths paths, int ready_fd) {

@@ -954,6 +954,18 @@ by encoded payload size, and checkpoint compaction of encoded retained records.
 This reduces WAL byte volume for zero-heavy page images without skipping the
 history-proof records or changing page-visible publication semantics.
 
+Ownerless native-reclaim unsafe-hook crash coverage uses threshold-crossing
+user-page WAL before pausing at native checkpoint proof. This keeps the
+deterministic crash/reclaim evidence aligned with the single-owner foreground
+reclaim budget, where small still-single-owner writes may intentionally retain
+WAL until timer or close-time cleanup.
+
+`START TRANSACTION WITH CONSISTENT SNAPSHOT` now chooses the live ownerless
+page-version read LSN before SQL execution when no ownerless writer or redo
+reservation is active, so newer repeatable-read transactions can see commits
+that completed after older snapshot pins while those older pins still retain
+their original WAL boundary.
+
 ## Public API
 
 | Capability | MyLite status | Compatibility target |
