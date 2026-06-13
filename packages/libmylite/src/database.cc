@@ -1149,6 +1149,13 @@ struct ErrorSnapshot {
     std::string errmsg;
 };
 
+struct OwnerlessInsertForeignKeyCacheEntry {
+    std::string schema_name;
+    std::string table_name;
+    std::uint64_t dictionary_generation = 0;
+    bool has_foreign_keys = true;
+};
+
 enum class OwnerlessTransactionIsolation {
     ReadUncommitted,
     ReadCommitted,
@@ -1192,6 +1199,7 @@ struct mylite_db {
     std::uint64_t ownerless_page_log_limit_bytes = 0;
     std::vector<std::uint64_t> ownerless_page_write_trx_ids;
     std::vector<std::string> ownerless_temporary_table_names;
+    std::vector<OwnerlessInsertForeignKeyCacheEntry> ownerless_insert_foreign_key_cache;
     unsigned ownerless_statement_lock_wait_timeout_ms = k_statement_lock_wait_timeout_ms;
     unsigned ownerless_active_page_visibility_statement_count = 0;
     OwnerlessTransactionIsolation ownerless_session_transaction_isolation =
@@ -1592,6 +1600,7 @@ int enforce_ownerless_page_log_limit_policy(mylite_db &db, const SqlPolicyTokens
 int refresh_ownerless_dictionary_before_statement(mylite_db &db, bool allow_global_refresh);
 int flush_ownerless_dictionary_cache(mylite_db &db);
 void initialize_ownerless_dictionary_generation(mylite_db &db);
+void clear_ownerless_insert_foreign_key_cache(mylite_db &db);
 bool ownerless_dictionary_ddl_statement(const SqlPolicyTokens &tokens);
 bool ownerless_dictionary_ddl_needs_native_file_op_checkpoint(const SqlPolicyTokens &tokens);
 bool ownerless_temporary_table_ddl_statement(const SqlPolicyTokens &tokens);
@@ -2225,6 +2234,18 @@ bool ownerless_insert_target_table(
     std::string *out_table
 );
 std::string ownerless_escape_metadata_literal(mylite_db &db, std::string_view value);
+bool ownerless_cached_insert_target_foreign_key_state(
+    const mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    bool *out_has_foreign_keys
+);
+void ownerless_cache_insert_target_foreign_key_state(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    bool has_foreign_keys
+);
 bool ownerless_insert_target_has_foreign_keys(mylite_db &db, const SqlPolicyTokens &tokens);
 bool sql_statement_requests_write_transaction(const SqlPolicyTokens &tokens);
 bool sql_statement_uses_locking_read(const SqlPolicyTokens &tokens);
@@ -4737,11 +4758,64 @@ std::string ownerless_escape_metadata_literal(mylite_db &db, std::string_view va
     return escaped;
 }
 
+bool ownerless_cached_insert_target_foreign_key_state(
+    const mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    bool *out_has_foreign_keys
+) {
+    if (out_has_foreign_keys == nullptr || db.ownerless_observed_dictionary_generation == 0U) {
+        return false;
+    }
+    for (const OwnerlessInsertForeignKeyCacheEntry &entry : db.ownerless_insert_foreign_key_cache) {
+        if (entry.dictionary_generation == db.ownerless_observed_dictionary_generation &&
+            entry.schema_name == schema_name && entry.table_name == table_name) {
+            *out_has_foreign_keys = entry.has_foreign_keys;
+            return true;
+        }
+    }
+    return false;
+}
+
+void ownerless_cache_insert_target_foreign_key_state(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    bool has_foreign_keys
+) {
+    if (db.ownerless_observed_dictionary_generation == 0U) {
+        return;
+    }
+    for (OwnerlessInsertForeignKeyCacheEntry &entry : db.ownerless_insert_foreign_key_cache) {
+        if (entry.dictionary_generation == db.ownerless_observed_dictionary_generation &&
+            entry.schema_name == schema_name && entry.table_name == table_name) {
+            entry.has_foreign_keys = has_foreign_keys;
+            return;
+        }
+    }
+    db.ownerless_insert_foreign_key_cache.push_back(
+        {std::string(schema_name),
+         std::string(table_name),
+         db.ownerless_observed_dictionary_generation,
+         has_foreign_keys}
+    );
+}
+
 bool ownerless_insert_target_has_foreign_keys(mylite_db &db, const SqlPolicyTokens &tokens) {
     std::string schema_name;
     std::string table_name;
     if (!ownerless_insert_target_table(db, tokens, &schema_name, &table_name)) {
         return true;
+    }
+
+    bool has_foreign_keys = true;
+    if (ownerless_cached_insert_target_foreign_key_state(
+            db,
+            schema_name,
+            table_name,
+            &has_foreign_keys
+        )) {
+        return has_foreign_keys;
     }
 
     const ErrorSnapshot snapshot = capture_error(db);
@@ -4751,17 +4825,26 @@ bool ownerless_insert_target_has_foreign_keys(mylite_db &db, const SqlPolicyToke
                             "WHERE constraint_schema = '" +
                             escaped_schema + "' AND table_name = '" + escaped_table + "'";
 
-    bool has_foreign_keys = true;
+    bool query_succeeded = false;
     if (mysql_query(&db.mysql, sql.c_str()) == 0) {
         MYSQL_RES *result = mysql_store_result(&db.mysql);
         if (result != nullptr) {
             MYSQL_ROW row = mysql_fetch_row(result);
             has_foreign_keys =
                 row != nullptr && row[0] != nullptr && std::strtoull(row[0], nullptr, 10) != 0U;
+            query_succeeded = row != nullptr && row[0] != nullptr;
             mysql_free_result(result);
         }
     }
     restore_error(db, snapshot);
+    if (query_succeeded) {
+        ownerless_cache_insert_target_foreign_key_state(
+            db,
+            schema_name,
+            table_name,
+            has_foreign_keys
+        );
+    }
     return has_foreign_keys;
 }
 
@@ -11592,6 +11675,7 @@ int refresh_ownerless_dictionary_before_statement(mylite_db &db, bool allow_glob
     static_cast<void>(mylite_ownerless_innodb_refresh_to_latest_external_lsn());
     const int flush_result = flush_ownerless_dictionary_cache(db);
     if (flush_result == MYLITE_OK) {
+        clear_ownerless_insert_foreign_key_cache(db);
         db.ownerless_observed_dictionary_generation = generation;
     }
     return flush_result;
@@ -11608,6 +11692,10 @@ int flush_ownerless_dictionary_cache(mylite_db &db) {
     }
     mylite_ownerless_innodb_evict_dictionary_cache();
     return MYLITE_OK;
+}
+
+void clear_ownerless_insert_foreign_key_cache(mylite_db &db) {
+    db.ownerless_insert_foreign_key_cache.clear();
 }
 
 void initialize_ownerless_dictionary_generation(mylite_db &db) {
@@ -12321,6 +12409,7 @@ int ownerless_begin_dictionary_ddl(
     }
 
     db.ownerless_observed_dictionary_generation = generation;
+    clear_ownerless_insert_foreign_key_cache(db);
     *out_ddl_started = true;
     static_cast<void>(mylite_ownerless_innodb_take_file_rename_redo());
     pause_for_ownerless_test_fault("dictionary-after-begin");
@@ -12356,6 +12445,7 @@ int ownerless_finish_dictionary_ddl(mylite_db &db, bool ddl_started) {
         &generation
     );
     if (finish_result == MYLITE_OWNERLESS_DICTIONARY_STATE_OK) {
+        clear_ownerless_insert_foreign_key_cache(db);
         db.ownerless_observed_dictionary_generation = generation;
         pause_for_ownerless_test_fault("dictionary-after-finish");
         return MYLITE_OK;

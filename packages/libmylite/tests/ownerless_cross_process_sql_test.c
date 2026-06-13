@@ -514,6 +514,7 @@ static void test_ownerless_single_owner_external_refresh_skips_page_reads(void);
 static void test_ownerless_single_owner_history_wal_proof(void);
 static void test_ownerless_single_owner_native_support_page_wal_elision(void);
 static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void);
+static void test_ownerless_insert_fk_fast_path_cache_invalidation(void);
 static void test_ownerless_single_owner_foreground_reclaim_budget_defers_to_timer(void);
 static void test_ownerless_peer_history_disables_foreground_reclaim_budget(void);
 static void test_ownerless_peer_history_blocks_single_owner_skip_proof(void);
@@ -3470,6 +3471,10 @@ int main(int argc, char **argv) {
         test_ownerless_single_owner_multi_row_insert_visible_fast_path();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "insert-fk-fast-path-cache") == 0) {
+        test_ownerless_insert_fk_fast_path_cache_invalidation();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "single-owner-foreground-reclaim-budget") == 0) {
         test_ownerless_single_owner_foreground_reclaim_budget_defers_to_timer();
         return 0;
@@ -4501,6 +4506,7 @@ int main(int argc, char **argv) {
             "single-owner-external-refresh-skip|single-owner-history-wal-proof|"
             "single-owner-native-support-page-wal-elision|"
             "single-owner-multi-row-insert-visible-fast-path|"
+            "insert-fk-fast-path-cache|"
             "single-owner-foreground-reclaim-budget|"
             "single-owner-foreground-reclaim-peer-history|single-owner-skip-peer-history|"
             "timer-checkpoint-scheduling|"
@@ -9453,6 +9459,117 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
     assert(
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_row_insert_fast_path") == 81U
     );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_insert_fk_fast_path_cache_invalidation(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-insert-fk-fast-path-cache.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    uint64_t commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT] = {0};
+    mylite_stmt *stmt = NULL;
+    const char *tail = NULL;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_fast_path_parent (id INT PRIMARY KEY) ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_fast_path_child ("
+        "id INT PRIMARY KEY, "
+        "parent_id INT NOT NULL, "
+        "value INT NOT NULL, "
+        "INDEX ownerless_fk_fast_path_parent_idx (parent_id)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_fk_fast_path_parent VALUES (1), (2), (3), (4)");
+
+    mylite_ownerless_innodb_set_commit_visibility_stats_enabled(1);
+    mylite_ownerless_innodb_reset_commit_visibility_stats();
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_fk_fast_path_child VALUES "
+        "(1, 1, 10), (2, 2, 20)"
+    );
+    mylite_ownerless_innodb_read_commit_visibility_stats(
+        commit_stats,
+        OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT
+    );
+    mylite_ownerless_innodb_set_commit_visibility_stats_enabled(0);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FAST] > 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH] == 0U);
+
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_fk_fast_path_child "
+        "ADD CONSTRAINT ownerless_fk_fast_path_child_parent "
+        "FOREIGN KEY (parent_id) "
+        "REFERENCES app.ownerless_fk_fast_path_parent (id)"
+    );
+
+    expect_exec_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_fk_fast_path_child VALUES (3, 99, 990)",
+        MYLITE_TEST_NO_REFERENCED_ROW_ERRNO
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_fast_path_child WHERE id = 3") ==
+        0U
+    );
+
+    assert(
+        mylite_prepare(
+            db,
+            "INSERT INTO app.ownerless_fk_fast_path_child VALUES (?, ?, ?)",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            &tail
+        ) == MYLITE_OK
+    );
+    assert(stmt != NULL);
+    assert(tail != NULL);
+    assert(*tail == '\0');
+    assert(mylite_bind_parameter_count(stmt) == 3U);
+    assert(mylite_bind_int64(stmt, 1U, 4) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 2U, 99) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 3U, 990) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == MYLITE_TEST_NO_REFERENCED_ROW_ERRNO);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_fast_path_child WHERE id = 4") ==
+        0U
+    );
+    assert(mylite_reset(stmt) == MYLITE_OK);
+    assert(mylite_clear_bindings(stmt) == MYLITE_OK);
+
+    assert(mylite_bind_int64(stmt, 1U, 4) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 2U, 4) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 3U, 400) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    stmt = NULL;
+
+    exec_ok(db, "INSERT INTO app.ownerless_fk_fast_path_child VALUES (3, 3, 300)");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_fast_path_child") == 4U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_fast_path_child") == 730U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_fast_path_child") == 4U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_fast_path_child") == 730U);
     assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);

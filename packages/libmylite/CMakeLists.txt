@@ -317,6 +317,10 @@ if(BUILD_TESTING)
       COMMAND mylite_ownerless_cross_process_sql_test single-owner-multi-row-insert-visible-fast-path
     )
     add_test(
+      NAME libmylite.ownerless-insert-fk-fast-path-cache
+      COMMAND mylite_ownerless_cross_process_sql_test insert-fk-fast-path-cache
+    )
+    add_test(
       NAME libmylite.ownerless-uncommitted-peer-hidden
       COMMAND mylite_ownerless_cross_process_sql_test uncommitted-peer-hidden
     )
@@ -510,6 +514,10 @@ if(BUILD_TESTING)
       TIMEOUT 90
     )
     set_tests_properties(libmylite.ownerless-single-owner-multi-row-insert-visible-fast-path PROPERTIES
+      LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
+      TIMEOUT 90
+    )
+    set_tests_properties(libmylite.ownerless-insert-fk-fast-path-cache PROPERTIES
       LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
       TIMEOUT 90
     )
