@@ -4930,9 +4930,16 @@ subsystems that this mode needs:
   `159.340` undo-log bytes, and `72.030` SYS bytes per insert, with
   fill-sparse selecting only the `1.000` SYS record per insert in the simple
   insert path. That proves the representative index image is not
-  fill-run-dominated; the next write-throughput target has moved to native
-  commit/page-publication cost and a stronger user/index representation than
-  fill-run compression, rather than SYS proof byte volume. The
+  fill-run-dominated. The follow-up index fill-sparse prefilter inspects the
+  already-built compact payload and requires an actual repeated fill run before
+  attempting the full fill-sparse index encoding. The reduced 100-row
+  stats-enabled production probe still selected only the `1.000` SYS
+  fill-sparse record per insert and reported `1779.030` index bytes per
+  insert, but append encode returned to `0.059 ms/insert` and page-log append
+  to `0.088 ms/insert`, with ownerless autocommit at `1364.26 ops/s` versus
+  ordinary at `2907.78 ops/s`. The next write-throughput target has moved to
+  native commit/page-publication cost and a stronger user/index representation
+  than fill-run compression, rather than SYS proof byte volume. The
   post-boundary production sample before this proof fast path reported stats-off
   ownerless warm open/close at `359.230 ms` versus ordinary `375.478 ms`,
   active-runtime reconnect overhead at `0.211 ms`, ownerless direct/prepared

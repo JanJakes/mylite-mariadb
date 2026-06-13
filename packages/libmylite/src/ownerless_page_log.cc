@@ -520,6 +520,18 @@ bool build_compact_sparse_zero_payload(
     bool *out_trailing_size_known,
     bool *out_uses_varint_payload
 );
+bool compact_sparse_payload_fill_sparse_size(
+    const std::vector<unsigned char> &payload,
+    bool varint_payload,
+    std::uint64_t *out_size
+);
+bool fill_sparse_encoded_run_size(
+    std::uint64_t *inout_size,
+    std::uint32_t gap,
+    std::uint32_t run_size,
+    bool fill_run
+);
+std::uint32_t varuint16_encoded_size(std::uint32_t value);
 bool build_fill_sparse_zero_payload(
     const void *page,
     std::uint32_t page_size,
@@ -2840,8 +2852,15 @@ std::uint64_t encoded_payload_size_for_page(
                               k_innodb_fil_page_type_offset
                           )
                         : 0U;
-                const bool fill_sparse_candidate =
-                    page_type == k_innodb_fil_page_type_sys || page_type == k_innodb_fil_page_index;
+                std::uint64_t fill_sparse_index_size = 0U;
+                const bool fill_sparse_candidate = page_type == k_innodb_fil_page_type_sys ||
+                                                   (page_type == k_innodb_fil_page_index &&
+                                                    compact_sparse_payload_fill_sparse_size(
+                                                        *out_payload,
+                                                        compact_uses_varint_payload,
+                                                        &fill_sparse_index_size
+                                                    ) &&
+                                                    fill_sparse_index_size < out_payload->size());
                 if (fill_sparse_candidate &&
                     build_fill_sparse_zero_payload(page, page_size, &fill_payload) &&
                     fill_payload.size() < out_payload->size()) {
@@ -3087,6 +3106,149 @@ bool build_compact_sparse_zero_payload(
     }
     store16(out_payload->data(), 0U, static_cast<std::uint16_t>(run_count));
     return true;
+}
+
+bool compact_sparse_payload_fill_sparse_size(
+    const std::vector<unsigned char> &payload,
+    bool varint_payload,
+    std::uint64_t *out_size
+) {
+    if (out_size == nullptr || payload.size() < sizeof(std::uint16_t)) {
+        return false;
+    }
+
+    const std::uint16_t run_count = load16(payload.data(), 0U);
+    std::size_t cursor = sizeof(std::uint16_t);
+    bool has_previous_run = false;
+    std::uint32_t previous_run_end = 0U;
+    std::uint64_t fill_sparse_size = sizeof(std::uint16_t);
+    std::uint32_t fill_sparse_run_count = 0U;
+    std::uint32_t previous_fill_sparse_run_end = 0U;
+    bool has_fill_run = false;
+    for (std::uint32_t run_index = 0; run_index < run_count; ++run_index) {
+        std::uint32_t run_offset = 0U;
+        std::uint32_t run_size = 0U;
+        if (varint_payload) {
+            std::uint32_t zero_gap = 0U;
+            if (!read_varuint16(payload.data(), payload.size(), &cursor, &zero_gap) ||
+                !read_varuint16(payload.data(), payload.size(), &cursor, &run_size) ||
+                previous_run_end > std::numeric_limits<std::uint32_t>::max() - zero_gap) {
+                return false;
+            }
+            run_offset = previous_run_end + zero_gap;
+        } else {
+            if (cursor + (2U * sizeof(std::uint16_t)) > payload.size()) {
+                return false;
+            }
+            run_offset = load16(payload.data(), cursor);
+            cursor += sizeof(std::uint16_t);
+            run_size = load16(payload.data(), cursor);
+            cursor += sizeof(std::uint16_t);
+        }
+        if (run_size == 0U || (has_previous_run && run_offset <= previous_run_end) ||
+            run_offset > std::numeric_limits<std::uint32_t>::max() - run_size ||
+            run_size > payload.size() - cursor) {
+            return false;
+        }
+        const unsigned char *run_bytes = payload.data() + cursor;
+        for (std::uint32_t local_offset = 0U; local_offset < run_size;) {
+            const unsigned char fill_byte = run_bytes[local_offset];
+            std::uint32_t fill_size = 1U;
+            while (local_offset + fill_size < run_size &&
+                   run_bytes[local_offset + fill_size] == fill_byte) {
+                ++fill_size;
+            }
+            if (fill_size >= k_fill_sparse_min_fill_run_size) {
+                const std::uint32_t absolute_offset = run_offset + local_offset;
+                if (fill_sparse_run_count == std::numeric_limits<std::uint16_t>::max() ||
+                    !fill_sparse_encoded_run_size(
+                        &fill_sparse_size,
+                        absolute_offset - previous_fill_sparse_run_end,
+                        fill_size,
+                        true
+                    )) {
+                    return false;
+                }
+                ++fill_sparse_run_count;
+                has_fill_run = true;
+                if (fill_sparse_size >= payload.size()) {
+                    return false;
+                }
+                local_offset += fill_size;
+                previous_fill_sparse_run_end = absolute_offset + fill_size;
+                continue;
+            }
+
+            const std::uint32_t raw_start = local_offset;
+            local_offset += fill_size;
+            while (local_offset < run_size) {
+                const unsigned char next_fill_byte = run_bytes[local_offset];
+                std::uint32_t next_fill_size = 1U;
+                while (local_offset + next_fill_size < run_size &&
+                       run_bytes[local_offset + next_fill_size] == next_fill_byte) {
+                    ++next_fill_size;
+                }
+                if (next_fill_size >= k_fill_sparse_min_fill_run_size) {
+                    break;
+                }
+                local_offset += next_fill_size;
+            }
+            const std::uint32_t raw_size = local_offset - raw_start;
+            const std::uint32_t absolute_offset = run_offset + raw_start;
+            if (fill_sparse_run_count == std::numeric_limits<std::uint16_t>::max() ||
+                !fill_sparse_encoded_run_size(
+                    &fill_sparse_size,
+                    absolute_offset - previous_fill_sparse_run_end,
+                    raw_size,
+                    false
+                )) {
+                return false;
+            }
+            ++fill_sparse_run_count;
+            if (fill_sparse_size >= payload.size()) {
+                return false;
+            }
+            previous_fill_sparse_run_end = absolute_offset + raw_size;
+        }
+        cursor += run_size;
+        previous_run_end = run_offset + run_size;
+        has_previous_run = true;
+    }
+    if (cursor != payload.size() || fill_sparse_run_count == 0U || !has_fill_run) {
+        return false;
+    }
+    *out_size = fill_sparse_size;
+    return true;
+}
+
+bool fill_sparse_encoded_run_size(
+    std::uint64_t *inout_size,
+    std::uint32_t gap,
+    std::uint32_t run_size,
+    bool fill_run
+) {
+    if (inout_size == nullptr || run_size == 0U ||
+        gap > std::numeric_limits<std::uint16_t>::max() ||
+        run_size > std::numeric_limits<std::uint16_t>::max()) {
+        return false;
+    }
+    const std::uint64_t encoded_size = varuint16_encoded_size(gap) +
+                                       varuint16_encoded_size(run_size) + 1U +
+                                       (fill_run ? 1U : run_size);
+    if (*inout_size > std::numeric_limits<std::uint64_t>::max() - encoded_size) {
+        return false;
+    }
+    *inout_size += encoded_size;
+    return true;
+}
+
+std::uint32_t varuint16_encoded_size(std::uint32_t value) {
+    std::uint32_t size = 0U;
+    do {
+        ++size;
+        value >>= 7U;
+    } while (value != 0U);
+    return size;
 }
 
 bool build_fill_sparse_zero_payload(

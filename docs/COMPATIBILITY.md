@@ -767,7 +767,14 @@ dominated by repeated fill runs. The same sample reported page-log append at
 `0.101 ms/insert`, append encode at `0.072 ms/insert`, ownerless autocommit at
 `1472.89 ops/s` versus ordinary at `3137.60 ops/s`, and a stats-off sample
 reported ownerless autocommit at `1241.04 ops/s` versus ordinary at
-`2730.72 ops/s`. The next performance target is therefore native
+`2730.72 ops/s`. The index fill-sparse prefilter now inspects the already-built
+compact payload before constructing a second index encoding and requires an
+actual fill run before trying the full fill-sparse path. The reduced 100-row
+stats-enabled production probe with that prefilter still reported only the
+SYS fill-sparse record per insert and the same index-heavy payload mix, but
+append encode returned to `0.059 ms/insert` and total page-log append to
+`0.088 ms/insert`, with ownerless autocommit at `1364.26 ops/s` versus
+ordinary at `2907.78 ops/s`. The next performance target is therefore native
 commit/page-publication cost and a stronger user/index representation than
 fill-run compression, not rollback-segment SYS proof byte volume.
 Ownerless page-version reads now validate the WAL tail after a direct

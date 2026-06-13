@@ -120,7 +120,11 @@ autocommit insert. Fill-sparse selected `1.000` record per insert, still the
 SYS page, so the representative simple insert index image is not dominated by
 repeated fill runs. The next performance slice should target native
 commit/page-publication cost or a stronger user/index representation rather
-than broader fill-run scanning.
+than broader fill-run scanning. The follow-up
+`ownerless-index-fill-sparse-prefilter` slice keeps this byte-exact index
+format available but skips the full index fill-sparse build unless the compact
+payload already proves an actual repeated fill run and a smaller estimated
+encoding.
 
 ## Risks And Open Questions
 
