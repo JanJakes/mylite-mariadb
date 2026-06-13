@@ -4921,9 +4921,9 @@ bool read_record_page_type(
                 return false;
             }
             const std::uint64_t available = record.payload_size - k_innodb_fil_page_type_offset;
-            const std::size_t bytes_to_read = static_cast<std::size_t>(
-                std::min<std::uint64_t>(sizeof(page_type_bytes), available)
-            );
+            const std::uint64_t bytes_to_read64 =
+                std::min<std::uint64_t>(sizeof(page_type_bytes), available);
+            const std::size_t bytes_to_read = static_cast<std::size_t>(bytes_to_read64);
             if (!read_exact_at(fd, page_type_bytes, bytes_to_read, page_type_offset)) {
                 return false;
             }
