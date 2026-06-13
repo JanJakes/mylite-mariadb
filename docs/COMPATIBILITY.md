@@ -247,7 +247,16 @@ page-publication write-volume work; it does not yet reduce page-version append
 volume. The same stats-enabled probe now reports page-log payload bytes,
 record-header bytes, and total record bytes, plus ownerless autocommit
 per-insert byte averages, so CI production timings can distinguish append time
-from full-page WAL write volume. The prepared DML reset path now avoids
+from full-page WAL write volume. The same probe now also attributes
+`FIL_PAGE_INDEX` page-log identity reuse and changed-byte density with raw and
+per-insert counters for unique, duplicate, size-mismatch, overflow, total
+changed bytes, `FIL` header changed bytes, and body changed bytes. The reduced
+100-row production sample after adding the index delta attribution reported
+`0.990` duplicate index identities per ownerless autocommit insert, no
+identity size mismatches or overflows, only `39.860` changed bytes per insert,
+and `1779.010` index payload bytes per insert. This makes a bounded index
+delta WAL format the next evidence-backed payload target.
+The prepared DML reset path now avoids
 `mysql_stmt_reset()` only after successful no-result statements with no result
 metadata; the post-change reduced production attribution sample reported 500
 ownerless autocommit resets with `0.064 ms` total reset time and

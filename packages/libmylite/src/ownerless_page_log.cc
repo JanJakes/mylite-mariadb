@@ -12,6 +12,7 @@
 #include <fcntl.h>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <new>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -81,6 +82,7 @@ constexpr unsigned char k_fill_sparse_run_kind_raw = 0U;
 constexpr unsigned char k_fill_sparse_run_kind_fill = 1U;
 constexpr std::uint32_t k_fill_sparse_min_fill_run_size = 8U;
 constexpr std::size_t k_innodb_fil_page_type_offset = 24;
+constexpr std::size_t k_innodb_fil_page_data_offset = 38;
 constexpr std::uint16_t k_innodb_fil_page_index = 17855;
 constexpr std::uint16_t k_innodb_fil_page_type_allocated = 0;
 constexpr std::uint16_t k_innodb_fil_page_undo_log = 2;
@@ -94,6 +96,8 @@ constexpr std::uint16_t k_innodb_fil_page_type_xdes = 9;
 constexpr std::uint16_t k_innodb_fil_page_type_blob = 10;
 constexpr std::uint16_t k_innodb_fil_page_type_zblob = 11;
 constexpr std::uint16_t k_innodb_fil_page_type_zblob2 = 12;
+constexpr std::size_t k_index_page_identity_slot_count = 1024;
+constexpr std::size_t k_index_page_identity_probe_limit = 8;
 constexpr off_t k_append_lock_start = 0;
 constexpr off_t k_checkpoint_lock_start = 1;
 
@@ -129,6 +133,14 @@ struct CompactSparsePayloadComposition {
     bool valid = false;
     std::uint64_t metadata_bytes = 0;
     std::uint64_t data_bytes = 0;
+};
+
+struct IndexPageIdentitySlot {
+    bool valid = false;
+    std::uint32_t space_id = 0;
+    std::uint32_t page_no = 0;
+    std::uint32_t page_size = 0;
+    std::vector<unsigned char> page;
 };
 
 enum PageLogAppendPerfStatIndex : std::size_t {
@@ -189,6 +201,13 @@ enum PageLogAppendPerfStatIndex : std::size_t {
     PAGE_LOG_APPEND_PERF_FILL_SPARSE_METADATA_BYTES,
     PAGE_LOG_APPEND_PERF_FILL_SPARSE_RAW_DATA_BYTES,
     PAGE_LOG_APPEND_PERF_FILL_SPARSE_FILL_BYTES,
+    PAGE_LOG_APPEND_PERF_INDEX_IDENTITY_UNIQUE,
+    PAGE_LOG_APPEND_PERF_INDEX_IDENTITY_DUPLICATE,
+    PAGE_LOG_APPEND_PERF_INDEX_IDENTITY_SIZE_MISMATCH,
+    PAGE_LOG_APPEND_PERF_INDEX_IDENTITY_TABLE_OVERFLOW,
+    PAGE_LOG_APPEND_PERF_INDEX_IDENTITY_CHANGED_BYTES,
+    PAGE_LOG_APPEND_PERF_INDEX_IDENTITY_FIL_HEADER_CHANGED_BYTES,
+    PAGE_LOG_APPEND_PERF_INDEX_IDENTITY_BODY_CHANGED_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
@@ -220,6 +239,8 @@ std::atomic<bool> page_log_scan_perf_stats_enabled{false};
 std::atomic<std::uint64_t> page_log_scan_perf_stats[PAGE_LOG_SCAN_PERF_STAT_COUNT];
 std::atomic<bool> page_log_sync_perf_stats_enabled{false};
 std::atomic<std::uint64_t> page_log_sync_perf_stats[PAGE_LOG_SYNC_PERF_STAT_COUNT];
+std::mutex index_page_identity_stats_mutex;
+std::array<IndexPageIdentitySlot, k_index_page_identity_slot_count> index_page_identity_slots;
 
 bool page_log_append_perf_stats_are_enabled() {
     return page_log_append_perf_stats_enabled.load(std::memory_order_relaxed);
@@ -485,11 +506,21 @@ CompactSparsePayloadComposition record_append_payload_encoding_stats(
     const std::vector<unsigned char> &payload
 );
 void record_append_page_type_stats(
+    std::uint32_t space_id,
+    std::uint32_t page_no,
     const void *page,
     std::uint32_t page_size,
     std::uint64_t payload_size,
     const CompactSparsePayloadComposition &compact_sparse
 );
+void record_append_index_page_identity_stats(
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    const unsigned char *page,
+    std::uint32_t page_size
+);
+std::uint64_t index_page_identity_fingerprint(std::uint32_t space_id, std::uint32_t page_no);
+std::uint64_t mix64(std::uint64_t value);
 bool record_page_too_large(const PageRecordHeader &record, std::size_t page_capacity);
 bool read_record_page_payload(
     int fd,
@@ -587,6 +618,14 @@ extern "C" void mylite_ownerless_page_log_set_append_perf_stats_enabled(int enab
 extern "C" void mylite_ownerless_page_log_reset_append_perf_stats(void) {
     for (std::size_t i = 0; i < PAGE_LOG_APPEND_PERF_STAT_COUNT; ++i) {
         page_log_append_perf_stats[i].store(0, std::memory_order_relaxed);
+    }
+    std::lock_guard<std::mutex> guard(index_page_identity_stats_mutex);
+    for (IndexPageIdentitySlot &slot : index_page_identity_slots) {
+        slot.valid = false;
+        slot.space_id = 0;
+        slot.page_no = 0;
+        slot.page_size = 0;
+        slot.page.clear();
     }
 }
 
@@ -1831,7 +1870,14 @@ int append_record_at_locked(
     }
     const CompactSparsePayloadComposition compact_sparse =
         record_append_payload_encoding_stats(record_flags, encoded_payload_size, encoded_payload);
-    record_append_page_type_stats(page, page_size, encoded_payload_size, compact_sparse);
+    record_append_page_type_stats(
+        space_id,
+        page_no,
+        page,
+        page_size,
+        encoded_payload_size,
+        compact_sparse
+    );
     if (!offset_adds(payload_offset, encoded_payload_size, &end_offset)) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
@@ -3665,6 +3711,8 @@ CompactSparsePayloadComposition record_append_payload_encoding_stats(
 }
 
 void record_append_page_type_stats(
+    std::uint32_t space_id,
+    std::uint32_t page_no,
     const void *page,
     std::uint32_t page_size,
     std::uint64_t payload_size,
@@ -3688,6 +3736,7 @@ void record_append_page_type_stats(
             byte_index = PAGE_LOG_APPEND_PERF_INDEX_PAYLOAD_BYTES;
             compact_metadata_index = PAGE_LOG_APPEND_PERF_INDEX_COMPACT_SPARSE_METADATA_BYTES;
             compact_data_index = PAGE_LOG_APPEND_PERF_INDEX_COMPACT_SPARSE_DATA_BYTES;
+            record_append_index_page_identity_stats(space_id, page_no, bytes, page_size);
             break;
         case k_innodb_fil_page_undo_log:
             record_index = PAGE_LOG_APPEND_PERF_UNDO_LOG_RECORDS;
@@ -3738,6 +3787,101 @@ void record_append_page_type_stats(
         page_log_append_perf_add(compact_metadata_index, compact_sparse.metadata_bytes);
         page_log_append_perf_add(compact_data_index, compact_sparse.data_bytes);
     }
+}
+
+void record_append_index_page_identity_stats(
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    const unsigned char *page,
+    std::uint32_t page_size
+) {
+    if (page == nullptr || page_size == 0U) {
+        return;
+    }
+
+    const std::uint64_t fingerprint = index_page_identity_fingerprint(space_id, page_no);
+    const std::size_t first_slot =
+        static_cast<std::size_t>(fingerprint) & (k_index_page_identity_slot_count - 1U);
+    std::lock_guard<std::mutex> guard(index_page_identity_stats_mutex);
+    for (std::size_t attempt = 0; attempt < k_index_page_identity_probe_limit; ++attempt) {
+        IndexPageIdentitySlot &slot = index_page_identity_slots
+            [(first_slot + attempt) & (k_index_page_identity_slot_count - 1U)];
+        if (slot.valid && slot.space_id == space_id && slot.page_no == page_no) {
+            if (slot.page_size != page_size || slot.page.size() != page_size) {
+                page_log_append_perf_add(PAGE_LOG_APPEND_PERF_INDEX_IDENTITY_SIZE_MISMATCH, 1U);
+            } else {
+                std::uint64_t changed_bytes = 0;
+                std::uint64_t fil_header_changed_bytes = 0;
+                std::uint64_t body_changed_bytes = 0;
+                for (std::uint32_t offset = 0; offset < page_size; ++offset) {
+                    if (slot.page[offset] == page[offset]) {
+                        continue;
+                    }
+                    ++changed_bytes;
+                    if (offset < k_innodb_fil_page_data_offset) {
+                        ++fil_header_changed_bytes;
+                    } else {
+                        ++body_changed_bytes;
+                    }
+                }
+                page_log_append_perf_add(PAGE_LOG_APPEND_PERF_INDEX_IDENTITY_DUPLICATE, 1U);
+                page_log_append_perf_add(
+                    PAGE_LOG_APPEND_PERF_INDEX_IDENTITY_CHANGED_BYTES,
+                    changed_bytes
+                );
+                page_log_append_perf_add(
+                    PAGE_LOG_APPEND_PERF_INDEX_IDENTITY_FIL_HEADER_CHANGED_BYTES,
+                    fil_header_changed_bytes
+                );
+                page_log_append_perf_add(
+                    PAGE_LOG_APPEND_PERF_INDEX_IDENTITY_BODY_CHANGED_BYTES,
+                    body_changed_bytes
+                );
+            }
+            slot.page_size = page_size;
+            try {
+                slot.page.assign(page, page + page_size);
+            } catch (const std::bad_alloc &) {
+                slot.valid = false;
+                slot.page_size = 0;
+                slot.page.clear();
+            }
+            return;
+        }
+        if (!slot.valid) {
+            slot.space_id = space_id;
+            slot.page_no = page_no;
+            slot.page_size = page_size;
+            try {
+                slot.page.assign(page, page + page_size);
+            } catch (const std::bad_alloc &) {
+                slot.page_size = 0;
+                slot.page.clear();
+                page_log_append_perf_add(PAGE_LOG_APPEND_PERF_INDEX_IDENTITY_TABLE_OVERFLOW, 1U);
+                return;
+            }
+            slot.valid = true;
+            page_log_append_perf_add(PAGE_LOG_APPEND_PERF_INDEX_IDENTITY_UNIQUE, 1U);
+            return;
+        }
+    }
+
+    page_log_append_perf_add(PAGE_LOG_APPEND_PERF_INDEX_IDENTITY_TABLE_OVERFLOW, 1U);
+}
+
+std::uint64_t index_page_identity_fingerprint(std::uint32_t space_id, std::uint32_t page_no) {
+    std::uint64_t value = (static_cast<std::uint64_t>(space_id) << 32) | page_no;
+    value = mix64(value);
+    return value == 0U ? 1U : value;
+}
+
+std::uint64_t mix64(std::uint64_t value) {
+    value ^= value >> 30U;
+    value *= 0xbf58476d1ce4e5b9ULL;
+    value ^= value >> 27U;
+    value *= 0x94d049bb133111ebULL;
+    value ^= value >> 31U;
+    return value;
 }
 
 bool record_payload_shape_valid(const PageRecordHeader &record) {

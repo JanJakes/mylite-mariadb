@@ -578,6 +578,13 @@ enum page_log_append_perf_stat_index {
     PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_METADATA_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_RAW_DATA_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_FILL_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_UNIQUE,
+    PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_DUPLICATE,
+    PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_SIZE_MISMATCH,
+    PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_TABLE_OVERFLOW,
+    PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_CHANGED_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_FIL_HEADER_CHANGED_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_BODY_CHANGED_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
@@ -2643,6 +2650,39 @@ static void assert_ownerless_history_flush_identity_accounting(
     }
 }
 
+static void assert_page_log_index_identity_accounting(const uint64_t *page_log_append) {
+    const uint64_t identity_pages =
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_UNIQUE] +
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_DUPLICATE] +
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_SIZE_MISMATCH] +
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_TABLE_OVERFLOW];
+    const uint64_t split_changed_bytes =
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_FIL_HEADER_CHANGED_BYTES] +
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_BODY_CHANGED_BYTES];
+
+    if (identity_pages != page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_RECORDS]) {
+        fprintf(
+            stderr,
+            "ownerless page-log index identity accounting mismatch: "
+            "identity_pages=%" PRIu64 " index_records=%" PRIu64 "\n",
+            identity_pages,
+            page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_RECORDS]
+        );
+        exit(1);
+    }
+    if (split_changed_bytes !=
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_CHANGED_BYTES]) {
+        fprintf(
+            stderr,
+            "ownerless page-log index identity changed-byte accounting mismatch: "
+            "split_changed_bytes=%" PRIu64 " changed_bytes=%" PRIu64 "\n",
+            split_changed_bytes,
+            page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_CHANGED_BYTES]
+        );
+        exit(1);
+    }
+}
+
 static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) {
     uint64_t page_publish[PAGE_PUBLISH_STAT_COUNT] = {0};
     uint64_t database_perf[DATABASE_PERF_STAT_COUNT] = {0};
@@ -2688,6 +2728,7 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
             [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_IDENTITY_DUPLICATE],
         ownerless_flush_duplicate_type_pages
     );
+    assert_page_log_index_identity_accounting(page_log_append);
     page_publish_extra_hook_calls = database_perf[DATABASE_PERF_STAT_PAGE_PUBLISH_CALLS] >
                                             page_publish[PAGE_PUBLISH_STAT_PUBLISHED]
                                         ? database_perf[DATABASE_PERF_STAT_PAGE_PUBLISH_CALLS] -
@@ -3433,6 +3474,43 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         "mylite_perf_summary_ownerless_autocommit_page_log_index_compact_sparse_data_bytes_per_"
         "insert",
         page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_COMPACT_SPARSE_DATA_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_index_identity_unique_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_UNIQUE],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_index_identity_duplicate_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_DUPLICATE],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_index_identity_size_mismatch_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_SIZE_MISMATCH],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_index_identity_overflow_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_TABLE_OVERFLOW],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_index_identity_changed_bytes_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_CHANGED_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_index_identity_fil_header_changed_"
+        "bytes_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_FIL_HEADER_CHANGED_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_index_identity_body_changed_bytes_per_"
+        "insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_BODY_CHANGED_BYTES],
         insert_iterations
     );
     emit_summary_count_per_iteration(
@@ -6959,6 +7037,41 @@ static void emit_page_log_append_perf_stats(const char *prefix) {
         prefix,
         "index_compact_sparse_data",
         values[PAGE_LOG_APPEND_PERF_STAT_INDEX_COMPACT_SPARSE_DATA_BYTES]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "index_identity_unique",
+        values[PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_UNIQUE]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "index_identity_duplicate",
+        values[PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_DUPLICATE]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "index_identity_size_mismatch",
+        values[PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_SIZE_MISMATCH]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "index_identity_overflow",
+        values[PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_TABLE_OVERFLOW]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "index_identity_changed",
+        values[PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_CHANGED_BYTES]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "index_identity_fil_header_changed",
+        values[PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_FIL_HEADER_CHANGED_BYTES]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "index_identity_body_changed",
+        values[PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_BODY_CHANGED_BYTES]
     );
     emit_page_log_append_perf_count(
         prefix,

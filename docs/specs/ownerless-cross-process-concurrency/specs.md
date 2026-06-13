@@ -4937,9 +4937,16 @@ subsystems that this mode needs:
   fill-sparse record per insert and reported `1779.030` index bytes per
   insert, but append encode returned to `0.059 ms/insert` and page-log append
   to `0.088 ms/insert`, with ownerless autocommit at `1364.26 ops/s` versus
-  ordinary at `2907.78 ops/s`. The next write-throughput target has moved to
-  native commit/page-publication cost and a stronger user/index representation
-  than fill-run compression, rather than SYS proof byte volume. The
+  ordinary at `2907.78 ops/s`. A follow-up index page delta attribution slice
+  added stats-only page-log identity reuse and changed-byte counters for
+  `FIL_PAGE_INDEX` records. Its reduced 100-row stats-enabled production probe
+  reported `0.990` duplicate index identities per ownerless autocommit insert,
+  `0.020` unique index identities per insert, no size mismatches or table
+  overflows, and only `39.860` changed bytes per insert while the index page
+  WAL still wrote `1779.010` payload bytes per insert. The next
+  write-throughput target has therefore moved to native commit/page-publication
+  cost and a bounded index delta representation, rather than SYS proof byte
+  volume or broader fill-run compression. The
   post-boundary production sample before this proof fast path reported stats-off
   ownerless warm open/close at `359.230 ms` versus ordinary `375.478 ms`,
   active-runtime reconnect overhead at `0.211 ms`, ownerless direct/prepared
