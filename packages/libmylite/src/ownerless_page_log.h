@@ -31,6 +31,9 @@ typedef struct mylite_ownerless_page_log_append_session {
     int active;
     uint64_t log_offset;
     uint64_t next_record_offset;
+    uint64_t log_device;
+    uint64_t log_inode;
+    uint64_t log_generation;
 } mylite_ownerless_page_log_append_session;
 
 int mylite_ownerless_page_log_initialize(int fd);

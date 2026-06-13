@@ -585,6 +585,8 @@ enum page_log_append_perf_stat_index {
     PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_CHANGED_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_FIL_HEADER_CHANGED_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_INDEX_IDENTITY_BODY_CHANGED_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_RECORDS,
+    PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_PAYLOAD_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
@@ -3462,6 +3464,16 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
     emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_page_log_index_payload_bytes_per_insert",
         page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_PAYLOAD_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_index_delta_records_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_RECORDS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_index_delta_payload_bytes_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_PAYLOAD_BYTES],
         insert_iterations
     );
     emit_summary_count_per_iteration(
@@ -7027,6 +7039,16 @@ static void emit_page_log_append_perf_stats(const char *prefix) {
         prefix,
         "index_payload",
         values[PAGE_LOG_APPEND_PERF_STAT_INDEX_PAYLOAD_BYTES]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "index_delta_records",
+        values[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_RECORDS]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "index_delta_payload",
+        values[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_PAYLOAD_BYTES]
     );
     emit_page_log_append_perf_bytes(
         prefix,

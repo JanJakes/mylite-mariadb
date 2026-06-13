@@ -1684,6 +1684,16 @@ Tasks:
    after native page proof. Boundary-preserving page-log primitives remain
    covered as lower-level evidence, but product close-time reclaim avoids native
    checkpoint side effects while a live peer can still need retained WAL.
+   The page-version WAL format also has an internal `FIL_PAGE_INDEX` delta
+   payload for repeated index-page identities. Delta records reference a
+   durable standalone base record in the same page-log file, offset, and
+   generation, are selected only when they are less than half the standalone
+   payload, and are rewritten as standalone records during checkpoint if
+   retained. A reduced stats-enabled production probe over 100 ownerless
+   autocommit inserts reduced index page-log payload from the preceding
+   `1779` bytes/insert baseline to `587.300` bytes/insert with `95` delta
+   records, while leaving broader redo/checkpoint reconciliation and DDL/file
+   lifecycle recovery as planned work.
    Undo, allocation,
    tablespace-header, extent, transaction-system, change-buffer, and system page
    records remain primitive evidence for future active-pin compaction.

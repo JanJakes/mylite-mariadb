@@ -116,6 +116,18 @@ native-support records, active-reader retention, and boundary synthesis for
 snapshot-sensitive pages remain unchanged. This is a bounded hot-path pruning
 slice, while replacing or shrinking the remaining history-proof page
 publication remains a planned performance target.
+Ownerless page-version WAL now encodes repeated InnoDB `FIL_PAGE_INDEX`
+records as bounded non-chained deltas against a durable standalone base record
+when the delta is less than half the standalone payload. Checkpoint rewrites
+retained deltas as standalone records, and the process-local base cache is
+scoped by page-log file identity, log offset, and log generation so compaction
+or cross-process checkpoint generation changes cannot reuse stale base
+offsets. A reduced stats-enabled production probe over 100 ownerless
+autocommit inserts reported index page-log payload falling from the preceding
+`1779` bytes/insert baseline to `587.300` bytes/insert, with `95` delta records
+and `545.120` delta payload bytes/insert; ownerless completion still requires
+the broader recovery, DDL/file-lifecycle, active-reader, and external stress
+gaps tracked in the ownerless concurrency spec.
 The timing-producing WordPress dependency, database-prep, performance-probe,
 and PHPUnit test-only steps repeat `Release` MyLite and `MinSizeRel` MariaDB
 embedded cache guards inside the step body, so a stale build directory fails
