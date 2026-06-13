@@ -4951,8 +4951,17 @@ subsystems that this mode needs:
   fill-sparse record per insert and reported `1779.030` index bytes per
   insert, but append encode returned to `0.059 ms/insert` and page-log append
   to `0.088 ms/insert`, with ownerless autocommit at `1364.26 ops/s` versus
-  ordinary at `2907.78 ops/s`. A follow-up index page delta attribution slice
-  added stats-only page-log identity reuse and changed-byte counters for
+  ordinary at `2907.78 ops/s`. A follow-up SYS fill-sparse direct-encode
+  slice then removed the discarded compact sparse materialization for
+  `FIL_PAGE_TYPE_SYS` pages when the existing fill-sparse record already wins.
+  The reduced 1000-row stats-enabled production probe preserved `3010`
+  single-row autocommit page-log append calls, `1000` fill-sparse/SYS records,
+  `1746847` payload bytes, and `72344` SYS payload bytes while append encode
+  moved from the pre-slice `63.598 ms` sample to `58.064 ms`. Bulk append
+  encode was `32.789 ms` with the same `1510` append calls, `250`
+  fill-sparse/SYS records, and `1166401` payload bytes. A follow-up index page
+  delta attribution slice added stats-only page-log identity reuse and
+  changed-byte counters for
   `FIL_PAGE_INDEX` records. Its reduced 100-row stats-enabled production probe
   reported `0.990` duplicate index identities per ownerless autocommit insert,
   `0.020` unique index identities per insert, no size mismatches or table

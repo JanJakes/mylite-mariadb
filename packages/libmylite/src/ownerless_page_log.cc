@@ -707,6 +707,21 @@ bool build_fill_sparse_zero_payload(
     std::uint32_t page_size,
     std::vector<unsigned char> *out_payload
 );
+bool build_fill_sparse_zero_payload_if_smaller_than_compact(
+    const void *page,
+    std::uint32_t page_size,
+    std::vector<unsigned char> *out_payload,
+    std::uint64_t *out_trailing_size,
+    bool *out_trailing_size_known
+);
+bool build_fill_sparse_zero_payload_internal(
+    const void *page,
+    std::uint32_t page_size,
+    std::vector<unsigned char> *out_payload,
+    bool require_smaller_than_compact,
+    std::uint64_t *out_trailing_size,
+    bool *out_trailing_size_known
+);
 bool append_fill_sparse_run(
     std::vector<unsigned char> *out_payload,
     std::uint32_t gap,
@@ -3139,72 +3154,93 @@ std::uint64_t encoded_payload_size_for_page(
     std::uint64_t trailing_size = page_size;
     bool trailing_size_known = false;
     if (out_payload != nullptr) {
-        std::uint64_t compact_trailing_size = page_size;
-        bool compact_trailing_size_known = false;
-        bool compact_uses_varint_payload = false;
-        if (build_compact_sparse_zero_payload(
-                page,
-                page_size,
-                out_payload,
-                &compact_trailing_size,
-                &compact_trailing_size_known,
-                &compact_uses_varint_payload
-            )) {
-            trailing_size = compact_trailing_size;
-            trailing_size_known = true;
-            if (out_payload->size() < trailing_size) {
-                thread_local std::vector<unsigned char> fill_payload;
-                fill_payload.clear();
-                const std::uint16_t page_type =
-                    page_size >= k_innodb_fil_page_type_offset + sizeof(std::uint16_t)
-                        ? load_be16(
-                              static_cast<const unsigned char *>(page) +
-                              k_innodb_fil_page_type_offset
-                          )
-                        : 0U;
-                std::uint64_t fill_sparse_index_size = 0U;
-                const bool fill_sparse_candidate = page_type == k_innodb_fil_page_type_sys ||
-                                                   (page_type == k_innodb_fil_page_index &&
-                                                    compact_sparse_payload_fill_sparse_size(
-                                                        *out_payload,
-                                                        compact_uses_varint_payload,
-                                                        &fill_sparse_index_size
-                                                    ) &&
-                                                    fill_sparse_index_size < out_payload->size());
-                if (fill_sparse_candidate &&
-                    build_fill_sparse_zero_payload(page, page_size, &fill_payload) &&
-                    fill_payload.size() < out_payload->size()) {
-                    out_payload->swap(fill_payload);
-                    flags |= k_record_flag_fill_sparse_zero_payload;
-                } else if (compact_uses_varint_payload) {
-                    flags |= k_record_flag_varint_compact_sparse_zero_payload;
-                } else {
-                    flags |= k_record_flag_compact_sparse_zero_payload;
-                }
-                encoded_size = out_payload->size();
-            }
-        } else if (compact_trailing_size_known) {
-            trailing_size = compact_trailing_size;
-            trailing_size_known = true;
-        } else {
-            std::uint64_t sparse_trailing_size = page_size;
-            bool sparse_trailing_size_known = false;
-            if (build_sparse_zero_payload(
+        const std::uint16_t page_type =
+            page_size >= k_innodb_fil_page_type_offset + sizeof(std::uint16_t)
+                ? load_be16(
+                      static_cast<const unsigned char *>(page) + k_innodb_fil_page_type_offset
+                  )
+                : 0U;
+        if (page_type == k_innodb_fil_page_type_sys) {
+            std::uint64_t fill_trailing_size = page_size;
+            bool fill_trailing_size_known = false;
+            if (build_fill_sparse_zero_payload_if_smaller_than_compact(
                     page,
                     page_size,
                     out_payload,
-                    &sparse_trailing_size,
-                    &sparse_trailing_size_known
+                    &fill_trailing_size,
+                    &fill_trailing_size_known
                 )) {
-                trailing_size = sparse_trailing_size;
+                trailing_size = fill_trailing_size;
+                trailing_size_known = true;
+                flags |= k_record_flag_fill_sparse_zero_payload;
+                encoded_size = out_payload->size();
+            } else if (fill_trailing_size_known) {
+                trailing_size = fill_trailing_size;
+                trailing_size_known = true;
+            }
+        }
+        std::uint64_t compact_trailing_size = page_size;
+        bool compact_trailing_size_known = false;
+        bool compact_uses_varint_payload = false;
+        if (flags == 0U) {
+            if (build_compact_sparse_zero_payload(
+                    page,
+                    page_size,
+                    out_payload,
+                    &compact_trailing_size,
+                    &compact_trailing_size_known,
+                    &compact_uses_varint_payload
+                )) {
+                trailing_size = compact_trailing_size;
                 trailing_size_known = true;
                 if (out_payload->size() < trailing_size) {
-                    flags |= k_record_flag_sparse_zero_payload;
+                    thread_local std::vector<unsigned char> fill_payload;
+                    fill_payload.clear();
+                    std::uint64_t fill_sparse_index_size = 0U;
+                    const bool fill_sparse_candidate =
+                        page_type == k_innodb_fil_page_type_sys ||
+                        (page_type == k_innodb_fil_page_index &&
+                         compact_sparse_payload_fill_sparse_size(
+                             *out_payload,
+                             compact_uses_varint_payload,
+                             &fill_sparse_index_size
+                         ) &&
+                         fill_sparse_index_size < out_payload->size());
+                    if (fill_sparse_candidate &&
+                        build_fill_sparse_zero_payload(page, page_size, &fill_payload) &&
+                        fill_payload.size() < out_payload->size()) {
+                        out_payload->swap(fill_payload);
+                        flags |= k_record_flag_fill_sparse_zero_payload;
+                    } else if (compact_uses_varint_payload) {
+                        flags |= k_record_flag_varint_compact_sparse_zero_payload;
+                    } else {
+                        flags |= k_record_flag_compact_sparse_zero_payload;
+                    }
                     encoded_size = out_payload->size();
                 }
-            } else if (sparse_trailing_size_known) {
-                trailing_size = sparse_trailing_size;
+            } else if (compact_trailing_size_known) {
+                trailing_size = compact_trailing_size;
                 trailing_size_known = true;
+            } else {
+                std::uint64_t sparse_trailing_size = page_size;
+                bool sparse_trailing_size_known = false;
+                if (build_sparse_zero_payload(
+                        page,
+                        page_size,
+                        out_payload,
+                        &sparse_trailing_size,
+                        &sparse_trailing_size_known
+                    )) {
+                    trailing_size = sparse_trailing_size;
+                    trailing_size_known = true;
+                    if (out_payload->size() < trailing_size) {
+                        flags |= k_record_flag_sparse_zero_payload;
+                        encoded_size = out_payload->size();
+                    }
+                } else if (sparse_trailing_size_known) {
+                    trailing_size = sparse_trailing_size;
+                    trailing_size_known = true;
+                }
             }
         }
     }
@@ -3566,15 +3602,60 @@ bool build_fill_sparse_zero_payload(
     std::uint32_t page_size,
     std::vector<unsigned char> *out_payload
 ) {
+    return build_fill_sparse_zero_payload_internal(
+        page,
+        page_size,
+        out_payload,
+        false,
+        nullptr,
+        nullptr
+    );
+}
+
+bool build_fill_sparse_zero_payload_if_smaller_than_compact(
+    const void *page,
+    std::uint32_t page_size,
+    std::vector<unsigned char> *out_payload,
+    std::uint64_t *out_trailing_size,
+    bool *out_trailing_size_known
+) {
+    return build_fill_sparse_zero_payload_internal(
+        page,
+        page_size,
+        out_payload,
+        true,
+        out_trailing_size,
+        out_trailing_size_known
+    );
+}
+
+bool build_fill_sparse_zero_payload_internal(
+    const void *page,
+    std::uint32_t page_size,
+    std::vector<unsigned char> *out_payload,
+    bool require_smaller_than_compact,
+    std::uint64_t *out_trailing_size,
+    bool *out_trailing_size_known
+) {
     if (out_payload == nullptr || page_size > std::numeric_limits<std::uint16_t>::max()) {
         return false;
     }
+    if (out_trailing_size_known != nullptr) {
+        *out_trailing_size_known = false;
+    }
+
     const auto *bytes = static_cast<const unsigned char *>(page);
     out_payload->clear();
     out_payload->reserve(page_size);
     out_payload->resize(sizeof(std::uint16_t));
-    std::uint32_t run_count = 0;
-    std::uint32_t previous_run_end = 0U;
+
+    std::uint32_t fill_run_count = 0U;
+    std::uint32_t fill_previous_run_end = 0U;
+    std::uint32_t compact_run_count = 0U;
+    std::uint32_t compact_previous_run_end = 0U;
+    std::uint64_t compact_payload_size = sizeof(std::uint16_t);
+    std::uint64_t varint_payload_size = sizeof(std::uint16_t);
+    std::uint64_t trailing_size = 0U;
 
     for (std::uint32_t offset = 0; offset < page_size;) {
         while (offset < page_size && bytes[offset] == 0U) {
@@ -3584,6 +3665,7 @@ bool build_fill_sparse_zero_payload(
             break;
         }
 
+        const std::uint32_t compact_run_start = offset;
         while (offset < page_size && bytes[offset] != 0U) {
             const unsigned char fill_byte = bytes[offset];
             std::uint32_t fill_size = 1U;
@@ -3591,10 +3673,10 @@ bool build_fill_sparse_zero_payload(
                 ++fill_size;
             }
             if (fill_size >= k_fill_sparse_min_fill_run_size) {
-                if (run_count == std::numeric_limits<std::uint16_t>::max() ||
+                if (fill_run_count == std::numeric_limits<std::uint16_t>::max() ||
                     !append_fill_sparse_run(
                         out_payload,
-                        offset - previous_run_end,
+                        offset - fill_previous_run_end,
                         fill_size,
                         k_fill_sparse_run_kind_fill,
                         nullptr,
@@ -3604,9 +3686,9 @@ bool build_fill_sparse_zero_payload(
                     out_payload->clear();
                     return false;
                 }
-                ++run_count;
+                ++fill_run_count;
                 offset += fill_size;
-                previous_run_end = offset;
+                fill_previous_run_end = offset;
                 continue;
             }
 
@@ -3625,10 +3707,10 @@ bool build_fill_sparse_zero_payload(
                 offset += next_fill_size;
             }
             const std::uint32_t raw_size = offset - raw_start;
-            if (run_count == std::numeric_limits<std::uint16_t>::max() ||
+            if (fill_run_count == std::numeric_limits<std::uint16_t>::max() ||
                 !append_fill_sparse_run(
                     out_payload,
-                    raw_start - previous_run_end,
+                    raw_start - fill_previous_run_end,
                     raw_size,
                     k_fill_sparse_run_kind_raw,
                     bytes + raw_start,
@@ -3638,16 +3720,67 @@ bool build_fill_sparse_zero_payload(
                 out_payload->clear();
                 return false;
             }
-            ++run_count;
-            previous_run_end = offset;
+            ++fill_run_count;
+            fill_previous_run_end = offset;
+        }
+
+        if (require_smaller_than_compact) {
+            trailing_size = offset;
+            const std::uint32_t compact_run_size = offset - compact_run_start;
+            if (compact_run_start > std::numeric_limits<std::uint16_t>::max() ||
+                compact_run_size > std::numeric_limits<std::uint16_t>::max() ||
+                compact_run_count == std::numeric_limits<std::uint16_t>::max()) {
+                out_payload->clear();
+                return false;
+            }
+
+            const std::uint64_t compact_encoded_run_size =
+                (2U * sizeof(std::uint16_t)) + compact_run_size;
+            if (compact_payload_size >
+                    std::numeric_limits<std::uint64_t>::max() - compact_encoded_run_size ||
+                compact_payload_size + compact_encoded_run_size >= page_size) {
+                out_payload->clear();
+                return false;
+            }
+            compact_payload_size += compact_encoded_run_size;
+
+            const std::uint64_t varint_encoded_run_size =
+                varuint16_encoded_size(compact_run_start - compact_previous_run_end) +
+                varuint16_encoded_size(compact_run_size) + compact_run_size;
+            if (varint_payload_size >
+                std::numeric_limits<std::uint64_t>::max() - varint_encoded_run_size) {
+                out_payload->clear();
+                return false;
+            }
+            varint_payload_size += varint_encoded_run_size;
+            ++compact_run_count;
+            compact_previous_run_end = offset;
         }
     }
 
-    if (run_count == 0U) {
+    if (require_smaller_than_compact) {
+        if (out_trailing_size != nullptr) {
+            *out_trailing_size = trailing_size;
+        }
+        if (out_trailing_size_known != nullptr) {
+            *out_trailing_size_known = true;
+        }
+    }
+    if (fill_run_count == 0U || (require_smaller_than_compact && compact_run_count == 0U)) {
         out_payload->clear();
         return false;
     }
-    store16(out_payload->data(), 0U, static_cast<std::uint16_t>(run_count));
+
+    if (require_smaller_than_compact) {
+        const std::uint64_t selected_compact_size =
+            varint_payload_size < compact_payload_size ? varint_payload_size : compact_payload_size;
+        if (selected_compact_size >= trailing_size ||
+            out_payload->size() >= selected_compact_size) {
+            out_payload->clear();
+            return false;
+        }
+    }
+    store16(out_payload->data(), 0U, static_cast<std::uint16_t>(fill_run_count));
     return true;
 }
 

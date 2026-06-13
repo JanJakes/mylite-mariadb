@@ -812,10 +812,18 @@ stats-enabled production probe with that prefilter still reported only the
 SYS fill-sparse record per insert and the same index-heavy payload mix, but
 append encode returned to `0.059 ms/insert` and total page-log append to
 `0.088 ms/insert`, with ownerless autocommit at `1364.26 ops/s` versus
-ordinary at `2907.78 ops/s`. That finding led to the index-delta page-log
-format and bounded base-refresh slices above. The remaining performance target
-is therefore native commit/page-publication cost and broader redo/checkpoint
-reconciliation, not rollback-segment SYS proof byte volume or fill-run
+ordinary at `2907.78 ops/s`. A follow-up SYS fill-sparse direct-encode slice
+then removed discarded compact sparse materialization for `FIL_PAGE_TYPE_SYS`
+pages when the existing fill-sparse record already wins. The reduced 1000-row
+stats-enabled production probe preserved `3010` single-row autocommit page-log
+append calls, `1000` fill-sparse/SYS records, `1746847` payload bytes, and
+`72344` SYS payload bytes while append encode moved from the pre-slice
+`63.598 ms` sample to `58.064 ms`. Bulk append encode was `32.789 ms` with
+the same `1510` append calls, `250` fill-sparse/SYS records, and `1166401`
+payload bytes. That finding led to the index-delta page-log format and bounded
+base-refresh slices above. The remaining performance target is therefore
+native commit/page-publication cost and broader redo/checkpoint reconciliation,
+not startup, SQL dispatch, rollback-segment SYS proof byte volume, or fill-run
 compression. A follow-up no-dirty publish-batch slice then made the MTR
 no-dirty release-loop publication path use the same page-publish batch contract
 as the made-dirty scan path and added direct-versus-session append counters.
