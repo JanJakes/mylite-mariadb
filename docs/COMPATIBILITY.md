@@ -74,7 +74,10 @@ wider combined seed-sweep wrapper over seeds `0` through `31` at rounds `2`;
 a focused seed-sweep replay through one disposable MariaDB 11.8 server covers
 the random transaction and DDL seeded suites over seeds `0`
 through `7` at rounds `4`, and a follow-up replay covers seeds `8` through
-`15` at rounds `2`.
+`15` at rounds `2`. A subsequent Docker-backed replay covers the random
+transaction, DDL stress, and FK graph seeded suites over seeds `16` through
+`31` at rounds `2`, with FK graph whole-seed retries recovering transient raw
+MariaDB `1213` exits for seeds `17`, `21`, and `25`.
 Longer randomized external MariaDB/RQG stress remains planned.
 
 Ownerless stale-reader file-lifecycle replay now includes same-schema and
