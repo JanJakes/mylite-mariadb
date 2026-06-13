@@ -231,6 +231,14 @@ int mylite_ownerless_innodb_lock_registry_owner_active_count(
     uint64_t latch_owner_generation,
     uint32_t *out_active_count
 );
+int mylite_ownerless_innodb_lock_registry_owner_blocks_waiting_lock(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t owner_id,
+    uint32_t latch_owner_id,
+    uint64_t latch_owner_generation,
+    int *out_blocks_waiting_lock
+);
 
 #ifdef __cplusplus
 }

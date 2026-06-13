@@ -2068,6 +2068,11 @@ Tasks:
    local writes take the global ownerless write statement lock and refresh
    current shared native state before executing, so independent process-local
    InnoDB support-page images cannot hide a peer's concurrent commit evidence.
+   If that global statement byte is held by a peer writer that is waiting on
+   this transaction's shared InnoDB or page-write lock, the transaction end can
+   proceed after the shared registry proves the blocker relationship, allowing
+   native `COMMIT`/full `ROLLBACK` to release the peer wait instead of timing
+   out behind the outer statement gate.
    Read-only explicit transactions that only used native locking reads still
    avoid global refresh while active, but their transaction-end SQL is not
    queued behind a peer writer's global ownerless statement gate; native InnoDB
@@ -4596,7 +4601,10 @@ subsystems that this mode needs:
   writes.
   No-live writer reclaim still requires native page proof before truncating
   retained WAL. Explicit transaction-end statements with local writes serialize
-  on the global ownerless write statement lock before current-state refresh;
+  on the global ownerless write statement lock before current-state refresh
+  except when a peer holding that global statement read lock is waiting on this
+  transaction's shared InnoDB or page-write lock and the shared registry proves
+  the blocker relationship;
   read-only transactions that only used native locking reads keep conservative
   active-transaction refresh behavior but do not block their `COMMIT`/full
   `ROLLBACK` behind a peer writer's global gate. Forced page-version refreshes

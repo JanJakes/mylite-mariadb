@@ -105,6 +105,7 @@ Completed on 2026-06-13:
 - The live LSN remains disallowed while ownerless write transactions or redo
   reservations are active; broad write/read interleavings remain covered by
   the existing active-reader pressure and transaction stress suites.
-- The full hook `crash-tail` aggregate still has a later
-  `record-lock-grant-crash` lock-ordering failure unrelated to this snapshot
-  pinning fix.
+- The full hook `crash-tail` aggregate exposed a later
+  `record-lock-grant-crash` statement-gate inversion unrelated to this snapshot
+  pinning fix. That follow-up is tracked by
+  `ownerless-transaction-end-lock-grant-progress`.

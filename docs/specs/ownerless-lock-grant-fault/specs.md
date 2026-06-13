@@ -69,6 +69,11 @@ The slice intentionally avoids editing MariaDB source. The existing
 MariaDB-derived hook call in `lock_grant()` already reaches the MyLite-owned
 callback boundary needed for deterministic coverage.
 
+The `ownerless-transaction-end-lock-grant-progress` follow-up keeps the holder
+`COMMIT` from timing out behind the blocked writer's ownerless statement read
+byte when the shared InnoDB/page-write registries prove that the holder owns the
+lock the writer is waiting for.
+
 ## Scope
 
 In scope:

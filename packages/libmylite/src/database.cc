@@ -1674,6 +1674,7 @@ bool sql_starts_explicit_transaction(const SqlPolicyTokens &tokens);
 bool sql_ends_explicit_transaction(const SqlPolicyTokens &tokens);
 bool sql_chains_transaction(const SqlPolicyTokens &tokens);
 bool ownerless_transaction_end_has_local_write(const mylite_db &db, const SqlPolicyTokens &tokens);
+bool ownerless_transaction_end_blocks_waiting_native_lock(mylite_db &db);
 int acquire_ownerless_statement_locks(
     mylite_db &db,
     const SqlPolicyTokens &tokens,
@@ -4692,6 +4693,52 @@ bool ownerless_transaction_end_has_local_write(const mylite_db &db, const SqlPol
     return sql_ends_explicit_transaction(tokens) &&
            ownerless_connection_is_in_explicit_transaction(db) &&
            db.ownerless_transaction_has_local_write;
+}
+
+bool ownerless_transaction_end_blocks_waiting_native_lock(mylite_db &db) {
+    if (!db.ownerless_rw_open) {
+        return false;
+    }
+
+    void *lock_registry = nullptr;
+    std::size_t lock_registry_size = 0;
+    void *page_write_lock_registry = nullptr;
+    std::size_t page_write_lock_registry_size = 0;
+    std::uint32_t owner_id = 0;
+    std::uint64_t owner_generation = 0;
+    {
+        const std::lock_guard<std::mutex> guard(g_runtime.mutex);
+        lock_registry = g_runtime.ownerless_innodb_lock_hook.lock_registry;
+        lock_registry_size = g_runtime.ownerless_innodb_lock_hook.lock_registry_size;
+        page_write_lock_registry = g_runtime.ownerless_innodb_lock_hook.page_write_lock_registry;
+        page_write_lock_registry_size =
+            g_runtime.ownerless_innodb_lock_hook.page_write_lock_registry_size;
+        owner_id = g_runtime.ownerless_innodb_lock_hook.owner_id;
+        owner_generation = g_runtime.ownerless_innodb_lock_hook.owner_generation;
+    }
+    if (owner_id == 0U || owner_generation == 0U) {
+        return false;
+    }
+
+    const auto registry_blocks_waiter = [&](void *registry, std::size_t registry_size) {
+        if (registry == nullptr || registry_size == 0U) {
+            return false;
+        }
+        int blocks_waiting_lock = 0;
+        const int registry_result = mylite_ownerless_innodb_lock_registry_owner_blocks_waiting_lock(
+            registry,
+            registry_size,
+            owner_id,
+            owner_id,
+            owner_generation,
+            &blocks_waiting_lock
+        );
+        return registry_result == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK &&
+               blocks_waiting_lock != 0;
+    };
+
+    return registry_blocks_waiter(lock_registry, lock_registry_size) ||
+           registry_blocks_waiter(page_write_lock_registry, page_write_lock_registry_size);
 }
 
 bool is_unsupported_oracle_sql_mode_statement(const SqlPolicyTokens &tokens) {
@@ -12053,9 +12100,27 @@ int acquire_ownerless_statement_locks(
     lock.add(lock_fd, k_dictionary_statement_lock_start, k_dictionary_statement_lock_length);
     std::vector<OwnerlessStatementLockRequest> table_write_locks;
     if (transaction_end_with_local_write) {
-        table_write_locks.push_back(
-            {k_global_write_statement_lock_start, k_global_write_statement_lock_length, F_WRLCK}
-        );
+        const OwnerlessStatementLockRequest request{
+            k_global_write_statement_lock_start,
+            k_global_write_statement_lock_length,
+            F_WRLCK
+        };
+        if (acquire_fd_range_lock(lock_fd, request.start, request.length, request.lock_type, 0U)) {
+            lock.add(lock_fd, request.start, request.length);
+        } else if (!ownerless_transaction_end_blocks_waiting_native_lock(db)) {
+            if (!acquire_fd_range_lock(
+                    lock_fd,
+                    request.start,
+                    request.length,
+                    request.lock_type,
+                    statement_lock_timeout_ms
+                )) {
+                set_error(db, MYLITE_BUSY, "ownerless table write statement lock is busy");
+                return MYLITE_BUSY;
+            }
+            lock.add(lock_fd, request.start, request.length);
+        }
+        return MYLITE_OK;
     } else {
         table_write_locks = ownerless_autocommit_write_statement_lock_requests(db, tokens);
     }

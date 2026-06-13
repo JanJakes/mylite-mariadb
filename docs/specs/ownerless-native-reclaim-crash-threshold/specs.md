@@ -126,7 +126,9 @@ Completed on 2026-06-13:
 - This slice repairs deterministic native reclaim crash evidence. It does not
   close broader redo/checkpoint reconciliation, active-reader pressure policy,
   or DDL/file-lifecycle crash matrices.
-- The full hook `crash-tail` aggregate now gets past the native-reclaim and
-  active-pin cases but fails later in `record-lock-grant-crash`, where a waiter
-  holding the ownerless statement gate can block the native row-lock holder's
-  `COMMIT`. That lock-ordering issue is separate follow-up work.
+- The full hook `crash-tail` aggregate exposed a later
+  `record-lock-grant-crash` statement-gate inversion after the native-reclaim
+  and active-pin cases. That follow-up is tracked by
+  `ownerless-transaction-end-lock-grant-progress`, where transaction end can
+  proceed when the shared registries prove it owns the native/page-write lock
+  blocking a peer waiter.

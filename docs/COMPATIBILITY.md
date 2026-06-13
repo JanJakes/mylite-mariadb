@@ -908,10 +908,15 @@ Ownerless `COMMIT` and full `ROLLBACK` ending an explicit transaction that has
 performed local writes take the global ownerless write statement lock and
 refresh current shared native state before executing the transaction-end SQL,
 preventing one process-local InnoDB support-page image from hiding a peer's
-concurrent commit evidence. Read-only transactions that only used locking
-reads keep the conservative no-global-refresh state while active, but their
-transaction end no longer waits behind a peer writer's global statement gate;
-native InnoDB row/table locks remain responsible for the SQL wait.
+concurrent commit evidence. When that global statement byte is held by a peer
+writer that is itself waiting on this transaction's shared InnoDB or
+transaction-scoped page-write lock, the transaction end can proceed after the
+shared registry proves the blocker relationship so native `COMMIT`/full
+`ROLLBACK` can release the peer wait instead of timing out behind it.
+Read-only transactions that only used locking reads keep the conservative
+no-global-refresh state while active, but their transaction end no longer waits
+behind a peer writer's global statement gate; native InnoDB row/table locks
+remain responsible for the SQL wait.
 Ownerless statement-lock acquisition defaults to the existing 60 second
 internal wait, but a successful session `SET lock_wait_timeout = N` on that
 handle now also bounds the ownerless statement-lock wait to `N` seconds so
