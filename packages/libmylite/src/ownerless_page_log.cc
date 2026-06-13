@@ -104,6 +104,7 @@ constexpr std::size_t k_index_delta_base_slot_count = 1024;
 constexpr std::size_t k_index_delta_base_probe_limit = 8;
 constexpr std::size_t k_index_delta_base_record_offset_size = sizeof(std::uint64_t);
 constexpr std::uint32_t k_index_delta_base_min_standalone_observations = 8;
+constexpr std::uint32_t k_index_delta_base_max_delta_records = 32;
 constexpr off_t k_append_lock_start = 0;
 constexpr off_t k_checkpoint_lock_start = 1;
 
@@ -160,6 +161,7 @@ struct IndexPageDeltaBaseSlot {
     std::uint32_t page_size = 0;
     std::uint64_t record_offset = 0;
     std::uint32_t standalone_observations = 0;
+    std::uint32_t delta_records_since_base = 0;
     std::vector<unsigned char> page;
 };
 
@@ -4284,6 +4286,9 @@ bool index_delta_base_snapshot(
             if (slot.standalone_observations < k_index_delta_base_min_standalone_observations) {
                 return false;
             }
+            if (slot.delta_records_since_base >= k_index_delta_base_max_delta_records) {
+                return false;
+            }
             try {
                 out_snapshot->page = slot.page;
             } catch (const std::bad_alloc &) {
@@ -4310,12 +4315,9 @@ void note_index_delta_base_after_successful_append(
     std::uint64_t record_offset,
     std::uint32_t record_flags
 ) {
-    if (space_id == k_innodb_system_space_id ||
-        (record_flags & k_record_flag_index_delta_payload) != 0U ||
-        !page_is_innodb_index_page(page, page_size)) {
+    if (space_id == k_innodb_system_space_id || !page_is_innodb_index_page(page, page_size)) {
         return;
     }
-    const auto *bytes = static_cast<const unsigned char *>(page);
     const std::uint64_t fingerprint = index_delta_base_fingerprint(
         log_device,
         log_inode,
@@ -4327,6 +4329,23 @@ void note_index_delta_base_after_successful_append(
     const std::size_t first_slot =
         static_cast<std::size_t>(fingerprint) & (k_index_delta_base_slot_count - 1U);
     std::lock_guard<std::mutex> guard(index_page_delta_base_mutex);
+    if ((record_flags & k_record_flag_index_delta_payload) != 0U) {
+        for (std::size_t attempt = 0; attempt < k_index_delta_base_probe_limit; ++attempt) {
+            IndexPageDeltaBaseSlot &slot = index_page_delta_base_slots
+                [(first_slot + attempt) & (k_index_delta_base_slot_count - 1U)];
+            if (slot.valid && slot.log_device == log_device && slot.log_inode == log_inode &&
+                slot.log_offset == log_offset && slot.log_generation == log_generation &&
+                slot.space_id == space_id && slot.page_no == page_no &&
+                slot.page_size == page_size && slot.page.size() == page_size &&
+                slot.delta_records_since_base < std::numeric_limits<std::uint32_t>::max()) {
+                ++slot.delta_records_since_base;
+                return;
+            }
+        }
+        return;
+    }
+
+    const auto *bytes = static_cast<const unsigned char *>(page);
     for (std::size_t attempt = 0; attempt < k_index_delta_base_probe_limit; ++attempt) {
         IndexPageDeltaBaseSlot &slot = index_page_delta_base_slots
             [(first_slot + attempt) & (k_index_delta_base_slot_count - 1U)];
@@ -4350,6 +4369,7 @@ void note_index_delta_base_after_successful_append(
             } else if (slot.standalone_observations < std::numeric_limits<std::uint32_t>::max()) {
                 ++slot.standalone_observations;
             }
+            slot.delta_records_since_base = 0U;
             try {
                 slot.page.assign(bytes, bytes + page_size);
                 slot.valid = true;
@@ -4358,6 +4378,7 @@ void note_index_delta_base_after_successful_append(
                 slot.page_size = 0U;
                 slot.record_offset = 0U;
                 slot.standalone_observations = 0U;
+                slot.delta_records_since_base = 0U;
                 slot.page.clear();
             }
             return;
@@ -4398,6 +4419,7 @@ void invalidate_index_delta_bases_for_log(
             slot.page_size = 0U;
             slot.record_offset = 0U;
             slot.standalone_observations = 0U;
+            slot.delta_records_since_base = 0U;
             slot.page.clear();
         }
     }

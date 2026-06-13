@@ -177,6 +177,11 @@ module.
   timing sample was collected while another PHPUnit workload was active on the
   host, so the byte/count counters are the evidence from that run rather than
   the wall-clock throughput.
+- A follow-up base-refresh slice now forces a standalone refresh after a
+  bounded delta run so longer writers do not keep diffing against an old base.
+  The 200-row production attribution sample after that slice reported
+  `619.275` index payload bytes per insert and `496.030` index-delta payload
+  bytes per insert.
 
 ## Risks And Open Questions
 
@@ -188,7 +193,7 @@ dictionary refreshes can produce short bursts that should stay independently
 decodable. The first writer after process restart, table overflow, checkpoint
 generation change, or system-tablespace DDL churn still writes standalone page
 images. The non-chained design keeps decode and checkpoint bounded but
-requires periodic standalone refreshes when the cumulative difference from the
-full base stops being a large payload win. Delta checkpoint rewrite must
-remain correct; retaining base-dependent records verbatim would be a
-correctness bug.
+now refreshes the standalone base after a bounded number of deltas so
+cumulative difference from the full base cannot grow without limit in a
+long-running same-process writer. Delta checkpoint rewrite must remain correct;
+retaining base-dependent records verbatim would be a correctness bug.

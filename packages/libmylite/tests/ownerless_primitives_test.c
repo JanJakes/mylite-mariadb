@@ -204,6 +204,7 @@ static void test_page_log_encodes_fill_sparse_zero_payloads(void);
 static void test_page_log_encodes_index_fill_sparse_zero_payloads(void);
 static void test_page_log_attributes_index_page_identity_deltas(void);
 static void test_page_log_encodes_index_delta_payloads(void);
+static void test_page_log_refreshes_index_delta_base(void);
 static void test_page_log_skips_index_fill_sparse_without_fill_runs(void);
 static void test_page_log_falls_back_to_compact_sparse_zero_payloads(void);
 static void test_page_log_falls_back_to_legacy_sparse_zero_payloads(void);
@@ -396,6 +397,7 @@ int main(void) {
     test_page_log_encodes_index_fill_sparse_zero_payloads();
     test_page_log_attributes_index_page_identity_deltas();
     test_page_log_encodes_index_delta_payloads();
+    test_page_log_refreshes_index_delta_base();
     test_page_log_skips_index_fill_sparse_without_fill_runs();
     test_page_log_falls_back_to_compact_sparse_zero_payloads();
     test_page_log_falls_back_to_legacy_sparse_zero_payloads();
@@ -2241,6 +2243,178 @@ static void test_page_log_encodes_index_delta_payloads(void) {
     assert(page_lsn == 530U);
     assert(commit_lsn == 530U);
     assert(memcmp(out_page, page_other_identity, sizeof(page_other_identity)) == 0);
+
+    assert(close(fd) == 0);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_refreshes_index_delta_base(void) {
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "index-delta-base-refresh-page-log.bin");
+    int fd = open_file(log_path);
+    uint8_t page_base[MYLITE_TEST_PAGE_SIZE];
+    uint8_t page_delta[MYLITE_TEST_PAGE_SIZE];
+    uint8_t page_refresh[MYLITE_TEST_PAGE_SIZE];
+    uint8_t page_after_refresh[MYLITE_TEST_PAGE_SIZE];
+    uint8_t out_page[MYLITE_TEST_PAGE_SIZE];
+    uint64_t record_offset = 0;
+    uint64_t refresh_record_offset = 0;
+    uint64_t after_refresh_record_offset = 0;
+    uint64_t page_lsn = 0;
+    uint64_t commit_lsn = 0;
+    uint32_t out_page_size = 0;
+    uint64_t stats[PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
+    const unsigned int refresh_limit = 32U;
+
+    memset(page_base, 0x5CU, sizeof(page_base));
+    store_test_be32(page_base, MYLITE_TEST_INNODB_PAGE_OFFSET_OFFSET, 33U);
+    store_test_be64(page_base, MYLITE_TEST_INNODB_PAGE_LSN_OFFSET, 600U);
+    store_test_be16(
+        page_base,
+        MYLITE_TEST_INNODB_PAGE_TYPE_OFFSET,
+        MYLITE_TEST_INNODB_PAGE_TYPE_INDEX
+    );
+    store_test_be32(page_base, MYLITE_TEST_INNODB_PAGE_SPACE_ID_OFFSET, 71U);
+    memset(out_page, 0xEE, sizeof(out_page));
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    for (unsigned int warmup = 0; warmup < 8U; ++warmup) {
+        store_test_be64(page_base, MYLITE_TEST_INNODB_PAGE_LSN_OFFSET, 600U + warmup);
+        assert(
+            mylite_ownerless_page_log_append(
+                fd,
+                71U,
+                33U,
+                600U + warmup,
+                600U + warmup,
+                page_base,
+                sizeof(page_base),
+                NULL
+            ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+        );
+    }
+
+    mylite_ownerless_page_log_reset_append_perf_stats();
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
+    for (unsigned int delta = 0; delta < refresh_limit; ++delta) {
+        memcpy(page_delta, page_base, sizeof(page_delta));
+        store_test_be64(page_delta, MYLITE_TEST_INNODB_PAGE_LSN_OFFSET, 700U + delta);
+        for (unsigned int byte_index = 0; byte_index <= delta; ++byte_index) {
+            page_delta[128U + byte_index] ^= (uint8_t)(0x10U + (byte_index & 0x0FU));
+        }
+        assert(
+            mylite_ownerless_page_log_append(
+                fd,
+                71U,
+                33U,
+                700U + delta,
+                700U + delta,
+                page_delta,
+                sizeof(page_delta),
+                &record_offset
+            ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+        );
+        assert(
+            (read_page_log_record_flags(fd, record_offset) &
+             MYLITE_TEST_PAGE_LOG_RECORD_FLAG_INDEX_DELTA) != 0U
+        );
+    }
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(0);
+    mylite_ownerless_page_log_read_append_perf_stats(stats, PAGE_LOG_APPEND_PERF_STAT_COUNT);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_RECORDS] == refresh_limit);
+
+    memcpy(page_refresh, page_base, sizeof(page_refresh));
+    store_test_be64(page_refresh, MYLITE_TEST_INNODB_PAGE_LSN_OFFSET, 800U);
+    for (unsigned int byte_index = 0; byte_index <= refresh_limit; ++byte_index) {
+        page_refresh[128U + byte_index] ^= (uint8_t)(0x30U + (byte_index & 0x0FU));
+    }
+
+    mylite_ownerless_page_log_reset_append_perf_stats();
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            71U,
+            33U,
+            800U,
+            800U,
+            page_refresh,
+            sizeof(page_refresh),
+            &refresh_record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(0);
+    mylite_ownerless_page_log_read_append_perf_stats(stats, PAGE_LOG_APPEND_PERF_STAT_COUNT);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_CALLS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_RECORDS] == 0U);
+    assert(
+        (read_page_log_record_flags(fd, refresh_record_offset) &
+         MYLITE_TEST_PAGE_LOG_RECORD_FLAG_INDEX_DELTA) == 0U
+    );
+    assert(
+        mylite_ownerless_page_log_read_record_at(
+            fd,
+            0U,
+            refresh_record_offset,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page_refresh));
+    assert(page_lsn == 800U);
+    assert(commit_lsn == 800U);
+    assert(memcmp(out_page, page_refresh, sizeof(page_refresh)) == 0);
+
+    memcpy(page_after_refresh, page_refresh, sizeof(page_after_refresh));
+    store_test_be64(page_after_refresh, MYLITE_TEST_INNODB_PAGE_LSN_OFFSET, 801U);
+    page_after_refresh[512] ^= 0x7DU;
+
+    mylite_ownerless_page_log_reset_append_perf_stats();
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            71U,
+            33U,
+            801U,
+            801U,
+            page_after_refresh,
+            sizeof(page_after_refresh),
+            &after_refresh_record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(0);
+    mylite_ownerless_page_log_read_append_perf_stats(stats, PAGE_LOG_APPEND_PERF_STAT_COUNT);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_CALLS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_RECORDS] == 1U);
+    assert(
+        (read_page_log_record_flags(fd, after_refresh_record_offset) &
+         MYLITE_TEST_PAGE_LOG_RECORD_FLAG_INDEX_DELTA) != 0U
+    );
+    memset(out_page, 0xEE, sizeof(out_page));
+    assert(
+        mylite_ownerless_page_log_read_record_at(
+            fd,
+            0U,
+            after_refresh_record_offset,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page_after_refresh));
+    assert(page_lsn == 801U);
+    assert(commit_lsn == 801U);
+    assert(memcmp(out_page, page_after_refresh, sizeof(page_after_refresh)) == 0);
 
     assert(close(fd) == 0);
     free(log_path);

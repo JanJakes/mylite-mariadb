@@ -127,12 +127,18 @@ system-tablespace index pages stay on standalone encodings. Checkpoint
 rewrites retained deltas as standalone records, and the process-local base
 cache is scoped by page-log file identity, log offset, and log generation so
 compaction or cross-process checkpoint generation changes cannot reuse stale
-base offsets. A reduced stats-enabled production probe over 100 ownerless
-autocommit inserts reported index page-log payload falling from the preceding
-`1779` bytes/insert baseline to `598.580` bytes/insert, with `90` delta records
-and `539.870` delta payload bytes/insert; ownerless completion still requires
-the broader recovery, DDL/file-lifecycle, active-reader, and external stress
-gaps tracked in the ownerless concurrency spec.
+base offsets. The process-local base cache now also forces a standalone base
+refresh after a bounded delta run so long same-process writers do not keep
+diffing against an old base indefinitely. A reduced stats-enabled production
+probe over 100 ownerless autocommit inserts reported index page-log payload
+falling from the preceding `1779` bytes/insert baseline to `598.580`
+bytes/insert, with `90` delta records and `539.870` delta payload bytes/insert;
+the follow-up 200-row base-refresh sample reported `619.275` index payload
+bytes/insert and `496.030` index-delta payload bytes/insert, down from the
+pre-refresh 200-row `217565` total index bytes and `207878` total index-delta
+bytes. Ownerless completion still requires the broader recovery,
+DDL/file-lifecycle, active-reader, and external stress gaps tracked in the
+ownerless concurrency spec.
 The timing-producing WordPress dependency, database-prep, performance-probe,
 and PHPUnit test-only steps repeat `Release` MyLite and `MinSizeRel` MariaDB
 embedded cache guards inside the step body, so a stale build directory fails
@@ -800,9 +806,11 @@ stats-enabled production probe with that prefilter still reported only the
 SYS fill-sparse record per insert and the same index-heavy payload mix, but
 append encode returned to `0.059 ms/insert` and total page-log append to
 `0.088 ms/insert`, with ownerless autocommit at `1364.26 ops/s` versus
-ordinary at `2907.78 ops/s`. The next performance target is therefore native
-commit/page-publication cost and a stronger user/index representation than
-fill-run compression, not rollback-segment SYS proof byte volume.
+ordinary at `2907.78 ops/s`. That finding led to the index-delta page-log
+format and bounded base-refresh slices above. The remaining performance target
+is therefore native commit/page-publication cost and broader redo/checkpoint
+reconciliation, not rollback-segment SYS proof byte volume or fill-run
+compression.
 Ownerless page-version reads now validate the WAL tail after a direct
 page-index hit because the shared page index is an acceleration cache updated
 after the append stream, not an authoritative visibility boundary by itself.
