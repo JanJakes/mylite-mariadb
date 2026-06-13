@@ -55,14 +55,16 @@ repeat run_count times:
     one repeated fill byte
 ```
 
-The encoder scans nonzero regions only for native `FIL_PAGE_TYPE_SYS` pages,
-the measured history-proof hot class. Runs of the same nonzero byte with length
-at least eight bytes are encoded as fill runs; other nonzero bytes are grouped
-as raw runs until the next fill candidate. The encoded payload is selected only
-when it is smaller than the existing compact/varint sparse payload for the
-same SYS page. If it is not smaller, the existing format choice is preserved.
-Application index and undo pages keep the existing sparse choices so they do
-not pay an extra fill-run scan.
+This slice originally scanned nonzero regions only for native
+`FIL_PAGE_TYPE_SYS` pages, the measured history-proof hot class. A follow-up
+index fill-sparse slice extends the same candidate predicate to
+`FIL_PAGE_INDEX` after adding snapshot-boundary retention coverage for
+fill-sparse index records. Runs of the same nonzero byte with length at least
+eight bytes are encoded as fill runs; other nonzero bytes are grouped as raw
+runs until the next fill candidate. The encoded payload is selected only when
+it is smaller than the existing compact/varint sparse payload for the same
+page. If it is not smaller, the existing format choice is preserved. Undo pages
+keep the existing sparse choices so they do not pay an extra fill-run scan.
 
 The decoder still reconstructs the full page into a zero-filled buffer and
 verifies the stored page checksum against the complete reconstructed image.

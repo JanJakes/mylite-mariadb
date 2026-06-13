@@ -2280,7 +2280,8 @@ int checkpoint_locked(
                 return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
             }
             const std::size_t payload_size = static_cast<std::size_t>(record.payload_size);
-            std::unique_ptr<unsigned char[]> payload(new (std::nothrow) unsigned char[payload_size]
+            std::unique_ptr<unsigned char[]> payload(
+                new (std::nothrow) unsigned char[payload_size]
             );
             if (payload == nullptr) {
                 return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
@@ -2833,11 +2834,15 @@ std::uint64_t encoded_payload_size_for_page(
             if (out_payload->size() < trailing_size) {
                 thread_local std::vector<unsigned char> fill_payload;
                 fill_payload.clear();
+                const std::uint16_t page_type =
+                    page_size >= k_innodb_fil_page_type_offset + sizeof(std::uint16_t)
+                        ? load_be16(
+                              static_cast<const unsigned char *>(page) +
+                              k_innodb_fil_page_type_offset
+                          )
+                        : 0U;
                 const bool fill_sparse_candidate =
-                    page_size >= k_innodb_fil_page_type_offset + sizeof(std::uint16_t) &&
-                    load_be16(
-                        static_cast<const unsigned char *>(page) + k_innodb_fil_page_type_offset
-                    ) == k_innodb_fil_page_type_sys;
+                    page_type == k_innodb_fil_page_type_sys || page_type == k_innodb_fil_page_index;
                 if (fill_sparse_candidate &&
                     build_fill_sparse_zero_payload(page, page_size, &fill_payload) &&
                     fill_payload.size() < out_payload->size()) {
@@ -3885,9 +3890,9 @@ bool read_record_page_type(
                 return false;
             }
             const std::uint64_t available = record.payload_size - k_innodb_fil_page_type_offset;
-            const std::size_t bytes_to_read =
-                static_cast<std::size_t>(std::min<std::uint64_t>(sizeof(page_type_bytes), available)
-                );
+            const std::size_t bytes_to_read = static_cast<std::size_t>(
+                std::min<std::uint64_t>(sizeof(page_type_bytes), available)
+            );
             if (!read_exact_at(fd, page_type_bytes, bytes_to_read, page_type_offset)) {
                 return false;
             }

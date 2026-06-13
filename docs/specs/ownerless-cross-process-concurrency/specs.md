@@ -4923,9 +4923,16 @@ subsystems that this mode needs:
   100-row stats-off sample reported ownerless autocommit at `1518.08 ops/s`
   versus ordinary autocommit at `3834.32 ops/s`, while a 500-row stats-off
   sample reported ownerless autocommit at `1110.33 ops/s` versus ordinary at
-  `3873.31 ops/s`; short throughput samples remain noisy, but the next
-  write-throughput target has clearly moved to user/index payload and native
-  commit/page-publication cost rather than SYS proof byte volume. The
+  `3873.31 ops/s`. A follow-up index fill-sparse page-log slice extends that
+  byte-exact format to `FIL_PAGE_INDEX` records while proving index records
+  still require oldest-snapshot boundary retention. The reduced 100-row
+  stats-enabled production probe still reported `1779.010` index bytes,
+  `159.340` undo-log bytes, and `72.030` SYS bytes per insert, with
+  fill-sparse selecting only the `1.000` SYS record per insert in the simple
+  insert path. That proves the representative index image is not
+  fill-run-dominated; the next write-throughput target has moved to native
+  commit/page-publication cost and a stronger user/index representation than
+  fill-run compression, rather than SYS proof byte volume. The
   post-boundary production sample before this proof fast path reported stats-off
   ownerless warm open/close at `359.230 ms` versus ordinary `375.478 ms`,
   active-runtime reconnect overhead at `0.211 ms`, ownerless direct/prepared

@@ -55,6 +55,7 @@
 #define MYLITE_TEST_INNODB_PAGE_LSN_OFFSET 16U
 #define MYLITE_TEST_INNODB_PAGE_TYPE_OFFSET 24U
 #define MYLITE_TEST_INNODB_PAGE_SPACE_ID_OFFSET 34U
+#define MYLITE_TEST_INNODB_PAGE_TYPE_INDEX 17855U
 #define MYLITE_TEST_INNODB_PAGE_TYPE_SYS 6U
 #define MYLITE_TEST_INNODB_PAGE_TYPE_FSP_HEADER 8U
 #define MYLITE_TEST_INNODB_PAGE_TYPE_RTREE 17854U
@@ -188,6 +189,7 @@ static void test_page_log_uses_payload_offset(void);
 static void test_page_log_append_reports_write_volume(void);
 static void test_page_log_encodes_sparse_zero_payloads(void);
 static void test_page_log_encodes_fill_sparse_zero_payloads(void);
+static void test_page_log_encodes_index_fill_sparse_zero_payloads(void);
 static void test_page_log_falls_back_to_compact_sparse_zero_payloads(void);
 static void test_page_log_falls_back_to_legacy_sparse_zero_payloads(void);
 static void test_page_log_initialized_append_uses_existing_header(void);
@@ -374,6 +376,7 @@ int main(void) {
     test_page_log_append_reports_write_volume();
     test_page_log_encodes_sparse_zero_payloads();
     test_page_log_encodes_fill_sparse_zero_payloads();
+    test_page_log_encodes_index_fill_sparse_zero_payloads();
     test_page_log_falls_back_to_compact_sparse_zero_payloads();
     test_page_log_falls_back_to_legacy_sparse_zero_payloads();
     test_page_log_initialized_append_uses_existing_header();
@@ -1567,6 +1570,216 @@ static void test_page_log_encodes_fill_sparse_zero_payloads(void) {
 
     assert(close(fd) == 0);
     free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_encodes_index_fill_sparse_zero_payloads(void) {
+    char *root = make_temp_root();
+    char *missing_boundary_log_path = path_join(root, "index-fill-sparse-missing-boundary.bin");
+    char *checkpoint_log_path = path_join(root, "index-fill-sparse-checkpoint.bin");
+    int fd = open_file(missing_boundary_log_path);
+    uint8_t page_boundary[MYLITE_TEST_PAGE_SIZE];
+    uint8_t page_after[MYLITE_TEST_PAGE_SIZE];
+    uint8_t out_page[MYLITE_TEST_PAGE_SIZE];
+    uint64_t record_offset = 0;
+    uint64_t page_lsn = 0;
+    uint64_t commit_lsn = 0;
+    uint32_t out_page_size = 0;
+    uint64_t stats[PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
+    page_log_checkpoint_index_context checkpoint_context = {0};
+
+    fill_innodb_test_page(page_after, 51U, 9U, 200U, 0x11U);
+    store_test_be16(
+        page_after,
+        MYLITE_TEST_INNODB_PAGE_TYPE_OFFSET,
+        MYLITE_TEST_INNODB_PAGE_TYPE_INDEX
+    );
+    memset(page_after + 256U, 0xA5, 512U);
+    memset(page_after + 2048U, 0x5A, 1024U);
+    page_after[4000] = 0x42U;
+    memset(out_page, 0xEE, sizeof(out_page));
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    mylite_ownerless_page_log_reset_append_perf_stats();
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            51U,
+            9U,
+            200U,
+            200U,
+            page_after,
+            sizeof(page_after),
+            &record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(0);
+    mylite_ownerless_page_log_read_append_perf_stats(stats, PAGE_LOG_APPEND_PERF_STAT_COUNT);
+
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_CALLS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_ZERO_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_SYS_RECORDS] == 0U);
+    assert(
+        stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_PAYLOAD_BYTES] ==
+        stats[PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_BYTES]
+    );
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_PAYLOAD_BYTES] < sizeof(page_after));
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_COMPACT_SPARSE_METADATA_BYTES] == 0U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_COMPACT_SPARSE_DATA_BYTES] == 0U);
+
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            51U,
+            9U,
+            200U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page_after));
+    assert(page_lsn == 200U);
+    assert(commit_lsn == 200U);
+    assert(memcmp(out_page, page_after, sizeof(page_after)) == 0);
+
+    memset(out_page, 0xEE, sizeof(out_page));
+    assert(
+        mylite_ownerless_page_log_read_record_at(
+            fd,
+            0U,
+            record_offset,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page_after));
+    assert(page_lsn == 200U);
+    assert(commit_lsn == 200U);
+    assert(memcmp(out_page, page_after, sizeof(page_after)) == 0);
+
+    assert(
+        mylite_ownerless_page_log_checkpoint_preserving_oldest_snapshot_at(
+            fd,
+            0U,
+            200U,
+            150U,
+            capture_page_log_record_for_checkpoint_index,
+            prepare_page_log_checkpoint,
+            NULL,
+            &checkpoint_context
+        ) == MYLITE_OWNERLESS_PAGE_LOG_BUSY
+    );
+    assert(checkpoint_context.prepare_count == 0U);
+    assert(checkpoint_context.retained.count == 0U);
+    assert(close(fd) == 0);
+
+    fd = open_file(checkpoint_log_path);
+    memset(&checkpoint_context, 0, sizeof(checkpoint_context));
+    fill_innodb_test_page(page_boundary, 51U, 9U, 150U, 0x22U);
+    store_test_be16(
+        page_boundary,
+        MYLITE_TEST_INNODB_PAGE_TYPE_OFFSET,
+        MYLITE_TEST_INNODB_PAGE_TYPE_INDEX
+    );
+    memset(page_boundary + 256U, 0xC3, 512U);
+    memset(page_boundary + 2048U, 0x3C, 1024U);
+    page_boundary[4000] = 0x24U;
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    mylite_ownerless_page_log_reset_append_perf_stats();
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            51U,
+            9U,
+            150U,
+            150U,
+            page_boundary,
+            sizeof(page_boundary),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            51U,
+            9U,
+            200U,
+            200U,
+            page_after,
+            sizeof(page_after),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(0);
+    mylite_ownerless_page_log_read_append_perf_stats(stats, PAGE_LOG_APPEND_PERF_STAT_COUNT);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_CALLS] == 2U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_ZERO_RECORDS] == 2U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_RECORDS] == 2U);
+
+    assert(
+        mylite_ownerless_page_log_checkpoint_preserving_oldest_snapshot_at(
+            fd,
+            0U,
+            200U,
+            150U,
+            capture_page_log_record_for_checkpoint_index,
+            prepare_page_log_checkpoint,
+            NULL,
+            &checkpoint_context
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(checkpoint_context.prepare_count == 1U);
+    assert(checkpoint_context.retained.count == 2U);
+
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            51U,
+            9U,
+            150U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page_boundary));
+    assert(page_lsn == 150U);
+    assert(commit_lsn == 150U);
+    assert(memcmp(out_page, page_boundary, sizeof(page_boundary)) == 0);
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            51U,
+            9U,
+            200U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page_after));
+    assert(page_lsn == 200U);
+    assert(commit_lsn == 200U);
+    assert(memcmp(out_page, page_after, sizeof(page_after)) == 0);
+
+    assert(close(fd) == 0);
+    free(checkpoint_log_path);
+    free(missing_boundary_log_path);
     remove_tree(root);
     free(root);
 }

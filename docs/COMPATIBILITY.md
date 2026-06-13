@@ -744,28 +744,32 @@ autocommit path's history-proof payload is fresh identity churn, not repeated
 same-page proof images hidden by the small byte-diff cache; a simple same-page
 delta WAL format is therefore not the next runtime optimization for that path.
 The fill-sparse page-log slice then targeted the measured SYS proof byte shape
-without changing page-version count or proof semantics: it encodes only
+without changing page-version count or proof semantics: it originally encoded
 `FIL_PAGE_TYPE_SYS` records with a zero-filled page plus raw and repeated-fill
-runs when that is smaller than the varint compact sparse payload. The reduced
+runs when that was smaller than the varint compact sparse payload. The reduced
 stats-enabled production sample reported the same `3.020` page-log append
 calls per ownerless autocommit insert, but total payload fell to `2010.720`
 bytes per insert and SYS payload fell to `72.010` bytes per insert. The new
 fill-sparse bucket accounted for `1.000` record and `72.010` payload bytes per
 insert, split into `46.030` metadata bytes, `23.980` raw-data bytes, and
 `2.000` fill bytes, while the remaining large buckets were `1779.030` index
-payload bytes and `159.340` undo-log payload bytes per insert. The SYS-only
-selection gate kept append encode work bounded at `5.386 ms` for the `302`
-records in the 100-row attribution sample, with page-log append at
-`0.084 ms/insert`; the implementation deliberately avoids applying the extra
-fill-run scan to application index pages. Focused primitive and SQL coverage
-now covers fill-sparse reconstruction, page-type peeking, the history WAL
-proof, native-support page WAL elision, and multi-row visible fast-path
-selectors. Short stats-off throughput samples remain noisy: the current
-100-row production sample reported ownerless autocommit at `1518.08 ops/s`
-versus ordinary autocommit at `3834.32 ops/s`, while a 500-row sample reported
-ownerless autocommit at `1110.33 ops/s` versus ordinary at `3873.31 ops/s`.
-The next performance target is therefore user/index payload and native
-commit/page-publication cost, not rollback-segment SYS proof byte volume.
+payload bytes and `159.340` undo-log payload bytes per insert. Focused
+primitive and SQL coverage now covers fill-sparse reconstruction, page-type
+peeking, the history WAL proof, native-support page WAL elision, and multi-row
+visible fast-path selectors. A follow-up index fill-sparse slice extends the
+same byte-exact format to `FIL_PAGE_INDEX` pages while proving those records
+remain snapshot-sensitive for oldest-reader checkpoint retention. The reduced
+100-row stats-enabled production probe reported the same representative insert
+payload mix, with `1779.010` index payload bytes, `159.340` undo-log bytes,
+and `72.030` SYS bytes per insert; fill-sparse still selected `1.000` record
+per insert for the SYS page, which shows the simple insert index image is not
+dominated by repeated fill runs. The same sample reported page-log append at
+`0.101 ms/insert`, append encode at `0.072 ms/insert`, ownerless autocommit at
+`1472.89 ops/s` versus ordinary at `3137.60 ops/s`, and a stats-off sample
+reported ownerless autocommit at `1241.04 ops/s` versus ordinary at
+`2730.72 ops/s`. The next performance target is therefore native
+commit/page-publication cost and a stronger user/index representation than
+fill-run compression, not rollback-segment SYS proof byte volume.
 Ownerless page-version reads now validate the WAL tail after a direct
 page-index hit because the shared page index is an acceleration cache updated
 after the append stream, not an authoritative visibility boundary by itself.
