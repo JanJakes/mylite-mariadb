@@ -1715,7 +1715,10 @@ Tasks:
    append performance probe now also attributes accepted fast versus exact
    index/undo deltas and fast/exact rejection reasons, separating the 1024-byte
    fast limit, standalone-size comparisons, and delta-build failures before any
-   later fast-path rule change is considered. Page-log
+   later fast-path rule change is considered. Exact fallback now reuses a
+   fast-miss delta payload after standalone encoding proves it still beats the
+   current standalone payload, avoiding duplicate delta construction without
+   changing the delta acceptance rule. Page-log
    scan/replay/checkpoint validation now streams the full-page checksum for
    non-delta full, trailing-zero, sparse-zero, compact sparse, varint compact
    sparse, and fill-sparse records instead of reconstructing a full page just
