@@ -5086,7 +5086,16 @@ subsystems that this mode needs:
   `page_write_leave_total_ms` from `5.554` to `4.911`, with the sampled
   no-dirty commit-log loop moving from `76.541 ms` to `65.279 ms`; this is a
   bounded hook overhead reduction, not a replacement for the larger native
-  commit/page-publication and redo/checkpoint work. The
+  commit/page-publication and redo/checkpoint work. A follow-up
+  ownerless page-publish buffer-reuse slice keeps the same synchronous
+  full-page publish hook, checksum initialization, page-type attribution, and
+  history-proof publication semantics, but reuses one aligned transient page
+  buffer per publishing thread and physical page size instead of
+  allocating/freeing a scratch page for every published record. The embedded
+  performance probe emits publish-buffer reuse hit/miss counters in detailed
+  page-write stats and compact ownerless autocommit summaries. This reduces
+  hot-path allocation churn but does not change page-version volume or the
+  remaining redo/checkpoint proof gap. The
   post-boundary production sample before this proof fast path reported stats-off
   ownerless warm open/close at `359.230 ms` versus ordinary `375.478 ms`,
   active-runtime reconnect overhead at `0.211 ms`, ownerless direct/prepared

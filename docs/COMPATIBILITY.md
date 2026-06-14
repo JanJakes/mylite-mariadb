@@ -915,6 +915,14 @@ insert, while `page_write_leave_total_ms` moved from `5.554` to `4.911` and
 the no-dirty commit-log loop sample moved from `76.541 ms` to `65.279 ms`.
 This is a bounded hook overhead reduction; the larger targets remain page-log
 encoding, native commit/page-publication, and redo/checkpoint reconciliation.
+The ownerless page-publish buffer-reuse slice then removed per-published-page
+scratch allocation/free churn from `mtr_t::ownerless_page_write_publish()` by
+retaining one aligned transient page buffer per publishing thread and physical
+page size. Page images, checksums, native-support attribution, and
+history-proof publication are unchanged; the embedded performance probe now
+emits publish-buffer reuse hit/miss counters in both detailed and summary
+ownerless autocommit output so branch/main timing comparisons can see whether
+the hot path avoids repeated allocation.
 Ownerless page-version reads now validate the WAL tail after a direct
 page-index hit because the shared page index is an acceleration cache updated
 after the append stream, not an authoritative visibility boundary by itself.

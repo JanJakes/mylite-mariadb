@@ -285,6 +285,8 @@ enum ownerless_page_write_perf_stat_index {
   OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_PUBLISH_NS,
   OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_RELEASE_MEMO_NS,
   OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_NO_DIRTY_LOOP_NS,
+  OWNERLESS_PAGE_WRITE_PERF_PUBLISH_BUFFER_REUSE_HITS,
+  OWNERLESS_PAGE_WRITE_PERF_PUBLISH_BUFFER_REUSE_MISSES,
   OWNERLESS_PAGE_WRITE_PERF_STAT_COUNT
 };
 
@@ -1122,6 +1124,89 @@ private:
   ownerless_page_write_perf_stat_index m_index;
   uint64_t m_start_ns;
 };
+
+class ownerless_page_publish_scratch
+{
+public:
+  ~ownerless_page_publish_scratch() noexcept
+  {
+    if (m_page != nullptr)
+      aligned_free(m_page);
+  }
+
+  byte *get(ulint page_size, bool *out_reused, bool *out_retained) noexcept
+  {
+    if (out_retained != nullptr)
+      *out_retained= false;
+    if (m_in_use)
+    {
+      if (out_reused != nullptr)
+        *out_reused= false;
+      return page_size == 0 ?
+          nullptr :
+          static_cast<byte*>(aligned_malloc(page_size, page_size));
+    }
+
+    if (m_page != nullptr && m_page_size == page_size)
+    {
+      if (out_reused != nullptr)
+        *out_reused= true;
+      if (out_retained != nullptr)
+        *out_retained= true;
+      m_in_use= true;
+      return m_page;
+    }
+
+    if (m_page != nullptr)
+    {
+      aligned_free(m_page);
+      m_page= nullptr;
+      m_page_size= 0;
+    }
+
+    if (out_reused != nullptr)
+      *out_reused= false;
+    if (page_size == 0)
+      return nullptr;
+
+    m_page= static_cast<byte*>(aligned_malloc(page_size, page_size));
+    if (m_page != nullptr)
+    {
+      m_page_size= page_size;
+      if (out_retained != nullptr)
+        *out_retained= true;
+      m_in_use= true;
+    }
+    return m_page;
+  }
+
+  void release(byte *page, bool retained) noexcept
+  {
+    if (!retained)
+    {
+      aligned_free(page);
+      return;
+    }
+
+    ut_ad(page == m_page);
+    m_in_use= false;
+  }
+
+  ownerless_page_publish_scratch(
+      const ownerless_page_publish_scratch&)= delete;
+  ownerless_page_publish_scratch& operator=(
+      const ownerless_page_publish_scratch&)= delete;
+
+  ownerless_page_publish_scratch() noexcept= default;
+
+private:
+  byte *m_page= nullptr;
+  ulint m_page_size= 0;
+  bool m_in_use= false;
+};
+
+static thread_local ownerless_page_publish_scratch
+    ownerless_page_publish_scratch_buffer;
 
 static void ownerless_page_write_note_publish_failure(trx_t *trx) noexcept
 {
@@ -2706,9 +2791,17 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
   start_ns= ownerless_page_write_perf_enabled() ?
       ownerless_page_write_perf_now_ns() :
       0;
-  byte *page= static_cast<byte*>(aligned_malloc(page_size, page_size));
+  bool reused_page_buffer= false;
+  bool retained_page_buffer= false;
+  byte *page= ownerless_page_publish_scratch_buffer.get(
+      page_size, &reused_page_buffer, &retained_page_buffer);
   ownerless_page_write_perf_add_elapsed(
       OWNERLESS_PAGE_WRITE_PERF_PUBLISH_ALLOC_NS, start_ns);
+  ownerless_page_write_perf_add(
+      reused_page_buffer ?
+          OWNERLESS_PAGE_WRITE_PERF_PUBLISH_BUFFER_REUSE_HITS :
+          OWNERLESS_PAGE_WRITE_PERF_PUBLISH_BUFFER_REUSE_MISSES,
+      1);
   if (page == nullptr)
   {
     ownerless_page_publish_count(ownerless_page_publish_skipped_alloc);
@@ -2781,12 +2874,17 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
   else
     ownerless_page_write_note_publish_failure(ownerless_trx);
 
-  start_ns= ownerless_page_write_perf_enabled() ?
-      ownerless_page_write_perf_now_ns() :
-      0;
-  aligned_free(page);
-  ownerless_page_write_perf_add_elapsed(
-      OWNERLESS_PAGE_WRITE_PERF_PUBLISH_FREE_NS, start_ns);
+  if (retained_page_buffer)
+    ownerless_page_publish_scratch_buffer.release(page, retained_page_buffer);
+  else
+  {
+    start_ns= ownerless_page_write_perf_enabled() ?
+        ownerless_page_write_perf_now_ns() :
+        0;
+    ownerless_page_publish_scratch_buffer.release(page, retained_page_buffer);
+    ownerless_page_write_perf_add_elapsed(
+        OWNERLESS_PAGE_WRITE_PERF_PUBLISH_FREE_NS, start_ns);
+  }
 }
 
 ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish_boundary(

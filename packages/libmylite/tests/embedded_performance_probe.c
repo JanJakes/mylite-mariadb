@@ -259,6 +259,8 @@ enum page_write_perf_stat_index {
     PAGE_WRITE_PERF_STAT_COMMIT_LOG_PUBLISH_NS,
     PAGE_WRITE_PERF_STAT_COMMIT_LOG_RELEASE_MEMO_NS,
     PAGE_WRITE_PERF_STAT_COMMIT_LOG_NO_DIRTY_LOOP_NS,
+    PAGE_WRITE_PERF_STAT_PUBLISH_BUFFER_REUSE_HITS,
+    PAGE_WRITE_PERF_STAT_PUBLISH_BUFFER_REUSE_MISSES,
     PAGE_WRITE_PERF_STAT_COUNT
 };
 
@@ -3663,6 +3665,17 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         page_write[PAGE_WRITE_PERF_STAT_PUBLISH_TOTAL_NS],
         insert_iterations
     );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_publish_buffer_reuse_hits_per_insert",
+        page_write[PAGE_WRITE_PERF_STAT_PUBLISH_BUFFER_REUSE_HITS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_publish_buffer_reuse_misses_per_"
+        "insert",
+        page_write[PAGE_WRITE_PERF_STAT_PUBLISH_BUFFER_REUSE_MISSES],
+        insert_iterations
+    );
     emit_summary_ms_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_commit_mtr_publish_ms_per_insert",
         page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_PUBLISH_NS],
@@ -5611,6 +5624,16 @@ static void emit_page_write_perf_stats(const char *prefix) {
         "%s_page_write_publish_free_ms=%.3f\n",
         prefix,
         (double)values[PAGE_WRITE_PERF_STAT_PUBLISH_FREE_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_write_publish_buffer_reuse_hits=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_WRITE_PERF_STAT_PUBLISH_BUFFER_REUSE_HITS]
+    );
+    printf(
+        "%s_page_write_publish_buffer_reuse_misses=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_WRITE_PERF_STAT_PUBLISH_BUFFER_REUSE_MISSES]
     );
     printf(
         "%s_page_write_commit_log_calls=%" PRIu64 "\n",
