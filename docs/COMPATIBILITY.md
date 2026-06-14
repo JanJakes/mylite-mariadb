@@ -77,7 +77,10 @@ through `7` at rounds `4`, and a follow-up replay covers seeds `8` through
 `15` at rounds `2`. A subsequent Docker-backed replay covers the random
 transaction, DDL stress, and FK graph seeded suites over seeds `16` through
 `31` at rounds `2`, with FK graph whole-seed retries recovering transient raw
-MariaDB `1213` exits for seeds `17`, `21`, and `25`.
+MariaDB `1213` exits for seeds `17`, `21`, and `25`. A follow-up replay covers
+the same three seeded suites over seeds `32` through `63` at rounds `2`, with
+FK graph whole-seed retries recovering transient raw MariaDB `1213` exits for
+seeds `34`, `35`, `36`, and `37`.
 Longer randomized external MariaDB/RQG stress remains planned.
 
 Ownerless stale-reader file-lifecycle replay now includes same-schema and

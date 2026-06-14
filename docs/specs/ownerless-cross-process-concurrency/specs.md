@@ -3935,7 +3935,12 @@ Tasks:
    Docker-backed MariaDB 11.8 replay for seeds `16` through `31` at rounds `2`
    across random transaction, DDL stress, and FK graph seeded suites, with FK
    graph seeds `17`, `21`, and `25` recovering on attempt `2` after transient
-   raw MariaDB `1213` deadlock exits. Separate foreign-key graph stress
+   raw MariaDB `1213` deadlock exits. The
+   `ownerless-external-seed-32-63-replay` follow-up records Docker-backed
+   MariaDB 11.8 replay for seeds `32` through `63` at rounds `2` across the
+   same three seeded suites, with FK graph seeds `34`, `35`, `36`, and `37`
+   recovering on attempt `2` after transient raw MariaDB `1213` deadlock exits.
+   Separate foreign-key graph stress
    coverage runs with
    `MYLITE_OWNERLESS_FK_GRAPH_STRESS_ROUNDS=48`, concurrent ownerless workers
    over shared `CASCADE`, `SET NULL`, and `RESTRICT` foreign-key edges,
@@ -4173,12 +4178,12 @@ Tasks:
    transaction, DDL stress, and FK graph generated traces for deterministic
    external stress probes, including focused Docker-backed replay for the
    default DDL seed set and contiguous combined random transaction plus DDL
-   seed-sweep replay windows through seed `31`; the `16` through `31` replay
-   also covers FK graph seeds at rounds `2`. FK graph now participates in the
-   dependency-free combined seed-sweep command-plan windows, and focused
-   Docker-backed FK graph seed replay has passed both the default seed set and
-   the `16` through `31` window with bounded whole-seed retries for transient
-   raw MariaDB deadlock exits.
+   seed-sweep replay windows through seed `63`; the `16` through `31` and
+   `32` through `63` replays also cover FK graph seeds at rounds `2`. FK graph
+   now participates in the dependency-free combined seed-sweep command-plan
+   windows, and focused Docker-backed FK graph seed replay has passed the
+   default seed set plus the `16` through `31` and `32` through `63` windows
+   with bounded whole-seed retries for transient raw MariaDB deadlock exits.
 
 Exit criteria:
 
