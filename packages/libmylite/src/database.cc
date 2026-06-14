@@ -623,9 +623,33 @@ constexpr std::size_t k_concurrency_checkpoint_lsn_record_latest_lsn_offset = 24
 constexpr std::size_t k_concurrency_checkpoint_lsn_record_visible_lsn_offset = 32;
 constexpr std::size_t k_concurrency_checkpoint_lsn_record_checksum_offset = 40;
 constexpr off_t k_concurrency_checkpoint_lsn_records_offset = k_concurrency_checkpoint_payload_end;
-constexpr off_t k_concurrency_checkpoint_file_end = static_cast<off_t>(
+constexpr std::array<unsigned char, 8> k_concurrency_checkpoint_native_file_op_record_magic = {
+    'M',
+    'Y',
+    'L',
+    'C',
+    'F',
+    'O',
+    'P',
+    '1',
+};
+constexpr std::uint32_t k_concurrency_checkpoint_native_file_op_record_format = 1;
+constexpr std::size_t k_concurrency_checkpoint_native_file_op_record_count = 2;
+constexpr std::size_t k_concurrency_checkpoint_native_file_op_record_size = 64;
+constexpr std::size_t k_concurrency_checkpoint_native_file_op_record_magic_offset = 0;
+constexpr std::size_t k_concurrency_checkpoint_native_file_op_record_format_offset = 8;
+constexpr std::size_t k_concurrency_checkpoint_native_file_op_record_reserved_offset = 12;
+constexpr std::size_t k_concurrency_checkpoint_native_file_op_record_generation_offset = 16;
+constexpr std::size_t k_concurrency_checkpoint_native_file_op_record_needed_offset = 24;
+constexpr std::size_t k_concurrency_checkpoint_native_file_op_record_checksum_offset = 32;
+constexpr off_t k_concurrency_checkpoint_native_file_op_records_offset = static_cast<off_t>(
     k_concurrency_checkpoint_lsn_records_offset +
     (k_concurrency_checkpoint_lsn_record_count * k_concurrency_checkpoint_lsn_record_size)
+);
+constexpr off_t k_concurrency_checkpoint_file_end = static_cast<off_t>(
+    k_concurrency_checkpoint_native_file_op_records_offset +
+    (k_concurrency_checkpoint_native_file_op_record_count *
+     k_concurrency_checkpoint_native_file_op_record_size)
 );
 constexpr off_t k_concurrency_checkpoint_lock_start = 0;
 constexpr off_t k_concurrency_checkpoint_lock_length = 1;
@@ -877,6 +901,19 @@ static_assert(
     "checkpoint LSN record checksum exceeds record"
 );
 static_assert(
+    k_concurrency_checkpoint_native_file_op_record_generation_offset % alignof(std::uint64_t) == 0,
+    "checkpoint native file-op record generation must be naturally aligned"
+);
+static_assert(
+    k_concurrency_checkpoint_native_file_op_record_needed_offset % alignof(std::uint64_t) == 0,
+    "checkpoint native file-op record needed value must be naturally aligned"
+);
+static_assert(
+    k_concurrency_checkpoint_native_file_op_record_checksum_offset + sizeof(std::uint32_t) <=
+        k_concurrency_checkpoint_native_file_op_record_size,
+    "checkpoint native file-op record checksum exceeds record"
+);
+static_assert(
     k_concurrency_redo_state_refcount_offset + sizeof(std::uint32_t) <=
         k_concurrency_redo_state_segment_size,
     "redo state refcount exceeds redo state segment"
@@ -1125,6 +1162,11 @@ struct OwnerlessCheckpointLsnRecord {
     std::uint64_t generation = 0;
     std::uint64_t latest_lsn = 0;
     std::uint64_t visible_lsn = 0;
+};
+
+struct OwnerlessCheckpointNativeFileOpRecord {
+    std::uint64_t generation = 0;
+    bool needed = false;
 };
 #endif
 
@@ -2121,6 +2163,25 @@ bool parse_concurrency_checkpoint_lsn_record(
     bool *out_empty
 );
 off_t concurrency_checkpoint_lsn_record_offset(std::size_t index);
+bool read_concurrency_native_file_op_checkpoint_records(
+    int checkpoint_fd,
+    OwnerlessCheckpointNativeFileOpRecord *out_record,
+    bool *out_has_record,
+    bool *out_saw_nonempty_record
+);
+void build_concurrency_native_file_op_checkpoint_record(
+    std::array<unsigned char, k_concurrency_checkpoint_native_file_op_record_size> &record,
+    std::uint64_t generation,
+    bool needed
+);
+bool parse_concurrency_native_file_op_checkpoint_record(
+    const std::array<unsigned char, k_concurrency_checkpoint_native_file_op_record_size> &record,
+    OwnerlessCheckpointNativeFileOpRecord *out_record,
+    bool *out_empty
+);
+off_t concurrency_native_file_op_checkpoint_record_offset(std::size_t index);
+bool write_concurrency_native_file_op_checkpoint_locked(int checkpoint_fd, bool needed);
+bool read_concurrency_native_file_op_checkpoint_legacy_needed(int checkpoint_fd, bool *out_needed);
 bool mark_concurrency_native_file_op_checkpoint_needed(int checkpoint_fd);
 bool read_concurrency_native_file_op_checkpoint_needed(int checkpoint_fd, bool *out_needed);
 bool clear_concurrency_native_file_op_checkpoint_needed(int checkpoint_fd);
@@ -16596,6 +16657,218 @@ bool read_concurrency_checkpoint_legacy_lsn(
     return true;
 }
 
+bool read_concurrency_native_file_op_checkpoint_records(
+    int checkpoint_fd,
+    OwnerlessCheckpointNativeFileOpRecord *out_record,
+    bool *out_has_record,
+    bool *out_saw_nonempty_record
+) {
+    if (checkpoint_fd < 0 || out_record == nullptr || out_has_record == nullptr ||
+        out_saw_nonempty_record == nullptr) {
+        return false;
+    }
+    *out_record = {};
+    *out_has_record = false;
+    *out_saw_nonempty_record = false;
+    OwnerlessCheckpointNativeFileOpRecord best_record = {};
+    bool has_best_record = false;
+
+    for (std::size_t index = 0; index < k_concurrency_checkpoint_native_file_op_record_count;
+         ++index) {
+        std::array<unsigned char, k_concurrency_checkpoint_native_file_op_record_size> bytes = {};
+        ssize_t bytes_read = 0;
+        do {
+            bytes_read = ::pread(
+                checkpoint_fd,
+                bytes.data(),
+                bytes.size(),
+                concurrency_native_file_op_checkpoint_record_offset(index)
+            );
+        } while (bytes_read < 0 && errno == EINTR);
+        if (bytes_read == 0) {
+            continue;
+        }
+        if (bytes_read != static_cast<ssize_t>(bytes.size())) {
+            *out_saw_nonempty_record = true;
+            continue;
+        }
+
+        OwnerlessCheckpointNativeFileOpRecord record = {};
+        bool empty_record = false;
+        if (!parse_concurrency_native_file_op_checkpoint_record(bytes, &record, &empty_record)) {
+            *out_saw_nonempty_record = true;
+            continue;
+        }
+        if (empty_record) {
+            continue;
+        }
+
+        *out_saw_nonempty_record = true;
+        if (!has_best_record || record.generation > best_record.generation) {
+            best_record = record;
+            has_best_record = true;
+        }
+    }
+
+    if (has_best_record) {
+        *out_record = best_record;
+        *out_has_record = true;
+    }
+    return true;
+}
+
+void build_concurrency_native_file_op_checkpoint_record(
+    std::array<unsigned char, k_concurrency_checkpoint_native_file_op_record_size> &record,
+    std::uint64_t generation,
+    bool needed
+) {
+    record.fill(0U);
+    std::memcpy(
+        record.data() + k_concurrency_checkpoint_native_file_op_record_magic_offset,
+        k_concurrency_checkpoint_native_file_op_record_magic.data(),
+        k_concurrency_checkpoint_native_file_op_record_magic.size()
+    );
+    store_le32(
+        record.data(),
+        k_concurrency_checkpoint_native_file_op_record_format_offset,
+        k_concurrency_checkpoint_native_file_op_record_format
+    );
+    store_le64(
+        record.data(),
+        k_concurrency_checkpoint_native_file_op_record_generation_offset,
+        generation
+    );
+    store_le64(
+        record.data(),
+        k_concurrency_checkpoint_native_file_op_record_needed_offset,
+        needed ? 1U : 0U
+    );
+    store_le32(
+        record.data(),
+        k_concurrency_checkpoint_native_file_op_record_checksum_offset,
+        my_crc32c(0, record.data(), k_concurrency_checkpoint_native_file_op_record_checksum_offset)
+    );
+}
+
+bool parse_concurrency_native_file_op_checkpoint_record(
+    const std::array<unsigned char, k_concurrency_checkpoint_native_file_op_record_size> &record,
+    OwnerlessCheckpointNativeFileOpRecord *out_record,
+    bool *out_empty
+) {
+    if (out_record == nullptr || out_empty == nullptr) {
+        return false;
+    }
+    *out_empty =
+        std::all_of(record.begin(), record.end(), [](unsigned char value) { return value == 0U; });
+    if (*out_empty) {
+        *out_record = {};
+        return true;
+    }
+
+    if (std::memcmp(
+            record.data() + k_concurrency_checkpoint_native_file_op_record_magic_offset,
+            k_concurrency_checkpoint_native_file_op_record_magic.data(),
+            k_concurrency_checkpoint_native_file_op_record_magic.size()
+        ) != 0 ||
+        load_le32(record.data(), k_concurrency_checkpoint_native_file_op_record_format_offset) !=
+            k_concurrency_checkpoint_native_file_op_record_format ||
+        load_le32(record.data(), k_concurrency_checkpoint_native_file_op_record_reserved_offset) !=
+            0U) {
+        return false;
+    }
+    const std::uint32_t stored_checksum =
+        load_le32(record.data(), k_concurrency_checkpoint_native_file_op_record_checksum_offset);
+    const std::uint32_t computed_checksum =
+        my_crc32c(0, record.data(), k_concurrency_checkpoint_native_file_op_record_checksum_offset);
+    if (stored_checksum != computed_checksum) {
+        return false;
+    }
+
+    out_record->generation =
+        load_le64(record.data(), k_concurrency_checkpoint_native_file_op_record_generation_offset);
+    const std::uint64_t needed =
+        load_le64(record.data(), k_concurrency_checkpoint_native_file_op_record_needed_offset);
+    if (out_record->generation == 0U || needed > 1U) {
+        return false;
+    }
+    out_record->needed = needed != 0U;
+    return true;
+}
+
+off_t concurrency_native_file_op_checkpoint_record_offset(std::size_t index) {
+    return static_cast<off_t>(
+        k_concurrency_checkpoint_native_file_op_records_offset +
+        static_cast<off_t>(index * k_concurrency_checkpoint_native_file_op_record_size)
+    );
+}
+
+bool write_concurrency_native_file_op_checkpoint_locked(int checkpoint_fd, bool needed) {
+    OwnerlessCheckpointNativeFileOpRecord current_record = {};
+    bool has_current_record = false;
+    bool saw_nonempty_record = false;
+    if (!read_concurrency_native_file_op_checkpoint_records(
+            checkpoint_fd,
+            &current_record,
+            &has_current_record,
+            &saw_nonempty_record
+        )) {
+        return false;
+    }
+    const std::uint64_t next_generation =
+        has_current_record && current_record.generation < UINT64_MAX
+            ? current_record.generation + 1U
+            : 1U;
+    const std::size_t record_index = static_cast<std::size_t>(
+        (next_generation - 1U) % k_concurrency_checkpoint_native_file_op_record_count
+    );
+
+    std::array<unsigned char, k_concurrency_checkpoint_native_file_op_record_size> record = {};
+    build_concurrency_native_file_op_checkpoint_record(record, next_generation, needed);
+    std::array<unsigned char, sizeof(std::uint64_t)> legacy_payload = {};
+    store_le64(legacy_payload.data(), 0U, needed ? 1U : 0U);
+    return write_exact_at(
+               checkpoint_fd,
+               record.data(),
+               record.size(),
+               concurrency_native_file_op_checkpoint_record_offset(record_index)
+           ) &&
+           write_exact_at(
+               checkpoint_fd,
+               legacy_payload.data(),
+               legacy_payload.size(),
+               static_cast<off_t>(k_concurrency_checkpoint_native_file_op_needed_offset)
+           ) &&
+           ::fsync(checkpoint_fd) == 0;
+}
+
+bool read_concurrency_native_file_op_checkpoint_legacy_needed(int checkpoint_fd, bool *out_needed) {
+    if (checkpoint_fd < 0 || out_needed == nullptr) {
+        return false;
+    }
+
+    std::array<unsigned char, sizeof(std::uint64_t)> payload = {};
+    ssize_t bytes_read = 0;
+    do {
+        bytes_read = ::pread(
+            checkpoint_fd,
+            payload.data(),
+            payload.size(),
+            static_cast<off_t>(k_concurrency_checkpoint_native_file_op_needed_offset)
+        );
+    } while (bytes_read < 0 && errno == EINTR);
+
+    if (bytes_read == 0) {
+        *out_needed = false;
+        return true;
+    }
+    if (bytes_read != static_cast<ssize_t>(payload.size())) {
+        return false;
+    }
+
+    *out_needed = load_le64(payload.data(), 0U) != 0U;
+    return true;
+}
+
 bool mark_concurrency_native_file_op_checkpoint_needed(int checkpoint_fd) {
     if (checkpoint_fd < 0) {
         return false;
@@ -16608,15 +16881,7 @@ bool mark_concurrency_native_file_op_checkpoint_needed(int checkpoint_fd) {
         return false;
     }
 
-    std::array<unsigned char, sizeof(std::uint64_t)> payload = {};
-    store_le64(payload.data(), 0U, 1U);
-    const bool ok = write_exact_at(
-                        checkpoint_fd,
-                        payload.data(),
-                        payload.size(),
-                        static_cast<off_t>(k_concurrency_checkpoint_native_file_op_needed_offset)
-                    ) &&
-                    ::fsync(checkpoint_fd) == 0;
+    const bool ok = write_concurrency_native_file_op_checkpoint_locked(checkpoint_fd, true);
     release_fd_lock(
         checkpoint_fd,
         k_concurrency_checkpoint_lock_start,
@@ -16637,24 +16902,21 @@ bool read_concurrency_native_file_op_checkpoint_needed(int checkpoint_fd, bool *
         return false;
     }
 
-    std::array<unsigned char, sizeof(std::uint64_t)> payload = {};
-    ssize_t bytes_read = 0;
-    do {
-        bytes_read = ::pread(
-            checkpoint_fd,
-            payload.data(),
-            payload.size(),
-            static_cast<off_t>(k_concurrency_checkpoint_native_file_op_needed_offset)
-        );
-    } while (bytes_read < 0 && errno == EINTR);
-
-    bool ok = true;
-    if (bytes_read == 0) {
-        *out_needed = false;
-    } else if (bytes_read == static_cast<ssize_t>(payload.size())) {
-        *out_needed = load_le64(payload.data(), 0U) != 0U;
-    } else {
-        ok = false;
+    OwnerlessCheckpointNativeFileOpRecord record = {};
+    bool has_record = false;
+    bool saw_nonempty_record = false;
+    bool ok = read_concurrency_native_file_op_checkpoint_records(
+        checkpoint_fd,
+        &record,
+        &has_record,
+        &saw_nonempty_record
+    );
+    if (ok && has_record) {
+        *out_needed = record.needed;
+    } else if (ok && saw_nonempty_record) {
+        *out_needed = true;
+    } else if (ok) {
+        ok = read_concurrency_native_file_op_checkpoint_legacy_needed(checkpoint_fd, out_needed);
     }
 
     release_fd_lock(
@@ -16677,14 +16939,7 @@ bool clear_concurrency_native_file_op_checkpoint_needed(int checkpoint_fd) {
         return false;
     }
 
-    std::array<unsigned char, sizeof(std::uint64_t)> payload = {};
-    const bool ok = write_exact_at(
-                        checkpoint_fd,
-                        payload.data(),
-                        payload.size(),
-                        static_cast<off_t>(k_concurrency_checkpoint_native_file_op_needed_offset)
-                    ) &&
-                    ::fsync(checkpoint_fd) == 0;
+    const bool ok = write_concurrency_native_file_op_checkpoint_locked(checkpoint_fd, false);
     release_fd_lock(
         checkpoint_fd,
         k_concurrency_checkpoint_lock_start,

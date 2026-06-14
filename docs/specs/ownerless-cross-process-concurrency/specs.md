@@ -4004,7 +4004,7 @@ Tasks:
    read/write reopen uses the same failure-then-restore retry path after
    ownerless activity, and can arm only the ownerless uncheckpointed
    file-operation recovery mode during native startup when retained page WAL,
-   the native file-op checkpoint marker, or a valid
+   the checksummed native file-op checkpoint marker, or a valid
    `mylite-redo-header.bin` backup proves prior ownerless redo/checkpoint
    suppression; hook-only SQL coverage corrupts redo-header backup magic,
    format, header size, payload size, recorded redo size, saved prefix, and
@@ -4015,7 +4015,10 @@ Tasks:
    `ALTER TABLE ... AUTO_INCREMENT` sets the native file-op checkpoint marker
    while a live peer prevents final drain; final no-live close drains that
    marker and also drains a stale native file-op checkpoint marker even when
-   `.ckpt` has no page-visible LSN or WAL to compact, forces native checkpoint
+   `.ckpt` has no page-visible LSN or WAL to compact; marker reads prefer the
+   highest valid marker generation and treat corrupt marker-record-only evidence
+   as checkpoint-needed, so a torn clear can cause an extra checkpoint but cannot
+   suppress required native drain; final no-live close forces native checkpoint
    proof for retained page-version WAL
    after active pins release, restores the 12 KiB redo startup prefix if
    embedded teardown leaves `ib_logfile0` without startup-checkpoint evidence,

@@ -89,6 +89,18 @@ extern uint32_t my_crc32c(uint32_t crc, const void *buf, size_t len);
 #define MYLITE_TEST_CONCURRENCY_CHECKPOINT_LSN_RECORD_LATEST_LSN_OFFSET 24U
 #define MYLITE_TEST_CONCURRENCY_CHECKPOINT_LSN_RECORD_VISIBLE_LSN_OFFSET 32U
 #define MYLITE_TEST_CONCURRENCY_CHECKPOINT_LSN_RECORD_CHECKSUM_OFFSET 40U
+#define MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_OFFSET                            \
+    (MYLITE_TEST_CONCURRENCY_CHECKPOINT_LSN_RECORD_OFFSET +                                        \
+     (MYLITE_TEST_CONCURRENCY_CHECKPOINT_LSN_RECORD_COUNT *                                        \
+      MYLITE_TEST_CONCURRENCY_CHECKPOINT_LSN_RECORD_SIZE))
+#define MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_COUNT 2U
+#define MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_SIZE 64U
+#define MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_FORMAT 1U
+#define MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_FORMAT_OFFSET 8U
+#define MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_RESERVED_OFFSET 12U
+#define MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_GENERATION_OFFSET 16U
+#define MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_NEEDED_OFFSET 24U
+#define MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_CHECKSUM_OFFSET 32U
 #define MYLITE_TEST_OWNERLESS_PAGE_LOG_CHECKPOINT_MIN_BYTES 65536
 #define MYLITE_TEST_REDO_HEADER_BACKUP_HEADER_SIZE 32U
 #define MYLITE_TEST_REDO_STARTUP_PREFIX_SIZE 12288U
@@ -493,6 +505,12 @@ typedef struct checkpoint_lsn_record {
     uint64_t visible_lsn;
 } checkpoint_lsn_record;
 
+typedef struct native_file_op_checkpoint_record {
+    int valid;
+    uint64_t generation;
+    int needed;
+} native_file_op_checkpoint_record;
+
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 typedef struct wait_child_or_pipe_result {
     int child_result;
@@ -607,6 +625,7 @@ static void test_ownerless_native_checkpoint_evidence(void);
 static void test_ownerless_native_checkpoint_reclaims_page_log(void);
 static void test_ownerless_checkpoint_lsn_record_recovers_from_torn_latest_slot(void);
 static void test_ownerless_native_file_op_marker_clears_without_page_log(void);
+static void test_ownerless_native_file_op_marker_recovers_from_torn_clear_record(void);
 static void test_ownerless_native_file_op_marker_drains_after_real_sql_ddl(void);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void test_ownerless_redo_header_backup_validation_boundaries(void);
@@ -2880,6 +2899,7 @@ static int read_concurrency_native_file_op_checkpoint_needed(const char *databas
 static void write_le32(unsigned char *bytes, uint32_t value);
 static void write_le64(unsigned char *bytes, uint64_t value);
 static off_t concurrency_checkpoint_lsn_record_offset(unsigned index);
+static off_t concurrency_native_file_op_checkpoint_record_offset(unsigned index);
 static int read_concurrency_checkpoint_lsn_record(
     const char *database_path,
     unsigned index,
@@ -2903,6 +2923,24 @@ static void write_concurrency_checkpoint_lsn_record(
 );
 static void zero_concurrency_checkpoint_lsn_records(int fd);
 static void corrupt_concurrency_checkpoint_latest_lsn_record(const char *database_path);
+static int read_concurrency_native_file_op_checkpoint_record(
+    const char *database_path,
+    unsigned index,
+    native_file_op_checkpoint_record *out_record,
+    int *out_nonempty
+);
+static int read_concurrency_native_file_op_checkpoint_records(
+    const char *database_path,
+    native_file_op_checkpoint_record *out_best_record,
+    int *out_saw_nonempty_record
+);
+static void write_concurrency_native_file_op_checkpoint_record(
+    int fd,
+    unsigned index,
+    uint64_t generation,
+    int needed
+);
+static void corrupt_concurrency_native_file_op_latest_record(const char *database_path);
 static void write_concurrency_checkpoint_lsns(
     const char *database_path,
     uint64_t latest_lsn,
@@ -3564,6 +3602,7 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "native-file-op-marker-drain") == 0) {
         test_ownerless_native_file_op_marker_clears_without_page_log();
+        test_ownerless_native_file_op_marker_recovers_from_torn_clear_record();
         test_ownerless_native_file_op_marker_drains_after_real_sql_ddl();
         return 0;
     }
@@ -4797,6 +4836,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_native_checkpoint_reclaims_page_log),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_checkpoint_lsn_record_recovers_from_torn_latest_slot),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_native_file_op_marker_clears_without_page_log),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_native_file_op_marker_recovers_from_torn_clear_record),
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
     OWNERLESS_SQL_TEST_CASE(test_ownerless_redo_header_backup_validation_boundaries),
 #endif
@@ -8465,6 +8505,71 @@ static void test_ownerless_native_file_op_marker_clears_without_page_log(void) {
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(concurrency_wal_is_checkpointed(database_path));
 
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_native_file_op_marker_recovers_from_torn_clear_record(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-native-file-op-marker-record.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    native_file_op_checkpoint_record marker_record = {0};
+    int saw_nonempty_record = 0;
+    uint64_t set_generation;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    assert(concurrency_wal_is_checkpointed(database_path));
+    write_concurrency_checkpoint_lsns(database_path, 0U, 0U);
+    write_concurrency_native_file_op_checkpoint_needed(database_path, 1);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_records(
+        database_path,
+        &marker_record,
+        &saw_nonempty_record
+    ));
+    assert(saw_nonempty_record);
+    assert(marker_record.needed);
+    set_generation = marker_record.generation;
+
+    write_concurrency_native_file_op_checkpoint_needed(database_path, 0);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_records(
+        database_path,
+        &marker_record,
+        &saw_nonempty_record
+    ));
+    assert(saw_nonempty_record);
+    assert(!marker_record.needed);
+    assert(marker_record.generation > set_generation);
+
+    corrupt_concurrency_native_file_op_latest_record(database_path);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(concurrency_wal_is_checkpointed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_records(
+        database_path,
+        &marker_record,
+        &saw_nonempty_record
+    ));
+    assert(saw_nonempty_record);
+    assert(!marker_record.needed);
+    assert(marker_record.generation > set_generation);
+
+    remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
     assert(mylite_close(db) == MYLITE_OK);
@@ -73507,6 +73612,20 @@ static uint64_t read_concurrency_checkpoint_visible_lsn(const char *database_pat
 }
 
 static int read_concurrency_native_file_op_checkpoint_needed(const char *database_path) {
+    native_file_op_checkpoint_record marker_record = {0};
+    int saw_nonempty_record = 0;
+
+    if (read_concurrency_native_file_op_checkpoint_records(
+            database_path,
+            &marker_record,
+            &saw_nonempty_record
+        )) {
+        return marker_record.needed;
+    }
+    if (saw_nonempty_record) {
+        return 1;
+    }
+
     char *concurrency_path = path_join(database_path, "concurrency");
     char *checkpoint_path = path_join(concurrency_path, "mylite-concurrency.ckpt");
     unsigned char bytes[8];
@@ -73604,13 +73723,28 @@ static void write_concurrency_native_file_op_checkpoint_needed(
 ) {
     char *concurrency_path = path_join(database_path, "concurrency");
     char *checkpoint_path = path_join(concurrency_path, "mylite-concurrency.ckpt");
+    native_file_op_checkpoint_record current_record = {0};
+    int saw_nonempty_record = 0;
     unsigned char bytes[8];
     int fd;
+    uint64_t next_generation = 1U;
+    unsigned next_index = 0U;
 
     write_le64(bytes, needed ? 1U : 0U);
+    if (read_concurrency_native_file_op_checkpoint_records(
+            database_path,
+            &current_record,
+            &saw_nonempty_record
+        )) {
+        next_generation =
+            current_record.generation < UINT64_MAX ? current_record.generation + 1U : 1U;
+    }
+    next_index = (unsigned)((next_generation - 1U) %
+                            MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_COUNT);
 
     fd = open(checkpoint_path, O_RDWR | O_CLOEXEC);
     assert(fd >= 0);
+    write_concurrency_native_file_op_checkpoint_record(fd, next_index, next_generation, needed);
     assert(
         pwrite(
             fd,
@@ -73636,6 +73770,11 @@ static void write_concurrency_checkpoint_visible_lsn(
 static off_t concurrency_checkpoint_lsn_record_offset(unsigned index) {
     return (off_t)(MYLITE_TEST_CONCURRENCY_CHECKPOINT_LSN_RECORD_OFFSET +
                    (index * MYLITE_TEST_CONCURRENCY_CHECKPOINT_LSN_RECORD_SIZE));
+}
+
+static off_t concurrency_native_file_op_checkpoint_record_offset(unsigned index) {
+    return (off_t)(MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_OFFSET +
+                   (index * MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_SIZE));
 }
 
 static int read_concurrency_checkpoint_lsn_record(
@@ -73798,6 +73937,199 @@ static void corrupt_concurrency_checkpoint_latest_lsn_record(const char *databas
             sizeof(corrupt_byte),
             concurrency_checkpoint_lsn_record_offset(best_index) +
                 MYLITE_TEST_CONCURRENCY_CHECKPOINT_LSN_RECORD_CHECKSUM_OFFSET
+        ) == (ssize_t)sizeof(corrupt_byte)
+    );
+    assert(fsync(fd) == 0);
+    assert(close(fd) == 0);
+    free(checkpoint_path);
+    free(concurrency_path);
+}
+
+static int read_concurrency_native_file_op_checkpoint_record(
+    const char *database_path,
+    unsigned index,
+    native_file_op_checkpoint_record *out_record,
+    int *out_nonempty
+) {
+    static const unsigned char magic[8] = {'M', 'Y', 'L', 'C', 'F', 'O', 'P', '1'};
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *checkpoint_path = path_join(concurrency_path, "mylite-concurrency.ckpt");
+    unsigned char bytes[MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_SIZE];
+    int fd;
+    ssize_t bytes_read;
+    int empty = 1;
+    uint64_t needed;
+
+    assert(index < MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_COUNT);
+    memset(out_record, 0, sizeof(*out_record));
+    *out_nonempty = 0;
+    fd = open(checkpoint_path, O_RDONLY | O_CLOEXEC);
+    assert(fd >= 0);
+    bytes_read =
+        pread(fd, bytes, sizeof(bytes), concurrency_native_file_op_checkpoint_record_offset(index));
+    assert(close(fd) == 0);
+    free(checkpoint_path);
+    free(concurrency_path);
+    if (bytes_read == 0) {
+        return 0;
+    }
+    assert(bytes_read == (ssize_t)sizeof(bytes));
+    for (size_t offset = 0U; offset < sizeof(bytes); ++offset) {
+        if (bytes[offset] != 0U) {
+            empty = 0;
+            break;
+        }
+    }
+    if (empty) {
+        return 0;
+    }
+    *out_nonempty = 1;
+    if (memcmp(bytes, magic, sizeof(magic)) != 0 ||
+        read_le32(bytes + MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_FORMAT_OFFSET) !=
+            MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_FORMAT ||
+        read_le32(
+            bytes + MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_RESERVED_OFFSET
+        ) != 0U ||
+        read_le32(
+            bytes + MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_CHECKSUM_OFFSET
+        ) !=
+            my_crc32c(
+                0,
+                bytes,
+                MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_CHECKSUM_OFFSET
+            )) {
+        return 0;
+    }
+
+    out_record->generation = read_le64(
+        bytes + MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_GENERATION_OFFSET
+    );
+    needed =
+        read_le64(bytes + MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_NEEDED_OFFSET);
+    out_record->valid = out_record->generation != 0U && needed <= 1U;
+    out_record->needed = needed != 0U;
+    return out_record->valid;
+}
+
+static int read_concurrency_native_file_op_checkpoint_records(
+    const char *database_path,
+    native_file_op_checkpoint_record *out_best_record,
+    int *out_saw_nonempty_record
+) {
+    native_file_op_checkpoint_record best_record = {0};
+
+    memset(out_best_record, 0, sizeof(*out_best_record));
+    *out_saw_nonempty_record = 0;
+    for (unsigned index = 0U;
+         index < MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_COUNT;
+         ++index) {
+        native_file_op_checkpoint_record record = {0};
+        int nonempty = 0;
+        if (!read_concurrency_native_file_op_checkpoint_record(
+                database_path,
+                index,
+                &record,
+                &nonempty
+            )) {
+            if (nonempty) {
+                *out_saw_nonempty_record = 1;
+            }
+            continue;
+        }
+        *out_saw_nonempty_record = 1;
+        if (!best_record.valid || record.generation > best_record.generation) {
+            best_record = record;
+        }
+    }
+    if (!best_record.valid) {
+        return 0;
+    }
+    *out_best_record = best_record;
+    return 1;
+}
+
+static void write_concurrency_native_file_op_checkpoint_record(
+    int fd,
+    unsigned index,
+    uint64_t generation,
+    int needed
+) {
+    static const unsigned char magic[8] = {'M', 'Y', 'L', 'C', 'F', 'O', 'P', '1'};
+    unsigned char bytes[MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_SIZE];
+
+    assert(index < MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_COUNT);
+    assert(generation != 0U);
+    memset(bytes, 0, sizeof(bytes));
+    memcpy(bytes, magic, sizeof(magic));
+    write_le32(
+        bytes + MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_FORMAT_OFFSET,
+        MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_FORMAT
+    );
+    write_le64(
+        bytes + MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_GENERATION_OFFSET,
+        generation
+    );
+    write_le64(
+        bytes + MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_NEEDED_OFFSET,
+        needed ? 1U : 0U
+    );
+    write_le32(
+        bytes + MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_CHECKSUM_OFFSET,
+        my_crc32c(
+            0,
+            bytes,
+            MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_CHECKSUM_OFFSET
+        )
+    );
+    assert(
+        pwrite(
+            fd,
+            bytes,
+            sizeof(bytes),
+            concurrency_native_file_op_checkpoint_record_offset(index)
+        ) == (ssize_t)sizeof(bytes)
+    );
+}
+
+static void corrupt_concurrency_native_file_op_latest_record(const char *database_path) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *checkpoint_path = path_join(concurrency_path, "mylite-concurrency.ckpt");
+    native_file_op_checkpoint_record best_record = {0};
+    unsigned best_index = MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_COUNT;
+    unsigned char corrupt_byte = 0xffU;
+    int fd;
+
+    for (unsigned index = 0U;
+         index < MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_COUNT;
+         ++index) {
+        native_file_op_checkpoint_record record = {0};
+        int nonempty = 0;
+        if (!read_concurrency_native_file_op_checkpoint_record(
+                database_path,
+                index,
+                &record,
+                &nonempty
+            )) {
+            continue;
+        }
+        if (best_index == MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_COUNT ||
+            record.generation > best_record.generation) {
+            best_record = record;
+            best_index = index;
+        }
+    }
+    assert(best_index < MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_COUNT);
+    assert(best_record.generation > 1U);
+
+    fd = open(checkpoint_path, O_RDWR | O_CLOEXEC);
+    assert(fd >= 0);
+    assert(
+        pwrite(
+            fd,
+            &corrupt_byte,
+            sizeof(corrupt_byte),
+            concurrency_native_file_op_checkpoint_record_offset(best_index) +
+                MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_CHECKSUM_OFFSET
         ) == (ssize_t)sizeof(corrupt_byte)
     );
     assert(fsync(fd) == 0);

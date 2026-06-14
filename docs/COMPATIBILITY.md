@@ -102,6 +102,11 @@ records to `mylite-concurrency.ckpt`; runtime reads prefer the highest valid
 record, fall back to the legacy pair only before any record has been written,
 and focused recovery coverage corrupts the latest record while preserving the
 previous one.
+The native file-operation checkpoint-needed marker also now uses two
+checksummed generation records after the LSN records; runtime marker reads
+prefer the highest valid record, fall back to the legacy marker only before any
+marker record has been written, and treat corrupt marker-record-only evidence
+as checkpoint-needed so a torn clear cannot suppress required native drain.
 Already-open ownerless peers now also recover a stale InnoDB dictionary-cache
 miss for a peer-created file-per-table table after trigger DDL: ownerless text
 reads that hit MariaDB errno `1932` refresh native pages, evict the SQL and

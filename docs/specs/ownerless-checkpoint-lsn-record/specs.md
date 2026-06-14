@@ -42,8 +42,8 @@ In scope:
 Out of scope:
 
 - Changing the checkpoint recovery header format or database UUID binding.
-- Moving the native file-operation checkpoint-needed marker into the checksummed
-  record.
+- Moving the native file-operation checkpoint-needed marker into the LSN record;
+  a follow-up slice adds separate checksummed marker records instead.
 - Solving the broader native redo/checkpoint reconciliation and DDL
   file-lifecycle protocol.
 - Replacing page-version WAL replay with native redo.
@@ -146,8 +146,10 @@ already-linked `my_crc32c()`.
 
 ## Risks And Follow-Up
 
-- The native file-operation checkpoint-needed marker is still a separate
-  fsynced field and remains outside the LSN record checksum.
+- The native file-operation checkpoint-needed marker remains separate from the
+  LSN record by design; the follow-up ownerless native file-op marker record
+  slice adds its own checksummed generation records with conservative
+  checkpoint-needed recovery.
 - Broader native redo/checkpoint reconciliation remains partial until DDL
   file-operation recovery, native checkpoint proof, page-version compaction,
   and external stress all cover the remaining lifecycle shapes.
