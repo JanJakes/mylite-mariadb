@@ -114,6 +114,13 @@ ratios, and stats-enabled per-row/per-statement ownerless attribution for page
 versions, page-log appends, native-support publication, and commit-visibility
 choices. This separates the single-row prepared autocommit cost from the
 multi-row fast-path SQL shape that ownerless concurrency now admits.
+The WordPress `perf-probe` now also compares process startup plus explicit
+`mysqli_close()` against process startup plus implicit PHP object-free close
+for a live mysqli link. Both paths intentionally continue through
+`mylite_close()`; the added output keys only distinguish whether
+process-isolated PHPUnit is paying a close-path shape that differs from the
+existing explicit connect/close probe. The probe alternates the two close
+shapes so one loop does not receive all warm filesystem/cache effects.
 Ownerless mini-transaction page-write release now skips transaction lookup and
 external release policy checks when the current MTR has no ownerless
 page-write pages left to release. In the CI-shaped stats-enabled bulk probe,
@@ -634,6 +641,12 @@ autocommit inserts at `619.96 ops/s`. The remaining high-cost path is the full
 MariaDB embedded lifecycle paid by process-isolated PHPUnit children and parent
 reconnects for classes that cannot safely defer reconnect, not the steady
 active-runtime SQL path.
+A later reduced production close-attribution probe with the same guarded
+WordPress build shape reported explicit process connect/close at `759.288 ms`,
+implicit PHP object-free process connect/close at `617.743 ms`, and
+active-runtime reconnect at `3.644 ms`. This keeps the process-isolated
+slowdown attributed to full embedded lifecycle startup/shutdown rather than an
+avoidable implicit PHP destructor penalty.
 The WordPress PHPUnit CI filters now use exact method-level process-isolated
 shards instead of broad mixed-class filters, while the two class-level
 `@runTestsInSeparateProcesses` files stay excluded from the non-isolated

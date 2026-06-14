@@ -1653,6 +1653,13 @@ elapsed_ms_average() {
     'BEGIN { printf "%.3f", (end - start) / 1000000 / iterations }'
 }
 
+elapsed_ns_average_ms() {
+  local elapsed_ns="$1"
+  local iterations="$2"
+  awk -v elapsed="${elapsed_ns}" -v iterations="${iterations}" \
+    'BEGIN { printf "%.3f", elapsed / 1000000 / iterations }'
+}
+
 nonnegative_delta_ms() {
   local left="$1"
   local right="$2"
@@ -1694,9 +1701,13 @@ done
 php_process_ms="$(elapsed_ms_average "${php_process_start_ns}" "${perf_process_iterations}")"
 echo "wordpress_perf_php_process_start_ms_avg=${php_process_ms}"
 
-connect_process_start_ns="$(date +%s%N)"
-i=0
-while [ "${i}" -lt "${perf_connect_iterations}" ]; do
+connect_process_explicit_total_ns=0
+connect_process_implicit_total_ns=0
+
+measure_explicit_connect_process() {
+  local start_ns
+  local end_ns
+  start_ns="$(date +%s%N)"
   "${php_wrapper}" -r '
 $db = mysqli_connect($argv[1]);
 if (!$db) {
@@ -1705,19 +1716,69 @@ if (!$db) {
 }
 mysqli_close($db);
 ' "${MYLITE_WORDPRESS_DB_DIR}"
+  end_ns="$(date +%s%N)"
+  connect_process_explicit_total_ns=$((connect_process_explicit_total_ns + end_ns - start_ns))
+}
+
+measure_implicit_connect_process() {
+  local start_ns
+  local end_ns
+  start_ns="$(date +%s%N)"
+  "${php_wrapper}" -r '
+$db = mysqli_connect($argv[1]);
+if (!$db) {
+    fwrite(STDERR, "connect failed: " . (mysqli_connect_error() ?? "") . PHP_EOL);
+    exit(1);
+}
+' "${MYLITE_WORDPRESS_DB_DIR}"
+  end_ns="$(date +%s%N)"
+  connect_process_implicit_total_ns=$((connect_process_implicit_total_ns + end_ns - start_ns))
+}
+
+i=0
+while [ "${i}" -lt "${perf_connect_iterations}" ]; do
+  if [ $((i % 2)) -eq 0 ]; then
+    measure_explicit_connect_process
+    measure_implicit_connect_process
+  else
+    measure_implicit_connect_process
+    measure_explicit_connect_process
+  fi
   i=$((i + 1))
 done
-php_connect_process_ms="$(elapsed_ms_average "${connect_process_start_ns}" "${perf_connect_iterations}")"
+php_connect_process_ms="$(
+  elapsed_ns_average_ms "${connect_process_explicit_total_ns}" "${perf_connect_iterations}"
+)"
+php_connect_process_implicit_ms="$(
+  elapsed_ns_average_ms "${connect_process_implicit_total_ns}" "${perf_connect_iterations}"
+)"
 echo "wordpress_perf_php_connect_process_ms_avg=${php_connect_process_ms}"
+echo "wordpress_perf_php_connect_process_explicit_close_ms_avg=${php_connect_process_ms}"
+echo "wordpress_perf_php_connect_process_implicit_object_free_ms_avg=${php_connect_process_implicit_ms}"
+echo "wordpress_perf_php_connect_process_close_shape_order=alternating"
 php_extension_process_overhead_ms="$(nonnegative_delta_ms "${php_process_ms}" "${stock_php_process_ms}")"
 php_connect_process_delta_ms="$(nonnegative_delta_ms "${php_connect_process_ms}" "${php_process_ms}")"
+php_connect_process_implicit_delta_ms="$(
+  nonnegative_delta_ms "${php_connect_process_implicit_ms}" "${php_process_ms}"
+)"
+php_connect_process_implicit_minus_explicit_ms="$(
+  awk -v implicit="${php_connect_process_implicit_ms}" -v explicit="${php_connect_process_ms}" \
+    'BEGIN { printf "%.3f", implicit - explicit }'
+)"
 echo "wordpress_perf_php_connect_process_iterations=${perf_connect_iterations}"
 echo "wordpress_perf_php_connect_process_delta_ms_avg=${php_connect_process_delta_ms}"
+echo "wordpress_perf_php_connect_process_implicit_object_free_delta_ms_avg=${php_connect_process_implicit_delta_ms}"
+echo "wordpress_perf_php_connect_process_implicit_minus_explicit_ms_avg=${php_connect_process_implicit_minus_explicit_ms}"
 echo "wordpress_perf_summary_stock_php_process_start_ms_avg=${stock_php_process_ms}"
 echo "wordpress_perf_summary_php_process_start_ms_avg=${php_process_ms}"
 echo "wordpress_perf_summary_php_extension_process_overhead_ms_avg=${php_extension_process_overhead_ms}"
 echo "wordpress_perf_summary_php_connect_process_ms_avg=${php_connect_process_ms}"
+echo "wordpress_perf_summary_php_connect_process_explicit_close_ms_avg=${php_connect_process_ms}"
+echo "wordpress_perf_summary_php_connect_process_implicit_object_free_ms_avg=${php_connect_process_implicit_ms}"
+echo "wordpress_perf_summary_php_connect_process_close_shape_order=alternating"
 echo "wordpress_perf_summary_php_connect_process_delta_ms_avg=${php_connect_process_delta_ms}"
+echo "wordpress_perf_summary_php_connect_process_implicit_object_free_delta_ms_avg=${php_connect_process_implicit_delta_ms}"
+echo "wordpress_perf_summary_php_connect_process_implicit_minus_explicit_ms_avg=${php_connect_process_implicit_minus_explicit_ms}"
 echo "wordpress_perf_summary_php_process_connect_close_iterations=${perf_connect_iterations}"
 echo "wordpress_perf_summary_php_process_connect_close_ms_avg=${php_connect_process_ms}"
 echo "wordpress_perf_summary_php_process_connect_close_delta_ms_avg=${php_connect_process_delta_ms}"
