@@ -283,8 +283,24 @@ enum PageLogAppendPerfStatIndex : std::size_t {
     PAGE_LOG_APPEND_PERF_PAYLOAD_STATS_NS,
     PAGE_LOG_APPEND_PERF_PAGE_TYPE_STATS_NS,
     PAGE_LOG_APPEND_PERF_DELTA_BASE_NOTE_NS,
+    PAGE_LOG_APPEND_PERF_INDEX_DELTA_FAST_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_INDEX_DELTA_EXACT_RECORDS,
+    PAGE_LOG_APPEND_PERF_INDEX_DELTA_EXACT_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_UNDO_DELTA_FAST_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_UNDO_DELTA_EXACT_RECORDS,
+    PAGE_LOG_APPEND_PERF_UNDO_DELTA_EXACT_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_DELTA_FAST_REJECTED_LIMIT_RECORDS,
+    PAGE_LOG_APPEND_PERF_DELTA_FAST_REJECTED_LIMIT_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_DELTA_FAST_REJECTED_STANDALONE_RECORDS,
+    PAGE_LOG_APPEND_PERF_DELTA_FAST_REJECTED_STANDALONE_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_DELTA_FAST_REJECTED_BUILD_FAILURES,
+    PAGE_LOG_APPEND_PERF_DELTA_EXACT_REJECTED_STANDALONE_RECORDS,
+    PAGE_LOG_APPEND_PERF_DELTA_EXACT_REJECTED_STANDALONE_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_DELTA_EXACT_REJECTED_BUILD_FAILURES,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
+
+enum class PageDeltaEncodeDecision { Ineligible, Encoded, BuildFailed, FastLimit, Standalone };
 
 enum PageLogScanPerfStatIndex : std::size_t {
     PAGE_LOG_SCAN_PERF_CALLS = 0,
@@ -352,11 +368,77 @@ void page_log_append_perf_add(PageLogAppendPerfStatIndex index, std::uint64_t va
     }
 }
 
-void page_log_append_perf_add_delta_fast_record(std::uint32_t delta_flag) {
+void page_log_append_perf_add_delta_accepted_record(
+    std::uint32_t delta_flag,
+    std::uint64_t payload_size,
+    bool fast
+) {
     if (delta_flag == k_record_flag_index_delta_payload) {
-        page_log_append_perf_add(PAGE_LOG_APPEND_PERF_INDEX_DELTA_FAST_RECORDS, 1U);
+        if (fast) {
+            page_log_append_perf_add(PAGE_LOG_APPEND_PERF_INDEX_DELTA_FAST_RECORDS, 1U);
+            page_log_append_perf_add(
+                PAGE_LOG_APPEND_PERF_INDEX_DELTA_FAST_PAYLOAD_BYTES,
+                payload_size
+            );
+        } else {
+            page_log_append_perf_add(PAGE_LOG_APPEND_PERF_INDEX_DELTA_EXACT_RECORDS, 1U);
+            page_log_append_perf_add(
+                PAGE_LOG_APPEND_PERF_INDEX_DELTA_EXACT_PAYLOAD_BYTES,
+                payload_size
+            );
+        }
     } else if (delta_flag == k_record_flag_undo_delta_payload) {
-        page_log_append_perf_add(PAGE_LOG_APPEND_PERF_UNDO_DELTA_FAST_RECORDS, 1U);
+        if (fast) {
+            page_log_append_perf_add(PAGE_LOG_APPEND_PERF_UNDO_DELTA_FAST_RECORDS, 1U);
+            page_log_append_perf_add(
+                PAGE_LOG_APPEND_PERF_UNDO_DELTA_FAST_PAYLOAD_BYTES,
+                payload_size
+            );
+        } else {
+            page_log_append_perf_add(PAGE_LOG_APPEND_PERF_UNDO_DELTA_EXACT_RECORDS, 1U);
+            page_log_append_perf_add(
+                PAGE_LOG_APPEND_PERF_UNDO_DELTA_EXACT_PAYLOAD_BYTES,
+                payload_size
+            );
+        }
+    }
+}
+
+void page_log_append_perf_add_delta_rejection(
+    PageDeltaEncodeDecision decision,
+    std::uint64_t delta_payload_size,
+    bool fast
+) {
+    if (fast) {
+        if (decision == PageDeltaEncodeDecision::FastLimit) {
+            page_log_append_perf_add(PAGE_LOG_APPEND_PERF_DELTA_FAST_REJECTED_LIMIT_RECORDS, 1U);
+            page_log_append_perf_add(
+                PAGE_LOG_APPEND_PERF_DELTA_FAST_REJECTED_LIMIT_PAYLOAD_BYTES,
+                delta_payload_size
+            );
+        } else if (decision == PageDeltaEncodeDecision::Standalone) {
+            page_log_append_perf_add(
+                PAGE_LOG_APPEND_PERF_DELTA_FAST_REJECTED_STANDALONE_RECORDS,
+                1U
+            );
+            page_log_append_perf_add(
+                PAGE_LOG_APPEND_PERF_DELTA_FAST_REJECTED_STANDALONE_PAYLOAD_BYTES,
+                delta_payload_size
+            );
+        } else if (decision == PageDeltaEncodeDecision::BuildFailed) {
+            page_log_append_perf_add(PAGE_LOG_APPEND_PERF_DELTA_FAST_REJECTED_BUILD_FAILURES, 1U);
+        }
+        return;
+    }
+
+    if (decision == PageDeltaEncodeDecision::Standalone) {
+        page_log_append_perf_add(PAGE_LOG_APPEND_PERF_DELTA_EXACT_REJECTED_STANDALONE_RECORDS, 1U);
+        page_log_append_perf_add(
+            PAGE_LOG_APPEND_PERF_DELTA_EXACT_REJECTED_STANDALONE_PAYLOAD_BYTES,
+            delta_payload_size
+        );
+    } else if (decision == PageDeltaEncodeDecision::BuildFailed) {
+        page_log_append_perf_add(PAGE_LOG_APPEND_PERF_DELTA_EXACT_REJECTED_BUILD_FAILURES, 1U);
     }
 }
 
@@ -632,7 +714,9 @@ bool maybe_encode_page_delta_payload(
     std::uint64_t standalone_payload_size,
     bool enforce_fast_limit,
     std::uint32_t *inout_flags,
-    std::vector<unsigned char> *inout_payload
+    std::vector<unsigned char> *inout_payload,
+    PageDeltaEncodeDecision *out_decision,
+    std::uint64_t *out_delta_payload_size
 );
 bool index_delta_base_snapshot_for_page(
     std::uint64_t log_device,
@@ -2262,6 +2346,8 @@ int append_record_at_locked(
         page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_DELTA_SNAPSHOT_NS, substage_start_ns);
         substage_start_ns =
             page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
+        PageDeltaEncodeDecision fast_delta_decision = PageDeltaEncodeDecision::Ineligible;
+        std::uint64_t fast_delta_payload_size = 0U;
         const bool fast_page_delta_encoded =
             has_page_delta_snapshot && maybe_encode_page_delta_payload(
                                            page_delta_snapshot,
@@ -2270,13 +2356,26 @@ int append_record_at_locked(
                                            page_delta_snapshot.standalone_payload_size,
                                            true,
                                            &record_flags,
-                                           &encoded_payload
+                                           &encoded_payload,
+                                           &fast_delta_decision,
+                                           &fast_delta_payload_size
                                        );
         page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_DELTA_ENCODE_NS, substage_start_ns);
         if (fast_page_delta_encoded) {
             encoded_payload_size = encoded_payload.size();
-            page_log_append_perf_add_delta_fast_record(record_flags);
+            page_log_append_perf_add_delta_accepted_record(
+                record_flags,
+                encoded_payload_size,
+                true
+            );
         } else {
+            if (has_page_delta_snapshot) {
+                page_log_append_perf_add_delta_rejection(
+                    fast_delta_decision,
+                    fast_delta_payload_size,
+                    true
+                );
+            }
             substage_start_ns =
                 page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
             encoded_payload_size = encoded_payload_size_for_page(
@@ -2291,6 +2390,8 @@ int append_record_at_locked(
             );
             substage_start_ns =
                 page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
+            PageDeltaEncodeDecision exact_delta_decision = PageDeltaEncodeDecision::Ineligible;
+            std::uint64_t exact_delta_payload_size = 0U;
             const bool exact_page_delta_encoded =
                 has_page_delta_snapshot && maybe_encode_page_delta_payload(
                                                page_delta_snapshot,
@@ -2299,7 +2400,9 @@ int append_record_at_locked(
                                                encoded_payload_size,
                                                false,
                                                &record_flags,
-                                               &encoded_payload
+                                               &encoded_payload,
+                                               &exact_delta_decision,
+                                               &exact_delta_payload_size
                                            );
             page_log_append_perf_add_elapsed(
                 PAGE_LOG_APPEND_PERF_DELTA_ENCODE_NS,
@@ -2307,6 +2410,17 @@ int append_record_at_locked(
             );
             if (exact_page_delta_encoded) {
                 encoded_payload_size = encoded_payload.size();
+                page_log_append_perf_add_delta_accepted_record(
+                    record_flags,
+                    encoded_payload_size,
+                    false
+                );
+            } else if (has_page_delta_snapshot) {
+                page_log_append_perf_add_delta_rejection(
+                    exact_delta_decision,
+                    exact_delta_payload_size,
+                    false
+                );
             }
         }
         page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_ENCODE_NS, stage_start_ns);
@@ -4568,8 +4682,16 @@ bool maybe_encode_page_delta_payload(
     std::uint64_t standalone_payload_size,
     bool enforce_fast_limit,
     std::uint32_t *inout_flags,
-    std::vector<unsigned char> *inout_payload
+    std::vector<unsigned char> *inout_payload,
+    PageDeltaEncodeDecision *out_decision,
+    std::uint64_t *out_delta_payload_size
 ) {
+    if (out_decision != nullptr) {
+        *out_decision = PageDeltaEncodeDecision::Ineligible;
+    }
+    if (out_delta_payload_size != nullptr) {
+        *out_delta_payload_size = 0U;
+    }
     if (inout_flags == nullptr || inout_payload == nullptr || !snapshot.found ||
         snapshot.standalone_payload_size == 0U || snapshot.page == nullptr ||
         snapshot.page->size() != page_size) {
@@ -4588,15 +4710,36 @@ bool maybe_encode_page_delta_payload(
             static_cast<const unsigned char *>(page),
             page_size,
             &delta_payload
-        ) ||
-        (enforce_fast_limit && delta_payload.size() > k_index_delta_fast_payload_size_limit) ||
-        !index_delta_payload_beats_standalone(delta_payload.size(), standalone_payload_size)) {
+        )) {
+        if (out_decision != nullptr) {
+            *out_decision = PageDeltaEncodeDecision::BuildFailed;
+        }
+        delta_payload.clear();
+        return false;
+    }
+    if (out_delta_payload_size != nullptr) {
+        *out_delta_payload_size = delta_payload.size();
+    }
+    if (enforce_fast_limit && delta_payload.size() > k_index_delta_fast_payload_size_limit) {
+        if (out_decision != nullptr) {
+            *out_decision = PageDeltaEncodeDecision::FastLimit;
+        }
+        delta_payload.clear();
+        return false;
+    }
+    if (!index_delta_payload_beats_standalone(delta_payload.size(), standalone_payload_size)) {
+        if (out_decision != nullptr) {
+            *out_decision = PageDeltaEncodeDecision::Standalone;
+        }
         delta_payload.clear();
         return false;
     }
 
     inout_payload->swap(delta_payload);
     *inout_flags = snapshot.delta_flag;
+    if (out_decision != nullptr) {
+        *out_decision = PageDeltaEncodeDecision::Encoded;
+    }
     return true;
 }
 

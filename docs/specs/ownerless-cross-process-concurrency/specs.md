@@ -1711,7 +1711,11 @@ Tasks:
    `927.956` to `829.066` index bytes per insert. A follow-up undo-log delta
    slice selected `0.752` undo-delta records per insert and reduced undo-log
    payload from `539.910` to `210.006` bytes per insert while preserving one
-   rollback-segment and one undo history-proof publication per insert. Page-log
+   rollback-segment and one undo history-proof publication per insert. The
+   append performance probe now also attributes accepted fast versus exact
+   index/undo deltas and fast/exact rejection reasons, separating the 1024-byte
+   fast limit, standalone-size comparisons, and delta-build failures before any
+   later fast-path rule change is considered. Page-log
    scan/replay/checkpoint validation now streams the full-page checksum for
    non-delta full, trailing-zero, sparse-zero, compact sparse, varint compact
    sparse, and fill-sparse records instead of reconstructing a full page just

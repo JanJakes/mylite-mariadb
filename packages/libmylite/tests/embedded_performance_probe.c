@@ -604,6 +604,20 @@ enum page_log_append_perf_stat_index {
     PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_STATS_NS,
     PAGE_LOG_APPEND_PERF_STAT_PAGE_TYPE_STATS_NS,
     PAGE_LOG_APPEND_PERF_STAT_DELTA_BASE_NOTE_NS,
+    PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_FAST_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_EXACT_RECORDS,
+    PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_EXACT_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_UNDO_DELTA_FAST_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_UNDO_DELTA_EXACT_RECORDS,
+    PAGE_LOG_APPEND_PERF_STAT_UNDO_DELTA_EXACT_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_DELTA_FAST_REJECTED_LIMIT_RECORDS,
+    PAGE_LOG_APPEND_PERF_STAT_DELTA_FAST_REJECTED_LIMIT_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_DELTA_FAST_REJECTED_STANDALONE_RECORDS,
+    PAGE_LOG_APPEND_PERF_STAT_DELTA_FAST_REJECTED_STANDALONE_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_DELTA_FAST_REJECTED_BUILD_FAILURES,
+    PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_REJECTED_STANDALONE_RECORDS,
+    PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_REJECTED_STANDALONE_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_REJECTED_BUILD_FAILURES,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
@@ -3551,6 +3565,23 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         insert_iterations
     );
     emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_index_delta_fast_payload_bytes_per_"
+        "insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_FAST_PAYLOAD_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_index_delta_exact_records_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_EXACT_RECORDS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_index_delta_exact_payload_bytes_per_"
+        "insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_EXACT_PAYLOAD_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_page_log_index_delta_payload_bytes_per_insert",
         page_log_append[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_PAYLOAD_BYTES],
         insert_iterations
@@ -3625,8 +3656,73 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         insert_iterations
     );
     emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_undo_delta_fast_payload_bytes_per_"
+        "insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_UNDO_DELTA_FAST_PAYLOAD_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_undo_delta_exact_records_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_UNDO_DELTA_EXACT_RECORDS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_undo_delta_exact_payload_bytes_per_"
+        "insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_UNDO_DELTA_EXACT_PAYLOAD_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_page_log_undo_delta_payload_bytes_per_insert",
         page_log_append[PAGE_LOG_APPEND_PERF_STAT_UNDO_DELTA_PAYLOAD_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_delta_fast_rejected_limit_records_per_"
+        "insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_DELTA_FAST_REJECTED_LIMIT_RECORDS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_delta_fast_rejected_limit_payload_"
+        "bytes_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_DELTA_FAST_REJECTED_LIMIT_PAYLOAD_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_delta_fast_rejected_standalone_records_"
+        "per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_DELTA_FAST_REJECTED_STANDALONE_RECORDS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_delta_fast_rejected_standalone_payload_"
+        "bytes_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_DELTA_FAST_REJECTED_STANDALONE_PAYLOAD_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_delta_fast_rejected_build_failures_per_"
+        "insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_DELTA_FAST_REJECTED_BUILD_FAILURES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_delta_exact_rejected_standalone_records_"
+        "per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_REJECTED_STANDALONE_RECORDS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_delta_exact_rejected_standalone_payload_"
+        "bytes_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_REJECTED_STANDALONE_PAYLOAD_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_delta_exact_rejected_build_failures_per_"
+        "insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_REJECTED_BUILD_FAILURES],
         insert_iterations
     );
     emit_summary_count_per_iteration(
@@ -7227,6 +7323,21 @@ static void emit_page_log_append_perf_stats(const char *prefix) {
     );
     emit_page_log_append_perf_bytes(
         prefix,
+        "index_delta_fast_payload",
+        values[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_FAST_PAYLOAD_BYTES]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "index_delta_exact_records",
+        values[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_EXACT_RECORDS]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "index_delta_exact_payload",
+        values[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_EXACT_PAYLOAD_BYTES]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
         "index_compact_sparse_metadata",
         values[PAGE_LOG_APPEND_PERF_STAT_INDEX_COMPACT_SPARSE_METADATA_BYTES]
     );
@@ -7294,6 +7405,61 @@ static void emit_page_log_append_perf_stats(const char *prefix) {
         prefix,
         "undo_delta_fast_records",
         values[PAGE_LOG_APPEND_PERF_STAT_UNDO_DELTA_FAST_RECORDS]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "undo_delta_fast_payload",
+        values[PAGE_LOG_APPEND_PERF_STAT_UNDO_DELTA_FAST_PAYLOAD_BYTES]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "undo_delta_exact_records",
+        values[PAGE_LOG_APPEND_PERF_STAT_UNDO_DELTA_EXACT_RECORDS]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "undo_delta_exact_payload",
+        values[PAGE_LOG_APPEND_PERF_STAT_UNDO_DELTA_EXACT_PAYLOAD_BYTES]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "delta_fast_rejected_limit_records",
+        values[PAGE_LOG_APPEND_PERF_STAT_DELTA_FAST_REJECTED_LIMIT_RECORDS]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "delta_fast_rejected_limit_payload",
+        values[PAGE_LOG_APPEND_PERF_STAT_DELTA_FAST_REJECTED_LIMIT_PAYLOAD_BYTES]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "delta_fast_rejected_standalone_records",
+        values[PAGE_LOG_APPEND_PERF_STAT_DELTA_FAST_REJECTED_STANDALONE_RECORDS]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "delta_fast_rejected_standalone_payload",
+        values[PAGE_LOG_APPEND_PERF_STAT_DELTA_FAST_REJECTED_STANDALONE_PAYLOAD_BYTES]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "delta_fast_rejected_build_failures",
+        values[PAGE_LOG_APPEND_PERF_STAT_DELTA_FAST_REJECTED_BUILD_FAILURES]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "delta_exact_rejected_standalone_records",
+        values[PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_REJECTED_STANDALONE_RECORDS]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "delta_exact_rejected_standalone_payload",
+        values[PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_REJECTED_STANDALONE_PAYLOAD_BYTES]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "delta_exact_rejected_build_failures",
+        values[PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_REJECTED_BUILD_FAILURES]
     );
     emit_page_log_append_perf_bytes(
         prefix,
