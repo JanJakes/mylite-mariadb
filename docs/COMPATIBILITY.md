@@ -923,6 +923,15 @@ history-proof publication are unchanged; the embedded performance probe now
 emits publish-buffer reuse hit/miss counters in both detailed and summary
 ownerless autocommit output so branch/main timing comparisons can see whether
 the hot path avoids repeated allocation.
+The follow-up page-log append attribution slice keeps the page-log record
+format unchanged and splits stats-enabled append time into delta-base snapshot,
+delta encoding, standalone encoding, payload stats, page-type stats, and
+delta-base note-update counters. This is profiling evidence for the next
+runtime optimization; it does not change page-version volume or durable WAL
+semantics. Reduced 50-row stats-enabled production probes showed the previous
+aggregate append total hiding both standalone-encode and delta-base note-update
+cost; the exact winner is noisy at that sample size, so the next optimization
+should use the split counters over a larger run before changing WAL semantics.
 Ownerless page-version reads now validate the WAL tail after a direct
 page-index hit because the shared page index is an acceleration cache updated
 after the append stream, not an authoritative visibility boundary by itself.

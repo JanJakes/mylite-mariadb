@@ -277,6 +277,12 @@ enum PageLogAppendPerfStatIndex : std::size_t {
     PAGE_LOG_APPEND_PERF_UNDO_DELTA_RECORDS,
     PAGE_LOG_APPEND_PERF_UNDO_DELTA_PAYLOAD_BYTES,
     PAGE_LOG_APPEND_PERF_UNDO_DELTA_FAST_RECORDS,
+    PAGE_LOG_APPEND_PERF_DELTA_SNAPSHOT_NS,
+    PAGE_LOG_APPEND_PERF_DELTA_ENCODE_NS,
+    PAGE_LOG_APPEND_PERF_STANDALONE_ENCODE_NS,
+    PAGE_LOG_APPEND_PERF_PAYLOAD_STATS_NS,
+    PAGE_LOG_APPEND_PERF_PAGE_TYPE_STATS_NS,
+    PAGE_LOG_APPEND_PERF_DELTA_BASE_NOTE_NS,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
@@ -2240,6 +2246,8 @@ int append_record_at_locked(
         const std::uint64_t stage_start_ns =
             page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
         IndexPageDeltaBaseSnapshot page_delta_snapshot;
+        std::uint64_t substage_start_ns =
+            page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
         const bool has_page_delta_snapshot = index_delta_base_snapshot_for_page(
             log_device,
             log_inode,
@@ -2251,6 +2259,9 @@ int append_record_at_locked(
             page_size,
             &page_delta_snapshot
         );
+        page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_DELTA_SNAPSHOT_NS, substage_start_ns);
+        substage_start_ns =
+            page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
         const bool fast_page_delta_encoded =
             has_page_delta_snapshot && maybe_encode_page_delta_payload(
                                            page_delta_snapshot,
@@ -2261,16 +2272,25 @@ int append_record_at_locked(
                                            &record_flags,
                                            &encoded_payload
                                        );
+        page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_DELTA_ENCODE_NS, substage_start_ns);
         if (fast_page_delta_encoded) {
             encoded_payload_size = encoded_payload.size();
             page_log_append_perf_add_delta_fast_record(record_flags);
         } else {
+            substage_start_ns =
+                page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
             encoded_payload_size = encoded_payload_size_for_page(
                 record_page,
                 page_size,
                 &record_flags,
                 &encoded_payload
             );
+            page_log_append_perf_add_elapsed(
+                PAGE_LOG_APPEND_PERF_STANDALONE_ENCODE_NS,
+                substage_start_ns
+            );
+            substage_start_ns =
+                page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
             const bool exact_page_delta_encoded =
                 has_page_delta_snapshot && maybe_encode_page_delta_payload(
                                                page_delta_snapshot,
@@ -2281,6 +2301,10 @@ int append_record_at_locked(
                                                &record_flags,
                                                &encoded_payload
                                            );
+            page_log_append_perf_add_elapsed(
+                PAGE_LOG_APPEND_PERF_DELTA_ENCODE_NS,
+                substage_start_ns
+            );
             if (exact_page_delta_encoded) {
                 encoded_payload_size = encoded_payload.size();
             }
@@ -2289,8 +2313,12 @@ int append_record_at_locked(
     } catch (const std::bad_alloc &) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
+    std::uint64_t stage_start_ns =
+        page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
     const CompactSparsePayloadComposition compact_sparse =
         record_append_payload_encoding_stats(record_flags, encoded_payload_size, encoded_payload);
+    page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_PAYLOAD_STATS_NS, stage_start_ns);
+    stage_start_ns = page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
     record_append_page_type_stats(
         space_id,
         page_no,
@@ -2299,6 +2327,7 @@ int append_record_at_locked(
         encoded_payload_size,
         compact_sparse
     );
+    page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_PAGE_TYPE_STATS_NS, stage_start_ns);
     if (!offset_adds(payload_offset, encoded_payload_size, &end_offset)) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
@@ -2311,8 +2340,7 @@ int append_record_at_locked(
     record.page_lsn = page_lsn;
     record.commit_lsn = commit_lsn;
     record.payload_size = encoded_payload_size;
-    std::uint64_t stage_start_ns =
-        page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
+    stage_start_ns = page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
     record.checksum = checksum_bytes(record_page, page_size);
     page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_CHECKSUM_NS, stage_start_ns);
 
@@ -2332,6 +2360,7 @@ int append_record_at_locked(
     if (!record_header_written) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
+    stage_start_ns = page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
     note_index_delta_base_after_successful_append(
         log_device,
         log_inode,
@@ -2345,6 +2374,7 @@ int append_record_at_locked(
         encoded_payload_size,
         record_flags
     );
+    page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_DELTA_BASE_NOTE_NS, stage_start_ns);
     page_log_append_perf_add(
         PAGE_LOG_APPEND_PERF_RECORD_HEADER_BYTES,
         MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE

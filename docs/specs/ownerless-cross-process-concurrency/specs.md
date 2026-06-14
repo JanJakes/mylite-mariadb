@@ -5095,7 +5095,15 @@ subsystems that this mode needs:
   performance probe emits publish-buffer reuse hit/miss counters in detailed
   page-write stats and compact ownerless autocommit summaries. This reduces
   hot-path allocation churn but does not change page-version volume or the
-  remaining redo/checkpoint proof gap. The
+  remaining redo/checkpoint proof gap. A follow-up page-log append attribution
+  slice keeps the WAL format unchanged and splits stats-enabled append time
+  into delta-base snapshot lookup, delta encoding, standalone encoding,
+  payload stats bookkeeping, page-type stats bookkeeping, and delta-base
+  note-update counters so future work can distinguish stats-only profiling cost
+  from runtime page-log append work. Reduced 50-row stats-enabled probes after
+  that split showed both standalone encoding and delta-base note update can be
+  visible inside the previous aggregate append total, with small-sample ranking
+  too noisy to pick a WAL-semantic change without a larger run. The
   post-boundary production sample before this proof fast path reported stats-off
   ownerless warm open/close at `359.230 ms` versus ordinary `375.478 ms`,
   active-runtime reconnect overhead at `0.211 ms`, ownerless direct/prepared
