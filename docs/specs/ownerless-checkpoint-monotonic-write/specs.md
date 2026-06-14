@@ -127,9 +127,12 @@ page publication.
 
 - Run focused ownerless primitive redo-state coverage.
 - Run visible-publish and visible-checkpoint crash-hook coverage to prove the
-  durable ordering still holds.
+  durable ordering still holds. This is covered by the hook-build
+  `visible-publish-crash` and `visible-checkpoint-crash` direct cases.
 - Run raw redo latest before/after checkpoint crash-hook coverage to prove raw
-  latest checkpoint progress remains recoverable.
+  latest checkpoint progress remains recoverable. This is covered by the
+  hook-build `redo-latest-crash` and `redo-latest-checkpoint-crash` direct
+  cases.
 - Run reduced production `embedded_performance_probe` with ownerless page
   publish stats enabled and verify checkpoint file-read time drops while the
   new elided-read counter is nonzero.
@@ -143,9 +146,29 @@ page publication.
   page-visible hook writes.
 - Existing startup/no-live direct checkpoint updates still merge against the
   file payload.
-- Crash-hook coverage for redo latest and visible publish/checkpoint still
-  passes.
+- Crash-hook coverage for redo latest and visible publish/checkpoint passes.
 - Performance logs expose the elided checkpoint-file read count.
+
+## Follow-Up Evidence
+
+A 2026-06-14 hook-build audit reran the direct checkpoint publication crash
+cases after later ownerless work:
+
+```sh
+cmake --build --preset ownerless-test-hooks --target mylite_ownerless_cross_process_sql_test
+for case_name in \
+  visible-publish-crash \
+  visible-checkpoint-crash \
+  redo-latest-crash \
+  redo-latest-checkpoint-crash; do
+  rm -rf /tmp/mylite-ownerless-sql.* /tmp/mylite-ownerless-*
+  build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test "${case_name}"
+done
+```
+
+All four direct cases passed. This confirms the raw-latest and page-visible
+crash-hook coverage described in the ownerless cross-process concurrency spec
+is present and still runnable from the unsafe hook build.
 
 ## Risks And Unresolved Questions
 
