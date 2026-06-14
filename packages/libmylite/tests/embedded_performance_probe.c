@@ -620,6 +620,10 @@ enum page_log_append_perf_stat_index {
     PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_REJECTED_BUILD_FAILURES,
     PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_REUSED_FAST_PAYLOAD_RECORDS,
     PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_REUSED_FAST_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_STANDALONE_SIZE_PROBE_CALLS,
+    PAGE_LOG_APPEND_PERF_STAT_STANDALONE_SIZE_PROBE_NS,
+    PAGE_LOG_APPEND_PERF_STAT_STANDALONE_MATERIALIZE_SKIPPED_RECORDS,
+    PAGE_LOG_APPEND_PERF_STAT_STANDALONE_MATERIALIZE_SKIPPED_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
@@ -3252,6 +3256,11 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         insert_iterations
     );
     emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_standalone_size_probe_ms_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_STANDALONE_SIZE_PROBE_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_page_log_payload_stats_ms_per_insert",
         page_log_append[PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_STATS_NS],
         insert_iterations
@@ -3737,6 +3746,23 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         "mylite_perf_summary_ownerless_autocommit_page_log_delta_exact_reused_fast_payload_bytes_"
         "per_insert",
         page_log_append[PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_REUSED_FAST_PAYLOAD_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_standalone_size_probe_calls_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_STANDALONE_SIZE_PROBE_CALLS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_standalone_materialize_skipped_records_"
+        "per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_STANDALONE_MATERIALIZE_SKIPPED_RECORDS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_standalone_materialize_skipped_bytes_"
+        "per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_STANDALONE_MATERIALIZE_SKIPPED_BYTES],
         insert_iterations
     );
     emit_summary_count_per_iteration(
@@ -7185,6 +7211,11 @@ static void emit_page_log_append_perf_stats(const char *prefix) {
     );
     emit_page_log_append_perf_ms(
         prefix,
+        "standalone_size_probe",
+        values[PAGE_LOG_APPEND_PERF_STAT_STANDALONE_SIZE_PROBE_NS]
+    );
+    emit_page_log_append_perf_ms(
+        prefix,
         "payload_stats",
         values[PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_STATS_NS]
     );
@@ -7484,6 +7515,21 @@ static void emit_page_log_append_perf_stats(const char *prefix) {
         prefix,
         "delta_exact_reused_fast_payload",
         values[PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_REUSED_FAST_PAYLOAD_BYTES]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "standalone_size_probe_calls",
+        values[PAGE_LOG_APPEND_PERF_STAT_STANDALONE_SIZE_PROBE_CALLS]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "standalone_materialize_skipped_records",
+        values[PAGE_LOG_APPEND_PERF_STAT_STANDALONE_MATERIALIZE_SKIPPED_RECORDS]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "standalone_materialize_skipped",
+        values[PAGE_LOG_APPEND_PERF_STAT_STANDALONE_MATERIALIZE_SKIPPED_BYTES]
     );
     emit_page_log_append_perf_bytes(
         prefix,

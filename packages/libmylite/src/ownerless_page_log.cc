@@ -299,6 +299,10 @@ enum PageLogAppendPerfStatIndex : std::size_t {
     PAGE_LOG_APPEND_PERF_DELTA_EXACT_REJECTED_BUILD_FAILURES,
     PAGE_LOG_APPEND_PERF_DELTA_EXACT_REUSED_FAST_PAYLOAD_RECORDS,
     PAGE_LOG_APPEND_PERF_DELTA_EXACT_REUSED_FAST_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STANDALONE_SIZE_PROBE_CALLS,
+    PAGE_LOG_APPEND_PERF_STANDALONE_SIZE_PROBE_NS,
+    PAGE_LOG_APPEND_PERF_STANDALONE_MATERIALIZE_SKIPPED_RECORDS,
+    PAGE_LOG_APPEND_PERF_STANDALONE_MATERIALIZE_SKIPPED_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
@@ -663,6 +667,7 @@ std::uint64_t encoded_payload_size_for_page(
     std::uint32_t *out_flags,
     std::vector<unsigned char> *out_payload
 );
+std::uint64_t encoded_payload_size_for_page_probe(const void *page, std::uint32_t page_size);
 bool record_uses_trailing_zero_payload(const PageRecordHeader &record);
 bool record_uses_sparse_zero_payload(const PageRecordHeader &record);
 bool record_uses_compact_sparse_zero_payload(const PageRecordHeader &record);
@@ -842,6 +847,25 @@ bool checksum_accumulator_matches(
     std::uint64_t expected_checksum
 );
 std::uint64_t trailing_zero_payload_size_for_page(const void *page, std::uint32_t page_size);
+bool sparse_zero_payload_size_for_page(
+    const void *page,
+    std::uint32_t page_size,
+    std::uint64_t *out_size,
+    std::uint64_t *out_trailing_size,
+    bool *out_trailing_size_known
+);
+bool compact_sparse_zero_payload_size_for_page(
+    const void *page,
+    std::uint32_t page_size,
+    std::uint64_t *out_size,
+    std::uint64_t *out_trailing_size,
+    bool *out_trailing_size_known
+);
+bool fill_sparse_zero_payload_size_for_page(
+    const void *page,
+    std::uint32_t page_size,
+    std::uint64_t *out_size
+);
 bool build_sparse_zero_payload(
     const void *page,
     std::uint32_t page_size,
@@ -2382,49 +2406,72 @@ int append_record_at_locked(
                     true
                 );
             }
-            substage_start_ns =
-                page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
-            encoded_payload_size = encoded_payload_size_for_page(
-                record_page,
-                page_size,
-                &record_flags,
-                &encoded_payload
-            );
-            page_log_append_perf_add_elapsed(
-                PAGE_LOG_APPEND_PERF_STANDALONE_ENCODE_NS,
-                substage_start_ns
-            );
-            substage_start_ns =
-                page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
             PageDeltaEncodeDecision exact_delta_decision = PageDeltaEncodeDecision::Ineligible;
             std::uint64_t exact_delta_payload_size = 0U;
             bool exact_page_delta_encoded = false;
-            if (has_page_delta_snapshot) {
-                if (!rejected_delta_payload.empty()) {
-                    exact_delta_payload_size = rejected_delta_payload.size();
-                    if (index_delta_payload_beats_standalone(
-                            rejected_delta_payload.size(),
-                            encoded_payload_size
-                        )) {
-                        encoded_payload.swap(rejected_delta_payload);
-                        record_flags = page_delta_snapshot.delta_flag;
-                        exact_delta_decision = PageDeltaEncodeDecision::Encoded;
-                        exact_page_delta_encoded = true;
-                        page_log_append_perf_add(
-                            PAGE_LOG_APPEND_PERF_DELTA_EXACT_REUSED_FAST_PAYLOAD_RECORDS,
-                            1U
-                        );
-                        page_log_append_perf_add(
-                            PAGE_LOG_APPEND_PERF_DELTA_EXACT_REUSED_FAST_PAYLOAD_BYTES,
-                            exact_delta_payload_size
-                        );
-                    } else {
-                        exact_delta_decision = PageDeltaEncodeDecision::Standalone;
-                        rejected_delta_payload.clear();
-                    }
-                } else if (fast_delta_decision == PageDeltaEncodeDecision::BuildFailed) {
-                    exact_delta_decision = PageDeltaEncodeDecision::BuildFailed;
+            if (has_page_delta_snapshot && !rejected_delta_payload.empty()) {
+                const std::uint64_t size_probe_start_ns =
+                    page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
+                page_log_append_perf_add(PAGE_LOG_APPEND_PERF_STANDALONE_SIZE_PROBE_CALLS, 1U);
+                const std::uint64_t probed_standalone_payload_size =
+                    encoded_payload_size_for_page_probe(record_page, page_size);
+                page_log_append_perf_add_elapsed(
+                    PAGE_LOG_APPEND_PERF_STANDALONE_SIZE_PROBE_NS,
+                    size_probe_start_ns
+                );
+                exact_delta_payload_size = rejected_delta_payload.size();
+                if (index_delta_payload_beats_standalone(
+                        rejected_delta_payload.size(),
+                        probed_standalone_payload_size
+                    )) {
+                    encoded_payload.swap(rejected_delta_payload);
+                    encoded_payload_size = encoded_payload.size();
+                    record_flags = page_delta_snapshot.delta_flag;
+                    exact_delta_decision = PageDeltaEncodeDecision::Encoded;
+                    exact_page_delta_encoded = true;
+                    page_log_append_perf_add(
+                        PAGE_LOG_APPEND_PERF_DELTA_EXACT_REUSED_FAST_PAYLOAD_RECORDS,
+                        1U
+                    );
+                    page_log_append_perf_add(
+                        PAGE_LOG_APPEND_PERF_DELTA_EXACT_REUSED_FAST_PAYLOAD_BYTES,
+                        exact_delta_payload_size
+                    );
+                    page_log_append_perf_add(
+                        PAGE_LOG_APPEND_PERF_STANDALONE_MATERIALIZE_SKIPPED_RECORDS,
+                        1U
+                    );
+                    page_log_append_perf_add(
+                        PAGE_LOG_APPEND_PERF_STANDALONE_MATERIALIZE_SKIPPED_BYTES,
+                        probed_standalone_payload_size
+                    );
                 } else {
+                    exact_delta_decision = PageDeltaEncodeDecision::Standalone;
+                    rejected_delta_payload.clear();
+                }
+            } else if (
+                has_page_delta_snapshot &&
+                fast_delta_decision == PageDeltaEncodeDecision::BuildFailed
+            ) {
+                exact_delta_decision = PageDeltaEncodeDecision::BuildFailed;
+            }
+            substage_start_ns =
+                page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
+            if (!exact_page_delta_encoded) {
+                encoded_payload_size = encoded_payload_size_for_page(
+                    record_page,
+                    page_size,
+                    &record_flags,
+                    &encoded_payload
+                );
+                page_log_append_perf_add_elapsed(
+                    PAGE_LOG_APPEND_PERF_STANDALONE_ENCODE_NS,
+                    substage_start_ns
+                );
+                substage_start_ns =
+                    page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
+                if (has_page_delta_snapshot &&
+                    exact_delta_decision == PageDeltaEncodeDecision::Ineligible) {
                     exact_page_delta_encoded = maybe_encode_page_delta_payload(
                         page_delta_snapshot,
                         record_page,
@@ -2438,11 +2485,11 @@ int append_record_at_locked(
                         nullptr
                     );
                 }
+                page_log_append_perf_add_elapsed(
+                    PAGE_LOG_APPEND_PERF_DELTA_ENCODE_NS,
+                    substage_start_ns
+                );
             }
-            page_log_append_perf_add_elapsed(
-                PAGE_LOG_APPEND_PERF_DELTA_ENCODE_NS,
-                substage_start_ns
-            );
             if (exact_page_delta_encoded) {
                 encoded_payload_size = encoded_payload.size();
                 page_log_append_perf_add_delta_accepted_record(
@@ -3626,6 +3673,67 @@ std::uint64_t encoded_payload_size_for_page(
     return encoded_size;
 }
 
+std::uint64_t encoded_payload_size_for_page_probe(const void *page, std::uint32_t page_size) {
+    std::uint64_t trailing_size = page_size;
+    bool trailing_size_known = false;
+    const std::uint16_t page_type =
+        page_size >= k_innodb_fil_page_type_offset + sizeof(std::uint16_t)
+            ? load_be16(static_cast<const unsigned char *>(page) + k_innodb_fil_page_type_offset)
+            : 0U;
+
+    std::uint64_t compact_size = page_size;
+    std::uint64_t compact_trailing_size = page_size;
+    bool compact_trailing_size_known = false;
+    if (compact_sparse_zero_payload_size_for_page(
+            page,
+            page_size,
+            &compact_size,
+            &compact_trailing_size,
+            &compact_trailing_size_known
+        )) {
+        trailing_size = compact_trailing_size;
+        trailing_size_known = true;
+        if (compact_size < trailing_size) {
+            if (page_type == k_innodb_fil_page_type_sys || page_type == k_innodb_fil_page_index) {
+                std::uint64_t fill_size = page_size;
+                if (fill_sparse_zero_payload_size_for_page(page, page_size, &fill_size) &&
+                    fill_size < compact_size) {
+                    return fill_size;
+                }
+            }
+            return compact_size;
+        }
+    } else if (compact_trailing_size_known) {
+        trailing_size = compact_trailing_size;
+        trailing_size_known = true;
+    } else {
+        std::uint64_t sparse_size = page_size;
+        std::uint64_t sparse_trailing_size = page_size;
+        bool sparse_trailing_size_known = false;
+        if (sparse_zero_payload_size_for_page(
+                page,
+                page_size,
+                &sparse_size,
+                &sparse_trailing_size,
+                &sparse_trailing_size_known
+            )) {
+            trailing_size = sparse_trailing_size;
+            trailing_size_known = true;
+            if (sparse_size < trailing_size) {
+                return sparse_size;
+            }
+        } else if (sparse_trailing_size_known) {
+            trailing_size = sparse_trailing_size;
+            trailing_size_known = true;
+        }
+    }
+
+    if (!trailing_size_known) {
+        trailing_size = trailing_zero_payload_size_for_page(page, page_size);
+    }
+    return trailing_size < page_size ? trailing_size : page_size;
+}
+
 std::uint64_t trailing_zero_payload_size_for_page(const void *page, std::uint32_t page_size) {
     const auto *bytes = static_cast<const unsigned char *>(page);
     std::uint64_t encoded_size = page_size;
@@ -3633,6 +3741,215 @@ std::uint64_t trailing_zero_payload_size_for_page(const void *page, std::uint32_
         --encoded_size;
     }
     return encoded_size;
+}
+
+bool sparse_zero_payload_size_for_page(
+    const void *page,
+    std::uint32_t page_size,
+    std::uint64_t *out_size,
+    std::uint64_t *out_trailing_size,
+    bool *out_trailing_size_known
+) {
+    if (out_size == nullptr) {
+        return false;
+    }
+    if (out_trailing_size_known != nullptr) {
+        *out_trailing_size_known = false;
+    }
+    const auto *bytes = static_cast<const unsigned char *>(page);
+    std::uint64_t payload_size = sizeof(std::uint32_t);
+    std::uint32_t run_count = 0U;
+    std::uint64_t trailing_size = 0U;
+
+    for (std::uint32_t offset = 0U; offset < page_size;) {
+        while (offset < page_size && bytes[offset] == 0U) {
+            ++offset;
+        }
+        if (offset == page_size) {
+            break;
+        }
+        const std::uint32_t run_start = offset;
+        while (offset < page_size && bytes[offset] != 0U) {
+            ++offset;
+        }
+        trailing_size = offset;
+        const std::uint32_t run_size = offset - run_start;
+        const std::uint64_t encoded_run_size = (2U * sizeof(std::uint32_t)) + run_size;
+        if (payload_size > std::numeric_limits<std::uint64_t>::max() - encoded_run_size ||
+            payload_size + encoded_run_size >= page_size) {
+            return false;
+        }
+        payload_size += encoded_run_size;
+        ++run_count;
+    }
+
+    if (out_trailing_size != nullptr) {
+        *out_trailing_size = trailing_size;
+    }
+    if (out_trailing_size_known != nullptr) {
+        *out_trailing_size_known = true;
+    }
+    if (run_count == 0U) {
+        return false;
+    }
+    *out_size = payload_size;
+    return true;
+}
+
+bool compact_sparse_zero_payload_size_for_page(
+    const void *page,
+    std::uint32_t page_size,
+    std::uint64_t *out_size,
+    std::uint64_t *out_trailing_size,
+    bool *out_trailing_size_known
+) {
+    if (out_size == nullptr) {
+        return false;
+    }
+    if (out_trailing_size_known != nullptr) {
+        *out_trailing_size_known = false;
+    }
+    const auto *bytes = static_cast<const unsigned char *>(page);
+    std::uint32_t run_count = 0U;
+    std::uint32_t previous_run_end = 0U;
+    std::uint64_t compact_payload_size = sizeof(std::uint16_t);
+    std::uint64_t varint_payload_size = sizeof(std::uint16_t);
+    std::uint64_t trailing_size = 0U;
+
+    for (std::uint32_t offset = 0U; offset < page_size;) {
+        while (offset < page_size && bytes[offset] == 0U) {
+            ++offset;
+        }
+        if (offset == page_size) {
+            break;
+        }
+        const std::uint32_t run_start = offset;
+        while (offset < page_size && bytes[offset] != 0U) {
+            ++offset;
+        }
+        trailing_size = offset;
+        const std::uint32_t run_size = offset - run_start;
+        if (run_start > std::numeric_limits<std::uint16_t>::max() ||
+            run_size > std::numeric_limits<std::uint16_t>::max() ||
+            run_count == std::numeric_limits<std::uint16_t>::max()) {
+            return false;
+        }
+
+        const std::uint64_t compact_encoded_run_size = (2U * sizeof(std::uint16_t)) + run_size;
+        if (compact_payload_size >
+                std::numeric_limits<std::uint64_t>::max() - compact_encoded_run_size ||
+            compact_payload_size + compact_encoded_run_size >= page_size) {
+            return false;
+        }
+        compact_payload_size += compact_encoded_run_size;
+
+        const std::uint64_t varint_encoded_run_size =
+            varuint16_encoded_size(run_start - previous_run_end) +
+            varuint16_encoded_size(run_size) + run_size;
+        if (varint_payload_size >
+            std::numeric_limits<std::uint64_t>::max() - varint_encoded_run_size) {
+            return false;
+        }
+        varint_payload_size += varint_encoded_run_size;
+        previous_run_end = offset;
+        ++run_count;
+    }
+
+    if (out_trailing_size != nullptr) {
+        *out_trailing_size = trailing_size;
+    }
+    if (out_trailing_size_known != nullptr) {
+        *out_trailing_size_known = true;
+    }
+    if (run_count == 0U) {
+        return false;
+    }
+    *out_size =
+        varint_payload_size < compact_payload_size ? varint_payload_size : compact_payload_size;
+    return true;
+}
+
+bool fill_sparse_zero_payload_size_for_page(
+    const void *page,
+    std::uint32_t page_size,
+    std::uint64_t *out_size
+) {
+    if (out_size == nullptr || page_size > std::numeric_limits<std::uint16_t>::max()) {
+        return false;
+    }
+    const auto *bytes = static_cast<const unsigned char *>(page);
+    std::uint64_t payload_size = sizeof(std::uint16_t);
+    std::uint32_t run_count = 0U;
+    std::uint32_t previous_run_end = 0U;
+    bool has_fill_run = false;
+
+    for (std::uint32_t offset = 0U; offset < page_size;) {
+        while (offset < page_size && bytes[offset] == 0U) {
+            ++offset;
+        }
+        if (offset == page_size) {
+            break;
+        }
+
+        while (offset < page_size && bytes[offset] != 0U) {
+            const unsigned char fill_byte = bytes[offset];
+            std::uint32_t fill_size = 1U;
+            while (offset + fill_size < page_size && bytes[offset + fill_size] == fill_byte) {
+                ++fill_size;
+            }
+            if (fill_size >= k_fill_sparse_min_fill_run_size) {
+                if (run_count == std::numeric_limits<std::uint16_t>::max() ||
+                    !fill_sparse_encoded_run_size(
+                        &payload_size,
+                        offset - previous_run_end,
+                        fill_size,
+                        true
+                    ) ||
+                    payload_size >= page_size) {
+                    return false;
+                }
+                ++run_count;
+                has_fill_run = true;
+                offset += fill_size;
+                previous_run_end = offset;
+                continue;
+            }
+
+            const std::uint32_t raw_start = offset;
+            offset += fill_size;
+            while (offset < page_size && bytes[offset] != 0U) {
+                const unsigned char next_fill_byte = bytes[offset];
+                std::uint32_t next_fill_size = 1U;
+                while (offset + next_fill_size < page_size &&
+                       bytes[offset + next_fill_size] == next_fill_byte) {
+                    ++next_fill_size;
+                }
+                if (next_fill_size >= k_fill_sparse_min_fill_run_size) {
+                    break;
+                }
+                offset += next_fill_size;
+            }
+            const std::uint32_t raw_size = offset - raw_start;
+            if (run_count == std::numeric_limits<std::uint16_t>::max() ||
+                !fill_sparse_encoded_run_size(
+                    &payload_size,
+                    raw_start - previous_run_end,
+                    raw_size,
+                    false
+                ) ||
+                payload_size >= page_size) {
+                return false;
+            }
+            ++run_count;
+            previous_run_end = offset;
+        }
+    }
+
+    if (run_count == 0U || !has_fill_run) {
+        return false;
+    }
+    *out_size = payload_size;
+    return true;
 }
 
 bool build_sparse_zero_payload(

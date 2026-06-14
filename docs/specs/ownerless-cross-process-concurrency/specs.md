@@ -1718,7 +1718,9 @@ Tasks:
    later fast-path rule change is considered. Exact fallback now reuses a
    fast-miss delta payload after standalone encoding proves it still beats the
    current standalone payload, avoiding duplicate delta construction without
-   changing the delta acceptance rule. Page-log
+   changing the delta acceptance rule; when an exact size-only standalone probe
+   proves the retained delta wins, exact fallback also skips materializing the
+   standalone payload that would otherwise be discarded. Page-log
    scan/replay/checkpoint validation now streams the full-page checksum for
    non-delta full, trailing-zero, sparse-zero, compact sparse, varint compact
    sparse, and fill-sparse records instead of reconstructing a full page just
