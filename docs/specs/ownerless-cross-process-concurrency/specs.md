@@ -1923,9 +1923,10 @@ Tasks:
    recovery: if the resolved disk page has different bytes, including the same
    LSN from another process-local redo history or a newer LSN from a killed
    uncommitted writer, replay rewrites it to the visible WAL image. Strict
-   primitive replay fails closed when the tablespace cannot be resolved;
-   product no-live recovery uses an explicit mode to skip unresolved retained
-   records for tablespaces no longer present in the directory.
+   primitive replay fails closed when the tablespace cannot be resolved or when
+   duplicate page-0 FSP-header candidates make the target ambiguous; product
+   no-live recovery uses an explicit mode to skip unresolved retained records
+   for tablespaces no longer present in the directory or otherwise ambiguous.
 5. Run kill tests around write, commit publish, checkpoint, and recovery.
    Existing guarded SQL coverage kills an uncommitted ownerless writer and
    verifies live-peer cleanup behavior: live peers release the dead owner's

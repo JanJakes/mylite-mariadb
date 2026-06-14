@@ -361,6 +361,9 @@ class TablespaceResolver {
             if (entry.is_regular_file(error) && !error &&
                 file_has_tablespace_id(entry.path(), space_id, page_size)) {
                 if (found) {
+                    // Ambiguous native files can mean a DDL/file lifecycle edge
+                    // has left multiple candidates for the same InnoDB space.
+                    // Replay must fail closed instead of guessing a target.
                     return false;
                 }
                 out_path = entry.path();

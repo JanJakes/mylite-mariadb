@@ -244,6 +244,7 @@ static void test_tablespace_replay_rewinds_newer_disk_page(void);
 static void test_tablespace_replay_rewrites_same_lsn_different_image(void);
 static void test_tablespace_replay_can_keep_native_same_lsn_page(void);
 static void test_tablespace_replay_ignores_non_fsp_page_zero_candidates(void);
+static void test_tablespace_replay_rejects_ambiguous_tablespace(void);
 static void test_tablespace_replay_rejects_missing_tablespace(void);
 static void test_tablespace_read_finds_native_snapshot_boundary(void);
 static int replay_page_log_record_into_index(
@@ -441,6 +442,7 @@ int main(void) {
     test_tablespace_replay_rewrites_same_lsn_different_image();
     test_tablespace_replay_can_keep_native_same_lsn_page();
     test_tablespace_replay_ignores_non_fsp_page_zero_candidates();
+    test_tablespace_replay_rejects_ambiguous_tablespace();
     test_tablespace_replay_rejects_missing_tablespace();
     test_tablespace_read_finds_native_snapshot_boundary();
     test_page_log_serializes_cross_process_appends();
@@ -5352,6 +5354,95 @@ static void test_tablespace_replay_ignores_non_fsp_page_zero_candidates(void) {
     free(log_path);
     free(space_path);
     free(fake_path);
+    free(datadir);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_tablespace_replay_rejects_ambiguous_tablespace(void) {
+    char *root = make_temp_root();
+    char *datadir = path_join(root, "datadir");
+    char *schema_a = path_join(datadir, "schema_a");
+    char *schema_b = path_join(datadir, "schema_b");
+    char *space_path_a = path_join(schema_a, "ambiguous.ibd");
+    char *space_path_b = path_join(schema_b, "ambiguous-copy.ibd");
+    char *log_path = path_join(root, "ambiguous-page-log.bin");
+    int space_fd_a;
+    int space_fd_b;
+    int log_fd;
+    uint8_t page[MYLITE_TEST_PAGE_SIZE];
+    uint8_t out_page[MYLITE_TEST_PAGE_SIZE];
+    uint32_t out_page_size = 0;
+    uint64_t out_page_lsn = 0;
+
+    assert(mkdir(datadir, 0700) == 0);
+    assert(mkdir(schema_a, 0700) == 0);
+    assert(mkdir(schema_b, 0700) == 0);
+    space_fd_a = open_file(space_path_a);
+    space_fd_b = open_file(space_path_b);
+    log_fd = open_file(log_path);
+    truncate_file(space_fd_a, MYLITE_TEST_PAGE_SIZE * 2);
+    truncate_file(space_fd_b, MYLITE_TEST_PAGE_SIZE * 2);
+
+    fill_innodb_test_page(page, 49U, 0U, 10U, 0x10U);
+    write_file_at(space_fd_a, page, sizeof(page), 0);
+    fill_innodb_test_page(page, 49U, 1U, 20U, 0x20U);
+    write_file_at(space_fd_a, page, sizeof(page), MYLITE_TEST_PAGE_SIZE);
+
+    fill_innodb_test_page(page, 49U, 0U, 11U, 0x11U);
+    write_file_at(space_fd_b, page, sizeof(page), 0);
+    fill_innodb_test_page(page, 49U, 1U, 30U, 0x30U);
+    write_file_at(space_fd_b, page, sizeof(page), MYLITE_TEST_PAGE_SIZE);
+
+    assert(mylite_ownerless_page_log_initialize(log_fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    fill_innodb_test_page(page, 49U, 1U, 200U, 0x90U);
+    assert(
+        mylite_ownerless_page_log_append(log_fd, 49U, 1U, 200U, 200U, page, sizeof(page), NULL) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+
+    assert(
+        mylite_ownerless_tablespace_replay_apply(datadir, log_fd, 0U, 200U) ==
+        MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR
+    );
+    assert(
+        mylite_ownerless_tablespace_read_page_at_or_before(
+            datadir,
+            49U,
+            1U,
+            MYLITE_TEST_PAGE_SIZE,
+            100U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &out_page_lsn
+        ) == MYLITE_OWNERLESS_TABLESPACE_REPLAY_NOT_FOUND
+    );
+    assert(
+        mylite_ownerless_tablespace_replay_apply_with_flags(
+            datadir,
+            log_fd,
+            0U,
+            200U,
+            MYLITE_OWNERLESS_TABLESPACE_REPLAY_IGNORE_MISSING_TABLESPACES
+        ) == MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK
+    );
+
+    read_file_at(space_fd_a, out_page, sizeof(out_page), MYLITE_TEST_PAGE_SIZE);
+    assert(innodb_test_page_lsn(out_page) == 20U);
+    assert(out_page[128] == 0x20U);
+    read_file_at(space_fd_b, out_page, sizeof(out_page), MYLITE_TEST_PAGE_SIZE);
+    assert(innodb_test_page_lsn(out_page) == 30U);
+    assert(out_page[128] == 0x30U);
+
+    assert(close(log_fd) == 0);
+    assert(close(space_fd_b) == 0);
+    assert(close(space_fd_a) == 0);
+    free(log_path);
+    free(space_path_b);
+    free(space_path_a);
+    free(schema_b);
+    free(schema_a);
     free(datadir);
     remove_tree(root);
     free(root);

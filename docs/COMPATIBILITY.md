@@ -93,6 +93,10 @@ in addition to the single-table drop, stale-reader retained-WAL killed-drop,
 and multi-table schema-drop evidence tracked below. This is still bounded
 replay evidence, not a claim that the
 broader durable DDL file-lifecycle protocol is complete.
+Primitive native tablespace replay also now proves duplicate page-0 FSP-header
+tablespace candidates fail closed: strict replay errors, product skip mode
+leaves both ambiguous files unchanged, and native boundary reads return
+`NOT_FOUND` rather than choosing one candidate.
 Already-open ownerless peers now also recover a stale InnoDB dictionary-cache
 miss for a peer-created file-per-table table after trigger DDL: ownerless text
 reads that hit MariaDB errno `1932` refresh native pages, evict the SQL and
