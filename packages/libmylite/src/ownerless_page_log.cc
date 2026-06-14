@@ -620,6 +620,11 @@ bool index_delta_payload_beats_standalone(
     std::size_t delta_payload_size,
     std::uint64_t standalone_payload_size
 );
+bool delta_pages_word_equal(
+    const unsigned char *base_page,
+    const unsigned char *page,
+    std::uint32_t offset
+);
 bool build_index_delta_payload(
     std::uint64_t base_record_offset,
     const std::vector<unsigned char> &base_page,
@@ -4454,6 +4459,18 @@ bool index_delta_payload_beats_standalone(
            static_cast<std::uint64_t>(delta_payload_size) * 2U < standalone_payload_size;
 }
 
+bool delta_pages_word_equal(
+    const unsigned char *base_page,
+    const unsigned char *page,
+    std::uint32_t offset
+) {
+    std::uint64_t base_word = 0;
+    std::uint64_t page_word = 0;
+    std::memcpy(&base_word, base_page + offset, sizeof(base_word));
+    std::memcpy(&page_word, page + offset, sizeof(page_word));
+    return base_word == page_word;
+}
+
 bool build_index_delta_payload(
     std::uint64_t base_record_offset,
     const std::vector<unsigned char> &base_page,
@@ -4471,6 +4488,10 @@ bool build_index_delta_payload(
     std::uint32_t previous_run_end = 0U;
     std::uint64_t raw_bytes = 0U;
     for (std::uint32_t offset = 0; offset < page_size;) {
+        while (offset + sizeof(std::uint64_t) <= page_size &&
+               delta_pages_word_equal(base_page.data(), page, offset)) {
+            offset += sizeof(std::uint64_t);
+        }
         while (offset < page_size && base_page[offset] == page[offset]) {
             ++offset;
         }
