@@ -97,6 +97,11 @@ Primitive native tablespace replay also now proves duplicate page-0 FSP-header
 tablespace candidates fail closed: strict replay errors, product skip mode
 leaves both ambiguous files unchanged, and native boundary reads return
 `NOT_FOUND` rather than choosing one candidate.
+Ownerless checkpoint LSN publication now appends two checksummed generation
+records to `mylite-concurrency.ckpt`; runtime reads prefer the highest valid
+record, fall back to the legacy pair only before any record has been written,
+and focused recovery coverage corrupts the latest record while preserving the
+previous one.
 Already-open ownerless peers now also recover a stale InnoDB dictionary-cache
 miss for a peer-created file-per-table table after trigger DDL: ownerless text
 reads that hit MariaDB errno `1932` refresh native pages, evict the SQL and

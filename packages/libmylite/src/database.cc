@@ -602,6 +602,31 @@ constexpr std::size_t k_concurrency_checkpoint_native_file_op_needed_offset =
 constexpr off_t k_concurrency_checkpoint_payload_end = static_cast<off_t>(
     k_concurrency_checkpoint_native_file_op_needed_offset + sizeof(std::uint64_t)
 );
+constexpr std::array<unsigned char, 8> k_concurrency_checkpoint_lsn_record_magic = {
+    'M',
+    'Y',
+    'L',
+    'C',
+    'L',
+    'S',
+    'N',
+    '1',
+};
+constexpr std::uint32_t k_concurrency_checkpoint_lsn_record_format = 1;
+constexpr std::size_t k_concurrency_checkpoint_lsn_record_count = 2;
+constexpr std::size_t k_concurrency_checkpoint_lsn_record_size = 64;
+constexpr std::size_t k_concurrency_checkpoint_lsn_record_magic_offset = 0;
+constexpr std::size_t k_concurrency_checkpoint_lsn_record_format_offset = 8;
+constexpr std::size_t k_concurrency_checkpoint_lsn_record_reserved_offset = 12;
+constexpr std::size_t k_concurrency_checkpoint_lsn_record_generation_offset = 16;
+constexpr std::size_t k_concurrency_checkpoint_lsn_record_latest_lsn_offset = 24;
+constexpr std::size_t k_concurrency_checkpoint_lsn_record_visible_lsn_offset = 32;
+constexpr std::size_t k_concurrency_checkpoint_lsn_record_checksum_offset = 40;
+constexpr off_t k_concurrency_checkpoint_lsn_records_offset = k_concurrency_checkpoint_payload_end;
+constexpr off_t k_concurrency_checkpoint_file_end = static_cast<off_t>(
+    k_concurrency_checkpoint_lsn_records_offset +
+    (k_concurrency_checkpoint_lsn_record_count * k_concurrency_checkpoint_lsn_record_size)
+);
 constexpr off_t k_concurrency_checkpoint_lock_start = 0;
 constexpr off_t k_concurrency_checkpoint_lock_length = 1;
 constexpr std::size_t k_database_uuid_size = 36;
@@ -841,6 +866,15 @@ static_assert(
     k_concurrency_checkpoint_native_file_op_needed_offset ==
         k_concurrency_checkpoint_visible_lsn_offset + sizeof(std::uint64_t),
     "checkpoint native file-op marker must follow checkpoint visible LSN"
+);
+static_assert(
+    k_concurrency_checkpoint_lsn_record_generation_offset % alignof(std::uint64_t) == 0,
+    "checkpoint LSN record generation must be naturally aligned"
+);
+static_assert(
+    k_concurrency_checkpoint_lsn_record_checksum_offset + sizeof(std::uint32_t) <=
+        k_concurrency_checkpoint_lsn_record_size,
+    "checkpoint LSN record checksum exceeds record"
 );
 static_assert(
     k_concurrency_redo_state_refcount_offset + sizeof(std::uint32_t) <=
@@ -1085,6 +1119,12 @@ struct OwnerlessPageLogSyncAnchor {
     std::uint64_t log_offset = 0;
     std::uint64_t end_offset = 0;
     std::uint64_t generation = 0;
+};
+
+struct OwnerlessCheckpointLsnRecord {
+    std::uint64_t generation = 0;
+    std::uint64_t latest_lsn = 0;
+    std::uint64_t visible_lsn = 0;
 };
 #endif
 
@@ -2054,11 +2094,33 @@ bool update_concurrency_checkpoint_lsn_from_redo_state(
     std::uint64_t visible_lsn,
     bool durable
 );
+bool read_concurrency_checkpoint_lsn_records(
+    int checkpoint_fd,
+    OwnerlessCheckpointLsnRecord *out_record,
+    bool *out_has_record
+);
+bool read_concurrency_checkpoint_legacy_lsn(
+    int checkpoint_fd,
+    std::uint64_t *out_latest_lsn,
+    std::uint64_t *out_visible_lsn
+);
 bool read_concurrency_checkpoint_lsn(
     int checkpoint_fd,
     std::uint64_t *out_latest_lsn,
     std::uint64_t *out_visible_lsn
 );
+void build_concurrency_checkpoint_lsn_record(
+    std::array<unsigned char, k_concurrency_checkpoint_lsn_record_size> &record,
+    std::uint64_t generation,
+    std::uint64_t latest_lsn,
+    std::uint64_t visible_lsn
+);
+bool parse_concurrency_checkpoint_lsn_record(
+    const std::array<unsigned char, k_concurrency_checkpoint_lsn_record_size> &record,
+    OwnerlessCheckpointLsnRecord *out_record,
+    bool *out_empty
+);
+off_t concurrency_checkpoint_lsn_record_offset(std::size_t index);
 bool mark_concurrency_native_file_op_checkpoint_needed(int checkpoint_fd);
 bool read_concurrency_native_file_op_checkpoint_needed(int checkpoint_fd, bool *out_needed);
 bool clear_concurrency_native_file_op_checkpoint_needed(int checkpoint_fd);
@@ -7724,11 +7786,9 @@ int prepare_concurrency_checkpoint_file(
         static_cast<void>(::close(file_fd));
         return MYLITE_IOERR;
     }
-    const bool checkpoint_file_needs_resize =
-        file_stat.st_size < k_concurrency_checkpoint_payload_end;
+    const bool checkpoint_file_needs_resize = file_stat.st_size < k_concurrency_checkpoint_file_end;
     if (checkpoint_file_needs_resize) {
-        if (::ftruncate(file_fd, k_concurrency_checkpoint_payload_end) != 0 ||
-            ::fsync(file_fd) != 0) {
+        if (::ftruncate(file_fd, k_concurrency_checkpoint_file_end) != 0 || ::fsync(file_fd) != 0) {
             static_cast<void>(::close(file_fd));
             return MYLITE_IOERR;
         }
@@ -16165,17 +16225,44 @@ bool write_concurrency_checkpoint_lsn_locked(
         latest_lsn = visible_lsn;
     }
 
-    std::array<unsigned char, 16> payload = {};
-    store_le64(payload.data(), 0U, latest_lsn);
-    store_le64(payload.data(), sizeof(std::uint64_t), visible_lsn);
+    OwnerlessCheckpointLsnRecord current_record = {};
+    bool has_current_record = false;
+    if (!read_concurrency_checkpoint_lsn_records(
+            checkpoint_fd,
+            &current_record,
+            &has_current_record
+        )) {
+        return false;
+    }
+    const std::uint64_t next_generation =
+        has_current_record && current_record.generation < UINT64_MAX
+            ? current_record.generation + 1U
+            : 1U;
+    const std::size_t record_index = static_cast<std::size_t>(
+        (next_generation - 1U) % k_concurrency_checkpoint_lsn_record_count
+    );
+
+    std::array<unsigned char, k_concurrency_checkpoint_lsn_record_size> lsn_record = {};
+    build_concurrency_checkpoint_lsn_record(lsn_record, next_generation, latest_lsn, visible_lsn);
     std::uint64_t stage_start_ns =
         ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     bool ok = write_exact_at(
         checkpoint_fd,
-        payload.data(),
-        payload.size(),
-        static_cast<off_t>(k_concurrency_checkpoint_latest_lsn_offset)
+        lsn_record.data(),
+        lsn_record.size(),
+        concurrency_checkpoint_lsn_record_offset(record_index)
     );
+    if (ok) {
+        std::array<unsigned char, 16> legacy_payload = {};
+        store_le64(legacy_payload.data(), 0U, latest_lsn);
+        store_le64(legacy_payload.data(), sizeof(std::uint64_t), visible_lsn);
+        ok = write_exact_at(
+            checkpoint_fd,
+            legacy_payload.data(),
+            legacy_payload.size(),
+            static_cast<off_t>(k_concurrency_checkpoint_latest_lsn_offset)
+        );
+    }
     ownerless_database_perf_add_elapsed(
         OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_WRITE_NS,
         stage_start_ns
@@ -16190,6 +16277,89 @@ bool write_concurrency_checkpoint_lsn_locked(
         );
     }
     return ok;
+}
+
+off_t concurrency_checkpoint_lsn_record_offset(std::size_t index) {
+    return static_cast<off_t>(
+        k_concurrency_checkpoint_lsn_records_offset +
+        static_cast<off_t>(index * k_concurrency_checkpoint_lsn_record_size)
+    );
+}
+
+void build_concurrency_checkpoint_lsn_record(
+    std::array<unsigned char, k_concurrency_checkpoint_lsn_record_size> &record,
+    std::uint64_t generation,
+    std::uint64_t latest_lsn,
+    std::uint64_t visible_lsn
+) {
+    if (visible_lsn > latest_lsn) {
+        latest_lsn = visible_lsn;
+    }
+    record.fill(0U);
+    std::memcpy(
+        record.data() + k_concurrency_checkpoint_lsn_record_magic_offset,
+        k_concurrency_checkpoint_lsn_record_magic.data(),
+        k_concurrency_checkpoint_lsn_record_magic.size()
+    );
+    store_le32(
+        record.data(),
+        k_concurrency_checkpoint_lsn_record_format_offset,
+        k_concurrency_checkpoint_lsn_record_format
+    );
+    store_le64(record.data(), k_concurrency_checkpoint_lsn_record_generation_offset, generation);
+    store_le64(record.data(), k_concurrency_checkpoint_lsn_record_latest_lsn_offset, latest_lsn);
+    store_le64(record.data(), k_concurrency_checkpoint_lsn_record_visible_lsn_offset, visible_lsn);
+    store_le32(
+        record.data(),
+        k_concurrency_checkpoint_lsn_record_checksum_offset,
+        my_crc32c(0, record.data(), k_concurrency_checkpoint_lsn_record_checksum_offset)
+    );
+}
+
+bool parse_concurrency_checkpoint_lsn_record(
+    const std::array<unsigned char, k_concurrency_checkpoint_lsn_record_size> &record,
+    OwnerlessCheckpointLsnRecord *out_record,
+    bool *out_empty
+) {
+    if (out_record == nullptr || out_empty == nullptr) {
+        return false;
+    }
+    *out_empty =
+        std::all_of(record.begin(), record.end(), [](unsigned char value) { return value == 0U; });
+    if (*out_empty) {
+        *out_record = {};
+        return true;
+    }
+
+    if (std::memcmp(
+            record.data() + k_concurrency_checkpoint_lsn_record_magic_offset,
+            k_concurrency_checkpoint_lsn_record_magic.data(),
+            k_concurrency_checkpoint_lsn_record_magic.size()
+        ) != 0 ||
+        load_le32(record.data(), k_concurrency_checkpoint_lsn_record_format_offset) !=
+            k_concurrency_checkpoint_lsn_record_format ||
+        load_le32(record.data(), k_concurrency_checkpoint_lsn_record_reserved_offset) != 0U) {
+        return false;
+    }
+    const std::uint32_t stored_checksum =
+        load_le32(record.data(), k_concurrency_checkpoint_lsn_record_checksum_offset);
+    const std::uint32_t computed_checksum =
+        my_crc32c(0, record.data(), k_concurrency_checkpoint_lsn_record_checksum_offset);
+    if (stored_checksum != computed_checksum) {
+        return false;
+    }
+
+    out_record->generation =
+        load_le64(record.data(), k_concurrency_checkpoint_lsn_record_generation_offset);
+    out_record->latest_lsn =
+        load_le64(record.data(), k_concurrency_checkpoint_lsn_record_latest_lsn_offset);
+    out_record->visible_lsn =
+        load_le64(record.data(), k_concurrency_checkpoint_lsn_record_visible_lsn_offset);
+    if (out_record->generation == 0U || out_record->latest_lsn == 0U ||
+        out_record->visible_lsn > out_record->latest_lsn) {
+        return false;
+    }
+    return true;
 }
 
 bool update_concurrency_checkpoint_lsn_from_redo_state(
@@ -16308,6 +16478,88 @@ bool update_concurrency_checkpoint_lsn(
 }
 
 bool read_concurrency_checkpoint_lsn(
+    int checkpoint_fd,
+    std::uint64_t *out_latest_lsn,
+    std::uint64_t *out_visible_lsn
+) {
+    if (checkpoint_fd < 0 || out_latest_lsn == nullptr || out_visible_lsn == nullptr) {
+        return false;
+    }
+
+    OwnerlessCheckpointLsnRecord record = {};
+    bool has_record = false;
+    if (!read_concurrency_checkpoint_lsn_records(checkpoint_fd, &record, &has_record)) {
+        return false;
+    }
+    if (has_record) {
+        *out_latest_lsn = record.latest_lsn;
+        *out_visible_lsn = record.visible_lsn;
+        return true;
+    }
+
+    return read_concurrency_checkpoint_legacy_lsn(checkpoint_fd, out_latest_lsn, out_visible_lsn);
+}
+
+bool read_concurrency_checkpoint_lsn_records(
+    int checkpoint_fd,
+    OwnerlessCheckpointLsnRecord *out_record,
+    bool *out_has_record
+) {
+    if (checkpoint_fd < 0 || out_record == nullptr || out_has_record == nullptr) {
+        return false;
+    }
+    *out_record = {};
+    *out_has_record = false;
+    bool saw_nonempty_record = false;
+    OwnerlessCheckpointLsnRecord best_record = {};
+    bool has_best_record = false;
+
+    for (std::size_t index = 0; index < k_concurrency_checkpoint_lsn_record_count; ++index) {
+        std::array<unsigned char, k_concurrency_checkpoint_lsn_record_size> bytes = {};
+        ssize_t bytes_read = 0;
+        do {
+            bytes_read = ::pread(
+                checkpoint_fd,
+                bytes.data(),
+                bytes.size(),
+                concurrency_checkpoint_lsn_record_offset(index)
+            );
+        } while (bytes_read < 0 && errno == EINTR);
+        if (bytes_read == 0) {
+            continue;
+        }
+        if (bytes_read != static_cast<ssize_t>(bytes.size())) {
+            saw_nonempty_record = true;
+            continue;
+        }
+
+        OwnerlessCheckpointLsnRecord record = {};
+        bool empty_record = false;
+        if (!parse_concurrency_checkpoint_lsn_record(bytes, &record, &empty_record)) {
+            saw_nonempty_record = true;
+            continue;
+        }
+        if (empty_record) {
+            continue;
+        }
+
+        saw_nonempty_record = true;
+        if (!has_best_record || record.generation > best_record.generation) {
+            best_record = record;
+            has_best_record = true;
+        }
+    }
+
+    if (has_best_record) {
+        *out_record = best_record;
+        *out_has_record = true;
+        return true;
+    }
+
+    return !saw_nonempty_record;
+}
+
+bool read_concurrency_checkpoint_legacy_lsn(
     int checkpoint_fd,
     std::uint64_t *out_latest_lsn,
     std::uint64_t *out_visible_lsn

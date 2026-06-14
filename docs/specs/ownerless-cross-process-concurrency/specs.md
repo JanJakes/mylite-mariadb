@@ -373,10 +373,13 @@ Roles:
   `.ckpt` payload without moving latest or visible LSNs backward. Startup
   baseline seeding and no-live native checkpoint promotion still merge against
   the `.ckpt` payload directly because their proof can come from native
-  checkpoint state rather than a just-published redo-state pair. The current
-  latest/visible pair still lacks a generation or checksum, so lazy or
-  unsynced checkpoint publication remains out of scope until a torn-write-safe
-  durable record is designed.
+  checkpoint state rather than a just-published redo-state pair. The
+  latest/visible pair now has two appended checksummed generation records after
+  the legacy payload; readers prefer the highest valid generation, fall back to
+  the legacy pair only while both record slots are empty, and fail closed when
+  non-empty record slots contain no valid checksum. Lazy unsynced checkpoint
+  publication and the separate native file-operation marker remain bounded by
+  their existing proof rules.
 - `process/*.heartbeat`: process-liveness evidence for crash detection. These
   are hints only; correctness must come from OS locks and durable recovery.
 
