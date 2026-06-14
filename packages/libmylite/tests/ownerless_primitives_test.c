@@ -64,6 +64,7 @@
 #define MYLITE_TEST_PAGE_LOG_RECORD_FLAGS_OFFSET 20U
 #define MYLITE_TEST_PAGE_LOG_RECORD_FLAG_INDEX_DELTA 32U
 #define MYLITE_TEST_PAGE_LOG_RECORD_FLAG_UNDO_DELTA 64U
+#define MYLITE_TEST_PAGE_LOG_RECORD_FLAG_EXTERNAL_SNAPSHOT_LINEAGE 256U
 #define MYLITE_TEST_PAGE_LOG_RECORD_PAYLOAD_CHECKSUM_OFFSET 48U
 
 typedef struct byte_range_lock {
@@ -230,6 +231,7 @@ static void test_page_log_tolerates_corrupt_tail_record(void);
 static void test_page_log_rejects_corrupt_interior_record(void);
 static void test_page_log_checkpoints_retained_records(void);
 static void test_page_log_preserves_oldest_snapshot_boundary(void);
+static void test_page_log_preserves_external_snapshot_lineage_metadata(void);
 static void test_page_log_requires_boundaries_only_for_snapshot_pages(void);
 static void test_page_log_checkpoint_waits_for_readers(void);
 static void test_page_log_scan_recovers_from_stale_index_offset(void);
@@ -426,6 +428,7 @@ int main(void) {
     test_page_log_rejects_corrupt_interior_record();
     test_page_log_checkpoints_retained_records();
     test_page_log_preserves_oldest_snapshot_boundary();
+    test_page_log_preserves_external_snapshot_lineage_metadata();
     test_page_log_requires_boundaries_only_for_snapshot_pages();
     test_page_log_checkpoint_waits_for_readers();
     test_page_log_scan_recovers_from_stale_index_offset();
@@ -4274,6 +4277,135 @@ static void test_page_log_preserves_oldest_snapshot_boundary(void) {
     free(single_snapshot_log_path);
     free(checkpoint_log_path);
     free(busy_log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_preserves_external_snapshot_lineage_metadata(void) {
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "external-snapshot-lineage-page-log.bin");
+    int fd = open_file(log_path);
+    uint8_t page_base[MYLITE_TEST_PAGE_SIZE];
+    uint8_t page_delta[MYLITE_TEST_PAGE_SIZE];
+    uint8_t out_page[MYLITE_TEST_PAGE_SIZE];
+    uint64_t base_record_offset = 0;
+    uint64_t lineage_record_offset = 0;
+    uint64_t page_lsn = 0;
+    uint64_t commit_lsn = 0;
+    uint32_t out_page_size = 0;
+    uint32_t lineage_flags = 0;
+    uint32_t retained_flags = 0;
+    int is_lineage = 0;
+    int is_snapshot_boundary = 0;
+    page_log_checkpoint_index_context checkpoint_context = {0};
+
+    memset(page_base, 0x71, sizeof(page_base));
+    store_test_be32(page_base, MYLITE_TEST_INNODB_PAGE_OFFSET_OFFSET, 21U);
+    store_test_be64(page_base, MYLITE_TEST_INNODB_PAGE_LSN_OFFSET, 700U);
+    store_test_be16(
+        page_base,
+        MYLITE_TEST_INNODB_PAGE_TYPE_OFFSET,
+        MYLITE_TEST_INNODB_PAGE_TYPE_INDEX
+    );
+    store_test_be32(page_base, MYLITE_TEST_INNODB_PAGE_SPACE_ID_OFFSET, 80U);
+
+    memcpy(page_delta, page_base, sizeof(page_delta));
+    store_test_be64(page_delta, MYLITE_TEST_INNODB_PAGE_LSN_OFFSET, 710U);
+    page_delta[128] ^= 0x19U;
+    page_delta[2048] ^= 0x27U;
+    memset(out_page, 0xEE, sizeof(out_page));
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            80U,
+            21U,
+            700U,
+            700U,
+            page_base,
+            sizeof(page_base),
+            &base_record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append_external_snapshot_lineage_initialized_at(
+            fd,
+            0U,
+            80U,
+            21U,
+            710U,
+            710U,
+            page_delta,
+            sizeof(page_delta),
+            &lineage_record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(lineage_record_offset > base_record_offset);
+
+    assert(
+        mylite_ownerless_page_log_record_is_external_snapshot_lineage_at(
+            fd,
+            lineage_record_offset,
+            &is_lineage
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(is_lineage == 1);
+    assert(
+        mylite_ownerless_page_log_record_is_snapshot_boundary_at(
+            fd,
+            lineage_record_offset,
+            &is_snapshot_boundary
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(is_snapshot_boundary == 0);
+    lineage_flags = read_page_log_record_flags(fd, lineage_record_offset);
+    assert((lineage_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_EXTERNAL_SNAPSHOT_LINEAGE) != 0U);
+    assert((lineage_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_INDEX_DELTA) != 0U);
+
+    assert(
+        mylite_ownerless_page_log_checkpoint(
+            fd,
+            705U,
+            capture_page_log_record_for_checkpoint_index,
+            &checkpoint_context
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(checkpoint_context.retained.count == 1U);
+    assert(checkpoint_context.retained.records[0].commit_lsn == 710U);
+    retained_flags =
+        read_page_log_record_flags(fd, checkpoint_context.retained.records[0].record_offset);
+    assert((retained_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_EXTERNAL_SNAPSHOT_LINEAGE) != 0U);
+    assert((retained_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_INDEX_DELTA) == 0U);
+    is_lineage = 0;
+    assert(
+        mylite_ownerless_page_log_record_is_external_snapshot_lineage_at(
+            fd,
+            checkpoint_context.retained.records[0].record_offset,
+            &is_lineage
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(is_lineage == 1);
+
+    assert(
+        mylite_ownerless_page_log_read_record_at(
+            fd,
+            0U,
+            checkpoint_context.retained.records[0].record_offset,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page_delta));
+    assert(page_lsn == 710U);
+    assert(commit_lsn == 710U);
+    assert(memcmp(out_page, page_delta, sizeof(page_delta)) == 0);
+
+    assert(close(fd) == 0);
+    free(log_path);
     remove_tree(root);
     free(root);
 }

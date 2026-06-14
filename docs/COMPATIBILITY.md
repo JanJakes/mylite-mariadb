@@ -283,6 +283,12 @@ the InnoDB file-read overlay. Autocommit writes outside that proof still seed
 the real page-version read LSN for multi-process read-your-writes and retained
 refresh. The active-reader pressure case covers the direct AUTO_INCREMENT
 read-before-DDL shape that exposed the accidental overlay.
+Ownerless page-version WAL records now carry an internal external-snapshot
+lineage marker when they are written by a runtime that consumed WAL retained
+for another ownerless reader's snapshot. No-live native checkpoint proof may
+accept a newer file-per-table page only for marked records whose native disk
+LSN is still within the visible reclaim boundary; unmarked commit-race records
+continue to require exact native proof or replay.
 Eligible plain `SELECT`/`WITH` statements also enter the ownerless plain-read
 scope when the current redo-visible state has no page-visible LSN and no
 page-version read LSN yet: the handle publishes only the baseline read pin,

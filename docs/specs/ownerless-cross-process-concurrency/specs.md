@@ -4616,8 +4616,13 @@ subsystems that this mode needs:
   until it has consumed the current visible page-version WAL after its local
   writes.
   No-live writer reclaim still requires native page proof before truncating
-  retained WAL. Explicit transaction-end statements with local writes serialize
-  on the global ownerless write statement lock before current-state refresh
+  retained WAL. A newer native file-per-table page can prove a retained record
+  only when the record carries the external-snapshot lineage marker from a
+  runtime that consumed WAL retained for another owner's reader snapshot; plain
+  concurrent-writer records, including commit-race records, still require exact
+  native proof or replay. Explicit transaction-end statements with local
+  writes serialize on the global ownerless write statement lock before
+  current-state refresh
   except when a peer holding that global statement read lock is waiting on this
   transaction's shared InnoDB or page-write lock and the shared registry proves
   the blocker relationship;

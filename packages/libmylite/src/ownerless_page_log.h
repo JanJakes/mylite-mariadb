@@ -70,6 +70,28 @@ int mylite_ownerless_page_log_append_initialized_at(
     uint32_t page_size,
     uint64_t *out_record_offset
 );
+int mylite_ownerless_page_log_append_snapshot_boundary_initialized_at(
+    int fd,
+    uint64_t log_offset,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t page_lsn,
+    uint64_t commit_lsn,
+    const void *page,
+    uint32_t page_size,
+    uint64_t *out_record_offset
+);
+int mylite_ownerless_page_log_append_external_snapshot_lineage_initialized_at(
+    int fd,
+    uint64_t log_offset,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t page_lsn,
+    uint64_t commit_lsn,
+    const void *page,
+    uint32_t page_size,
+    uint64_t *out_record_offset
+);
 int mylite_ownerless_page_log_append_session_begin_initialized_at(
     int fd,
     uint64_t log_offset,
@@ -101,6 +123,16 @@ int mylite_ownerless_page_log_sync_initialized_if_changed_at(
     uint64_t *out_current_end_offset,
     uint64_t *out_current_generation,
     int *out_synced
+);
+int mylite_ownerless_page_log_record_is_snapshot_boundary_at(
+    int fd,
+    uint64_t record_offset,
+    int *out_is_snapshot_boundary
+);
+int mylite_ownerless_page_log_record_is_external_snapshot_lineage_at(
+    int fd,
+    uint64_t record_offset,
+    int *out_is_external_snapshot_lineage
 );
 int mylite_ownerless_page_log_snapshot(int fd, uint64_t *out_snapshot_end_offset);
 int mylite_ownerless_page_log_snapshot_at(

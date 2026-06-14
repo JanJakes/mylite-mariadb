@@ -76,11 +76,17 @@ constexpr std::uint32_t k_record_flag_varint_compact_sparse_zero_payload = 8U;
 constexpr std::uint32_t k_record_flag_fill_sparse_zero_payload = 16U;
 constexpr std::uint32_t k_record_flag_index_delta_payload = 32U;
 constexpr std::uint32_t k_record_flag_undo_delta_payload = 64U;
-constexpr std::uint32_t k_record_flags_known_mask =
+constexpr std::uint32_t k_record_flag_snapshot_boundary = 128U;
+constexpr std::uint32_t k_record_flag_external_snapshot_lineage = 256U;
+constexpr std::uint32_t k_record_encoding_flags =
     k_record_flag_trailing_zero_payload | k_record_flag_sparse_zero_payload |
     k_record_flag_compact_sparse_zero_payload | k_record_flag_varint_compact_sparse_zero_payload |
     k_record_flag_fill_sparse_zero_payload | k_record_flag_index_delta_payload |
     k_record_flag_undo_delta_payload;
+constexpr std::uint32_t k_record_metadata_flags =
+    k_record_flag_snapshot_boundary | k_record_flag_external_snapshot_lineage;
+constexpr std::uint32_t k_record_flags_known_mask =
+    k_record_encoding_flags | k_record_metadata_flags;
 constexpr unsigned char k_fill_sparse_run_kind_raw = 0U;
 constexpr unsigned char k_fill_sparse_run_kind_fill = 1U;
 constexpr std::uint32_t k_fill_sparse_min_fill_run_size = 8U;
@@ -407,7 +413,8 @@ int append_locked(
     std::uint64_t commit_lsn,
     const void *page,
     std::uint32_t page_size,
-    std::uint64_t *out_record_offset
+    std::uint64_t *out_record_offset,
+    std::uint32_t extra_record_flags
 );
 int append_record_at_locked(
     int fd,
@@ -423,7 +430,8 @@ int append_record_at_locked(
     const void *page,
     std::uint32_t page_size,
     std::uint64_t *out_record_offset,
-    std::uint64_t *out_next_record_offset
+    std::uint64_t *out_next_record_offset,
+    std::uint32_t extra_record_flags
 );
 int snapshot_locked(int fd, off_t log_offset, std::uint64_t *out_snapshot_end_offset);
 int snapshot_locked_with_generation(
@@ -918,7 +926,8 @@ int append_at_common(
     const void *page,
     std::uint32_t page_size,
     std::uint64_t *out_record_offset,
-    bool validate_header
+    bool validate_header,
+    std::uint32_t extra_record_flags
 ) {
     PageLogAppendPerfScope total_scope(PAGE_LOG_APPEND_PERF_TOTAL_NS);
     page_log_append_perf_add(PAGE_LOG_APPEND_PERF_CALLS, 1U);
@@ -953,7 +962,8 @@ int append_at_common(
                                                                                   commit_lsn,
                                                                                   page,
                                                                                   page_size,
-                                                                                  out_record_offset
+                                                                                  out_record_offset,
+                                                                                  extra_record_flags
                                                                               )
                                                                             : header_result;
     release_log_lock(fd, k_append_lock_start);
@@ -1040,7 +1050,8 @@ int mylite_ownerless_page_log_append_at(
         page,
         page_size,
         out_record_offset,
-        true
+        true,
+        0U
     );
 }
 
@@ -1065,7 +1076,60 @@ int mylite_ownerless_page_log_append_initialized_at(
         page,
         page_size,
         out_record_offset,
-        false
+        false,
+        0U
+    );
+}
+
+int mylite_ownerless_page_log_append_snapshot_boundary_initialized_at(
+    int fd,
+    std::uint64_t log_offset,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t page_lsn,
+    std::uint64_t commit_lsn,
+    const void *page,
+    std::uint32_t page_size,
+    std::uint64_t *out_record_offset
+) {
+    return append_at_common(
+        fd,
+        log_offset,
+        space_id,
+        page_no,
+        page_lsn,
+        commit_lsn,
+        page,
+        page_size,
+        out_record_offset,
+        false,
+        k_record_flag_snapshot_boundary
+    );
+}
+
+int mylite_ownerless_page_log_append_external_snapshot_lineage_initialized_at(
+    int fd,
+    std::uint64_t log_offset,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t page_lsn,
+    std::uint64_t commit_lsn,
+    const void *page,
+    std::uint32_t page_size,
+    std::uint64_t *out_record_offset
+) {
+    return append_at_common(
+        fd,
+        log_offset,
+        space_id,
+        page_no,
+        page_lsn,
+        commit_lsn,
+        page,
+        page_size,
+        out_record_offset,
+        false,
+        k_record_flag_external_snapshot_lineage
     );
 }
 
@@ -1152,7 +1216,8 @@ int mylite_ownerless_page_log_append_session_append(
         page,
         page_size,
         out_record_offset,
-        &next_record_offset
+        &next_record_offset,
+        0U
     );
     if (result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
         session->next_record_offset = next_record_offset;
@@ -1267,6 +1332,49 @@ int mylite_ownerless_page_log_sync_initialized_if_changed_at(
         }
     }
     return result;
+}
+
+int mylite_ownerless_page_log_record_is_snapshot_boundary_at(
+    int fd,
+    std::uint64_t record_offset,
+    int *out_is_snapshot_boundary
+) {
+    if (out_is_snapshot_boundary != nullptr) {
+        *out_is_snapshot_boundary = 0;
+    }
+    if (fd < 0 || out_is_snapshot_boundary == nullptr ||
+        record_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    PageRecordHeader record = {};
+    if (!read_record_header(fd, static_cast<off_t>(record_offset), record)) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    *out_is_snapshot_boundary = (record.flags & k_record_flag_snapshot_boundary) != 0U ? 1 : 0;
+    return MYLITE_OWNERLESS_PAGE_LOG_OK;
+}
+
+int mylite_ownerless_page_log_record_is_external_snapshot_lineage_at(
+    int fd,
+    std::uint64_t record_offset,
+    int *out_is_external_snapshot_lineage
+) {
+    if (out_is_external_snapshot_lineage != nullptr) {
+        *out_is_external_snapshot_lineage = 0;
+    }
+    if (fd < 0 || out_is_external_snapshot_lineage == nullptr ||
+        record_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    PageRecordHeader record = {};
+    if (!read_record_header(fd, static_cast<off_t>(record_offset), record)) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    *out_is_external_snapshot_lineage =
+        (record.flags & k_record_flag_external_snapshot_lineage) != 0U ? 1 : 0;
+    return MYLITE_OWNERLESS_PAGE_LOG_OK;
 }
 
 int mylite_ownerless_page_log_snapshot(int fd, std::uint64_t *out_snapshot_end_offset) {
@@ -2017,9 +2125,13 @@ int append_locked(
     std::uint64_t commit_lsn,
     const void *page,
     std::uint32_t page_size,
-    std::uint64_t *out_record_offset
+    std::uint64_t *out_record_offset,
+    std::uint32_t extra_record_flags
 ) {
     PageLogAppendPerfScope body_scope(PAGE_LOG_APPEND_PERF_BODY_NS);
+    if ((extra_record_flags & ~k_record_metadata_flags) != 0U) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
     struct stat file_stat = {};
     PageLogHeader header = {};
     const std::uint64_t fstat_start_ns =
@@ -2048,7 +2160,8 @@ int append_locked(
         page,
         page_size,
         out_record_offset,
-        nullptr
+        nullptr,
+        extra_record_flags
     );
 }
 
@@ -2066,7 +2179,8 @@ int append_record_at_locked(
     const void *page,
     std::uint32_t page_size,
     std::uint64_t *out_record_offset,
-    std::uint64_t *out_next_record_offset
+    std::uint64_t *out_next_record_offset,
+    std::uint32_t extra_record_flags
 ) {
     off_t payload_offset = 0;
     if (!offset_adds(
@@ -2153,7 +2267,7 @@ int append_record_at_locked(
     record.space_id = space_id;
     record.page_no = page_no;
     record.page_size = page_size;
-    record.flags = record_flags;
+    record.flags = record_flags | extra_record_flags;
     record.page_lsn = page_lsn;
     record.commit_lsn = commit_lsn;
     record.payload_size = encoded_payload_size;
@@ -4760,12 +4874,7 @@ bool record_payload_shape_valid(const PageRecordHeader &record) {
     if (record.page_size == 0U || (record.flags & ~k_record_flags_known_mask) != 0U) {
         return false;
     }
-    const std::uint32_t encoding_flags =
-        record.flags &
-        (k_record_flag_trailing_zero_payload | k_record_flag_sparse_zero_payload |
-         k_record_flag_compact_sparse_zero_payload |
-         k_record_flag_varint_compact_sparse_zero_payload | k_record_flag_fill_sparse_zero_payload |
-         k_record_flag_index_delta_payload | k_record_flag_undo_delta_payload);
+    const std::uint32_t encoding_flags = record.flags & k_record_encoding_flags;
     if ((encoding_flags & (encoding_flags - 1U)) != 0U) {
         return false;
     }
@@ -4793,7 +4902,7 @@ bool record_payload_shape_valid(const PageRecordHeader &record) {
     if (record_uses_trailing_zero_payload(record)) {
         return record.payload_size < record.page_size;
     }
-    return record.flags == 0U && record.payload_size == record.page_size;
+    return encoding_flags == 0U && record.payload_size == record.page_size;
 }
 
 bool decode_page_delta_payload(
@@ -4959,7 +5068,7 @@ bool read_standalone_or_rewrite_delta_payload(
                 page.data() + static_cast<std::size_t>(rewritten_payload_size)
             );
         }
-        rewritten.flags = rewritten_flags;
+        rewritten.flags = rewritten_flags | (record.flags & k_record_metadata_flags);
         rewritten.payload_size = rewritten_payload_size;
         rewritten.checksum = checksum_bytes(page.data(), page.size());
         *out_record = rewritten;
