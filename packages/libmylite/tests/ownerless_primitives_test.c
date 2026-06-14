@@ -2328,6 +2328,7 @@ static void test_page_log_encodes_undo_delta_payloads(void) {
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_CALLS] == 2U);
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_UNDO_LOG_RECORDS] == 2U);
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_UNDO_DELTA_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_UNDO_DELTA_FAST_RECORDS] == 1U);
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_UNDO_DELTA_PAYLOAD_BYTES] > 0U);
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_UNDO_DELTA_PAYLOAD_BYTES] < sizeof(page_delta));
     delta_flags = read_page_log_record_flags(fd, delta_record_offset);
@@ -2434,6 +2435,7 @@ static void test_page_log_encodes_undo_delta_payloads(void) {
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_CALLS] == 1U);
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_UNDO_LOG_RECORDS] == 1U);
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_UNDO_DELTA_RECORDS] == 0U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_UNDO_DELTA_FAST_RECORDS] == 0U);
 
     memset(out_page, 0xEE, sizeof(out_page));
     assert(

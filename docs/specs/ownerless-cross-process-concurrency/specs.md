@@ -5047,7 +5047,14 @@ subsystems that this mode needs:
   from the preceding same-shape `539.910` bytes per insert to `210.006`, cut
   total page-log payload from `1442.294` to `1112.380` bytes per insert, and
   preserved `1.000` rollback-segment plus `1.000` undo history-proof
-  publications per insert. The remaining write-throughput targets are native
+  publications per insert. A follow-up delta-base snapshot slice keeps the
+  same durable non-chained delta record format but stores cached base pages as
+  immutable shared vectors, so index and undo delta candidates no longer copy
+  a 16 KiB base page out of the process-local base table before encoding. Its
+  reduced 500-row production attribution sample preserved `1506` page-log
+  appends, selected `0.962` index deltas and `0.752` undo deltas per insert,
+  and reported `0.040` page-log encode ms/insert. The
+  remaining write-throughput targets are native
   commit/page-publication, non-fast page-log encoding, the remaining
   history-proof proof volume, and broader redo/checkpoint recovery work. The visible-fast page-log append-batch slice
   narrows another measured overhead source by keeping the append session open
