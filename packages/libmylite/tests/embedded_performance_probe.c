@@ -608,6 +608,8 @@ enum page_log_scan_perf_stat_index {
     PAGE_LOG_SCAN_PERF_STAT_NOT_FOUND_NO_PAGE_RECORD,
     PAGE_LOG_SCAN_PERF_STAT_NOT_FOUND_PAGE_RECORD_NOT_VISIBLE,
     PAGE_LOG_SCAN_PERF_STAT_ERRORS,
+    PAGE_LOG_SCAN_PERF_STAT_STREAM_CHECKSUM_RECORDS,
+    PAGE_LOG_SCAN_PERF_STAT_STREAM_CHECKSUM_BYTES,
     PAGE_LOG_SCAN_PERF_STAT_COUNT
 };
 
@@ -7348,6 +7350,16 @@ static void emit_page_log_scan_perf_stats(const char *prefix) {
         values[PAGE_LOG_SCAN_PERF_STAT_NOT_FOUND_PAGE_RECORD_NOT_VISIBLE]
     );
     printf("%s_page_log_scan_errors=%" PRIu64 "\n", prefix, values[PAGE_LOG_SCAN_PERF_STAT_ERRORS]);
+    printf(
+        "%s_page_log_scan_stream_checksum_records=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_LOG_SCAN_PERF_STAT_STREAM_CHECKSUM_RECORDS]
+    );
+    printf(
+        "%s_page_log_scan_stream_checksum_bytes=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_LOG_SCAN_PERF_STAT_STREAM_CHECKSUM_BYTES]
+    );
 }
 
 static void emit_page_log_sync_perf_stats(const char *prefix) {

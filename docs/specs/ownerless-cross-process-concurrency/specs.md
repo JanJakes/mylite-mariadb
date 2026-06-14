@@ -1711,9 +1711,14 @@ Tasks:
    `927.956` to `829.066` index bytes per insert. A follow-up undo-log delta
    slice selected `0.752` undo-delta records per insert and reduced undo-log
    payload from `539.910` to `210.006` bytes per insert while preserving one
-   rollback-segment and one undo history-proof publication per insert. Broader
-   native history-proof replacement, redo/checkpoint reconciliation, and
-   DDL/file lifecycle recovery remain planned work.
+   rollback-segment and one undo history-proof publication per insert. Page-log
+   scan/replay/checkpoint validation now streams the full-page checksum for
+   non-delta full, trailing-zero, sparse-zero, compact sparse, varint compact
+   sparse, and fill-sparse records instead of reconstructing a full page just
+   to prove payload integrity; delta records remain on the existing base-page
+   reconstruction path. Broader native history-proof replacement,
+   redo/checkpoint reconciliation, and DDL/file lifecycle recovery remain
+   planned work.
    Single-row pure `INSERT ... VALUES` visible-fast-path statements reuse one
    page-log append session across the statement's ownerless mini-transactions
    and release it before page-log sync/page-visible LSN publication. Focused

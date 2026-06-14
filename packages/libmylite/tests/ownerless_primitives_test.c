@@ -180,6 +180,20 @@ enum page_log_append_perf_stat_index {
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
+enum page_log_scan_perf_stat_index {
+    PAGE_LOG_SCAN_PERF_STAT_CALLS = 0,
+    PAGE_LOG_SCAN_PERF_STAT_RECORD_HEADERS,
+    PAGE_LOG_SCAN_PERF_STAT_PAGE_RECORDS,
+    PAGE_LOG_SCAN_PERF_STAT_VISIBLE_PAGE_RECORDS,
+    PAGE_LOG_SCAN_PERF_STAT_FOUND,
+    PAGE_LOG_SCAN_PERF_STAT_NOT_FOUND_NO_PAGE_RECORD,
+    PAGE_LOG_SCAN_PERF_STAT_NOT_FOUND_PAGE_RECORD_NOT_VISIBLE,
+    PAGE_LOG_SCAN_PERF_STAT_ERRORS,
+    PAGE_LOG_SCAN_PERF_STAT_STREAM_CHECKSUM_RECORDS,
+    PAGE_LOG_SCAN_PERF_STAT_STREAM_CHECKSUM_BYTES,
+    PAGE_LOG_SCAN_PERF_STAT_COUNT
+};
+
 enum page_log_sync_perf_stat_index {
     PAGE_LOG_SYNC_PERF_STAT_CALLS = 0,
     PAGE_LOG_SYNC_PERF_STAT_TOTAL_NS,
@@ -193,6 +207,9 @@ enum page_log_sync_perf_stat_index {
 void mylite_ownerless_page_log_set_append_perf_stats_enabled(int enabled);
 void mylite_ownerless_page_log_reset_append_perf_stats(void);
 void mylite_ownerless_page_log_read_append_perf_stats(uint64_t *out_values, size_t value_count);
+void mylite_ownerless_page_log_set_scan_perf_stats_enabled(int enabled);
+void mylite_ownerless_page_log_reset_scan_perf_stats(void);
+void mylite_ownerless_page_log_read_scan_perf_stats(uint64_t *out_values, size_t value_count);
 void mylite_ownerless_page_log_set_sync_perf_stats_enabled(int enabled);
 void mylite_ownerless_page_log_reset_sync_perf_stats(void);
 void mylite_ownerless_page_log_read_sync_perf_stats(uint64_t *out_values, size_t value_count);
@@ -212,6 +229,8 @@ static void test_page_log_uses_payload_offset(void);
 static void test_page_log_append_reports_write_volume(void);
 static void test_page_log_encodes_sparse_zero_payloads(void);
 static void test_page_log_encodes_fill_sparse_zero_payloads(void);
+static void test_page_log_streams_sparse_checksum_validation(void);
+static void test_page_log_rejects_corrupt_sparse_checksum_records(void);
 static void test_page_log_encodes_index_fill_sparse_zero_payloads(void);
 static void test_page_log_attributes_index_page_identity_deltas(void);
 static void test_page_log_encodes_index_delta_payloads(void);
@@ -410,6 +429,8 @@ int main(void) {
     test_page_log_append_reports_write_volume();
     test_page_log_encodes_sparse_zero_payloads();
     test_page_log_encodes_fill_sparse_zero_payloads();
+    test_page_log_streams_sparse_checksum_validation();
+    test_page_log_rejects_corrupt_sparse_checksum_records();
     test_page_log_encodes_index_fill_sparse_zero_payloads();
     test_page_log_attributes_index_page_identity_deltas();
     test_page_log_encodes_index_delta_payloads();
@@ -1617,6 +1638,280 @@ static void test_page_log_encodes_fill_sparse_zero_payloads(void) {
 
     assert(close(fd) == 0);
     free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_streams_sparse_checksum_validation(void) {
+    enum { entry_count = 8U };
+
+    const size_t index_size = MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE +
+                              (entry_count * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE);
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "stream-sparse-checksum-page-log.bin");
+    int fd = open_file(log_path);
+    uint8_t *index = calloc(1U, index_size);
+    page_log_replay_context context = {.page_index = index, .page_index_size = index_size};
+    uint8_t page[256];
+    uint64_t record_offset = 0;
+    uint64_t page_lsn = 0;
+    uint64_t commit_lsn = 0;
+    uint64_t append_stats[PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
+    uint64_t scan_stats[PAGE_LOG_SCAN_PERF_STAT_COUNT] = {0};
+
+    assert(index != NULL);
+    memset(page, 0, sizeof(page));
+    store_test_be16(page, MYLITE_TEST_INNODB_PAGE_TYPE_OFFSET, MYLITE_TEST_INNODB_PAGE_TYPE_SYS);
+    page[32] = 0x11U;
+    page[33] = 0x22U;
+    page[63] = 0x44U;
+    memset(page + 64U, 0xFF, 128U);
+    page[220] = 0x33U;
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    mylite_ownerless_page_log_reset_append_perf_stats();
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            12U,
+            1U,
+            200U,
+            200U,
+            page,
+            sizeof(page),
+            &record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(0);
+    mylite_ownerless_page_log_read_append_perf_stats(append_stats, PAGE_LOG_APPEND_PERF_STAT_COUNT);
+    assert(append_stats[PAGE_LOG_APPEND_PERF_STAT_FILL_SPARSE_ZERO_RECORDS] == 1U);
+
+    assert(
+        mylite_ownerless_page_index_initialize(index, index_size, entry_count) ==
+        MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    mylite_ownerless_page_log_reset_scan_perf_stats();
+    mylite_ownerless_page_log_set_scan_perf_stats_enabled(1);
+    assert(
+        mylite_ownerless_page_log_replay_at(fd, 0U, replay_page_log_record_into_index, &context) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    mylite_ownerless_page_log_set_scan_perf_stats_enabled(0);
+    mylite_ownerless_page_log_read_scan_perf_stats(scan_stats, PAGE_LOG_SCAN_PERF_STAT_COUNT);
+    assert(scan_stats[PAGE_LOG_SCAN_PERF_STAT_STREAM_CHECKSUM_RECORDS] == 1U);
+    assert(scan_stats[PAGE_LOG_SCAN_PERF_STAT_STREAM_CHECKSUM_BYTES] == sizeof(page));
+    assert(
+        mylite_ownerless_page_index_find(
+            index,
+            index_size,
+            1U,
+            10U,
+            12U,
+            1U,
+            200U,
+            &record_offset,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(page_lsn == 200U);
+    assert(commit_lsn == 200U);
+
+    assert(close(fd) == 0);
+    free(index);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_rejects_corrupt_sparse_checksum_records(void) {
+    enum { entry_count = 8U };
+
+    const size_t index_size = MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE +
+                              (entry_count * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE);
+    char *root = make_temp_root();
+    char *interior_log_path = path_join(root, "corrupt-sparse-interior-page-log.bin");
+    char *tail_log_path = path_join(root, "corrupt-sparse-tail-page-log.bin");
+    int fd = open_file(interior_log_path);
+    uint8_t *index = calloc(1U, index_size);
+    page_log_replay_context context = {.page_index = index, .page_index_size = index_size};
+    uint8_t page_v1[256];
+    uint8_t page_v2[256];
+    uint8_t out_page[256];
+    uint64_t first_offset = 0;
+    uint64_t second_offset = 0;
+    uint64_t record_offset = 0;
+    uint64_t page_lsn = 0;
+    uint64_t commit_lsn = 0;
+    uint32_t out_page_size = 0;
+    int checkpointed = -1;
+    const uint8_t corrupt_byte = 0xCCU;
+
+    assert(index != NULL);
+    memset(page_v1, 0, sizeof(page_v1));
+    store_test_be16(page_v1, MYLITE_TEST_INNODB_PAGE_TYPE_OFFSET, MYLITE_TEST_INNODB_PAGE_TYPE_SYS);
+    page_v1[32] = 0x11U;
+    page_v1[33] = 0x22U;
+    page_v1[63] = 0x44U;
+    memset(page_v1 + 64U, 0xFF, 128U);
+    page_v1[220] = 0x33U;
+    memcpy(page_v2, page_v1, sizeof(page_v2));
+    page_v2[32] = 0x55U;
+    page_v2[220] = 0x66U;
+    memset(out_page, 0, sizeof(out_page));
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            12U,
+            1U,
+            200U,
+            200U,
+            page_v1,
+            sizeof(page_v1),
+            &first_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            12U,
+            1U,
+            220U,
+            220U,
+            page_v2,
+            sizeof(page_v2),
+            &second_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(second_offset > first_offset);
+    assert(
+        pwrite(
+            fd,
+            &corrupt_byte,
+            sizeof(corrupt_byte),
+            (off_t)(first_offset + MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE + 1U)
+        ) == sizeof(corrupt_byte)
+    );
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            12U,
+            1U,
+            220U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_ERROR
+    );
+    assert(
+        mylite_ownerless_page_index_initialize(index, index_size, entry_count) ==
+        MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(
+        mylite_ownerless_page_log_replay_at(fd, 0U, replay_page_log_record_into_index, &context) ==
+        MYLITE_OWNERLESS_PAGE_LOG_ERROR
+    );
+    assert(
+        mylite_ownerless_page_log_checkpoint_if_safe(fd, 220U, &checkpointed) ==
+        MYLITE_OWNERLESS_PAGE_LOG_ERROR
+    );
+    assert(checkpointed == 0);
+    assert(close(fd) == 0);
+
+    memset(index, 0, index_size);
+    memset(out_page, 0, sizeof(out_page));
+    checkpointed = -1;
+    fd = open_file(tail_log_path);
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            12U,
+            1U,
+            200U,
+            200U,
+            page_v1,
+            sizeof(page_v1),
+            &first_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            12U,
+            1U,
+            220U,
+            220U,
+            page_v2,
+            sizeof(page_v2),
+            &second_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        pwrite(
+            fd,
+            &corrupt_byte,
+            sizeof(corrupt_byte),
+            (off_t)(second_offset + MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE + 1U)
+        ) == sizeof(corrupt_byte)
+    );
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            12U,
+            1U,
+            220U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page_v1));
+    assert(page_lsn == 200U);
+    assert(commit_lsn == 200U);
+    assert(memcmp(out_page, page_v1, sizeof(page_v1)) == 0);
+    assert(
+        mylite_ownerless_page_index_initialize(index, index_size, entry_count) ==
+        MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(
+        mylite_ownerless_page_log_replay_at(fd, 0U, replay_page_log_record_into_index, &context) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_index_find(
+            index,
+            index_size,
+            1U,
+            10U,
+            12U,
+            1U,
+            220U,
+            &record_offset,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(record_offset == first_offset);
+    assert(page_lsn == 200U);
+    assert(commit_lsn == 200U);
+    assert(
+        mylite_ownerless_page_log_checkpoint_if_safe(fd, 220U, &checkpointed) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(checkpointed == 1);
+
+    assert(close(fd) == 0);
+    free(index);
+    free(tail_log_path);
+    free(interior_log_path);
     remove_tree(root);
     free(root);
 }

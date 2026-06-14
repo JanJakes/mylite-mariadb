@@ -90,6 +90,10 @@ constexpr std::uint32_t k_record_flags_known_mask =
 constexpr unsigned char k_fill_sparse_run_kind_raw = 0U;
 constexpr unsigned char k_fill_sparse_run_kind_fill = 1U;
 constexpr std::uint32_t k_fill_sparse_min_fill_run_size = 8U;
+constexpr std::uint32_t k_page_checksum_second_seed = 0xa5a5a5a5U;
+constexpr std::uint64_t k_legacy_checksum_offset_basis = 1469598103934665603ULL;
+constexpr std::uint64_t k_legacy_checksum_prime = 1099511628211ULL;
+constexpr std::size_t k_checksum_stream_chunk_size = 4096U;
 constexpr std::size_t k_innodb_fil_page_type_offset = 24;
 constexpr std::size_t k_innodb_fil_page_data_offset = 38;
 constexpr std::uint32_t k_innodb_system_space_id = 0;
@@ -189,6 +193,15 @@ struct IndexPageDeltaRun {
     std::uint32_t size = 0;
 };
 
+struct PageChecksumAccumulator {
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    std::uint32_t low = 0;
+    std::uint32_t high = k_page_checksum_second_seed;
+#endif
+    std::uint64_t legacy = k_legacy_checksum_offset_basis;
+    std::uint64_t bytes = 0;
+};
+
 enum PageLogAppendPerfStatIndex : std::size_t {
     PAGE_LOG_APPEND_PERF_CALLS = 0,
     PAGE_LOG_APPEND_PERF_TOTAL_NS,
@@ -276,6 +289,8 @@ enum PageLogScanPerfStatIndex : std::size_t {
     PAGE_LOG_SCAN_PERF_NOT_FOUND_NO_PAGE_RECORD,
     PAGE_LOG_SCAN_PERF_NOT_FOUND_PAGE_RECORD_NOT_VISIBLE,
     PAGE_LOG_SCAN_PERF_ERRORS,
+    PAGE_LOG_SCAN_PERF_STREAM_CHECKSUM_RECORDS,
+    PAGE_LOG_SCAN_PERF_STREAM_CHECKSUM_BYTES,
     PAGE_LOG_SCAN_PERF_STAT_COUNT
 };
 
@@ -713,6 +728,26 @@ bool read_record_page_type(
     const PageRecordHeader &record,
     std::uint16_t *out_page_type
 );
+void checksum_accumulator_update(
+    PageChecksumAccumulator *inout_checksum,
+    const void *buffer,
+    std::size_t size
+);
+bool checksum_accumulator_update_file(
+    PageChecksumAccumulator *inout_checksum,
+    int fd,
+    off_t offset,
+    std::uint64_t size
+);
+void checksum_accumulator_update_repeated(
+    PageChecksumAccumulator *inout_checksum,
+    unsigned char byte,
+    std::uint64_t size
+);
+bool checksum_accumulator_matches(
+    const PageChecksumAccumulator &checksum,
+    std::uint64_t expected_checksum
+);
 std::uint64_t trailing_zero_payload_size_for_page(const void *page, std::uint32_t page_size);
 bool build_sparse_zero_payload(
     const void *page,
@@ -784,6 +819,11 @@ bool read_varuint16_at(
     std::uint32_t *out_value
 );
 PayloadStatus record_payload_status(int fd, off_t payload_offset, const PageRecordHeader &record);
+PayloadStatus stream_non_delta_record_payload_status(
+    int fd,
+    off_t payload_offset,
+    const PageRecordHeader &record
+);
 bool record_requires_oldest_snapshot_boundary(
     int fd,
     off_t payload_offset,
@@ -5400,9 +5440,94 @@ bool read_record_page_type(
     return true;
 }
 
+void checksum_accumulator_update(
+    PageChecksumAccumulator *inout_checksum,
+    const void *buffer,
+    std::size_t size
+) {
+    if (inout_checksum == nullptr || buffer == nullptr || size == 0U) {
+        return;
+    }
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    inout_checksum->low = my_crc32c(inout_checksum->low, buffer, size);
+    inout_checksum->high = my_crc32c(inout_checksum->high, buffer, size);
+#endif
+    const auto *bytes = static_cast<const unsigned char *>(buffer);
+    for (std::size_t index = 0; index < size; ++index) {
+        inout_checksum->legacy ^= bytes[index];
+        inout_checksum->legacy *= k_legacy_checksum_prime;
+    }
+    inout_checksum->bytes += size;
+}
+
+bool checksum_accumulator_update_file(
+    PageChecksumAccumulator *inout_checksum,
+    int fd,
+    off_t offset,
+    std::uint64_t size
+) {
+    if (inout_checksum == nullptr) {
+        return false;
+    }
+    std::array<unsigned char, k_checksum_stream_chunk_size> buffer = {};
+    std::uint64_t consumed = 0;
+    while (consumed < size) {
+        const std::uint64_t remaining = size - consumed;
+        const auto chunk_size =
+            static_cast<std::size_t>(std::min<std::uint64_t>(remaining, buffer.size()));
+        off_t chunk_offset = 0;
+        if (!offset_adds(offset, consumed, &chunk_offset) ||
+            !read_exact_at(fd, buffer.data(), chunk_size, chunk_offset)) {
+            return false;
+        }
+        checksum_accumulator_update(inout_checksum, buffer.data(), chunk_size);
+        consumed += chunk_size;
+    }
+    return true;
+}
+
+void checksum_accumulator_update_repeated(
+    PageChecksumAccumulator *inout_checksum,
+    unsigned char byte,
+    std::uint64_t size
+) {
+    if (inout_checksum == nullptr || size == 0U) {
+        return;
+    }
+    std::array<unsigned char, k_checksum_stream_chunk_size> buffer = {};
+    if (byte != 0U) {
+        buffer.fill(byte);
+    }
+    std::uint64_t consumed = 0;
+    while (consumed < size) {
+        const std::uint64_t remaining = size - consumed;
+        const auto chunk_size =
+            static_cast<std::size_t>(std::min<std::uint64_t>(remaining, buffer.size()));
+        checksum_accumulator_update(inout_checksum, buffer.data(), chunk_size);
+        consumed += chunk_size;
+    }
+}
+
+bool checksum_accumulator_matches(
+    const PageChecksumAccumulator &checksum,
+    std::uint64_t expected_checksum
+) {
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    const std::uint64_t crc_checksum =
+        (static_cast<std::uint64_t>(checksum.high) << 32U) | checksum.low;
+    if (crc_checksum == expected_checksum) {
+        return true;
+    }
+#endif
+    return checksum.legacy == expected_checksum;
+}
+
 PayloadStatus record_payload_status(int fd, off_t payload_offset, const PageRecordHeader &record) {
     if (!record_payload_shape_valid(record)) {
         return PayloadStatus::Error;
+    }
+    if (!record_uses_any_delta_payload(record)) {
+        return stream_non_delta_record_payload_status(fd, payload_offset, record);
     }
     std::unique_ptr<unsigned char[]> page(new (std::nothrow) unsigned char[record.page_size]);
     if (page == nullptr) {
@@ -5411,6 +5536,146 @@ PayloadStatus record_payload_status(int fd, off_t payload_offset, const PageReco
     if (!read_record_page_payload(fd, payload_offset, record, page.get(), record.page_size)) {
         return PayloadStatus::Mismatch;
     }
+    return PayloadStatus::Ok;
+}
+
+PayloadStatus stream_non_delta_record_payload_status(
+    int fd,
+    off_t payload_offset,
+    const PageRecordHeader &record
+) {
+    if (!record_payload_shape_valid(record) || record_uses_any_delta_payload(record)) {
+        return PayloadStatus::Error;
+    }
+    if constexpr (sizeof(std::size_t) < sizeof(record.payload_size)) {
+        if (record.payload_size > std::numeric_limits<std::size_t>::max()) {
+            return PayloadStatus::Mismatch;
+        }
+    }
+
+    const std::size_t payload_size = static_cast<std::size_t>(record.payload_size);
+    PageChecksumAccumulator checksum;
+    if (record_uses_any_sparse_zero_payload(record)) {
+        std::vector<unsigned char> payload;
+        try {
+            payload.resize(payload_size);
+        } catch (const std::bad_alloc &) {
+            return PayloadStatus::Error;
+        }
+        if (payload_size != 0U &&
+            !read_exact_at(fd, payload.data(), payload_size, payload_offset)) {
+            return PayloadStatus::Mismatch;
+        }
+
+        const bool compact_sparse = record_uses_compact_sparse_zero_payload(record);
+        const bool varint_compact_sparse = record_uses_varint_compact_sparse_zero_payload(record);
+        const bool fill_sparse = record_uses_fill_sparse_zero_payload(record);
+        const std::size_t run_count_size = (compact_sparse || varint_compact_sparse || fill_sparse)
+                                               ? sizeof(std::uint16_t)
+                                               : sizeof(std::uint32_t);
+        const std::size_t run_header_size =
+            compact_sparse ? 2U * sizeof(std::uint16_t) : 2U * sizeof(std::uint32_t);
+        if (payload_size < run_count_size) {
+            return PayloadStatus::Mismatch;
+        }
+        const std::uint32_t run_count = (compact_sparse || varint_compact_sparse || fill_sparse)
+                                            ? load16(payload.data(), 0U)
+                                            : load32(payload.data(), 0U);
+        if (run_count == 0U) {
+            return PayloadStatus::Mismatch;
+        }
+
+        std::size_t cursor = run_count_size;
+        bool has_previous_run = false;
+        std::uint32_t previous_run_end = 0;
+        for (std::uint32_t run_index = 0; run_index < run_count; ++run_index) {
+            if (!varint_compact_sparse && !fill_sparse &&
+                (cursor > payload_size || run_header_size > payload_size - cursor)) {
+                return PayloadStatus::Mismatch;
+            }
+            std::uint32_t run_offset = 0;
+            std::uint32_t run_size = 0;
+            unsigned char fill_sparse_kind = k_fill_sparse_run_kind_raw;
+            if (varint_compact_sparse || fill_sparse) {
+                std::uint32_t zero_gap = 0;
+                if (!read_varuint16(payload.data(), payload_size, &cursor, &zero_gap) ||
+                    !read_varuint16(payload.data(), payload_size, &cursor, &run_size) ||
+                    previous_run_end > std::numeric_limits<std::uint32_t>::max() - zero_gap) {
+                    return PayloadStatus::Mismatch;
+                }
+                run_offset = previous_run_end + zero_gap;
+                if (fill_sparse) {
+                    if (cursor >= payload_size) {
+                        return PayloadStatus::Mismatch;
+                    }
+                    fill_sparse_kind = payload[cursor++];
+                }
+            } else {
+                run_offset = compact_sparse ? load16(payload.data(), cursor)
+                                            : load32(payload.data(), cursor);
+                cursor += run_header_size / 2U;
+                run_size = compact_sparse ? load16(payload.data(), cursor)
+                                          : load32(payload.data(), cursor);
+                cursor += run_header_size / 2U;
+            }
+
+            const bool overlaps_previous =
+                has_previous_run &&
+                (fill_sparse ? run_offset < previous_run_end : run_offset <= previous_run_end);
+            if (run_size == 0U || overlaps_previous || run_offset > record.page_size ||
+                run_size > record.page_size - run_offset ||
+                (fill_sparse && fill_sparse_kind != k_fill_sparse_run_kind_raw &&
+                 fill_sparse_kind != k_fill_sparse_run_kind_fill) ||
+                (fill_sparse && fill_sparse_kind == k_fill_sparse_run_kind_raw &&
+                 run_size > payload_size - cursor) ||
+                (!fill_sparse && run_size > payload_size - cursor)) {
+                return PayloadStatus::Mismatch;
+            }
+
+            checksum_accumulator_update_repeated(
+                &checksum,
+                0U,
+                static_cast<std::uint64_t>(run_offset - previous_run_end)
+            );
+            if (fill_sparse && fill_sparse_kind == k_fill_sparse_run_kind_fill) {
+                if (cursor >= payload_size) {
+                    return PayloadStatus::Mismatch;
+                }
+                checksum_accumulator_update_repeated(&checksum, payload[cursor++], run_size);
+            } else {
+                checksum_accumulator_update(&checksum, payload.data() + cursor, run_size);
+                cursor += run_size;
+            }
+            previous_run_end = run_offset + run_size;
+            has_previous_run = true;
+        }
+        if (cursor != payload_size) {
+            return PayloadStatus::Mismatch;
+        }
+        checksum_accumulator_update_repeated(
+            &checksum,
+            0U,
+            static_cast<std::uint64_t>(record.page_size - previous_run_end)
+        );
+    } else if (record_uses_trailing_zero_payload(record)) {
+        if (!checksum_accumulator_update_file(&checksum, fd, payload_offset, record.payload_size)) {
+            return PayloadStatus::Mismatch;
+        }
+        checksum_accumulator_update_repeated(&checksum, 0U, record.page_size - record.payload_size);
+    } else if (!checksum_accumulator_update_file(
+                   &checksum,
+                   fd,
+                   payload_offset,
+                   record.payload_size
+               )) {
+        return PayloadStatus::Mismatch;
+    }
+
+    if (!checksum_accumulator_matches(checksum, record.checksum)) {
+        return PayloadStatus::Mismatch;
+    }
+    page_log_scan_perf_add(PAGE_LOG_SCAN_PERF_STREAM_CHECKSUM_RECORDS, 1U);
+    page_log_scan_perf_add(PAGE_LOG_SCAN_PERF_STREAM_CHECKSUM_BYTES, checksum.bytes);
     return PayloadStatus::Ok;
 }
 
@@ -5459,9 +5724,8 @@ std::uint64_t page_key(std::uint32_t space_id, std::uint32_t page_no) {
 
 std::uint64_t checksum_bytes(const void *buffer, std::size_t size) {
 #if MYLITE_WITH_MARIADB_EMBEDDED
-    constexpr std::uint32_t k_second_seed = 0xa5a5a5a5U;
     const std::uint32_t low = my_crc32c(0U, buffer, size);
-    const std::uint32_t high = my_crc32c(k_second_seed, buffer, size);
+    const std::uint32_t high = my_crc32c(k_page_checksum_second_seed, buffer, size);
     return (static_cast<std::uint64_t>(high) << 32U) | low;
 #else
     return legacy_checksum_bytes(buffer, size);
@@ -5470,10 +5734,10 @@ std::uint64_t checksum_bytes(const void *buffer, std::size_t size) {
 
 std::uint64_t legacy_checksum_bytes(const void *buffer, std::size_t size) {
     const auto *bytes = static_cast<const unsigned char *>(buffer);
-    std::uint64_t hash = 1469598103934665603ULL;
+    std::uint64_t hash = k_legacy_checksum_offset_basis;
     for (std::size_t index = 0; index < size; ++index) {
         hash ^= bytes[index];
-        hash *= 1099511628211ULL;
+        hash *= k_legacy_checksum_prime;
     }
     return hash;
 }
