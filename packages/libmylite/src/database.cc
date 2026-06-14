@@ -144,6 +144,7 @@ enum OwnerlessDatabasePerfStatIndex : std::size_t {
     OWNERLESS_DATABASE_PERF_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_PINS,
     OWNERLESS_DATABASE_PERF_SINGLE_OWNER_SKIP_BLOCKED_BASELINE,
     OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_FILE_READ_ELIDED,
+    OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_NOOP_ELIDED,
     OWNERLESS_DATABASE_PERF_STAT_COUNT
 };
 
@@ -1158,6 +1159,12 @@ struct OwnerlessPageLogSyncAnchor {
     std::uint64_t generation = 0;
 };
 
+struct OwnerlessCheckpointLsnSyncAnchor {
+    int fd = -1;
+    std::uint64_t latest_lsn = 0;
+    std::uint64_t visible_lsn = 0;
+};
+
 struct OwnerlessCheckpointLsnRecord {
     std::uint64_t generation = 0;
     std::uint64_t latest_lsn = 0;
@@ -1222,6 +1229,8 @@ RuntimeState g_runtime;
 std::mutex g_system_table_mutex;
 std::mutex g_ownerless_page_log_sync_anchor_mutex;
 OwnerlessPageLogSyncAnchor g_ownerless_page_log_sync_anchor;
+std::mutex g_ownerless_checkpoint_lsn_sync_anchor_mutex;
+OwnerlessCheckpointLsnSyncAnchor g_ownerless_checkpoint_lsn_sync_anchor;
 #endif
 
 } // namespace
@@ -1819,6 +1828,17 @@ void reset_ownerless_native_shutdown_hooks(RuntimeState &runtime);
 void advance_ownerless_local_trx_horizon(RuntimeState &runtime);
 void clear_ownerless_native_hook_contexts(RuntimeState &runtime);
 void reset_ownerless_page_log_sync_anchor();
+void reset_ownerless_checkpoint_lsn_sync_anchor();
+bool ownerless_checkpoint_lsn_sync_anchor_matches(
+    int checkpoint_fd,
+    std::uint64_t latest_lsn,
+    std::uint64_t visible_lsn
+);
+void ownerless_checkpoint_lsn_sync_anchor_store(
+    int checkpoint_fd,
+    std::uint64_t latest_lsn,
+    std::uint64_t visible_lsn
+);
 int sync_ownerless_page_log_if_changed(OwnerlessInnoDBLockHookContext *hook);
 void release_concurrency_owner_state(RuntimeState &runtime);
 void release_concurrency_process_slot(RuntimeState &runtime);
@@ -11264,6 +11284,7 @@ int open_concurrency_checkpoint_for_runtime(
     if (checkpoint_fd < 0) {
         return MYLITE_IOERR;
     }
+    reset_ownerless_checkpoint_lsn_sync_anchor();
 
     std::uint64_t latest_lsn = 0;
     std::uint64_t visible_lsn = 0;
@@ -13489,6 +13510,7 @@ void advance_ownerless_local_trx_horizon(RuntimeState &runtime) {
 void clear_ownerless_native_hook_contexts(RuntimeState &runtime) {
     ownerless_page_log_append_batch_release_current();
     reset_ownerless_page_log_sync_anchor();
+    reset_ownerless_checkpoint_lsn_sync_anchor();
     runtime.ownerless_innodb_lock_hook = {};
     runtime.ownerless_read_view_hook = {};
     runtime.ownerless_trx_hook = {};
@@ -13498,6 +13520,33 @@ void clear_ownerless_native_hook_contexts(RuntimeState &runtime) {
 void reset_ownerless_page_log_sync_anchor() {
     std::lock_guard<std::mutex> guard(g_ownerless_page_log_sync_anchor_mutex);
     g_ownerless_page_log_sync_anchor = {};
+}
+
+void reset_ownerless_checkpoint_lsn_sync_anchor() {
+    std::lock_guard<std::mutex> guard(g_ownerless_checkpoint_lsn_sync_anchor_mutex);
+    g_ownerless_checkpoint_lsn_sync_anchor = {};
+}
+
+bool ownerless_checkpoint_lsn_sync_anchor_matches(
+    int checkpoint_fd,
+    std::uint64_t latest_lsn,
+    std::uint64_t visible_lsn
+) {
+    std::lock_guard<std::mutex> guard(g_ownerless_checkpoint_lsn_sync_anchor_mutex);
+    return g_ownerless_checkpoint_lsn_sync_anchor.fd == checkpoint_fd &&
+           g_ownerless_checkpoint_lsn_sync_anchor.latest_lsn == latest_lsn &&
+           g_ownerless_checkpoint_lsn_sync_anchor.visible_lsn == visible_lsn;
+}
+
+void ownerless_checkpoint_lsn_sync_anchor_store(
+    int checkpoint_fd,
+    std::uint64_t latest_lsn,
+    std::uint64_t visible_lsn
+) {
+    std::lock_guard<std::mutex> guard(g_ownerless_checkpoint_lsn_sync_anchor_mutex);
+    g_ownerless_checkpoint_lsn_sync_anchor.fd = checkpoint_fd;
+    g_ownerless_checkpoint_lsn_sync_anchor.latest_lsn = latest_lsn;
+    g_ownerless_checkpoint_lsn_sync_anchor.visible_lsn = visible_lsn;
 }
 
 int sync_ownerless_page_log_if_changed(OwnerlessInnoDBLockHookContext *hook) {
@@ -16295,6 +16344,13 @@ bool write_concurrency_checkpoint_lsn_locked(
         )) {
         return false;
     }
+    if (has_current_record && current_record.latest_lsn == latest_lsn &&
+        current_record.visible_lsn == visible_lsn &&
+        (!durable ||
+         ownerless_checkpoint_lsn_sync_anchor_matches(checkpoint_fd, latest_lsn, visible_lsn))) {
+        ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_NOOP_ELIDED, 1U);
+        return true;
+    }
     const std::uint64_t next_generation =
         has_current_record && current_record.generation < UINT64_MAX
             ? current_record.generation + 1U
@@ -16305,6 +16361,7 @@ bool write_concurrency_checkpoint_lsn_locked(
 
     std::array<unsigned char, k_concurrency_checkpoint_lsn_record_size> lsn_record = {};
     build_concurrency_checkpoint_lsn_record(lsn_record, next_generation, latest_lsn, visible_lsn);
+    reset_ownerless_checkpoint_lsn_sync_anchor();
     std::uint64_t stage_start_ns =
         ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     bool ok = write_exact_at(
@@ -16336,6 +16393,9 @@ bool write_concurrency_checkpoint_lsn_locked(
             OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_SYNC_NS,
             stage_start_ns
         );
+        if (ok) {
+            ownerless_checkpoint_lsn_sync_anchor_store(checkpoint_fd, latest_lsn, visible_lsn);
+        }
     }
     return ok;
 }
@@ -16536,6 +16596,46 @@ bool update_concurrency_checkpoint_lsn(
         k_concurrency_checkpoint_lock_length
     );
     return ok;
+}
+
+extern "C" int mylite_ownerless_database_test_update_checkpoint_lsn_repeated(
+    const char *database_path,
+    std::uint64_t latest_lsn,
+    std::uint64_t visible_lsn,
+    int durable,
+    unsigned repetitions
+) {
+    if (database_path == nullptr || (latest_lsn == 0U && visible_lsn == 0U) || repetitions == 0U) {
+        return MYLITE_MISUSE;
+    }
+    const std::filesystem::path checkpoint_path = std::filesystem::path(database_path) /
+                                                  k_concurrency_dir_name /
+                                                  k_concurrency_checkpoint_filename;
+    const std::string checkpoint_name = checkpoint_path.string();
+    const int checkpoint_fd = ::open(checkpoint_name.c_str(), O_RDWR | O_CLOEXEC);
+    if (checkpoint_fd < 0) {
+        return MYLITE_IOERR;
+    }
+    reset_ownerless_checkpoint_lsn_sync_anchor();
+
+    int result = MYLITE_OK;
+    for (unsigned iteration = 0; iteration < repetitions; ++iteration) {
+        if (!update_concurrency_checkpoint_lsn(
+                checkpoint_fd,
+                latest_lsn,
+                visible_lsn,
+                durable != 0
+            )) {
+            result = MYLITE_IOERR;
+            break;
+        }
+    }
+
+    reset_ownerless_checkpoint_lsn_sync_anchor();
+    if (::close(checkpoint_fd) != 0 && result == MYLITE_OK) {
+        result = MYLITE_IOERR;
+    }
+    return result;
 }
 
 bool read_concurrency_checkpoint_lsn(

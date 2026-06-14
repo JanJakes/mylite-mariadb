@@ -179,6 +179,13 @@ extern void mylite_ownerless_innodb_refresh_buffer_pool_pages(uint64_t visible_l
 extern void mylite_ownerless_database_set_perf_stats_enabled(int enabled);
 extern void mylite_ownerless_database_reset_perf_stats(void);
 extern void mylite_ownerless_database_read_perf_stats(uint64_t *out_values, size_t value_count);
+extern int mylite_ownerless_database_test_update_checkpoint_lsn_repeated(
+    const char *database_path,
+    uint64_t latest_lsn,
+    uint64_t visible_lsn,
+    int durable,
+    unsigned repetitions
+);
 extern void mylite_ownerless_innodb_deep_set_perf_stats_enabled(int enabled);
 extern void mylite_ownerless_innodb_deep_reset_perf_stats(void);
 extern void mylite_ownerless_innodb_deep_read_perf_stats(uint64_t *out_values, size_t value_count);
@@ -209,23 +216,25 @@ extern void mylite_ownerless_page_log_read_append_perf_stats(
 );
 
 enum ownerless_test_database_perf_stat_index {
-    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_CALLS = 28,
-    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_INDEX_HITS = 32,
-    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_INDEX_MISSES = 33,
-    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_INDEX_SCAN_REQUIRED = 34,
-    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_INDEX_STALE = 35,
-    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_INDEX_ERRORS = 36,
-    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_CALLS = 37,
-    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_FOUND = 39,
-    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_MISSES = 40,
-    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_ERRORS = 43,
-    OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_CALLS = 63,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_CALLS = 35,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_INDEX_HITS = 39,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_INDEX_MISSES = 40,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_INDEX_SCAN_REQUIRED = 41,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_INDEX_STALE = 42,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_INDEX_ERRORS = 43,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_CALLS = 44,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_FOUND = 46,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_MISSES = 47,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_ERRORS = 50,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_CALLS = 74,
     OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_ALLOWED,
     OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_UNMAPPED,
     OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_COUNT,
     OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_GENERATION,
     OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_PINS,
     OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_BASELINE,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_CHECKPOINT_UPDATE_FILE_READ_ELIDED,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_CHECKPOINT_UPDATE_NOOP_ELIDED,
     OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT
 };
 
@@ -624,6 +633,7 @@ static void test_ownerless_purge_preserves_cross_process_snapshot(void);
 static void test_ownerless_native_checkpoint_evidence(void);
 static void test_ownerless_native_checkpoint_reclaims_page_log(void);
 static void test_ownerless_checkpoint_lsn_record_recovers_from_torn_latest_slot(void);
+static void test_ownerless_checkpoint_lsn_noop_update_keeps_generation(void);
 static void test_ownerless_native_file_op_marker_clears_without_page_log(void);
 static void test_ownerless_native_file_op_marker_recovers_from_torn_clear_record(void);
 static void test_ownerless_native_file_op_marker_drains_after_real_sql_ddl(void);
@@ -3596,6 +3606,10 @@ int main(int argc, char **argv) {
         test_ownerless_native_checkpoint_evidence();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "checkpoint-lsn-noop-elision") == 0) {
+        test_ownerless_checkpoint_lsn_noop_update_keeps_generation();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "native-reclaim") == 0) {
         test_ownerless_native_checkpoint_reclaims_page_log();
         return 0;
@@ -4662,7 +4676,7 @@ int main(int argc, char **argv) {
         );
         fputs(
             "prepared-committed-read|local-write-first-read|isolation|"
-            "shared-readonly|checkpoint-evidence|native-reclaim|"
+            "shared-readonly|checkpoint-evidence|checkpoint-lsn-noop-elision|native-reclaim|"
             "native-file-op-marker-drain|"
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
             "redo-header-backup-validation|"
@@ -4835,6 +4849,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_native_checkpoint_evidence),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_native_checkpoint_reclaims_page_log),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_checkpoint_lsn_record_recovers_from_torn_latest_slot),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_checkpoint_lsn_noop_update_keeps_generation),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_native_file_op_marker_clears_without_page_log),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_native_file_op_marker_recovers_from_torn_clear_record),
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
@@ -8474,6 +8489,115 @@ static void test_ownerless_checkpoint_lsn_record_recovers_from_torn_latest_slot(
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert(query_unsigned(db, "SELECT value FROM app.ownerless_checkpoint_lsn_record") == 12U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_checkpoint_lsn_noop_update_keeps_generation(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-checkpoint-noop-elision.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    checkpoint_lsn_record record = {0};
+    uint64_t database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT] = {0};
+    uint64_t latest_lsn;
+    uint64_t visible_lsn;
+    uint64_t initial_generation;
+    uint64_t durable_generation;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_checkpoint_noop ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_checkpoint_noop VALUES (1, 10)");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_concurrency_wal_checkpointed_eventually(database_path);
+
+    assert(read_concurrency_checkpoint_lsn_records(database_path, &record));
+    latest_lsn = record.latest_lsn;
+    visible_lsn = record.visible_lsn;
+    initial_generation = record.generation;
+    assert(latest_lsn > 0U);
+    assert(visible_lsn > 0U);
+    assert(visible_lsn <= latest_lsn);
+    assert(initial_generation > 0U);
+
+    mylite_ownerless_database_set_perf_stats_enabled(1);
+    mylite_ownerless_database_reset_perf_stats();
+    assert(
+        mylite_ownerless_database_test_update_checkpoint_lsn_repeated(
+            database_path,
+            latest_lsn,
+            visible_lsn,
+            0,
+            3U
+        ) == MYLITE_OK
+    );
+    assert(read_concurrency_checkpoint_lsn_records(database_path, &record));
+    assert(record.generation == initial_generation);
+    assert(record.latest_lsn == latest_lsn);
+    assert(record.visible_lsn == visible_lsn);
+    mylite_ownerless_database_read_perf_stats(
+        database_stats,
+        OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT
+    );
+    assert(database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_CHECKPOINT_UPDATE_NOOP_ELIDED] == 3U);
+
+    assert(
+        mylite_ownerless_database_test_update_checkpoint_lsn_repeated(
+            database_path,
+            latest_lsn,
+            visible_lsn,
+            1,
+            2U
+        ) == MYLITE_OK
+    );
+    assert(read_concurrency_checkpoint_lsn_records(database_path, &record));
+    assert(record.generation == initial_generation + 1U);
+    assert(record.latest_lsn == latest_lsn);
+    assert(record.visible_lsn == visible_lsn);
+    durable_generation = record.generation;
+    mylite_ownerless_database_read_perf_stats(
+        database_stats,
+        OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT
+    );
+    assert(database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_CHECKPOINT_UPDATE_NOOP_ELIDED] == 4U);
+    mylite_ownerless_database_set_perf_stats_enabled(0);
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(db, "SELECT value FROM app.ownerless_checkpoint_noop WHERE id = 1") == 10U
+    );
+    exec_ok(db, "UPDATE app.ownerless_checkpoint_noop SET value = 11 WHERE id = 1");
+    assert(
+        query_unsigned(db, "SELECT value FROM app.ownerless_checkpoint_noop WHERE id = 1") == 11U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_concurrency_wal_checkpointed_eventually(database_path);
+
+    assert(read_concurrency_checkpoint_lsn_records(database_path, &record));
+    assert(record.generation > durable_generation);
+    assert(record.latest_lsn >= latest_lsn);
+    assert(record.visible_lsn >= visible_lsn);
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(
+        query_unsigned(db, "SELECT value FROM app.ownerless_checkpoint_noop WHERE id = 1") == 11U
+    );
     assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);

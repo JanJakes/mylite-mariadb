@@ -377,9 +377,12 @@ Roles:
   latest/visible pair now has two appended checksummed generation records after
   the legacy payload; readers prefer the highest valid generation, fall back to
   the legacy pair only while both record slots are empty, and fail closed when
-  non-empty record slots contain no valid checksum. Lazy unsynced checkpoint
-  publication and the separate native file-operation marker remain bounded by
-  their existing proof rules.
+  non-empty record slots contain no valid checksum. Repeated same-pair
+  checkpoint publications skip new record generations for non-durable updates;
+  durable same-pair updates skip only when a process-local sync anchor proves
+  that the same process already synced the same pair on the same checkpoint fd.
+  Cross-process group commit, broader checkpoint batching, and the separate
+  native file-operation marker remain bounded by their existing proof rules.
 - `process/*.heartbeat`: process-liveness evidence for crash detection. These
   are hints only; correctness must come from OS locks and durable recovery.
 
