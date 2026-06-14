@@ -24209,6 +24209,13 @@ static void test_ownerless_trigger_ddl_refreshes_peer_dictionary(void) {
     );
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_trigger_base") == 10U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_trigger_audit") == 10U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.innodb_sys_tablespaces "
+            "WHERE name = 'app/ownerless_trigger_audit'"
+        ) == 1U
+    );
     exec_ok(db, "INSERT INTO app.ownerless_trigger_base VALUES (2, 20)");
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_trigger_base") == 30U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_trigger_audit") == 30U);

@@ -390,6 +390,7 @@ constexpr unsigned k_statement_lock_wait_timeout_ms = 60000;
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
 constexpr unsigned k_mariadb_lock_deadlock_errno = 1213;
+constexpr unsigned k_mariadb_no_such_table_in_engine_errno = 1932;
 constexpr auto k_ownerless_checkpoint_scheduler_interval =
     std::chrono::milliseconds(MYLITE_OWNERLESS_PAGE_LOG_CHECKPOINT_INTERVAL_MS);
 static_assert(MYLITE_OWNERLESS_MDL_MODE_SHARED == MYLITE_OWNERLESS_LOCK_TABLE_SHARED);
@@ -1612,10 +1613,16 @@ int read_ownerless_pressure_state(mylite_db &db, OwnerlessPressureState &state);
 int enforce_ownerless_page_log_limit_policy(mylite_db &db, const SqlPolicyTokens &tokens);
 int refresh_ownerless_dictionary_before_statement(mylite_db &db, bool allow_global_refresh);
 int flush_ownerless_dictionary_cache(mylite_db &db);
+int refresh_ownerless_dictionary_cache_after_stale_engine_error(mylite_db &db);
 void initialize_ownerless_dictionary_generation(mylite_db &db);
 void clear_ownerless_insert_foreign_key_cache(mylite_db &db);
 bool ownerless_dictionary_ddl_statement(const SqlPolicyTokens &tokens);
 bool ownerless_dictionary_ddl_needs_native_file_op_checkpoint(const SqlPolicyTokens &tokens);
+bool ownerless_stale_engine_error_allows_retry(
+    const mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    bool statement_started_in_explicit_transaction
+);
 bool ownerless_temporary_table_ddl_statement(const SqlPolicyTokens &tokens);
 bool ownerless_table_identifier_token(std::string_view token);
 std::string ownerless_normalized_identifier(std::string_view token);
@@ -4145,6 +4152,18 @@ int exec_result_impl(
     );
     if (mysql_query(&db->mysql, sql) != 0) {
         set_mariadb_error(*db);
+        if (ownerless_stale_engine_error_allows_retry(
+                *db,
+                policy_tokens,
+                statement_started_in_explicit_transaction
+            ) &&
+            refresh_ownerless_dictionary_cache_after_stale_engine_error(*db) == MYLITE_OK) {
+            set_ok(*db);
+            if (mysql_query(&db->mysql, sql) == 0) {
+                goto ownerless_query_success;
+            }
+            set_mariadb_error(*db);
+        }
         const int dictionary_finish_result =
             ownerless_finish_dictionary_ddl(*db, dictionary_ddl_started);
         if (dictionary_finish_result != MYLITE_OK) {
@@ -4170,6 +4189,7 @@ int exec_result_impl(
         rollback_active_transaction_after_deadlock(*db);
         return copy_error_message(*db, errmsg);
     }
+ownerless_query_success:
     refresh_ownerless_pending_post_open_clean_pages(*db);
     const my_ulonglong affected_rows = mysql_affected_rows(&db->mysql);
     const unsigned long long insert_id =
@@ -11751,6 +11771,19 @@ int flush_ownerless_dictionary_cache(mylite_db &db) {
     return MYLITE_OK;
 }
 
+int refresh_ownerless_dictionary_cache_after_stale_engine_error(mylite_db &db) {
+    if (!db.ownerless_rw_open) {
+        return MYLITE_OK;
+    }
+
+    static_cast<void>(mylite_ownerless_innodb_refresh_to_latest_external_lsn());
+    const int flush_result = flush_ownerless_dictionary_cache(db);
+    if (flush_result == MYLITE_OK) {
+        clear_ownerless_insert_foreign_key_cache(db);
+    }
+    return flush_result;
+}
+
 void clear_ownerless_insert_foreign_key_cache(mylite_db &db) {
     db.ownerless_insert_foreign_key_cache.clear();
 }
@@ -11815,6 +11848,16 @@ bool ownerless_temporary_table_ddl_statement(const SqlPolicyTokens &tokens) {
 bool ownerless_dictionary_ddl_statement(const SqlPolicyTokens &tokens) {
     const std::string_view first = identifier_token_at(tokens, 0);
     return token_in(first, "ALTER", "CREATE", "DROP", "RENAME") || token_equals(first, "TRUNCATE");
+}
+
+bool ownerless_stale_engine_error_allows_retry(
+    const mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    bool statement_started_in_explicit_transaction
+) {
+    return db.ownerless_rw_open && !statement_started_in_explicit_transaction &&
+           db.mariadb_errno == k_mariadb_no_such_table_in_engine_errno &&
+           statement_allows_ownerless_page_version_reads(tokens);
 }
 
 bool ownerless_dictionary_ddl_needs_native_file_op_checkpoint(const SqlPolicyTokens &tokens) {

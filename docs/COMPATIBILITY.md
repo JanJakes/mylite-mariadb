@@ -90,6 +90,14 @@ in addition to the single-table drop, stale-reader retained-WAL killed-drop,
 and multi-table schema-drop evidence tracked below. This is still bounded
 replay evidence, not a claim that the
 broader durable DDL file-lifecycle protocol is complete.
+Already-open ownerless peers now also recover a stale InnoDB dictionary-cache
+miss for a peer-created file-per-table table after trigger DDL: ownerless text
+reads that hit MariaDB errno `1932` refresh native pages, evict the SQL and
+InnoDB dictionary caches, clear MyLite's ownerless foreign-key cache, and retry
+once. The focused trigger DDL refresh case verifies the peer reads the
+trigger-maintained audit table without a manual `FLUSH TABLES` and then
+observes its native tablespace registration. Mutating statements, DDL, and
+explicit-transaction statements do not use this retry path.
 
 Ownerless performance diagnostics now run through production build presets for
 CI-visible timings, and CI separates the stats-off embedded throughput probe
