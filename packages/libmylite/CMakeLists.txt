@@ -392,6 +392,10 @@ if(BUILD_TESTING)
         COMMAND mylite_ownerless_cross_process_sql_test native-table-wait
       )
       add_test(
+        NAME libmylite.ownerless-native-table-wait-crash
+        COMMAND mylite_ownerless_cross_process_sql_test native-table-wait-crash
+      )
+      add_test(
         NAME libmylite.ownerless-stale-drop-crash-recovery
         COMMAND mylite_ownerless_cross_process_sql_test stale-drop-crash-recovery
       )
@@ -600,6 +604,10 @@ if(BUILD_TESTING)
       )
       set_tests_properties(libmylite.ownerless-native-table-wait PROPERTIES
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-innodb-lock"
+        TIMEOUT 90
+      )
+      set_tests_properties(libmylite.ownerless-native-table-wait-crash PROPERTIES
+        LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-innodb-lock;compat.crash-reopen"
         TIMEOUT 90
       )
       set_tests_properties(libmylite.ownerless-stale-drop-crash-recovery PROPERTIES

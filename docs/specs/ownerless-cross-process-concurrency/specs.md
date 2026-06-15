@@ -2755,8 +2755,12 @@ Tasks:
    hook-build positive SQL proof that a `foreign_key_checks=0` and
    `unique_checks=0` empty-table bulk insert waiting behind a peer
    `LOCK IN SHARE MODE` reader publishes a shared external native table-wait
-   registry entry and clears that entry after release, rather than MariaDB's
-   SQL locked-table lifecycle across processes.
+   registry entry and clears that entry after release, plus a hook-build crash
+   proof that kills the same SQL waiter after that shared wait entry is
+   published, verifies live-peer cleanup remains busy while the blocking reader
+   is alive, and verifies no-live recovery removes the dead waiter before the
+   interrupted insert is retried, rather than MariaDB's SQL locked-table
+   lifecycle across processes.
    Ownerless `FLUSH TABLES ... WITH READ LOCK` and
    `FLUSH TABLES ... FOR EXPORT` are also rejected: MariaDB routes these forms
    through global read-lock, locked-table, InnoDB quiesce, and checkpoint
@@ -4313,6 +4317,12 @@ Minimum suites before support can be claimed:
     waiting behind a peer ownerless `LOCK IN SHARE MODE` reader publishes a
     shared external native table-wait registry entry, clears it after release,
     and remains durable through ownerless/native reopen and forced `.shm`
+    rebuild. Hook-build SQL crash coverage kills that same native table-wait
+    SQL waiter after the shared table-wait entry is published, verifies the
+    dead wait remains observable, verifies live-peer cleanup remains busy while
+    the blocking reader is alive, verifies no-live recovery removes the dead
+    wait after the blocker dies, confirms the interrupted insert is absent, and
+    retries the insert through ownerless/native reopen and forced `.shm`
     rebuild. Hook-build SQL negative proof arms the
     local ownerless table-wait callback while representative blocked `ALTER TABLE`,
     CHECK/FK add, `CREATE INDEX`, online index add/drop, existing-index
