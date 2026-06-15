@@ -973,8 +973,11 @@ from pinning a raw latest boundary whose page image is neither in the ownerless
 WAL nor durable on disk.
 If a runtime only reads the current visible page-version WAL, final no-live
 close leaves that WAL for recovery instead of truncating it without
-writer-owned native page evidence; writer runtimes still use the normal
-statement, timer, and close reclaim paths.
+writer-owned native page evidence; the native-successor shortcut is limited to
+writer runtimes, while reader-only consumers still need exact native page proof
+or retained WAL and do not refresh external pages just to attempt no-live
+reclaim. Writer runtimes still use the normal statement, timer, and close
+reclaim paths.
 Ordinary exclusive read/write reopen with retained ownerless page-version WAL
 or a nonzero ownerless checkpoint-visible boundary also refreshes clean
 process-local InnoDB buffer-pool pages from that boundary before SQL can reuse

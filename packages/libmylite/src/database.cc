@@ -9401,10 +9401,19 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
 
     const bool consumed_page_version_wal =
         runtime.ownerless_runtime_consumed_page_version_wal.load(std::memory_order_relaxed);
+    const bool reader_only_page_version_consumer =
+        no_live_peers && consumed_page_version_wal && !runtime.ownerless_runtime_has_local_write;
     const bool skip_external_refresh =
-        no_live_peers && single_owner_epoch && !consumed_page_version_wal;
+        no_live_peers &&
+        ((single_owner_epoch && !consumed_page_version_wal) || reader_only_page_version_consumer);
     const bool require_native_page_lsn_proof = !no_live_peers || !native_file_op_checkpoint_needed;
-    const bool allow_no_live_consumed_native_successor = no_live_peers && consumed_page_version_wal;
+    /*
+     * A runtime that only read peer page-version WAL does not own the native
+     * dirty-page handoff. A newer native page LSN is therefore not proof that
+     * disk contains the retained payload.
+     */
+    const bool allow_no_live_consumed_native_successor =
+        no_live_peers && consumed_page_version_wal && runtime.ownerless_runtime_has_local_write;
     if (!prepare_ownerless_page_log_native_checkpoint_for_reclaim(
             runtime,
             visible_lsn,

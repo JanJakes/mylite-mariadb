@@ -4634,7 +4634,10 @@ subsystems that this mode needs:
   refresh checks. A no-live final close by a
   runtime that only consumed the current visible page-version WAL leaves that
   WAL for no-live recovery instead of truncating it without writer-owned native
-  page evidence. Read/write runtime shutdown with live peers, or when no-live
+  page evidence; reader-only consumers do not use newer native page LSNs as
+  successor proof unless the retained payload matches exactly, and skip the
+  external refresh side effect during that failed reclaim attempt. Read/write
+  runtime shutdown with live peers, or when no-live
   status cannot be proven, now refreshes the local InnoDB buffer pool to the
   latest ownerless external LSN and waits for local dirty pages through the max
   of that ownerless LSN and the local native LSN before MariaDB embedded

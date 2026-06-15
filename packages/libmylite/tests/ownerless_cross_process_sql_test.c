@@ -7956,7 +7956,12 @@ static void test_ownerless_peer_uncommitted_update_stays_hidden(void) {
 
     remove_concurrency_shm(database_path);
     reader = open_database(paths, MYLITE_OPEN_READWRITE);
-    assert(query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 17U);
+    const unsigned long long reopened_value =
+        query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1");
+    if (reopened_value != 17U) {
+        fprintf(stderr, "post-rebuild ordinary peer update stale: value=%llu\n", reopened_value);
+    }
+    assert(reopened_value == 17U);
     assert(mylite_close(reader) == MYLITE_OK);
 
     free(database_path);
