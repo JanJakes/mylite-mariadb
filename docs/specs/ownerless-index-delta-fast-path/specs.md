@@ -60,7 +60,7 @@ slot. On the next same-identity index page, the append path now:
 - snapshots the warmed base slot once;
 - builds an index delta against that base before standalone encoding;
 - fast-accepts the delta only when it is less than half the stored standalone
-  payload size and at most `1024` bytes;
+  payload size and below the configured fast payload limit;
 - otherwise falls back to the previous exact path: build the current standalone
   payload, compare the delta against that exact current payload size, and write
   standalone when the delta is marginal.

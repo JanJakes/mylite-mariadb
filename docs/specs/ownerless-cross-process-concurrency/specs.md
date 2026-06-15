@@ -1713,9 +1713,9 @@ Tasks:
    payload from `539.910` to `210.006` bytes per insert while preserving one
    rollback-segment and one undo history-proof publication per insert. The
    append performance probe now also attributes accepted fast versus exact
-   index/undo deltas and fast/exact rejection reasons, separating the 1024-byte
-   fast limit, standalone-size comparisons, and delta-build failures before any
-   later fast-path rule change is considered. Exact fallback now reuses a
+   index/undo deltas and fast/exact rejection reasons, separating the fast
+   payload limit, standalone-size comparisons, and delta-build failures before
+   any later fast-path rule change is considered. Exact fallback now reuses a
    fast-miss delta payload after standalone encoding proves it still beats the
    current standalone payload, avoiding duplicate delta construction without
    changing the delta acceptance rule; when an exact size-only standalone probe
@@ -5090,7 +5090,14 @@ subsystems that this mode needs:
   a 16 KiB base page out of the process-local base table before encoding. Its
   reduced 500-row production attribution sample preserved `1506` page-log
   appends, selected `0.962` index deltas and `0.752` undo deltas per insert,
-  and reported `0.040` page-log encode ms/insert. The
+  and reported `0.040` page-log encode ms/insert. A follow-up delta fast-limit
+  slice raised the fast acceptance threshold from `1024` to `2048` bytes while
+  keeping the half-standalone-size rule and exact fallback unchanged. The
+  reduced 500-row production attribution sample kept payload bytes stable
+  (`556202` versus `556208` before the slice), increased fast index deltas from
+  `410` to `449`, dropped standalone-size probe calls from `91` to `51`,
+  dropped size-probe time from `7.229 ms` to `1.157 ms`, and moved total
+  page-log append time from `49.012 ms` to `44.932 ms`. The
   remaining write-throughput targets are native
   commit/page-publication, non-fast page-log encoding, the remaining
   history-proof proof volume, and broader redo/checkpoint recovery work. The visible-fast page-log append-batch slice

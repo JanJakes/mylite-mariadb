@@ -119,7 +119,7 @@ constexpr std::size_t k_index_delta_base_probe_limit = 8;
 constexpr std::size_t k_index_delta_base_record_offset_size = sizeof(std::uint64_t);
 constexpr std::uint32_t k_index_delta_base_min_standalone_observations = 1;
 constexpr std::uint32_t k_index_delta_base_max_delta_records = 32;
-constexpr std::uint64_t k_index_delta_fast_payload_size_limit = 1024;
+constexpr std::uint64_t k_index_delta_fast_payload_size_limit = 2048;
 constexpr off_t k_append_lock_start = 0;
 constexpr off_t k_checkpoint_lock_start = 1;
 

@@ -2857,7 +2857,7 @@ static void test_page_log_fast_encodes_small_index_delta_payloads(void) {
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_RECORDS] == 1U);
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_FAST_RECORDS] == 1U);
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_PAYLOAD_BYTES] > 0U);
-    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_PAYLOAD_BYTES] <= 1024U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_PAYLOAD_BYTES] <= 2048U);
     assert(
         stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_FAST_PAYLOAD_BYTES] ==
         stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_PAYLOAD_BYTES]
@@ -2912,9 +2912,9 @@ static void test_page_log_reuses_fast_miss_delta_payload_for_exact_fallback(void
     char *root = make_temp_root();
     char *log_path = path_join(root, "index-delta-fast-miss-reuse-page-log.bin");
     int fd = open_file(log_path);
-    uint8_t page_base[MYLITE_TEST_PAGE_SIZE];
-    uint8_t page_delta[MYLITE_TEST_PAGE_SIZE];
-    uint8_t out_page[MYLITE_TEST_PAGE_SIZE];
+    uint8_t page_base[MYLITE_TEST_PAGE_SIZE * 2U];
+    uint8_t page_delta[MYLITE_TEST_PAGE_SIZE * 2U];
+    uint8_t out_page[MYLITE_TEST_PAGE_SIZE * 2U];
     uint64_t delta_record_offset = 0;
     uint64_t page_lsn = 0;
     uint64_t commit_lsn = 0;
@@ -2934,7 +2934,7 @@ static void test_page_log_reuses_fast_miss_delta_payload_for_exact_fallback(void
 
     memcpy(page_delta, page_base, sizeof(page_delta));
     store_test_be64(page_delta, MYLITE_TEST_INNODB_PAGE_LSN_OFFSET, 940U);
-    for (uint32_t offset = 2048U; offset < 3584U; ++offset) {
+    for (uint32_t offset = 2048U; offset < 4608U; ++offset) {
         page_delta[offset] ^= (uint8_t)(0x11U + (offset & 0x3FU));
     }
     memset(out_page, 0xEE, sizeof(out_page));
@@ -2975,7 +2975,7 @@ static void test_page_log_reuses_fast_miss_delta_payload_for_exact_fallback(void
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_RECORDS] == 1U);
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_FAST_RECORDS] == 0U);
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_EXACT_RECORDS] == 1U);
-    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_PAYLOAD_BYTES] > 1024U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_PAYLOAD_BYTES] > 2048U);
     assert(
         stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_EXACT_PAYLOAD_BYTES] ==
         stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_PAYLOAD_BYTES]

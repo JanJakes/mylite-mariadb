@@ -939,6 +939,18 @@ semantics. Reduced 50-row stats-enabled production probes showed the previous
 aggregate append total hiding both standalone-encode and delta-base note-update
 cost; the exact winner is noisy at that sample size, so the next optimization
 should use the split counters over a larger run before changing WAL semantics.
+The ownerless delta fast-limit slice used those counters to widen the
+non-chained index/undo delta fast threshold from `1024` to `2048` bytes without
+changing WAL format, checkpoint rewrite, or replay rules. In the reduced
+500-row production attribution sample, page-log append calls stayed at `1506`
+and payload bytes stayed effectively unchanged (`556202` versus `556208`),
+while fast index deltas increased from `410` to `449`, standalone-size probe
+calls dropped from `91` to `51`, size-probe time dropped from `7.229 ms` to
+`1.157 ms`, page-log append encode time dropped from `22.498 ms` to
+`19.103 ms`, and total append time dropped from `49.012 ms` to `44.932 ms`.
+This is a bounded page-log CPU heuristic, not a concurrency-semantics change;
+the larger remaining performance targets are still native commit/page
+publication, remaining non-fast encoding, and redo/checkpoint reconciliation.
 Ownerless page-version reads now validate the WAL tail after a direct
 page-index hit because the shared page index is an acceleration cache updated
 after the append stream, not an authoritative visibility boundary by itself.

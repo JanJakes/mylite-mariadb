@@ -10,7 +10,7 @@ many accepted deltas that were not fast accepted: index exact deltas were
 `undo_delta_records - undo_delta_fast_records`.
 
 Before changing the fast-path rule, MyLite needs to know whether those fast
-misses are caused by the bounded 1024-byte fast payload limit, by the
+misses are caused by the bounded fast payload limit, by the
 stored-base standalone-size comparison, by delta-build failure, or by exact
 fallback rejecting the delta after comparing against the current standalone
 payload.
@@ -31,7 +31,7 @@ MariaDB base ref: `mariadb-11.8.6`
   checksum, payload write, and process-local base update.
 - `packages/libmylite/src/ownerless_page_log.cc::maybe_encode_page_delta_payload()`
   already has all decision inputs: delta build success, delta payload size,
-  the fast 1024-byte limit, and the half-standalone-size comparison.
+  the fast payload limit, and the half-standalone-size comparison.
 - `packages/libmylite/tests/embedded_performance_probe.c` mirrors the private
   page-log append perf counter order and emits raw plus per-insert summary
   ownerless performance keys.
@@ -44,7 +44,7 @@ append-only page-log append perf counters for:
 - accepted fast delta payload bytes split by index and undo page class;
 - accepted exact delta record and payload bytes split by index and undo page
   class;
-- fast-path misses caused by the 1024-byte payload limit;
+- fast-path misses caused by the fast payload limit;
 - fast-path misses caused by the stored-base standalone-size comparison;
 - fast-path and exact-path delta-build failures;
 - exact fallback rejections caused by the current standalone-size comparison.

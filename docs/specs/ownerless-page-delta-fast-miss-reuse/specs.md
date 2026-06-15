@@ -35,7 +35,7 @@ MariaDB base ref: `mariadb-11.8.6`
 
 Keep the delta selection rule unchanged:
 
-- fast acceptance still requires the 1024-byte fast limit and the stored-base
+- fast acceptance still requires the configured fast limit and the stored-base
   standalone-size comparison;
 - exact acceptance still requires the current standalone payload size computed
   by `encoded_payload_size_for_page()`;
