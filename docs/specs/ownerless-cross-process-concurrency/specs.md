@@ -1720,7 +1720,10 @@ Tasks:
    current standalone payload, avoiding duplicate delta construction without
    changing the delta acceptance rule; when an exact size-only standalone probe
    proves the retained delta wins, exact fallback also skips materializing the
-   standalone payload that would otherwise be discarded. Page-log
+   standalone payload that would otherwise be discarded. Successful exact-probed
+   delta appends now refresh the volatile standalone-size estimate for that
+   durable base, so later same-base appends can fast-accept without repeating
+   the size probe. Page-log
    scan/replay/checkpoint validation now streams the full-page checksum for
    non-delta full, trailing-zero, sparse-zero, compact sparse, varint compact
    sparse, and fill-sparse records instead of reconstructing a full page just
@@ -5097,8 +5100,14 @@ subsystems that this mode needs:
   (`556202` versus `556208` before the slice), increased fast index deltas from
   `410` to `449`, dropped standalone-size probe calls from `91` to `51`,
   dropped size-probe time from `7.229 ms` to `1.157 ms`, and moved total
-  page-log append time from `49.012 ms` to `44.932 ms`. The
-  remaining write-throughput targets are native
+  page-log append time from `49.012 ms` to `44.932 ms`. A follow-up delta
+  standalone-estimate slice refreshes the process-local fast-decision
+  standalone-size estimate after exact fallback has computed the current size
+  and the delta append succeeds. Its reduced 500-row production attribution
+  sample kept page-log appends at `1506`, kept payload bytes flat (`556191`
+  versus `556202`), increased fast index deltas from `449` to `468`, dropped
+  exact index deltas from `32` to `13`, and dropped standalone-size probes from
+  `51` to `30`. The remaining write-throughput targets are native
   commit/page-publication, non-fast page-log encoding, the remaining
   history-proof proof volume, and broader redo/checkpoint recovery work. The visible-fast page-log append-batch slice
   narrows another measured overhead source by keeping the append session open

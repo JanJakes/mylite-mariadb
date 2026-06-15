@@ -777,7 +777,8 @@ void note_index_delta_base_after_successful_append(
     std::uint32_t page_size,
     std::uint64_t record_offset,
     std::uint64_t record_payload_size,
-    std::uint32_t record_flags
+    std::uint32_t record_flags,
+    std::uint64_t observed_standalone_payload_size
 );
 std::uint64_t index_delta_base_fingerprint(
     std::uint64_t log_device,
@@ -2355,6 +2356,7 @@ int append_record_at_locked(
     const void *record_page = page;
     thread_local std::vector<unsigned char> encoded_payload;
     encoded_payload.clear();
+    std::uint64_t observed_standalone_payload_size = 0U;
     try {
         const std::uint64_t stage_start_ns =
             page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
@@ -2420,6 +2422,7 @@ int append_record_at_locked(
                 page_log_append_perf_add(PAGE_LOG_APPEND_PERF_STANDALONE_SIZE_PROBE_CALLS, 1U);
                 const std::uint64_t probed_standalone_payload_size =
                     encoded_payload_size_for_page_probe(record_page, page_size);
+                observed_standalone_payload_size = probed_standalone_payload_size;
                 page_log_append_perf_add_elapsed(
                     PAGE_LOG_APPEND_PERF_STANDALONE_SIZE_PROBE_NS,
                     size_probe_start_ns
@@ -2570,7 +2573,8 @@ int append_record_at_locked(
         page_size,
         static_cast<std::uint64_t>(record_offset),
         encoded_payload_size,
-        record_flags
+        record_flags,
+        observed_standalone_payload_size
     );
     page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_DELTA_BASE_NOTE_NS, stage_start_ns);
     page_log_append_perf_add(
@@ -5317,7 +5321,8 @@ void note_index_delta_base_after_successful_append(
     std::uint32_t page_size,
     std::uint64_t record_offset,
     std::uint64_t record_payload_size,
-    std::uint32_t record_flags
+    std::uint32_t record_flags,
+    std::uint64_t observed_standalone_payload_size
 ) {
     std::uint32_t delta_flag = 0U;
     if (!page_delta_flag_for_page(space_id, page, page_size, &delta_flag)) {
@@ -5350,6 +5355,12 @@ void note_index_delta_base_after_successful_append(
                 slot.page_no == page_no && slot.page_size == page_size && slot.page != nullptr &&
                 slot.page->size() == page_size &&
                 slot.delta_records_since_base < std::numeric_limits<std::uint32_t>::max()) {
+                if (observed_standalone_payload_size != 0U) {
+                    slot.standalone_payload_size = observed_standalone_payload_size;
+                    if (slot.standalone_observations < std::numeric_limits<std::uint32_t>::max()) {
+                        ++slot.standalone_observations;
+                    }
+                }
                 ++slot.delta_records_since_base;
                 return;
             }

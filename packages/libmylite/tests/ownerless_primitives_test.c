@@ -263,6 +263,7 @@ static void test_page_log_encodes_index_delta_payloads(void);
 static void test_page_log_encodes_undo_delta_payloads(void);
 static void test_page_log_fast_encodes_small_index_delta_payloads(void);
 static void test_page_log_reuses_fast_miss_delta_payload_for_exact_fallback(void);
+static void test_page_log_refreshes_delta_standalone_size_estimate(void);
 static void test_page_log_refreshes_index_delta_base(void);
 static void test_page_log_skips_index_fill_sparse_without_fill_runs(void);
 static void test_page_log_falls_back_to_compact_sparse_zero_payloads(void);
@@ -464,6 +465,7 @@ int main(void) {
     test_page_log_encodes_undo_delta_payloads();
     test_page_log_fast_encodes_small_index_delta_payloads();
     test_page_log_reuses_fast_miss_delta_payload_for_exact_fallback();
+    test_page_log_refreshes_delta_standalone_size_estimate();
     test_page_log_refreshes_index_delta_base();
     test_page_log_skips_index_fill_sparse_without_fill_runs();
     test_page_log_falls_back_to_compact_sparse_zero_payloads();
@@ -3013,6 +3015,131 @@ static void test_page_log_reuses_fast_miss_delta_payload_for_exact_fallback(void
     assert(page_lsn == 940U);
     assert(commit_lsn == 940U);
     assert(memcmp(out_page, page_delta, sizeof(page_delta)) == 0);
+
+    assert(close(fd) == 0);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_refreshes_delta_standalone_size_estimate(void) {
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "index-delta-standalone-estimate-page-log.bin");
+    int fd = open_file(log_path);
+    uint8_t page_base[MYLITE_TEST_PAGE_SIZE * 2U];
+    uint8_t page_delta_one[MYLITE_TEST_PAGE_SIZE * 2U];
+    uint8_t page_delta_two[MYLITE_TEST_PAGE_SIZE * 2U];
+    uint8_t out_page[MYLITE_TEST_PAGE_SIZE * 2U];
+    uint64_t latest_record_offset = 0;
+    uint64_t page_lsn = 0;
+    uint64_t commit_lsn = 0;
+    uint32_t out_page_size = 0;
+    uint64_t stats[PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
+    uint32_t delta_flags = 0;
+
+    memset(page_base, 0, sizeof(page_base));
+    for (uint32_t offset = 96U; offset < 1120U; ++offset) {
+        page_base[offset] = (uint8_t)(0x31U + (offset & 0x7FU));
+    }
+    for (uint32_t offset = 4096U; offset < sizeof(page_base); ++offset) {
+        page_base[offset] = 0x6DU;
+    }
+    store_test_be32(page_base, MYLITE_TEST_INNODB_PAGE_OFFSET_OFFSET, 46U);
+    store_test_be64(page_base, MYLITE_TEST_INNODB_PAGE_LSN_OFFSET, 950U);
+    store_test_be16(
+        page_base,
+        MYLITE_TEST_INNODB_PAGE_TYPE_OFFSET,
+        MYLITE_TEST_INNODB_PAGE_TYPE_INDEX
+    );
+    store_test_be32(page_base, MYLITE_TEST_INNODB_PAGE_SPACE_ID_OFFSET, 74U);
+
+    memcpy(page_delta_one, page_base, sizeof(page_delta_one));
+    store_test_be64(page_delta_one, MYLITE_TEST_INNODB_PAGE_LSN_OFFSET, 960U);
+    for (uint32_t offset = 4608U; offset < 5208U; ++offset) {
+        page_delta_one[offset] = (uint8_t)(0x10U + (offset & 0x3FU));
+    }
+
+    memcpy(page_delta_two, page_delta_one, sizeof(page_delta_two));
+    store_test_be64(page_delta_two, MYLITE_TEST_INNODB_PAGE_LSN_OFFSET, 970U);
+    for (uint32_t offset = 5400U; offset < 5416U; ++offset) {
+        page_delta_two[offset] = (uint8_t)(0x90U ^ (offset & 0x1FU));
+    }
+    memset(out_page, 0xEE, sizeof(out_page));
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            74U,
+            46U,
+            950U,
+            950U,
+            page_base,
+            sizeof(page_base),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+
+    mylite_ownerless_page_log_reset_append_perf_stats();
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            74U,
+            46U,
+            960U,
+            960U,
+            page_delta_one,
+            sizeof(page_delta_one),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            74U,
+            46U,
+            970U,
+            970U,
+            page_delta_two,
+            sizeof(page_delta_two),
+            &latest_record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(0);
+    mylite_ownerless_page_log_read_append_perf_stats(stats, PAGE_LOG_APPEND_PERF_STAT_COUNT);
+
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_CALLS] == 2U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_RECORDS] == 2U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_RECORDS] == 2U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_EXACT_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_FAST_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_DELTA_FAST_REJECTED_STANDALONE_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_DELTA_FAST_REJECTED_LIMIT_RECORDS] == 0U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_REUSED_FAST_PAYLOAD_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_STANDALONE_SIZE_PROBE_CALLS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_STANDALONE_MATERIALIZE_SKIPPED_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_REJECTED_STANDALONE_RECORDS] == 0U);
+    delta_flags = read_page_log_record_flags(fd, latest_record_offset);
+    assert((delta_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_INDEX_DELTA) != 0U);
+
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            74U,
+            46U,
+            970U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page_delta_two));
+    assert(page_lsn == 970U);
+    assert(commit_lsn == 970U);
+    assert(memcmp(out_page, page_delta_two, sizeof(page_delta_two)) == 0);
 
     assert(close(fd) == 0);
     free(log_path);
