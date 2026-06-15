@@ -143,7 +143,14 @@ external release policy checks when the current MTR has no ownerless
 page-write pages left to release. In the CI-shaped stats-enabled bulk probe,
 this reduced ownerless bulk `page_write_leave_total_ms` from `3.892` to
 `0.551`, kept bulk commit visibility on the fast path with zero publish
-failures, and preserved native latch/memo release ordering.
+failures, and preserved native latch/memo release ordering. The no-new-dirty
+commit-log path also skips page-publish batch setup when the mini-transaction
+has no persistent modifications and skips page-write release checks when it
+never acquired ownerless page-write state; a 200-row stats-enabled production
+sample reduced ownerless autocommit `page_write_commit_log_no_dirty_loop_ms`
+from `21.428` to `15.488`, `page_write_commit_log_publish_ms` from `30.745`
+to `23.641`, and commit-MTR publish attribution from `0.154` to
+`0.118 ms/insert`.
 Ownerless page-version publication now skips synthesized snapshot-boundary
 probes for native-support page classes and returns before the page-pin registry
 latch when no active pins exist; normal page-version publication, history-proof

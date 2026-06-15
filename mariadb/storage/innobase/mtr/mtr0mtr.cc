@@ -3275,7 +3275,11 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
 
     phase_start_ns= ownerless_perf ? ownerless_page_write_perf_now_ns() : 0;
     const bool ownerless_hooks= mtr->ownerless_hooks_enabled();
-    if (UNIV_UNLIKELY(ownerless_hooks))
+    const bool ownerless_page_publish= ownerless_hooks && mtr->m_modifications;
+    const bool ownerless_page_leave=
+      ownerless_hooks && mtr->m_ownerless_page_write_mtr_pages != nullptr &&
+      !mtr->m_ownerless_page_write_mtr_pages->empty();
+    if (UNIV_UNLIKELY(ownerless_page_publish))
       mylite_ownerless_innodb_begin_page_publish_batch();
     for (auto it= mtr->m_memo.rbegin(); it != mtr->m_memo.rend(); )
     {
@@ -3315,7 +3319,7 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
           if (UNIV_LIKELY_NULL(bpage->zip.data))
             memcpy_aligned<8>(FIL_PAGE_LSN + bpage->zip.data,
                               FIL_PAGE_LSN + bpage->frame, 8);
-          if (UNIV_UNLIKELY(ownerless_hooks))
+          if (UNIV_UNLIKELY(ownerless_page_publish))
           {
             const uint64_t publish_start_ns= ownerless_perf ?
                 ownerless_page_write_perf_now_ns() :
@@ -3340,7 +3344,7 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
           continue;
         case MTR_MEMO_PAGE_SX_FIX:
         case MTR_MEMO_PAGE_X_FIX:
-          if (UNIV_UNLIKELY(ownerless_hooks))
+          if (UNIV_UNLIKELY(ownerless_page_leave))
             mtr->ownerless_page_write_leave(slot);
           bpage->lock.u_or_x_unlock(latch == MTR_MEMO_PAGE_SX_FIX);
           continue;
@@ -3349,7 +3353,7 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
         }
       }
     }
-    if (UNIV_UNLIKELY(ownerless_hooks))
+    if (UNIV_UNLIKELY(ownerless_page_publish))
       mylite_ownerless_innodb_end_page_publish_batch();
 
     buf_pool.add_flush_list_requests(modified);
