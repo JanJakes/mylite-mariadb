@@ -2400,7 +2400,7 @@ bool ownerless_prepared_write_defers_native_prepare(
 bool count_sql_parameter_markers(std::string_view sql, std::size_t *out_count);
 bool sql_contains_identifier_token(std::string_view sql, const char *keyword);
 bool ownerless_insert_values_statement_allows_visible_fast_path(const SqlPolicyTokens &tokens);
-bool ownerless_insert_values_statement_allows_append_batch_fast_path(const SqlPolicyTokens &tokens);
+bool ownerless_insert_values_allows_append_batch_fast_path(const SqlPolicyTokens &tokens);
 bool ownerless_statement_allows_visible_fast_path(mylite_db &db, const SqlPolicyTokens &tokens);
 bool ownerless_statement_allows_append_batch_fast_path(
     mylite_db &db,
@@ -4921,9 +4921,7 @@ bool ownerless_insert_values_statement_allows_visible_fast_path(const SqlPolicyT
     return ownerless_insert_values_statement_row_count(tokens, &row_count) && row_count != 0U;
 }
 
-bool ownerless_insert_values_statement_allows_append_batch_fast_path(
-    const SqlPolicyTokens &tokens
-) {
+bool ownerless_insert_values_allows_append_batch_fast_path(const SqlPolicyTokens &tokens) {
     std::size_t row_count = 0U;
     return ownerless_insert_values_statement_row_count(tokens, &row_count) && row_count == 1U;
 }
@@ -4937,7 +4935,7 @@ bool ownerless_statement_allows_append_batch_fast_path(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 ) {
-    return ownerless_insert_values_statement_allows_append_batch_fast_path(tokens) &&
+    return ownerless_insert_values_allows_append_batch_fast_path(tokens) &&
            !ownerless_insert_target_has_foreign_keys(db, tokens);
 }
 
@@ -10613,16 +10611,15 @@ int collect_ownerless_native_page_checkpoint_record(
         )) {
         return MYLITE_OWNERLESS_PAGE_LOG_OK;
     }
-    proof->records.push_back(
-        OwnerlessNativePageCheckpointRecord{
-            space_id,
-            page_no,
-            page_lsn,
-            commit_lsn,
-            record_offset,
-            is_external_snapshot_lineage != 0
-        }
-    );
+    OwnerlessNativePageCheckpointRecord record{
+        space_id,
+        page_no,
+        page_lsn,
+        commit_lsn,
+        record_offset,
+        is_external_snapshot_lineage != 0
+    };
+    proof->records.push_back(record);
     return MYLITE_OWNERLESS_PAGE_LOG_OK;
 }
 
