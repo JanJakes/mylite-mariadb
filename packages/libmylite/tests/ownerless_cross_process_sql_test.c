@@ -74675,13 +74675,8 @@ static void dump_ownerless_sql_timeout_process(pid_t process_id) {
         if (path_length > 0 && (size_t)path_length < sizeof(path)) {
             dump_ownerless_sql_timeout_file("task-status", path);
         }
-        path_length = snprintf(
-            path,
-            sizeof(path),
-            "/proc/%ld/task/%s/stat",
-            (long)process_id,
-            entry->d_name
-        );
+        path_length =
+            snprintf(path, sizeof(path), "/proc/%ld/task/%s/stat", (long)process_id, entry->d_name);
         if (path_length > 0 && (size_t)path_length < sizeof(path)) {
             dump_ownerless_sql_timeout_file("task-stat", path);
         }

@@ -90,7 +90,9 @@ constexpr std::uint32_t k_record_flags_known_mask =
 constexpr unsigned char k_fill_sparse_run_kind_raw = 0U;
 constexpr unsigned char k_fill_sparse_run_kind_fill = 1U;
 constexpr std::uint32_t k_fill_sparse_min_fill_run_size = 8U;
+#if MYLITE_WITH_MARIADB_EMBEDDED
 constexpr std::uint32_t k_page_checksum_second_seed = 0xa5a5a5a5U;
+#endif
 constexpr std::uint64_t k_legacy_checksum_offset_basis = 1469598103934665603ULL;
 constexpr std::uint64_t k_legacy_checksum_prime = 1099511628211ULL;
 constexpr std::size_t k_checksum_stream_chunk_size = 4096U;
