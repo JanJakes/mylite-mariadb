@@ -2411,6 +2411,9 @@ int append_record_at_locked(
             PageDeltaEncodeDecision exact_delta_decision = PageDeltaEncodeDecision::Ineligible;
             std::uint64_t exact_delta_payload_size = 0U;
             bool exact_page_delta_encoded = false;
+            const bool exact_delta_build_failed =
+                has_page_delta_snapshot &&
+                fast_delta_decision == PageDeltaEncodeDecision::BuildFailed;
             if (has_page_delta_snapshot && !rejected_delta_payload.empty()) {
                 const std::uint64_t size_probe_start_ns =
                     page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
@@ -2451,10 +2454,7 @@ int append_record_at_locked(
                     exact_delta_decision = PageDeltaEncodeDecision::Standalone;
                     rejected_delta_payload.clear();
                 }
-            } else if (
-                has_page_delta_snapshot &&
-                fast_delta_decision == PageDeltaEncodeDecision::BuildFailed
-            ) {
+            } else if (exact_delta_build_failed) {
                 exact_delta_decision = PageDeltaEncodeDecision::BuildFailed;
             }
             substage_start_ns =
