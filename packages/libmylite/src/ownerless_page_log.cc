@@ -335,6 +335,7 @@ enum PageLogSyncPerfStatIndex : std::size_t {
 };
 
 std::atomic<bool> page_log_append_perf_stats_enabled{false};
+std::atomic<bool> page_log_append_detail_perf_stats_enabled{false};
 std::atomic<std::uint64_t> page_log_append_perf_stats[PAGE_LOG_APPEND_PERF_STAT_COUNT];
 std::atomic<bool> page_log_scan_perf_stats_enabled{false};
 std::atomic<std::uint64_t> page_log_scan_perf_stats[PAGE_LOG_SCAN_PERF_STAT_COUNT];
@@ -347,6 +348,11 @@ std::array<IndexPageDeltaBaseSlot, k_index_delta_base_slot_count> index_page_del
 
 bool page_log_append_perf_stats_are_enabled() {
     return page_log_append_perf_stats_enabled.load(std::memory_order_relaxed);
+}
+
+bool page_log_append_detail_perf_stats_are_enabled() {
+    return page_log_append_perf_stats_are_enabled() &&
+           page_log_append_detail_perf_stats_enabled.load(std::memory_order_relaxed);
 }
 
 bool page_log_scan_perf_stats_are_enabled() {
@@ -965,7 +971,13 @@ void store64(unsigned char *bytes, std::size_t offset, std::uint64_t value);
 } // namespace
 
 extern "C" void mylite_ownerless_page_log_set_append_perf_stats_enabled(int enabled) {
-    page_log_append_perf_stats_enabled.store(enabled != 0, std::memory_order_relaxed);
+    const bool is_enabled = enabled != 0;
+    page_log_append_perf_stats_enabled.store(is_enabled, std::memory_order_relaxed);
+    page_log_append_detail_perf_stats_enabled.store(is_enabled, std::memory_order_relaxed);
+}
+
+extern "C" void mylite_ownerless_page_log_set_append_detail_perf_stats_enabled(int enabled) {
+    page_log_append_detail_perf_stats_enabled.store(enabled != 0, std::memory_order_relaxed);
 }
 
 extern "C" void mylite_ownerless_page_log_reset_append_perf_stats(void) {
@@ -2519,16 +2531,18 @@ int append_record_at_locked(
     const CompactSparsePayloadComposition compact_sparse =
         record_append_payload_encoding_stats(record_flags, encoded_payload_size, encoded_payload);
     page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_PAYLOAD_STATS_NS, stage_start_ns);
-    stage_start_ns = page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
-    record_append_page_type_stats(
-        space_id,
-        page_no,
-        record_page,
-        page_size,
-        encoded_payload_size,
-        compact_sparse
-    );
-    page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_PAGE_TYPE_STATS_NS, stage_start_ns);
+    if (page_log_append_detail_perf_stats_are_enabled()) {
+        stage_start_ns = page_log_append_perf_now_ns();
+        record_append_page_type_stats(
+            space_id,
+            page_no,
+            record_page,
+            page_size,
+            encoded_payload_size,
+            compact_sparse
+        );
+        page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_PAGE_TYPE_STATS_NS, stage_start_ns);
+    }
     if (!offset_adds(payload_offset, encoded_payload_size, &end_offset)) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
@@ -4824,7 +4838,7 @@ void record_append_page_type_stats(
     std::uint64_t payload_size,
     const CompactSparsePayloadComposition &compact_sparse
 ) {
-    if (!page_log_append_perf_stats_are_enabled()) {
+    if (!page_log_append_detail_perf_stats_are_enabled()) {
         return;
     }
 

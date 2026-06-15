@@ -231,6 +231,7 @@ enum page_log_sync_perf_stat_index {
 };
 
 void mylite_ownerless_page_log_set_append_perf_stats_enabled(int enabled);
+void mylite_ownerless_page_log_set_append_detail_perf_stats_enabled(int enabled);
 void mylite_ownerless_page_log_reset_append_perf_stats(void);
 void mylite_ownerless_page_log_read_append_perf_stats(uint64_t *out_values, size_t value_count);
 void mylite_ownerless_page_log_set_scan_perf_stats_enabled(int enabled);
@@ -253,6 +254,7 @@ static void test_directory_probe_records_required_primitives(void);
 static void test_page_log_reads_latest_visible_page(void);
 static void test_page_log_uses_payload_offset(void);
 static void test_page_log_append_reports_write_volume(void);
+static void test_page_log_append_detail_stats_are_opt_in(void);
 static void test_page_log_encodes_sparse_zero_payloads(void);
 static void test_page_log_encodes_fill_sparse_zero_payloads(void);
 static void test_page_log_streams_sparse_checksum_validation(void);
@@ -455,6 +457,7 @@ int main(void) {
     test_page_log_reads_latest_visible_page();
     test_page_log_uses_payload_offset();
     test_page_log_append_reports_write_volume();
+    test_page_log_append_detail_stats_are_opt_in();
     test_page_log_encodes_sparse_zero_payloads();
     test_page_log_encodes_fill_sparse_zero_payloads();
     test_page_log_streams_sparse_checksum_validation();
@@ -1272,6 +1275,53 @@ static void test_page_log_append_reports_write_volume(void) {
     assert(
         stats[PAGE_LOG_APPEND_PERF_STAT_OTHER_PAYLOAD_BYTES] == sizeof(page_v1) + sizeof(page_v2)
     );
+
+    assert(close(fd) == 0);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_append_detail_stats_are_opt_in(void) {
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "append-detail-stats-page-log.bin");
+    int fd = open_file(log_path);
+    uint8_t page[MYLITE_TEST_PAGE_SIZE];
+    uint64_t stats[PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
+
+    fill_innodb_test_page(page, 15U, 1U, 100U, 0x3AU);
+    store_test_be16(page, MYLITE_TEST_INNODB_PAGE_TYPE_OFFSET, MYLITE_TEST_INNODB_PAGE_TYPE_INDEX);
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    mylite_ownerless_page_log_reset_append_perf_stats();
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
+    mylite_ownerless_page_log_set_append_detail_perf_stats_enabled(0);
+    assert(
+        mylite_ownerless_page_log_append(fd, 15U, 1U, 100U, 100U, page, sizeof(page), NULL) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    mylite_ownerless_page_log_read_append_perf_stats(stats, PAGE_LOG_APPEND_PERF_STAT_COUNT);
+
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_CALLS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_BYTES] > 0U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_RECORDS] == 0U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_PAYLOAD_BYTES] == 0U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_OTHER_RECORDS] == 0U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_PAGE_TYPE_STATS_NS] == 0U);
+
+    mylite_ownerless_page_log_set_append_detail_perf_stats_enabled(1);
+    store_test_be64(page, MYLITE_TEST_INNODB_PAGE_LSN_OFFSET, 120U);
+    assert(
+        mylite_ownerless_page_log_append(fd, 15U, 1U, 120U, 120U, page, sizeof(page), NULL) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(0);
+    mylite_ownerless_page_log_read_append_perf_stats(stats, PAGE_LOG_APPEND_PERF_STAT_COUNT);
+
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_CALLS] == 2U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_PAYLOAD_BYTES] > 0U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_OTHER_RECORDS] == 0U);
 
     assert(close(fd) == 0);
     free(log_path);

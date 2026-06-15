@@ -731,6 +731,7 @@ void mylite_ownerless_database_set_perf_stats_enabled(int enabled);
 void mylite_ownerless_database_reset_perf_stats(void);
 void mylite_ownerless_database_read_perf_stats(uint64_t *out_values, size_t value_count);
 void mylite_ownerless_page_log_set_append_perf_stats_enabled(int enabled);
+void mylite_ownerless_page_log_set_append_detail_perf_stats_enabled(int enabled);
 void mylite_ownerless_page_log_reset_append_perf_stats(void);
 void mylite_ownerless_page_log_read_append_perf_stats(uint64_t *out_values, size_t value_count);
 void mylite_ownerless_page_log_set_scan_perf_stats_enabled(int enabled);
@@ -877,6 +878,7 @@ int main(void) {
     );
     unsigned bulk_insert_statements;
     const int page_publish_stats = env_flag("MYLITE_PERF_OWNERLESS_PAGE_PUBLISH_STATS");
+    const int page_log_detail_stats = env_flag("MYLITE_PERF_OWNERLESS_PAGE_LOG_DETAIL_STATS");
     const unsigned ordinary_flags = MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE;
     const unsigned ownerless_flags =
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE | MYLITE_OPEN_OWNERLESS_RW;
@@ -918,6 +920,7 @@ int main(void) {
     printf("mylite_perf_bulk_insert_statements=%u\n", bulk_insert_statements);
     printf("mylite_perf_durability=%s\n", durability_name(durability));
     printf("mylite_perf_ownerless_page_publish_stats=%d\n", page_publish_stats);
+    printf("mylite_perf_ownerless_page_log_detail_stats=%d\n", page_log_detail_stats);
     printf("mylite_perf_database_path=%s\n", paths.database_path);
 
     start_ns = monotonic_ns();
@@ -1081,6 +1084,7 @@ int main(void) {
         mylite_ownerless_innodb_set_commit_visibility_stats_enabled(1);
         mylite_ownerless_database_set_perf_stats_enabled(1);
         mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
+        mylite_ownerless_page_log_set_append_detail_perf_stats_enabled(page_log_detail_stats);
         mylite_ownerless_page_log_set_scan_perf_stats_enabled(1);
         mylite_ownerless_page_log_set_sync_perf_stats_enabled(1);
         mylite_ownerless_sql_handler_set_perf_stats_enabled(1);
@@ -1177,6 +1181,7 @@ int main(void) {
         mylite_ownerless_innodb_set_page_write_refresh_stats_enabled(0);
         mylite_ownerless_innodb_set_commit_visibility_stats_enabled(0);
         mylite_ownerless_database_set_perf_stats_enabled(0);
+        mylite_ownerless_page_log_set_append_detail_perf_stats_enabled(0);
         mylite_ownerless_page_log_set_append_perf_stats_enabled(0);
         mylite_ownerless_page_log_set_scan_perf_stats_enabled(0);
         mylite_ownerless_page_log_set_sync_perf_stats_enabled(0);

@@ -573,10 +573,19 @@ correctness-sensitive batching or deferral is attempted. Clean page-log syncs
 may now be elided only when the current WAL file size and page-log header
 generation match a process-local already-synced anchor; WAL-growth commits
 still take the normal durability path. A bounded local
-stats-enabled sample after adding that split reported page-visible hook cost at
-`0.012 ms` per ownerless autocommit insert, while the broader checkpoint update
-primitive ran four times per insert with `0.137 ms` total, mostly current-LSN
-read time, and native clustered/undo mini-transaction deltas remained larger;
+production attribution sample then showed that detailed page-log page-type
+classification alone can dominate stats-enabled append timing; the embedded
+performance probe now defaults that detail work off and prints
+`mylite_perf_ownerless_page_log_detail_stats=0`, while
+`MYLITE_PERF_OWNERLESS_PAGE_LOG_DETAIL_STATS=1` restores page-class and
+index-identity buckets for byte-composition investigations. This is a
+diagnostics overhead split only: stats-off production behavior, page-log
+records, page-log sync, recovery, and checkpoint rules are unchanged.
+A later bounded local stats-enabled sample after adding the visible-anchor
+split reported page-visible hook cost at `0.012 ms` per ownerless autocommit
+insert, while the broader checkpoint update primitive ran four times per
+insert with `0.137 ms` total, mostly current-LSN read time, and native
+clustered/undo mini-transaction deltas remained larger;
 the write-history handoff
 now waits natively only for the
 rollback-segment tablespace through the history MTR LSN while leaving broader

@@ -5138,7 +5138,14 @@ subsystems that this mode needs:
   into delta-base snapshot lookup, delta encoding, standalone encoding,
   payload stats bookkeeping, page-type stats bookkeeping, and delta-base
   note-update counters so future work can distinguish stats-only profiling cost
-  from runtime page-log append work. Reduced 50-row stats-enabled probes after
+  from runtime page-log append work. The embedded performance probe now keeps
+  append timing, append byte, and payload-format counters enabled while making
+  detailed page-type and index-identity attribution opt-in through
+  `MYLITE_PERF_OWNERLESS_PAGE_LOG_DETAIL_STATS=1`; the default
+  stats-attribution mode prints
+  `mylite_perf_ownerless_page_log_detail_stats=0` so CI timings are not
+  dominated by the classifier used only for byte-composition investigations.
+  Reduced 50-row stats-enabled probes after
   that split showed both standalone encoding and delta-base note update can be
   visible inside the previous aggregate append total, with small-sample ranking
   too noisy to pick a WAL-semantic change without a larger run. The
