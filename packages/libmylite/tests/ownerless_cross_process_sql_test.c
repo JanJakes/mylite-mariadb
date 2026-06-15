@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <ftw.h>
+#include <limits.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -575,6 +576,15 @@ static void run_all_ownerless_sql_tests(void);
 static void run_ownerless_sql_test_shard(size_t shard_index, size_t shard_count);
 static void run_ownerless_sql_weighted_shard(size_t shard_index, size_t shard_count);
 static void run_ownerless_sql_test_case(size_t test_case_index);
+static void dump_ownerless_sql_timeout_process_state(
+    size_t test_case_index,
+    const char *test_case_name,
+    pid_t child
+);
+static void dump_ownerless_sql_timeout_process(pid_t process_id);
+static void dump_ownerless_sql_timeout_file(const char *label, const char *path);
+static int ownerless_timeout_dirent_is_numeric(const struct dirent *entry);
+static int read_ownerless_timeout_process_group(pid_t process_id, long *out_process_group);
 static unsigned estimate_ownerless_sql_test_case_weight(const char *name);
 static void assign_ownerless_sql_weighted_shards(
     size_t shard_count,
@@ -5529,6 +5539,7 @@ static void run_ownerless_sql_test_case(size_t test_case_index) {
             MYLITE_TEST_OWNERLESS_SQL_CASE_TIMEOUT_MS / 1000U
         );
         fflush(stderr);
+        dump_ownerless_sql_timeout_process_state(test_case_index, test_case->name, child);
         if (kill(-child, SIGKILL) != 0 && errno != ESRCH) {
             fprintf(
                 stderr,
@@ -74517,6 +74528,273 @@ static int wait_for_child_with_timeout(pid_t child, unsigned timeout_ms, int *ou
             sleep_microseconds(sleep_us);
         }
     }
+}
+
+static void dump_ownerless_sql_timeout_process_state(
+    size_t test_case_index,
+    const char *test_case_name,
+    pid_t child
+) {
+    DIR *proc_dir;
+    struct dirent *entry;
+    long child_process_group = -1;
+    unsigned dumped_count = 0U;
+
+    fprintf(
+        stderr,
+        "ownerless-sql timeout process-state begin index=%zu name=%s pid=%ld\n",
+        test_case_index,
+        test_case_name,
+        (long)child
+    );
+    if (read_ownerless_timeout_process_group(child, &child_process_group) != 0) {
+        fprintf(
+            stderr,
+            "ownerless-sql timeout process-group unavailable pid=%ld errno=%d\n",
+            (long)child,
+            errno
+        );
+        dump_ownerless_sql_timeout_process(child);
+        fprintf(
+            stderr,
+            "ownerless-sql timeout process-state end index=%zu name=%s dumped=%u\n",
+            test_case_index,
+            test_case_name,
+            1U
+        );
+        fflush(stderr);
+        return;
+    }
+    proc_dir = opendir("/proc");
+    if (proc_dir == NULL) {
+        fprintf(stderr, "ownerless-sql timeout proc unavailable errno=%d\n", errno);
+        dump_ownerless_sql_timeout_process(child);
+        fprintf(
+            stderr,
+            "ownerless-sql timeout process-state end index=%zu name=%s dumped=%u\n",
+            test_case_index,
+            test_case_name,
+            1U
+        );
+        fflush(stderr);
+        return;
+    }
+    while ((entry = readdir(proc_dir)) != NULL) {
+        char *end = NULL;
+        long process_id;
+        long process_group = -1;
+
+        if (!ownerless_timeout_dirent_is_numeric(entry)) {
+            continue;
+        }
+        errno = 0;
+        process_id = strtol(entry->d_name, &end, 10);
+        if (errno != 0 || end == entry->d_name || *end != '\0' || process_id <= 0) {
+            continue;
+        }
+        if (read_ownerless_timeout_process_group((pid_t)process_id, &process_group) != 0) {
+            continue;
+        }
+        if (process_group != child_process_group) {
+            continue;
+        }
+        dump_ownerless_sql_timeout_process((pid_t)process_id);
+        ++dumped_count;
+    }
+    closedir(proc_dir);
+    if (dumped_count == 0U) {
+        dump_ownerless_sql_timeout_process(child);
+        dumped_count = 1U;
+    }
+    fprintf(
+        stderr,
+        "ownerless-sql timeout process-state end index=%zu name=%s dumped=%u\n",
+        test_case_index,
+        test_case_name,
+        dumped_count
+    );
+    fflush(stderr);
+}
+
+static void dump_ownerless_sql_timeout_process(pid_t process_id) {
+    char path[PATH_MAX];
+    DIR *task_dir;
+    struct dirent *entry;
+    int path_length;
+
+    fprintf(stderr, "ownerless-sql timeout process pid=%ld\n", (long)process_id);
+    path_length = snprintf(path, sizeof(path), "/proc/%ld/cmdline", (long)process_id);
+    if (path_length > 0 && (size_t)path_length < sizeof(path)) {
+        dump_ownerless_sql_timeout_file("process-cmdline", path);
+    }
+    path_length = snprintf(path, sizeof(path), "/proc/%ld/status", (long)process_id);
+    if (path_length > 0 && (size_t)path_length < sizeof(path)) {
+        dump_ownerless_sql_timeout_file("process-status", path);
+    }
+    path_length = snprintf(path, sizeof(path), "/proc/%ld/stat", (long)process_id);
+    if (path_length > 0 && (size_t)path_length < sizeof(path)) {
+        dump_ownerless_sql_timeout_file("process-stat", path);
+    }
+    path_length = snprintf(path, sizeof(path), "/proc/%ld/wchan", (long)process_id);
+    if (path_length > 0 && (size_t)path_length < sizeof(path)) {
+        dump_ownerless_sql_timeout_file("process-wchan", path);
+    }
+    path_length = snprintf(path, sizeof(path), "/proc/%ld/task", (long)process_id);
+    if (path_length <= 0 || (size_t)path_length >= sizeof(path)) {
+        fprintf(stderr, "ownerless-sql timeout task path truncated pid=%ld\n", (long)process_id);
+        return;
+    }
+    task_dir = opendir(path);
+    if (task_dir == NULL) {
+        fprintf(
+            stderr,
+            "ownerless-sql timeout process-task-dir unavailable pid=%ld path=%s errno=%d\n",
+            (long)process_id,
+            path,
+            errno
+        );
+        return;
+    }
+    while ((entry = readdir(task_dir)) != NULL) {
+        if (!ownerless_timeout_dirent_is_numeric(entry)) {
+            continue;
+        }
+        fprintf(
+            stderr,
+            "ownerless-sql timeout process pid=%ld task tid=%s\n",
+            (long)process_id,
+            entry->d_name
+        );
+        path_length = snprintf(
+            path,
+            sizeof(path),
+            "/proc/%ld/task/%s/status",
+            (long)process_id,
+            entry->d_name
+        );
+        if (path_length > 0 && (size_t)path_length < sizeof(path)) {
+            dump_ownerless_sql_timeout_file("task-status", path);
+        }
+        path_length = snprintf(
+            path,
+            sizeof(path),
+            "/proc/%ld/task/%s/stat",
+            (long)process_id,
+            entry->d_name
+        );
+        if (path_length > 0 && (size_t)path_length < sizeof(path)) {
+            dump_ownerless_sql_timeout_file("task-stat", path);
+        }
+        path_length = snprintf(
+            path,
+            sizeof(path),
+            "/proc/%ld/task/%s/wchan",
+            (long)process_id,
+            entry->d_name
+        );
+        if (path_length > 0 && (size_t)path_length < sizeof(path)) {
+            dump_ownerless_sql_timeout_file("task-wchan", path);
+        }
+    }
+    closedir(task_dir);
+}
+
+static void dump_ownerless_sql_timeout_file(const char *label, const char *path) {
+    FILE *file;
+    char buffer[512];
+    int last_byte_was_newline = 1;
+
+    file = fopen(path, "rb");
+    if (file == NULL) {
+        fprintf(
+            stderr,
+            "ownerless-sql timeout %s unavailable path=%s errno=%d\n",
+            label,
+            path,
+            errno
+        );
+        return;
+    }
+    fprintf(stderr, "ownerless-sql timeout %s begin path=%s\n", label, path);
+    while (1) {
+        size_t bytes = fread(buffer, 1U, sizeof(buffer), file);
+
+        if (bytes == 0U) {
+            break;
+        }
+        for (size_t offset = 0U; offset < bytes; ++offset) {
+            if (buffer[offset] == '\0') {
+                buffer[offset] = ' ';
+            }
+        }
+        last_byte_was_newline = buffer[bytes - 1U] == '\n';
+        fwrite(buffer, 1U, bytes, stderr);
+    }
+    if (ferror(file)) {
+        fprintf(stderr, "\nownerless-sql timeout %s read-error errno=%d\n", label, errno);
+    } else if (!last_byte_was_newline) {
+        fputc('\n', stderr);
+    }
+    fprintf(stderr, "ownerless-sql timeout %s end path=%s\n", label, path);
+    fclose(file);
+}
+
+static int ownerless_timeout_dirent_is_numeric(const struct dirent *entry) {
+    const char *cursor;
+
+    assert(entry != NULL);
+    cursor = entry->d_name;
+    if (*cursor == '\0') {
+        return 0;
+    }
+    while (*cursor != '\0') {
+        if (*cursor < '0' || *cursor > '9') {
+            return 0;
+        }
+        ++cursor;
+    }
+    return 1;
+}
+
+static int read_ownerless_timeout_process_group(pid_t process_id, long *out_process_group) {
+    char path[PATH_MAX];
+    char buffer[512];
+    FILE *file;
+    size_t bytes;
+    char *close_paren;
+    char state = '\0';
+    long parent_process = -1;
+    long process_group = -1;
+    int path_length;
+
+    assert(out_process_group != NULL);
+    path_length = snprintf(path, sizeof(path), "/proc/%ld/stat", (long)process_id);
+    if (path_length <= 0 || (size_t)path_length >= sizeof(path)) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    file = fopen(path, "rb");
+    if (file == NULL) {
+        return -1;
+    }
+    bytes = fread(buffer, 1U, sizeof(buffer) - 1U, file);
+    if (ferror(file)) {
+        int read_errno = errno;
+
+        fclose(file);
+        errno = read_errno;
+        return -1;
+    }
+    fclose(file);
+    buffer[bytes] = '\0';
+    close_paren = strrchr(buffer, ')');
+    if (close_paren == NULL || close_paren[1] != ' ' ||
+        sscanf(close_paren + 2, "%c %ld %ld", &state, &parent_process, &process_group) != 3) {
+        errno = EINVAL;
+        return -1;
+    }
+    *out_process_group = process_group;
+    return 0;
 }
 
 static void report_child_status(const char *label, unsigned index, pid_t child, int child_status) {
