@@ -161,6 +161,11 @@ exists. The legacy payload is still initialized for empty-record fallback,
 generation records remain the authoritative recovery source, durable sync
 ordering is unchanged, and performance summaries expose the
 `checkpoint_update_legacy_write_elided` counter.
+Ownerless page-log attribution summaries now also include append lock, fstat,
+header/body setup, checksum, payload write, and record-header write time per
+autocommit insert. These rows promote existing detailed counters so CI can
+separate WAL encoding cost from positioned-write cost without changing page-log
+record format or payload-before-header crash ordering.
 The WordPress `perf-probe` now also compares process startup plus explicit
 `mysqli_close()` against process startup plus implicit PHP object-free close
 for a live mysqli link. Both paths intentionally continue through

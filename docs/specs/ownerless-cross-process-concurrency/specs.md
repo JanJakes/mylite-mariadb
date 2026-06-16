@@ -5237,6 +5237,11 @@ subsystems that this mode needs:
   checksum-protected LSN records are initialized, exposing a
   `checkpoint_update_legacy_write_elided` counter while preserving durable sync
   ordering and fail-closed torn-record recovery.
+  The page-log write summary slice promoted existing append lock, fstat,
+  header/body setup, checksum, payload write, and record-header write counters
+  into compact CI-facing summaries. It does not change page-log write order;
+  payloads still reach disk before record headers so crash recovery cannot see
+  a valid header for a missing payload.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.

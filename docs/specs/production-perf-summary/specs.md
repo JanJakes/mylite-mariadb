@@ -791,6 +791,9 @@ values are timing smoke evidence, not a replacement for CI-sized samples.
 - Ownerless checkpoint update summaries include
   `checkpoint_update_legacy_write_elided_per_insert`, distinguishing legacy
   payload write removal from same-pair no-op elision and file-read elision.
+- Ownerless page-log append summaries include append lock/fstat/header/body
+  setup, checksum, payload write, and record-header write rows so CI can
+  distinguish WAL encoding cost from positioned-write cost.
 - CI rejects non-Release CMake caches before CMake-backed test or timing
   phases run.
 - Timer-driven ownerless checkpoint scheduling remains an idle-runtime cleanup

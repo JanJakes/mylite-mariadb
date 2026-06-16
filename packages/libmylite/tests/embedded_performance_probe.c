@@ -3247,6 +3247,26 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         insert_iterations
     );
     emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_lock_ms_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_LOCK_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_fstat_ms_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_FSTAT_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_header_ms_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_HEADER_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_body_ms_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_BODY_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_page_log_delta_snapshot_ms_per_insert",
         page_log_append[PAGE_LOG_APPEND_PERF_STAT_DELTA_SNAPSHOT_NS],
         insert_iterations
@@ -3279,6 +3299,21 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
     emit_summary_ms_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_page_log_delta_base_note_ms_per_insert",
         page_log_append[PAGE_LOG_APPEND_PERF_STAT_DELTA_BASE_NOTE_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_checksum_ms_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_CHECKSUM_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_payload_write_ms_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_WRITE_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_record_header_write_ms_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_WRITE_NS],
         insert_iterations
     );
     emit_summary_count_per_iteration(
