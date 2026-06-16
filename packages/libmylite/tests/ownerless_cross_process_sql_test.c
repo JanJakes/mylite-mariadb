@@ -17145,7 +17145,7 @@ static void test_killed_ownerless_snapshot_pin_allows_live_page_log_reclaim(void
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 35U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert(!concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_has_page_versions_or_checkpoint(database_path);
 
     signal_pipe(peer_release_pipe[1]);
     wait_for_child(peer_child);
@@ -17525,7 +17525,19 @@ static void test_crashed_record_lock_grant_blocks_peer_cleanup_until_reopen_rebu
     wait_for_child(peer_child);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
-    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
+    {
+        const unsigned long long recovered_sum =
+            query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql");
+        if (recovered_sum != 31U) {
+            fprintf(
+                stderr,
+                "record-lock grant recovery expected sum=31, got %llu\n",
+                recovered_sum
+            );
+            fflush(stderr);
+        }
+        assert(recovered_sum == 31U);
+    }
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 

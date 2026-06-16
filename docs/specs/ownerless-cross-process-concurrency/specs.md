@@ -5107,7 +5107,15 @@ subsystems that this mode needs:
   sample kept page-log appends at `1506`, kept payload bytes flat (`556191`
   versus `556202`), increased fast index deltas from `449` to `468`, dropped
   exact index deltas from `32` to `13`, and dropped standalone-size probes from
-  `51` to `30`. The remaining write-throughput targets are native
+  `51` to `30`. A follow-up SYS page-delta audit rejected automatic
+  `FIL_PAGE_TYPE_SYS` deltas for now: a broad 500-row probe selected `0.752`
+  SYS deltas per ownerless autocommit insert and reduced page-log payload from
+  `1112.386` to `1081.608` bytes/insert, but the record-lock-grant crash hook
+  recovered `SUM(value)=30` instead of `31`, and a narrower user-tablespace
+  attempt still failed from the repository-root working directory. Primitive
+  coverage now proves repeated `space_id=1` and `space_id=80` SYS records stay
+  standalone and read back byte-identically. The remaining write-throughput
+  targets are native
   commit/page-publication, non-fast page-log encoding, the remaining
   history-proof proof volume, and broader redo/checkpoint recovery work. The visible-fast page-log append-batch slice
   narrows another measured overhead source by keeping the append session open
