@@ -980,6 +980,13 @@ delta-encode subphase without changing page-version volume, payload bytes,
 checkpoint rewrite, or recovery semantics; the larger remaining performance
 targets remain native commit/page-publication cost and broader
 redo/checkpoint reconciliation.
+The follow-up sparse payload direct-copy slice applies the same bounded
+materialization cleanup to standalone compact-varint sparse and fill-sparse raw
+runs. It keeps the ownerless WAL sparse payload formats and checksums
+unchanged, but copies raw run bytes into resized vector tails instead of using
+range inserts during standalone encoding. This targets the measured
+standalone-encode subphase without changing sparse record selection, payload
+bytes, replay, checkpoint rewrite, or SQL behavior.
 Ownerless page-version reads now validate the WAL tail after a direct
 page-index hit because the shared page index is an acceleration cache updated
 after the append stream, not an authoritative visibility boundary by itself.

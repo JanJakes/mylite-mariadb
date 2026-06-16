@@ -5122,7 +5122,13 @@ subsystems that this mode needs:
   non-chained delta record bytes but copies all raw changed-byte runs into an
   already-sized payload buffer instead of repeatedly appending each run. This
   narrows a measured delta-encode CPU cost without changing WAL format,
-  checkpoint rewrite, recovery, or page-version volume. The visible-fast page-log append-batch slice
+  checkpoint rewrite, recovery, or page-version volume. A follow-up sparse
+  payload direct-copy slice keeps the same standalone sparse WAL formats but
+  copies compact-varint sparse and fill-sparse raw runs into resized vector
+  tails instead of using range inserts. This narrows a measured standalone
+  encode CPU cost without changing sparse record selection, payload bytes,
+  replay, checkpoint rewrite, recovery, or page-version volume. The
+  visible-fast page-log append-batch slice
   narrows another measured overhead source by keeping the append session open
   across the adjacent mini-transactions of a single-row pure
   `INSERT ... VALUES` visible-fast statement, then releasing it before

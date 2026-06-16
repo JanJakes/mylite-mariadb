@@ -4098,7 +4098,9 @@ bool build_compact_sparse_zero_payload(
             varint_payload.clear();
             return false;
         }
-        varint_payload.insert(varint_payload.end(), bytes + run_start, bytes + offset);
+        const std::size_t raw_payload_offset = varint_payload.size();
+        varint_payload.resize(raw_payload_offset + run_size);
+        std::memcpy(varint_payload.data() + raw_payload_offset, bytes + run_start, run_size);
         ++run_count;
         previous_run_end = offset;
     }
@@ -4508,7 +4510,9 @@ bool append_fill_sparse_run(
         out_payload->push_back(fill_byte);
         return true;
     }
-    out_payload->insert(out_payload->end(), raw_bytes, raw_bytes + run_size);
+    const std::size_t raw_payload_offset = out_payload->size();
+    out_payload->resize(raw_payload_offset + run_size);
+    std::memcpy(out_payload->data() + raw_payload_offset, raw_bytes, run_size);
     return true;
 }
 
