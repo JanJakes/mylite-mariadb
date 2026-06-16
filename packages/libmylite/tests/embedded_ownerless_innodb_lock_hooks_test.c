@@ -154,6 +154,7 @@ static int page_read_hook(
     uint32_t *out_page_size,
     uint64_t *out_page_lsn,
     uint64_t *out_commit_lsn,
+    uint32_t *out_record_flags,
     void *context
 );
 static int skip_external_page_refresh_hook(void *context);
@@ -672,6 +673,7 @@ static int page_read_hook(
     uint32_t *out_page_size,
     uint64_t *out_page_lsn,
     uint64_t *out_commit_lsn,
+    uint32_t *out_record_flags,
     void *context
 ) {
     page_visibility_state *state = (page_visibility_state *)context;
@@ -682,12 +684,14 @@ static int page_read_hook(
     assert(out_page_size != NULL);
     assert(out_page_lsn != NULL);
     assert(out_commit_lsn != NULL);
+    assert(out_record_flags != NULL);
     memset(page, 0, page_capacity);
     state->last_max_commit_lsn = max_commit_lsn;
     ++state->read_count;
     *out_page_size = page_capacity;
     *out_page_lsn = max_commit_lsn;
     *out_commit_lsn = max_commit_lsn;
+    *out_record_flags = 0U;
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
 }
 

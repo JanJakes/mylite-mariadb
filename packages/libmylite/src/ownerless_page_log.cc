@@ -1496,7 +1496,7 @@ int mylite_ownerless_page_log_append_session_begin_initialized_at(
     return MYLITE_OWNERLESS_PAGE_LOG_OK;
 }
 
-static int page_log_append_session_append_common(
+int page_log_append_session_append_common(
     int fd,
     mylite_ownerless_page_log_append_session *session,
     std::uint32_t space_id,
