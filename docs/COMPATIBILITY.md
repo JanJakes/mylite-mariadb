@@ -155,6 +155,11 @@ and unlogged release loops. Statement-visible autocommit writes still use the
 same page-write lock, refresh, publication, history-proof, and release rules,
 but avoid repeated transaction-release and per-page transaction-deferral helper
 work after the mini-transaction decision is known.
+Modified-page entry and commit-publication sites then reuse the already-known
+write-enter or `transaction_publish` decision when adding pages to
+transaction-deferred dirty publishing. This preserves the same page-version and
+history-proof publication rules while removing another redundant
+classification hop from the ownerless write path.
 Ownerless checkpoint LSN publication now skips rewriting the legacy
 latest/visible payload once a valid checksummed LSN generation record already
 exists. The legacy payload is still initialized for empty-record fallback,

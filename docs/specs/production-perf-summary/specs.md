@@ -788,6 +788,10 @@ values are timing smoke evidence, not a replacement for CI-sized samples.
   InnoDB page-write overhead first; the transaction-release classification fast
   path is a scoped example and does not claim to complete redo/checkpoint or
   history-proof publication work.
+- Modified-page entry and commit-publication paths now reuse already-computed
+  transaction-held-page or `transaction_publish` decisions when marking pages
+  for transaction-deferred dirty publishing. This avoids another redundant
+  ownerless classification hop without changing publication volume.
 - Ownerless checkpoint update summaries include
   `checkpoint_update_legacy_write_elided_per_insert`, distinguishing legacy
   payload write removal from same-pair no-op elision and file-read elision.

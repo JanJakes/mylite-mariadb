@@ -5235,6 +5235,12 @@ subsystems that this mode needs:
   release loops. It preserves lock, refresh, publication, boundary, and
   history-proof behavior while avoiding repeated helper work on
   statement-visible autocommit writes.
+  The follow-up page-write enter classification reuse slice returned that
+  already-computed write-enter predicate to modified-page entry sites and let
+  commit-publication paths pass a precomputed `transaction_publish` result into
+  dirty-page tracking. It is another hot-path cleanup only; page-version WAL,
+  native history-proof publication, checkpoint ordering, and ownerless lock
+  release semantics stay unchanged.
   The checkpoint legacy-write elision slice then removed the legacy
   latest/visible payload write from advancing checkpoint updates after
   checksum-protected LSN records are initialized, exposing a

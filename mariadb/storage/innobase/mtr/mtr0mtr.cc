@@ -2319,7 +2319,7 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_redo_leave() noexcept
   m_ownerless_redo_end_lsn= 0;
 }
 
-ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_enter(
+ATTRIBUTE_NOINLINE bool mtr_t::ownerless_page_write_enter(
     const buf_block_t &block, bool allow_refresh) noexcept
 {
   ownerless_page_write_perf_add(OWNERLESS_PAGE_WRITE_PERF_ENTER_CALLS, 1);
@@ -2327,13 +2327,13 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_enter(
       OWNERLESS_PAGE_WRITE_PERF_ENTER_TOTAL_NS);
 
   if (UNIV_LIKELY(!ownerless_hooks_enabled()))
-    return;
+    return false;
 
   if (!ownerless_page_write_requires_lock(block.page))
   {
     if (allow_refresh)
       ownerless_page_write_refresh(block);
-    return;
+    return false;
   }
 
   const page_id_t id{block.page.id()};
@@ -2342,7 +2342,8 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_enter(
   {
     if (allow_refresh)
       ownerless_page_write_refresh(block);
-    return;
+    return ownerless_page_write_uses_transaction_release() &&
+           ownerless_page_write_holds_for_transaction(block.page);
   }
   const bool lock_only_page=
     ownerless_page_write_lock_only_transaction_page(ownerless_trx, block.page);
@@ -2350,7 +2351,7 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_enter(
   {
     if (allow_refresh)
       ownerless_page_write_refresh(block);
-    return;
+    return false;
   }
   const bool uses_transaction_release=
       ownerless_page_write_uses_transaction_release();
@@ -2363,7 +2364,7 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_enter(
       std::find(m_ownerless_page_write_mtr_pages->begin(),
                 m_ownerless_page_write_mtr_pages->end(),
                 packed_page) != m_ownerless_page_write_mtr_pages->end())
-    return;
+    return holds_for_transaction;
 
   bool page_write_waited= false;
   if (ownerless_trx != nullptr &&
@@ -2395,16 +2396,16 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_enter(
       if (result == MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK)
       {
         ownerless_page_write_note_deadlock(ownerless_trx);
-        return;
+        return holds_for_transaction;
       }
       if (result == MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT &&
           ownerless_page_write_timeout_aborts_statement(ownerless_trx))
       {
         ownerless_page_write_note_lock_timeout(ownerless_trx);
-        return;
+        return holds_for_transaction;
       }
       if (ownerless_page_write_in_startup_or_recovery())
-        return;
+        return holds_for_transaction;
       page_write_waited= true;
     }
   }
@@ -2420,7 +2421,7 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_enter(
   }
   if (page_already_modified_by_transaction)
   {
-    return;
+    return holds_for_transaction;
   }
   bool page_write_acquired= false;
   for (;;)
@@ -2451,13 +2452,13 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_enter(
         ownerless_page_write_timeout_aborts_statement(ownerless_trx))
     {
       ownerless_page_write_note_lock_timeout(ownerless_trx);
-      return;
+      return holds_for_transaction;
     }
     if (ownerless_page_write_in_startup_or_recovery())
     {
       if (allow_refresh)
         ownerless_page_write_refresh(block, true);
-      return;
+      return holds_for_transaction;
     }
     if (result == MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK)
     {
@@ -2476,7 +2477,7 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_enter(
       }
       page_write_waited= true;
       ownerless_page_write_note_deadlock(ownerless_trx);
-      return;
+      return holds_for_transaction;
     }
     page_write_waited= true;
   }
@@ -2496,7 +2497,7 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_enter(
       ownerless_page_write_publish_boundary(block.page);
     if (ownerless_trx != nullptr)
       ownerless_trx->mylite_ownerless_page_refreshed_after_wait= true;
-    return;
+    return holds_for_transaction;
   }
 
   if (block.page.oldest_modification_acquire() > 1)
@@ -2519,7 +2520,7 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_enter(
     }
     else if (page_write_acquired)
       ownerless_page_write_publish_boundary(block.page);
-    return;
+    return holds_for_transaction;
   }
   const bool force_transaction_page_refresh=
       allow_refresh && holds_for_transaction;
@@ -2529,6 +2530,7 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_enter(
     ownerless_trx->mylite_ownerless_page_refreshed_after_wait= true;
   if (page_write_acquired)
     ownerless_page_write_publish_boundary(block.page);
+  return holds_for_transaction;
 }
 
 trx_t *mtr_t::ownerless_page_write_trx() const noexcept
@@ -2696,7 +2698,7 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_writes_publish() noexcept
             *bpage);
     if (transaction_publish)
     {
-      ownerless_page_write_note_dirty_transaction_page(*bpage);
+      ownerless_page_write_note_dirty_transaction_page(*bpage, true);
       ownerless_page_write_capture_dirty_transaction_page(*bpage);
       continue;
     }
@@ -2960,7 +2962,15 @@ void mtr_t::ownerless_page_write_note_dirty_transaction_page(
   if (UNIV_LIKELY(!ownerless_hooks_enabled()))
     return;
 
-  if (!ownerless_page_write_publishes_with_transaction(bpage))
+  ownerless_page_write_note_dirty_transaction_page(
+      bpage, ownerless_page_write_publishes_with_transaction(bpage));
+}
+
+void mtr_t::ownerless_page_write_note_dirty_transaction_page(
+    const buf_page_t &bpage,
+    bool transaction_release_holds_page) const noexcept
+{
+  if (!transaction_release_holds_page)
     return;
 
   trx_t *ownerless_trx= ownerless_page_write_trx();
@@ -3330,7 +3340,8 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
             if (ownerless_uses_transaction_release &&
                 ownerless_page_write_publishes_with_transaction(*bpage))
             {
-              mtr->ownerless_page_write_note_dirty_transaction_page(*bpage);
+              mtr->ownerless_page_write_note_dirty_transaction_page(
+                  *bpage, true);
               mtr->ownerless_page_write_capture_dirty_transaction_page(*bpage);
             }
             else
@@ -4553,6 +4564,7 @@ void mtr_t::set_modified(const buf_block_t &block)
   }
 
   const bool ownerless_hooks= ownerless_hooks_enabled();
+  bool ownerless_transaction_release_holds_page= false;
   if (UNIV_UNLIKELY(ownerless_hooks))
   {
     bool ownerless_page_write_modified= false;
@@ -4565,12 +4577,16 @@ void mtr_t::set_modified(const buf_block_t &block)
       }
     }
     if (!ownerless_page_write_modified)
-      ownerless_page_write_enter(block, false);
+      ownerless_transaction_release_holds_page=
+          ownerless_page_write_enter(block, false);
+    else
+      ownerless_transaction_release_holds_page=
+          ownerless_page_write_uses_transaction_release() &&
+          ownerless_page_write_publishes_with_transaction(block.page);
   }
 
-	  if (UNIV_UNLIKELY(ownerless_hooks) &&
-	      ownerless_page_write_uses_transaction_release())
-	    ownerless_page_write_note_dirty_transaction_page(block.page);
+  if (UNIV_UNLIKELY(ownerless_transaction_release_holds_page))
+    ownerless_page_write_note_dirty_transaction_page(block.page, true);
   m_modifications= true;
 
   if (UNIV_UNLIKELY(m_log_mode == MTR_LOG_NONE))
@@ -4614,13 +4630,14 @@ void mtr_t::init(buf_block_t *b)
       if (slot.object == b && slot.type & MTR_MEMO_PAGE_X_FIX)
       {
         const bool ownerless_hooks= ownerless_hooks_enabled();
+        bool ownerless_transaction_release_holds_page= false;
         if (UNIV_UNLIKELY(ownerless_hooks))
-          ownerless_page_write_enter(*b);
+          ownerless_transaction_release_holds_page=
+              ownerless_page_write_enter(*b);
         slot.type= MTR_MEMO_PAGE_X_MODIFY;
         m_modifications= true;
-	        if (UNIV_UNLIKELY(ownerless_hooks) &&
-	            ownerless_page_write_uses_transaction_release())
-	          ownerless_page_write_note_dirty_transaction_page(b->page);
+        if (UNIV_UNLIKELY(ownerless_transaction_release_holds_page))
+          ownerless_page_write_note_dirty_transaction_page(b->page, true);
         if (!m_made_dirty)
           m_made_dirty= b->page.oldest_modification() <= 1;
         goto found;
