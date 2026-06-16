@@ -1780,7 +1780,11 @@ Tasks:
    statements at a live page-version read LSN, including transactions with
    local writes whose own uncommitted redo can hold back the durable
    page-visible LSN. Eligible handles keep that read LSN monotonic and pin it
-   before clean-page refresh. Direct successful reads retain that shared handle
+   before clean-page refresh. Plain reads inside explicit transactions that
+   already performed a local write or locking read preserve local pages even
+   before the handle has a local-native read watermark, so same-transaction
+   reads continue to observe their own dirty rows. Direct successful reads
+   retain that shared handle
    pin until a replacement read, non-read/current-read statement, error, or
    close, and live raw-latest promotion is blocked while other active native
    transactions or active redo reservations are present. An older external

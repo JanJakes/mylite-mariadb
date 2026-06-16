@@ -3129,7 +3129,8 @@ int mylite_step(mylite_stmt *stmt) {
         OwnerlessStatementPageWriteTrackingScope page_write_tracking(*stmt->db);
         OwnerlessStatementPlainReadScope plain_read(
             page_version_reads_enabled,
-            stmt->db->ownerless_local_native_read_lsn != 0U
+            stmt->db->ownerless_local_native_read_lsn != 0U ||
+                ownerless_transaction_has_local_write_or_locking_read(*stmt->db)
         );
         OwnerlessStatementVisibleFastPathScope visible_fast_path(
             ownerless_statement_allows_visible_fast_path(*stmt->db, policy_tokens),
@@ -4409,7 +4410,8 @@ int exec_result_impl(
     OwnerlessStatementPageWriteTrackingScope page_write_tracking(*db);
     OwnerlessStatementPlainReadScope plain_read(
         page_version_reads_enabled,
-        db->ownerless_local_native_read_lsn != 0U
+        db->ownerless_local_native_read_lsn != 0U ||
+            ownerless_transaction_has_local_write_or_locking_read(*db)
     );
     OwnerlessStatementVisibleFastPathScope visible_fast_path(
         ownerless_statement_allows_visible_fast_path(*db, policy_tokens),
