@@ -345,8 +345,12 @@ Roles:
   page boundary at the same visible LSN still refreshes clean buffered pages.
   Equal InnoDB page LSNs are not an ordering proof for retained ownerless page
   boundaries: live refresh overlays only forced or strictly newer page-version
-  images, and product no-live tablespace replay keeps an existing matching
-  native disk page when its page LSN equals the retained WAL image.
+  images, retained current live reads reject lower/equal boundary images only
+  after the same handle has already observed the same user page at an
+  equal-or-newer ownerless commit boundary or when the page-log read selected a
+  record flagged as a synthesized snapshot boundary, and product no-live
+  tablespace replay keeps an existing matching native disk page when its page
+  LSN equals the retained WAL image.
   Before no-live reclaim discards retained page-version WAL, the runtime
   publishes eligible native support/allocation/system buffer-pool pages to the
   reclaim LSN, waits for native dirty pages to flush, and takes the native
@@ -889,7 +893,10 @@ Add a process registry in `mylite-concurrency.shm`:
 
 Correctness must not depend only on heartbeats. Heartbeats help diagnostics and
 orphan cleanup, while byte-range locks and durable logs decide ownership of
-critical sections.
+critical sections. Linux liveness also treats `/proc/<pid>/stat` state `Z` as
+dead owner state because a zombie process has exited and cannot release
+ownerless resources even though `kill(pid, 0)` still succeeds before parent
+reap.
 
 ### Shared Lock Primitives
 
@@ -1473,19 +1480,22 @@ Tasks:
    now let purge free old undo history after refreshing rollback-segment
    metadata from the directory-visible header. Rollback-segment history commits
    also refresh and serialize the current first history-list undo page before
-   prepending a new undo log, so the file-list splice does not read stale links
-   from another process's buffer pool. Physical undo tablespace truncation stays
-   disabled until that path has directory-owned rollback-segment metadata
-   rebuild coverage.
+   prepending a new undo log, and force a clean-page refresh for that exact
+   first history-list page after it is latched, so the file-list splice does
+   not read stale links from another process's buffer pool. Physical undo
+   tablespace truncation stays disabled until that path has directory-owned
+   rollback-segment metadata rebuild coverage.
 5. Add crash cleanup for active transactions from dead process slots.
    Product opens now detect dead owners with active transaction/read-view/lock
    state and preserve that state while live peers remain. A guarded
    cross-process SQL test kills an uncommitted ownerless writer, verifies that a
    concurrent opener receives busy while another ownerless peer is live, then
    verifies that a no-live-process reopen rebuilds volatile shared state and
-   sees only committed rows. Durable rollback/recovery records are still needed
-   before product writers can recover a crashed owner while other processes
-   continue running.
+   sees only committed rows. A focused Linux SQL regression also leaves an
+   exited committed writer unreaped as a zombie and verifies the dead owner slot
+   can be reclaimed before the parent calls `waitpid()`. Durable
+   rollback/recovery records are still needed before product writers can recover
+   a crashed owner while other processes continue running.
 
 Exit criteria:
 
@@ -1583,7 +1593,10 @@ Tasks:
    `ownerless-autoinc-column-ddl-refresh` slice also covers adding a new
    `AUTO_INCREMENT PRIMARY KEY` column during an InnoDB table rebuild while an
    already-open ownerless peer is live, proving the peer refreshes the rebuilt
-   definition and next implicit ID before inserting. The
+   definition and next implicit ID before inserting. When that peer first
+   observes the newer dictionary generation, its next insert avoids the
+   ownerless visible fast path and uses the conservative dirty-page flush path
+   so rebuilt clustered-index pages are durable for later indexed lookups. The
    `ownerless-autoinc-primary-key-ddl-refresh` slice moves the primary key away
    from an existing AUTO_INCREMENT column while retaining a unique secondary
    index, verifies the live peer sees the replacement clustered key, and
@@ -1834,7 +1847,12 @@ Tasks:
    the local durable LSN when a process reads an externally flushed page whose
    page LSN is ahead of the local log, and refreshes durable tablespace header
    and allocation metadata from page 0 plus the file-segment inode page after
-   visible peer commits so native allocation bounds do not remain stale.
+   visible peer commits so native allocation bounds do not remain stale. While a
+   dictionary DDL statement holds the ownerless dictionary statement lock, the
+   InnoDB hook suppresses repeated internal external allocation-page refreshes
+   after the pre-statement refresh has run; that prevents online DDL from
+   rewinding its own freshly local file-per-table allocation state while peer
+   writes are already excluded.
 3. Publish commit end marks and reader snapshots.
    Guarded commits now separate raw redo progress from page-visible progress in
    the ownerless redo state segment. `redo_leave` still advances the raw latest
@@ -2374,12 +2392,13 @@ Tasks:
    AUTO_INCREMENT column DDL slice adds a rebuild-style `ADD COLUMN ... PRIMARY
    KEY` case and verifies the already-open peer sees the new column and next
    implicit ID through ownerless/native reopen before and after forced `.shm`
-   rebuild. AUTO_INCREMENT primary-key replacement coverage preserves a unique
-   secondary index on the AUTO_INCREMENT column while moving `PRIMARY` to
-   `code`, verifies the already-open peer receives the next ID, and verifies a
-   failed duplicate replacement-key insert leaves a non-reused AUTO_INCREMENT
-   gap across forced `.shm` rebuild. AUTO_INCREMENT descending primary-key
-   replacement coverage keeps the same allocation proof while moving
+   rebuild, including primary-index lookups after the peer inserts under the
+   refreshed dictionary. AUTO_INCREMENT primary-key replacement coverage
+   preserves a unique secondary index on the AUTO_INCREMENT column while moving
+   `PRIMARY` to `code`, verifies the already-open peer receives the next ID,
+   and verifies a failed duplicate replacement-key insert leaves a non-reused
+   AUTO_INCREMENT gap across forced `.shm` rebuild. AUTO_INCREMENT descending
+   primary-key replacement coverage keeps the same allocation proof while moving
    `PRIMARY` to `code DESC`, verifies `COLLATION = 'D'` metadata, and verifies
    the duplicate-key allocation gap across forced `.shm` rebuild.
    Secondary-index rename coverage now performs

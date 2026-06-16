@@ -928,10 +928,12 @@ static void test_crashed_schema_idempotent_drop_dictionary_ddl_preserves_schema(
 static void test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema(void);
 #endif
 static void test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds(void);
+static void test_ownerless_zombie_writer_cleanup_before_reap(void);
 static void initialize_database(open_database_paths paths);
 static void initialize_database_in_process(open_database_paths paths);
 static void update_first_row_until_released(open_database_paths paths, child_pipes pipes);
 static void update_first_row_without_commit_until_killed(open_database_paths paths, int ready_fd);
+static void update_first_row_and_exit(open_database_paths paths, int ready_fd);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void lock_first_row_for_update_until_released(open_database_paths paths, child_pipes pipes);
 static void update_first_row_until_trx_register_fault(open_database_paths paths, int ready_fd);
@@ -3046,6 +3048,8 @@ static void wait_for_pipe_message(int pipe_fd);
 static void signal_pipe(int pipe_fd);
 static void wait_for_pipe(int pipe_fd);
 static void wait_for_child(pid_t child);
+static int process_is_zombie(pid_t process_id);
+static void wait_for_zombie_process(pid_t process_id);
 static int wait_for_child_with_timeout(pid_t child, unsigned timeout_ms, int *out_status);
 static void wait_for_children(const char *label, const pid_t *children, unsigned count);
 static void wait_for_signaled_child(pid_t child, int expected_signal);
@@ -3824,6 +3828,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "crash-writer") == 0) {
         test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "zombie-writer-cleanup") == 0) {
+        test_ownerless_zombie_writer_cleanup_before_reap();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "page-publish-before-append-crash") == 0) {
@@ -4727,7 +4735,8 @@ int main(int argc, char **argv) {
             "savepoint|serializable|write-skew|auto-inc|auto-inc-ddl|"
             "auto-inc-column-ddl|engine-policy|"
             "engine-policy-page-publish|"
-            "crash-writer|visible-publish-crash|visible-checkpoint-crash|redo-written-crash|",
+            "crash-writer|zombie-writer-cleanup|visible-publish-crash|"
+            "visible-checkpoint-crash|redo-written-crash|",
             stderr
         );
         fputs(
@@ -5213,6 +5222,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
 #endif
     OWNERLESS_SQL_TEST_CASE(test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds
     ),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_zombie_writer_cleanup_before_reap),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_native_file_op_marker_drains_after_real_sql_ddl),
 };
 // clang-format on
@@ -47378,6 +47388,49 @@ static void test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebui
     free(root);
 }
 
+static void test_ownerless_zombie_writer_cleanup_before_reap(void) {
+#if defined(__linux__)
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-zombie-writer.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int writer_ready_pipe[2];
+    pid_t writer_child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(writer_ready_pipe) == 0);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(writer_ready_pipe[0]);
+        update_first_row_and_exit(paths, writer_ready_pipe[1]);
+    }
+
+    close(writer_ready_pipe[1]);
+    wait_for_pipe(writer_ready_pipe[0]);
+    wait_for_zombie_process(writer_child);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 5 WHERE id = 2");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 36U);
+    assert(mylite_close(db) == MYLITE_OK);
+    wait_for_child(writer_child);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 36U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+#endif
+}
+
 static void initialize_database(open_database_paths paths) {
     pid_t child;
 
@@ -47466,6 +47519,15 @@ static void update_first_row_without_commit_until_killed(open_database_paths pat
     for (;;) {
         pause();
     }
+}
+
+static void update_first_row_and_exit(open_database_paths paths, int ready_fd) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1");
+    signal_pipe(ready_fd);
+    _exit(0);
 }
 
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
@@ -59784,6 +59846,13 @@ static void assert_ownerless_auto_increment_column_ddl_state(
         expected_value_sum
     );
     assert(query_unsigned(db, "SELECT MIN(id) FROM app.ownerless_auto_inc_column_ddl") == 1U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_auto_inc_column_ddl "
+            "WHERE id = 3 AND value = 30 AND note = 'parent'"
+        ) == (expected_max_id >= 3U ? 1U : 0U)
+    );
     assert(
         query_unsigned(db, "SELECT MAX(id) FROM app.ownerless_auto_inc_column_ddl") ==
         expected_max_id
@@ -74743,6 +74812,55 @@ static void wait_for_child(pid_t child) {
     }
     assert(WIFEXITED(child_status));
     assert(WEXITSTATUS(child_status) == 0);
+}
+
+static int process_is_zombie(pid_t process_id) {
+#if defined(__linux__)
+    char path[PATH_MAX];
+    char buffer[512];
+    FILE *file;
+    size_t bytes;
+    char *close_paren;
+    int path_length;
+
+    path_length = snprintf(path, sizeof(path), "/proc/%ld/stat", (long)process_id);
+    if (path_length <= 0 || (size_t)path_length >= sizeof(path)) {
+        return 0;
+    }
+    file = fopen(path, "rb");
+    if (file == NULL) {
+        return 0;
+    }
+    bytes = fread(buffer, 1U, sizeof(buffer) - 1U, file);
+    if (ferror(file)) {
+        fclose(file);
+        return 0;
+    }
+    fclose(file);
+    buffer[bytes] = '\0';
+    close_paren = strrchr(buffer, ')');
+    return close_paren != NULL && close_paren[1] == ' ' && close_paren[2] == 'Z';
+#else
+    (void)process_id;
+    return 0;
+#endif
+}
+
+static void wait_for_zombie_process(pid_t process_id) {
+#if defined(__linux__)
+    const uint64_t deadline_ms = monotonic_milliseconds() + 30000ULL;
+
+    while (monotonic_milliseconds() < deadline_ms) {
+        if (process_is_zombie(process_id)) {
+            return;
+        }
+        sleep_microseconds(MYLITE_TEST_WAIT_POLL_INTERVAL_US);
+    }
+    fprintf(stderr, "process %ld did not become zombie before timeout\n", (long)process_id);
+    assert(0);
+#else
+    (void)process_id;
+#endif
 }
 
 static int child_status_is_ok(int child_status) {

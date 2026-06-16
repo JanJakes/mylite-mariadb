@@ -54,6 +54,9 @@ extern "C" {
 #define MYLITE_OWNERLESS_INNODB_SPACE_TRANSACTION_WRITE_PAGE_NO (UINT32_MAX - 1U)
 #define MYLITE_OWNERLESS_INNODB_LOCK_ACQUIRE_WAITED 1U
 
+#define MYLITE_OWNERLESS_INNODB_PAGE_VERSION_SNAPSHOT_BOUNDARY 1U
+#define MYLITE_OWNERLESS_INNODB_PAGE_VERSION_EXTERNAL_SNAPSHOT_LINEAGE 2U
+
 struct ib_lock_t;
 struct buf_block_t;
 struct dict_index_t;
@@ -189,6 +192,7 @@ typedef int (*mylite_ownerless_innodb_page_read_callback)(
     uint32_t *out_page_size,
     uint64_t *out_page_lsn,
     uint64_t *out_commit_lsn,
+    uint32_t *out_record_flags,
     void *context);
 typedef int (*mylite_ownerless_innodb_skip_external_page_refresh_callback)(void *context);
 typedef int (*mylite_ownerless_innodb_autoinc_read_callback)(
@@ -352,6 +356,11 @@ int mylite_ownerless_innodb_set_statement_visible_fast_path(int enabled);
 int mylite_ownerless_innodb_statement_visible_fast_path(void);
 int mylite_ownerless_innodb_set_statement_plain_read(int enabled);
 int mylite_ownerless_innodb_statement_plain_read(void);
+int mylite_ownerless_innodb_set_statement_plain_read_preserve_local_pages(int enabled);
+int mylite_ownerless_innodb_statement_plain_read_preserves_local_pages(void);
+void mylite_ownerless_innodb_refresh_statement_plain_read_pages_once(void);
+int mylite_ownerless_innodb_set_statement_dictionary_ddl(int enabled);
+int mylite_ownerless_innodb_statement_dictionary_ddl(void);
 uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
     struct trx_t *trx, uint64_t visible_lsn);
 void mylite_ownerless_innodb_flush_dirty_pages_to_lsn(uint64_t visible_lsn);
@@ -417,6 +426,16 @@ uint64_t mylite_ownerless_innodb_external_page_visibility(void);
 int mylite_ownerless_innodb_external_page_visibility_is_current(void);
 void mylite_ownerless_innodb_set_retained_external_page_visibility(int enabled);
 int mylite_ownerless_innodb_retained_external_page_visibility(void);
+void mylite_ownerless_innodb_set_external_page_observation_token(uint64_t token);
+void mylite_ownerless_innodb_clear_external_page_observations(void);
+void mylite_ownerless_innodb_note_external_page_observed(
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t commit_lsn);
+int mylite_ownerless_innodb_external_page_observed_at_or_after(
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t commit_lsn);
 uint64_t mylite_ownerless_innodb_push_external_page_visibility(uint64_t latest_lsn);
 void mylite_ownerless_innodb_restore_external_page_visibility(uint64_t previous_lsn);
 void mylite_ownerless_innodb_clear_external_page_visibility(void);
@@ -459,7 +478,8 @@ int mylite_ownerless_innodb_read_page_version_with_metadata(
     void *page,
     uint32_t page_capacity,
     uint64_t *out_page_lsn,
-    uint64_t *out_commit_lsn);
+    uint64_t *out_commit_lsn,
+    uint32_t *out_record_flags);
 int mylite_ownerless_innodb_disk_page_lsn(
     uint32_t space_id,
     uint32_t page_no,

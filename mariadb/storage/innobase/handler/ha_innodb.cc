@@ -9283,6 +9283,8 @@ ha_innobase::index_read(
 		DBUG_RETURN(HA_ERR_UNSUPPORTED);
 	}
 
+	mylite_ownerless_innodb_refresh_statement_plain_read_pages_once();
+
 	mariadb_set_stats temp(m_prebuilt->trx, handler_stats);
 	dberr_t ret =
 		row_search_mvcc(buf, mode, m_prebuilt, m_last_match_mode, 0);

@@ -13,6 +13,9 @@ extern "C" {
 #define MYLITE_OWNERLESS_PAGE_LOG_ERROR 3
 #define MYLITE_OWNERLESS_PAGE_LOG_BUSY 4
 
+#define MYLITE_OWNERLESS_PAGE_LOG_RECORD_SNAPSHOT_BOUNDARY 128U
+#define MYLITE_OWNERLESS_PAGE_LOG_RECORD_EXTERNAL_SNAPSHOT_LINEAGE 256U
+
 #define MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE 64U
 #define MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE 64U
 
@@ -134,6 +137,12 @@ int mylite_ownerless_page_log_record_is_external_snapshot_lineage_at(
     uint64_t record_offset,
     int *out_is_external_snapshot_lineage
 );
+int mylite_ownerless_page_log_record_next_offset_at(
+    int fd,
+    uint64_t log_offset,
+    uint64_t record_offset,
+    uint64_t *out_next_record_offset
+);
 int mylite_ownerless_page_log_snapshot(int fd, uint64_t *out_snapshot_end_offset);
 int mylite_ownerless_page_log_snapshot_at(
     int fd,
@@ -183,6 +192,19 @@ int mylite_ownerless_page_log_find_latest_under_read_lock_at(
     uint64_t *out_page_lsn,
     uint64_t *out_commit_lsn
 );
+int mylite_ownerless_page_log_find_latest_under_read_lock_at_with_flags(
+    int fd,
+    uint64_t log_offset,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t max_commit_lsn,
+    void *out_page,
+    uint32_t page_capacity,
+    uint32_t *out_page_size,
+    uint64_t *out_page_lsn,
+    uint64_t *out_commit_lsn,
+    uint32_t *out_record_flags
+);
 int mylite_ownerless_page_log_find_latest_in_snapshot(
     int fd,
     uint64_t snapshot_end_offset,
@@ -223,6 +245,22 @@ int mylite_ownerless_page_log_find_latest_in_snapshot_from_under_read_lock_at(
     uint64_t *out_commit_lsn,
     int *out_saw_page_record
 );
+int mylite_ownerless_page_log_find_latest_in_snapshot_from_under_read_lock_at_with_flags(
+    int fd,
+    uint64_t log_offset,
+    uint64_t scan_start_offset,
+    uint64_t snapshot_end_offset,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t max_commit_lsn,
+    void *out_page,
+    uint32_t page_capacity,
+    uint32_t *out_page_size,
+    uint64_t *out_page_lsn,
+    uint64_t *out_commit_lsn,
+    uint32_t *out_record_flags,
+    int *out_saw_page_record
+);
 int mylite_ownerless_page_log_read_record_at(
     int fd,
     uint64_t log_offset,
@@ -256,6 +294,19 @@ int mylite_ownerless_page_log_read_page_under_read_lock_at(
     uint32_t *out_page_size,
     uint64_t *out_page_lsn,
     uint64_t *out_commit_lsn
+);
+int mylite_ownerless_page_log_read_page_under_read_lock_at_with_flags(
+    int fd,
+    uint64_t log_offset,
+    uint64_t record_offset,
+    uint32_t space_id,
+    uint32_t page_no,
+    void *out_page,
+    uint32_t page_capacity,
+    uint32_t *out_page_size,
+    uint64_t *out_page_lsn,
+    uint64_t *out_commit_lsn,
+    uint32_t *out_record_flags
 );
 int mylite_ownerless_page_log_replay_at(
     int fd,

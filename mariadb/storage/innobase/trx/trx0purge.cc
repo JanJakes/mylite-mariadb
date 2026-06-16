@@ -121,6 +121,12 @@ mylite_ownerless_refresh_history_list_first(
 		RW_SX_LATCH, nullptr, BUF_GET_POSSIBLY_FREED, mtr, &err);
 	ut_a(first_page);
 	mtr->ownerless_page_write_prepare(first_savepoint);
+	if (first_page->page.oldest_modification_acquire() <= 1) {
+		const int refresh_result=
+			mylite_ownerless_innodb_refresh_page_for_write(first_page);
+		ut_a(refresh_result == MYLITE_OWNERLESS_INNODB_LOCK_OK ||
+		     refresh_result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE);
+	}
 }
 
 /** Initialise the purge system. */

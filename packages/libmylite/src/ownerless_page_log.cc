@@ -76,8 +76,10 @@ constexpr std::uint32_t k_record_flag_varint_compact_sparse_zero_payload = 8U;
 constexpr std::uint32_t k_record_flag_fill_sparse_zero_payload = 16U;
 constexpr std::uint32_t k_record_flag_index_delta_payload = 32U;
 constexpr std::uint32_t k_record_flag_undo_delta_payload = 64U;
-constexpr std::uint32_t k_record_flag_snapshot_boundary = 128U;
-constexpr std::uint32_t k_record_flag_external_snapshot_lineage = 256U;
+constexpr std::uint32_t k_record_flag_snapshot_boundary =
+    MYLITE_OWNERLESS_PAGE_LOG_RECORD_SNAPSHOT_BOUNDARY;
+constexpr std::uint32_t k_record_flag_external_snapshot_lineage =
+    MYLITE_OWNERLESS_PAGE_LOG_RECORD_EXTERNAL_SNAPSHOT_LINEAGE;
 constexpr std::uint32_t k_record_encoding_flags =
     k_record_flag_trailing_zero_payload | k_record_flag_sparse_zero_payload |
     k_record_flag_compact_sparse_zero_payload | k_record_flag_varint_compact_sparse_zero_payload |
@@ -575,7 +577,8 @@ int find_latest_in_snapshot(
     std::uint32_t page_capacity,
     std::uint32_t *out_page_size,
     std::uint64_t *out_page_lsn,
-    std::uint64_t *out_commit_lsn
+    std::uint64_t *out_commit_lsn,
+    std::uint32_t *out_record_flags
 );
 int find_latest_in_snapshot_range(
     int fd,
@@ -590,6 +593,7 @@ int find_latest_in_snapshot_range(
     std::uint32_t *out_page_size,
     std::uint64_t *out_page_lsn,
     std::uint64_t *out_commit_lsn,
+    std::uint32_t *out_record_flags,
     int *out_saw_page_record
 );
 int replay_in_snapshot(
@@ -610,7 +614,8 @@ int read_record_at_locked(
     std::uint32_t page_capacity,
     std::uint32_t *out_page_size,
     std::uint64_t *out_page_lsn,
-    std::uint64_t *out_commit_lsn
+    std::uint64_t *out_commit_lsn,
+    std::uint32_t *out_record_flags
 );
 int checkpoint_locked(
     int fd,
@@ -1549,6 +1554,47 @@ int mylite_ownerless_page_log_record_is_external_snapshot_lineage_at(
     return MYLITE_OWNERLESS_PAGE_LOG_OK;
 }
 
+int mylite_ownerless_page_log_record_next_offset_at(
+    int fd,
+    std::uint64_t log_offset,
+    std::uint64_t record_offset,
+    std::uint64_t *out_next_record_offset
+) {
+    if (out_next_record_offset != nullptr) {
+        *out_next_record_offset = 0U;
+    }
+    if (fd < 0 || out_next_record_offset == nullptr ||
+        log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) ||
+        record_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    const auto physical_log_offset = static_cast<off_t>(log_offset);
+    const auto physical_record_offset = static_cast<off_t>(record_offset);
+    off_t records_offset = 0;
+    off_t payload_offset = 0;
+    off_t next_record_offset = 0;
+    struct stat file_stat = {};
+    PageRecordHeader record = {};
+    if (validate_existing_header(fd, physical_log_offset) != MYLITE_OWNERLESS_PAGE_LOG_OK ||
+        ::fstat(fd, &file_stat) != 0 ||
+        !offset_adds(physical_log_offset, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE, &records_offset) ||
+        physical_record_offset < records_offset ||
+        !offset_adds(
+            physical_record_offset,
+            MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE,
+            &payload_offset
+        ) ||
+        !read_record_header(fd, physical_record_offset, record) ||
+        !offset_adds(payload_offset, record.payload_size, &next_record_offset) ||
+        next_record_offset > file_stat.st_size) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    *out_next_record_offset = static_cast<std::uint64_t>(next_record_offset);
+    return MYLITE_OWNERLESS_PAGE_LOG_OK;
+}
+
 int mylite_ownerless_page_log_snapshot(int fd, std::uint64_t *out_snapshot_end_offset) {
     return mylite_ownerless_page_log_snapshot_at(fd, 0U, out_snapshot_end_offset);
 }
@@ -1648,6 +1694,56 @@ int mylite_ownerless_page_log_find_latest(
     );
 }
 
+int mylite_ownerless_page_log_find_latest_under_read_lock_at_with_flags(
+    int fd,
+    std::uint64_t log_offset,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t max_commit_lsn,
+    void *out_page,
+    std::uint32_t page_capacity,
+    std::uint32_t *out_page_size,
+    std::uint64_t *out_page_lsn,
+    std::uint64_t *out_commit_lsn,
+    std::uint32_t *out_record_flags
+) {
+    if (out_record_flags != nullptr) {
+        *out_record_flags = 0U;
+    }
+    if (fd < 0 || out_page == nullptr || page_capacity == 0U || out_page_size == nullptr ||
+        out_page_lsn == nullptr || out_commit_lsn == nullptr || out_record_flags == nullptr) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if (log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    const auto offset = static_cast<off_t>(log_offset);
+    std::uint64_t snapshot_end_offset = 0;
+    const int snapshot_result = snapshot_under_read_lock(fd, offset, &snapshot_end_offset);
+    if (snapshot_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        return snapshot_result;
+    }
+    if (snapshot_end_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    return find_latest_in_snapshot(
+        fd,
+        offset,
+        static_cast<off_t>(snapshot_end_offset),
+        space_id,
+        page_no,
+        max_commit_lsn,
+        out_page,
+        page_capacity,
+        out_page_size,
+        out_page_lsn,
+        out_commit_lsn,
+        out_record_flags
+    );
+}
+
 int mylite_ownerless_page_log_find_latest_at(
     int fd,
     std::uint64_t log_offset,
@@ -1729,7 +1825,8 @@ int mylite_ownerless_page_log_find_latest_under_read_lock_at(
         page_capacity,
         out_page_size,
         out_page_lsn,
-        out_commit_lsn
+        out_commit_lsn,
+        nullptr
     );
 }
 
@@ -1798,7 +1895,8 @@ int mylite_ownerless_page_log_find_latest_in_snapshot_at(
         page_capacity,
         out_page_size,
         out_page_lsn,
-        out_commit_lsn
+        out_commit_lsn,
+        nullptr
     );
     release_log_lock(fd, k_checkpoint_lock_start);
     return result;
@@ -1842,6 +1940,55 @@ int mylite_ownerless_page_log_find_latest_in_snapshot_from_under_read_lock_at(
         out_page_size,
         out_page_lsn,
         out_commit_lsn,
+        nullptr,
+        out_saw_page_record
+    );
+}
+
+int mylite_ownerless_page_log_find_latest_in_snapshot_from_under_read_lock_at_with_flags(
+    int fd,
+    std::uint64_t log_offset,
+    std::uint64_t scan_start_offset,
+    std::uint64_t snapshot_end_offset,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t max_commit_lsn,
+    void *out_page,
+    std::uint32_t page_capacity,
+    std::uint32_t *out_page_size,
+    std::uint64_t *out_page_lsn,
+    std::uint64_t *out_commit_lsn,
+    std::uint32_t *out_record_flags,
+    int *out_saw_page_record
+) {
+    if (out_record_flags != nullptr) {
+        *out_record_flags = 0U;
+    }
+    if (fd < 0 || out_page == nullptr || page_capacity == 0U || out_page_size == nullptr ||
+        out_page_lsn == nullptr || out_commit_lsn == nullptr || out_record_flags == nullptr ||
+        out_saw_page_record == nullptr) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if (log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) ||
+        scan_start_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) ||
+        snapshot_end_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    return find_latest_in_snapshot_range(
+        fd,
+        static_cast<off_t>(log_offset),
+        static_cast<off_t>(scan_start_offset),
+        static_cast<off_t>(snapshot_end_offset),
+        space_id,
+        page_no,
+        max_commit_lsn,
+        out_page,
+        page_capacity,
+        out_page_size,
+        out_page_lsn,
+        out_commit_lsn,
+        out_record_flags,
         out_saw_page_record
     );
 }
@@ -1879,7 +2026,8 @@ int mylite_ownerless_page_log_read_record_at(
         page_capacity,
         out_page_size,
         out_page_lsn,
-        out_commit_lsn
+        out_commit_lsn,
+        nullptr
     );
 
     release_log_lock(fd, k_checkpoint_lock_start);
@@ -1921,7 +2069,8 @@ int mylite_ownerless_page_log_read_page_at(
         page_capacity,
         out_page_size,
         out_page_lsn,
-        out_commit_lsn
+        out_commit_lsn,
+        nullptr
     );
 
     release_log_lock(fd, k_checkpoint_lock_start);
@@ -1960,7 +2109,50 @@ int mylite_ownerless_page_log_read_page_under_read_lock_at(
         page_capacity,
         out_page_size,
         out_page_lsn,
-        out_commit_lsn
+        out_commit_lsn,
+        nullptr
+    );
+}
+
+int mylite_ownerless_page_log_read_page_under_read_lock_at_with_flags(
+    int fd,
+    std::uint64_t log_offset,
+    std::uint64_t record_offset,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    void *out_page,
+    std::uint32_t page_capacity,
+    std::uint32_t *out_page_size,
+    std::uint64_t *out_page_lsn,
+    std::uint64_t *out_commit_lsn,
+    std::uint32_t *out_record_flags
+) {
+    if (out_record_flags != nullptr) {
+        *out_record_flags = 0U;
+    }
+    if (fd < 0 || record_offset == 0U || out_page == nullptr || page_capacity == 0U ||
+        out_page_size == nullptr || out_page_lsn == nullptr || out_commit_lsn == nullptr ||
+        out_record_flags == nullptr) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if (log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) ||
+        record_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    return read_record_at_locked(
+        fd,
+        static_cast<off_t>(log_offset),
+        static_cast<off_t>(record_offset),
+        true,
+        space_id,
+        page_no,
+        out_page,
+        page_capacity,
+        out_page_size,
+        out_page_lsn,
+        out_commit_lsn,
+        out_record_flags
     );
 }
 
@@ -2677,7 +2869,8 @@ int find_latest_in_snapshot(
     std::uint32_t page_capacity,
     std::uint32_t *out_page_size,
     std::uint64_t *out_page_lsn,
-    std::uint64_t *out_commit_lsn
+    std::uint64_t *out_commit_lsn,
+    std::uint32_t *out_record_flags
 ) {
     return find_latest_in_snapshot_range(
         fd,
@@ -2692,6 +2885,7 @@ int find_latest_in_snapshot(
         out_page_size,
         out_page_lsn,
         out_commit_lsn,
+        out_record_flags,
         nullptr
     );
 }
@@ -2709,10 +2903,14 @@ int find_latest_in_snapshot_range(
     std::uint32_t *out_page_size,
     std::uint64_t *out_page_lsn,
     std::uint64_t *out_commit_lsn,
+    std::uint32_t *out_record_flags,
     int *out_saw_page_record
 ) {
     if (out_saw_page_record != nullptr) {
         *out_saw_page_record = 0;
+    }
+    if (out_record_flags != nullptr) {
+        *out_record_flags = 0U;
     }
     const bool collect_scan_perf = page_log_scan_perf_stats_are_enabled();
     std::uint64_t scanned_record_headers = 0;
@@ -2830,6 +3028,9 @@ int find_latest_in_snapshot_range(
     *out_page_size = best.page_size;
     *out_page_lsn = best.page_lsn;
     *out_commit_lsn = best.commit_lsn;
+    if (out_record_flags != nullptr) {
+        *out_record_flags = best.flags;
+    }
     publish_scan_perf(PAGE_LOG_SCAN_PERF_FOUND);
     return MYLITE_OWNERLESS_PAGE_LOG_OK;
 }
@@ -2845,8 +3046,12 @@ int read_record_at_locked(
     std::uint32_t page_capacity,
     std::uint32_t *out_page_size,
     std::uint64_t *out_page_lsn,
-    std::uint64_t *out_commit_lsn
+    std::uint64_t *out_commit_lsn,
+    std::uint32_t *out_record_flags
 ) {
+    if (out_record_flags != nullptr) {
+        *out_record_flags = 0U;
+    }
     int result = validate_existing_header(fd, log_offset);
     if (result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
         return result;
@@ -2885,6 +3090,9 @@ int read_record_at_locked(
     *out_page_size = record.page_size;
     *out_page_lsn = record.page_lsn;
     *out_commit_lsn = record.commit_lsn;
+    if (out_record_flags != nullptr) {
+        *out_record_flags = record.flags;
+    }
     return MYLITE_OWNERLESS_PAGE_LOG_OK;
 }
 

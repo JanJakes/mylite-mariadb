@@ -82,6 +82,44 @@ row_sel_ownerless_current_read_refresh_sql(
 	}
 }
 
+static bool
+row_sel_ownerless_current_read_refresh_needed(
+/*=========================================*/
+	const row_prebuilt_t*	prebuilt,
+	const trx_t*		trx)
+{
+	if (!mylite_ownerless_innodb_lock_has_hooks()) {
+		return(false);
+	}
+
+	if (mylite_ownerless_innodb_statement_plain_read() != 0) {
+		return(mylite_ownerless_innodb_statement_plain_read_preserves_local_pages()
+		       == 0);
+	}
+
+	return(prebuilt->select_lock_type != LOCK_NONE
+	       && row_sel_ownerless_current_read_refresh_sql(trx));
+}
+
+static dberr_t
+row_sel_ownerless_current_read_refresh_page(
+/*=======================================*/
+	const row_prebuilt_t*	prebuilt,
+	const trx_t*		trx,
+	btr_pcur_t*		pcur)
+{
+	if (!row_sel_ownerless_current_read_refresh_needed(prebuilt, trx)) {
+		return(DB_SUCCESS);
+	}
+
+	const int refresh_result =
+		mylite_ownerless_innodb_refresh_page_for_current_read(
+			btr_pcur_get_block(pcur));
+	return(refresh_result == MYLITE_OWNERLESS_INNODB_LOCK_OK
+	       || refresh_result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE
+	       ? DB_SUCCESS : DB_ERROR);
+}
+
 /* Maximum number of rows to prefetch; MySQL interface has another parameter */
 #define SEL_MAX_N_PREFETCH	16
 
@@ -4843,17 +4881,34 @@ page_corrupted:
 
 		rec = btr_pcur_get_rec(pcur);
 		ut_ad(page_rec_is_leaf(rec));
-		if (UNIV_UNLIKELY(prebuilt->select_lock_type != LOCK_NONE &&
-				  row_sel_ownerless_current_read_refresh_sql(trx) &&
-				  mylite_ownerless_innodb_lock_has_hooks())) {
-			const int refresh_result =
-				mylite_ownerless_innodb_refresh_page_for_current_read(
-					btr_pcur_get_block(pcur));
-			if (refresh_result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
-			    refresh_result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE) {
+		if (UNIV_UNLIKELY(row_sel_ownerless_current_read_refresh_needed(
+				  prebuilt, trx))) {
+			if (row_sel_ownerless_current_read_refresh_page(
+				    prebuilt, trx, pcur) != DB_SUCCESS) {
 				err = DB_ERROR;
 				goto page_read_error;
 			}
+			mtr.commit();
+			mtr.start();
+			pcur->old_rec = nullptr;
+			if (index->is_spatial()) {
+				rtr_info_reinit_in_cursor(
+					btr_pcur_get_btr_cur(pcur),
+					index, set_also_gap_locks);
+				prebuilt->rtr_info->search_tuple = search_tuple;
+				prebuilt->rtr_info->search_mode = mode;
+				err = rtr_search_leaf(pcur, thr, search_tuple, mode,
+						      &mtr);
+			} else {
+				err = btr_pcur_open_with_no_init(search_tuple, mode,
+								 BTR_SEARCH_LEAF,
+								 pcur, &mtr);
+			}
+			if (err != DB_SUCCESS) {
+				rec = NULL;
+				goto page_read_error;
+			}
+			pcur->trx_if_known = trx;
 			rec = btr_pcur_get_rec(pcur);
 		}
 
@@ -4899,6 +4954,27 @@ page_corrupted:
 			}
 			rec = NULL;
 			goto page_read_error;
+		}
+		if (UNIV_UNLIKELY(row_sel_ownerless_current_read_refresh_page(
+				  prebuilt, trx, pcur) != DB_SUCCESS)) {
+			err = DB_ERROR;
+			rec = NULL;
+			goto page_read_error;
+		}
+		if (UNIV_UNLIKELY(row_sel_ownerless_current_read_refresh_needed(
+				  prebuilt, trx))) {
+			mtr.commit();
+			mtr.start();
+			err = pcur->open_leaf(mode == PAGE_CUR_G, index,
+					      BTR_SEARCH_LEAF, &mtr);
+			if (err != DB_SUCCESS) {
+				if (err == DB_DECRYPTION_FAILED) {
+					innodb_decryption_failed(trx->mysql_thd,
+								 index->table);
+				}
+				rec = NULL;
+				goto page_read_error;
+			}
 		}
 	}
 

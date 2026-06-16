@@ -3917,10 +3917,12 @@ dberr_t buf_page_t::read_complete(const fil_node_t &node,
     if (ownerless_page != nullptr)
     {
       uint64_t ownerless_commit_lsn= 0;
+      uint32_t ownerless_record_flags= 0;
       const int ownerless_read_result=
           mylite_ownerless_innodb_read_page_version_with_metadata(
               expected_id.space(), expected_id.page_no(), ownerless_page,
-              page_size, nullptr, &ownerless_commit_lsn);
+              page_size, nullptr, &ownerless_commit_lsn,
+              &ownerless_record_flags);
       switch (ownerless_read_result)
       {
       case MYLITE_OWNERLESS_INNODB_LOCK_OK:
@@ -3971,8 +3973,15 @@ dberr_t buf_page_t::read_complete(const fil_node_t &node,
                   0 &&
                 read_frame_usable &&
                 mylite_ownerless_retained_user_page(read_id, read_frame);
+            const bool ownerless_snapshot_boundary=
+                (ownerless_record_flags &
+                 MYLITE_OWNERLESS_INNODB_PAGE_VERSION_SNAPSHOT_BOUNDARY) != 0;
             const bool retained_lower_boundary_page=
-                retained_user_page && !ownerless_current_visibility;
+                retained_user_page &&
+                (!ownerless_current_visibility || ownerless_snapshot_boundary ||
+                 mylite_ownerless_innodb_external_page_observed_at_or_after(
+                     expected_id.space(), expected_id.page_no(),
+                     ownerless_commit_lsn) != 0);
             const bool copy_ownerless=
                 !current_trx_modified_page &&
                 (!read_frame_usable || ownerless_lsn > read_lsn ||
@@ -3982,7 +3991,12 @@ dberr_t buf_page_t::read_complete(const fil_node_t &node,
                  (!retained_lower_boundary_page &&
                   ownerless_boundary_newer_than_frame));
             if (copy_ownerless)
+            {
               memcpy(read_frame, ownerless_page, page_size);
+              mylite_ownerless_innodb_note_external_page_observed(
+                  expected_id.space(), expected_id.page_no(),
+                  ownerless_commit_lsn);
+            }
           }
         }
         break;
@@ -4067,14 +4081,14 @@ dberr_t buf_page_t::read_complete(const fil_node_t &node,
     else
     {
       if (recovery && recv_sys.free_corrupted_page(expected_id, node));
-      else if (err == DB_FAIL)
-        /* We already output a more specific message. */
-        err= DB_PAGE_CORRUPTED;
-      else
-      {
-        sql_print_error("InnoDB: Failed to read page " UINT32PF
-                        " from file '%s': %s", expected_id.page_no(),
-                        node.name, ut_strerr(err));
+	      else if (err == DB_FAIL)
+	        /* We already output a more specific message. */
+	        err= DB_PAGE_CORRUPTED;
+	      else
+	      {
+	        sql_print_error("InnoDB: Failed to read page " UINT32PF
+	                        " from file '%s': %s", expected_id.page_no(),
+	                        node.name, ut_strerr(err));
 
         buf_page_print(read_frame, zip_size());
 

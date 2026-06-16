@@ -3630,7 +3630,6 @@ lsn_t buf_flush_publish_ownerless_page_to_lsn(
     const lsn_t page_lsn= mach_read_from_8(page + FIL_PAGE_LSN);
     if (read_space_id == space_id && read_page_no == page_no &&
         page_lsn != 0 &&
-        buf_page_is_corrupted(true, page, flags) == NOT_CORRUPTED &&
         (!native_support_only ||
          buf_flush_ownerless_can_publish_dirty_page(page)))
     {
@@ -3641,6 +3640,11 @@ lsn_t buf_flush_publish_ownerless_page_to_lsn(
           buf_flush_update_zip_checksum(page, page_size);
         else
           buf_flush_init_for_writing(nullptr, page, nullptr, full_crc32);
+        if (buf_page_is_corrupted(true, page, flags) != NOT_CORRUPTED)
+        {
+          aligned_free(page);
+          return observed_lsn;
+        }
         const int result= mylite_ownerless_innodb_publish_page_version(
             space_id, page_no, page_lsn, visible_lsn, page, page_size);
         if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK &&
