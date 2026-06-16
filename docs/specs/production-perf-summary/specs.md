@@ -780,6 +780,10 @@ values are timing smoke evidence, not a replacement for CI-sized samples.
 - CI runs both embedded performance probes before embedded correctness tests so
   production timing evidence remains visible even if a later correctness case
   fails.
+- Stats-enabled ownerless attribution summaries include native page-write
+  publish and commit-log subphase rows so CI logs show whether remaining write
+  cost sits in scan, page image preparation, hook/page-log append, redo-leave,
+  or no-dirty commit-loop work.
 - CI rejects non-Release CMake caches before CMake-backed test or timing
   phases run.
 - Timer-driven ownerless checkpoint scheduling remains an idle-runtime cleanup

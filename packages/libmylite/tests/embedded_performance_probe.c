@@ -3843,6 +3843,59 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         insert_iterations
     );
     emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_publish_calls_per_insert",
+        page_write[PAGE_WRITE_PERF_STAT_PUBLISH_CALLS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_publish_scan_calls_per_"
+        "insert",
+        page_write[PAGE_WRITE_PERF_STAT_PUBLISH_SCAN_CALLS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_publish_scan_ms_per_insert",
+        page_write[PAGE_WRITE_PERF_STAT_PUBLISH_SCAN_TOTAL_NS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_publish_deferred_pages_per_"
+        "insert",
+        page_write[PAGE_WRITE_PERF_STAT_PUBLISH_DEFERRED_PAGES],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_publish_space_ms_per_insert",
+        page_write[PAGE_WRITE_PERF_STAT_PUBLISH_SPACE_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_publish_alloc_ms_per_insert",
+        page_write[PAGE_WRITE_PERF_STAT_PUBLISH_ALLOC_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_publish_copy_ms_per_insert",
+        page_write[PAGE_WRITE_PERF_STAT_PUBLISH_COPY_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_publish_checksum_ms_per_"
+        "insert",
+        page_write[PAGE_WRITE_PERF_STAT_PUBLISH_CHECKSUM_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_publish_hook_ms_per_insert",
+        page_write[PAGE_WRITE_PERF_STAT_PUBLISH_HOOK_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_publish_free_ms_per_insert",
+        page_write[PAGE_WRITE_PERF_STAT_PUBLISH_FREE_NS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_page_write_publish_buffer_reuse_hits_per_insert",
         page_write[PAGE_WRITE_PERF_STAT_PUBLISH_BUFFER_REUSE_HITS],
         insert_iterations
@@ -3853,9 +3906,67 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         page_write[PAGE_WRITE_PERF_STAT_PUBLISH_BUFFER_REUSE_MISSES],
         insert_iterations
     );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_commit_log_calls_per_insert",
+        page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_CALLS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_commit_log_made_dirty_calls_per_"
+        "insert",
+        page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_MADE_DIRTY_CALLS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_commit_log_no_dirty_calls_per_"
+        "insert",
+        page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_NO_DIRTY_CALLS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_commit_log_ms_per_insert",
+        page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_TOTAL_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_commit_log_flush_list_ms_per_"
+        "insert",
+        page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_FLUSH_LIST_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_commit_log_release_ms_per_"
+        "insert",
+        page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_RELEASE_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_commit_log_redo_leave_ms_per_"
+        "insert",
+        page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_REDO_LEAVE_NS],
+        insert_iterations
+    );
     emit_summary_ms_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_commit_mtr_publish_ms_per_insert",
         page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_PUBLISH_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_commit_log_publish_ms_per_"
+        "insert",
+        page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_PUBLISH_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_commit_log_release_memo_ms_per_"
+        "insert",
+        page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_RELEASE_MEMO_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_commit_log_no_dirty_loop_ms_per_"
+        "insert",
+        page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_NO_DIRTY_LOOP_NS],
         insert_iterations
     );
     emit_summary_ms_per_iteration(

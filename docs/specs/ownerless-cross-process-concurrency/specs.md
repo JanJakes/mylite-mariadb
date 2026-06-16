@@ -5216,6 +5216,12 @@ subsystems that this mode needs:
   reduced ownerless stress pass cover the change. This is a broad query
   plumbing cleanup for WordPress-shaped text SQL, not a replacement for the
   remaining ownerless redo/checkpoint and page-publication performance work.
+  The page-write publish summary slice then promoted existing detailed native
+  page-write counters into CI-facing per-insert summary rows for publish
+  calls, dirty-page scan work, deferred pages, lookup/allocation/copy/checksum/
+  hook/free time, and commit-log flush-list/release/redo-leave/publish/
+  release-memo/no-dirty-loop subphases. This is diagnostics-only and keeps the
+  next write-path optimization selectable from production CI logs.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.

@@ -141,6 +141,14 @@ ratios, and stats-enabled per-row/per-statement ownerless attribution for page
 versions, page-log appends, native-support publication, and commit-visibility
 choices. This separates the single-row prepared autocommit cost from the
 multi-row fast-path SQL shape that ownerless concurrency now admits.
+The stats-enabled ownerless autocommit summary now also promotes the existing
+native page-write detailed counters into per-insert summary rows for publish
+calls, dirty-page scan work, deferred pages, tablespace lookup, scratch
+allocation, page copy, checksum initialization, page-version hook time, and
+commit-log subphases including flush-list, release, redo-leave, publish,
+release-memo, and no-dirty-loop time. This keeps CI timing summaries useful
+for the remaining write-path work without changing the page-version WAL format
+or ownerless visibility semantics.
 The WordPress `perf-probe` now also compares process startup plus explicit
 `mysqli_close()` against process startup plus implicit PHP object-free close
 for a live mysqli link. Both paths intentionally continue through
