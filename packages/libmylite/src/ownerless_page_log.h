@@ -73,6 +73,19 @@ int mylite_ownerless_page_log_append_initialized_at(
     uint32_t page_size,
     uint64_t *out_record_offset
 );
+uint64_t mylite_ownerless_page_log_checksum_page(const void *page, uint32_t page_size);
+int mylite_ownerless_page_log_append_initialized_at_with_checksum(
+    int fd,
+    uint64_t log_offset,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t page_lsn,
+    uint64_t commit_lsn,
+    const void *page,
+    uint32_t page_size,
+    uint64_t page_checksum,
+    uint64_t *out_record_offset
+);
 int mylite_ownerless_page_log_append_snapshot_boundary_initialized_at(
     int fd,
     uint64_t log_offset,
@@ -95,6 +108,18 @@ int mylite_ownerless_page_log_append_external_snapshot_lineage_initialized_at(
     uint32_t page_size,
     uint64_t *out_record_offset
 );
+int mylite_ownerless_page_log_append_external_snapshot_lineage_initialized_at_with_checksum(
+    int fd,
+    uint64_t log_offset,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t page_lsn,
+    uint64_t commit_lsn,
+    const void *page,
+    uint32_t page_size,
+    uint64_t page_checksum,
+    uint64_t *out_record_offset
+);
 int mylite_ownerless_page_log_append_session_begin_initialized_at(
     int fd,
     uint64_t log_offset,
@@ -109,6 +134,18 @@ int mylite_ownerless_page_log_append_session_append(
     uint64_t commit_lsn,
     const void *page,
     uint32_t page_size,
+    uint64_t *out_record_offset
+);
+int mylite_ownerless_page_log_append_session_append_with_checksum(
+    int fd,
+    mylite_ownerless_page_log_append_session *session,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t page_lsn,
+    uint64_t commit_lsn,
+    const void *page,
+    uint32_t page_size,
+    uint64_t page_checksum,
     uint64_t *out_record_offset
 );
 void mylite_ownerless_page_log_append_session_end(

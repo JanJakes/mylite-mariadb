@@ -307,6 +307,7 @@ enum PageLogAppendPerfStatIndex : std::size_t {
     PAGE_LOG_APPEND_PERF_STANDALONE_SIZE_PROBE_NS,
     PAGE_LOG_APPEND_PERF_STANDALONE_MATERIALIZE_SKIPPED_RECORDS,
     PAGE_LOG_APPEND_PERF_STANDALONE_MATERIALIZE_SKIPPED_BYTES,
+    PAGE_LOG_APPEND_PERF_PRECOMPUTED_CHECKSUM_RECORDS,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
@@ -558,7 +559,9 @@ int append_locked(
     const void *page,
     std::uint32_t page_size,
     std::uint64_t *out_record_offset,
-    std::uint32_t extra_record_flags
+    std::uint32_t extra_record_flags,
+    bool has_precomputed_checksum,
+    std::uint64_t precomputed_checksum
 );
 int append_record_at_locked(
     int fd,
@@ -577,7 +580,9 @@ int append_record_at_locked(
     std::uint64_t *out_next_record_offset,
     std::uint32_t extra_record_flags,
     bool append_stats_enabled,
-    bool append_detail_stats_enabled
+    bool append_detail_stats_enabled,
+    bool has_precomputed_checksum,
+    std::uint64_t precomputed_checksum
 );
 int snapshot_locked(int fd, off_t log_offset, std::uint64_t *out_snapshot_end_offset);
 int snapshot_locked_with_generation(
@@ -1131,7 +1136,9 @@ int append_at_common(
     std::uint32_t page_size,
     std::uint64_t *out_record_offset,
     bool validate_header,
-    std::uint32_t extra_record_flags
+    std::uint32_t extra_record_flags,
+    bool has_precomputed_checksum,
+    std::uint64_t precomputed_checksum
 ) {
     const bool append_stats_enabled = page_log_append_perf_stats_are_enabled();
     PageLogAppendPerfScope total_scope(PAGE_LOG_APPEND_PERF_TOTAL_NS, append_stats_enabled);
@@ -1172,19 +1179,22 @@ int append_at_common(
             stage_start_ns
         );
     }
-    const int append_result = header_result == MYLITE_OWNERLESS_PAGE_LOG_OK ? append_locked(
-                                                                                  fd,
-                                                                                  offset,
-                                                                                  space_id,
-                                                                                  page_no,
-                                                                                  page_lsn,
-                                                                                  commit_lsn,
-                                                                                  page,
-                                                                                  page_size,
-                                                                                  out_record_offset,
-                                                                                  extra_record_flags
-                                                                              )
-                                                                            : header_result;
+    const int append_result = header_result == MYLITE_OWNERLESS_PAGE_LOG_OK
+                                  ? append_locked(
+                                        fd,
+                                        offset,
+                                        space_id,
+                                        page_no,
+                                        page_lsn,
+                                        commit_lsn,
+                                        page,
+                                        page_size,
+                                        out_record_offset,
+                                        extra_record_flags,
+                                        has_precomputed_checksum,
+                                        precomputed_checksum
+                                    )
+                                  : header_result;
     release_log_lock(fd, k_append_lock_start);
     return append_result;
 }
@@ -1270,6 +1280,8 @@ int mylite_ownerless_page_log_append_at(
         page_size,
         out_record_offset,
         true,
+        0U,
+        false,
         0U
     );
 }
@@ -1296,7 +1308,45 @@ int mylite_ownerless_page_log_append_initialized_at(
         page_size,
         out_record_offset,
         false,
+        0U,
+        false,
         0U
+    );
+}
+
+std::uint64_t mylite_ownerless_page_log_checksum_page(const void *page, std::uint32_t page_size) {
+    if (page == nullptr || page_size == 0U) {
+        return 0U;
+    }
+    return checksum_bytes(page, page_size);
+}
+
+int mylite_ownerless_page_log_append_initialized_at_with_checksum(
+    int fd,
+    std::uint64_t log_offset,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t page_lsn,
+    std::uint64_t commit_lsn,
+    const void *page,
+    std::uint32_t page_size,
+    std::uint64_t page_checksum,
+    std::uint64_t *out_record_offset
+) {
+    return append_at_common(
+        fd,
+        log_offset,
+        space_id,
+        page_no,
+        page_lsn,
+        commit_lsn,
+        page,
+        page_size,
+        out_record_offset,
+        false,
+        0U,
+        true,
+        page_checksum
     );
 }
 
@@ -1322,7 +1372,9 @@ int mylite_ownerless_page_log_append_snapshot_boundary_initialized_at(
         page_size,
         out_record_offset,
         false,
-        k_record_flag_snapshot_boundary
+        k_record_flag_snapshot_boundary,
+        false,
+        0U
     );
 }
 
@@ -1348,7 +1400,38 @@ int mylite_ownerless_page_log_append_external_snapshot_lineage_initialized_at(
         page_size,
         out_record_offset,
         false,
-        k_record_flag_external_snapshot_lineage
+        k_record_flag_external_snapshot_lineage,
+        false,
+        0U
+    );
+}
+
+int mylite_ownerless_page_log_append_external_snapshot_lineage_initialized_at_with_checksum(
+    int fd,
+    std::uint64_t log_offset,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t page_lsn,
+    std::uint64_t commit_lsn,
+    const void *page,
+    std::uint32_t page_size,
+    std::uint64_t page_checksum,
+    std::uint64_t *out_record_offset
+) {
+    return append_at_common(
+        fd,
+        log_offset,
+        space_id,
+        page_no,
+        page_lsn,
+        commit_lsn,
+        page,
+        page_size,
+        out_record_offset,
+        false,
+        k_record_flag_external_snapshot_lineage,
+        true,
+        page_checksum
     );
 }
 
@@ -1413,7 +1496,7 @@ int mylite_ownerless_page_log_append_session_begin_initialized_at(
     return MYLITE_OWNERLESS_PAGE_LOG_OK;
 }
 
-int mylite_ownerless_page_log_append_session_append(
+static int page_log_append_session_append_common(
     int fd,
     mylite_ownerless_page_log_append_session *session,
     std::uint32_t space_id,
@@ -1422,6 +1505,8 @@ int mylite_ownerless_page_log_append_session_append(
     std::uint64_t commit_lsn,
     const void *page,
     std::uint32_t page_size,
+    bool has_precomputed_checksum,
+    std::uint64_t page_checksum,
     std::uint64_t *out_record_offset
 ) {
     const bool append_stats_enabled = page_log_append_perf_stats_are_enabled();
@@ -1461,12 +1546,67 @@ int mylite_ownerless_page_log_append_session_append(
         &next_record_offset,
         0U,
         append_stats_enabled,
-        append_detail_stats_enabled
+        append_detail_stats_enabled,
+        has_precomputed_checksum,
+        page_checksum
     );
     if (result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
         session->next_record_offset = next_record_offset;
     }
     return result;
+}
+
+int mylite_ownerless_page_log_append_session_append(
+    int fd,
+    mylite_ownerless_page_log_append_session *session,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t page_lsn,
+    std::uint64_t commit_lsn,
+    const void *page,
+    std::uint32_t page_size,
+    std::uint64_t *out_record_offset
+) {
+    return page_log_append_session_append_common(
+        fd,
+        session,
+        space_id,
+        page_no,
+        page_lsn,
+        commit_lsn,
+        page,
+        page_size,
+        false,
+        0U,
+        out_record_offset
+    );
+}
+
+int mylite_ownerless_page_log_append_session_append_with_checksum(
+    int fd,
+    mylite_ownerless_page_log_append_session *session,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t page_lsn,
+    std::uint64_t commit_lsn,
+    const void *page,
+    std::uint32_t page_size,
+    std::uint64_t page_checksum,
+    std::uint64_t *out_record_offset
+) {
+    return page_log_append_session_append_common(
+        fd,
+        session,
+        space_id,
+        page_no,
+        page_lsn,
+        commit_lsn,
+        page,
+        page_size,
+        true,
+        page_checksum,
+        out_record_offset
+    );
 }
 
 void mylite_ownerless_page_log_append_session_end(
@@ -2562,7 +2702,9 @@ int append_locked(
     const void *page,
     std::uint32_t page_size,
     std::uint64_t *out_record_offset,
-    std::uint32_t extra_record_flags
+    std::uint32_t extra_record_flags,
+    bool has_precomputed_checksum,
+    std::uint64_t precomputed_checksum
 ) {
     const bool append_stats_enabled = page_log_append_perf_stats_are_enabled();
     const bool append_detail_stats_enabled =
@@ -2605,7 +2747,9 @@ int append_locked(
         nullptr,
         extra_record_flags,
         append_stats_enabled,
-        append_detail_stats_enabled
+        append_detail_stats_enabled,
+        has_precomputed_checksum,
+        precomputed_checksum
     );
 }
 
@@ -2626,7 +2770,9 @@ int append_record_at_locked(
     std::uint64_t *out_next_record_offset,
     std::uint32_t extra_record_flags,
     bool append_stats_enabled,
-    bool append_detail_stats_enabled
+    bool append_detail_stats_enabled,
+    bool has_precomputed_checksum,
+    std::uint64_t precomputed_checksum
 ) {
     off_t payload_offset = 0;
     if (!offset_adds(
@@ -2865,13 +3011,22 @@ int append_record_at_locked(
     record.page_lsn = page_lsn;
     record.commit_lsn = commit_lsn;
     record.payload_size = encoded_payload_size;
-    stage_start_ns = append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
-    record.checksum = checksum_bytes(record_page, page_size);
-    page_log_append_perf_add_elapsed_if_enabled(
-        append_stats_enabled,
-        PAGE_LOG_APPEND_PERF_CHECKSUM_NS,
-        stage_start_ns
-    );
+    if (has_precomputed_checksum) {
+        record.checksum = precomputed_checksum;
+        page_log_append_perf_add_if_enabled(
+            append_stats_enabled,
+            PAGE_LOG_APPEND_PERF_PRECOMPUTED_CHECKSUM_RECORDS,
+            1U
+        );
+    } else {
+        stage_start_ns = append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
+        record.checksum = checksum_bytes(record_page, page_size);
+        page_log_append_perf_add_elapsed_if_enabled(
+            append_stats_enabled,
+            PAGE_LOG_APPEND_PERF_CHECKSUM_NS,
+            stage_start_ns
+        );
+    }
 
     stage_start_ns = append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
     const void *payload = encoded_payload.empty() ? record_page : encoded_payload.data();

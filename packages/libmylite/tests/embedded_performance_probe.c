@@ -228,6 +228,7 @@ enum database_perf_stat_index {
     DATABASE_PERF_STAT_CHECKPOINT_UPDATE_GENERATION_CACHE_HITS,
     DATABASE_PERF_STAT_CHECKPOINT_UPDATE_LEGACY_WRITE_ELIDED,
     DATABASE_PERF_STAT_CHECKPOINT_UPDATE_NOOP_ELIDED,
+    DATABASE_PERF_STAT_PAGE_PUBLISH_PAGE_LOG_CHECKSUM_NS,
     DATABASE_PERF_STAT_COUNT
 };
 
@@ -626,6 +627,7 @@ enum page_log_append_perf_stat_index {
     PAGE_LOG_APPEND_PERF_STAT_STANDALONE_SIZE_PROBE_NS,
     PAGE_LOG_APPEND_PERF_STAT_STANDALONE_MATERIALIZE_SKIPPED_RECORDS,
     PAGE_LOG_APPEND_PERF_STAT_STANDALONE_MATERIALIZE_SKIPPED_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_PRECOMPUTED_CHECKSUM_RECORDS,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
@@ -3238,6 +3240,11 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         insert_iterations
     );
     emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_publish_page_log_checksum_ms_per_insert",
+        database_perf[DATABASE_PERF_STAT_PAGE_PUBLISH_PAGE_LOG_CHECKSUM_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_page_publish_index_ms_per_insert",
         database_perf[DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_NS],
         insert_iterations
@@ -3305,6 +3312,12 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
     emit_summary_ms_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_page_log_checksum_ms_per_insert",
         page_log_append[PAGE_LOG_APPEND_PERF_STAT_CHECKSUM_NS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_precomputed_checksum_records_per_"
+        "insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_PRECOMPUTED_CHECKSUM_RECORDS],
         insert_iterations
     );
     emit_summary_ms_per_iteration(
@@ -5045,6 +5058,11 @@ static void emit_database_perf_stats(const char *prefix) {
         "%s_page_publish_hook_append_ms=%.3f\n",
         prefix,
         (double)values[DATABASE_PERF_STAT_PAGE_PUBLISH_APPEND_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_publish_hook_page_log_checksum_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PAGE_PUBLISH_PAGE_LOG_CHECKSUM_NS] / 1000000.0
     );
     printf(
         "%s_page_publish_hook_index_ms=%.3f\n",
@@ -7405,6 +7423,11 @@ static void emit_page_log_append_perf_stats(const char *prefix) {
         values[PAGE_LOG_APPEND_PERF_STAT_DELTA_BASE_NOTE_NS]
     );
     emit_page_log_append_perf_ms(prefix, "checksum", values[PAGE_LOG_APPEND_PERF_STAT_CHECKSUM_NS]);
+    emit_page_log_append_perf_count(
+        prefix,
+        "precomputed_checksum_records",
+        values[PAGE_LOG_APPEND_PERF_STAT_PRECOMPUTED_CHECKSUM_RECORDS]
+    );
     emit_page_log_append_perf_ms(
         prefix,
         "payload_write",

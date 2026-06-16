@@ -147,6 +147,7 @@ enum OwnerlessDatabasePerfStatIndex : std::size_t {
     OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_GENERATION_CACHE_HITS,
     OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_LEGACY_WRITE_ELIDED,
     OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_NOOP_ELIDED,
+    OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_PAGE_LOG_CHECKSUM_NS,
     OWNERLESS_DATABASE_PERF_STAT_COUNT
 };
 
@@ -2086,6 +2087,7 @@ int append_ownerless_page_version(
     std::uint64_t visible_lsn,
     const void *page,
     std::uint32_t page_size,
+    std::uint64_t page_checksum,
     std::uint64_t *out_record_offset
 );
 void pause_for_ownerless_test_fault(const char *fault_name);
@@ -15184,6 +15186,7 @@ int append_ownerless_page_version(
     std::uint64_t visible_lsn,
     const void *page,
     std::uint32_t page_size,
+    std::uint64_t page_checksum,
     std::uint64_t *out_record_offset
 ) {
     if (ownerless_page_log_append_batch.hook == hook) {
@@ -15201,7 +15204,7 @@ int append_ownerless_page_version(
 
     if (ownerless_page_log_append_batch.session.active != 0 &&
         ownerless_page_log_append_batch.hook == hook) {
-        return mylite_ownerless_page_log_append_session_append(
+        return mylite_ownerless_page_log_append_session_append_with_checksum(
             hook->page_log_fd,
             &ownerless_page_log_append_batch.session,
             space_id,
@@ -15210,11 +15213,12 @@ int append_ownerless_page_version(
             visible_lsn,
             page,
             page_size,
+            page_checksum,
             out_record_offset
         );
     }
 
-    return mylite_ownerless_page_log_append_initialized_at(
+    return mylite_ownerless_page_log_append_initialized_at_with_checksum(
         hook->page_log_fd,
         hook->page_log_offset,
         space_id,
@@ -15223,6 +15227,7 @@ int append_ownerless_page_version(
         visible_lsn,
         page,
         page_size,
+        page_checksum,
         out_record_offset
     );
 }
@@ -15487,6 +15492,13 @@ int ownerless_innodb_page_publish_hook(
 
     stage_start_ns =
         ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
+    const std::uint64_t page_checksum = mylite_ownerless_page_log_checksum_page(page, page_size);
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_PAGE_LOG_CHECKSUM_NS,
+        stage_start_ns
+    );
+    stage_start_ns =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     const bool external_snapshot_lineage_active =
         external_snapshot_pin_active ||
         g_runtime.ownerless_runtime_consumed_external_snapshot_page_version_wal.load(
@@ -15494,7 +15506,7 @@ int ownerless_innodb_page_publish_hook(
         );
     const int append_result =
         external_snapshot_lineage_active
-            ? mylite_ownerless_page_log_append_external_snapshot_lineage_initialized_at(
+            ? mylite_ownerless_page_log_append_external_snapshot_lineage_initialized_at_with_checksum(
                   hook->page_log_fd,
                   hook->page_log_offset,
                   space_id,
@@ -15503,6 +15515,7 @@ int ownerless_innodb_page_publish_hook(
                   visible_lsn,
                   page,
                   page_size,
+                  page_checksum,
                   &record_offset
               )
             : append_ownerless_page_version(
@@ -15513,6 +15526,7 @@ int ownerless_innodb_page_publish_hook(
                   visible_lsn,
                   page,
                   page_size,
+                  page_checksum,
                   &record_offset
               );
     ownerless_database_perf_add_elapsed(

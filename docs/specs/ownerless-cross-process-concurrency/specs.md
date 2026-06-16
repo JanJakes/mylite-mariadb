@@ -291,7 +291,11 @@ Roles:
   a replacement for InnoDB redo. Its fixed recovery header is followed by the
   ownerless page-version payload. Guarded ownerless SQL now appends dirty page
   images before the temporary commit-LSN flush bridge releases shared locks.
-  The shared page-version index can rebuild and checkpoint those records.
+  The shared page-version index can rebuild and checkpoint those records. The
+  page-log checksum remains a full reconstructed page checksum independent of
+  the selected payload encoding; ownerless InnoDB publish hooks may precompute
+  that checksum after accepting a page for append and hand it to the page-log
+  encoder to keep the append path from rescanning the page.
   Guarded ownerless SQL can use page-version reads for direct or prepared
   `SELECT`/`WITH` statements at a live page-version read LSN, while the
   page-visible LSN remains the durable recovery/checkpoint boundary. Eligible

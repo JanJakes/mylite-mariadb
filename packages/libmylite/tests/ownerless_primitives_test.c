@@ -203,6 +203,7 @@ enum page_log_append_perf_stat_index {
     PAGE_LOG_APPEND_PERF_STAT_STANDALONE_SIZE_PROBE_NS,
     PAGE_LOG_APPEND_PERF_STAT_STANDALONE_MATERIALIZE_SKIPPED_RECORDS,
     PAGE_LOG_APPEND_PERF_STAT_STANDALONE_MATERIALIZE_SKIPPED_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_PRECOMPUTED_CHECKSUM_RECORDS,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
@@ -254,6 +255,7 @@ static void test_directory_probe_records_required_primitives(void);
 static void test_page_log_reads_latest_visible_page(void);
 static void test_page_log_uses_payload_offset(void);
 static void test_page_log_append_reports_write_volume(void);
+static void test_page_log_append_uses_precomputed_checksum(void);
 static void test_page_log_append_detail_stats_are_opt_in(void);
 static void test_page_log_encodes_sparse_zero_payloads(void);
 static void test_page_log_encodes_fill_sparse_zero_payloads(void);
@@ -458,6 +460,7 @@ int main(void) {
     test_page_log_reads_latest_visible_page();
     test_page_log_uses_payload_offset();
     test_page_log_append_reports_write_volume();
+    test_page_log_append_uses_precomputed_checksum();
     test_page_log_append_detail_stats_are_opt_in();
     test_page_log_encodes_sparse_zero_payloads();
     test_page_log_encodes_fill_sparse_zero_payloads();
@@ -1312,6 +1315,71 @@ static void test_page_log_append_reports_write_volume(void) {
     assert(out_page_lsn == 140U);
     assert(out_commit_lsn == 140U);
     assert(memcmp(out_page, page_v3, sizeof(page_v3)) == 0);
+
+    assert(close(fd) == 0);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_append_uses_precomputed_checksum(void) {
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "append-precomputed-checksum-page-log.bin");
+    int fd = open_file(log_path);
+    uint8_t page[MYLITE_TEST_PAGE_SIZE];
+    uint8_t out_page[MYLITE_TEST_PAGE_SIZE];
+    uint64_t record_offset = 0;
+    uint64_t stats[PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
+    uint32_t out_page_size = 0;
+    uint64_t out_page_lsn = 0;
+    uint64_t out_commit_lsn = 0;
+    uint64_t page_checksum = 0;
+
+    fill_innodb_test_page(page, 17U, 4U, 180U, 0x5CU);
+    page_checksum = mylite_ownerless_page_log_checksum_page(page, sizeof(page));
+    memset(out_page, 0, sizeof(out_page));
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    mylite_ownerless_page_log_reset_append_perf_stats();
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
+    assert(
+        mylite_ownerless_page_log_append_initialized_at_with_checksum(
+            fd,
+            0U,
+            17U,
+            4U,
+            180U,
+            180U,
+            page,
+            sizeof(page),
+            page_checksum,
+            &record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(0);
+    mylite_ownerless_page_log_read_append_perf_stats(stats, PAGE_LOG_APPEND_PERF_STAT_COUNT);
+
+    assert(record_offset == MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_CALLS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_PRECOMPUTED_CHECKSUM_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_CHECKSUM_NS] == 0U);
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            17U,
+            4U,
+            180U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &out_page_lsn,
+            &out_commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page));
+    assert(out_page_lsn == 180U);
+    assert(out_commit_lsn == 180U);
+    assert(memcmp(out_page, page, sizeof(page)) == 0);
 
     assert(close(fd) == 0);
     free(log_path);
