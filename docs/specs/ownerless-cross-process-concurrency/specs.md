@@ -389,6 +389,11 @@ Roles:
   payload once a valid checksummed generation record exists; empty-record
   fallback still initializes the legacy pair, and non-empty invalid record
   slots still fail closed rather than falling back to stale legacy bytes.
+  Redo-state-backed hook writes also maintain a process-local latest/visible
+  generation-record cache while the process registry proves this runtime is the
+  only active owner and no peer owner has joined since registration; peer
+  presence, direct native checkpoint writes, startup seeding, and no-live native
+  checkpoint promotion reset the cache and keep the file-read merge path.
   Cross-process group commit, broader checkpoint batching, and the separate
   native file-operation marker remain bounded by their existing proof rules.
 - `process/*.heartbeat`: process-liveness evidence for crash detection. These

@@ -144,6 +144,7 @@ enum OwnerlessDatabasePerfStatIndex : std::size_t {
     OWNERLESS_DATABASE_PERF_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_PINS,
     OWNERLESS_DATABASE_PERF_SINGLE_OWNER_SKIP_BLOCKED_BASELINE,
     OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_FILE_READ_ELIDED,
+    OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_GENERATION_CACHE_HITS,
     OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_LEGACY_WRITE_ELIDED,
     OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_NOOP_ELIDED,
     OWNERLESS_DATABASE_PERF_STAT_COUNT
@@ -1172,6 +1173,12 @@ struct OwnerlessCheckpointLsnRecord {
     std::uint64_t visible_lsn = 0;
 };
 
+struct OwnerlessCheckpointLsnGenerationCache {
+    int fd = -1;
+    std::uint64_t registry_generation = 0;
+    OwnerlessCheckpointLsnRecord record = {};
+};
+
 struct OwnerlessCheckpointNativeFileOpRecord {
     std::uint64_t generation = 0;
     bool needed = false;
@@ -1232,6 +1239,8 @@ std::mutex g_ownerless_page_log_sync_anchor_mutex;
 OwnerlessPageLogSyncAnchor g_ownerless_page_log_sync_anchor;
 std::mutex g_ownerless_checkpoint_lsn_sync_anchor_mutex;
 OwnerlessCheckpointLsnSyncAnchor g_ownerless_checkpoint_lsn_sync_anchor;
+std::mutex g_ownerless_checkpoint_lsn_generation_cache_mutex;
+OwnerlessCheckpointLsnGenerationCache g_ownerless_checkpoint_lsn_generation_cache;
 std::atomic<std::uint64_t> g_ownerless_next_page_observation_token{1};
 #endif
 
@@ -1861,6 +1870,7 @@ void advance_ownerless_local_trx_horizon(RuntimeState &runtime);
 void clear_ownerless_native_hook_contexts(RuntimeState &runtime);
 void reset_ownerless_page_log_sync_anchor();
 void reset_ownerless_checkpoint_lsn_sync_anchor();
+void reset_ownerless_checkpoint_lsn_generation_cache();
 bool ownerless_checkpoint_lsn_sync_anchor_matches(
     int checkpoint_fd,
     std::uint64_t latest_lsn,
@@ -2187,9 +2197,34 @@ bool update_concurrency_checkpoint_lsn_from_redo_state(
     int checkpoint_fd,
     void *redo_state,
     std::size_t redo_state_size,
+    const void *process_registry,
+    std::size_t process_registry_size,
+    std::uint64_t owner_generation,
     std::uint64_t latest_lsn,
     std::uint64_t visible_lsn,
     bool durable
+);
+bool ownerless_checkpoint_generation_cache_allowed(
+    const void *process_registry,
+    std::size_t process_registry_size,
+    std::uint64_t owner_generation,
+    std::uint64_t *out_registry_generation
+);
+bool write_concurrency_checkpoint_lsn_with_current_record_locked(
+    int checkpoint_fd,
+    std::uint64_t latest_lsn,
+    std::uint64_t visible_lsn,
+    bool durable,
+    const OwnerlessCheckpointLsnRecord &current_record,
+    bool has_current_record,
+    OwnerlessCheckpointLsnRecord *out_record
+);
+bool write_concurrency_checkpoint_lsn_with_generation_cache_locked(
+    int checkpoint_fd,
+    std::uint64_t latest_lsn,
+    std::uint64_t visible_lsn,
+    bool durable,
+    std::uint64_t registry_generation
 );
 bool read_concurrency_checkpoint_lsn_records(
     int checkpoint_fd,
@@ -13636,6 +13671,7 @@ void clear_ownerless_native_hook_contexts(RuntimeState &runtime) {
     ownerless_page_log_append_batch_release_current();
     reset_ownerless_page_log_sync_anchor();
     reset_ownerless_checkpoint_lsn_sync_anchor();
+    reset_ownerless_checkpoint_lsn_generation_cache();
     runtime.ownerless_innodb_lock_hook = {};
     runtime.ownerless_read_view_hook = {};
     runtime.ownerless_trx_hook = {};
@@ -13650,6 +13686,11 @@ void reset_ownerless_page_log_sync_anchor() {
 void reset_ownerless_checkpoint_lsn_sync_anchor() {
     std::lock_guard<std::mutex> guard(g_ownerless_checkpoint_lsn_sync_anchor_mutex);
     g_ownerless_checkpoint_lsn_sync_anchor = {};
+}
+
+void reset_ownerless_checkpoint_lsn_generation_cache() {
+    std::lock_guard<std::mutex> guard(g_ownerless_checkpoint_lsn_generation_cache_mutex);
+    g_ownerless_checkpoint_lsn_generation_cache = {};
 }
 
 bool ownerless_checkpoint_lsn_sync_anchor_matches(
@@ -15074,6 +15115,9 @@ void ownerless_persist_redo_checkpoint(
             hook->checkpoint_fd,
             hook->redo_state,
             hook->redo_state_size,
+            hook->process_registry,
+            hook->process_registry_size,
+            hook->owner_generation,
             latest_lsn,
             visible_lsn,
             durable
@@ -16539,10 +16583,6 @@ bool write_concurrency_checkpoint_lsn_locked(
     std::uint64_t visible_lsn,
     bool durable
 ) {
-    if (visible_lsn > latest_lsn) {
-        latest_lsn = visible_lsn;
-    }
-
     OwnerlessCheckpointLsnRecord current_record = {};
     bool has_current_record = false;
     if (!read_concurrency_checkpoint_lsn_records(
@@ -16552,11 +16592,38 @@ bool write_concurrency_checkpoint_lsn_locked(
         )) {
         return false;
     }
+    return write_concurrency_checkpoint_lsn_with_current_record_locked(
+        checkpoint_fd,
+        latest_lsn,
+        visible_lsn,
+        durable,
+        current_record,
+        has_current_record,
+        nullptr
+    );
+}
+
+bool write_concurrency_checkpoint_lsn_with_current_record_locked(
+    int checkpoint_fd,
+    std::uint64_t latest_lsn,
+    std::uint64_t visible_lsn,
+    bool durable,
+    const OwnerlessCheckpointLsnRecord &current_record,
+    bool has_current_record,
+    OwnerlessCheckpointLsnRecord *out_record
+) {
+    if (visible_lsn > latest_lsn) {
+        latest_lsn = visible_lsn;
+    }
+
     if (has_current_record && current_record.latest_lsn == latest_lsn &&
         current_record.visible_lsn == visible_lsn &&
         (!durable ||
          ownerless_checkpoint_lsn_sync_anchor_matches(checkpoint_fd, latest_lsn, visible_lsn))) {
         ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_NOOP_ELIDED, 1U);
+        if (out_record != nullptr) {
+            *out_record = current_record;
+        }
         return true;
     }
     const std::uint64_t next_generation =
@@ -16569,6 +16636,11 @@ bool write_concurrency_checkpoint_lsn_locked(
 
     std::array<unsigned char, k_concurrency_checkpoint_lsn_record_size> lsn_record = {};
     build_concurrency_checkpoint_lsn_record(lsn_record, next_generation, latest_lsn, visible_lsn);
+    OwnerlessCheckpointLsnRecord written_record = {
+        next_generation,
+        latest_lsn,
+        visible_lsn,
+    };
     reset_ownerless_checkpoint_lsn_sync_anchor();
     std::uint64_t stage_start_ns =
         ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
@@ -16609,6 +16681,58 @@ bool write_concurrency_checkpoint_lsn_locked(
         if (ok) {
             ownerless_checkpoint_lsn_sync_anchor_store(checkpoint_fd, latest_lsn, visible_lsn);
         }
+    }
+    if (ok && out_record != nullptr) {
+        *out_record = written_record;
+    }
+    return ok;
+}
+
+bool write_concurrency_checkpoint_lsn_with_generation_cache_locked(
+    int checkpoint_fd,
+    std::uint64_t latest_lsn,
+    std::uint64_t visible_lsn,
+    bool durable,
+    std::uint64_t registry_generation
+) {
+    std::lock_guard<std::mutex> guard(g_ownerless_checkpoint_lsn_generation_cache_mutex);
+
+    OwnerlessCheckpointLsnRecord current_record = {};
+    bool has_current_record = false;
+    if (g_ownerless_checkpoint_lsn_generation_cache.fd == checkpoint_fd &&
+        g_ownerless_checkpoint_lsn_generation_cache.registry_generation == registry_generation &&
+        g_ownerless_checkpoint_lsn_generation_cache.record.generation != 0U) {
+        current_record = g_ownerless_checkpoint_lsn_generation_cache.record;
+        has_current_record = true;
+        ownerless_database_perf_add(
+            OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_GENERATION_CACHE_HITS,
+            1U
+        );
+    } else if (!read_concurrency_checkpoint_lsn_records(
+                   checkpoint_fd,
+                   &current_record,
+                   &has_current_record
+               )) {
+        g_ownerless_checkpoint_lsn_generation_cache = {};
+        return false;
+    }
+
+    OwnerlessCheckpointLsnRecord updated_record = {};
+    const bool ok = write_concurrency_checkpoint_lsn_with_current_record_locked(
+        checkpoint_fd,
+        latest_lsn,
+        visible_lsn,
+        durable,
+        current_record,
+        has_current_record,
+        &updated_record
+    );
+    if (ok && updated_record.generation != 0U) {
+        g_ownerless_checkpoint_lsn_generation_cache.fd = checkpoint_fd;
+        g_ownerless_checkpoint_lsn_generation_cache.registry_generation = registry_generation;
+        g_ownerless_checkpoint_lsn_generation_cache.record = updated_record;
+    } else if (!ok) {
+        g_ownerless_checkpoint_lsn_generation_cache = {};
     }
     return ok;
 }
@@ -16696,10 +16820,40 @@ bool parse_concurrency_checkpoint_lsn_record(
     return true;
 }
 
+bool ownerless_checkpoint_generation_cache_allowed(
+    const void *process_registry,
+    std::size_t process_registry_size,
+    std::uint64_t owner_generation,
+    std::uint64_t *out_registry_generation
+) {
+    if (out_registry_generation == nullptr) {
+        return false;
+    }
+    *out_registry_generation = 0U;
+    if (process_registry == nullptr ||
+        process_registry_size < MYLITE_OWNERLESS_PROCESS_REGISTRY_HEADER_SIZE ||
+        owner_generation == 0U) {
+        return false;
+    }
+
+    const std::uint64_t active_count =
+        mylite_ownerless_process_registry_active_count(process_registry);
+    const std::uint64_t registry_generation =
+        mylite_ownerless_process_registry_generation(process_registry);
+    if (active_count != 1U || registry_generation != owner_generation) {
+        return false;
+    }
+    *out_registry_generation = registry_generation;
+    return true;
+}
+
 bool update_concurrency_checkpoint_lsn_from_redo_state(
     int checkpoint_fd,
     void *redo_state,
     std::size_t redo_state_size,
+    const void *process_registry,
+    std::size_t process_registry_size,
+    std::uint64_t owner_generation,
     std::uint64_t latest_lsn,
     std::uint64_t visible_lsn,
     bool durable
@@ -16737,12 +16891,29 @@ bool update_concurrency_checkpoint_lsn_from_redo_state(
         visible_lsn = std::max(visible_lsn, snapshot.visible_lsn);
         visible_lsn = std::max(visible_lsn, snapshot.durable_lsn);
         ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_FILE_READ_ELIDED, 1U);
-        ok = write_concurrency_checkpoint_lsn_locked(
-            checkpoint_fd,
-            latest_lsn,
-            visible_lsn,
-            durable
-        );
+        std::uint64_t registry_generation = 0U;
+        if (ownerless_checkpoint_generation_cache_allowed(
+                process_registry,
+                process_registry_size,
+                owner_generation,
+                &registry_generation
+            )) {
+            ok = write_concurrency_checkpoint_lsn_with_generation_cache_locked(
+                checkpoint_fd,
+                latest_lsn,
+                visible_lsn,
+                durable,
+                registry_generation
+            );
+        } else {
+            reset_ownerless_checkpoint_lsn_generation_cache();
+            ok = write_concurrency_checkpoint_lsn_locked(
+                checkpoint_fd,
+                latest_lsn,
+                visible_lsn,
+                durable
+            );
+        }
     }
 
     release_fd_lock(
@@ -16764,6 +16935,7 @@ bool update_concurrency_checkpoint_lsn(
     if (checkpoint_fd < 0 || (latest_lsn == 0U && visible_lsn == 0U)) {
         return false;
     }
+    reset_ownerless_checkpoint_lsn_generation_cache();
     std::uint64_t stage_start_ns =
         ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     if (!acquire_fd_write_lock(
@@ -16808,6 +16980,7 @@ bool update_concurrency_checkpoint_lsn(
         k_concurrency_checkpoint_lock_start,
         k_concurrency_checkpoint_lock_length
     );
+    reset_ownerless_checkpoint_lsn_generation_cache();
     return ok;
 }
 
@@ -16830,6 +17003,7 @@ extern "C" int mylite_ownerless_database_test_update_checkpoint_lsn_repeated(
         return MYLITE_IOERR;
     }
     reset_ownerless_checkpoint_lsn_sync_anchor();
+    reset_ownerless_checkpoint_lsn_generation_cache();
 
     int result = MYLITE_OK;
     for (unsigned iteration = 0; iteration < repetitions; ++iteration) {
@@ -16845,6 +17019,7 @@ extern "C" int mylite_ownerless_database_test_update_checkpoint_lsn_repeated(
     }
 
     reset_ownerless_checkpoint_lsn_sync_anchor();
+    reset_ownerless_checkpoint_lsn_generation_cache();
     if (::close(checkpoint_fd) != 0 && result == MYLITE_OK) {
         result = MYLITE_IOERR;
     }
