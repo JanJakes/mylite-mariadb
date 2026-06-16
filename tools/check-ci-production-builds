@@ -153,6 +153,57 @@ require_step_order() {
   fi
 }
 
+require_step_timeout() {
+  local step_name="$1"
+  local minutes="$2"
+  local status
+
+  if awk -v step_name="${step_name}" -v minutes="${minutes}" '
+    BEGIN {
+      timeout = "        timeout-minutes: " minutes
+    }
+    /^[[:space:]]+- name: / {
+      in_step = ($0 == "      - name: " step_name)
+      if (in_step) {
+        seen = 1
+      }
+      next
+    }
+    in_step && $0 == timeout {
+      found = 1
+    }
+    END {
+      if (!seen) {
+        exit 2
+      }
+      if (!found) {
+        exit 1
+      }
+    }
+  ' "${workflow}"; then
+    status=0
+  else
+    status="$?"
+  fi
+
+  case "${status}" in
+    0)
+      ;;
+    1)
+      echo "Missing required CI timeout inside step '${step_name}': ${minutes} minutes" >&2
+      failed=1
+      ;;
+    2)
+      echo "Missing required CI timeout step: ${step_name}" >&2
+      failed=1
+      ;;
+    *)
+      echo "Could not audit CI timeout for step '${step_name}'" >&2
+      failed=1
+      ;;
+  esac
+}
+
 require_embedded_timing_step_guards() {
   local step_name="$1"
 
@@ -222,6 +273,8 @@ require_literal "cmake --build --preset format-check-prod"
 require_literal "cmake --build --preset tidy-prod"
 require_literal_count_at_least "Audit CI production build configuration" 4
 require_literal_count_at_least "run: tools/check-ci-production-builds" 4
+require_literal "timeout-minutes: 75"
+require_literal "timeout-minutes: 90"
 
 require_literal "tools/require-cmake-release-build build/prod"
 require_literal "tools/require-cmake-release-build build/php-embedded-prod"
@@ -286,6 +339,12 @@ require_step_order "Run embedded performance probe" "Run embedded non-ownerless 
 require_step_order "Run embedded ownerless attribution probe" "Run embedded non-ownerless tests"
 require_step_order "Run embedded performance probe" "Run embedded ownerless SQL tests"
 require_step_order "Run embedded ownerless attribution probe" "Run embedded ownerless SQL tests"
+
+require_step_timeout "Build MariaDB embedded archive" 30
+require_step_timeout "Build embedded PHP targets" 15
+require_step_timeout "Run embedded non-ownerless tests" 10
+require_step_timeout "Run embedded ownerless SQL tests" 45
+require_step_timeout "Build MyLite PHP extensions for WordPress PHPUnit" 30
 
 require_step_literal "Test" "tools/require-cmake-release-build build/prod"
 require_embedded_timing_step_guards "Run embedded non-ownerless tests"

@@ -75,6 +75,13 @@ preserves per-case seconds in logs, and avoids the failing aggregate execution
 shape until the ownerless DDL/view, prefix-index, and foreign-key hot paths have
 a runtime fix.
 
+The later `ci-long-phase-timeouts` slice keeps those visible timing buckets
+bounded as well as split: the embedded job has a 75-minute job timeout, the
+MariaDB embedded archive build, embedded PHP target build, non-ownerless CTest
+half, ownerless SQL direct-case loop, and WordPress `build-php` step all have
+phase-specific `timeout-minutes` markers audited by
+`tools/check-ci-production-builds`.
+
 ## Performance Findings
 
 Current-head local profiling on 2026-06-08 used branch
@@ -146,6 +153,9 @@ WordPress PHPUnit partitioning.
 
 - GitHub Actions shows separate embedded non-ownerless and ownerless SQL step
   timings.
+- Long embedded and WordPress PHP build/test timing buckets fail within their
+  audited phase-specific timeout instead of remaining live for hours without a
+  completed timing sample.
 - WordPress PHPUnit remains split from build/setup and from the non-DB suite.
 - Ownerless SQL keeps a visible CI step timing and emits per-case harness
   timings while running each case in an isolated `sql-case` invocation until

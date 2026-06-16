@@ -66,6 +66,7 @@ jobs:
   embedded:
     name: ubuntu-embedded
     runs-on: ubuntu-24.04
+    timeout-minutes: 75
 
     steps:
       - uses: actions/checkout@v5
@@ -91,6 +92,7 @@ jobs:
             zlib1g-dev
 
       - name: Build MariaDB embedded archive
+        timeout-minutes: 30
         run: tools/mariadb-embedded-build all
 
       - name: Verify MariaDB embedded production build type
@@ -102,7 +104,8 @@ jobs:
       - name: Verify embedded production build type
         run: tools/require-cmake-release-build build/php-embedded-prod
 
-      - name: Build
+      - name: Build embedded PHP targets
+        timeout-minutes: 15
         run: cmake --build --preset php-embedded-prod
 
       - name: Run embedded performance probe
@@ -125,6 +128,7 @@ jobs:
           build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe
 
       - name: Run embedded non-ownerless tests
+        timeout-minutes: 10
         run: |
           set -euo pipefail
           tools/require-cmake-build-type MinSizeRel build/mariadb-embedded
@@ -134,6 +138,7 @@ jobs:
             --output-on-failure
 
       - name: Run embedded ownerless SQL tests
+        timeout-minutes: 45
         run: |
           set -euo pipefail
           tools/require-cmake-build-type MinSizeRel build/mariadb-embedded
@@ -204,6 +209,7 @@ jobs:
         run: tools/wordpress-phpunit-mysqli-mylite
 
       - name: Build MyLite PHP extensions for WordPress PHPUnit
+        timeout-minutes: 30
         env:
           MYLITE_WORDPRESS_PHASE: build-php
           MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
