@@ -774,6 +774,10 @@ private:
   /** Publish and release ownerless physical-page write serialization. */
   void ownerless_page_writes_publish() noexcept;
 
+  /** Publish ownerless page images from an already collected modified-page list. */
+  void ownerless_page_writes_publish_list(
+      const buf_page_t *const *pages, size_t page_count) noexcept;
+
   /** Publish one ownerless page image after its commit LSN is installed. */
   void ownerless_page_write_publish(const buf_page_t &bpage) noexcept;
 

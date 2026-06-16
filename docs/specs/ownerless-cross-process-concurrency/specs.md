@@ -5196,7 +5196,18 @@ subsystems that this mode needs:
   `page_write_leave_total_ms` from `5.554` to `4.911`, with the sampled
   no-dirty commit-log loop moving from `76.541 ms` to `65.279 ms`; this is a
   bounded hook overhead reduction, not a replacement for the larger native
-  commit/page-publication and redo/checkpoint work. A follow-up
+  commit/page-publication and redo/checkpoint work. The made-dirty MTR commit
+  path now collects modified page pointers during MariaDB's existing
+  flush-list pass and publishes that collected list after commit-log and
+  ownerless-redo latch release, avoiding the later full MTR memo scan used
+  only to rediscover modified pages. A reduced production attribution sample
+  after the change kept `3.000` MTR-published pages and `3.020` page-log
+  appends per ownerless autocommit insert while moving
+  `page_write_publish_scan_calls_per_insert` and
+  `page_write_publish_scan_ms_per_insert` from the prior `1.275` / `0.049`
+  sample to `0.000` / `0.000`; this preserves page-version volume and leaves
+  the larger native commit, history-proof publication, and page-log append
+  costs as remaining targets. A follow-up
   ownerless page-publish buffer-reuse slice keeps the same synchronous
   full-page publish hook, checksum initialization, page-type attribution, and
   history-proof publication semantics, but reuses one aligned transient page

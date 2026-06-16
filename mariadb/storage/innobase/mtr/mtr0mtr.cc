@@ -2672,6 +2672,38 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_space_write_leave(
       MYLITE_OWNERLESS_INNODB_SPACE_WRITE_PAGE_NO);
 }
 
+void mtr_t::ownerless_page_writes_publish_list(
+    const buf_page_t *const *pages, size_t page_count) noexcept
+{
+  if (UNIV_LIKELY(!ownerless_hooks_enabled()) || m_commit_lsn == 0 ||
+      page_count == 0)
+    return;
+  if (recv_recovery_is_on() || !srv_was_started)
+    return;
+
+  mylite_ownerless_innodb_begin_page_publish_batch();
+  const bool uses_transaction= ownerless_page_write_uses_transaction_release();
+  for (size_t i= 0; i < page_count; ++i)
+  {
+    const buf_page_t *bpage= pages[i];
+    if (bpage == nullptr)
+      continue;
+
+    const bool transaction_publish=
+        uses_transaction && ownerless_page_write_publishes_with_transaction(
+            *bpage);
+    if (transaction_publish)
+    {
+      ownerless_page_write_note_dirty_transaction_page(*bpage, true);
+      ownerless_page_write_capture_dirty_transaction_page(*bpage);
+      continue;
+    }
+
+    ownerless_page_write_publish(*bpage);
+  }
+  mylite_ownerless_innodb_end_page_publish_batch();
+}
+
 ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_writes_publish() noexcept
 {
   if (UNIV_LIKELY(!ownerless_hooks_enabled()) || m_commit_lsn == 0)
@@ -3191,6 +3223,11 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
 
   if (mtr->m_made_dirty)
   {
+    const buf_page_t *ownerless_modified_pages[16];
+    size_t ownerless_modified_page_count= 0;
+    bool ownerless_modified_page_overflow= false;
+    const bool ownerless_collect_modified_pages= mtr->m_ownerless_hooks != 0 &&
+        UNIV_UNLIKELY(mtr->ownerless_hooks_enabled());
     if (ownerless_perf)
       ownerless_page_write_perf_add(
           OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_MADE_DIRTY_CALLS, 1);
@@ -3225,6 +3262,14 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
           memcpy_aligned<8>(FIL_PAGE_LSN + b->page.zip.data,
                             FIL_PAGE_LSN + b->page.frame, 8);
         buf_pool.insert_into_flush_list(prev, b, lsns.first);
+        if (UNIV_UNLIKELY(ownerless_collect_modified_pages))
+        {
+          if (ownerless_modified_page_count <
+              UT_ARR_SIZE(ownerless_modified_pages))
+            ownerless_modified_pages[ownerless_modified_page_count++]= &b->page;
+          else
+            ownerless_modified_page_overflow= true;
+        }
       }
     }
 
@@ -3248,10 +3293,14 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
           OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_REDO_LEAVE_NS,
           phase_start_ns);
     }
-    if (UNIV_UNLIKELY(mtr->ownerless_hooks_enabled()))
+    if (UNIV_UNLIKELY(ownerless_collect_modified_pages))
     {
       phase_start_ns= ownerless_perf ? ownerless_page_write_perf_now_ns() : 0;
-      mtr->ownerless_page_writes_publish();
+      if (UNIV_LIKELY(!ownerless_modified_page_overflow))
+        mtr->ownerless_page_writes_publish_list(
+            ownerless_modified_pages, ownerless_modified_page_count);
+      else
+        mtr->ownerless_page_writes_publish();
       ownerless_page_write_perf_add_elapsed(
           OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_PUBLISH_NS,
           phase_start_ns);
