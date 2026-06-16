@@ -352,9 +352,13 @@ bool page_log_append_perf_stats_are_enabled() {
     return page_log_append_perf_stats_enabled.load(std::memory_order_relaxed);
 }
 
-bool page_log_append_detail_perf_stats_are_enabled() {
-    return page_log_append_perf_stats_are_enabled() &&
+bool page_log_append_detail_perf_stats_are_enabled(bool append_stats_enabled) {
+    return append_stats_enabled &&
            page_log_append_detail_perf_stats_enabled.load(std::memory_order_relaxed);
+}
+
+bool page_log_append_detail_perf_stats_are_enabled() {
+    return page_log_append_detail_perf_stats_are_enabled(page_log_append_perf_stats_are_enabled());
 }
 
 bool page_log_scan_perf_stats_are_enabled() {
@@ -380,6 +384,16 @@ void page_log_scan_perf_add(PageLogScanPerfStatIndex index, std::uint64_t value)
 
 void page_log_append_perf_add(PageLogAppendPerfStatIndex index, std::uint64_t value) {
     if (page_log_append_perf_stats_are_enabled()) {
+        page_log_append_perf_stats[index].fetch_add(value, std::memory_order_relaxed);
+    }
+}
+
+void page_log_append_perf_add_if_enabled(
+    bool stats_enabled,
+    PageLogAppendPerfStatIndex index,
+    std::uint64_t value
+) {
+    if (stats_enabled) {
         page_log_append_perf_stats[index].fetch_add(value, std::memory_order_relaxed);
     }
 }
@@ -458,9 +472,17 @@ void page_log_append_perf_add_delta_rejection(
     }
 }
 
-void page_log_append_perf_add_elapsed(PageLogAppendPerfStatIndex index, std::uint64_t start_ns) {
+void page_log_append_perf_add_elapsed_if_enabled(
+    bool stats_enabled,
+    PageLogAppendPerfStatIndex index,
+    std::uint64_t start_ns
+) {
     if (start_ns != 0U) {
-        page_log_append_perf_add(index, page_log_append_perf_now_ns() - start_ns);
+        page_log_append_perf_add_if_enabled(
+            stats_enabled,
+            index,
+            page_log_append_perf_now_ns() - start_ns
+        );
     }
 }
 
@@ -479,12 +501,14 @@ void page_log_sync_perf_add_elapsed(PageLogSyncPerfStatIndex index, std::uint64_
 class PageLogAppendPerfScope {
   public:
     explicit PageLogAppendPerfScope(PageLogAppendPerfStatIndex index)
-        : index_(index),
-          start_ns_(page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U) {
-    }
+        : PageLogAppendPerfScope(index, page_log_append_perf_stats_are_enabled()) {}
+
+    PageLogAppendPerfScope(PageLogAppendPerfStatIndex index, bool stats_enabled)
+        : index_(index), stats_enabled_(stats_enabled),
+          start_ns_(stats_enabled ? page_log_append_perf_now_ns() : 0U) {}
 
     ~PageLogAppendPerfScope() {
-        page_log_append_perf_add_elapsed(index_, start_ns_);
+        page_log_append_perf_add_elapsed_if_enabled(stats_enabled_, index_, start_ns_);
     }
 
     PageLogAppendPerfScope(const PageLogAppendPerfScope &) = delete;
@@ -492,6 +516,7 @@ class PageLogAppendPerfScope {
 
   private:
     PageLogAppendPerfStatIndex index_;
+    bool stats_enabled_;
     std::uint64_t start_ns_;
 };
 
@@ -550,7 +575,9 @@ int append_record_at_locked(
     std::uint32_t page_size,
     std::uint64_t *out_record_offset,
     std::uint64_t *out_next_record_offset,
-    std::uint32_t extra_record_flags
+    std::uint32_t extra_record_flags,
+    bool append_stats_enabled,
+    bool append_detail_stats_enabled
 );
 int snapshot_locked(int fd, off_t log_offset, std::uint64_t *out_snapshot_end_offset);
 int snapshot_locked_with_generation(
@@ -1106,29 +1133,44 @@ int append_at_common(
     bool validate_header,
     std::uint32_t extra_record_flags
 ) {
-    PageLogAppendPerfScope total_scope(PAGE_LOG_APPEND_PERF_TOTAL_NS);
-    page_log_append_perf_add(PAGE_LOG_APPEND_PERF_CALLS, 1U);
-    page_log_append_perf_add(PAGE_LOG_APPEND_PERF_DIRECT_APPEND_CALLS, 1U);
+    const bool append_stats_enabled = page_log_append_perf_stats_are_enabled();
+    PageLogAppendPerfScope total_scope(PAGE_LOG_APPEND_PERF_TOTAL_NS, append_stats_enabled);
+    page_log_append_perf_add_if_enabled(append_stats_enabled, PAGE_LOG_APPEND_PERF_CALLS, 1U);
+    page_log_append_perf_add_if_enabled(
+        append_stats_enabled,
+        PAGE_LOG_APPEND_PERF_DIRECT_APPEND_CALLS,
+        1U
+    );
     if (fd < 0 || commit_lsn == 0U || page == nullptr || page_size == 0U) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
     if (log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
-    std::uint64_t stage_start_ns =
-        page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
+    std::uint64_t stage_start_ns = append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
     if (!acquire_append_lock(fd)) {
-        page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_LOCK_NS, stage_start_ns);
+        page_log_append_perf_add_elapsed_if_enabled(
+            append_stats_enabled,
+            PAGE_LOG_APPEND_PERF_LOCK_NS,
+            stage_start_ns
+        );
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
-    page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_LOCK_NS, stage_start_ns);
+    page_log_append_perf_add_elapsed_if_enabled(
+        append_stats_enabled,
+        PAGE_LOG_APPEND_PERF_LOCK_NS,
+        stage_start_ns
+    );
     const auto offset = static_cast<off_t>(log_offset);
     int header_result = MYLITE_OWNERLESS_PAGE_LOG_OK;
     if (validate_header) {
-        stage_start_ns =
-            page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
+        stage_start_ns = append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
         header_result = validate_or_create_header(fd, offset);
-        page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_HEADER_NS, stage_start_ns);
+        page_log_append_perf_add_elapsed_if_enabled(
+            append_stats_enabled,
+            PAGE_LOG_APPEND_PERF_HEADER_NS,
+            stage_start_ns
+        );
     }
     const int append_result = header_result == MYLITE_OWNERLESS_PAGE_LOG_OK ? append_locked(
                                                                                   fd,
@@ -1315,7 +1357,12 @@ int mylite_ownerless_page_log_append_session_begin_initialized_at(
     std::uint64_t log_offset,
     mylite_ownerless_page_log_append_session *session
 ) {
-    page_log_append_perf_add(PAGE_LOG_APPEND_PERF_SESSION_BEGIN_CALLS, 1U);
+    const bool append_stats_enabled = page_log_append_perf_stats_are_enabled();
+    page_log_append_perf_add_if_enabled(
+        append_stats_enabled,
+        PAGE_LOG_APPEND_PERF_SESSION_BEGIN_CALLS,
+        1U
+    );
     if (session == nullptr || fd < 0 || session->active != 0) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
@@ -1323,21 +1370,32 @@ int mylite_ownerless_page_log_append_session_begin_initialized_at(
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
 
-    std::uint64_t stage_start_ns =
-        page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
+    std::uint64_t stage_start_ns = append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
     if (!acquire_append_lock(fd)) {
-        page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_LOCK_NS, stage_start_ns);
+        page_log_append_perf_add_elapsed_if_enabled(
+            append_stats_enabled,
+            PAGE_LOG_APPEND_PERF_LOCK_NS,
+            stage_start_ns
+        );
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
-    page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_LOCK_NS, stage_start_ns);
+    page_log_append_perf_add_elapsed_if_enabled(
+        append_stats_enabled,
+        PAGE_LOG_APPEND_PERF_LOCK_NS,
+        stage_start_ns
+    );
 
     const auto offset = static_cast<off_t>(log_offset);
     struct stat file_stat = {};
     PageLogHeader header = {};
     off_t records_offset = 0;
-    stage_start_ns = page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
+    stage_start_ns = append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
     const int fstat_result = ::fstat(fd, &file_stat);
-    page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_FSTAT_NS, stage_start_ns);
+    page_log_append_perf_add_elapsed_if_enabled(
+        append_stats_enabled,
+        PAGE_LOG_APPEND_PERF_FSTAT_NS,
+        stage_start_ns
+    );
     if (fstat_result != 0 ||
         !offset_adds(offset, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE, &records_offset) ||
         file_stat.st_size < records_offset || !read_header(fd, offset, header) ||
@@ -1366,9 +1424,16 @@ int mylite_ownerless_page_log_append_session_append(
     std::uint32_t page_size,
     std::uint64_t *out_record_offset
 ) {
-    PageLogAppendPerfScope total_scope(PAGE_LOG_APPEND_PERF_TOTAL_NS);
-    page_log_append_perf_add(PAGE_LOG_APPEND_PERF_CALLS, 1U);
-    page_log_append_perf_add(PAGE_LOG_APPEND_PERF_SESSION_APPEND_CALLS, 1U);
+    const bool append_stats_enabled = page_log_append_perf_stats_are_enabled();
+    const bool append_detail_stats_enabled =
+        page_log_append_detail_perf_stats_are_enabled(append_stats_enabled);
+    PageLogAppendPerfScope total_scope(PAGE_LOG_APPEND_PERF_TOTAL_NS, append_stats_enabled);
+    page_log_append_perf_add_if_enabled(append_stats_enabled, PAGE_LOG_APPEND_PERF_CALLS, 1U);
+    page_log_append_perf_add_if_enabled(
+        append_stats_enabled,
+        PAGE_LOG_APPEND_PERF_SESSION_APPEND_CALLS,
+        1U
+    );
     if (fd < 0 || session == nullptr || session->active == 0 || commit_lsn == 0U ||
         page == nullptr || page_size == 0U ||
         session->log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) ||
@@ -1394,7 +1459,9 @@ int mylite_ownerless_page_log_append_session_append(
         page_size,
         out_record_offset,
         &next_record_offset,
-        0U
+        0U,
+        append_stats_enabled,
+        append_detail_stats_enabled
     );
     if (result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
         session->next_record_offset = next_record_offset;
@@ -1406,7 +1473,12 @@ void mylite_ownerless_page_log_append_session_end(
     int fd,
     mylite_ownerless_page_log_append_session *session
 ) {
-    page_log_append_perf_add(PAGE_LOG_APPEND_PERF_SESSION_END_CALLS, 1U);
+    const bool append_stats_enabled = page_log_append_perf_stats_are_enabled();
+    page_log_append_perf_add_if_enabled(
+        append_stats_enabled,
+        PAGE_LOG_APPEND_PERF_SESSION_END_CALLS,
+        1U
+    );
     if (session == nullptr || session->active == 0) {
         return;
     }
@@ -2492,16 +2564,22 @@ int append_locked(
     std::uint64_t *out_record_offset,
     std::uint32_t extra_record_flags
 ) {
-    PageLogAppendPerfScope body_scope(PAGE_LOG_APPEND_PERF_BODY_NS);
+    const bool append_stats_enabled = page_log_append_perf_stats_are_enabled();
+    const bool append_detail_stats_enabled =
+        page_log_append_detail_perf_stats_are_enabled(append_stats_enabled);
+    PageLogAppendPerfScope body_scope(PAGE_LOG_APPEND_PERF_BODY_NS, append_stats_enabled);
     if ((extra_record_flags & ~k_record_metadata_flags) != 0U) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
     struct stat file_stat = {};
     PageLogHeader header = {};
-    const std::uint64_t fstat_start_ns =
-        page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
+    const std::uint64_t fstat_start_ns = append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
     const int fstat_result = ::fstat(fd, &file_stat);
-    page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_FSTAT_NS, fstat_start_ns);
+    page_log_append_perf_add_elapsed_if_enabled(
+        append_stats_enabled,
+        PAGE_LOG_APPEND_PERF_FSTAT_NS,
+        fstat_start_ns
+    );
     off_t records_offset = 0;
     if (fstat_result != 0 ||
         !offset_adds(log_offset, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE, &records_offset) ||
@@ -2525,7 +2603,9 @@ int append_locked(
         page_size,
         out_record_offset,
         nullptr,
-        extra_record_flags
+        extra_record_flags,
+        append_stats_enabled,
+        append_detail_stats_enabled
     );
 }
 
@@ -2544,7 +2624,9 @@ int append_record_at_locked(
     std::uint32_t page_size,
     std::uint64_t *out_record_offset,
     std::uint64_t *out_next_record_offset,
-    std::uint32_t extra_record_flags
+    std::uint32_t extra_record_flags,
+    bool append_stats_enabled,
+    bool append_detail_stats_enabled
 ) {
     off_t payload_offset = 0;
     if (!offset_adds(
@@ -2563,10 +2645,9 @@ int append_record_at_locked(
     std::uint64_t observed_standalone_payload_size = 0U;
     try {
         const std::uint64_t stage_start_ns =
-            page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
+            append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
         IndexPageDeltaBaseSnapshot page_delta_snapshot;
-        std::uint64_t substage_start_ns =
-            page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
+        std::uint64_t substage_start_ns = append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
         const bool has_page_delta_snapshot = index_delta_base_snapshot_for_page(
             log_device,
             log_inode,
@@ -2578,9 +2659,12 @@ int append_record_at_locked(
             page_size,
             &page_delta_snapshot
         );
-        page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_DELTA_SNAPSHOT_NS, substage_start_ns);
-        substage_start_ns =
-            page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
+        page_log_append_perf_add_elapsed_if_enabled(
+            append_stats_enabled,
+            PAGE_LOG_APPEND_PERF_DELTA_SNAPSHOT_NS,
+            substage_start_ns
+        );
+        substage_start_ns = append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
         thread_local std::vector<unsigned char> rejected_delta_payload;
         rejected_delta_payload.clear();
         PageDeltaEncodeDecision fast_delta_decision = PageDeltaEncodeDecision::Ineligible;
@@ -2598,16 +2682,22 @@ int append_record_at_locked(
                                            &fast_delta_payload_size,
                                            &rejected_delta_payload
                                        );
-        page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_DELTA_ENCODE_NS, substage_start_ns);
+        page_log_append_perf_add_elapsed_if_enabled(
+            append_stats_enabled,
+            PAGE_LOG_APPEND_PERF_DELTA_ENCODE_NS,
+            substage_start_ns
+        );
         if (fast_page_delta_encoded) {
             encoded_payload_size = encoded_payload.size();
-            page_log_append_perf_add_delta_accepted_record(
-                record_flags,
-                encoded_payload_size,
-                true
-            );
+            if (append_stats_enabled) {
+                page_log_append_perf_add_delta_accepted_record(
+                    record_flags,
+                    encoded_payload_size,
+                    true
+                );
+            }
         } else {
-            if (has_page_delta_snapshot) {
+            if (append_stats_enabled && has_page_delta_snapshot) {
                 page_log_append_perf_add_delta_rejection(
                     fast_delta_decision,
                     fast_delta_payload_size,
@@ -2622,12 +2712,17 @@ int append_record_at_locked(
                 fast_delta_decision == PageDeltaEncodeDecision::BuildFailed;
             if (has_page_delta_snapshot && !rejected_delta_payload.empty()) {
                 const std::uint64_t size_probe_start_ns =
-                    page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
-                page_log_append_perf_add(PAGE_LOG_APPEND_PERF_STANDALONE_SIZE_PROBE_CALLS, 1U);
+                    append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
+                page_log_append_perf_add_if_enabled(
+                    append_stats_enabled,
+                    PAGE_LOG_APPEND_PERF_STANDALONE_SIZE_PROBE_CALLS,
+                    1U
+                );
                 const std::uint64_t probed_standalone_payload_size =
                     encoded_payload_size_for_page_probe(record_page, page_size);
                 observed_standalone_payload_size = probed_standalone_payload_size;
-                page_log_append_perf_add_elapsed(
+                page_log_append_perf_add_elapsed_if_enabled(
+                    append_stats_enabled,
                     PAGE_LOG_APPEND_PERF_STANDALONE_SIZE_PROBE_NS,
                     size_probe_start_ns
                 );
@@ -2641,19 +2736,23 @@ int append_record_at_locked(
                     record_flags = page_delta_snapshot.delta_flag;
                     exact_delta_decision = PageDeltaEncodeDecision::Encoded;
                     exact_page_delta_encoded = true;
-                    page_log_append_perf_add(
+                    page_log_append_perf_add_if_enabled(
+                        append_stats_enabled,
                         PAGE_LOG_APPEND_PERF_DELTA_EXACT_REUSED_FAST_PAYLOAD_RECORDS,
                         1U
                     );
-                    page_log_append_perf_add(
+                    page_log_append_perf_add_if_enabled(
+                        append_stats_enabled,
                         PAGE_LOG_APPEND_PERF_DELTA_EXACT_REUSED_FAST_PAYLOAD_BYTES,
                         exact_delta_payload_size
                     );
-                    page_log_append_perf_add(
+                    page_log_append_perf_add_if_enabled(
+                        append_stats_enabled,
                         PAGE_LOG_APPEND_PERF_STANDALONE_MATERIALIZE_SKIPPED_RECORDS,
                         1U
                     );
-                    page_log_append_perf_add(
+                    page_log_append_perf_add_if_enabled(
+                        append_stats_enabled,
                         PAGE_LOG_APPEND_PERF_STANDALONE_MATERIALIZE_SKIPPED_BYTES,
                         probed_standalone_payload_size
                     );
@@ -2664,8 +2763,7 @@ int append_record_at_locked(
             } else if (exact_delta_build_failed) {
                 exact_delta_decision = PageDeltaEncodeDecision::BuildFailed;
             }
-            substage_start_ns =
-                page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
+            substage_start_ns = append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
             if (!exact_page_delta_encoded) {
                 encoded_payload_size = encoded_payload_size_for_page(
                     record_page,
@@ -2673,12 +2771,12 @@ int append_record_at_locked(
                     &record_flags,
                     &encoded_payload
                 );
-                page_log_append_perf_add_elapsed(
+                page_log_append_perf_add_elapsed_if_enabled(
+                    append_stats_enabled,
                     PAGE_LOG_APPEND_PERF_STANDALONE_ENCODE_NS,
                     substage_start_ns
                 );
-                substage_start_ns =
-                    page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
+                substage_start_ns = append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
                 if (has_page_delta_snapshot &&
                     exact_delta_decision == PageDeltaEncodeDecision::Ineligible) {
                     exact_page_delta_encoded = maybe_encode_page_delta_payload(
@@ -2694,19 +2792,22 @@ int append_record_at_locked(
                         nullptr
                     );
                 }
-                page_log_append_perf_add_elapsed(
+                page_log_append_perf_add_elapsed_if_enabled(
+                    append_stats_enabled,
                     PAGE_LOG_APPEND_PERF_DELTA_ENCODE_NS,
                     substage_start_ns
                 );
             }
             if (exact_page_delta_encoded) {
                 encoded_payload_size = encoded_payload.size();
-                page_log_append_perf_add_delta_accepted_record(
-                    record_flags,
-                    encoded_payload_size,
-                    false
-                );
-            } else if (has_page_delta_snapshot) {
+                if (append_stats_enabled) {
+                    page_log_append_perf_add_delta_accepted_record(
+                        record_flags,
+                        encoded_payload_size,
+                        false
+                    );
+                }
+            } else if (append_stats_enabled && has_page_delta_snapshot) {
                 page_log_append_perf_add_delta_rejection(
                     exact_delta_decision,
                     exact_delta_payload_size,
@@ -2714,16 +2815,29 @@ int append_record_at_locked(
                 );
             }
         }
-        page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_ENCODE_NS, stage_start_ns);
+        page_log_append_perf_add_elapsed_if_enabled(
+            append_stats_enabled,
+            PAGE_LOG_APPEND_PERF_ENCODE_NS,
+            stage_start_ns
+        );
     } catch (const std::bad_alloc &) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
-    std::uint64_t stage_start_ns =
-        page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
-    const CompactSparsePayloadComposition compact_sparse =
-        record_append_payload_encoding_stats(record_flags, encoded_payload_size, encoded_payload);
-    page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_PAYLOAD_STATS_NS, stage_start_ns);
-    if (page_log_append_detail_perf_stats_are_enabled()) {
+    CompactSparsePayloadComposition compact_sparse;
+    std::uint64_t stage_start_ns = append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
+    if (append_stats_enabled) {
+        compact_sparse = record_append_payload_encoding_stats(
+            record_flags,
+            encoded_payload_size,
+            encoded_payload
+        );
+    }
+    page_log_append_perf_add_elapsed_if_enabled(
+        append_stats_enabled,
+        PAGE_LOG_APPEND_PERF_PAYLOAD_STATS_NS,
+        stage_start_ns
+    );
+    if (append_detail_stats_enabled) {
         stage_start_ns = page_log_append_perf_now_ns();
         record_append_page_type_stats(
             space_id,
@@ -2733,7 +2847,11 @@ int append_record_at_locked(
             encoded_payload_size,
             compact_sparse
         );
-        page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_PAGE_TYPE_STATS_NS, stage_start_ns);
+        page_log_append_perf_add_elapsed_if_enabled(
+            append_stats_enabled,
+            PAGE_LOG_APPEND_PERF_PAGE_TYPE_STATS_NS,
+            stage_start_ns
+        );
     }
     if (!offset_adds(payload_offset, encoded_payload_size, &end_offset)) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
@@ -2747,27 +2865,43 @@ int append_record_at_locked(
     record.page_lsn = page_lsn;
     record.commit_lsn = commit_lsn;
     record.payload_size = encoded_payload_size;
-    stage_start_ns = page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
+    stage_start_ns = append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
     record.checksum = checksum_bytes(record_page, page_size);
-    page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_CHECKSUM_NS, stage_start_ns);
+    page_log_append_perf_add_elapsed_if_enabled(
+        append_stats_enabled,
+        PAGE_LOG_APPEND_PERF_CHECKSUM_NS,
+        stage_start_ns
+    );
 
-    stage_start_ns = page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
+    stage_start_ns = append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
     const void *payload = encoded_payload.empty() ? record_page : encoded_payload.data();
     const bool payload_written =
         write_exact_at(fd, payload, static_cast<std::size_t>(encoded_payload_size), payload_offset);
-    page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_PAYLOAD_WRITE_NS, stage_start_ns);
+    page_log_append_perf_add_elapsed_if_enabled(
+        append_stats_enabled,
+        PAGE_LOG_APPEND_PERF_PAYLOAD_WRITE_NS,
+        stage_start_ns
+    );
     if (!payload_written) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
-    page_log_append_perf_add(PAGE_LOG_APPEND_PERF_PAYLOAD_BYTES, encoded_payload_size);
+    page_log_append_perf_add_if_enabled(
+        append_stats_enabled,
+        PAGE_LOG_APPEND_PERF_PAYLOAD_BYTES,
+        encoded_payload_size
+    );
 
-    stage_start_ns = page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
+    stage_start_ns = append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
     const bool record_header_written = write_record_header(fd, record_offset, record);
-    page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_RECORD_HEADER_WRITE_NS, stage_start_ns);
+    page_log_append_perf_add_elapsed_if_enabled(
+        append_stats_enabled,
+        PAGE_LOG_APPEND_PERF_RECORD_HEADER_WRITE_NS,
+        stage_start_ns
+    );
     if (!record_header_written) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
-    stage_start_ns = page_log_append_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
+    stage_start_ns = append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
     note_index_delta_base_after_successful_append(
         log_device,
         log_inode,
@@ -2782,8 +2916,13 @@ int append_record_at_locked(
         record_flags,
         observed_standalone_payload_size
     );
-    page_log_append_perf_add_elapsed(PAGE_LOG_APPEND_PERF_DELTA_BASE_NOTE_NS, stage_start_ns);
-    page_log_append_perf_add(
+    page_log_append_perf_add_elapsed_if_enabled(
+        append_stats_enabled,
+        PAGE_LOG_APPEND_PERF_DELTA_BASE_NOTE_NS,
+        stage_start_ns
+    );
+    page_log_append_perf_add_if_enabled(
+        append_stats_enabled,
         PAGE_LOG_APPEND_PERF_RECORD_HEADER_BYTES,
         MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE
     );

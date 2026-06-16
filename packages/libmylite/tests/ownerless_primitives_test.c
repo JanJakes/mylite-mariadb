@@ -1209,13 +1209,20 @@ static void test_page_log_append_reports_write_volume(void) {
     int fd = open_file(log_path);
     uint8_t page_v1[16];
     uint8_t page_v2[32];
+    uint8_t page_v3[24];
+    uint8_t out_page[24];
     uint64_t first_record_offset = 0;
     uint64_t second_record_offset = 0;
+    uint32_t out_page_size = 0;
+    uint64_t out_page_lsn = 0;
+    uint64_t out_commit_lsn = 0;
     uint64_t stats[PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
     mylite_ownerless_page_log_append_session session = {0};
 
     memset(page_v1, 0x51, sizeof(page_v1));
     memset(page_v2, 0x52, sizeof(page_v2));
+    memset(page_v3, 0x53, sizeof(page_v3));
+    memset(out_page, 0, sizeof(out_page));
 
     assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
     mylite_ownerless_page_log_reset_append_perf_stats();
@@ -1277,6 +1284,34 @@ static void test_page_log_append_reports_write_volume(void) {
     assert(
         stats[PAGE_LOG_APPEND_PERF_STAT_OTHER_PAYLOAD_BYTES] == sizeof(page_v1) + sizeof(page_v2)
     );
+
+    mylite_ownerless_page_log_reset_append_perf_stats();
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(0);
+    assert(
+        mylite_ownerless_page_log_append(fd, 5U, 3U, 140U, 140U, page_v3, sizeof(page_v3), NULL) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    mylite_ownerless_page_log_read_append_perf_stats(stats, PAGE_LOG_APPEND_PERF_STAT_COUNT);
+    for (size_t i = 0; i < PAGE_LOG_APPEND_PERF_STAT_COUNT; ++i) {
+        assert(stats[i] == 0U);
+    }
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            5U,
+            3U,
+            140U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &out_page_lsn,
+            &out_commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page_v3));
+    assert(out_page_lsn == 140U);
+    assert(out_commit_lsn == 140U);
+    assert(memcmp(out_page, page_v3, sizeof(page_v3)) == 0);
 
     assert(close(fd) == 0);
     free(log_path);
