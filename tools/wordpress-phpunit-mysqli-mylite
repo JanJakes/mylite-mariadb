@@ -1668,6 +1668,45 @@ PHP_KEEPALIVE
   if [ "${#phpunit_summary_metrics[@]}" -gt 0 ]; then
     append_timing_summary "${phpunit_summary_metrics[@]}"
   fi
+  mysqli_profile_summary_metrics=()
+  mysqli_profile_summary_keys=(
+    mylite_mysqli_profile_open_calls
+    mylite_mysqli_profile_open_ms_total
+    mylite_mysqli_profile_close_calls
+    mylite_mysqli_profile_close_ms_total
+    mylite_mysqli_profile_query_calls
+    mylite_mysqli_profile_query_result_calls
+    mylite_mysqli_profile_query_no_result_calls
+    mylite_mysqli_profile_query_ms_total
+    mylite_mysqli_profile_query_ms_avg
+    mylite_mysqli_profile_query_cache_hits
+    mylite_mysqli_profile_query_cache_misses
+    mylite_mysqli_profile_query_prepare_calls
+    mylite_mysqli_profile_query_prepare_ms_total
+    mylite_mysqli_profile_query_cache_clear_ms_total
+    mylite_mysqli_profile_query_status_sync_ms_total
+    mylite_mysqli_profile_exec_result_calls
+    mylite_mysqli_profile_exec_result_ms_total
+    mylite_mysqli_profile_exec_no_result_calls
+    mylite_mysqli_profile_exec_no_result_ms_total
+    mylite_mysqli_profile_query_result_rows
+    mylite_mysqli_profile_fetch_object_calls
+    mylite_mysqli_profile_fetch_object_ms_total
+  )
+  for mysqli_profile_summary_key in "${mysqli_profile_summary_keys[@]}"; do
+    mysqli_profile_summary_value="$(
+      sed -n "s/^${mysqli_profile_summary_key}=//p" "${phpunit_output}" |
+        tail -n 1
+    )"
+    if [ -n "${mysqli_profile_summary_value}" ]; then
+      mysqli_profile_summary_metrics+=(
+        "${mysqli_profile_summary_key}=${mysqli_profile_summary_value}"
+      )
+    fi
+  done
+  if [ "${#mysqli_profile_summary_metrics[@]}" -gt 0 ]; then
+    append_timing_summary "${mysqli_profile_summary_metrics[@]}"
+  fi
   if [ -n "${phpunit_junit_path}" ] &&
      [ "${phpunit_junit_path}" != "caller-supplied" ] &&
      [ -f "${phpunit_junit_path}" ]; then

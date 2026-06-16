@@ -4780,7 +4780,10 @@ subsystems that this mode needs:
   the step bodies for embedded tests/probes, WordPress dependency/database/
   perf/PHPUnit phases, and clang tools, so those timing paths must retain their
   `Release` MyLite and `MinSizeRel` MariaDB embedded cache guards locally in
-  the step that publishes timings. A fresh guarded
+  the step that publishes timings. The WordPress timing summary now also
+  copies selected non-isolated `mylite_mysqli_profile_*` profile totals from
+  the captured PHPUnit output, using the last profile summary when bootstrap
+  emits an earlier process-local profile. A fresh guarded
   sample on 2026-06-10 reported ordinary embedded warm open/close at
   `361.594 ms`, with `mysql_server_init()` at `125.794 ms` and
   `mysql_server_end()` at `228.758 ms`, while active-runtime reconnect stayed
