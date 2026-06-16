@@ -2125,7 +2125,7 @@ int ownerless_innodb_page_read_locked(
     std::uint64_t *out_commit_lsn,
     std::uint32_t *out_record_flags
 );
-std::uint32_t ownerless_innodb_page_version_flags_from_page_log_flags(std::uint32_t page_log_flags);
+std::uint32_t ownerless_innodb_page_version_flags(std::uint32_t page_log_flags);
 bool ownerless_page_log_negative_cache_absence_lookup(
     OwnerlessInnoDBLockHookContext *hook,
     std::uint32_t space_id,
@@ -11723,9 +11723,8 @@ int refresh_ownerless_external_pages_before_statement(
     if (out_page_version_reads_enabled != nullptr) {
         *out_page_version_reads_enabled = false;
     }
-    mylite_ownerless_innodb_set_external_page_observation_token(
-        db.ownerless_page_observation_token
-    );
+    const std::uint64_t observation_token = db.ownerless_page_observation_token;
+    mylite_ownerless_innodb_set_external_page_observation_token(observation_token);
     mylite_ownerless_innodb_clear_external_page_visibility();
     if (!allow_page_version_reads) {
         release_ownerless_handle_page_version_pin(db);
@@ -13342,9 +13341,8 @@ void refresh_ownerless_pending_post_open_clean_pages(mylite_db &db) {
         return;
     }
 
-    mylite_ownerless_innodb_set_external_page_observation_token(
-        db.ownerless_page_observation_token
-    );
+    const std::uint64_t observation_token = db.ownerless_page_observation_token;
+    mylite_ownerless_innodb_set_external_page_observation_token(observation_token);
     db.ownerless_pending_post_open_clean_page_refresh_lsn = 0;
     const bool visible_boundary_refresh =
         db.ownerless_pending_post_open_clean_page_refresh_visible_boundary;
@@ -15636,9 +15634,7 @@ int ownerless_innodb_page_read_hook(
     return result;
 }
 
-std::uint32_t ownerless_innodb_page_version_flags_from_page_log_flags(
-    std::uint32_t page_log_flags
-) {
+std::uint32_t ownerless_innodb_page_version_flags(const std::uint32_t page_log_flags) {
     std::uint32_t flags = 0U;
     if ((page_log_flags & MYLITE_OWNERLESS_PAGE_LOG_RECORD_SNAPSHOT_BOUNDARY) != 0U) {
         flags |= MYLITE_OWNERLESS_INNODB_PAGE_VERSION_SNAPSHOT_BOUNDARY;
@@ -15947,10 +15943,7 @@ int ownerless_innodb_page_read_locked(
                             page_log_flags = tail_page_log_flags;
                         }
                         if (out_record_flags != nullptr) {
-                            *out_record_flags =
-                                ownerless_innodb_page_version_flags_from_page_log_flags(
-                                    page_log_flags
-                                );
+                            *out_record_flags = ownerless_innodb_page_version_flags(page_log_flags);
                         }
                         return MYLITE_OWNERLESS_INNODB_LOCK_OK;
                     }
@@ -15975,8 +15968,7 @@ int ownerless_innodb_page_read_locked(
                 }
                 ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_PAGE_READ_INDEX_HITS, 1U);
                 if (out_record_flags != nullptr) {
-                    *out_record_flags =
-                        ownerless_innodb_page_version_flags_from_page_log_flags(page_log_flags);
+                    *out_record_flags = ownerless_innodb_page_version_flags(page_log_flags);
                 }
                 return MYLITE_OWNERLESS_INNODB_LOCK_OK;
             }
@@ -16077,8 +16069,7 @@ int ownerless_innodb_page_read_locked(
     if (result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
         ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_FOUND, 1U);
         if (out_record_flags != nullptr) {
-            *out_record_flags =
-                ownerless_innodb_page_version_flags_from_page_log_flags(page_log_flags);
+            *out_record_flags = ownerless_innodb_page_version_flags(page_log_flags);
         }
         return MYLITE_OWNERLESS_INNODB_LOCK_OK;
     }
