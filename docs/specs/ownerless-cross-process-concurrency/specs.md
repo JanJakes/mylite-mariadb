@@ -381,6 +381,10 @@ Roles:
   checkpoint publications skip new record generations for non-durable updates;
   durable same-pair updates skip only when a process-local sync anchor proves
   that the same process already synced the same pair on the same checkpoint fd.
+  Advancing checkpoint updates also skip rewriting the legacy latest/visible
+  payload once a valid checksummed generation record exists; empty-record
+  fallback still initializes the legacy pair, and non-empty invalid record
+  slots still fail closed rather than falling back to stale legacy bytes.
   Cross-process group commit, broader checkpoint batching, and the separate
   native file-operation marker remain bounded by their existing proof rules.
 - `process/*.heartbeat`: process-liveness evidence for crash detection. These
@@ -5228,6 +5232,11 @@ subsystems that this mode needs:
   release loops. It preserves lock, refresh, publication, boundary, and
   history-proof behavior while avoiding repeated helper work on
   statement-visible autocommit writes.
+  The checkpoint legacy-write elision slice then removed the legacy
+  latest/visible payload write from advancing checkpoint updates after
+  checksum-protected LSN records are initialized, exposing a
+  `checkpoint_update_legacy_write_elided` counter while preserving durable sync
+  ordering and fail-closed torn-record recovery.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.

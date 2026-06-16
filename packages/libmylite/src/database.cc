@@ -144,6 +144,7 @@ enum OwnerlessDatabasePerfStatIndex : std::size_t {
     OWNERLESS_DATABASE_PERF_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_PINS,
     OWNERLESS_DATABASE_PERF_SINGLE_OWNER_SKIP_BLOCKED_BASELINE,
     OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_FILE_READ_ELIDED,
+    OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_LEGACY_WRITE_ELIDED,
     OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_NOOP_ELIDED,
     OWNERLESS_DATABASE_PERF_STAT_COUNT
 };
@@ -16376,7 +16377,7 @@ bool write_concurrency_checkpoint_lsn_locked(
         lsn_record.size(),
         concurrency_checkpoint_lsn_record_offset(record_index)
     );
-    if (ok) {
+    if (ok && !has_current_record) {
         std::array<unsigned char, 16> legacy_payload = {};
         store_le64(legacy_payload.data(), 0U, latest_lsn);
         store_le64(legacy_payload.data(), sizeof(std::uint64_t), visible_lsn);
@@ -16385,6 +16386,11 @@ bool write_concurrency_checkpoint_lsn_locked(
             legacy_payload.data(),
             legacy_payload.size(),
             static_cast<off_t>(k_concurrency_checkpoint_latest_lsn_offset)
+        );
+    } else if (ok) {
+        ownerless_database_perf_add(
+            OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_LEGACY_WRITE_ELIDED,
+            1U
         );
     }
     ownerless_database_perf_add_elapsed(

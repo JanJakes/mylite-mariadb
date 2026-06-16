@@ -788,6 +788,9 @@ values are timing smoke evidence, not a replacement for CI-sized samples.
   InnoDB page-write overhead first; the transaction-release classification fast
   path is a scoped example and does not claim to complete redo/checkpoint or
   history-proof publication work.
+- Ownerless checkpoint update summaries include
+  `checkpoint_update_legacy_write_elided_per_insert`, distinguishing legacy
+  payload write removal from same-pair no-op elision and file-read elision.
 - CI rejects non-Release CMake caches before CMake-backed test or timing
   phases run.
 - Timer-driven ownerless checkpoint scheduling remains an idle-runtime cleanup

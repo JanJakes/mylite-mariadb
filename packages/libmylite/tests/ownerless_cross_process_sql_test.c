@@ -235,6 +235,7 @@ enum ownerless_test_database_perf_stat_index {
     OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_PINS,
     OWNERLESS_TEST_DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_BASELINE,
     OWNERLESS_TEST_DATABASE_PERF_STAT_CHECKPOINT_UPDATE_FILE_READ_ELIDED,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_CHECKPOINT_UPDATE_LEGACY_WRITE_ELIDED,
     OWNERLESS_TEST_DATABASE_PERF_STAT_CHECKPOINT_UPDATE_NOOP_ELIDED,
     OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT
 };
@@ -644,6 +645,7 @@ static void test_ownerless_native_checkpoint_evidence(void);
 static void test_ownerless_native_checkpoint_reclaims_page_log(void);
 static void test_ownerless_checkpoint_lsn_record_recovers_from_torn_latest_slot(void);
 static void test_ownerless_checkpoint_lsn_noop_update_keeps_generation(void);
+static void test_ownerless_checkpoint_lsn_skips_legacy_after_record_init(void);
 static void test_ownerless_native_file_op_marker_clears_without_page_log(void);
 static void test_ownerless_native_file_op_marker_recovers_from_torn_clear_record(void);
 static void test_ownerless_native_file_op_marker_drains_after_real_sql_ddl(void);
@@ -2935,6 +2937,11 @@ static void write_concurrency_checkpoint_legacy_lsns(
     uint64_t latest_lsn,
     uint64_t visible_lsn
 );
+static void read_concurrency_checkpoint_legacy_lsns(
+    const char *database_path,
+    uint64_t *out_latest_lsn,
+    uint64_t *out_visible_lsn
+);
 static void write_concurrency_checkpoint_lsn_record(
     int fd,
     unsigned index,
@@ -4867,6 +4874,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_native_checkpoint_reclaims_page_log),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_checkpoint_lsn_record_recovers_from_torn_latest_slot),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_checkpoint_lsn_noop_update_keeps_generation),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_checkpoint_lsn_skips_legacy_after_record_init),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_native_file_op_marker_clears_without_page_log),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_native_file_op_marker_recovers_from_torn_clear_record),
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
@@ -8623,6 +8631,89 @@ static void test_ownerless_checkpoint_lsn_noop_update_keeps_generation(void) {
         query_unsigned(db, "SELECT value FROM app.ownerless_checkpoint_noop WHERE id = 1") == 11U
     );
     assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_checkpoint_lsn_skips_legacy_after_record_init(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-checkpoint-legacy-elision.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    checkpoint_lsn_record record = {0};
+    uint64_t database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT] = {0};
+    uint64_t latest_lsn;
+    uint64_t visible_lsn;
+    uint64_t legacy_latest_lsn = 0U;
+    uint64_t legacy_visible_lsn = 0U;
+    uint64_t initial_legacy_latest_lsn;
+    uint64_t initial_legacy_visible_lsn;
+    uint64_t advanced_latest_lsn;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_checkpoint_legacy_elision ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_checkpoint_legacy_elision VALUES (1, 10)");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_concurrency_wal_checkpointed_eventually(database_path);
+
+    assert(read_concurrency_checkpoint_lsn_records(database_path, &record));
+    latest_lsn = record.latest_lsn;
+    visible_lsn = record.visible_lsn;
+    assert(latest_lsn > 0U);
+    assert(visible_lsn > 0U);
+    assert(visible_lsn <= latest_lsn);
+
+    read_concurrency_checkpoint_legacy_lsns(database_path, &legacy_latest_lsn, &legacy_visible_lsn);
+    assert(legacy_latest_lsn > 0U);
+    assert(legacy_visible_lsn <= legacy_latest_lsn);
+    assert(legacy_latest_lsn <= latest_lsn);
+    assert(legacy_visible_lsn <= visible_lsn);
+    initial_legacy_latest_lsn = legacy_latest_lsn;
+    initial_legacy_visible_lsn = legacy_visible_lsn;
+
+    advanced_latest_lsn = latest_lsn + 1024U;
+    assert(advanced_latest_lsn > latest_lsn);
+    mylite_ownerless_database_set_perf_stats_enabled(1);
+    mylite_ownerless_database_reset_perf_stats();
+    assert(
+        mylite_ownerless_database_test_update_checkpoint_lsn_repeated(
+            database_path,
+            advanced_latest_lsn,
+            visible_lsn,
+            0,
+            1U
+        ) == MYLITE_OK
+    );
+    mylite_ownerless_database_read_perf_stats(
+        database_stats,
+        OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT
+    );
+    mylite_ownerless_database_set_perf_stats_enabled(0);
+
+    assert(read_concurrency_checkpoint_lsn_records(database_path, &record));
+    assert(record.latest_lsn == advanced_latest_lsn);
+    assert(record.visible_lsn == visible_lsn);
+    read_concurrency_checkpoint_legacy_lsns(database_path, &legacy_latest_lsn, &legacy_visible_lsn);
+    assert(legacy_latest_lsn == initial_legacy_latest_lsn);
+    assert(legacy_visible_lsn == initial_legacy_visible_lsn);
+    assert(
+        database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_CHECKPOINT_UPDATE_LEGACY_WRITE_ELIDED] ==
+        1U
+    );
+    assert(database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_CHECKPOINT_UPDATE_NOOP_ELIDED] == 0U);
 
     free(database_path);
     free(runtime_root);
@@ -73987,6 +74078,33 @@ static void write_concurrency_checkpoint_legacy_lsns(
     assert(close(fd) == 0);
     free(checkpoint_path);
     free(concurrency_path);
+}
+
+static void read_concurrency_checkpoint_legacy_lsns(
+    const char *database_path,
+    uint64_t *out_latest_lsn,
+    uint64_t *out_visible_lsn
+) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *checkpoint_path = path_join(concurrency_path, "mylite-concurrency.ckpt");
+    unsigned char bytes[16];
+    int fd;
+
+    assert(out_latest_lsn != NULL);
+    assert(out_visible_lsn != NULL);
+
+    fd = open(checkpoint_path, O_RDONLY | O_CLOEXEC);
+    assert(fd >= 0);
+    read_exact_at(fd, bytes, sizeof(bytes), MYLITE_TEST_CONCURRENCY_CHECKPOINT_LATEST_LSN_OFFSET);
+    assert(close(fd) == 0);
+    free(checkpoint_path);
+    free(concurrency_path);
+
+    *out_latest_lsn = read_le64(bytes);
+    *out_visible_lsn = read_le64(bytes + sizeof(uint64_t));
+    if (*out_visible_lsn > *out_latest_lsn) {
+        *out_latest_lsn = *out_visible_lsn;
+    }
 }
 
 static void write_concurrency_native_file_op_checkpoint_needed(
