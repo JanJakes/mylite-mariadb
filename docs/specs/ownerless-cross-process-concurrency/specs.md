@@ -4334,7 +4334,10 @@ Minimum suites before support can be claimed:
     waiting behind a peer ownerless `LOCK IN SHARE MODE` reader publishes a
     shared external native table-wait registry entry, clears it after release,
     and remains durable through ownerless/native reopen and forced `.shm`
-    rebuild. Hook-build SQL crash coverage kills that same native table-wait
+    rebuild. Embedded hook coverage directly asserts retained external
+    table-wait snapshots dispatch through `wait_until_table` with stable
+    transaction ID, table ID, mode, timeout, and result propagation.
+    Hook-build SQL crash coverage kills that same native table-wait
     SQL waiter after the shared table-wait entry is published, verifies the
     dead wait remains observable, verifies live-peer cleanup remains busy while
     the blocking reader is alive, verifies no-live recovery removes the dead

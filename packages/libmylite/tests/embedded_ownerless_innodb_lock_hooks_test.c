@@ -13,14 +13,21 @@ typedef struct page_visibility_state {
     uint64_t last_written_start_lsn;
     uint64_t last_written_end_lsn;
     uint64_t observed_lsn;
+    uint64_t last_table_wait_trx_id;
+    uint64_t last_table_wait_table_id;
+    uint32_t last_table_wait_mode;
+    unsigned int last_table_wait_timeout_ms;
     unsigned read_count;
     unsigned reserve_count;
     unsigned written_count;
     unsigned observe_count;
+    unsigned table_wait_count;
+    int table_wait_result;
 } page_visibility_state;
 
 static void test_page_visibility_is_thread_local(void);
 static void test_checkpoint_suppression_and_file_op_flags_reset(void);
+static void test_external_table_wait_dispatch_uses_table_hook(void);
 static void install_page_hooks(page_visibility_state *state);
 static void *exercise_visibility_in_thread(void *context);
 static int acquire_table_hook(
@@ -153,6 +160,7 @@ static int skip_external_page_refresh_hook(void *context);
 
 int main(void) {
     test_checkpoint_suppression_and_file_op_flags_reset();
+    test_external_table_wait_dispatch_uses_table_hook();
     test_page_visibility_is_thread_local();
     return 0;
 }
@@ -182,6 +190,65 @@ static void test_checkpoint_suppression_and_file_op_flags_reset(void) {
     assert(!mylite_ownerless_innodb_checkpoint_suppressed());
     assert(!mylite_ownerless_innodb_relative_file_op_redo_paths());
     assert(!mylite_ownerless_innodb_take_file_rename_redo());
+}
+
+static void test_external_table_wait_dispatch_uses_table_hook(void) {
+    page_visibility_state state = {0};
+    struct mylite_ownerless_innodb_lock_external_wait wait = {0};
+    struct mylite_ownerless_innodb_lock_external_wait none = {0};
+
+    wait.kind = MYLITE_OWNERLESS_INNODB_LOCK_EXTERNAL_WAIT_TABLE;
+    wait.trx_id = 17U;
+    wait.table_id = 23U;
+    wait.mode = MYLITE_OWNERLESS_INNODB_LOCK_MODE_X;
+
+    assert(
+        mylite_ownerless_innodb_lock_wait_for_external(&wait, 10U) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE
+    );
+    assert(
+        mylite_ownerless_innodb_lock_wait_for_external(&none, 10U) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_wait_for_external(NULL, 10U) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_ERROR
+    );
+
+    install_page_hooks(&state);
+    assert(mylite_ownerless_innodb_lock_has_hooks());
+    assert(
+        mylite_ownerless_innodb_lock_wait_for_external(&wait, 250U) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_OK
+    );
+    assert(state.table_wait_count == 1U);
+    assert(state.last_table_wait_trx_id == 17U);
+    assert(state.last_table_wait_table_id == 23U);
+    assert(state.last_table_wait_mode == MYLITE_OWNERLESS_INNODB_LOCK_MODE_X);
+    assert(state.last_table_wait_timeout_ms == 250U);
+
+    state.table_wait_result = MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT;
+    wait.trx_id = 19U;
+    wait.table_id = 29U;
+    wait.mode = MYLITE_OWNERLESS_INNODB_LOCK_MODE_S;
+    assert(
+        mylite_ownerless_innodb_lock_wait_for_external(&wait, 7U) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT
+    );
+    assert(state.table_wait_count == 2U);
+    assert(state.last_table_wait_trx_id == 19U);
+    assert(state.last_table_wait_table_id == 29U);
+    assert(state.last_table_wait_mode == MYLITE_OWNERLESS_INNODB_LOCK_MODE_S);
+    assert(state.last_table_wait_timeout_ms == 7U);
+
+    wait.kind = 99U;
+    assert(
+        mylite_ownerless_innodb_lock_wait_for_external(&wait, 1U) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_ERROR
+    );
+
+    mylite_ownerless_innodb_lock_reset_hooks();
+    assert(!mylite_ownerless_innodb_lock_has_hooks());
 }
 
 static void test_page_visibility_is_thread_local(void) {
@@ -342,12 +409,15 @@ static int wait_until_table_hook(
     unsigned int timeout_ms,
     void *context
 ) {
-    (void)trx_id;
-    (void)table_id;
-    (void)mode;
-    (void)timeout_ms;
-    (void)context;
-    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+    page_visibility_state *state = (page_visibility_state *)context;
+
+    assert(state != NULL);
+    state->last_table_wait_trx_id = trx_id;
+    state->last_table_wait_table_id = table_id;
+    state->last_table_wait_mode = mode;
+    state->last_table_wait_timeout_ms = timeout_ms;
+    ++state->table_wait_count;
+    return state->table_wait_result;
 }
 
 static int acquire_record_hook(
