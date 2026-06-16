@@ -987,6 +987,16 @@ unchanged, but copies raw run bytes into resized vector tails instead of using
 range inserts during standalone encoding. This targets the measured
 standalone-encode subphase without changing sparse record selection, payload
 bytes, replay, checkpoint rewrite, or SQL behavior.
+A local MTR wrapper fast-path prototype that cached
+`ownerless_page_write_uses_transaction_release()` per publish pass and reused
+the tracked-page lookup for release was rejected after stress evidence: one
+prototype produced ownerless reader monotonicity failures and a DDL stress
+InnoDB assertion at `trx0trx.cc:1345`; a narrowed ordered-erase variant still
+failed the first ownerless stress case. The code was backed out, rebuilt from
+the restored source, and the isolated baseline stress case passed again. Future
+native commit/page-publication optimization should not repeat this shortcut
+without a stronger proof across transaction-deferred publication and DDL
+stress.
 Ownerless page-version reads now validate the WAL tail after a direct
 page-index hit because the shared page index is an acceleration cache updated
 after the append stream, not an authoritative visibility boundary by itself.

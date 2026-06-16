@@ -5127,7 +5127,12 @@ subsystems that this mode needs:
   copies compact-varint sparse and fill-sparse raw runs into resized vector
   tails instead of using range inserts. This narrows a measured standalone
   encode CPU cost without changing sparse record selection, payload bytes,
-  replay, checkpoint rewrite, recovery, or page-version volume. The
+  replay, checkpoint rewrite, recovery, or page-version volume. A later MTR
+  wrapper fast-path audit rejected caching
+  `ownerless_page_write_uses_transaction_release()` per publish pass or
+  reusing the tracked-page lookup for release after ownerless stress found
+  reader monotonicity failures and a DDL stress InnoDB assertion in prototype
+  builds; that path needs stronger proof before being retried. The
   visible-fast page-log append-batch slice
   narrows another measured overhead source by keeping the append session open
   across the adjacent mini-transactions of a single-row pure
