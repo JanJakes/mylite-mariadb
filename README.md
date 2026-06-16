@@ -154,7 +154,9 @@ performance-probe, and PHPUnit test-only steps so stale non-production build
 directories are rejected before timings are reported. The CI WordPress PHPUnit
 timing job also requires the transient WordPress MyLite test database directory
 outside the repository worktree so test-database I/O is not silently timed on
-the build artifact path.
+the build artifact path. Each WordPress timing phase also appends its compact
+metrics to `build/wordpress-phpunit-reports/timing-summary.md`, and CI publishes
+that file to the GitHub step summary after the split PHPUnit steps finish.
 The `tools/check-ci-production-builds` audit is also run directly by CI and by
 the production CTest preset, so workflow changes that reintroduce developer
 presets or remove timing guards fail before producing comparable-looking

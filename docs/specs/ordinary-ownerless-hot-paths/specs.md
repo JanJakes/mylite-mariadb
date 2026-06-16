@@ -738,3 +738,18 @@ remaining shell real `691.743s`, for about `14.1` minutes across test-only
 PHPUnit steps. The full WordPress CI job completed in `21m52s`; this remains
 below the comparable main one-shot job that reported PHPUnit `28:21.227` and
 `wordpress_phpunit_seconds=1706`.
+
+A 2026-06-16 production CI timing audit at ownerless head `c81c2d59` kept the
+same conclusion after the later ownerless native snapshot and payload
+performance slices. The WordPress job completed in about `21m17s`: the MyLite
+PHP extension build step took about `6m50s`, `^Tests_DB` shell real was
+`9.382s`, deferred process-isolated shell real was `80.317s`, eager
+process-isolated shell real was `56.438s`, and the non-isolated remaining shard
+reported PHPUnit `10:53.367` with shell real `657.686s`. The mysqli profile for
+that long shard attributed `391775.862 ms` to `490734` query calls, while
+adapter-side row materialization, field metadata, result-object creation,
+status sync, and PHP fetch wrappers together remained small relative to engine
+execution and WordPress/PHP test work. The follow-up timing-summary slice keeps
+the existing split/test-only production phases and writes their key metrics to
+`build/wordpress-phpunit-reports/timing-summary.md`, which CI publishes to the
+GitHub step summary after the WordPress timing steps.

@@ -157,6 +157,7 @@ jobs:
       MYLITE_WORDPRESS_COMPOSER_CACHE_DIR: build/wordpress-composer-cache
       MYLITE_WORDPRESS_CMAKE_BUILD_DIR: build/wordpress-php-embedded-prod
       MYLITE_WORDPRESS_CMAKE_BUILD_TYPE: Release
+      MYLITE_WORDPRESS_TIMING_SUMMARY_PATH: build/wordpress-phpunit-reports/timing-summary.md
       MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD: "1"
       MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR: "1"
       MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT: "0"
@@ -192,18 +193,21 @@ jobs:
       - name: Build WordPress PHPUnit Docker image
         env:
           MYLITE_WORDPRESS_PHASE: docker-image
+          MYLITE_WORDPRESS_TIMING_LABEL: docker-image
         run: tools/wordpress-phpunit-mysqli-mylite
 
       - name: Fetch WordPress PHPUnit sources
         env:
           MYLITE_WORDPRESS_PHASE: fetch
           MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
+          MYLITE_WORDPRESS_TIMING_LABEL: fetch
         run: tools/wordpress-phpunit-mysqli-mylite
 
       - name: Build MyLite PHP extensions for WordPress PHPUnit
         env:
           MYLITE_WORDPRESS_PHASE: build-php
           MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
+          MYLITE_WORDPRESS_TIMING_LABEL: build-php
         run: tools/wordpress-phpunit-mysqli-mylite
 
       - name: Verify WordPress MariaDB embedded production build type
@@ -216,6 +220,7 @@ jobs:
         env:
           MYLITE_WORDPRESS_PHASE: dependencies
           MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
+          MYLITE_WORDPRESS_TIMING_LABEL: dependencies
         run: |
           set -euo pipefail
           tools/require-cmake-build-type MinSizeRel build/wordpress-mariadb-embedded
@@ -226,6 +231,7 @@ jobs:
         env:
           MYLITE_WORDPRESS_PHASE: prepare-db
           MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
+          MYLITE_WORDPRESS_TIMING_LABEL: prepare-db
         run: |
           set -euo pipefail
           tools/require-cmake-build-type MinSizeRel build/wordpress-mariadb-embedded
@@ -236,6 +242,7 @@ jobs:
         env:
           MYLITE_WORDPRESS_PHASE: perf-probe
           MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
+          MYLITE_WORDPRESS_TIMING_LABEL: perf-probe
           MYLITE_WORDPRESS_PERF_PROCESS_ITERATIONS: "5"
           MYLITE_WORDPRESS_PERF_CONNECT_ITERATIONS: "5"
           MYLITE_WORDPRESS_PERF_SQL_ITERATIONS: "1000"
@@ -250,6 +257,7 @@ jobs:
         env:
           MYLITE_WORDPRESS_PHASE: phpunit
           MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
+          MYLITE_WORDPRESS_TIMING_LABEL: phpunit-db
         run: |
           set -euo pipefail
           tools/require-cmake-build-type MinSizeRel build/wordpress-mariadb-embedded
@@ -260,6 +268,7 @@ jobs:
         env:
           MYLITE_WORDPRESS_PHASE: phpunit
           MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
+          MYLITE_WORDPRESS_TIMING_LABEL: phpunit-deferred-reconnect
           MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD: "0"
         run: |
           set -euo pipefail
@@ -271,6 +280,7 @@ jobs:
         env:
           MYLITE_WORDPRESS_PHASE: phpunit
           MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
+          MYLITE_WORDPRESS_TIMING_LABEL: phpunit-eager-reconnect
           MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD: "1"
         run: |
           set -euo pipefail
@@ -282,6 +292,7 @@ jobs:
         env:
           MYLITE_WORDPRESS_PHASE: phpunit
           MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
+          MYLITE_WORDPRESS_TIMING_LABEL: phpunit-non-isolated
           MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI: "1"
           MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE: "1"
         run: |
@@ -289,6 +300,20 @@ jobs:
           tools/require-cmake-build-type MinSizeRel build/wordpress-mariadb-embedded
           tools/require-cmake-release-build build/wordpress-php-embedded-prod
           tools/wordpress-phpunit-mysqli-mylite --filter "$MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER"
+
+      - name: Show WordPress timing summary
+        if: always()
+        run: |
+          set -euo pipefail
+          summary="${MYLITE_WORDPRESS_TIMING_SUMMARY_PATH}"
+          if [ -f "${summary}" ]; then
+            cat "${summary}"
+            if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+              cat "${summary}" >> "${GITHUB_STEP_SUMMARY}"
+            fi
+          else
+            echo "Missing WordPress timing summary: ${summary}"
+          fi
 
       - name: Show generated artifact sizes
         if: always()

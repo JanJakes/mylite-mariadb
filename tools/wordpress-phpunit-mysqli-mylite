@@ -13,6 +13,7 @@ cmake_build_dir="${MYLITE_WORDPRESS_CMAKE_BUILD_DIR:-${root_dir}/build/wordpress
 cmake_build_type="${MYLITE_WORDPRESS_CMAKE_BUILD_TYPE:-Release}"
 composer_cache_dir="${MYLITE_WORDPRESS_COMPOSER_CACHE_DIR:-${root_dir}/build/wordpress-composer-cache}"
 phpunit_report_dir="${MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR:-${root_dir}/build/wordpress-phpunit-reports}"
+timing_summary_path="${MYLITE_WORDPRESS_TIMING_SUMMARY_PATH:-${phpunit_report_dir}/timing-summary.md}"
 phpunit_log_junit="${MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT:-0}"
 phpunit_no_logging="${MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING:-0}"
 phpunit_profile_child_processes="${MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES:-0}"
@@ -25,6 +26,7 @@ require_external_db_dir="${MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR:-0}"
 db_dir="${MYLITE_WORDPRESS_DB_DIR:-${TMPDIR:-/tmp}/mylite-wordpress-tests-${root_hash}.mylite}"
 build_targets="${MYLITE_WORDPRESS_BUILD_TARGETS:-mylite_php_extension mylite_mysqli_php_extension}"
 phase="${MYLITE_WORDPRESS_PHASE:-all}"
+timing_label="${MYLITE_WORDPRESS_TIMING_LABEL:-${phase}}"
 skip_docker_build="${MYLITE_WORDPRESS_SKIP_DOCKER_BUILD:-0}"
 case "${phase}" in
   all | docker-image | setup | fetch | build-php | dependencies | prepare-db | phpunit | perf-probe)
@@ -149,6 +151,7 @@ mariadb_build_dir="$(normalize_root_dir MYLITE_WORDPRESS_MARIADB_BUILD_DIR "${ma
 cmake_build_dir="$(normalize_root_dir MYLITE_WORDPRESS_CMAKE_BUILD_DIR "${cmake_build_dir}")"
 composer_cache_dir="$(normalize_root_dir MYLITE_WORDPRESS_COMPOSER_CACHE_DIR "${composer_cache_dir}")"
 phpunit_report_dir="$(normalize_root_dir MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR "${phpunit_report_dir}")"
+timing_summary_path="$(normalize_root_dir MYLITE_WORDPRESS_TIMING_SUMMARY_PATH "${timing_summary_path}")"
 
 if [[ "${db_dir}" != /* ]]; then
   db_dir="${root_dir}/${db_dir}"
@@ -171,6 +174,7 @@ container_mariadb_build_dir="${container_root}${mariadb_build_dir#"${root_dir}"}
 container_cmake_build_dir="${container_root}${cmake_build_dir#"${root_dir}"}"
 container_composer_cache_dir="${container_root}${composer_cache_dir#"${root_dir}"}"
 container_phpunit_report_dir="${container_root}${phpunit_report_dir#"${root_dir}"}"
+container_timing_summary_path="${container_root}${timing_summary_path#"${root_dir}"}"
 db_mount_args=()
 if [[ "${db_dir}" == "${root_dir}"/* ]]; then
   container_db_dir="${container_root}${db_dir#"${root_dir}"}"
@@ -185,6 +189,44 @@ host_seconds_since() {
   local end
   end="$(date +%s)"
   echo "$((end - start))"
+}
+
+host_markdown_cell() {
+  local value="$1"
+  value="${value//$'\n'/ }"
+  value="${value//|/\\|}"
+  printf '%s' "${value}"
+}
+
+host_append_timing_summary() {
+  local metric
+  local value
+  local escaped_label
+  local escaped_metric
+  local escaped_value
+
+  mkdir -p "$(dirname "${timing_summary_path}")"
+  if [ ! -s "${timing_summary_path}" ]; then
+    {
+      echo "## WordPress PHPUnit Timing"
+      echo
+      echo "| label | metric | value |"
+      echo "| --- | --- | ---: |"
+    } > "${timing_summary_path}"
+  fi
+
+  escaped_label="$(host_markdown_cell "${timing_label}")"
+  for metric in "$@"; do
+    value="${metric#*=}"
+    metric="${metric%%=*}"
+    escaped_metric="$(host_markdown_cell "${metric}")"
+    escaped_value="$(host_markdown_cell "${value}")"
+    printf '| %s | %s | %s |\n' \
+      "${escaped_label}" \
+      "${escaped_metric}" \
+      "${escaped_value}" \
+      >> "${timing_summary_path}"
+  done
 }
 
 build_image() {
@@ -234,6 +276,8 @@ run_suite() {
     -e MYLITE_WORDPRESS_CMAKE_BUILD_TYPE="${cmake_build_type}" \
     -e MYLITE_WORDPRESS_COMPOSER_CACHE_DIR="${container_composer_cache_dir}" \
     -e MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR="${container_phpunit_report_dir}" \
+    -e MYLITE_WORDPRESS_TIMING_SUMMARY_PATH="${container_timing_summary_path}" \
+    -e MYLITE_WORDPRESS_TIMING_LABEL="${timing_label}" \
     -e MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT="${phpunit_log_junit}" \
     -e MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING="${phpunit_no_logging}" \
     -e MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES="${phpunit_profile_child_processes}" \
@@ -273,6 +317,48 @@ seconds_since() {
   local end
   end="$(date +%s)"
   echo "$((end - start))"
+}
+
+markdown_cell() {
+  local value="$1"
+  value="${value//$'\n'/ }"
+  value="${value//|/\\|}"
+  printf '%s' "${value}"
+}
+
+append_timing_summary() {
+  local metric
+  local value
+  local escaped_label
+  local escaped_metric
+  local escaped_value
+
+  if [ -z "${MYLITE_WORDPRESS_TIMING_SUMMARY_PATH}" ]; then
+    return
+  fi
+
+  mkdir -p "$(dirname "${MYLITE_WORDPRESS_TIMING_SUMMARY_PATH}")"
+  if [ ! -s "${MYLITE_WORDPRESS_TIMING_SUMMARY_PATH}" ]; then
+    {
+      echo "## WordPress PHPUnit Timing"
+      echo
+      echo "| label | metric | value |"
+      echo "| --- | --- | ---: |"
+    } > "${MYLITE_WORDPRESS_TIMING_SUMMARY_PATH}"
+  fi
+
+  escaped_label="$(markdown_cell "${MYLITE_WORDPRESS_TIMING_LABEL}")"
+  for metric in "$@"; do
+    value="${metric#*=}"
+    metric="${metric%%=*}"
+    escaped_metric="$(markdown_cell "${metric}")"
+    escaped_value="$(markdown_cell "${value}")"
+    printf '| %s | %s | %s |\n' \
+      "${escaped_label}" \
+      "${escaped_metric}" \
+      "${escaped_value}" \
+      >> "${MYLITE_WORDPRESS_TIMING_SUMMARY_PATH}"
+  done
 }
 
 require_path() {
@@ -403,6 +489,8 @@ echo "wordpress_cmake_build_dir=${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}"
 echo "wordpress_cmake_build_type=${MYLITE_WORDPRESS_CMAKE_BUILD_TYPE}"
 echo "wordpress_composer_cache_dir=${MYLITE_WORDPRESS_COMPOSER_CACHE_DIR}"
 echo "wordpress_phpunit_report_dir=${MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR}"
+echo "wordpress_timing_summary_path=${MYLITE_WORDPRESS_TIMING_SUMMARY_PATH}"
+echo "wordpress_timing_label=${MYLITE_WORDPRESS_TIMING_LABEL}"
 echo "wordpress_phpunit_log_junit=${MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT}"
 echo "wordpress_phpunit_no_logging=${MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING}"
 echo "wordpress_phpunit_profile_child_processes=${MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES}"
@@ -439,8 +527,11 @@ fi
 git -C "${MYLITE_WORDPRESS_DIR}" fetch --depth 1 origin "${MYLITE_WORDPRESS_REF}"
 git -C "${MYLITE_WORDPRESS_DIR}" checkout --detach FETCH_HEAD
 wordpress_sha="$(git -C "${MYLITE_WORDPRESS_DIR}" rev-parse HEAD)"
+wordpress_fetch_seconds="$(seconds_since "${fetch_start}")"
 echo "wordpress_sha=${wordpress_sha}"
-echo "wordpress_fetch_seconds=$(seconds_since "${fetch_start}")"
+echo "wordpress_fetch_seconds=${wordpress_fetch_seconds}"
+append_timing_summary \
+  "wordpress_fetch_seconds=${wordpress_fetch_seconds}"
 fi
 
 if [ "${MYLITE_WORDPRESS_PHASE}" = "all" ] ||
@@ -452,7 +543,8 @@ build_start="$(date +%s)"
 mariadb_embedded_start="$(date +%s)"
 BUILD_DIR="${MYLITE_WORDPRESS_MARIADB_BUILD_DIR}" tools/mariadb-embedded-build ensure
 require_mariadb_embedded_production_build_type
-echo "mylite_mariadb_embedded_seconds=$(seconds_since "${mariadb_embedded_start}")"
+mylite_mariadb_embedded_seconds="$(seconds_since "${mariadb_embedded_start}")"
+echo "mylite_mariadb_embedded_seconds=${mylite_mariadb_embedded_seconds}"
 mylite_php_configure_start="$(date +%s)"
 cmake -S . -B "${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}" -G Ninja \
   -DBUILD_TESTING=OFF \
@@ -465,7 +557,8 @@ cmake -S . -B "${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}" -G Ninja \
   -DMYLITE_PHP_CONFIG_EXECUTABLE=/usr/local/bin/php-config \
   -DMYLITE_PHP_EXECUTABLE=/usr/local/bin/php
 require_matching_cmake_build_type
-echo "mylite_php_configure_seconds=$(seconds_since "${mylite_php_configure_start}")"
+mylite_php_configure_seconds="$(seconds_since "${mylite_php_configure_start}")"
+echo "mylite_php_configure_seconds=${mylite_php_configure_seconds}"
 read -r -a mylite_wordpress_build_targets <<<"${MYLITE_WORDPRESS_BUILD_TARGETS}"
 if [ "${#mylite_wordpress_build_targets[@]}" -eq 0 ]; then
   echo "No WordPress harness build targets configured" >&2
@@ -474,7 +567,8 @@ fi
 echo "mylite_build_targets=${MYLITE_WORDPRESS_BUILD_TARGETS}"
 mylite_php_build_start="$(date +%s)"
 cmake --build "${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}" --target "${mylite_wordpress_build_targets[@]}"
-echo "mylite_php_build_seconds=$(seconds_since "${mylite_php_build_start}")"
+mylite_php_build_seconds="$(seconds_since "${mylite_php_build_start}")"
+echo "mylite_php_build_seconds=${mylite_php_build_seconds}"
 mylite_php_wrapper_start="$(date +%s)"
 mkdir -p "${php_ini_dir}"
 cat > "${php_ini_dir}/mylite.ini" <<INI
@@ -488,8 +582,16 @@ exec /usr/local/bin/php "\$@"
 PHP
 chmod +x "${php_wrapper}"
 "${php_wrapper}" -r 'if (!extension_loaded("mylite") || !extension_loaded("mysqli_mylite") || !function_exists("mysqli_connect")) { exit(1); }'
-echo "mylite_php_wrapper_seconds=$(seconds_since "${mylite_php_wrapper_start}")"
-echo "mylite_build_seconds=$(seconds_since "${build_start}")"
+mylite_php_wrapper_seconds="$(seconds_since "${mylite_php_wrapper_start}")"
+mylite_build_seconds="$(seconds_since "${build_start}")"
+echo "mylite_php_wrapper_seconds=${mylite_php_wrapper_seconds}"
+echo "mylite_build_seconds=${mylite_build_seconds}"
+append_timing_summary \
+  "mylite_mariadb_embedded_seconds=${mylite_mariadb_embedded_seconds}" \
+  "mylite_php_configure_seconds=${mylite_php_configure_seconds}" \
+  "mylite_php_build_seconds=${mylite_php_build_seconds}" \
+  "mylite_php_wrapper_seconds=${mylite_php_wrapper_seconds}" \
+  "mylite_build_seconds=${mylite_build_seconds}"
 fi
 
 if [ "${MYLITE_WORDPRESS_PHASE}" = "all" ] ||
@@ -499,12 +601,14 @@ phase "Install WordPress PHPUnit dependencies"
 deps_start="$(date +%s)"
 wordpress_composer_install_start="$(date +%s)"
 composer --working-dir="${MYLITE_WORDPRESS_DIR}" install --no-interaction --no-progress --prefer-dist
-echo "wordpress_composer_install_seconds=$(seconds_since "${wordpress_composer_install_start}")"
+wordpress_composer_install_seconds="$(seconds_since "${wordpress_composer_install_start}")"
+echo "wordpress_composer_install_seconds=${wordpress_composer_install_seconds}"
 wordpress_phpunit_tool_dependency_start="$(date +%s)"
 if [ ! -x "${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}/vendor/bin/phpunit" ]; then
   composer --working-dir="${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}" require --no-interaction --no-progress --prefer-dist phpunit/phpunit:^9.6
 fi
-echo "wordpress_phpunit_tool_dependency_seconds=$(seconds_since "${wordpress_phpunit_tool_dependency_start}")"
+wordpress_phpunit_tool_dependency_seconds="$(seconds_since "${wordpress_phpunit_tool_dependency_start}")"
+echo "wordpress_phpunit_tool_dependency_seconds=${wordpress_phpunit_tool_dependency_seconds}"
 wordpress_phpunit_patch_start="$(date +%s)"
 PHPUNIT_PROCESS_FILE="${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}/vendor/phpunit/phpunit/src/Util/PHP/DefaultPhpProcess.php" /usr/local/bin/php <<'PHP'
 <?php
@@ -1311,8 +1415,15 @@ if ($patched === $source) {
 
 file_put_contents($file, $patched);
 PHP
-echo "wordpress_phpunit_patch_seconds=$(seconds_since "${wordpress_phpunit_patch_start}")"
-echo "wordpress_dependency_seconds=$(seconds_since "${deps_start}")"
+wordpress_phpunit_patch_seconds="$(seconds_since "${wordpress_phpunit_patch_start}")"
+wordpress_dependency_seconds="$(seconds_since "${deps_start}")"
+echo "wordpress_phpunit_patch_seconds=${wordpress_phpunit_patch_seconds}"
+echo "wordpress_dependency_seconds=${wordpress_dependency_seconds}"
+append_timing_summary \
+  "wordpress_composer_install_seconds=${wordpress_composer_install_seconds}" \
+  "wordpress_phpunit_tool_dependency_seconds=${wordpress_phpunit_tool_dependency_seconds}" \
+  "wordpress_phpunit_patch_seconds=${wordpress_phpunit_patch_seconds}" \
+  "wordpress_dependency_seconds=${wordpress_dependency_seconds}"
 fi
 
 if [ "${MYLITE_WORDPRESS_PHASE}" = "all" ] ||
@@ -1359,7 +1470,10 @@ define( 'WP_TESTS_TITLE', 'Test Blog' );
 define( 'WP_PHP_BINARY', '${php_wrapper}' );
 define( 'WPLANG', '' );
 PHP
-echo "wordpress_prepare_db_seconds=$(seconds_since "${prepare_start}")"
+wordpress_prepare_db_seconds="$(seconds_since "${prepare_start}")"
+echo "wordpress_prepare_db_seconds=${wordpress_prepare_db_seconds}"
+append_timing_summary \
+  "wordpress_prepare_db_seconds=${wordpress_prepare_db_seconds}"
 fi
 
 if [ "${MYLITE_WORDPRESS_PHASE}" = "all" ] ||
@@ -1530,12 +1644,29 @@ PHP_KEEPALIVE
   if [ -n "${phpunit_reported_seconds}" ]; then
     echo "wordpress_phpunit_reported_seconds=${phpunit_reported_seconds}"
   fi
+  phpunit_shell_overhead_seconds=
   if [ -n "${phpunit_shell_real_seconds}" ] &&
      [ -n "${phpunit_reported_seconds}" ]; then
-    awk \
+    phpunit_shell_overhead_seconds="$(
+      awk \
       -v shell_real="${phpunit_shell_real_seconds}" \
       -v reported="${phpunit_reported_seconds}" \
-      'BEGIN { printf "wordpress_phpunit_shell_overhead_seconds=%.3f\n", shell_real - reported }'
+      'BEGIN { printf "%.3f", shell_real - reported }'
+    )"
+    echo "wordpress_phpunit_shell_overhead_seconds=${phpunit_shell_overhead_seconds}"
+  fi
+  phpunit_summary_metrics=()
+  if [ -n "${phpunit_shell_real_seconds}" ]; then
+    phpunit_summary_metrics+=("wordpress_phpunit_shell_real_seconds=${phpunit_shell_real_seconds}")
+  fi
+  if [ -n "${phpunit_reported_seconds}" ]; then
+    phpunit_summary_metrics+=("wordpress_phpunit_reported_seconds=${phpunit_reported_seconds}")
+  fi
+  if [ -n "${phpunit_shell_overhead_seconds}" ]; then
+    phpunit_summary_metrics+=("wordpress_phpunit_shell_overhead_seconds=${phpunit_shell_overhead_seconds}")
+  fi
+  if [ "${#phpunit_summary_metrics[@]}" -gt 0 ]; then
+    append_timing_summary "${phpunit_summary_metrics[@]}"
   fi
   if [ -n "${phpunit_junit_path}" ] &&
      [ "${phpunit_junit_path}" != "caller-supplied" ] &&
@@ -1615,7 +1746,10 @@ PHP_JUNIT_SUMMARY
 )
 suite_status="$?"
 set -e
-echo "wordpress_phpunit_seconds=$(seconds_since "${suite_start}")"
+wordpress_phpunit_seconds="$(seconds_since "${suite_start}")"
+echo "wordpress_phpunit_seconds=${wordpress_phpunit_seconds}"
+append_timing_summary \
+  "wordpress_phpunit_seconds=${wordpress_phpunit_seconds}"
 exit "${suite_status}"
 fi
 
@@ -1783,11 +1917,15 @@ echo "wordpress_perf_summary_php_process_connect_close_iterations=${perf_connect
 echo "wordpress_perf_summary_php_process_connect_close_ms_avg=${php_connect_process_ms}"
 echo "wordpress_perf_summary_php_process_connect_close_delta_ms_avg=${php_connect_process_delta_ms}"
 
+if ! perf_output="$(mktemp "${TMPDIR:-/tmp}/mylite-wordpress-perf.XXXXXX")"; then
+  echo "Could not create temporary WordPress perf output capture" >&2
+  exit 1
+fi
 "${php_wrapper}" /dev/stdin \
   "${MYLITE_WORDPRESS_DB_DIR}" \
   "${perf_connect_iterations}" \
   "${perf_sql_iterations}" \
-  "${perf_write_iterations}" <<'PHP_PERF'
+  "${perf_write_iterations}" <<'PHP_PERF' | tee "${perf_output}"
 <?php
 $dbDir = $argv[1];
 $connectIterations = (int) $argv[2];
@@ -1972,11 +2110,22 @@ must_query($db, 'DROP TABLE IF EXISTS mylite_perf_probe_autocommit');
 must_query($db, 'DROP TABLE IF EXISTS mylite_perf_probe_direct_autocommit');
 mysqli_close($db);
 PHP_PERF
+perf_summary_metrics=()
+while IFS= read -r perf_metric; do
+  perf_summary_metrics+=("${perf_metric}")
+done < <(sed -n 's/^\(wordpress_perf_summary_[^=]*=.*\)$/\1/p' "${perf_output}")
+rm -f "${perf_output}"
+if [ "${#perf_summary_metrics[@]}" -gt 0 ]; then
+  append_timing_summary "${perf_summary_metrics[@]}"
+fi
 fi
 CONTAINER
 }
 
 overall_start="$(date +%s)"
+if [[ "${phase}" == "docker-image" && "${skip_docker_build}" != "1" ]]; then
+  rm -f "${timing_summary_path}"
+fi
 echo "wordpress_docker_image=${image}"
 echo "wordpress_phase=${phase}"
 echo "wordpress_host_root_dir=${root_dir}"
@@ -1986,24 +2135,34 @@ echo "wordpress_host_mariadb_build_dir=${mariadb_build_dir}"
 echo "wordpress_host_cmake_build_dir=${cmake_build_dir}"
 echo "wordpress_host_composer_cache_dir=${composer_cache_dir}"
 echo "wordpress_host_phpunit_report_dir=${phpunit_report_dir}"
+echo "wordpress_host_timing_summary_path=${timing_summary_path}"
 echo "wordpress_host_db_dir=${db_dir}"
 echo "wordpress_container_db_dir=${container_db_dir}"
+echo "wordpress_host_timing_label=${timing_label}"
 echo "wordpress_host_phpunit_reconnect_after_child=${phpunit_reconnect_after_child}"
 echo "wordpress_host_phpunit_profile_mysqli=${phpunit_profile_mysqli}"
 echo "wordpress_host_phpunit_keepalive=${phpunit_keepalive}"
 echo "wordpress_host_require_release_build=${require_release_build}"
 echo "wordpress_host_require_external_db_dir=${require_external_db_dir}"
 if [[ "${skip_docker_build}" == "1" ]]; then
-  echo "wordpress_docker_build_seconds=skipped"
+  wordpress_docker_build_seconds=skipped
 else
   docker_build_start="$(date +%s)"
   build_image
-  echo "wordpress_docker_build_seconds=$(host_seconds_since "${docker_build_start}")"
+  wordpress_docker_build_seconds="$(host_seconds_since "${docker_build_start}")"
 fi
+echo "wordpress_docker_build_seconds=${wordpress_docker_build_seconds}"
+host_append_timing_summary \
+  "wordpress_docker_build_seconds=${wordpress_docker_build_seconds}"
 if [[ "${phase}" == "docker-image" ]]; then
-  echo "wordpress_container_seconds=skipped"
+  wordpress_container_seconds=skipped
+  echo "wordpress_container_seconds=${wordpress_container_seconds}"
   overall_end="$(date +%s)"
-  echo "wordpress_total_seconds=$((overall_end - overall_start))"
+  wordpress_total_seconds="$((overall_end - overall_start))"
+  echo "wordpress_total_seconds=${wordpress_total_seconds}"
+  host_append_timing_summary \
+    "wordpress_container_seconds=${wordpress_container_seconds}" \
+    "wordpress_total_seconds=${wordpress_total_seconds}"
   exit 0
 fi
 container_start="$(date +%s)"
@@ -2011,7 +2170,12 @@ set +e
 run_suite "$@"
 overall_status="$?"
 set -e
-echo "wordpress_container_seconds=$(host_seconds_since "${container_start}")"
+wordpress_container_seconds="$(host_seconds_since "${container_start}")"
+echo "wordpress_container_seconds=${wordpress_container_seconds}"
 overall_end="$(date +%s)"
-echo "wordpress_total_seconds=$((overall_end - overall_start))"
+wordpress_total_seconds="$((overall_end - overall_start))"
+echo "wordpress_total_seconds=${wordpress_total_seconds}"
+host_append_timing_summary \
+  "wordpress_container_seconds=${wordpress_container_seconds}" \
+  "wordpress_total_seconds=${wordpress_total_seconds}"
 exit "${overall_status}"

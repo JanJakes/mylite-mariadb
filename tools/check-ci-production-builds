@@ -180,6 +180,7 @@ require_literal "tools/require-cmake-build-type MinSizeRel build/wordpress-maria
 
 require_literal "MYLITE_WORDPRESS_CMAKE_BUILD_DIR: build/wordpress-php-embedded-prod"
 require_literal "MYLITE_WORDPRESS_CMAKE_BUILD_TYPE: Release"
+require_literal "MYLITE_WORDPRESS_TIMING_SUMMARY_PATH: build/wordpress-phpunit-reports/timing-summary.md"
 require_literal 'MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD: "1"'
 require_literal 'MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR: "1"'
 require_literal 'MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT: "0"'
@@ -207,12 +208,24 @@ require_literal "Run WordPress PHPUnit database suite (test only)"
 require_literal "Run WordPress PHPUnit process-isolated deferred-reconnect suite (test only)"
 require_literal "Run WordPress PHPUnit process-isolated eager-reconnect suite (test only)"
 require_literal "Run WordPress PHPUnit non-isolated remaining suite (test only)"
+require_literal "Show WordPress timing summary"
 require_literal "MYLITE_WORDPRESS_PHASE: docker-image"
 require_literal "MYLITE_WORDPRESS_PHASE: fetch"
 require_literal "MYLITE_WORDPRESS_PHASE: build-php"
 require_literal "MYLITE_WORDPRESS_PHASE: dependencies"
 require_literal "MYLITE_WORDPRESS_PHASE: prepare-db"
 require_literal "MYLITE_WORDPRESS_PHASE: perf-probe"
+require_literal "MYLITE_WORDPRESS_TIMING_LABEL: docker-image"
+require_literal "MYLITE_WORDPRESS_TIMING_LABEL: fetch"
+require_literal "MYLITE_WORDPRESS_TIMING_LABEL: build-php"
+require_literal "MYLITE_WORDPRESS_TIMING_LABEL: dependencies"
+require_literal "MYLITE_WORDPRESS_TIMING_LABEL: prepare-db"
+require_literal "MYLITE_WORDPRESS_TIMING_LABEL: perf-probe"
+require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-db"
+require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-deferred-reconnect"
+require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-eager-reconnect"
+require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-non-isolated"
+require_literal 'cat "${summary}" >> "${GITHUB_STEP_SUMMARY}"'
 require_literal_count_at_least "MYLITE_WORDPRESS_PHASE: phpunit" 4
 require_literal_count_at_least 'MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"' 8
 

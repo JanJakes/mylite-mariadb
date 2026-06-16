@@ -124,6 +124,10 @@ CI-visible timings, and CI separates the stats-off embedded throughput probe
 from a reduced stats-enabled ownerless attribution probe. CI also separates the
 WordPress PHPUnit source, build, dependency, database-prep, performance-probe,
 and test-only phases so PHPUnit wall timings are not hidden inside build work.
+Those phases append compact timing rows into
+`build/wordpress-phpunit-reports/timing-summary.md`, and CI publishes that
+Markdown table to the GitHub step summary so setup, build, probe, and each
+PHPUnit shard can be compared without scraping separate step logs.
 The embedded performance and attribution probes run before embedded correctness
 tests, so production throughput and attribution numbers remain visible even
 when a later ownerless SQL case fails.
@@ -726,7 +730,10 @@ enabled on the critical CI timing path. The CI timing path also sets
 WordPress' default `phpunit.xml.dist` JUnit logger does not add XML generation
 work to the split test-only timings. Diagnostic runs that need JUnit must set
 `MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING=0` together with
-`MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1`.
+`MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1`. The follow-up CI timing-summary slice
+keeps those same production/test-only phases but records their key
+`wordpress_*` and `wordpress_perf_summary_*` metrics in one Markdown file that
+the final WordPress CI step publishes to the GitHub step summary.
 Current stats-enabled ownerless autocommit attribution also shows zero
 non-SELECT page-version read probes after the InnoDB read-complete overlay was
 limited to MyLite-classified plain reads. A 1000-row serial production
