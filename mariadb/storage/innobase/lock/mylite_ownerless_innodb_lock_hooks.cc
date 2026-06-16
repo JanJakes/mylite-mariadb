@@ -42,6 +42,8 @@ thread_local bool mylite_ownerless_statement_plain_read_preserve_local_pages=
     false;
 thread_local bool mylite_ownerless_statement_plain_read_pages_refreshed= false;
 thread_local bool mylite_ownerless_statement_dictionary_ddl= false;
+thread_local bool mylite_ownerless_statement_suppress_native_lifecycle_refresh=
+    false;
 
 namespace {
 
@@ -1497,6 +1499,22 @@ extern "C" int mylite_ownerless_innodb_statement_dictionary_ddl(void)
   return mylite_ownerless_statement_dictionary_ddl ? 1 : 0;
 }
 
+extern "C" int
+mylite_ownerless_innodb_set_statement_suppress_native_lifecycle_refresh(
+    int enabled)
+{
+  const bool previous=
+      mylite_ownerless_statement_suppress_native_lifecycle_refresh;
+  mylite_ownerless_statement_suppress_native_lifecycle_refresh= enabled != 0;
+  return previous ? 1 : 0;
+}
+
+extern "C" int
+mylite_ownerless_innodb_statement_suppress_native_lifecycle_refresh(void)
+{
+  return mylite_ownerless_statement_suppress_native_lifecycle_refresh ? 1 : 0;
+}
+
 static void collect_transaction_page_write_pages(
     const trx_t *trx, std::vector<uint64_t> &pages, bool include_dirty_pages)
 {
@@ -2073,7 +2091,8 @@ extern "C" void mylite_ownerless_innodb_refresh_external_space_allocation(
     return;
   if (recv_recovery_is_on() || !srv_was_started)
     return;
-  if (mylite_ownerless_statement_dictionary_ddl)
+  if (mylite_ownerless_statement_dictionary_ddl ||
+      mylite_ownerless_statement_suppress_native_lifecycle_refresh)
     return;
   if (ownerless_skip_external_page_refresh())
     return;

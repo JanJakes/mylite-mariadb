@@ -360,7 +360,13 @@ Roles:
   reclaim LSN, waits for native dirty pages to flush, and takes the native
   checkpoint. User data/index page images require transaction-owned
   page-version records or native snapshot-boundary synthesis before their
-  ownerless page boundary records are compacted. Non-DDL no-live DML reclaim
+  ownerless page boundary records are compacted. Native snapshot-boundary
+  synthesis is suppressed during dictionary DDL and the post-DDL
+  conservative-write window because page LSN does not prove that a newly
+  created file-per-table tablespace existed at an older reader snapshot; the
+  same window suppresses external space-allocation refresh so local post-create
+  allocation pages are not refreshed from retained external state.
+  Non-DDL no-live DML reclaim
   also scans checkpointable user tablespace page-version records before
   truncation and retains the WAL unless the native tablespace page on disk has
   a `FIL_PAGE_LSN` newer than the record page LSN, or the same `FIL_PAGE_LSN`
@@ -4593,7 +4599,10 @@ renamed, truncated, and force-rebuilt file-per-table SQL coverage, multi-rename
 swap coverage, plus
 multi-table schema-drop absence, and
 local post-DDL insert coverage that keeps visible write fast paths disabled
-while an external page-version pin is active after dictionary DDL, and
+while an external page-version pin is active after dictionary DDL and
+suppresses native snapshot-boundary synthesis plus external space-allocation
+refresh for those local post-DDL writes,
+and
 hook-build coverage now kills same-schema,
 cross-schema, and same-schema multi-pair swap `RENAME TABLE` writers after the
 native file move but before ownerless dictionary finish, plus a `TRUNCATE TABLE`

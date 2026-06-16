@@ -361,6 +361,8 @@ int mylite_ownerless_innodb_statement_plain_read_preserves_local_pages(void);
 void mylite_ownerless_innodb_refresh_statement_plain_read_pages_once(void);
 int mylite_ownerless_innodb_set_statement_dictionary_ddl(int enabled);
 int mylite_ownerless_innodb_statement_dictionary_ddl(void);
+int mylite_ownerless_innodb_set_statement_suppress_native_lifecycle_refresh(int enabled);
+int mylite_ownerless_innodb_statement_suppress_native_lifecycle_refresh(void);
 uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
     struct trx_t *trx, uint64_t visible_lsn);
 void mylite_ownerless_innodb_flush_dirty_pages_to_lsn(uint64_t visible_lsn);

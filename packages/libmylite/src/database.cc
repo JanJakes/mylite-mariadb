@@ -1405,6 +1405,20 @@ struct OwnerlessStatementDictionaryDdlScope {
   private:
     int previous = 0;
 };
+
+struct OwnerlessStatementNativeLifecycleRefreshScope {
+    explicit OwnerlessStatementNativeLifecycleRefreshScope(bool suppress)
+        : previous(mylite_ownerless_innodb_set_statement_suppress_native_lifecycle_refresh(
+              suppress ? 1 : 0
+          )) {}
+
+    ~OwnerlessStatementNativeLifecycleRefreshScope() {
+        mylite_ownerless_innodb_set_statement_suppress_native_lifecycle_refresh(previous);
+    }
+
+  private:
+    int previous = 0;
+};
 #else
 struct OwnerlessStatementVisibleFastPathScope {
     explicit OwnerlessStatementVisibleFastPathScope(bool enabled) {
@@ -1421,6 +1435,12 @@ struct OwnerlessStatementPlainReadScope {
 struct OwnerlessStatementDictionaryDdlScope {
     explicit OwnerlessStatementDictionaryDdlScope(bool enabled) {
         (void)enabled;
+    }
+};
+
+struct OwnerlessStatementNativeLifecycleRefreshScope {
+    explicit OwnerlessStatementNativeLifecycleRefreshScope(bool suppress) {
+        (void)suppress;
     }
 };
 #endif
@@ -3132,6 +3152,10 @@ int mylite_step(mylite_stmt *stmt) {
             stmt->db->ownerless_local_native_read_lsn != 0U ||
                 ownerless_transaction_has_local_write_or_locking_read(*stmt->db)
         );
+        OwnerlessStatementNativeLifecycleRefreshScope native_lifecycle_refresh(
+            dictionary_ddl_started ||
+            stmt->db->ownerless_peer_dictionary_refresh_requires_conservative_write
+        );
         OwnerlessStatementVisibleFastPathScope visible_fast_path(
             ownerless_statement_allows_visible_fast_path(*stmt->db, policy_tokens),
             ownerless_statement_allows_append_batch_fast_path(*stmt->db, policy_tokens)
@@ -4416,6 +4440,9 @@ int exec_result_impl(
         page_version_reads_enabled,
         db->ownerless_local_native_read_lsn != 0U ||
             ownerless_transaction_has_local_write_or_locking_read(*db)
+    );
+    OwnerlessStatementNativeLifecycleRefreshScope native_lifecycle_refresh(
+        dictionary_ddl_started || db->ownerless_peer_dictionary_refresh_requires_conservative_write
     );
     OwnerlessStatementVisibleFastPathScope visible_fast_path(
         ownerless_statement_allows_visible_fast_path(*db, policy_tokens),
@@ -15288,6 +15315,9 @@ bool publish_ownerless_snapshot_boundary_if_needed(
             true,
             std::memory_order_relaxed
         );
+    }
+    if (mylite_ownerless_innodb_statement_suppress_native_lifecycle_refresh() != 0) {
+        return external_snapshot_pin_active;
     }
     ownerless_page_log_append_batch_release_for_snapshot(hook);
 

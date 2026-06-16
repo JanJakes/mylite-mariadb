@@ -54,6 +54,19 @@ The native page becomes a synthesized boundary record only if:
 - the native page LSN is non-zero and at or before the oldest active snapshot
   LSN.
 
+Boundary synthesis is also suppressed for dictionary DDL statements and for
+the post-DDL conservative-write window that follows local DDL while an external
+page-version pin remains active. In that window, page LSN proves only the page
+image age, not that a newly created file-per-table tablespace existed at the
+older snapshot. The publish hook still records external-lineage consumption and
+still publishes the current page-version record, so retained-reader WAL and
+later conservative reclaim remain safe.
+
+The paired post-DDL guard also suppresses external space-allocation refresh for
+the same statement window. That keeps newly created tablespace allocation pages
+from being refreshed from page-version or disk state selected under an older
+retained snapshot while local post-create writes are still building the table.
+
 The synthesized boundary record is appended to the ownerless page-version WAL
 with `commit_lsn = oldest_snapshot_lsn`, then the normal newer page-version
 record is appended. If any check fails, publication still proceeds without a
@@ -70,6 +83,9 @@ In scope:
   boundary record to be retained while a peer writer commits.
 - Boundary-synthesis pruning for no-active-pin publication and native-support
   state page classes.
+- Boundary-synthesis suppression during dictionary DDL and the post-DDL
+  conservative-write window, paired with external space-allocation refresh
+  suppression for that same window.
 
 Out of scope:
 
@@ -125,6 +141,10 @@ when the page LSN proves it is visible to the oldest active snapshot.
 - The current resolver is intentionally conservative and still depends on
   page-0 space-id discovery. Broader DDL/file-lifecycle metadata remains a
   separate ownerless gap.
+- Page LSN is not DDL-created tablespace lifecycle proof. Local DDL and the
+  following conservative-write window therefore suppress native boundary
+  synthesis and external space-allocation refresh until the retained external
+  pin releases.
 - Boundary synthesis is opportunistic. If the native page has already advanced
   beyond the oldest snapshot LSN, MyLite keeps the existing safe behavior and
   retains the WAL until the active pin releases.

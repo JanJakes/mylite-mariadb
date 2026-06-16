@@ -198,6 +198,14 @@ native-support records, active-reader retention, and boundary synthesis for
 snapshot-sensitive pages remain unchanged. This is a bounded hot-path pruning
 slice, while replacing or shrinking the remaining history-proof page
 publication remains a planned performance target.
+Ownerless native snapshot-boundary synthesis is now suppressed while a local
+dictionary DDL statement is running and while the same handle remains in the
+post-DDL conservative-write window under an external page-version pin. The
+publish path still records external-lineage retention and current page-version
+records, but it does not treat page LSN alone as proof that a newly created
+file-per-table tablespace existed at an older reader snapshot. The same window
+also suppresses external space-allocation refresh so local post-create
+allocation pages are not refreshed from retained external state.
 Ownerless page-version WAL now encodes repeated InnoDB `FIL_PAGE_INDEX`
 records as bounded non-chained deltas against a durable standalone base record
 when the page identity has warmed through standalone records and the delta is

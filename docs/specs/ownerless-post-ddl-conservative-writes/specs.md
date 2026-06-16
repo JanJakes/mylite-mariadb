@@ -64,6 +64,19 @@ gate and avoids a new state bit with the same observable semantics:
 post-dictionary-change writes must use the conservative native page bridge
 until retained readers stop constraining page-version visibility.
 
+The same window also suppresses native snapshot-boundary synthesis. A native
+page read from a just-created file-per-table tablespace can have a page LSN at
+or below the older reader snapshot even though the file did not exist at that
+snapshot. Suppression keeps current page-version records and external-lineage
+retention, but prevents page-LSN-only evidence from becoming a stale reader
+boundary for local post-DDL writes.
+
+It also suppresses external space-allocation refresh in InnoDB's ownerless
+space-write enter hook. Allocation pages for a locally created file-per-table
+space must not be refreshed from retained external state before the external
+pin releases; current page-version publication still records the post-DDL
+write stream for recovery and later conservative reclaim.
+
 ## File Lifecycle
 
 The slice does not add files, durable metadata, or directory layout. It changes
@@ -88,6 +101,8 @@ MariaDB source.
 - Build `mylite_ownerless_cross_process_sql_test` with `php-embedded-prod`.
 - Run focused SQL case 65,
   `test_ownerless_rename_create_tablespace_replay_keeps_both_spaces`.
+- Run focused SQL case 70,
+  `test_ownerless_created_tablespace_replay_keeps_created_space`.
 - Run the focused ownerless SQL CTest shard or direct case wrapper that
   contains the rename-create tablespace replay case.
 - Run formatting and whitespace checks.
@@ -99,6 +114,9 @@ MariaDB source.
 - Ownerless and native reopens, including forced `.shm` rebuild, preserve the
   moved table's original `SPACE` and the recreated original-name table's
   distinct `SPACE`.
+- Created-table replay with a live retained snapshot completes inserts and
+  secondary-index reads without using native page-LSN-only boundary proof for
+  the new tablespace or external allocation refresh during the post-DDL window.
 - The local diff contains no diagnostic output or abandoned InnoDB hook
   experiment.
 - The compatibility matrix and ownerless cross-process spec describe the
