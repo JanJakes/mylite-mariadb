@@ -5117,7 +5117,12 @@ subsystems that this mode needs:
   standalone and read back byte-identically. The remaining write-throughput
   targets are native
   commit/page-publication, non-fast page-log encoding, the remaining
-  history-proof proof volume, and broader redo/checkpoint recovery work. The visible-fast page-log append-batch slice
+  history-proof proof volume, and broader redo/checkpoint recovery work. A
+  follow-up delta payload direct-copy slice keeps the same index/undo
+  non-chained delta record bytes but copies all raw changed-byte runs into an
+  already-sized payload buffer instead of repeatedly appending each run. This
+  narrows a measured delta-encode CPU cost without changing WAL format,
+  checkpoint rewrite, recovery, or page-version volume. The visible-fast page-log append-batch slice
   narrows another measured overhead source by keeping the append session open
   across the adjacent mini-transactions of a single-row pure
   `INSERT ... VALUES` visible-fast statement, then releasing it before

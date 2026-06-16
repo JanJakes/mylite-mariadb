@@ -5254,8 +5254,12 @@ bool build_index_delta_payload(
         }
         previous_run_end = run.offset + run.size;
     }
+    const std::size_t raw_payload_offset = out_payload->size();
+    out_payload->resize(raw_payload_offset + static_cast<std::size_t>(raw_bytes));
+    unsigned char *raw_payload = out_payload->data() + raw_payload_offset;
     for (const IndexPageDeltaRun &run : runs) {
-        out_payload->insert(out_payload->end(), page + run.offset, page + run.offset + run.size);
+        std::memcpy(raw_payload, page + run.offset, run.size);
+        raw_payload += run.size;
     }
     runs.clear();
     return out_payload->size() < page_size;

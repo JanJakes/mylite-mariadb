@@ -972,6 +972,14 @@ pre-slice same-host sample to `1.044 ms`, and exact fallback records reusing a
 fast-miss payload dropped from `44` to `23`. This remains volatile cache
 training; replay, checkpoint rewrite, and exact fallback correctness are
 unchanged.
+The follow-up delta payload direct-copy slice keeps the same non-chained
+index/undo delta WAL bytes but resizes the encoded payload once for all raw
+changed-byte runs and copies those runs directly instead of repeatedly
+appending them with `std::vector::insert()`. This targets the measured
+delta-encode subphase without changing page-version volume, payload bytes,
+checkpoint rewrite, or recovery semantics; the larger remaining performance
+targets remain native commit/page-publication cost and broader
+redo/checkpoint reconciliation.
 Ownerless page-version reads now validate the WAL tail after a direct
 page-index hit because the shared page index is an acceleration cache updated
 after the append stream, not an authoritative visibility boundary by itself.
