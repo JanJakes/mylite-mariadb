@@ -3301,6 +3301,9 @@ int mylite_step(mylite_stmt *stmt) {
                 return dictionary_flush_result;
             }
             clear_ownerless_insert_foreign_key_cache(*stmt->db);
+            if (ownerless_runtime_has_external_page_version_pin(g_runtime)) {
+                stmt->db->ownerless_peer_dictionary_refresh_requires_conservative_write = true;
+            }
         }
         advance_ownerless_handle_read_lsn_after_autocommit_write(
             *stmt->db,
@@ -3309,7 +3312,8 @@ int mylite_step(mylite_stmt *stmt) {
         );
         if (stmt->db->ownerless_peer_dictionary_refresh_requires_conservative_write &&
             ownerless_insert_values_statement_allows_visible_fast_path(policy_tokens) &&
-            !statement_started_in_explicit_transaction) {
+            !statement_started_in_explicit_transaction &&
+            !ownerless_runtime_has_external_page_version_pin(g_runtime)) {
             stmt->db->ownerless_peer_dictionary_refresh_requires_conservative_write = false;
         }
 
@@ -4537,6 +4541,9 @@ ownerless_query_success:
             return copy_error_message(*db, errmsg);
         }
         clear_ownerless_insert_foreign_key_cache(*db);
+        if (ownerless_runtime_has_external_page_version_pin(g_runtime)) {
+            db->ownerless_peer_dictionary_refresh_requires_conservative_write = true;
+        }
     }
     advance_ownerless_handle_read_lsn_after_autocommit_write(
         *db,
@@ -4545,7 +4552,8 @@ ownerless_query_success:
     );
     if (db->ownerless_peer_dictionary_refresh_requires_conservative_write &&
         ownerless_insert_values_statement_allows_visible_fast_path(policy_tokens) &&
-        !statement_started_in_explicit_transaction) {
+        !statement_started_in_explicit_transaction &&
+        !ownerless_runtime_has_external_page_version_pin(g_runtime)) {
         db->ownerless_peer_dictionary_refresh_requires_conservative_write = false;
     }
 

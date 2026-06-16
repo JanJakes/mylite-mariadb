@@ -4243,6 +4243,8 @@ Tasks:
    process-control, account/grant, plugin, binlog, logging, query-cache,
    event/scheduler, host-file import, table-admin, locked-table, flush-lock,
    tablespace, storage-option, and sequence SQL,
+   local post-DDL conservative-write coverage for rename-away plus same-name
+   recreate under an active retained page-version pin,
    plus the
    public active-pin/WAL pressure diagnostic.
    Each stress test has a 900-second timeout. Long-running randomized external
@@ -4590,6 +4592,8 @@ post-create DML, recreated, rename-away plus new original-name create,
 renamed, truncated, and force-rebuilt file-per-table SQL coverage, multi-rename
 swap coverage, plus
 multi-table schema-drop absence, and
+local post-DDL insert coverage that keeps visible write fast paths disabled
+while an external page-version pin is active after dictionary DDL, and
 hook-build coverage now kills same-schema,
 cross-schema, and same-schema multi-pair swap `RENAME TABLE` writers after the
 native file move but before ownerless dictionary finish, plus a `TRUNCATE TABLE`
