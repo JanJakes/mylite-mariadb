@@ -293,7 +293,6 @@ jobs:
           MYLITE_WORDPRESS_PHASE: phpunit
           MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
           MYLITE_WORDPRESS_TIMING_LABEL: phpunit-non-isolated
-          MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI: "1"
           MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE: "1"
         run: |
           set -euo pipefail

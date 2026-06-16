@@ -113,8 +113,9 @@ execution leaves timing disabled.
 - Profiling is disabled unless `MYLITE_MYSQLI_PROFILE=1` is set.
 - Enabled profiling prints parseable `mylite_mysqli_profile_*` lines at process
   shutdown.
-- CI enables the profile only for the slow non-isolated PHPUnit step and keeps
-  `Release`/`MinSizeRel` guards in that step.
+- CI keeps profile-heavy mysqli attribution off the normal long PHPUnit timing
+  step; explicitly profiled diagnostic phases still keep `Release`/`MinSizeRel`
+  guards in their step.
 - The emitted counters can distinguish lifecycle churn from direct query,
   result-query, and prepared-statement adapter work.
 - Existing PHP mysqli compatibility tests still pass.

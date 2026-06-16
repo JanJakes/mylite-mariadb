@@ -261,19 +261,21 @@ child mode used by CI: parent child-process profiling and defensive static
 `wpdb` scanning are off unless a diagnostic run explicitly sets
 `MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES=1` or
 `MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN=1`.
-The slow non-isolated WordPress PHPUnit CI step now enables
-`MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI=1`, which sets
-`MYLITE_MYSQLI_PROFILE=1` only for that PHPUnit process and emits
+The slow non-isolated WordPress PHPUnit CI timing step now keeps mysqli
+profiling off by default, so the published test-only timing reflects the
+production-built adapter path rather than diagnostic timer overhead. Diagnostic
+runs can still set `MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI=1`, which maps to
+`MYLITE_MYSQLI_PROFILE=1` for that PHPUnit process and emits
 `mylite_mysqli_profile_*` open/close, direct-query, result-query,
 prepared-statement, cache, result-step, row-materialization,
 status-synchronization, result-object, and fetch counters plus fetch elapsed
-time from the production-built mysqli adapter; selected profile totals are also
-copied into the CI timing summary for the profiled non-isolated shard so the
-next optimization target is visible without raw-log scraping. A focused production
-`Tests_DB` run after the keepalive slice reported `fetch_object_calls=76626`
-but only `fetch_object_ms_total=122.798`, while `query_ms_total=19084.516`,
-`exec_no_result_ms_total=6329.991`, `query_result_step_ms_total=4828.470`,
-`query_prepare_ms_total=4327.226`, and `query_cache_clear_ms_total=3530.218`
+time from the production-built mysqli adapter; selected profile totals are
+copied into the timing summary only for explicitly profiled phases. A focused
+production `Tests_DB` run after the keepalive slice reported
+`fetch_object_calls=76626` but only `fetch_object_ms_total=122.798`, while
+`query_ms_total=19084.516`, `exec_no_result_ms_total=6329.991`,
+`query_result_step_ms_total=4828.470`, `query_prepare_ms_total=4327.226`, and
+`query_cache_clear_ms_total=3530.218`
 remained much larger. The current WordPress performance target is therefore
 MariaDB/libmylite query execution and prepared-statement lifecycle cost, not
 PHP fetch-object conversion. Other WordPress CI timing steps keep that profile
@@ -767,9 +769,9 @@ work to the split test-only timings. Diagnostic runs that need JUnit must set
 `MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING=0` together with
 `MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1`. The follow-up CI timing-summary slice
 keeps those same production/test-only phases but records their key
-`wordpress_*`, `wordpress_perf_summary_*`, and profiled non-isolated
-`mylite_mysqli_profile_*` metrics in one Markdown file that the final
-WordPress CI step publishes to the GitHub step summary.
+`wordpress_*`, `wordpress_perf_summary_*`, and any explicitly profiled
+`mylite_mysqli_profile_*` metrics in one Markdown file that the final WordPress
+CI step publishes to the GitHub step summary.
 Current stats-enabled ownerless autocommit attribution also shows zero
 non-SELECT page-version read probes after the InnoDB read-complete overlay was
 limited to MyLite-classified plain reads. A 1000-row serial production

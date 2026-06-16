@@ -33,7 +33,7 @@ require_step_literal() {
   local needle="$2"
   local status
 
-  awk -v step_name="${step_name}" -v needle="${needle}" '
+  if awk -v step_name="${step_name}" -v needle="${needle}" '
     /^[[:space:]]+- name: / {
       in_step = ($0 == "      - name: " step_name)
       if (in_step) {
@@ -52,14 +52,65 @@ require_step_literal() {
         exit 1
       }
     }
-  ' "${workflow}"
-  status="$?"
+  ' "${workflow}"; then
+    status=0
+  else
+    status="$?"
+  fi
 
   case "${status}" in
     0)
       ;;
     1)
       echo "Missing required CI production-build marker inside step '${step_name}': ${needle}" >&2
+      failed=1
+      ;;
+    2)
+      echo "Missing required CI production-build step: ${step_name}" >&2
+      failed=1
+      ;;
+    *)
+      echo "Could not audit CI production-build step '${step_name}'" >&2
+      failed=1
+      ;;
+  esac
+}
+
+forbid_step_literal() {
+  local step_name="$1"
+  local needle="$2"
+  local status
+
+  if awk -v step_name="${step_name}" -v needle="${needle}" '
+    /^[[:space:]]+- name: / {
+      in_step = ($0 == "      - name: " step_name)
+      if (in_step) {
+        seen = 1
+      }
+      next
+    }
+    in_step && index($0, needle) > 0 {
+      found = 1
+    }
+    END {
+      if (!seen) {
+        exit 2
+      }
+      if (found) {
+        exit 1
+      }
+    }
+  ' "${workflow}"; then
+    status=0
+  else
+    status="$?"
+  fi
+
+  case "${status}" in
+    0)
+      ;;
+    1)
+      echo "Forbidden CI production timing marker inside step '${step_name}': ${needle}" >&2
       failed=1
       ;;
     2)
@@ -250,7 +301,7 @@ require_wordpress_timing_step_guards \
 require_wordpress_timing_step_guards \
   "Run WordPress PHPUnit process-isolated eager-reconnect suite (test only)"
 require_wordpress_timing_step_guards "Run WordPress PHPUnit non-isolated remaining suite (test only)"
-require_step_literal \
+forbid_step_literal \
   "Run WordPress PHPUnit non-isolated remaining suite (test only)" \
   'MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI: "1"'
 require_step_literal \
