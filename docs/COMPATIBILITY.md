@@ -149,6 +149,12 @@ commit-log subphases including flush-list, release, redo-leave, publish,
 release-memo, and no-dirty-loop time. This keeps CI timing summaries useful
 for the remaining write-path work without changing the page-version WAL format
 or ownerless visibility semantics.
+Ownerless mini-transaction page-write paths now also cache transaction-release
+classification inside the hot write-enter, page-publish, no-dirty commit-log,
+and unlogged release loops. Statement-visible autocommit writes still use the
+same page-write lock, refresh, publication, history-proof, and release rules,
+but avoid repeated transaction-release and per-page transaction-deferral helper
+work after the mini-transaction decision is known.
 The WordPress `perf-probe` now also compares process startup plus explicit
 `mysqli_close()` against process startup plus implicit PHP object-free close
 for a live mysqli link. Both paths intentionally continue through

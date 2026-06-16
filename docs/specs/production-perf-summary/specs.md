@@ -784,6 +784,10 @@ values are timing smoke evidence, not a replacement for CI-sized samples.
   publish and commit-log subphase rows so CI logs show whether remaining write
   cost sits in scan, page image preparation, hook/page-log append, redo-leave,
   or no-dirty commit-loop work.
+- Ownerless write-path optimization slices use those rows to target native
+  InnoDB page-write overhead first; the transaction-release classification fast
+  path is a scoped example and does not claim to complete redo/checkpoint or
+  history-proof publication work.
 - CI rejects non-Release CMake caches before CMake-backed test or timing
   phases run.
 - Timer-driven ownerless checkpoint scheduling remains an idle-runtime cleanup

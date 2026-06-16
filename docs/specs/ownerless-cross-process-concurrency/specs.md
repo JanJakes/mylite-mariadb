@@ -5222,6 +5222,12 @@ subsystems that this mode needs:
   hook/free time, and commit-log flush-list/release/redo-leave/publish/
   release-memo/no-dirty-loop subphases. This is diagnostics-only and keeps the
   next write-path optimization selectable from production CI logs.
+  The transaction-release classification fast path then cached
+  mini-transaction-local transaction-release and page-deferral decisions in the
+  ownerless write-enter, page-publish, no-dirty commit-log, and unlogged
+  release loops. It preserves lock, refresh, publication, boundary, and
+  history-proof behavior while avoiding repeated helper work on
+  statement-visible autocommit writes.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.

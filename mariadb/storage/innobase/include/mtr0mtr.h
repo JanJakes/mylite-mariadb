@@ -798,7 +798,8 @@ private:
 
   /** @return whether ownerless page-write release is deferred. */
   bool ownerless_page_write_release_deferred(
-      const mtr_memo_slot_t &slot) const noexcept;
+      const mtr_memo_slot_t &slot,
+      bool transaction_release_holds_page) const noexcept;
 
   /** Release log_sys.latch. */
   void commit_log_release() noexcept;
