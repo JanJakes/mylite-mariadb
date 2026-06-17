@@ -1152,7 +1152,10 @@ Ownerless statement-lock acquisition defaults to the existing 60 second
 internal wait, but a successful session `SET lock_wait_timeout = N` on that
 handle now also bounds the ownerless statement-lock wait to `N` seconds so
 tests and applications can fail fast on MyLite's directory-owned statement
-gate without changing native InnoDB lock timeout semantics.
+gate without changing native InnoDB lock timeout semantics. Contended
+directory-owned file-lock waits poll adaptively from 1 ms up to the existing
+10 ms cap, improving short ownerless handoffs without changing timeout or
+lock-compatibility behavior.
 Explicit ownerless `READ COMMITTED` transactions remain non-pinning for plain
 read statements: an eligible read can advance to the live page-version read
 LSN when that transaction has not performed a local write or locking read and

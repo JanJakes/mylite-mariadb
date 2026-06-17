@@ -1931,7 +1931,10 @@ Tasks:
    same byte-range lock file on every statement. A successful session
    `SET lock_wait_timeout = N` on an ownerless handle now also bounds these
    MyLite statement-lock waits to `N` seconds; handles that do not set the
-   variable keep the existing 60 second internal wait.
+   variable keep the existing 60 second internal wait. Contended
+   directory-owned file-lock acquisition now polls at 1 ms first and backs off
+   to the existing 10 ms cap, preserving the timeout contract while reducing
+   short ownerless statement-lock and startup-lock handoff latency.
    External record waits use targeted waited-page refresh after the blocker
    releases. Page-version scans, rebuilds, and checkpoints ignore only the
    final incomplete or checksum-corrupt tail record; checksum failure before

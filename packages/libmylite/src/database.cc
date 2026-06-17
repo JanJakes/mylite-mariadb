@@ -493,7 +493,8 @@ constexpr const char *k_create_procs_priv_table_sql =
     "engine=Aria transactional=1 CHARACTER SET utf8mb3 COLLATE utf8mb3_bin "
     "comment='Procedure privileges'";
 constexpr int k_runtime_directory_attempts = 100;
-constexpr unsigned k_lock_poll_interval_ms = 10;
+constexpr unsigned k_lock_poll_initial_interval_ms = 1;
+constexpr unsigned k_lock_poll_max_interval_ms = 10;
 constexpr unsigned k_concurrency_lock_wait_timeout_ms = 5000;
 constexpr unsigned k_system_tables_lock_wait_timeout_ms = 60000;
 constexpr unsigned k_ownerless_runtime_startup_attempts = 3;
@@ -7916,6 +7917,7 @@ bool acquire_fd_range_lock(
     lock.l_start = start;
     lock.l_len = length;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    unsigned poll_interval_ms = k_lock_poll_initial_interval_ms;
     for (;;) {
         if (::fcntl(fd, F_SETLK, &lock) == 0) {
             return true;
@@ -7926,7 +7928,8 @@ bool acquire_fd_range_lock(
         if (std::chrono::steady_clock::now() >= deadline) {
             return false;
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(k_lock_poll_interval_ms));
+        std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
+        poll_interval_ms = std::min(poll_interval_ms * 2U, k_lock_poll_max_interval_ms);
     }
 }
 
@@ -19343,6 +19346,7 @@ int acquire_database_lock(
 int wait_for_database_lock(DatabaseLockWait wait) {
     const auto start = std::chrono::steady_clock::now();
     const auto timeout = std::chrono::milliseconds(wait.busy_timeout_ms);
+    unsigned poll_interval_ms = k_lock_poll_initial_interval_ms;
     for (;;) {
         if (::flock(wait.lock_fd, LOCK_EX | LOCK_NB) == 0) {
             return MYLITE_OK;
@@ -19353,7 +19357,8 @@ int wait_for_database_lock(DatabaseLockWait wait) {
         if (wait.busy_timeout_ms == 0U || std::chrono::steady_clock::now() - start >= timeout) {
             return MYLITE_BUSY;
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(k_lock_poll_interval_ms));
+        std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
+        poll_interval_ms = std::min(poll_interval_ms * 2U, k_lock_poll_max_interval_ms);
     }
 }
 
