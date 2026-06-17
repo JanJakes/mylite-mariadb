@@ -190,6 +190,8 @@ struct IndexPageDeltaBaseSnapshot {
     std::uint32_t delta_flag = 0;
     std::uint64_t record_offset = 0;
     std::uint64_t standalone_payload_size = 0;
+    bool has_slot_index = false;
+    std::size_t slot_index = 0;
     std::shared_ptr<const std::vector<unsigned char>> page;
 };
 
@@ -835,7 +837,9 @@ void note_index_delta_base_after_successful_append(
     std::uint64_t record_payload_size,
     std::uint32_t record_flags,
     std::uint64_t observed_standalone_payload_size,
-    std::uint32_t delta_flag
+    std::uint32_t delta_flag,
+    bool has_preferred_slot_index,
+    std::size_t preferred_slot_index
 );
 std::uint64_t index_delta_base_fingerprint(
     std::uint64_t log_device,
@@ -2895,10 +2899,10 @@ int append_record_at_locked(
         allow_history_rseg_delta,
         &page_delta_flag
     );
+    IndexPageDeltaBaseSnapshot page_delta_snapshot;
     try {
         const std::uint64_t stage_start_ns =
             append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
-        IndexPageDeltaBaseSnapshot page_delta_snapshot;
         std::uint64_t substage_start_ns = append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
         const bool has_page_delta_snapshot =
             page_delta_eligible && index_delta_base_snapshot(
@@ -3178,7 +3182,9 @@ int append_record_at_locked(
             encoded_payload_size,
             record_flags,
             observed_standalone_payload_size,
-            page_delta_flag
+            page_delta_flag,
+            page_delta_snapshot.has_slot_index,
+            page_delta_snapshot.slot_index
         );
     }
     page_log_append_perf_add_elapsed_if_enabled(
@@ -5885,6 +5891,8 @@ bool index_delta_base_snapshot(
     out_snapshot->delta_flag = 0U;
     out_snapshot->record_offset = 0U;
     out_snapshot->standalone_payload_size = 0U;
+    out_snapshot->has_slot_index = false;
+    out_snapshot->slot_index = 0U;
     out_snapshot->page.reset();
     if (delta_flag != k_record_flag_index_delta_payload &&
         delta_flag != k_record_flag_undo_delta_payload &&
@@ -5905,8 +5913,9 @@ bool index_delta_base_snapshot(
         static_cast<std::size_t>(fingerprint) & (k_index_delta_base_slot_count - 1U);
     std::lock_guard<std::mutex> guard(index_page_delta_base_mutex);
     for (std::size_t attempt = 0; attempt < k_index_delta_base_probe_limit; ++attempt) {
-        const IndexPageDeltaBaseSlot &slot = index_page_delta_base_slots
-            [(first_slot + attempt) & (k_index_delta_base_slot_count - 1U)];
+        const std::size_t slot_index =
+            (first_slot + attempt) & (k_index_delta_base_slot_count - 1U);
+        const IndexPageDeltaBaseSlot &slot = index_page_delta_base_slots[slot_index];
         if (!slot.valid) {
             continue;
         }
@@ -5924,6 +5933,8 @@ bool index_delta_base_snapshot(
             out_snapshot->delta_flag = delta_flag;
             out_snapshot->record_offset = slot.record_offset;
             out_snapshot->standalone_payload_size = slot.standalone_payload_size;
+            out_snapshot->has_slot_index = true;
+            out_snapshot->slot_index = slot_index;
             out_snapshot->found = true;
             return true;
         }
@@ -5944,7 +5955,9 @@ void note_index_delta_base_after_successful_append(
     std::uint64_t record_payload_size,
     std::uint32_t record_flags,
     std::uint64_t observed_standalone_payload_size,
-    std::uint32_t delta_flag
+    std::uint32_t delta_flag,
+    bool has_preferred_slot_index,
+    std::size_t preferred_slot_index
 ) {
     if (delta_flag != k_record_flag_index_delta_payload &&
         delta_flag != k_record_flag_undo_delta_payload &&
@@ -5957,19 +5970,37 @@ void note_index_delta_base_after_successful_append(
     if (record_delta_flag != 0U && record_delta_flag != delta_flag) {
         return;
     }
-    const std::uint64_t fingerprint = index_delta_base_fingerprint(
-        log_device,
-        log_inode,
-        log_offset,
-        log_generation,
-        delta_flag,
-        space_id,
-        page_no
-    );
-    const std::size_t first_slot =
-        static_cast<std::size_t>(fingerprint) & (k_index_delta_base_slot_count - 1U);
     std::lock_guard<std::mutex> guard(index_page_delta_base_mutex);
     if (record_delta_flag != 0U) {
+        if (has_preferred_slot_index && preferred_slot_index < k_index_delta_base_slot_count) {
+            IndexPageDeltaBaseSlot &slot = index_page_delta_base_slots[preferred_slot_index];
+            if (slot.valid && slot.log_device == log_device && slot.log_inode == log_inode &&
+                slot.log_offset == log_offset && slot.log_generation == log_generation &&
+                slot.delta_flag == delta_flag && slot.space_id == space_id &&
+                slot.page_no == page_no && slot.page_size == page_size && slot.page != nullptr &&
+                slot.page->size() == page_size &&
+                slot.delta_records_since_base < std::numeric_limits<std::uint32_t>::max()) {
+                if (observed_standalone_payload_size != 0U) {
+                    slot.standalone_payload_size = observed_standalone_payload_size;
+                    if (slot.standalone_observations < std::numeric_limits<std::uint32_t>::max()) {
+                        ++slot.standalone_observations;
+                    }
+                }
+                ++slot.delta_records_since_base;
+                return;
+            }
+        }
+        const std::uint64_t fingerprint = index_delta_base_fingerprint(
+            log_device,
+            log_inode,
+            log_offset,
+            log_generation,
+            delta_flag,
+            space_id,
+            page_no
+        );
+        const std::size_t first_slot =
+            static_cast<std::size_t>(fingerprint) & (k_index_delta_base_slot_count - 1U);
         for (std::size_t attempt = 0; attempt < k_index_delta_base_probe_limit; ++attempt) {
             IndexPageDeltaBaseSlot &slot = index_page_delta_base_slots
                 [(first_slot + attempt) & (k_index_delta_base_slot_count - 1U)];
@@ -5992,6 +6023,17 @@ void note_index_delta_base_after_successful_append(
         return;
     }
 
+    const std::uint64_t fingerprint = index_delta_base_fingerprint(
+        log_device,
+        log_inode,
+        log_offset,
+        log_generation,
+        delta_flag,
+        space_id,
+        page_no
+    );
+    const std::size_t first_slot =
+        static_cast<std::size_t>(fingerprint) & (k_index_delta_base_slot_count - 1U);
     const auto *bytes = static_cast<const unsigned char *>(page);
     for (std::size_t attempt = 0; attempt < k_index_delta_base_probe_limit; ++attempt) {
         IndexPageDeltaBaseSlot &slot = index_page_delta_base_slots

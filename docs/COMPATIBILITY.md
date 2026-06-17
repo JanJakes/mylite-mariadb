@@ -1192,6 +1192,12 @@ base snapshot lookup and post-append base-note update. Non-delta-eligible page
 classes now skip the base-note helper entirely. This is a first-party CPU
 cleanup; it does not reduce page-version publication volume or replace the
 remaining history-proof records.
+The delta note slot-reuse slice then carries the process-local delta-base slot
+index found during snapshot lookup into the successful post-append note path.
+Delta appends revalidate that preferred slot under the same cache mutex before
+falling back to the existing fingerprint/probe loop. This keeps the same
+non-chained delta records, payload bytes, refresh boundary, checkpoint rewrite,
+and recovery behavior while trimming duplicate volatile cache work.
 A local MTR wrapper fast-path prototype that cached
 `ownerless_page_write_uses_transaction_release()` per publish pass and reused
 the tracked-page lookup for release was rejected after stress evidence: one
