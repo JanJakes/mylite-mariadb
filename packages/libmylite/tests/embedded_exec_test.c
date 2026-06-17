@@ -10,7 +10,6 @@
 #include <unistd.h>
 
 #define MYLITE_TEST_REMOVE_TREE_MAX_FDS 32
-#define MYLITE_TEST_EMPTY_OWNERLESS_PAGE_LOG_SIZE 192
 
 typedef struct select_context {
     int rows;
@@ -66,7 +65,7 @@ static char *make_temp_root(void);
 static char *path_join(const char *directory, const char *name);
 static int is_directory(const char *path);
 static int is_directory_empty(const char *path);
-static off_t file_size(const char *path);
+static int path_exists(const char *path);
 static void remove_tree(const char *path);
 static int remove_tree_entry(
     const char *path,
@@ -189,7 +188,7 @@ static void test_ordinary_write_does_not_publish_ownerless_page_log(void) {
     exec_ok(db, "INSERT INTO app.ordinary_page_log VALUES (1, REPEAT('a', 128))");
     exec_ok(db, "UPDATE app.ordinary_page_log SET value = REPEAT('b', 128) WHERE id = 1");
     assert(mylite_close(db) == MYLITE_OK);
-    assert(file_size(wal_path) == MYLITE_TEST_EMPTY_OWNERLESS_PAGE_LOG_SIZE);
+    assert(!path_exists(wal_path));
 
     free(wal_path);
     free(concurrency_path);
@@ -477,10 +476,9 @@ static int is_directory_empty(const char *path) {
     return count == 0;
 }
 
-static off_t file_size(const char *path) {
+static int path_exists(const char *path) {
     struct stat path_stat;
-    assert(stat(path, &path_stat) == 0);
-    return path_stat.st_size;
+    return lstat(path, &path_stat) == 0;
 }
 
 static void remove_tree(const char *path) {
