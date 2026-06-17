@@ -229,6 +229,132 @@ host_append_timing_summary() {
   done
 }
 
+host_find_newer_first_party_source() {
+  local artifact="$1"
+  local source_group="$2"
+  local -a candidates
+  local candidate
+  local newer_source
+
+  case "${source_group}" in
+    libmylite)
+      candidates=(
+        "${root_dir}/CMakeLists.txt"
+        "${root_dir}/packages/libmylite/CMakeLists.txt"
+        "${root_dir}/cmake"
+        "${root_dir}/packages/libmylite/include"
+        "${root_dir}/packages/libmylite/src"
+      )
+      ;;
+    mylite-extension)
+      candidates=(
+        "${root_dir}/CMakeLists.txt"
+        "${root_dir}/packages/php-ext-mylite/CMakeLists.txt"
+        "${root_dir}/cmake"
+        "${root_dir}/packages/php-ext-mylite/src"
+        "${cmake_build_dir}/packages/libmylite/libmylite.a"
+      )
+      ;;
+    mysqli-extension)
+      candidates=(
+        "${root_dir}/CMakeLists.txt"
+        "${root_dir}/packages/php-ext-mysqli-mylite/CMakeLists.txt"
+        "${root_dir}/cmake"
+        "${root_dir}/packages/libmylite/include"
+        "${root_dir}/packages/php-ext-mysqli-mylite/src"
+      )
+      ;;
+    *)
+      echo "Unknown WordPress freshness source group: ${source_group}" >&2
+      exit 1
+      ;;
+  esac
+
+  for candidate in "${candidates[@]}"; do
+    if [ -f "${candidate}" ] && [ "${candidate}" -nt "${artifact}" ]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+    if [ -d "${candidate}" ]; then
+      newer_source="$(
+        find "${candidate}" -type f \
+          \( \
+            -name '*.c' -o \
+            -name '*.cc' -o \
+            -name '*.cpp' -o \
+            -name '*.h' -o \
+            -name '*.hpp' -o \
+            -name '*.cmake' -o \
+            -name 'CMakeLists.txt' \
+          \) \
+          -newer "${artifact}" \
+          -print \
+          -quit
+      )"
+      if [ -n "${newer_source}" ]; then
+        printf '%s\n' "${newer_source}"
+        return 0
+      fi
+    fi
+  done
+  return 1
+}
+
+host_require_fresh_artifact() {
+  local artifact="$1"
+  local description="$2"
+  local source_group="$3"
+  local newer_source
+
+  if [ ! -e "${artifact}" ]; then
+    echo "Missing ${description}: ${artifact}" >&2
+    echo "Run MYLITE_WORDPRESS_PHASE=build-php before MYLITE_WORDPRESS_PHASE=${phase}." >&2
+    exit 1
+  fi
+
+  newer_source="$(host_find_newer_first_party_source "${artifact}" "${source_group}" || true)"
+  if [ -n "${newer_source}" ]; then
+    echo "Stale ${description}: ${artifact} is older than ${newer_source}." >&2
+    echo "Run MYLITE_WORDPRESS_PHASE=build-php before MYLITE_WORDPRESS_PHASE=${phase}." >&2
+    exit 1
+  fi
+}
+
+host_require_wordpress_php_artifacts_fresh() {
+  local mariadb_archive
+
+  case "${phase}" in
+    prepare-db | phpunit | perf-probe)
+      ;;
+    *)
+      return
+      ;;
+  esac
+
+  mariadb_archive="${mariadb_build_dir}/libmysqld/libmariadbd.a"
+  cmake \
+    "-DMYLITE_MARIADB_SOURCE_DIR=${root_dir}/mariadb" \
+    "-DMYLITE_MARIADB_ARCHIVE=${mariadb_archive}" \
+    "-DMYLITE_MARIADB_PROFILE=${root_dir}/cmake/mariadb-embedded-baseline.cmake" \
+    -P "${root_dir}/cmake/check-mariadb-embedded-freshness.cmake"
+
+  host_require_fresh_artifact \
+    "${cmake_build_dir}/packages/libmylite/libmylite.a" \
+    "WordPress libmylite archive" \
+    libmylite
+  host_require_fresh_artifact \
+    "${cmake_build_dir}/packages/php-ext-mylite/mylite.so" \
+    "WordPress mylite PHP extension" \
+    mylite-extension
+  host_require_fresh_artifact \
+    "${cmake_build_dir}/packages/php-ext-mysqli-mylite/mysqli_mylite.so" \
+    "WordPress mysqli_mylite PHP extension" \
+    mysqli-extension
+
+  echo "wordpress_php_artifact_freshness_ok=${cmake_build_dir}"
+  host_append_timing_summary "wordpress_php_artifact_freshness_ok=${cmake_build_dir}"
+}
+
 build_image() {
   docker build -t "${image}" - <<'DOCKERFILE'
 FROM composer:2 AS composer
@@ -2343,6 +2469,7 @@ if [[ "${phase}" == "docker-image" ]]; then
     "wordpress_total_seconds=${wordpress_total_seconds}"
   exit 0
 fi
+host_require_wordpress_php_artifacts_fresh
 container_start="$(date +%s)"
 set +e
 run_suite "$@"
