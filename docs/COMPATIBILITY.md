@@ -204,6 +204,12 @@ precheck while the vector is still non-empty, so non-member X/SX page memo
 slots do not enter the ownerless leave helper only to return before release.
 Member pages still use the same leave helper and release ordering before
 native latch unlock.
+Ownerless page-write publication now snapshots the page-write performance
+stats flag once per publish call and uses that snapshot for publish-call,
+publish-total, subphase, and scratch-buffer reuse counters. Page publication,
+history-proof marking, page-log append, checkpoint ordering, and recovery
+semantics are unchanged; the change removes repeated diagnostics-only flag
+loads from stats-disabled production paths.
 Ownerless checkpoint LSN publication now skips rewriting the legacy
 latest/visible payload once a valid checksummed LSN generation record already
 exists. The legacy payload is still initialized for empty-record fallback,

@@ -5425,6 +5425,12 @@ subsystems that this mode needs:
   page memo slots no longer enter `ownerless_page_write_leave()` only to
   return before release; member pages still use the existing helper and release
   order.
+  Ownerless page-write publication now snapshots the page-write perf-enabled
+  flag once per publish call and uses that snapshot for publish-call,
+  publish-total, subphase, and scratch-buffer reuse counters. This removes
+  repeated diagnostics-only flag loads from stats-disabled production paths
+  while preserving page publication, history-proof marking, page-log append,
+  checkpoint, and recovery semantics.
   The page-write stats-off fast-path slice then made disabled page-write
   elapsed scopes return on the existing zero start-time sentinel before
   rechecking the stats-enabled flag. Focused SQL coverage proves disabled

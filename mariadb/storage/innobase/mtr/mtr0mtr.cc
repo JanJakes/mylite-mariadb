@@ -1090,6 +1090,15 @@ static void ownerless_page_write_perf_add(
                                                      std::memory_order_relaxed);
 }
 
+static void ownerless_page_write_perf_add_if_enabled(
+    bool stats_enabled, ownerless_page_write_perf_stat_index index,
+    uint64_t value) noexcept
+{
+  if (stats_enabled)
+    ownerless_page_write_perf_stats[index].fetch_add(value,
+                                                     std::memory_order_relaxed);
+}
+
 static void ownerless_page_write_perf_add_elapsed(
     ownerless_page_write_perf_stat_index index, uint64_t start_ns) noexcept
 {
@@ -1106,10 +1115,15 @@ class ownerless_page_write_perf_scope
 public:
   explicit ownerless_page_write_perf_scope(
       ownerless_page_write_perf_stat_index index) noexcept
+      : ownerless_page_write_perf_scope(
+            index, ownerless_page_write_perf_enabled())
+  {}
+
+  ownerless_page_write_perf_scope(
+      ownerless_page_write_perf_stat_index index,
+      bool stats_enabled) noexcept
       : m_index(index),
-        m_start_ns(ownerless_page_write_perf_enabled() ?
-                       ownerless_page_write_perf_now_ns() :
-                       0)
+        m_start_ns(stats_enabled ? ownerless_page_write_perf_now_ns() : 0)
   {}
 
   ~ownerless_page_write_perf_scope() noexcept
@@ -2751,9 +2765,11 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_writes_publish() noexcept
 ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
     const buf_page_t &bpage) noexcept
 {
-  ownerless_page_write_perf_add(OWNERLESS_PAGE_WRITE_PERF_PUBLISH_CALLS, 1);
+  const bool page_write_perf_enabled= ownerless_page_write_perf_enabled();
+  ownerless_page_write_perf_add_if_enabled(
+      page_write_perf_enabled, OWNERLESS_PAGE_WRITE_PERF_PUBLISH_CALLS, 1);
   ownerless_page_write_perf_scope perf_scope(
-      OWNERLESS_PAGE_WRITE_PERF_PUBLISH_TOTAL_NS);
+      OWNERLESS_PAGE_WRITE_PERF_PUBLISH_TOTAL_NS, page_write_perf_enabled);
 
   if (UNIV_LIKELY(!ownerless_hooks_enabled()) || m_commit_lsn == 0)
     return;
@@ -2826,7 +2842,7 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
   }
 
   fil_space_t *space= fil_space_t::get(id.space());
-  uint64_t start_ns= ownerless_page_write_perf_enabled() ?
+  uint64_t start_ns= page_write_perf_enabled ?
       ownerless_page_write_perf_now_ns() :
       0;
   if (space == nullptr)
@@ -2844,7 +2860,7 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
       OWNERLESS_PAGE_WRITE_PERF_PUBLISH_SPACE_NS, start_ns);
 
   const ulint page_size= bpage.physical_size();
-  start_ns= ownerless_page_write_perf_enabled() ?
+  start_ns= page_write_perf_enabled ?
       ownerless_page_write_perf_now_ns() :
       0;
   bool reused_page_buffer= false;
@@ -2853,7 +2869,8 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
       page_size, &reused_page_buffer, &retained_page_buffer);
   ownerless_page_write_perf_add_elapsed(
       OWNERLESS_PAGE_WRITE_PERF_PUBLISH_ALLOC_NS, start_ns);
-  ownerless_page_write_perf_add(
+  ownerless_page_write_perf_add_if_enabled(
+      page_write_perf_enabled,
       reused_page_buffer ?
           OWNERLESS_PAGE_WRITE_PERF_PUBLISH_BUFFER_REUSE_HITS :
           OWNERLESS_PAGE_WRITE_PERF_PUBLISH_BUFFER_REUSE_MISSES,
@@ -2866,13 +2883,13 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
     return;
   }
 
-  start_ns= ownerless_page_write_perf_enabled() ?
+  start_ns= page_write_perf_enabled ?
       ownerless_page_write_perf_now_ns() :
       0;
   ::memcpy(page, source, page_size);
   ownerless_page_write_perf_add_elapsed(
       OWNERLESS_PAGE_WRITE_PERF_PUBLISH_COPY_NS, start_ns);
-  start_ns= ownerless_page_write_perf_enabled() ?
+  start_ns= page_write_perf_enabled ?
       ownerless_page_write_perf_now_ns() :
       0;
   if (bpage.zip.data)
@@ -2900,7 +2917,7 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
       (history_proof_roles & ownerless_page_write_history_proof_role_rseg)
           ? MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_HISTORY_RSEG
           : 0U;
-  start_ns= ownerless_page_write_perf_enabled() ?
+  start_ns= page_write_perf_enabled ?
       ownerless_page_write_perf_now_ns() :
       0;
   const int result= mylite_ownerless_innodb_publish_page_version_with_flags(
@@ -2945,7 +2962,7 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
     ownerless_page_publish_scratch_buffer.release(page, retained_page_buffer);
   else
   {
-    start_ns= ownerless_page_write_perf_enabled() ?
+    start_ns= page_write_perf_enabled ?
         ownerless_page_write_perf_now_ns() :
         0;
     ownerless_page_publish_scratch_buffer.release(page, retained_page_buffer);
