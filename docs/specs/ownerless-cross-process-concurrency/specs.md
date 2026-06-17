@@ -5311,10 +5311,17 @@ subsystems that this mode needs:
   post-append base-note update, skipping the note helper for page classes that
   cannot seed deltas. This narrows first-party append bookkeeping without
   changing WAL bytes, delta acceptance, replay, checkpoint rewrite, or
-  page-version volume. A follow-up delta note slot-reuse slice carries the
-  matched process-local delta-base slot index from snapshot lookup into the
-  successful post-append note path and revalidates that slot before falling
-  back to the old fingerprint/probe loop. This keeps the same volatile
+  page-version volume. A follow-up history-rseg page-type slice keeps the
+  explicit `MYLITE_OWNERLESS_PAGE_LOG_APPEND_HISTORY_RSEG_DELTA` gate but lets
+  hinted rollback-segment proof pages use the same history-rseg delta for
+  MariaDB's `FIL_PAGE_TYPE_TRX_SYS` page class as well as `FIL_PAGE_TYPE_SYS`.
+  Primitive coverage proves hinted SYS and TRX_SYS reconstruction/latest lookup
+  and checkpoint rewrite to standalone records, while ordinary unhinted system
+  pages stay standalone and the required rollback-segment plus undo-header
+  proof publication remains unchanged. A follow-up delta note slot-reuse slice
+  carries the matched process-local delta-base slot index from snapshot lookup
+  into the successful post-append note path and revalidates that slot before
+  falling back to the old fingerprint/probe loop. This keeps the same volatile
   base-cache rules and durable WAL semantics while trimming duplicate cache
   lookup work for accepted deltas. A later MTR wrapper fast-path audit rejected
   caching

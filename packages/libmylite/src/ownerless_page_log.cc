@@ -5779,9 +5779,13 @@ bool page_delta_flag_for_page(
         return true;
     }
     if (allow_history_rseg_delta && page != nullptr &&
-        page_size >= k_innodb_fil_page_type_offset + sizeof(std::uint16_t) &&
-        load_be16(static_cast<const unsigned char *>(page) + k_innodb_fil_page_type_offset) ==
-            k_innodb_fil_page_type_sys) {
+        page_size >= k_innodb_fil_page_type_offset + sizeof(std::uint16_t)) {
+        const std::uint16_t page_type =
+            load_be16(static_cast<const unsigned char *>(page) + k_innodb_fil_page_type_offset);
+        if (page_type != k_innodb_fil_page_type_sys &&
+            page_type != k_innodb_fil_page_type_trx_sys) {
+            return false;
+        }
         *out_delta_flag = k_record_flag_history_rseg_delta_payload;
         return true;
     }
