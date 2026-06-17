@@ -251,7 +251,11 @@ app.mylite/
   run/
 ```
 
-Ownerless concurrency needs additional directory-owned coordination state:
+Ownerless concurrency needs additional directory-owned coordination state.
+Fresh ordinary exclusive read/write opens do not create this subtree; it is
+created by ownerless/shared-readonly opens, or reused by ordinary opens only
+when durable ownerless runtime files already exist and must be validated or
+recovered:
 
 ```text
 app.mylite/
@@ -4115,7 +4119,12 @@ Tasks:
    startup, connection, core `mysql.*` compatibility-table bootstrap, and
    dictionary-generation initialization, so concurrent openers do not race
    InnoDB redo startup; the opener creates `concurrency/` before taking that
-   startup lock. Ownerless startup failures are retried a bounded number of
+   startup lock. Fresh ordinary exclusive read/write opens now skip
+   `concurrency/` creation, SHM/WAL/checkpoint preparation, process-slot
+   allocation, ownerless redo evidence capture, and ownerless close cleanup
+   unless explicit ownerless/shared-readonly flags are present or durable
+   ownerless runtime files already exist. Ownerless startup failures are
+   retried a bounded number of
    times only after ending partial MariaDB embedded startup state and restoring
    the saved 12 KiB redo startup prefix when its checkpoint pages pass MariaDB
    startup validation, or the captured prefix fallback; ordinary native

@@ -34,6 +34,12 @@
 #define MYLITE_TEST_REMOVE_TREE_MAX_FDS 32
 #define MYLITE_TEST_METADATA_LINE_SIZE 128
 #define MYLITE_TEST_METADATA "format=1\nmariadb_base=mariadb-11.8.6\n"
+#define MYLITE_TEST_CONCURRENCY_METADATA                                                            \
+    "format=1\n"                                                                                    \
+    "mariadb_base=mariadb-11.8.6\n"                                                                 \
+    "database_uuid=00000000-0000-4000-8000-000000000001\n"                                          \
+    "concurrency_generation=0\n"                                                                    \
+    "mode=exclusive\n"
 #define MYLITE_TEST_CONCURRENCY_SHM_HEADER_SIZE 128
 #define MYLITE_TEST_CONCURRENCY_SHM_FORMAT_VERSION 10
 #define MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE 2097152
@@ -203,7 +209,7 @@ static void test_existing_empty_directory_without_create_fails(void);
 static void test_nonempty_directory_without_metadata_fails(void);
 static void test_invalid_metadata_fails(void);
 static void test_incomplete_layout_fails(void);
-static void test_missing_concurrency_metadata_is_initialized(void);
+static void test_ownerless_open_initializes_concurrency_metadata(void);
 static void test_invalid_concurrency_metadata_fails(void);
 static void test_concurrency_shared_memory_is_grow_only(void);
 static void test_dead_ownerless_transaction_rebuilds_shared_state_on_open(void);
@@ -227,6 +233,8 @@ static char *path_join(const char *directory, const char *name);
 static mylite_open_config open_config(const char *temp_directory);
 static void assert_open_database_layout(const char *database_path);
 static void assert_closed_database_layout(const char *database_path);
+static void assert_ownerless_open_database_layout(const char *database_path);
+static void assert_ownerless_closed_database_layout(const char *database_path);
 static void assert_metadata_file(const char *metadata_path);
 static void assert_concurrency_metadata_file(const char *metadata_path);
 static void assert_concurrency_recovery_file(
@@ -243,7 +251,6 @@ static void assert_concurrency_shared_memory_file(
     uint64_t expected_min_mdl_generation,
     uint64_t expected_min_trx_generation
 );
-static uint64_t read_concurrency_registry_generation(const char *database_path);
 static uint64_t read_concurrency_trx_header_field(const char *database_path, off_t field_offset);
 static uint64_t read_concurrency_read_view_header_field(
     const char *database_path,
@@ -287,6 +294,7 @@ static int is_directory_empty(const char *path);
 static int is_directory(const char *path);
 static int path_exists(const char *path);
 static void write_file(text_file file_data);
+static void write_ownerless_concurrency_metadata(const char *database_path);
 static void write_file_prefix(const char *path, const char *contents, size_t size);
 static void write_shm_state(const char *shm_path, uint32_t state);
 static void copy_tree(const char *source_path, const char *destination_path);
@@ -378,7 +386,7 @@ static void run_baseline_tests(void) {
 
 static void run_ownerless_directory_tests(void) {
     test_shared_readonly_open_reads_existing_database();
-    test_missing_concurrency_metadata_is_initialized();
+    test_ownerless_open_initializes_concurrency_metadata();
     test_invalid_concurrency_metadata_fails();
     test_concurrency_shared_memory_is_grow_only();
     test_dead_ownerless_transaction_rebuilds_shared_state_on_open();
@@ -409,7 +417,6 @@ static void test_open_close_repeatedly(void) {
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(root, "open-close.mylite");
     mylite_open_config config = open_config(runtime_root);
-    uint64_t last_registry_generation = 0U;
 
     assert(mkdir(runtime_root, 0700) == 0);
 
@@ -429,9 +436,6 @@ static void test_open_close_repeatedly(void) {
         assert(strcmp(mylite_errmsg(db), "not an error") == 0);
         assert(mylite_close(db) == MYLITE_OK);
         assert_closed_database_layout(database_path);
-        const uint64_t registry_generation = read_concurrency_registry_generation(database_path);
-        assert(registry_generation > last_registry_generation);
-        last_registry_generation = registry_generation;
         assert(is_directory_empty(runtime_root));
     }
 
@@ -957,7 +961,7 @@ static void test_incomplete_layout_fails(void) {
     free(root);
 }
 
-static void test_missing_concurrency_metadata_is_initialized(void) {
+static void test_ownerless_open_initializes_concurrency_metadata(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(root, "upgrade-concurrency.mylite");
@@ -973,11 +977,18 @@ static void test_missing_concurrency_metadata_is_initialized(void) {
     assert(mkdir(tmp_path, 0700) == 0);
     write_file((text_file){.path = metadata_path, .contents = MYLITE_TEST_METADATA});
 
-    assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);
+    assert(
+        mylite_open(
+            database_path,
+            &db,
+            MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+            &config
+        ) == MYLITE_OK
+    );
     assert(db != NULL);
-    assert_open_database_layout(database_path);
+    assert_ownerless_open_database_layout(database_path);
     assert(mylite_close(db) == MYLITE_OK);
-    assert_closed_database_layout(database_path);
+    assert_ownerless_closed_database_layout(database_path);
     assert(is_directory_empty(runtime_root));
 
     free(tmp_path);
@@ -1048,6 +1059,9 @@ static void test_concurrency_shared_memory_is_grow_only(void) {
         MYLITE_OK
     );
     assert(mylite_close(db) == MYLITE_OK);
+    write_ownerless_concurrency_metadata(database_path);
+    assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);
+    assert(mylite_close(db) == MYLITE_OK);
     assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 2U, 0U, 0U, 0U);
 
     assert(truncate(shm_path, 1) == 0);
@@ -1098,6 +1112,9 @@ static void test_dead_ownerless_transaction_rebuilds_shared_state_on_open(void) 
         MYLITE_OK
     );
     assert(mylite_close(db) == MYLITE_OK);
+    write_ownerless_concurrency_metadata(database_path);
+    assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);
+    assert(mylite_close(db) == MYLITE_OK);
     seed_dead_ownerless_transaction(database_path);
     assert(read_concurrency_innodb_lock_header_field(database_path, 16) == 1U);
 
@@ -1145,7 +1162,11 @@ static void test_closed_directory_copy_rebuilds_ownerless_shared_memory(void) {
     );
     exec_ok(db, "INSERT INTO app.closed_copy_shm VALUES (1, 10), (2, 20)");
     assert(mylite_close(db) == MYLITE_OK);
-    assert_closed_database_layout(source_path);
+    write_ownerless_concurrency_metadata(source_path);
+    assert(mylite_open(source_path, &db, MYLITE_OPEN_READWRITE, &source_config) == MYLITE_OK);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.closed_copy_shm") == 30U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_ownerless_closed_database_layout(source_path);
     assert(is_directory_empty(source_runtime_root));
 
     copy_tree(source_path, copy_path);
@@ -1618,6 +1639,49 @@ static mylite_open_config open_config(const char *temp_directory) {
 static void assert_open_database_layout(const char *database_path) {
     char *metadata_path = path_join(database_path, "mylite.meta");
     char *concurrency_path = path_join(database_path, "concurrency");
+    char *data_path = path_join(database_path, "datadir");
+    char *tmp_path = path_join(database_path, "tmp");
+    char *run_path = path_join(database_path, "run");
+
+    assert(path_exists(metadata_path));
+    assert_metadata_file(metadata_path);
+    assert(!path_exists(concurrency_path));
+    assert(is_directory(data_path));
+    assert(is_directory(tmp_path));
+    assert(is_directory(run_path));
+    assert(!is_directory_empty(run_path));
+
+    free(run_path);
+    free(tmp_path);
+    free(data_path);
+    free(concurrency_path);
+    free(metadata_path);
+}
+
+static void assert_closed_database_layout(const char *database_path) {
+    char *metadata_path = path_join(database_path, "mylite.meta");
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *data_path = path_join(database_path, "datadir");
+    char *tmp_path = path_join(database_path, "tmp");
+    char *run_path = path_join(database_path, "run");
+
+    assert(path_exists(metadata_path));
+    assert_metadata_file(metadata_path);
+    assert(!path_exists(concurrency_path));
+    assert(is_directory(data_path));
+    assert(is_directory(tmp_path));
+    assert(!path_exists(run_path));
+
+    free(run_path);
+    free(tmp_path);
+    free(data_path);
+    free(concurrency_path);
+    free(metadata_path);
+}
+
+static void assert_ownerless_open_database_layout(const char *database_path) {
+    char *metadata_path = path_join(database_path, "mylite.meta");
+    char *concurrency_path = path_join(database_path, "concurrency");
     char *concurrency_metadata_path = path_join(concurrency_path, "mylite-concurrency.meta");
     char *concurrency_lock_path = path_join(concurrency_path, "mylite-concurrency.lock");
     char *concurrency_shm_path = path_join(concurrency_path, "mylite-concurrency.shm");
@@ -1664,7 +1728,7 @@ static void assert_open_database_layout(const char *database_path) {
     free(metadata_path);
 }
 
-static void assert_closed_database_layout(const char *database_path) {
+static void assert_ownerless_closed_database_layout(const char *database_path) {
     char *metadata_path = path_join(database_path, "mylite.meta");
     char *concurrency_path = path_join(database_path, "concurrency");
     char *concurrency_metadata_path = path_join(concurrency_path, "mylite-concurrency.meta");
@@ -2076,23 +2140,6 @@ static void assert_concurrency_shared_memory_file(
     assert(read_le64(dictionary_state + 24U) == 0U);
     assert(munmap((void *)page, MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE) == 0);
     assert(close(fd) == 0);
-}
-
-static uint64_t read_concurrency_registry_generation(const char *database_path) {
-    char *concurrency_path = path_join(database_path, "concurrency");
-    char *shm_path = path_join(concurrency_path, "mylite-concurrency.shm");
-    unsigned char bytes[8];
-    int fd = open(shm_path, O_RDONLY | O_CLOEXEC);
-
-    assert(fd >= 0);
-    assert(
-        pread(fd, bytes, sizeof(bytes), MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_OFFSET + 8) ==
-        (ssize_t)sizeof(bytes)
-    );
-    assert(close(fd) == 0);
-    free(shm_path);
-    free(concurrency_path);
-    return read_le64(bytes);
 }
 
 static uint64_t read_concurrency_trx_header_field(const char *database_path, off_t field_offset) {
@@ -2601,6 +2648,20 @@ static void write_file(text_file file_data) {
     assert(file != NULL);
     assert(fputs(file_data.contents, file) >= 0);
     assert(fclose(file) == 0);
+}
+
+static void write_ownerless_concurrency_metadata(const char *database_path) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *metadata_path = path_join(concurrency_path, "mylite-concurrency.meta");
+
+    assert(mkdir(concurrency_path, 0700) == 0);
+    write_file((text_file){
+        .path = metadata_path,
+        .contents = MYLITE_TEST_CONCURRENCY_METADATA,
+    });
+
+    free(metadata_path);
+    free(concurrency_path);
 }
 
 static void write_file_prefix(const char *path, const char *contents, size_t size) {

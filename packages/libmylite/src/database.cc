@@ -1557,6 +1557,7 @@ int prepare_existing_database_directory(const std::filesystem::path &database_pa
 int validate_database_layout(const std::filesystem::path &database_path);
 int validate_layout_directory(const std::filesystem::path &directory);
 int validate_database_metadata(const std::filesystem::path &metadata_path);
+bool ownerless_concurrency_runtime_files_exist(const std::filesystem::path &database_path);
 bool ownerless_platform_probe_proof_matches(
     const std::filesystem::path &metadata_path,
     std::uint64_t database_device
@@ -7844,6 +7845,39 @@ int validate_database_metadata(const std::filesystem::path &metadata_path) {
     }
 
     return has_format && has_mariadb_base ? MYLITE_OK : MYLITE_CORRUPT;
+}
+
+bool ownerless_concurrency_runtime_files_exist(const std::filesystem::path &database_path) {
+    const std::filesystem::path concurrency_directory = database_path / k_concurrency_dir_name;
+    std::error_code error;
+    const bool directory_exists = std::filesystem::exists(concurrency_directory, error);
+    if (error) {
+        return true;
+    }
+    if (!directory_exists) {
+        return false;
+    }
+    if (!std::filesystem::is_directory(concurrency_directory, error) || error) {
+        return true;
+    }
+
+    static constexpr std::array<const char *, 5> k_runtime_files = {
+        k_concurrency_meta_filename,
+        k_concurrency_shm_filename,
+        k_concurrency_wal_filename,
+        k_concurrency_checkpoint_filename,
+        k_concurrency_redo_header_filename,
+    };
+    for (const char *filename : k_runtime_files) {
+        error.clear();
+        if (std::filesystem::exists(concurrency_directory / filename, error)) {
+            return true;
+        }
+        if (error) {
+            return true;
+        }
+    }
+    return false;
 }
 
 int prepare_concurrency_metadata(const std::filesystem::path &database_path) {
@@ -18339,6 +18373,9 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
     }
 
     const bool memory_database = is_memory_database_path(db.database_path);
+    const bool ownerless_concurrency_runtime_needed =
+        !memory_database &&
+        (ownerless_runtime_open || ownerless_concurrency_runtime_files_exist(db.database_path));
     const bool skip_database_lock =
         ownerless_runtime_open || unsafe_disable_database_lock_for_tests();
     int lock_fd = -1;
@@ -18361,7 +18398,7 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
     RuntimeLayout layout = {};
     OwnerlessRedoStartupPrefixSnapshot redo_startup_prefix = {};
     try {
-        if (!memory_database) {
+        if (ownerless_concurrency_runtime_needed) {
             std::uint64_t stage_start_ns = embedded_open_perf_start_ns();
             const int concurrency_result = prepare_concurrency_metadata(db.database_path);
             embedded_open_perf_add_elapsed(
@@ -18408,7 +18445,7 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
             stage_start_ns
         );
 
-        if (!memory_database) {
+        if (ownerless_concurrency_runtime_needed) {
             stage_start_ns = embedded_open_perf_start_ns();
             const int concurrency_runtime_result =
                 map_concurrency_shared_memory_for_runtime(db.database_path, g_runtime);
@@ -18609,6 +18646,13 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
                 EMBEDDED_OPEN_PERF_START_REDO_EVIDENCE_NS,
                 stage_start_ns
             );
+        } else {
+            stage_start_ns = embedded_open_perf_start_ns();
+            reset_ownerless_runtime_hooks(g_runtime);
+            embedded_open_perf_add_elapsed(
+                EMBEDDED_OPEN_PERF_START_PRE_HOOKS_NS,
+                stage_start_ns
+            );
         }
 
         int bootstrap_lock_fd = -1;
@@ -18699,7 +18743,7 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
             db.ownerless_preserve_native_recovery_pages = true;
         }
 
-        if (!memory_database) {
+        if (ownerless_concurrency_runtime_needed) {
             stage_start_ns = embedded_open_perf_start_ns();
             int hook_result = MYLITE_OK;
             if (ownerless_runtime_open) {
@@ -18896,18 +18940,21 @@ int ensure_core_system_tables(mylite_db &db) {
         return MYLITE_OK;
     }
 
-    const std::filesystem::path lock_path = std::filesystem::path(db.database_path) /
-                                            k_concurrency_dir_name / k_concurrency_lock_filename;
     std::uint64_t stage_start_ns = embedded_open_perf_start_ns();
-    const int lock_fd = acquire_concurrency_lock(
-        lock_path,
-        k_system_tables_lock_start,
-        k_system_tables_lock_length,
-        F_WRLCK,
-        k_system_tables_lock_wait_timeout_ms
-    );
+    int lock_fd = -1;
+    if (g_runtime.ownerless_rw_mode) {
+        const std::filesystem::path lock_path = std::filesystem::path(db.database_path) /
+                                                k_concurrency_dir_name / k_concurrency_lock_filename;
+        lock_fd = acquire_concurrency_lock(
+            lock_path,
+            k_system_tables_lock_start,
+            k_system_tables_lock_length,
+            F_WRLCK,
+            k_system_tables_lock_wait_timeout_ms
+        );
+    }
     embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_SYSTEM_TABLES_LOCK_NS, stage_start_ns);
-    if (lock_fd < 0) {
+    if (g_runtime.ownerless_rw_mode && lock_fd < 0) {
         set_error(db, MYLITE_BUSY, "database system table initialization is busy");
         return MYLITE_BUSY;
     }
@@ -18916,7 +18963,9 @@ int ensure_core_system_tables(mylite_db &db) {
     embedded_open_perf_add(EMBEDDED_OPEN_PERF_SYSTEM_TABLES_EXECUTIONS, 1U);
     const int result = execute_core_system_table_statements(db);
     embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_SYSTEM_TABLES_STATEMENTS_NS, stage_start_ns);
-    release_concurrency_lock(lock_fd, k_system_tables_lock_start, k_system_tables_lock_length);
+    if (lock_fd >= 0) {
+        release_concurrency_lock(lock_fd, k_system_tables_lock_start, k_system_tables_lock_length);
+    }
     if (result == MYLITE_OK) {
         g_runtime.core_system_tables_ready.store(true, std::memory_order_release);
     }
@@ -18982,11 +19031,15 @@ void release_runtime(void) {
     stop_ownerless_checkpoint_scheduler(g_runtime, lock);
     embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_RELEASE_STOP_SCHEDULER_NS, stage_start_ns);
 
+    const bool ownerless_concurrency_runtime_mapped =
+        g_runtime.concurrency_shm_fd >= 0 || g_runtime.concurrency_wal_fd >= 0 ||
+        g_runtime.concurrency_checkpoint_fd >= 0 || g_runtime.concurrency_shm_mapping != nullptr;
     int startup_lock_fd = -1;
     OwnerlessRedoStartupPrefixSnapshot shutdown_redo_prefix = {};
     bool no_live_ownerless_shutdown = false;
     const bool redo_shutdown_repair_candidate =
-        !g_runtime.readonly_mode && !is_memory_database_path(g_runtime.database_path);
+        ownerless_concurrency_runtime_mapped && !g_runtime.readonly_mode &&
+        !is_memory_database_path(g_runtime.database_path);
     if (g_runtime.ownerless_rw_mode && redo_shutdown_repair_candidate) {
         const std::filesystem::path startup_lock_path =
             std::filesystem::path(g_runtime.database_path) / k_concurrency_dir_name /
@@ -19013,9 +19066,11 @@ void release_runtime(void) {
             mylite_ownerless_innodb_flush_dirty_pages_for_page_writes(flush_lsn);
         }
     }
-    stage_start_ns = embedded_open_perf_start_ns();
-    reclaim_ownerless_page_log_after_native_checkpoint(g_runtime);
-    embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_RELEASE_RECLAIM_NS, stage_start_ns);
+    if (ownerless_concurrency_runtime_mapped) {
+        stage_start_ns = embedded_open_perf_start_ns();
+        reclaim_ownerless_page_log_after_native_checkpoint(g_runtime);
+        embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_RELEASE_RECLAIM_NS, stage_start_ns);
+    }
     if (redo_shutdown_repair_candidate) {
         const std::filesystem::path redo_path = std::filesystem::path(g_runtime.database_path) /
                                                 k_datadir_name / k_innodb_redo_log_filename;
@@ -19044,16 +19099,22 @@ void release_runtime(void) {
         embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_RELEASE_REDO_CAPTURE_NS, stage_start_ns);
     }
     stage_start_ns = embedded_open_perf_start_ns();
-    reset_ownerless_native_shutdown_hooks(g_runtime);
+    if (ownerless_concurrency_runtime_mapped) {
+        reset_ownerless_native_shutdown_hooks(g_runtime);
+        mylite_ownerless_innodb_close_current_read_view();
+        mylite_ownerless_innodb_evict_dictionary_cache();
+        mylite_ownerless_innodb_evict_clean_external_pages();
+    } else {
+        reset_ownerless_runtime_hooks(g_runtime);
+    }
     embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_RELEASE_RESET_HOOKS_NS, stage_start_ns);
-    mylite_ownerless_innodb_close_current_read_view();
-    mylite_ownerless_innodb_evict_dictionary_cache();
-    mylite_ownerless_innodb_evict_clean_external_pages();
     stage_start_ns = embedded_open_perf_start_ns();
     mysql_thread_end();
     mysql_server_end();
     embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_RELEASE_MYSQL_SHUTDOWN_NS, stage_start_ns);
-    clear_ownerless_native_hook_contexts(g_runtime);
+    if (ownerless_concurrency_runtime_mapped) {
+        clear_ownerless_native_hook_contexts(g_runtime);
+    }
     const bool retained_ownerless_page_log =
         g_runtime.ownerless_rw_mode && ownerless_page_log_has_uncheckpointed_records(g_runtime);
     const bool restore_shutdown_redo_prefix =
@@ -19073,9 +19134,11 @@ void release_runtime(void) {
             k_ownerless_runtime_startup_lock_length
         );
     }
-    stage_start_ns = embedded_open_perf_start_ns();
-    unmap_concurrency_shared_memory_for_runtime(g_runtime);
-    embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_RELEASE_UNMAP_NS, stage_start_ns);
+    if (ownerless_concurrency_runtime_mapped) {
+        stage_start_ns = embedded_open_perf_start_ns();
+        unmap_concurrency_shared_memory_for_runtime(g_runtime);
+        embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_RELEASE_UNMAP_NS, stage_start_ns);
+    }
 #endif
 #if MYLITE_WITH_MARIADB_EMBEDDED
     stage_start_ns = embedded_open_perf_start_ns();
