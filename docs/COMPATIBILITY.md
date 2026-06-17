@@ -808,6 +808,14 @@ probe shape. The next performance target remains
 page-version/native-support publication volume and native InnoDB
 commit/row-insert cost, not timer-driven buffer-pool scan publication,
 non-SELECT refresh probing, or post-commit release.
+The page-write stats-off fast-path slice is a diagnostics-only cleanup:
+disabled page-write elapsed scopes now return on the existing zero timing
+sentinel before rechecking the stats-enabled flag, focused SQL coverage proves
+disabled page-write counters stay zero through the native-support WAL proof
+workload, and stats-enabled probes still emit page-write summaries. The first
+stats-off sample after the cleanup reported ownerless autocommit at
+`1046.79 ops/s` versus ordinary autocommit at `3673.54 ops/s`, ratio `0.2850`,
+so this does not change the remaining performance target.
 A follow-up production attribution slice now splits native-support page
 publication into published versus elided page classes. The reduced
 stats-enabled sample reported `2.000` published native-support pages per

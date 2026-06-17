@@ -5309,6 +5309,15 @@ subsystems that this mode needs:
   dirty-page tracking. It is another hot-path cleanup only; page-version WAL,
   native history-proof publication, checkpoint ordering, and ownerless lock
   release semantics stay unchanged.
+  The page-write stats-off fast-path slice then made disabled page-write
+  elapsed scopes return on the existing zero start-time sentinel before
+  rechecking the stats-enabled flag. Focused SQL coverage proves disabled
+  page-write counters stay zero through the native-support WAL proof workload,
+  and the stats-enabled attribution probe still emits page-write summary rows.
+  The first stats-off sample after the cleanup reported ownerless autocommit at
+  `1046.79 ops/s` versus ordinary autocommit at `3673.54 ops/s`, ratio
+  `0.2850`, so this is a bounded diagnostics hot-path cleanup rather than
+  evidence that the larger write-throughput gap is solved.
   The checkpoint legacy-write elision slice then removed the legacy
   latest/visible payload write from advancing checkpoint updates after
   checksum-protected LSN records are initialized, exposing a

@@ -1093,10 +1093,12 @@ static void ownerless_page_write_perf_add(
 static void ownerless_page_write_perf_add_elapsed(
     ownerless_page_write_perf_stat_index index, uint64_t start_ns) noexcept
 {
-  if (start_ns != 0)
-    ownerless_page_write_perf_add(index,
-                                  ownerless_page_write_perf_now_ns() -
-                                      start_ns);
+  if (start_ns == 0 || !ownerless_page_write_perf_enabled())
+    return;
+
+  ownerless_page_write_perf_stats[index].fetch_add(
+      ownerless_page_write_perf_now_ns() - start_ns,
+      std::memory_order_relaxed);
 }
 
 class ownerless_page_write_perf_scope
