@@ -18649,10 +18649,7 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
         } else {
             stage_start_ns = embedded_open_perf_start_ns();
             reset_ownerless_runtime_hooks(g_runtime);
-            embedded_open_perf_add_elapsed(
-                EMBEDDED_OPEN_PERF_START_PRE_HOOKS_NS,
-                stage_start_ns
-            );
+            embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_START_PRE_HOOKS_NS, stage_start_ns);
         }
 
         int bootstrap_lock_fd = -1;
@@ -18944,7 +18941,8 @@ int ensure_core_system_tables(mylite_db &db) {
     int lock_fd = -1;
     if (g_runtime.ownerless_rw_mode) {
         const std::filesystem::path lock_path = std::filesystem::path(db.database_path) /
-                                                k_concurrency_dir_name / k_concurrency_lock_filename;
+                                                k_concurrency_dir_name /
+                                                k_concurrency_lock_filename;
         lock_fd = acquire_concurrency_lock(
             lock_path,
             k_system_tables_lock_start,
@@ -19037,9 +19035,9 @@ void release_runtime(void) {
     int startup_lock_fd = -1;
     OwnerlessRedoStartupPrefixSnapshot shutdown_redo_prefix = {};
     bool no_live_ownerless_shutdown = false;
-    const bool redo_shutdown_repair_candidate =
-        ownerless_concurrency_runtime_mapped && !g_runtime.readonly_mode &&
-        !is_memory_database_path(g_runtime.database_path);
+    const bool redo_shutdown_repair_candidate = ownerless_concurrency_runtime_mapped &&
+                                                !g_runtime.readonly_mode &&
+                                                !is_memory_database_path(g_runtime.database_path);
     if (g_runtime.ownerless_rw_mode && redo_shutdown_repair_candidate) {
         const std::filesystem::path startup_lock_path =
             std::filesystem::path(g_runtime.database_path) / k_concurrency_dir_name /

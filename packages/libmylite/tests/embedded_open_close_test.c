@@ -34,11 +34,11 @@
 #define MYLITE_TEST_REMOVE_TREE_MAX_FDS 32
 #define MYLITE_TEST_METADATA_LINE_SIZE 128
 #define MYLITE_TEST_METADATA "format=1\nmariadb_base=mariadb-11.8.6\n"
-#define MYLITE_TEST_CONCURRENCY_METADATA                                                            \
-    "format=1\n"                                                                                    \
-    "mariadb_base=mariadb-11.8.6\n"                                                                 \
-    "database_uuid=00000000-0000-4000-8000-000000000001\n"                                          \
-    "concurrency_generation=0\n"                                                                    \
+#define MYLITE_TEST_CONCURRENCY_METADATA                                                           \
+    "format=1\n"                                                                                   \
+    "mariadb_base=mariadb-11.8.6\n"                                                                \
+    "database_uuid=00000000-0000-4000-8000-000000000001\n"                                         \
+    "concurrency_generation=0\n"                                                                   \
     "mode=exclusive\n"
 #define MYLITE_TEST_CONCURRENCY_SHM_HEADER_SIZE 128
 #define MYLITE_TEST_CONCURRENCY_SHM_FORMAT_VERSION 10
