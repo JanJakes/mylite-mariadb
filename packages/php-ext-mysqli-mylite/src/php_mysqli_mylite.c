@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -156,6 +157,7 @@ static zend_object_handlers php_mylite_mysqli_stmt_handlers;
 static bool php_mylite_mysqli_global_symbols_enabled;
 static bool php_mylite_mysqli_profile_enabled;
 static bool php_mylite_mysqli_prepared_query_results_enabled;
+static FILE *php_mylite_mysqli_profile_output_file;
 static php_mylite_mysqli_profile_stats php_mylite_mysqli_profile;
 static unsigned php_mylite_mysqli_connect_errno_value;
 static char php_mylite_mysqli_connect_error_value[512];
@@ -2189,11 +2191,17 @@ static void php_mylite_mysqli_profile_add_elapsed(uint64_t *target, uint64_t sta
 }
 
 static void php_mylite_mysqli_profile_print_counter(const char *name, uint64_t value) {
-    fprintf(stderr, "mylite_mysqli_profile_%s=%" PRIu64 "\n", name, value);
+    FILE *output = php_mylite_mysqli_profile_output_file != NULL
+                       ? php_mylite_mysqli_profile_output_file
+                       : stderr;
+    fprintf(output, "mylite_mysqli_profile_%s=%" PRIu64 "\n", name, value);
 }
 
 static void php_mylite_mysqli_profile_print_millis(const char *name, uint64_t ns) {
-    fprintf(stderr, "mylite_mysqli_profile_%s=%.3f\n", name, (double)ns / 1000000.0);
+    FILE *output = php_mylite_mysqli_profile_output_file != NULL
+                       ? php_mylite_mysqli_profile_output_file
+                       : stderr;
+    fprintf(output, "mylite_mysqli_profile_%s=%.3f\n", name, (double)ns / 1000000.0);
 }
 
 static void php_mylite_mysqli_profile_print_average_millis(
@@ -2202,7 +2210,10 @@ static void php_mylite_mysqli_profile_print_average_millis(
     uint64_t count
 ) {
     const double average = count == 0 ? 0.0 : ((double)ns / 1000000.0) / (double)count;
-    fprintf(stderr, "mylite_mysqli_profile_%s=%.3f\n", name, average);
+    FILE *output = php_mylite_mysqli_profile_output_file != NULL
+                       ? php_mylite_mysqli_profile_output_file
+                       : stderr;
+    fprintf(output, "mylite_mysqli_profile_%s=%.3f\n", name, average);
 }
 
 static void php_mylite_mysqli_profile_print(void) {
@@ -2217,6 +2228,17 @@ static void php_mylite_mysqli_profile_print(void) {
     if (operations == 0) {
         return;
     }
+
+    FILE *profile_output = stderr;
+    const char *profile_output_path = getenv("MYLITE_MYSQLI_PROFILE_OUTPUT");
+    if (profile_output_path != NULL && profile_output_path[0] != '\0') {
+        FILE *file = fopen(profile_output_path, "a");
+        if (file != NULL) {
+            profile_output = file;
+            (void)flock(fileno(profile_output), LOCK_EX);
+        }
+    }
+    php_mylite_mysqli_profile_output_file = profile_output;
 
     php_mylite_mysqli_profile_print_counter("enabled", 1);
     php_mylite_mysqli_profile_print_counter("pid", (uint64_t)getpid());
@@ -2536,6 +2558,13 @@ static void php_mylite_mysqli_profile_print(void) {
         php_mylite_mysqli_profile.fetch_all_ns,
         php_mylite_mysqli_profile.fetch_all_calls
     );
+
+    fflush(profile_output);
+    php_mylite_mysqli_profile_output_file = NULL;
+    if (profile_output != stderr) {
+        (void)flock(fileno(profile_output), LOCK_UN);
+        fclose(profile_output);
+    }
 }
 
 static int php_mylite_mysqli_profile_finish_query(int status, uint64_t start) {

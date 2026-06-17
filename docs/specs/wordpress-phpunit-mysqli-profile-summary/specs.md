@@ -162,8 +162,10 @@ git diff --check
 
 ## Risks And Follow-Up
 
-- The profile rows are diagnostics, not a runtime optimization. They are meant
-  to keep the next optimization target evidence-based.
+- The profile rows are diagnostics, not a runtime optimization. The follow-up
+  `wordpress-phpunit-mysqli-profile-aggregate` slice adds aggregate rows for
+  process-isolated runs, so child-process cost investigations should use the
+  aggregate counters instead of relying only on the last profile block.
 - The current next optimization target remains engine/query execution inside
   the non-isolated shard and ownerless/native page-publication cost, not PHP
   fetch-object conversion or repeated full open/close in the keepalive-enabled

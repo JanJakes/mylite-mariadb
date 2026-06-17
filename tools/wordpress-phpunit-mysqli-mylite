@@ -1547,8 +1547,16 @@ set +e
     exit 1
   fi
   phpunit_env=()
+  mysqli_profile_output=
   if [ "${MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI}" = "1" ]; then
-    phpunit_env+=(MYLITE_MYSQLI_PROFILE=1)
+    if ! mysqli_profile_output="$(mktemp "${TMPDIR:-/tmp}/mylite-wordpress-mysqli-profile.XXXXXX")"; then
+      echo "Could not create temporary mysqli profile output capture" >&2
+      exit 1
+    fi
+    phpunit_env+=(
+      MYLITE_MYSQLI_PROFILE=1
+      "MYLITE_MYSQLI_PROFILE_OUTPUT=${mysqli_profile_output}"
+    )
   fi
   phpunit_keepalive_file=
   if [ "${MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE}" = "1" ]; then
@@ -1614,6 +1622,12 @@ PHP_KEEPALIVE
   { time env "${phpunit_env[@]}" "${php_wrapper}" "${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}/vendor/bin/phpunit" "${phpunit_args[@]}"; } 2>&1 |
     tee "${phpunit_output}"
   phpunit_status="${PIPESTATUS[0]}"
+  if [ -n "${mysqli_profile_output}" ]; then
+    if [ -s "${mysqli_profile_output}" ]; then
+      tee -a "${phpunit_output}" <"${mysqli_profile_output}"
+    fi
+    rm -f "${mysqli_profile_output}"
+  fi
   if [ -n "${phpunit_keepalive_file}" ]; then
     rm -f "${phpunit_keepalive_file}"
   fi
@@ -1727,6 +1741,87 @@ PHP_KEEPALIVE
       )
     fi
   done
+  mysqli_profile_aggregate_metrics="$(
+    awk -F= '
+      BEGIN {
+        profile_keys = "open_calls open_successes open_failures open_ms_total";
+        profile_keys = profile_keys " close_calls close_successes close_failures";
+        profile_keys = profile_keys " close_explicit_calls close_object_free_calls";
+        profile_keys = profile_keys " close_reopen_calls close_ms_total query_calls";
+        profile_keys = profile_keys " query_result_calls query_no_result_calls";
+        profile_keys = profile_keys " query_ms_total query_cache_hits query_cache_misses";
+        profile_keys = profile_keys " query_prepare_calls query_prepare_ms_total";
+        profile_keys = profile_keys " query_cache_clear_ms_total query_status_sync_ms_total";
+        profile_keys = profile_keys " exec_result_calls exec_result_ms_total";
+        profile_keys = profile_keys " exec_no_result_calls exec_no_result_ms_total";
+        profile_keys = profile_keys " query_result_rows fetch_object_calls";
+        profile_keys = profile_keys " fetch_object_ms_total";
+        key_count = split(profile_keys, keys, " ");
+        for (key_index = 1; key_index <= key_count; ++key_index) {
+          selected["mylite_mysqli_profile_" keys[key_index]] = keys[key_index];
+        }
+      }
+
+      function is_number(value) {
+        return value ~ /^-?[0-9]+([.][0-9]+)?$/;
+      }
+
+      function print_total(key) {
+        if (!(key in seen)) {
+          return;
+        }
+        if (key ~ /_ms_total$/) {
+          printf "mylite_mysqli_profile_aggregate_%s=%.3f\n", key, totals[key];
+          return;
+        }
+        printf "mylite_mysqli_profile_aggregate_%s=%.0f\n", key, totals[key];
+      }
+
+      /^mylite_mysqli_profile_enabled=1$/ {
+        ++profile_processes;
+        next;
+      }
+
+      /^mylite_mysqli_profile_/ {
+        if (($1 in selected) && is_number($2)) {
+          key = selected[$1];
+          totals[key] += $2 + 0;
+          seen[key] = 1;
+        }
+      }
+
+      END {
+        if (profile_processes == 0) {
+          exit;
+        }
+        printf "mylite_mysqli_profile_aggregate_processes=%d\n", profile_processes;
+        for (key_index = 1; key_index <= key_count; ++key_index) {
+          print_total(keys[key_index]);
+        }
+        if (totals["open_calls"] > 0) {
+          printf "mylite_mysqli_profile_aggregate_open_ms_avg=%.3f\n", \
+            totals["open_ms_total"] / totals["open_calls"];
+        }
+        if (totals["close_calls"] > 0) {
+          printf "mylite_mysqli_profile_aggregate_close_ms_avg=%.3f\n", \
+            totals["close_ms_total"] / totals["close_calls"];
+        }
+        if (totals["query_calls"] > 0) {
+          printf "mylite_mysqli_profile_aggregate_query_ms_avg=%.3f\n", \
+            totals["query_ms_total"] / totals["query_calls"];
+        }
+        if (totals["fetch_object_calls"] > 0) {
+          printf "mylite_mysqli_profile_aggregate_fetch_object_ms_avg=%.3f\n", \
+            totals["fetch_object_ms_total"] / totals["fetch_object_calls"];
+        }
+      }
+    ' "${phpunit_output}"
+  )"
+  if [ -n "${mysqli_profile_aggregate_metrics}" ]; then
+    while IFS= read -r mysqli_profile_aggregate_metric; do
+      mysqli_profile_summary_metrics+=("${mysqli_profile_aggregate_metric}")
+    done <<<"${mysqli_profile_aggregate_metrics}"
+  fi
   if [ "${#mysqli_profile_summary_metrics[@]}" -gt 0 ]; then
     append_timing_summary "${mysqli_profile_summary_metrics[@]}"
   fi
