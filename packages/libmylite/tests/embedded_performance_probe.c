@@ -794,6 +794,12 @@ static void emit_summary_ms_per_iteration_delta(
     uint64_t right_ns,
     unsigned iterations
 );
+static void emit_redo_hook_summary(
+    const char *prefix,
+    const uint64_t *database_perf,
+    unsigned iterations,
+    const char *unit
+);
 static uint64_t page_publish_sys_identity_space_id(uint64_t identity);
 static uint64_t page_publish_sys_identity_page_no(uint64_t identity);
 static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations);
@@ -1609,6 +1615,106 @@ static void emit_summary_ms_per_iteration_delta(
     printf("%s=%.3f\n", name, average_ms);
 }
 
+static void emit_summary_count_per_named_unit(
+    const char *prefix,
+    const char *metric,
+    uint64_t count,
+    unsigned iterations,
+    const char *unit
+) {
+    const double average = iterations > 0U ? (double)count / (double)iterations : 0.0;
+    printf("%s_%s_per_%s=%.3f\n", prefix, metric, unit, average);
+}
+
+static void emit_summary_ms_per_named_unit(
+    const char *prefix,
+    const char *metric,
+    uint64_t value_ns,
+    unsigned iterations,
+    const char *unit
+) {
+    const double total_ms = (double)value_ns / 1000000.0;
+    const double average_ms = iterations > 0U ? total_ms / (double)iterations : 0.0;
+    printf("%s_%s_per_%s=%.3f\n", prefix, metric, unit, average_ms);
+}
+
+static void emit_redo_hook_metric_summary(
+    const char *prefix,
+    const uint64_t *database_perf,
+    size_t calls_index,
+    size_t ns_index,
+    const char *metric,
+    unsigned iterations,
+    const char *unit
+) {
+    char calls_metric[96];
+    char ms_metric[96];
+
+    snprintf(calls_metric, sizeof(calls_metric), "%s_calls", metric);
+    snprintf(ms_metric, sizeof(ms_metric), "%s_ms", metric);
+    emit_summary_count_per_named_unit(
+        prefix,
+        calls_metric,
+        database_perf[calls_index],
+        iterations,
+        unit
+    );
+    emit_summary_ms_per_named_unit(prefix, ms_metric, database_perf[ns_index], iterations, unit);
+}
+
+static void emit_redo_hook_summary(
+    const char *prefix,
+    const uint64_t *database_perf,
+    unsigned iterations,
+    const char *unit
+) {
+    emit_redo_hook_metric_summary(
+        prefix,
+        database_perf,
+        DATABASE_PERF_STAT_REDO_ENTER_CALLS,
+        DATABASE_PERF_STAT_REDO_ENTER_NS,
+        "redo_enter",
+        iterations,
+        unit
+    );
+    emit_redo_hook_metric_summary(
+        prefix,
+        database_perf,
+        DATABASE_PERF_STAT_REDO_OBSERVE_CALLS,
+        DATABASE_PERF_STAT_REDO_OBSERVE_NS,
+        "redo_observe",
+        iterations,
+        unit
+    );
+    emit_redo_hook_metric_summary(
+        prefix,
+        database_perf,
+        DATABASE_PERF_STAT_REDO_RESERVE_CALLS,
+        DATABASE_PERF_STAT_REDO_RESERVE_NS,
+        "redo_reserve",
+        iterations,
+        unit
+    );
+    emit_redo_hook_metric_summary(
+        prefix,
+        database_perf,
+        DATABASE_PERF_STAT_REDO_WRITTEN_CALLS,
+        DATABASE_PERF_STAT_REDO_WRITTEN_NS,
+        "redo_written",
+        iterations,
+        unit
+    );
+    emit_redo_hook_metric_summary(
+        prefix,
+        database_perf,
+        DATABASE_PERF_STAT_REDO_LEAVE_CALLS,
+        DATABASE_PERF_STAT_REDO_LEAVE_NS,
+        "redo_leave",
+        iterations,
+        unit
+    );
+}
+
 static void emit_ownerless_bulk_autocommit_phase_summary(
     unsigned insert_rows,
     unsigned insert_statements
@@ -1799,6 +1905,18 @@ static void emit_ownerless_transaction_phase_summary(
         "mylite_perf_summary_ownerless_insert_txn_page_versions_per_transaction",
         page_publish[PAGE_PUBLISH_STAT_PUBLISHED],
         1U
+    );
+    emit_redo_hook_summary(
+        "mylite_perf_summary_ownerless_insert_txn",
+        database_perf,
+        insert_iterations,
+        "insert"
+    );
+    emit_redo_hook_summary(
+        "mylite_perf_summary_ownerless_insert_txn",
+        database_perf,
+        1U,
+        "transaction"
     );
     emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_insert_txn_native_support_published_pages_per_insert",
@@ -3169,6 +3287,13 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
                                         ? database_perf[DATABASE_PERF_STAT_PAGE_PUBLISH_CALLS] -
                                               page_publish[PAGE_PUBLISH_STAT_PUBLISHED]
                                         : 0U;
+
+    emit_redo_hook_summary(
+        "mylite_perf_summary_ownerless_autocommit",
+        database_perf,
+        insert_iterations,
+        "insert"
+    );
 
     emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_page_versions_per_insert",

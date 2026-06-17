@@ -5301,6 +5301,16 @@ subsystems that this mode needs:
   stats-attribution mode prints
   `mylite_perf_ownerless_page_log_detail_stats=0` so CI timings are not
   dominated by the classifier used only for byte-composition investigations.
+  A follow-up redo hook attribution slice promotes existing database perf
+  counters into compact production summaries for ownerless redo enter, observe,
+  reserve, written, and leave work. The reduced 200-row stats-enabled sample
+  reported autocommit redo enter/reserve/written/leave at `3.000` calls per
+  insert with redo-leave `0.022 ms/insert`, while the explicit transaction
+  probe reported `401.000` enter/reserve/written/leave calls per transaction
+  and redo-leave `3.159 ms/transaction`. That separates redo hook overhead from
+  page-write publish (`0.094 ms/insert`), commit-log publish
+  (`0.095 ms/insert`), page-log append (`0.058 ms/insert`), and checkpoint
+  update (`0.024 ms/insert`) in the same autocommit sample.
   Reduced 50-row stats-enabled probes after
   that split showed both standalone encoding and delta-base note update can be
   visible inside the previous aggregate append total, with small-sample ranking

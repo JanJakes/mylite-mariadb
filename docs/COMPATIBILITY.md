@@ -149,6 +149,11 @@ commit-log subphases including flush-list, release, redo-leave, publish,
 release-memo, and no-dirty-loop time. This keeps CI timing summaries useful
 for the remaining write-path work without changing the page-version WAL format
 or ownerless visibility semantics.
+The production embedded performance probe also promotes existing ownerless
+redo hook counters into compact autocommit and explicit-transaction summary
+rows for enter, observe, reserve, written, and leave calls plus elapsed time,
+so branch/main timing can distinguish redo-state hook work from checkpoint
+updates, page-log append, and page-publication cost.
 Ownerless mini-transaction page-write paths now also cache transaction-release
 classification inside the hot write-enter, page-publish, no-dirty commit-log,
 and unlogged release loops. Statement-visible autocommit writes still use the
