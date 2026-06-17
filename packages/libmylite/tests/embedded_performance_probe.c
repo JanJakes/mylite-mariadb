@@ -228,6 +228,7 @@ enum database_perf_stat_index {
     DATABASE_PERF_STAT_CHECKPOINT_UPDATE_GENERATION_CACHE_HITS,
     DATABASE_PERF_STAT_CHECKPOINT_UPDATE_LEGACY_WRITE_ELIDED,
     DATABASE_PERF_STAT_CHECKPOINT_UPDATE_NOOP_ELIDED,
+    DATABASE_PERF_STAT_CHECKPOINT_UPDATE_DEFERRED_LATEST_COALESCED,
     DATABASE_PERF_STAT_PAGE_PUBLISH_PAGE_LOG_CHECKSUM_NS,
     DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_SKIPPED_NATIVE_SUPPORT,
     DATABASE_PERF_STAT_COUNT
@@ -1726,11 +1727,13 @@ static void emit_ownerless_bulk_autocommit_phase_summary(
     unsigned insert_statements
 ) {
     uint64_t page_publish[PAGE_PUBLISH_STAT_COUNT] = {0};
+    uint64_t database_perf[DATABASE_PERF_STAT_COUNT] = {0};
     uint64_t page_log_append[PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
     uint64_t commit_visibility[COMMIT_VISIBILITY_STAT_COUNT] = {0};
     uint64_t innodb_deep[INNODB_DEEP_PERF_STAT_COUNT] = {0};
 
     mylite_ownerless_innodb_read_page_publish_stats(page_publish, PAGE_PUBLISH_STAT_COUNT);
+    mylite_ownerless_database_read_perf_stats(database_perf, DATABASE_PERF_STAT_COUNT);
     mylite_ownerless_page_log_read_append_perf_stats(
         page_log_append,
         PAGE_LOG_APPEND_PERF_STAT_COUNT
@@ -1813,6 +1816,18 @@ static void emit_ownerless_bulk_autocommit_phase_summary(
     emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_bulk_commit_visibility_flush_per_statement",
         commit_visibility[COMMIT_VISIBILITY_STAT_FLUSH],
+        insert_statements
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_bulk_checkpoint_update_deferred_latest_"
+        "coalesced_per_row",
+        database_perf[DATABASE_PERF_STAT_CHECKPOINT_UPDATE_DEFERRED_LATEST_COALESCED],
+        insert_rows
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_bulk_checkpoint_update_deferred_latest_"
+        "coalesced_per_statement",
+        database_perf[DATABASE_PERF_STAT_CHECKPOINT_UPDATE_DEFERRED_LATEST_COALESCED],
         insert_statements
     );
     emit_summary_count_per_iteration(
@@ -3969,6 +3984,12 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         database_perf[DATABASE_PERF_STAT_CHECKPOINT_UPDATE_NOOP_ELIDED],
         insert_iterations
     );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_checkpoint_update_deferred_latest_coalesced_"
+        "per_insert",
+        database_perf[DATABASE_PERF_STAT_CHECKPOINT_UPDATE_DEFERRED_LATEST_COALESCED],
+        insert_iterations
+    );
     emit_summary_ms_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_checkpoint_update_write_ms_per_insert",
         database_perf[DATABASE_PERF_STAT_CHECKPOINT_UPDATE_WRITE_NS],
@@ -5695,6 +5716,11 @@ static void emit_database_perf_stats(const char *prefix) {
         "%s_checkpoint_update_noop_elided=%" PRIu64 "\n",
         prefix,
         values[DATABASE_PERF_STAT_CHECKPOINT_UPDATE_NOOP_ELIDED]
+    );
+    printf(
+        "%s_checkpoint_update_deferred_latest_coalesced=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_CHECKPOINT_UPDATE_DEFERRED_LATEST_COALESCED]
     );
     printf(
         "%s_checkpoint_update_write_ms=%.3f\n",

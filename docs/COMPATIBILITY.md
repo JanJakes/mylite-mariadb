@@ -155,6 +155,15 @@ from the previous `250`/`250` sample. A stats-off local production probe then
 reported ownerless bulk rows at `4440.89 ops/s` and `0.6569x` ordinary rows in
 that run; larger native commit and history-proof work remain separate
 performance targets.
+Ownerless latest-only checkpoint publication now also coalesces repeated
+non-durable latest updates inside the same parser-proven implicit/autocommit
+visible-fast append-batched statement after the first successful latest
+checkpoint has been preserved. The final durable latest/visible checkpoint,
+page-version WAL sync, explicit-transaction behavior, and unsafe ownerless
+fault-test behavior are unchanged. Production probe output exposes the detailed
+`checkpoint_update_deferred_latest_coalesced` counter plus compact autocommit
+and bulk summary rows so CI can show whether capped multi-row inserts are
+skipping redundant checkpoint updates.
 The stats-enabled ownerless autocommit summary now also promotes the existing
 native page-write detailed counters into per-insert summary rows for publish
 calls, dirty-page scan work, deferred pages, tablespace lookup, scratch

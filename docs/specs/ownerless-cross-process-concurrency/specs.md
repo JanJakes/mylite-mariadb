@@ -1781,15 +1781,19 @@ Tasks:
    reconstruction path. Broader native history-proof replacement,
    redo/checkpoint reconciliation, and DDL/file lifecycle recovery remain
    planned work.
-   Single-row pure `INSERT ... VALUES` visible-fast-path statements reuse one
-   page-log append session across the statement's ownerless mini-transactions
-   and release it before page-log sync/page-visible LSN publication. Focused
-   SQL coverage keeps the existing native history WAL proof, multi-row
-   visible-fast proof, and conservative upsert fallback checks while asserting
-   that append-session begin/end counts collapse for the successful single-row
-   visible-fast insert. Broader DML, DDL, explicit-transaction, foreign-key,
-   multi-row append-session deferral, and cross-statement group-commit batching
-   remain future work.
+   Parser-proven pure `INSERT ... VALUES` visible-fast-path statements with one
+   through four row constructors reuse one page-log append session across the
+   statement's ownerless mini-transactions and release it before page-log
+   sync/page-visible LSN publication. Focused SQL coverage keeps the existing
+   native history WAL proof, capped multi-row visible-fast proof, single-row
+   append-session proof, and conservative upsert fallback checks while asserting
+   that append-session begin/end counts collapse for successful capped
+   visible-fast inserts. Later latest-only checkpoint updates inside the same
+   implicit/autocommit deferred append-batch statement are coalesced only after
+   the first successful latest-only checkpoint has been preserved; final
+   durable page-visible checkpoint publication is unchanged. Broader DML, DDL,
+   explicit-transaction coalescing, foreign-key, larger row-list append-session
+   deferral, and cross-statement group-commit batching remain future work.
    Undo, allocation,
    tablespace-header, extent, transaction-system, change-buffer, and system page
    records remain primitive evidence for future active-pin compaction.
@@ -2061,6 +2065,11 @@ Tasks:
    that visible-anchor path into page-log sync lock/header/data-sync costs plus
    durable `.ckpt` update lock/read/write/data-sync costs before any later
    batching or deferral is considered and reports clean-sync skips separately.
+   Capped implicit/autocommit visible-fast append-batched statements also
+   preserve the first latest-only `.ckpt` update and coalesce later non-durable
+   latest-only updates in the same statement, while explicit transactions,
+   unsafe fault hooks, and final durable latest/visible checkpoint publication
+   keep the previous behavior.
    The redo segment bookkeeping now lives
    in a first-party primitive that owns latch/refcount handling, latest/visible LSN
    publication, reserved-LSN counters, contiguous written-LSN tracking,

@@ -147,6 +147,7 @@ enum OwnerlessDatabasePerfStatIndex : std::size_t {
     OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_GENERATION_CACHE_HITS,
     OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_LEGACY_WRITE_ELIDED,
     OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_NOOP_ELIDED,
+    OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_DEFERRED_LATEST_COALESCED,
     OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_PAGE_LOG_CHECKSUM_NS,
     OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_INDEX_SKIPPED_NATIVE_SUPPORT,
     OWNERLESS_DATABASE_PERF_STAT_COUNT
@@ -1337,6 +1338,8 @@ struct mylite_db {
 
 thread_local mylite_db *ownerless_current_statement_db = nullptr;
 thread_local bool ownerless_statement_defers_page_log_append_batch = false;
+thread_local bool ownerless_statement_allows_deferred_latest_checkpoint_coalescing = false;
+thread_local bool ownerless_statement_latest_checkpoint_preserved = false;
 
 struct OwnerlessStatementPageWriteTrackingScope {
     explicit OwnerlessStatementPageWriteTrackingScope(mylite_db &db)
@@ -1358,16 +1361,32 @@ void ownerless_page_log_append_batch_release_current();
 }
 
 struct OwnerlessStatementVisibleFastPathScope {
-    explicit OwnerlessStatementVisibleFastPathScope(bool enabled, bool defer_page_log_append_batch)
+    explicit OwnerlessStatementVisibleFastPathScope(
+        bool enabled,
+        bool defer_page_log_append_batch,
+        bool coalesce_deferred_latest_checkpoint
+    )
         : previous(mylite_ownerless_innodb_set_statement_visible_fast_path(enabled ? 1 : 0)),
-          previous_defer_page_log_append_batch(ownerless_statement_defers_page_log_append_batch) {
+          previous_defer_page_log_append_batch(ownerless_statement_defers_page_log_append_batch),
+          previous_coalesce_deferred_latest_checkpoint(
+              ownerless_statement_allows_deferred_latest_checkpoint_coalescing
+          ),
+          previous_latest_checkpoint_preserved(ownerless_statement_latest_checkpoint_preserved) {
         ownerless_statement_defers_page_log_append_batch = defer_page_log_append_batch;
+        ownerless_statement_allows_deferred_latest_checkpoint_coalescing =
+            coalesce_deferred_latest_checkpoint;
+        if (coalesce_deferred_latest_checkpoint && !previous_coalesce_deferred_latest_checkpoint) {
+            ownerless_statement_latest_checkpoint_preserved = false;
+        }
     }
 
     ~OwnerlessStatementVisibleFastPathScope() {
         if (ownerless_statement_defers_page_log_append_batch) {
             ownerless_page_log_append_batch_release_current();
         }
+        ownerless_statement_latest_checkpoint_preserved = previous_latest_checkpoint_preserved;
+        ownerless_statement_allows_deferred_latest_checkpoint_coalescing =
+            previous_coalesce_deferred_latest_checkpoint;
         ownerless_statement_defers_page_log_append_batch = previous_defer_page_log_append_batch;
         mylite_ownerless_innodb_set_statement_visible_fast_path(previous);
     }
@@ -1375,6 +1394,8 @@ struct OwnerlessStatementVisibleFastPathScope {
   private:
     int previous = 0;
     bool previous_defer_page_log_append_batch = false;
+    bool previous_coalesce_deferred_latest_checkpoint = false;
+    bool previous_latest_checkpoint_preserved = false;
 };
 
 struct OwnerlessStatementPlainReadScope {
@@ -1425,8 +1446,14 @@ struct OwnerlessStatementNativeLifecycleRefreshScope {
 };
 #else
 struct OwnerlessStatementVisibleFastPathScope {
-    explicit OwnerlessStatementVisibleFastPathScope(bool enabled) {
+    explicit OwnerlessStatementVisibleFastPathScope(
+        bool enabled,
+        bool defer_page_log_append_batch,
+        bool coalesce_deferred_latest_checkpoint
+    ) {
         (void)enabled;
+        (void)defer_page_log_append_batch;
+        (void)coalesce_deferred_latest_checkpoint;
     }
 };
 
@@ -3194,7 +3221,8 @@ int mylite_step(mylite_stmt *stmt) {
         );
         OwnerlessStatementVisibleFastPathScope visible_fast_path(
             statement_visible_fast_path,
-            statement_append_batch_fast_path
+            statement_append_batch_fast_path,
+            statement_append_batch_fast_path && !statement_started_in_explicit_transaction
         );
         ownerless_stage_start =
             ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
@@ -4500,7 +4528,8 @@ int exec_result_impl(
     );
     OwnerlessStatementVisibleFastPathScope visible_fast_path(
         statement_visible_fast_path,
-        statement_append_batch_fast_path
+        statement_append_batch_fast_path,
+        statement_append_batch_fast_path && !statement_started_in_explicit_transaction
     );
     if (mysql_query(&db->mysql, sql) != 0) {
         set_mariadb_error(*db);
@@ -15331,6 +15360,17 @@ void ownerless_innodb_pages_visible_hook(std::uint64_t visible_lsn, void *ctx) {
 #  endif
 }
 
+bool ownerless_checkpoint_update_allows_deferred_latest_coalescing(
+    std::uint64_t latest_lsn,
+    std::uint64_t visible_lsn,
+    bool durable
+) {
+    return !durable && latest_lsn != 0U && visible_lsn == 0U &&
+           ownerless_statement_defers_page_log_append_batch &&
+           ownerless_statement_allows_deferred_latest_checkpoint_coalescing &&
+           mylite_ownerless_innodb_test_faults_enabled_fast() == 0;
+}
+
 void ownerless_persist_redo_checkpoint(
     OwnerlessInnoDBLockHookContext *hook,
     std::uint64_t latest_lsn,
@@ -15340,9 +15380,23 @@ void ownerless_persist_redo_checkpoint(
     if (hook == nullptr || hook->checkpoint_fd < 0) {
         return;
     }
+    const bool coalesce_deferred_latest =
+        ownerless_checkpoint_update_allows_deferred_latest_coalescing(
+            latest_lsn,
+            visible_lsn,
+            durable
+        );
+    if (coalesce_deferred_latest && ownerless_statement_latest_checkpoint_preserved) {
+        ownerless_database_perf_add(
+            OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_DEFERRED_LATEST_COALESCED,
+            1U
+        );
+        return;
+    }
+    bool ok = false;
     if (hook->redo_state != nullptr &&
         hook->redo_state_size >= k_concurrency_redo_state_segment_size) {
-        static_cast<void>(update_concurrency_checkpoint_lsn_from_redo_state(
+        ok = update_concurrency_checkpoint_lsn_from_redo_state(
             hook->checkpoint_fd,
             hook->redo_state,
             hook->redo_state_size,
@@ -15352,12 +15406,18 @@ void ownerless_persist_redo_checkpoint(
             latest_lsn,
             visible_lsn,
             durable
-        ));
-        return;
+        );
+    } else {
+        ok = update_concurrency_checkpoint_lsn(
+            hook->checkpoint_fd,
+            latest_lsn,
+            visible_lsn,
+            durable
+        );
     }
-    static_cast<void>(
-        update_concurrency_checkpoint_lsn(hook->checkpoint_fd, latest_lsn, visible_lsn, durable)
-    );
+    if (ok && coalesce_deferred_latest) {
+        ownerless_statement_latest_checkpoint_preserved = true;
+    }
 }
 
 void ownerless_innodb_page_publish_batch_begin_hook(void *ctx) {
