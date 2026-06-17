@@ -15,11 +15,14 @@ transaction commits. The final commit still writes MariaDB's serialization
 history. If a future explicit-transaction path is proven for visible-fast
 commit publication, the active history-proof rollback-segment and undo pages
 must still be published or otherwise proved before skipping the exact native
-history flush. The currently measured prepared explicit transaction remains
-unproven for visible-fast commit publication and uses the conservative native
-flush fallback. This slice narrows native-support WAL publication for explicit
-transactions without changing transaction visibility, redo, or crash recovery
-semantics.
+history flush. At the time this slice landed, the measured prepared explicit
+transaction remained unproven for visible-fast commit publication and used the
+conservative native flush fallback. The follow-up
+`ownerless-explicit-transaction-visible-proof` slice carries a narrower
+transaction-scoped proof for eligible `INSERT ... VALUES` transactions; this
+slice remains the undo-WAL reduction that made that later proof cheaper. This
+slice narrows native-support WAL publication for explicit transactions without
+changing transaction visibility, redo, or crash recovery semantics.
 
 ## Source Findings
 
@@ -126,19 +129,19 @@ and focused first-party tests/docs.
     forced-`.shm` native reopen paths.
 - Run adjacent native-support/history-proof selectors.
 - Run a reduced stats-enabled production performance probe and confirm explicit
-  transaction page-version/append volume drops while the prepared transaction
-  still commits through the conservative flush fallback without publish
-  failure.
+  transaction page-version/append volume drops while the then-current prepared
+  transaction still commits through the conservative flush fallback without
+  publish failure.
 - Run production build guards, format check, and whitespace checks.
 
 ## Acceptance Criteria
 
 - Explicit transaction inserts elide pre-commit native-support undo page WAL
   records.
-- The currently measured prepared explicit transaction commits through the
+- The then-current measured prepared explicit transaction commits through the
   conservative flush fallback without page-publish failure.
 - Active history-proof rollback-segment and undo pages remain blocked from this
-  elision before any future visible-fast explicit transaction path could skip
+  elision before any visible-fast explicit transaction path can skip
   the exact native history flush.
 - Focused ownerless correctness coverage for explicit transaction reopen and
   forced shared-memory rebuild passes.

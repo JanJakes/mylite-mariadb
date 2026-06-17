@@ -1321,6 +1321,8 @@ struct mylite_db {
     bool ownerless_explicit_transaction_active = false;
     bool ownerless_transaction_has_local_write = false;
     bool ownerless_transaction_has_locking_read = false;
+    bool ownerless_transaction_visible_fast_commit_candidate = false;
+    bool ownerless_transaction_visible_fast_commit_disqualified = false;
     bool ownerless_transaction_snapshot_visibility_pinned = false;
     bool ownerless_transaction_snapshot_pin_registered = false;
     bool ownerless_page_version_read_pin_registered = false;
@@ -2494,10 +2496,30 @@ bool count_sql_parameter_markers(std::string_view sql, std::size_t *out_count);
 bool sql_contains_identifier_token(std::string_view sql, const char *keyword);
 bool ownerless_insert_values_statement_allows_visible_fast_path(const SqlPolicyTokens &tokens);
 bool ownerless_insert_values_allows_append_batch_fast_path(const SqlPolicyTokens &tokens);
+bool ownerless_write_statement_allows_visible_fast_path(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
+bool ownerless_transaction_commit_allows_visible_fast_path(
+    const mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
 bool ownerless_statement_allows_visible_fast_path(mylite_db &db, const SqlPolicyTokens &tokens);
 bool ownerless_statement_allows_append_batch_fast_path(
     mylite_db &db,
     const SqlPolicyTokens &tokens
+);
+void reset_ownerless_transaction_visible_fast_proof(mylite_db &db);
+void disqualify_ownerless_transaction_visible_fast_proof(mylite_db &db);
+void update_ownerless_explicit_transaction_visible_fast_proof_before_sql(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    bool statement_visible_fast_path
+);
+void disqualify_ownerless_explicit_transaction_visible_fast_proof_after_failed_sql(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    bool statement_started_in_explicit_transaction
 );
 bool ownerless_insert_target_table(
     const mylite_db &db,
@@ -3158,9 +3180,18 @@ int mylite_step(mylite_stmt *stmt) {
             dictionary_ddl_started ||
             stmt->db->ownerless_peer_dictionary_refresh_requires_conservative_write
         );
+        const bool statement_visible_fast_path =
+            ownerless_statement_allows_visible_fast_path(*stmt->db, policy_tokens);
+        const bool statement_append_batch_fast_path =
+            ownerless_statement_allows_append_batch_fast_path(*stmt->db, policy_tokens);
+        update_ownerless_explicit_transaction_visible_fast_proof_before_sql(
+            *stmt->db,
+            policy_tokens,
+            statement_visible_fast_path
+        );
         OwnerlessStatementVisibleFastPathScope visible_fast_path(
-            ownerless_statement_allows_visible_fast_path(*stmt->db, policy_tokens),
-            ownerless_statement_allows_append_batch_fast_path(*stmt->db, policy_tokens)
+            statement_visible_fast_path,
+            statement_append_batch_fast_path
         );
         ownerless_stage_start =
             ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
@@ -3176,6 +3207,11 @@ int mylite_step(mylite_stmt *stmt) {
                     ownerless_stage_start
                 );
                 set_mariadb_error(*stmt->db);
+                disqualify_ownerless_explicit_transaction_visible_fast_proof_after_failed_sql(
+                    *stmt->db,
+                    policy_tokens,
+                    statement_started_in_explicit_transaction
+                );
                 const int dictionary_finish_result =
                     ownerless_finish_dictionary_ddl(*stmt->db, dictionary_ddl_started);
                 if (dictionary_finish_result != MYLITE_OK) {
@@ -3213,6 +3249,11 @@ int mylite_step(mylite_stmt *stmt) {
                         "ownerless prepared text write unexpectedly returned result metadata"
                     );
                 }
+                disqualify_ownerless_explicit_transaction_visible_fast_proof_after_failed_sql(
+                    *stmt->db,
+                    policy_tokens,
+                    statement_started_in_explicit_transaction
+                );
                 const int dictionary_finish_result =
                     ownerless_finish_dictionary_ddl(*stmt->db, dictionary_ddl_started);
                 if (dictionary_finish_result != MYLITE_OK) {
@@ -3240,6 +3281,11 @@ int mylite_step(mylite_stmt *stmt) {
                     ownerless_stage_start
                 );
                 set_mariadb_statement_error(*stmt);
+                disqualify_ownerless_explicit_transaction_visible_fast_proof_after_failed_sql(
+                    *stmt->db,
+                    policy_tokens,
+                    statement_started_in_explicit_transaction
+                );
                 const int dictionary_finish_result =
                     ownerless_finish_dictionary_ddl(*stmt->db, dictionary_ddl_started);
                 if (dictionary_finish_result != MYLITE_OK) {
@@ -4440,12 +4486,26 @@ int exec_result_impl(
     OwnerlessStatementNativeLifecycleRefreshScope native_lifecycle_refresh(
         dictionary_ddl_started || db->ownerless_peer_dictionary_refresh_requires_conservative_write
     );
+    const bool statement_visible_fast_path =
+        ownerless_statement_allows_visible_fast_path(*db, policy_tokens);
+    const bool statement_append_batch_fast_path =
+        ownerless_statement_allows_append_batch_fast_path(*db, policy_tokens);
+    update_ownerless_explicit_transaction_visible_fast_proof_before_sql(
+        *db,
+        policy_tokens,
+        statement_visible_fast_path
+    );
     OwnerlessStatementVisibleFastPathScope visible_fast_path(
-        ownerless_statement_allows_visible_fast_path(*db, policy_tokens),
-        ownerless_statement_allows_append_batch_fast_path(*db, policy_tokens)
+        statement_visible_fast_path,
+        statement_append_batch_fast_path
     );
     if (mysql_query(&db->mysql, sql) != 0) {
         set_mariadb_error(*db);
+        disqualify_ownerless_explicit_transaction_visible_fast_proof_after_failed_sql(
+            *db,
+            policy_tokens,
+            statement_started_in_explicit_transaction
+        );
         if (ownerless_stale_engine_error_allows_retry(
                 *db,
                 policy_tokens,
@@ -4493,6 +4553,11 @@ ownerless_query_success:
     const int result =
         store_and_emit_result(*db, metadata_callback, row_callback, ctx, &has_result);
     if (result != MYLITE_OK) {
+        disqualify_ownerless_explicit_transaction_visible_fast_proof_after_failed_sql(
+            *db,
+            policy_tokens,
+            statement_started_in_explicit_transaction
+        );
         if (ownerless_finish_dictionary_ddl(*db, dictionary_ddl_started) != MYLITE_OK) {
             set_error(*db, MYLITE_IOERR, "ownerless dictionary change could not finish");
         }
@@ -5082,12 +5147,34 @@ bool ownerless_insert_values_allows_append_batch_fast_path(const SqlPolicyTokens
     return ownerless_insert_values_statement_row_count(tokens, &row_count) && row_count == 1U;
 }
 
-bool ownerless_statement_allows_visible_fast_path(mylite_db &db, const SqlPolicyTokens &tokens) {
+bool ownerless_write_statement_allows_visible_fast_path(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
     if (db.ownerless_peer_dictionary_refresh_requires_conservative_write) {
         return false;
     }
     return ownerless_insert_values_statement_allows_visible_fast_path(tokens) &&
            !ownerless_insert_target_has_foreign_keys(db, tokens);
+}
+
+bool ownerless_transaction_commit_allows_visible_fast_path(
+    const mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    return token_equals(identifier_token_at(tokens, 0), "COMMIT") &&
+           ownerless_connection_is_in_explicit_transaction(db) &&
+           db.ownerless_transaction_has_local_write &&
+           db.ownerless_transaction_visible_fast_commit_candidate &&
+           !db.ownerless_transaction_visible_fast_commit_disqualified &&
+           !db.ownerless_peer_dictionary_refresh_requires_conservative_write;
+}
+
+bool ownerless_statement_allows_visible_fast_path(mylite_db &db, const SqlPolicyTokens &tokens) {
+    if (ownerless_write_statement_allows_visible_fast_path(db, tokens)) {
+        return true;
+    }
+    return ownerless_transaction_commit_allows_visible_fast_path(db, tokens);
 }
 
 bool ownerless_statement_allows_append_batch_fast_path(
@@ -6906,6 +6993,7 @@ int rollback_active_transaction(mylite_db &db) {
         set_ownerless_explicit_transaction_active(db, false);
         db.ownerless_transaction_has_local_write = false;
         db.ownerless_transaction_has_locking_read = false;
+        reset_ownerless_transaction_visible_fast_proof(db);
         db.ownerless_transaction_snapshot_visible_lsn = 0;
         db.ownerless_transaction_snapshot_visibility_pinned = false;
     }
@@ -13058,6 +13146,67 @@ bool ownerless_transaction_has_local_write_or_locking_read(const mylite_db &db) 
     return db.ownerless_transaction_has_local_write || db.ownerless_transaction_has_locking_read;
 }
 
+void reset_ownerless_transaction_visible_fast_proof(mylite_db &db) {
+    db.ownerless_transaction_visible_fast_commit_candidate = false;
+    db.ownerless_transaction_visible_fast_commit_disqualified = false;
+}
+
+void disqualify_ownerless_transaction_visible_fast_proof(mylite_db &db) {
+    db.ownerless_transaction_visible_fast_commit_candidate = false;
+    db.ownerless_transaction_visible_fast_commit_disqualified = true;
+}
+
+void update_ownerless_explicit_transaction_visible_fast_proof_before_sql(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    bool statement_visible_fast_path
+) {
+    if (!ownerless_connection_is_in_explicit_transaction(db) ||
+        sql_ends_explicit_transaction(tokens)) {
+        return;
+    }
+
+    const std::string_view first = identifier_token_at(tokens, 0);
+    const std::string_view second = identifier_token_at(tokens, 1);
+    if (token_equals(first, "SAVEPOINT") ||
+        (token_equals(first, "RELEASE") && token_equals(second, "SAVEPOINT")) ||
+        (token_equals(first, "ROLLBACK") && token_equals(second, "TO"))) {
+        disqualify_ownerless_transaction_visible_fast_proof(db);
+        return;
+    }
+
+    if (sql_statement_uses_locking_read(tokens)) {
+        disqualify_ownerless_transaction_visible_fast_proof(db);
+        return;
+    }
+
+    if (!sql_statement_requires_write(tokens)) {
+        return;
+    }
+
+    if (!statement_visible_fast_path) {
+        disqualify_ownerless_transaction_visible_fast_proof(db);
+        return;
+    }
+
+    if (!db.ownerless_transaction_visible_fast_commit_disqualified) {
+        db.ownerless_transaction_visible_fast_commit_candidate = true;
+    }
+}
+
+void disqualify_ownerless_explicit_transaction_visible_fast_proof_after_failed_sql(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    bool statement_started_in_explicit_transaction
+) {
+    if (!statement_started_in_explicit_transaction) {
+        return;
+    }
+    if (sql_statement_requires_write(tokens) || sql_statement_uses_locking_read(tokens)) {
+        disqualify_ownerless_transaction_visible_fast_proof(db);
+    }
+}
+
 bool ownerless_connection_allows_global_refresh(
     const mylite_db &db,
     bool allow_page_version_reads
@@ -13104,6 +13253,7 @@ int update_ownerless_transaction_state_after_successful_sql(
         set_ownerless_explicit_transaction_active(db, true);
         db.ownerless_transaction_has_local_write = false;
         db.ownerless_transaction_has_locking_read = false;
+        reset_ownerless_transaction_visible_fast_proof(db);
         db.ownerless_transaction_snapshot_visible_lsn =
             consistent_snapshot && db.ownerless_transaction_snapshot_pin_registered
                 ? db.ownerless_transaction_snapshot_pin_lsn
@@ -13127,6 +13277,7 @@ int update_ownerless_transaction_state_after_successful_sql(
         db.ownerless_active_transaction_isolation = db.ownerless_session_transaction_isolation;
         db.ownerless_transaction_has_local_write = false;
         db.ownerless_transaction_has_locking_read = false;
+        reset_ownerless_transaction_visible_fast_proof(db);
         db.ownerless_transaction_snapshot_visible_lsn = 0;
         db.ownerless_transaction_snapshot_visibility_pinned = false;
         return MYLITE_OK;
@@ -13145,6 +13296,7 @@ int update_ownerless_transaction_state_after_successful_sql(
         set_ownerless_explicit_transaction_active(db, false);
         db.ownerless_transaction_has_local_write = false;
         db.ownerless_transaction_has_locking_read = false;
+        reset_ownerless_transaction_visible_fast_proof(db);
         db.ownerless_transaction_snapshot_visible_lsn = 0;
         db.ownerless_transaction_snapshot_visibility_pinned = false;
         db.ownerless_active_transaction_isolation = db.ownerless_session_transaction_isolation;

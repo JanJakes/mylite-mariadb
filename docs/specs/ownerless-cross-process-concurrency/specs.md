@@ -4923,15 +4923,25 @@ subsystems that this mode needs:
   page-version WAL for non-autocommit ownerless SQL transactions in the
   transaction's own rollback-segment space, after the active history-proof page
   check has already refused rollback-segment and undo pages needed by commit
-  serialization. The current prepared explicit-transaction probe remains
-  unproven for visible-fast commit publication and therefore uses the
-  conservative native dirty-page flush fallback; a future visible-fast explicit
-  transaction path would still have to publish or otherwise prove its active
-  history pages before skipping the exact native history flush. Broader
-  redo/checkpoint reconciliation and transaction-scoped append batching remain
-  separate follow-up work. That keeps the next remaining performance slices
-  near native-support proof and InnoDB commit/row-insert work rather than
-  PHP/PHPUnit startup or SQL row encoding. The generic InnoDB read-complete
+  serialization. The explicit transaction visible-proof slice now carries a
+  conservative first-party proof from eligible `INSERT ... VALUES` writes to
+  the later `COMMIT`, so the prepared explicit-transaction probe can publish
+  visibility through the same fast commit gate instead of reporting
+  `flush_unproven_statement`; the write-history flush path inside
+  `trx_t::write_serialisation_history()` remains measured for this
+  explicit-transaction shape. The reduced stats-enabled sample for this slice
+  reported explicit-transaction commit visibility at `fast=1.000`,
+  `flush=0.000`, and `unproven=0.000` per transaction, with transaction-page
+  publication at `3.000` image pages and `9.000` buffer pages per transaction,
+  and the stats-off 1000-row run reported explicit transaction throughput at
+  `2307.08` ownerless ops/s versus `2708.92` ordinary ops/s, ratio `0.8517`.
+  Savepoint-controlled transactions are deliberately disqualified from this
+  proof and remain on the conservative unproven path. Broader
+  redo/checkpoint reconciliation, transaction-scoped append batching, and
+  explicit-transaction history-proof replacement remain separate follow-up
+  work. That keeps the next remaining performance slices near native-support
+  proof and InnoDB commit/row-insert work rather than PHP/PHPUnit startup or
+  SQL row encoding. The generic InnoDB read-complete
   ownerless overlay now runs only for MyLite-classified plain `SELECT`/`WITH`
   page-version reads; non-SELECT DDL and DML rely on explicit page-write
   refresh and publication paths. The current reduced stats-enabled autocommit
