@@ -317,7 +317,10 @@ Roles:
   The rollback-segment and undo-header history-proof pages remain part of the
   current ownerless write proof; unsafe-hook coverage now forces native-support
   page-version publication failure and verifies the native history flush
-  fallback before any smaller replacement proof can be claimed.
+  fallback before any smaller replacement proof can be claimed. The
+  rollback-segment proof page may use a hinted history-rseg page-log delta
+  payload after a standalone base record exists, but that optimization does not
+  elide the proof page and does not enable broad SYS-page delta encoding.
   Same-runtime reads covered by the handle's local-native autocommit write
   boundary do not publish a page-version pin or enable the file-read overlay
   while the runtime remains in a continuous single-owner epoch and has not

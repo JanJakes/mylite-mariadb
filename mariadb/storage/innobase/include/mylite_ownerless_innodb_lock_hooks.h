@@ -57,6 +57,8 @@ extern "C" {
 #define MYLITE_OWNERLESS_INNODB_PAGE_VERSION_SNAPSHOT_BOUNDARY 1U
 #define MYLITE_OWNERLESS_INNODB_PAGE_VERSION_EXTERNAL_SNAPSHOT_LINEAGE 2U
 
+#define MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_HISTORY_RSEG 1U
+
 struct ib_lock_t;
 struct buf_block_t;
 struct dict_index_t;
@@ -181,6 +183,7 @@ typedef int (*mylite_ownerless_innodb_page_publish_callback)(
     uint64_t visible_lsn,
     const void *page,
     uint32_t page_size,
+    uint32_t publish_flags,
     void *context);
 typedef void (*mylite_ownerless_innodb_page_publish_batch_callback)(void *context);
 typedef int (*mylite_ownerless_innodb_page_read_callback)(
@@ -467,6 +470,14 @@ int mylite_ownerless_innodb_publish_page_version(
     uint64_t visible_lsn,
     const void *page,
     uint32_t page_size);
+int mylite_ownerless_innodb_publish_page_version_with_flags(
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t page_lsn,
+    uint64_t visible_lsn,
+    const void *page,
+    uint32_t page_size,
+    uint32_t publish_flags);
 void mylite_ownerless_innodb_begin_page_publish_batch(void);
 void mylite_ownerless_innodb_end_page_publish_batch(void);
 int mylite_ownerless_innodb_read_page_version(

@@ -76,6 +76,7 @@ constexpr std::uint32_t k_record_flag_varint_compact_sparse_zero_payload = 8U;
 constexpr std::uint32_t k_record_flag_fill_sparse_zero_payload = 16U;
 constexpr std::uint32_t k_record_flag_index_delta_payload = 32U;
 constexpr std::uint32_t k_record_flag_undo_delta_payload = 64U;
+constexpr std::uint32_t k_record_flag_history_rseg_delta_payload = 512U;
 constexpr std::uint32_t k_record_flag_snapshot_boundary =
     MYLITE_OWNERLESS_PAGE_LOG_RECORD_SNAPSHOT_BOUNDARY;
 constexpr std::uint32_t k_record_flag_external_snapshot_lineage =
@@ -84,7 +85,7 @@ constexpr std::uint32_t k_record_encoding_flags =
     k_record_flag_trailing_zero_payload | k_record_flag_sparse_zero_payload |
     k_record_flag_compact_sparse_zero_payload | k_record_flag_varint_compact_sparse_zero_payload |
     k_record_flag_fill_sparse_zero_payload | k_record_flag_index_delta_payload |
-    k_record_flag_undo_delta_payload;
+    k_record_flag_undo_delta_payload | k_record_flag_history_rseg_delta_payload;
 constexpr std::uint32_t k_record_metadata_flags =
     k_record_flag_snapshot_boundary | k_record_flag_external_snapshot_lineage;
 constexpr std::uint32_t k_record_flags_known_mask =
@@ -293,6 +294,12 @@ enum PageLogAppendPerfStatIndex : std::size_t {
     PAGE_LOG_APPEND_PERF_UNDO_DELTA_FAST_PAYLOAD_BYTES,
     PAGE_LOG_APPEND_PERF_UNDO_DELTA_EXACT_RECORDS,
     PAGE_LOG_APPEND_PERF_UNDO_DELTA_EXACT_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_HISTORY_RSEG_DELTA_RECORDS,
+    PAGE_LOG_APPEND_PERF_HISTORY_RSEG_DELTA_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_HISTORY_RSEG_DELTA_FAST_RECORDS,
+    PAGE_LOG_APPEND_PERF_HISTORY_RSEG_DELTA_FAST_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_HISTORY_RSEG_DELTA_EXACT_RECORDS,
+    PAGE_LOG_APPEND_PERF_HISTORY_RSEG_DELTA_EXACT_PAYLOAD_BYTES,
     PAGE_LOG_APPEND_PERF_DELTA_FAST_REJECTED_LIMIT_RECORDS,
     PAGE_LOG_APPEND_PERF_DELTA_FAST_REJECTED_LIMIT_PAYLOAD_BYTES,
     PAGE_LOG_APPEND_PERF_DELTA_FAST_REJECTED_STANDALONE_RECORDS,
@@ -432,6 +439,20 @@ void page_log_append_perf_add_delta_accepted_record(
                 payload_size
             );
         }
+    } else if (delta_flag == k_record_flag_history_rseg_delta_payload) {
+        if (fast) {
+            page_log_append_perf_add(PAGE_LOG_APPEND_PERF_HISTORY_RSEG_DELTA_FAST_RECORDS, 1U);
+            page_log_append_perf_add(
+                PAGE_LOG_APPEND_PERF_HISTORY_RSEG_DELTA_FAST_PAYLOAD_BYTES,
+                payload_size
+            );
+        } else {
+            page_log_append_perf_add(PAGE_LOG_APPEND_PERF_HISTORY_RSEG_DELTA_EXACT_RECORDS, 1U);
+            page_log_append_perf_add(
+                PAGE_LOG_APPEND_PERF_HISTORY_RSEG_DELTA_EXACT_PAYLOAD_BYTES,
+                payload_size
+            );
+        }
     }
 }
 
@@ -561,7 +582,8 @@ int append_locked(
     std::uint64_t *out_record_offset,
     std::uint32_t extra_record_flags,
     bool has_precomputed_checksum,
-    std::uint64_t precomputed_checksum
+    std::uint64_t precomputed_checksum,
+    std::uint32_t append_options
 );
 int append_record_at_locked(
     int fd,
@@ -582,7 +604,8 @@ int append_record_at_locked(
     bool append_stats_enabled,
     bool append_detail_stats_enabled,
     bool has_precomputed_checksum,
-    std::uint64_t precomputed_checksum
+    std::uint64_t precomputed_checksum,
+    std::uint32_t append_options
 );
 int snapshot_locked(int fd, off_t log_offset, std::uint64_t *out_snapshot_end_offset);
 int snapshot_locked_with_generation(
@@ -729,6 +752,7 @@ bool page_delta_flag_for_page(
     std::uint32_t space_id,
     const void *page,
     std::uint32_t page_size,
+    bool allow_history_rseg_delta,
     std::uint32_t *out_delta_flag
 );
 CompactSparsePayloadComposition compact_sparse_payload_composition(
@@ -780,6 +804,7 @@ bool index_delta_base_snapshot_for_page(
     std::uint32_t page_no,
     const void *page,
     std::uint32_t page_size,
+    bool allow_history_rseg_delta,
     IndexPageDeltaBaseSnapshot *out_snapshot
 );
 bool index_delta_payload_beats_standalone(
@@ -821,7 +846,8 @@ void note_index_delta_base_after_successful_append(
     std::uint64_t record_offset,
     std::uint64_t record_payload_size,
     std::uint32_t record_flags,
-    std::uint64_t observed_standalone_payload_size
+    std::uint64_t observed_standalone_payload_size,
+    bool allow_history_rseg_delta
 );
 std::uint64_t index_delta_base_fingerprint(
     std::uint64_t log_device,
@@ -1138,7 +1164,8 @@ int append_at_common(
     bool validate_header,
     std::uint32_t extra_record_flags,
     bool has_precomputed_checksum,
-    std::uint64_t precomputed_checksum
+    std::uint64_t precomputed_checksum,
+    std::uint32_t append_options
 ) {
     const bool append_stats_enabled = page_log_append_perf_stats_are_enabled();
     PageLogAppendPerfScope total_scope(PAGE_LOG_APPEND_PERF_TOTAL_NS, append_stats_enabled);
@@ -1149,6 +1176,9 @@ int append_at_common(
         1U
     );
     if (fd < 0 || commit_lsn == 0U || page == nullptr || page_size == 0U) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if ((append_options & ~MYLITE_OWNERLESS_PAGE_LOG_APPEND_HISTORY_RSEG_DELTA) != 0U) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
     if (log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
@@ -1192,7 +1222,8 @@ int append_at_common(
                                         out_record_offset,
                                         extra_record_flags,
                                         has_precomputed_checksum,
-                                        precomputed_checksum
+                                        precomputed_checksum,
+                                        append_options
                                     )
                                   : header_result;
     release_log_lock(fd, k_append_lock_start);
@@ -1282,6 +1313,7 @@ int mylite_ownerless_page_log_append_at(
         true,
         0U,
         false,
+        0U,
         0U
     );
 }
@@ -1310,6 +1342,7 @@ int mylite_ownerless_page_log_append_initialized_at(
         false,
         0U,
         false,
+        0U,
         0U
     );
 }
@@ -1346,7 +1379,39 @@ int mylite_ownerless_page_log_append_initialized_at_with_checksum(
         false,
         0U,
         true,
-        page_checksum
+        page_checksum,
+        0U
+    );
+}
+
+int mylite_ownerless_page_log_append_initialized_at_with_checksum_and_options(
+    int fd,
+    std::uint64_t log_offset,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t page_lsn,
+    std::uint64_t commit_lsn,
+    const void *page,
+    std::uint32_t page_size,
+    std::uint64_t page_checksum,
+    std::uint32_t append_options,
+    std::uint64_t *out_record_offset
+) {
+    return append_at_common(
+        fd,
+        log_offset,
+        space_id,
+        page_no,
+        page_lsn,
+        commit_lsn,
+        page,
+        page_size,
+        out_record_offset,
+        false,
+        0U,
+        true,
+        page_checksum,
+        append_options
     );
 }
 
@@ -1374,6 +1439,7 @@ int mylite_ownerless_page_log_append_snapshot_boundary_initialized_at(
         false,
         k_record_flag_snapshot_boundary,
         false,
+        0U,
         0U
     );
 }
@@ -1402,6 +1468,7 @@ int mylite_ownerless_page_log_append_external_snapshot_lineage_initialized_at(
         false,
         k_record_flag_external_snapshot_lineage,
         false,
+        0U,
         0U
     );
 }
@@ -1431,7 +1498,8 @@ int mylite_ownerless_page_log_append_external_snapshot_lineage_initialized_at_wi
         false,
         k_record_flag_external_snapshot_lineage,
         true,
-        page_checksum
+        page_checksum,
+        0U
     );
 }
 
@@ -1507,6 +1575,7 @@ int page_log_append_session_append_common(
     std::uint32_t page_size,
     bool has_precomputed_checksum,
     std::uint64_t page_checksum,
+    std::uint32_t append_options,
     std::uint64_t *out_record_offset
 ) {
     const bool append_stats_enabled = page_log_append_perf_stats_are_enabled();
@@ -1523,7 +1592,8 @@ int page_log_append_session_append_common(
         page == nullptr || page_size == 0U ||
         session->log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) ||
         session->next_record_offset >
-            static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+            static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) ||
+        (append_options & ~MYLITE_OWNERLESS_PAGE_LOG_APPEND_HISTORY_RSEG_DELTA) != 0U) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
 
@@ -1548,7 +1618,8 @@ int page_log_append_session_append_common(
         append_stats_enabled,
         append_detail_stats_enabled,
         has_precomputed_checksum,
-        page_checksum
+        page_checksum,
+        append_options
     );
     if (result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
         session->next_record_offset = next_record_offset;
@@ -1578,6 +1649,7 @@ int mylite_ownerless_page_log_append_session_append(
         page_size,
         false,
         0U,
+        0U,
         out_record_offset
     );
 }
@@ -1605,6 +1677,36 @@ int mylite_ownerless_page_log_append_session_append_with_checksum(
         page_size,
         true,
         page_checksum,
+        0U,
+        out_record_offset
+    );
+}
+
+int mylite_ownerless_page_log_append_session_append_with_checksum_and_options(
+    int fd,
+    mylite_ownerless_page_log_append_session *session,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t page_lsn,
+    std::uint64_t commit_lsn,
+    const void *page,
+    std::uint32_t page_size,
+    std::uint64_t page_checksum,
+    std::uint32_t append_options,
+    std::uint64_t *out_record_offset
+) {
+    return page_log_append_session_append_common(
+        fd,
+        session,
+        space_id,
+        page_no,
+        page_lsn,
+        commit_lsn,
+        page,
+        page_size,
+        true,
+        page_checksum,
+        append_options,
         out_record_offset
     );
 }
@@ -2704,13 +2806,17 @@ int append_locked(
     std::uint64_t *out_record_offset,
     std::uint32_t extra_record_flags,
     bool has_precomputed_checksum,
-    std::uint64_t precomputed_checksum
+    std::uint64_t precomputed_checksum,
+    std::uint32_t append_options
 ) {
     const bool append_stats_enabled = page_log_append_perf_stats_are_enabled();
     const bool append_detail_stats_enabled =
         page_log_append_detail_perf_stats_are_enabled(append_stats_enabled);
     PageLogAppendPerfScope body_scope(PAGE_LOG_APPEND_PERF_BODY_NS, append_stats_enabled);
     if ((extra_record_flags & ~k_record_metadata_flags) != 0U) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if ((append_options & ~MYLITE_OWNERLESS_PAGE_LOG_APPEND_HISTORY_RSEG_DELTA) != 0U) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
     struct stat file_stat = {};
@@ -2749,7 +2855,8 @@ int append_locked(
         append_stats_enabled,
         append_detail_stats_enabled,
         has_precomputed_checksum,
-        precomputed_checksum
+        precomputed_checksum,
+        append_options
     );
 }
 
@@ -2772,7 +2879,8 @@ int append_record_at_locked(
     bool append_stats_enabled,
     bool append_detail_stats_enabled,
     bool has_precomputed_checksum,
-    std::uint64_t precomputed_checksum
+    std::uint64_t precomputed_checksum,
+    std::uint32_t append_options
 ) {
     off_t payload_offset = 0;
     if (!offset_adds(
@@ -2789,6 +2897,8 @@ int append_record_at_locked(
     thread_local std::vector<unsigned char> encoded_payload;
     encoded_payload.clear();
     std::uint64_t observed_standalone_payload_size = 0U;
+    const bool allow_history_rseg_delta =
+        (append_options & MYLITE_OWNERLESS_PAGE_LOG_APPEND_HISTORY_RSEG_DELTA) != 0U;
     try {
         const std::uint64_t stage_start_ns =
             append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
@@ -2803,6 +2913,7 @@ int append_record_at_locked(
             page_no,
             record_page,
             page_size,
+            allow_history_rseg_delta,
             &page_delta_snapshot
         );
         page_log_append_perf_add_elapsed_if_enabled(
@@ -3069,7 +3180,8 @@ int append_record_at_locked(
         static_cast<std::uint64_t>(record_offset),
         encoded_payload_size,
         record_flags,
-        observed_standalone_payload_size
+        observed_standalone_payload_size,
+        allow_history_rseg_delta
     );
     page_log_append_perf_add_elapsed_if_enabled(
         append_stats_enabled,
@@ -5127,8 +5239,13 @@ bool record_uses_undo_delta_payload(const PageRecordHeader &record) {
     return (record.flags & k_record_flag_undo_delta_payload) != 0U;
 }
 
+bool record_uses_history_rseg_delta_payload(const PageRecordHeader &record) {
+    return (record.flags & k_record_flag_history_rseg_delta_payload) != 0U;
+}
+
 bool record_uses_any_delta_payload(const PageRecordHeader &record) {
-    return record_uses_index_delta_payload(record) || record_uses_undo_delta_payload(record);
+    return record_uses_index_delta_payload(record) || record_uses_undo_delta_payload(record) ||
+           record_uses_history_rseg_delta_payload(record);
 }
 
 bool record_uses_any_sparse_zero_payload(const PageRecordHeader &record) {
@@ -5265,6 +5382,14 @@ CompactSparsePayloadComposition record_append_payload_encoding_stats(
     if ((flags & k_record_flag_undo_delta_payload) != 0U) {
         page_log_append_perf_add(PAGE_LOG_APPEND_PERF_UNDO_DELTA_RECORDS, 1U);
         page_log_append_perf_add(PAGE_LOG_APPEND_PERF_UNDO_DELTA_PAYLOAD_BYTES, payload_size);
+        return compact_sparse;
+    }
+    if ((flags & k_record_flag_history_rseg_delta_payload) != 0U) {
+        page_log_append_perf_add(PAGE_LOG_APPEND_PERF_HISTORY_RSEG_DELTA_RECORDS, 1U);
+        page_log_append_perf_add(
+            PAGE_LOG_APPEND_PERF_HISTORY_RSEG_DELTA_PAYLOAD_BYTES,
+            payload_size
+        );
         return compact_sparse;
     }
     if ((flags & (k_record_flag_sparse_zero_payload | k_record_flag_compact_sparse_zero_payload |
@@ -5530,6 +5655,7 @@ bool page_delta_flag_for_page(
     std::uint32_t space_id,
     const void *page,
     std::uint32_t page_size,
+    bool allow_history_rseg_delta,
     std::uint32_t *out_delta_flag
 ) {
     if (out_delta_flag == nullptr) {
@@ -5548,6 +5674,13 @@ bool page_delta_flag_for_page(
     }
     if (page_is_innodb_undo_log_page(page, page_size)) {
         *out_delta_flag = k_record_flag_undo_delta_payload;
+        return true;
+    }
+    if (allow_history_rseg_delta && page != nullptr &&
+        page_size >= k_innodb_fil_page_type_offset + sizeof(std::uint16_t) &&
+        load_be16(static_cast<const unsigned char *>(page) + k_innodb_fil_page_type_offset) ==
+            k_innodb_fil_page_type_sys) {
+        *out_delta_flag = k_record_flag_history_rseg_delta_payload;
         return true;
     }
     return false;
@@ -5580,7 +5713,8 @@ bool maybe_encode_page_delta_payload(
         return false;
     }
     if (snapshot.delta_flag != k_record_flag_index_delta_payload &&
-        snapshot.delta_flag != k_record_flag_undo_delta_payload) {
+        snapshot.delta_flag != k_record_flag_undo_delta_payload &&
+        snapshot.delta_flag != k_record_flag_history_rseg_delta_payload) {
         return false;
     }
 
@@ -5642,6 +5776,7 @@ bool index_delta_base_snapshot_for_page(
     std::uint32_t page_no,
     const void *page,
     std::uint32_t page_size,
+    bool allow_history_rseg_delta,
     IndexPageDeltaBaseSnapshot *out_snapshot
 ) {
     if (out_snapshot == nullptr) {
@@ -5653,7 +5788,13 @@ bool index_delta_base_snapshot_for_page(
     out_snapshot->standalone_payload_size = 0U;
     out_snapshot->page.reset();
     std::uint32_t delta_flag = 0U;
-    if (!page_delta_flag_for_page(space_id, page, page_size, &delta_flag)) {
+    if (!page_delta_flag_for_page(
+            space_id,
+            page,
+            page_size,
+            allow_history_rseg_delta,
+            &delta_flag
+        )) {
         return false;
     }
     return index_delta_base_snapshot(
@@ -5791,7 +5932,8 @@ bool index_delta_base_snapshot(
     out_snapshot->standalone_payload_size = 0U;
     out_snapshot->page.reset();
     if (delta_flag != k_record_flag_index_delta_payload &&
-        delta_flag != k_record_flag_undo_delta_payload) {
+        delta_flag != k_record_flag_undo_delta_payload &&
+        delta_flag != k_record_flag_history_rseg_delta_payload) {
         return false;
     }
 
@@ -5846,14 +5988,22 @@ void note_index_delta_base_after_successful_append(
     std::uint64_t record_offset,
     std::uint64_t record_payload_size,
     std::uint32_t record_flags,
-    std::uint64_t observed_standalone_payload_size
+    std::uint64_t observed_standalone_payload_size,
+    bool allow_history_rseg_delta
 ) {
     std::uint32_t delta_flag = 0U;
-    if (!page_delta_flag_for_page(space_id, page, page_size, &delta_flag)) {
+    if (!page_delta_flag_for_page(
+            space_id,
+            page,
+            page_size,
+            allow_history_rseg_delta,
+            &delta_flag
+        )) {
         return;
     }
     const std::uint32_t record_delta_flag =
-        record_flags & (k_record_flag_index_delta_payload | k_record_flag_undo_delta_payload);
+        record_flags & (k_record_flag_index_delta_payload | k_record_flag_undo_delta_payload |
+                        k_record_flag_history_rseg_delta_payload);
     if (record_delta_flag != 0U && record_delta_flag != delta_flag) {
         return;
     }

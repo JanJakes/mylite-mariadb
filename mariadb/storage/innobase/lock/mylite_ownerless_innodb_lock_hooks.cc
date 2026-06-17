@@ -2578,6 +2578,19 @@ extern "C" int mylite_ownerless_innodb_publish_page_version(
     const void *page,
     uint32_t page_size)
 {
+  return mylite_ownerless_innodb_publish_page_version_with_flags(
+      space_id, page_no, page_lsn, visible_lsn, page, page_size, 0U);
+}
+
+extern "C" int mylite_ownerless_innodb_publish_page_version_with_flags(
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t page_lsn,
+    uint64_t visible_lsn,
+    const void *page,
+    uint32_t page_size,
+    uint32_t publish_flags)
+{
   if (!ownerless_lock_hooks_enabled())
     return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
 
@@ -2587,7 +2600,7 @@ extern "C" int mylite_ownerless_innodb_publish_page_version(
   if (hook == nullptr || context == nullptr)
     return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
   return hook(space_id, page_no, page_lsn, visible_lsn, page, page_size,
-              context);
+              publish_flags, context);
 }
 
 extern "C" void mylite_ownerless_innodb_begin_page_publish_batch(void)

@@ -2875,12 +2875,19 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
   if (id.space() == TRX_SYS_SPACE && id.page_no() == TRX_SYS_PAGE_NO &&
       page_type == FIL_PAGE_TYPE_TRX_SYS)
     ownerless_page_publish_count_trx_system_diff(page, page_size);
+  const unsigned history_proof_roles=
+      ownerless_page_write_history_proof_roles(
+          ownerless_trx, id.space(), id.page_no());
+  const uint32_t publish_flags=
+      (history_proof_roles & ownerless_page_write_history_proof_role_rseg)
+          ? MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_HISTORY_RSEG
+          : 0U;
   start_ns= ownerless_page_write_perf_enabled() ?
       ownerless_page_write_perf_now_ns() :
       0;
-  const int result= mylite_ownerless_innodb_publish_page_version(
+  const int result= mylite_ownerless_innodb_publish_page_version_with_flags(
       id.space(), id.page_no(), source_page_lsn, m_commit_lsn, page,
-      static_cast<uint32_t>(page_size));
+      static_cast<uint32_t>(page_size), publish_flags);
   ownerless_page_write_perf_add_elapsed(
       OWNERLESS_PAGE_WRITE_PERF_PUBLISH_HOOK_NS, start_ns);
   ownerless_page_publish_count(
@@ -2891,9 +2898,6 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
   {
     if (ownerless_page_publish_type_has_native_support(page_type))
     {
-      const unsigned history_proof_roles=
-          ownerless_page_write_history_proof_roles(
-              ownerless_trx, id.space(), id.page_no());
       ownerless_page_publish_count(
           ownerless_page_publish_native_support_published);
       ownerless_page_publish_count_native_support_published_page_type(

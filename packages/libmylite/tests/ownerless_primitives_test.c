@@ -64,6 +64,7 @@
 #define MYLITE_TEST_PAGE_LOG_RECORD_FLAGS_OFFSET 20U
 #define MYLITE_TEST_PAGE_LOG_RECORD_FLAG_INDEX_DELTA 32U
 #define MYLITE_TEST_PAGE_LOG_RECORD_FLAG_UNDO_DELTA 64U
+#define MYLITE_TEST_PAGE_LOG_RECORD_FLAG_HISTORY_RSEG_DELTA 512U
 #define MYLITE_TEST_PAGE_LOG_RECORD_FLAG_EXTERNAL_SNAPSHOT_LINEAGE 256U
 #define MYLITE_TEST_PAGE_LOG_RECORD_PAYLOAD_CHECKSUM_OFFSET 48U
 
@@ -189,6 +190,12 @@ enum page_log_append_perf_stat_index {
     PAGE_LOG_APPEND_PERF_STAT_UNDO_DELTA_FAST_PAYLOAD_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_UNDO_DELTA_EXACT_RECORDS,
     PAGE_LOG_APPEND_PERF_STAT_UNDO_DELTA_EXACT_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_HISTORY_RSEG_DELTA_RECORDS,
+    PAGE_LOG_APPEND_PERF_STAT_HISTORY_RSEG_DELTA_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_HISTORY_RSEG_DELTA_FAST_RECORDS,
+    PAGE_LOG_APPEND_PERF_STAT_HISTORY_RSEG_DELTA_FAST_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_HISTORY_RSEG_DELTA_EXACT_RECORDS,
+    PAGE_LOG_APPEND_PERF_STAT_HISTORY_RSEG_DELTA_EXACT_PAYLOAD_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_DELTA_FAST_REJECTED_LIMIT_RECORDS,
     PAGE_LOG_APPEND_PERF_STAT_DELTA_FAST_REJECTED_LIMIT_PAYLOAD_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_DELTA_FAST_REJECTED_STANDALONE_RECORDS,
@@ -266,6 +273,7 @@ static void test_page_log_attributes_index_page_identity_deltas(void);
 static void test_page_log_encodes_index_delta_payloads(void);
 static void test_page_log_encodes_undo_delta_payloads(void);
 static void test_page_log_keeps_sys_pages_standalone(void);
+static void test_page_log_encodes_history_rseg_delta_payloads(void);
 static void test_page_log_fast_encodes_small_index_delta_payloads(void);
 static void test_page_log_reuses_fast_miss_delta_payload_for_exact_fallback(void);
 static void test_page_log_refreshes_delta_standalone_size_estimate(void);
@@ -471,6 +479,7 @@ int main(void) {
     test_page_log_encodes_index_delta_payloads();
     test_page_log_encodes_undo_delta_payloads();
     test_page_log_keeps_sys_pages_standalone();
+    test_page_log_encodes_history_rseg_delta_payloads();
     test_page_log_fast_encodes_small_index_delta_payloads();
     test_page_log_reuses_fast_miss_delta_payload_for_exact_fallback();
     test_page_log_refreshes_delta_standalone_size_estimate();
@@ -3014,9 +3023,11 @@ static void test_page_log_keeps_sys_pages_standalone(void) {
 
         assert(stats[PAGE_LOG_APPEND_PERF_STAT_CALLS] == 2U);
         assert(stats[PAGE_LOG_APPEND_PERF_STAT_SYS_RECORDS] == 2U);
+        assert(stats[PAGE_LOG_APPEND_PERF_STAT_HISTORY_RSEG_DELTA_RECORDS] == 0U);
         second_flags = read_page_log_record_flags(fd, second_record_offset);
         assert((second_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_INDEX_DELTA) == 0U);
         assert((second_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_UNDO_DELTA) == 0U);
+        assert((second_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_HISTORY_RSEG_DELTA) == 0U);
 
         memset(out_page, 0xEE, sizeof(out_page));
         assert(
@@ -3036,6 +3047,159 @@ static void test_page_log_keeps_sys_pages_standalone(void) {
         assert(commit_lsn == delta_lsn);
         assert(memcmp(out_page, page_delta, sizeof(page_delta)) == 0);
     }
+
+    assert(close(fd) == 0);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_encodes_history_rseg_delta_payloads(void) {
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "history-rseg-delta-page-log.bin");
+    int fd = open_file(log_path);
+    uint8_t page_base[MYLITE_TEST_PAGE_SIZE];
+    uint8_t page_delta[MYLITE_TEST_PAGE_SIZE];
+    uint8_t out_page[MYLITE_TEST_PAGE_SIZE];
+    uint64_t delta_record_offset = 0;
+    uint64_t page_lsn = 0;
+    uint64_t commit_lsn = 0;
+    uint32_t out_page_size = 0;
+    uint64_t stats[PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
+    page_log_checkpoint_index_context checkpoint_context = {0};
+    uint32_t delta_flags = 0;
+    uint32_t retained_flags = 0;
+
+    memset(page_base, 0x5A, sizeof(page_base));
+    store_test_be32(page_base, MYLITE_TEST_INNODB_PAGE_OFFSET_OFFSET, 3U);
+    store_test_be64(page_base, MYLITE_TEST_INNODB_PAGE_LSN_OFFSET, 1000U);
+    store_test_be16(
+        page_base,
+        MYLITE_TEST_INNODB_PAGE_TYPE_OFFSET,
+        MYLITE_TEST_INNODB_PAGE_TYPE_SYS
+    );
+    store_test_be32(page_base, MYLITE_TEST_INNODB_PAGE_SPACE_ID_OFFSET, 1U);
+
+    memcpy(page_delta, page_base, sizeof(page_delta));
+    store_test_be64(page_delta, MYLITE_TEST_INNODB_PAGE_LSN_OFFSET, 1010U);
+    page_delta[128] ^= 0x11U;
+    page_delta[3072] ^= 0x27U;
+    memset(out_page, 0xEE, sizeof(out_page));
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    mylite_ownerless_page_log_reset_append_perf_stats();
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
+    assert(
+        mylite_ownerless_page_log_append_initialized_at_with_checksum_and_options(
+            fd,
+            0U,
+            1U,
+            3U,
+            1000U,
+            1000U,
+            page_base,
+            sizeof(page_base),
+            mylite_ownerless_page_log_checksum_page(page_base, sizeof(page_base)),
+            MYLITE_OWNERLESS_PAGE_LOG_APPEND_HISTORY_RSEG_DELTA,
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append_initialized_at_with_checksum_and_options(
+            fd,
+            0U,
+            1U,
+            3U,
+            1010U,
+            1010U,
+            page_delta,
+            sizeof(page_delta),
+            mylite_ownerless_page_log_checksum_page(page_delta, sizeof(page_delta)),
+            MYLITE_OWNERLESS_PAGE_LOG_APPEND_HISTORY_RSEG_DELTA,
+            &delta_record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(0);
+    mylite_ownerless_page_log_read_append_perf_stats(stats, PAGE_LOG_APPEND_PERF_STAT_COUNT);
+
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_CALLS] == 2U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_SYS_RECORDS] == 2U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_HISTORY_RSEG_DELTA_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_HISTORY_RSEG_DELTA_FAST_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_HISTORY_RSEG_DELTA_PAYLOAD_BYTES] > 0U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_HISTORY_RSEG_DELTA_PAYLOAD_BYTES] < sizeof(page_delta));
+    delta_flags = read_page_log_record_flags(fd, delta_record_offset);
+    assert((delta_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_HISTORY_RSEG_DELTA) != 0U);
+    assert((delta_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_INDEX_DELTA) == 0U);
+    assert((delta_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_UNDO_DELTA) == 0U);
+
+    assert(
+        mylite_ownerless_page_log_read_record_at(
+            fd,
+            0U,
+            delta_record_offset,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page_delta));
+    assert(page_lsn == 1010U);
+    assert(commit_lsn == 1010U);
+    assert(memcmp(out_page, page_delta, sizeof(page_delta)) == 0);
+
+    memset(out_page, 0xEE, sizeof(out_page));
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            1U,
+            3U,
+            1010U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page_delta));
+    assert(page_lsn == 1010U);
+    assert(commit_lsn == 1010U);
+    assert(memcmp(out_page, page_delta, sizeof(page_delta)) == 0);
+
+    assert(
+        mylite_ownerless_page_log_checkpoint(
+            fd,
+            1005U,
+            capture_page_log_record_for_checkpoint_index,
+            &checkpoint_context
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(checkpoint_context.retained.count == 1U);
+    assert(checkpoint_context.retained.records[0].commit_lsn == 1010U);
+    retained_flags =
+        read_page_log_record_flags(fd, checkpoint_context.retained.records[0].record_offset);
+    assert((retained_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_HISTORY_RSEG_DELTA) == 0U);
+
+    memset(out_page, 0xEE, sizeof(out_page));
+    assert(
+        mylite_ownerless_page_log_read_record_at(
+            fd,
+            0U,
+            checkpoint_context.retained.records[0].record_offset,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page_delta));
+    assert(page_lsn == 1010U);
+    assert(commit_lsn == 1010U);
+    assert(memcmp(out_page, page_delta, sizeof(page_delta)) == 0);
 
     assert(close(fd) == 0);
     free(log_path);
