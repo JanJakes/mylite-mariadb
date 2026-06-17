@@ -673,6 +673,7 @@ static void test_ownerless_single_owner_page_write_refresh_skips_external_reads(
 static void test_ownerless_single_owner_external_refresh_skips_page_reads(void);
 static void test_ownerless_single_owner_history_wal_proof(void);
 static void test_ownerless_single_owner_native_support_page_wal_elision(void);
+static void test_ownerless_explicit_transaction_undo_wal_elision(void);
 static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void);
 static void test_ownerless_insert_fk_fast_path_cache_invalidation(void);
 static void test_ownerless_single_owner_foreground_reclaim_budget_defers_to_timer(void);
@@ -3687,6 +3688,10 @@ int main(int argc, char **argv) {
         test_ownerless_single_owner_native_support_page_wal_elision();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "explicit-transaction-undo-wal-elision") == 0) {
+        test_ownerless_explicit_transaction_undo_wal_elision();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "single-owner-multi-row-insert-visible-fast-path") == 0) {
         test_ownerless_single_owner_multi_row_insert_visible_fast_path();
         return 0;
@@ -4735,6 +4740,7 @@ int main(int argc, char **argv) {
             "statement-checkpoint-scheduling|single-owner-page-write-refresh-skip|"
             "single-owner-external-refresh-skip|single-owner-history-wal-proof|"
             "single-owner-native-support-page-wal-elision|"
+            "explicit-transaction-undo-wal-elision|"
             "single-owner-multi-row-insert-visible-fast-path|"
             "insert-fk-fast-path-cache|"
             "single-owner-foreground-reclaim-budget|"
@@ -4915,6 +4921,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_external_refresh_skips_page_reads),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_history_wal_proof),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_native_support_page_wal_elision),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_explicit_transaction_undo_wal_elision),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_multi_row_insert_visible_fast_path),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_foreground_reclaim_budget_defers_to_timer),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_peer_history_disables_foreground_reclaim_budget),
@@ -9952,6 +9959,179 @@ static void test_ownerless_single_owner_native_support_page_wal_elision(void) {
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_native_support_elision") == rows);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_explicit_transaction_undo_wal_elision(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-explicit-txn-undo-elision.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    uint64_t page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT] = {0};
+    uint64_t commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT] = {0};
+    mylite_stmt *stmt = NULL;
+    const char *tail = NULL;
+    mylite_db *db;
+    const unsigned rows = 32U;
+    const unsigned expected_sum = 10U * rows * (rows + 1U) / 2U;
+    uint64_t native_support_published_type_pages;
+    uint64_t native_support_elided_type_pages;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_explicit_txn_undo_elision ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "payload VARBINARY(4000) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert(
+        mylite_prepare(
+            db,
+            "INSERT INTO app.ownerless_explicit_txn_undo_elision "
+            "VALUES (?, ?, REPEAT('u', 4000))",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            &tail
+        ) == MYLITE_OK
+    );
+    assert(stmt != NULL);
+    assert(tail != NULL && *tail == '\0');
+    assert(mylite_bind_parameter_count(stmt) == 2U);
+
+    mylite_ownerless_innodb_set_page_publish_stats_enabled(1);
+    mylite_ownerless_innodb_set_commit_visibility_stats_enabled(1);
+    mylite_ownerless_innodb_reset_page_publish_stats();
+    mylite_ownerless_innodb_reset_commit_visibility_stats();
+
+    exec_ok(db, "START TRANSACTION");
+    for (unsigned id = 1U; id <= rows; ++id) {
+        assert(mylite_bind_uint64(stmt, 1U, id) == MYLITE_OK);
+        assert(mylite_bind_uint64(stmt, 2U, id * 10U) == MYLITE_OK);
+        assert(mylite_step(stmt) == MYLITE_DONE);
+        assert(mylite_reset(stmt) == MYLITE_OK);
+        assert(mylite_clear_bindings(stmt) == MYLITE_OK);
+    }
+    exec_ok(db, "COMMIT");
+
+    mylite_ownerless_innodb_read_page_publish_stats(
+        page_stats,
+        OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT
+    );
+    mylite_ownerless_innodb_read_commit_visibility_stats(
+        commit_stats,
+        OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT
+    );
+    mylite_ownerless_innodb_set_page_publish_stats_enabled(0);
+    mylite_ownerless_innodb_set_commit_visibility_stats_enabled(0);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    stmt = NULL;
+
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_explicit_txn_undo_elision") == rows
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_explicit_txn_undo_elision") ==
+        expected_sum
+    );
+
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_CANDIDATES] > 0U);
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_PUBLISHED] > 0U);
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_FAILED] == 0U);
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_SKIPPED_UNPUBLISHABLE] == 0U);
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_SKIPPED_LOCK_ONLY] == 0U);
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_SKIPPED_NO_SOURCE] == 0U);
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_SKIPPED_NO_SPACE] == 0U);
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_SKIPPED_ALLOC] == 0U);
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_SKIPPED_LSN_MISMATCH] == 0U);
+
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT] > 0U);
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED] > 0U);
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED] > 0U);
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_UNDO] > 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FAST] == 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH] > 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_UNPROVEN_STATEMENT] > 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_PUBLISH_FAILED] == 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_NO_PUBLISHED_PAGES] == 0U);
+    assert(
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_RSEG] ==
+        0U
+    );
+    assert(
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO] ==
+        0U
+    );
+    assert(
+        page_stats
+            [OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELISION_BLOCKED_HISTORY_PROOF_RSEG] >=
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_RSEG]
+    );
+    assert(
+        page_stats
+            [OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELISION_BLOCKED_HISTORY_PROOF_UNDO] >=
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO]
+    );
+    assert(
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_UNDO] >=
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO]
+    );
+    assert(
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_UNDO] >
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_UNDO]
+    );
+    native_support_published_type_pages =
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_UNDO] +
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SPACE_METADATA] +
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_TRX_SYSTEM];
+    native_support_elided_type_pages =
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_UNDO] +
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_SPACE_METADATA] +
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_TRX_SYSTEM];
+    assert(
+        native_support_published_type_pages ==
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED]
+    );
+    assert(
+        native_support_elided_type_pages ==
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED]
+    );
+    assert(
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED] +
+            page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED] ==
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT]
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_explicit_txn_undo_elision") == rows
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_explicit_txn_undo_elision") ==
+        expected_sum
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_explicit_txn_undo_elision") == rows
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_explicit_txn_undo_elision") ==
+        expected_sum
+    );
     assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);

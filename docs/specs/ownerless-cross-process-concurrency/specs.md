@@ -4918,9 +4918,20 @@ subsystems that this mode needs:
   undo-report MTR commit bucket, near-zero page-record encoding and success
   bookkeeping deltas, no assign/space/record-size/other errors, ownerless
   cached-undo hits at `0.810` per insert, and fresh undo creates at `0.190`
-  per insert. That keeps the next performance slice near ownerless
-  mini-transaction page publication rather than PHP/PHPUnit startup or SQL row
-  encoding. The generic InnoDB read-complete
+  per insert. The explicit transaction undo-elision slice reduces that path by
+  skipping pre-commit rollback-segment `FIL_PAGE_UNDO_LOG` native-support
+  page-version WAL for non-autocommit ownerless SQL transactions in the
+  transaction's own rollback-segment space, after the active history-proof page
+  check has already refused rollback-segment and undo pages needed by commit
+  serialization. The current prepared explicit-transaction probe remains
+  unproven for visible-fast commit publication and therefore uses the
+  conservative native dirty-page flush fallback; a future visible-fast explicit
+  transaction path would still have to publish or otherwise prove its active
+  history pages before skipping the exact native history flush. Broader
+  redo/checkpoint reconciliation and transaction-scoped append batching remain
+  separate follow-up work. That keeps the next remaining performance slices
+  near native-support proof and InnoDB commit/row-insert work rather than
+  PHP/PHPUnit startup or SQL row encoding. The generic InnoDB read-complete
   ownerless overlay now runs only for MyLite-classified plain `SELECT`/`WITH`
   page-version reads; non-SELECT DDL and DML rely on explicit page-write
   refresh and publication paths. The current reduced stats-enabled autocommit

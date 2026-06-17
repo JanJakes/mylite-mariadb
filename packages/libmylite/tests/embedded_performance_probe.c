@@ -1811,8 +1811,23 @@ static void emit_ownerless_transaction_phase_summary(
         1U
     );
     emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_native_support_elided_pages_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_native_support_elided_pages_per_transaction",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED],
+        1U
+    );
+    emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_insert_txn_native_support_published_undo_pages_per_insert",
         page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_UNDO],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_native_support_elided_undo_pages_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED_TYPE_UNDO],
         insert_iterations
     );
     emit_summary_count_per_iteration(
@@ -1820,6 +1835,18 @@ static void emit_ownerless_transaction_phase_summary(
         "insert",
         page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_TRX_SYS],
         insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_native_support_published_history_proof_rseg_"
+        "pages_per_transaction",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_RSEG],
+        1U
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_native_support_published_history_proof_undo_"
+        "pages_per_transaction",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO],
+        1U
     );
     emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_insert_txn_snapshot_boundary_pages_per_insert",

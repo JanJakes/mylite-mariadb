@@ -1275,14 +1275,19 @@ static bool ownerless_page_write_can_elide_native_support_page(
         ownerless_page_publish_native_support_elision_blocked_history_proof_undo);
     return false;
   }
-  if (!trx->auto_commit && !ownerless_page_write_sql_autocommit(trx))
+  const trx_rseg_t *rseg= trx->rsegs.m_redo.rseg;
+  if (rseg == nullptr || rseg->space == nullptr ||
+      rseg->space->id != space_id)
     return false;
+
+  if (trx->mysql_thd != nullptr && !trx->auto_commit &&
+      !ownerless_page_write_sql_autocommit(trx))
+    return page_type == FIL_PAGE_UNDO_LOG;
+
   if (!ownerless_page_write_sql_allows_visible_fast_path(trx))
     return false;
 
-  const trx_rseg_t *rseg= trx->rsegs.m_redo.rseg;
-  return rseg != nullptr && rseg->space != nullptr &&
-         rseg->space->id == space_id;
+  return true;
 }
 
 static bool ownerless_space_path_is_undo_tablespace(const char *path)
