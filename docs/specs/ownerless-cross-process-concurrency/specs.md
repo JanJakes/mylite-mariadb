@@ -5410,6 +5410,13 @@ subsystems that this mode needs:
   `1046.79 ops/s` versus ordinary autocommit at `3673.54 ops/s`, ratio
   `0.2850`, so this is a bounded diagnostics hot-path cleanup rather than
   evidence that the larger write-throughput gap is solved.
+  A follow-up page-publish stats-off fast path then hoisted the disabled
+  page-publish attribution decision once per native publish call and skips
+  diagnostics-only page-type, identity, history-proof, and result counter
+  helper calls while stats are disabled. The focused native-support SQL
+  selector now performs a stats-disabled ownerless write and verifies
+  representative page-publish counters remain zero, while enabled attribution
+  counters remain covered by the same selector and production probe.
   The checkpoint legacy-write elision slice then removed the legacy
   latest/visible payload write from advancing checkpoint updates after
   checksum-protected LSN records are initialized, exposing a

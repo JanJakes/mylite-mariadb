@@ -857,6 +857,15 @@ workload, and stats-enabled probes still emit page-write summaries. The first
 stats-off sample after the cleanup reported ownerless autocommit at
 `1046.79 ops/s` versus ordinary autocommit at `3673.54 ops/s`, ratio `0.2850`,
 so this does not change the remaining performance target.
+The page-publish stats-off fast-path slice applies the same production-path
+discipline to ownerless page-publish attribution: the native publish hot path
+now snapshots the disabled page-publish stats flag once and skips
+diagnostics-only page-type, identity, history-proof, and failure/success
+counter helpers when those stats are off. Publication, page-log append,
+history-proof success marking, checkpoint ordering, and recovery semantics are
+unchanged. Focused SQL coverage proves a stats-disabled ownerless write leaves
+representative page-publish counters at zero while the enabled attribution path
+still reports native-support and history-proof counters.
 A follow-up production attribution slice now splits native-support page
 publication into published versus elided page classes. The reduced
 stats-enabled sample reported `2.000` published native-support pages per

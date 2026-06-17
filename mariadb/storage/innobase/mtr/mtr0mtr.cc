@@ -1259,7 +1259,7 @@ static bool ownerless_page_write_sql_allows_visible_fast_path(
 
 static bool ownerless_page_write_can_elide_native_support_page(
     const trx_t *trx, uint32_t space_id, uint32_t page_no,
-    uint16_t page_type) noexcept
+    uint16_t page_type, bool count_stats) noexcept
 {
   if (!ownerless_page_publish_type_has_native_support(page_type))
     return false;
@@ -1269,10 +1269,11 @@ static bool ownerless_page_write_can_elide_native_support_page(
       ownerless_page_write_history_proof_roles(trx, space_id, page_no);
   if (history_proof_roles != 0)
   {
-    ownerless_page_publish_count_history_proof_roles(
-        history_proof_roles,
-        ownerless_page_publish_native_support_elision_blocked_history_proof_rseg,
-        ownerless_page_publish_native_support_elision_blocked_history_proof_undo);
+    if (count_stats)
+      ownerless_page_publish_count_history_proof_roles(
+          history_proof_roles,
+          ownerless_page_publish_native_support_elision_blocked_history_proof_rseg,
+          ownerless_page_publish_native_support_elision_blocked_history_proof_undo);
     return false;
   }
   const trx_rseg_t *rseg= trx->rsegs.m_redo.rseg;
@@ -2759,20 +2760,25 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
   if (recv_recovery_is_on() || !srv_was_started)
     return;
 
-  ownerless_page_publish_count(ownerless_page_publish_candidates);
+  const bool publish_stats_enabled= ownerless_page_publish_stats_enabled.load(
+      std::memory_order_relaxed);
+  if (publish_stats_enabled)
+    ownerless_page_publish_count(ownerless_page_publish_candidates);
   trx_t *ownerless_trx= ownerless_page_write_trx();
   const page_id_t id{bpage.id()};
   if (id.space() >= SRV_TMP_SPACE_ID || !bpage.in_file())
   {
-    ownerless_page_publish_count(
-        ownerless_page_publish_skipped_unpublishable);
+    if (publish_stats_enabled)
+      ownerless_page_publish_count(
+          ownerless_page_publish_skipped_unpublishable);
     ownerless_page_write_note_publish_failure(ownerless_trx);
     return;
   }
   if (ownerless_page_write_lock_only_transaction_page(
           ownerless_trx, bpage))
   {
-    ownerless_page_publish_count(ownerless_page_publish_skipped_lock_only);
+    if (publish_stats_enabled)
+      ownerless_page_publish_count(ownerless_page_publish_skipped_lock_only);
     ownerless_page_write_note_publish_failure(ownerless_trx);
     return;
   }
@@ -2780,7 +2786,8 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
   const byte *source= bpage.zip.data ? bpage.zip.data : bpage.frame;
   if (source == nullptr)
   {
-    ownerless_page_publish_count(ownerless_page_publish_skipped_no_source);
+    if (publish_stats_enabled)
+      ownerless_page_publish_count(ownerless_page_publish_skipped_no_source);
     ownerless_page_write_note_publish_failure(ownerless_trx);
     return;
   }
@@ -2788,28 +2795,33 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
   const lsn_t source_page_lsn= mach_read_from_8(source + FIL_PAGE_LSN);
   if (source_page_lsn != m_commit_lsn)
   {
-    ownerless_page_publish_count(
-        ownerless_page_publish_skipped_lsn_mismatch);
+    if (publish_stats_enabled)
+      ownerless_page_publish_count(
+          ownerless_page_publish_skipped_lsn_mismatch);
     ownerless_page_write_note_publish_failure(ownerless_trx);
     return;
   }
 
   const uint16_t source_page_type= fil_page_get_type(source);
   if (ownerless_page_write_can_elide_native_support_page(
-          ownerless_trx, id.space(), id.page_no(), source_page_type))
+          ownerless_trx, id.space(), id.page_no(), source_page_type,
+          publish_stats_enabled))
   {
-    ownerless_page_publish_count_page_type(source_page_type);
-    ownerless_page_publish_count_identity(
-        id.space(), id.page_no(), m_commit_lsn, source_page_type);
-    ownerless_page_publish_count(
-        ownerless_page_publish_native_support_elided);
-    ownerless_page_publish_count_native_support_elided_page_type(
-        source_page_type);
-    ownerless_page_publish_count_native_support_elided_system_page_type(
-        source_page_type);
-    if (source_page_type == FIL_PAGE_TYPE_SYS)
-      ownerless_page_publish_count_elided_sys_identity(
-          id.space(), id.page_no());
+    if (publish_stats_enabled)
+    {
+      ownerless_page_publish_count_page_type(source_page_type);
+      ownerless_page_publish_count_identity(
+          id.space(), id.page_no(), m_commit_lsn, source_page_type);
+      ownerless_page_publish_count(
+          ownerless_page_publish_native_support_elided);
+      ownerless_page_publish_count_native_support_elided_page_type(
+          source_page_type);
+      ownerless_page_publish_count_native_support_elided_system_page_type(
+          source_page_type);
+      if (source_page_type == FIL_PAGE_TYPE_SYS)
+        ownerless_page_publish_count_elided_sys_identity(
+            id.space(), id.page_no());
+    }
     return;
   }
 
@@ -2821,7 +2833,8 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
   {
     ownerless_page_write_perf_add_elapsed(
         OWNERLESS_PAGE_WRITE_PERF_PUBLISH_SPACE_NS, start_ns);
-    ownerless_page_publish_count(ownerless_page_publish_skipped_no_space);
+    if (publish_stats_enabled)
+      ownerless_page_publish_count(ownerless_page_publish_skipped_no_space);
     ownerless_page_write_note_publish_failure(ownerless_trx);
     return;
   }
@@ -2847,7 +2860,8 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
       1);
   if (page == nullptr)
   {
-    ownerless_page_publish_count(ownerless_page_publish_skipped_alloc);
+    if (publish_stats_enabled)
+      ownerless_page_publish_count(ownerless_page_publish_skipped_alloc);
     ownerless_page_write_note_publish_failure(ownerless_trx);
     return;
   }
@@ -2868,16 +2882,20 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
   ownerless_page_write_perf_add_elapsed(
       OWNERLESS_PAGE_WRITE_PERF_PUBLISH_CHECKSUM_NS, start_ns);
 
-  const uint16_t page_type= fil_page_get_type(page);
-  ownerless_page_publish_count_page_type(page_type);
-  ownerless_page_publish_count_identity(
-      id.space(), id.page_no(), m_commit_lsn, page_type);
-  if (id.space() == TRX_SYS_SPACE && id.page_no() == TRX_SYS_PAGE_NO &&
-      page_type == FIL_PAGE_TYPE_TRX_SYS)
-    ownerless_page_publish_count_trx_system_diff(page, page_size);
   const unsigned history_proof_roles=
       ownerless_page_write_history_proof_roles(
           ownerless_trx, id.space(), id.page_no());
+  uint16_t page_type= source_page_type;
+  if (publish_stats_enabled)
+  {
+    page_type= fil_page_get_type(page);
+    ownerless_page_publish_count_page_type(page_type);
+    ownerless_page_publish_count_identity(
+        id.space(), id.page_no(), m_commit_lsn, page_type);
+    if (id.space() == TRX_SYS_SPACE && id.page_no() == TRX_SYS_PAGE_NO &&
+        page_type == FIL_PAGE_TYPE_TRX_SYS)
+      ownerless_page_publish_count_trx_system_diff(page, page_size);
+  }
   const uint32_t publish_flags=
       (history_proof_roles & ownerless_page_write_history_proof_role_rseg)
           ? MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_HISTORY_RSEG
@@ -2890,13 +2908,15 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
       static_cast<uint32_t>(page_size), publish_flags);
   ownerless_page_write_perf_add_elapsed(
       OWNERLESS_PAGE_WRITE_PERF_PUBLISH_HOOK_NS, start_ns);
-  ownerless_page_publish_count(
-      result == MYLITE_OWNERLESS_INNODB_LOCK_OK ?
-          ownerless_page_publish_published :
-          ownerless_page_publish_failed);
+  if (publish_stats_enabled)
+    ownerless_page_publish_count(
+        result == MYLITE_OWNERLESS_INNODB_LOCK_OK ?
+            ownerless_page_publish_published :
+            ownerless_page_publish_failed);
   if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
   {
-    if (ownerless_page_publish_type_has_native_support(page_type))
+    if (publish_stats_enabled &&
+        ownerless_page_publish_type_has_native_support(page_type))
     {
       ownerless_page_publish_count(
           ownerless_page_publish_native_support_published);

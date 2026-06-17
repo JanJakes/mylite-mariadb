@@ -9764,6 +9764,7 @@ static void test_ownerless_single_owner_native_support_page_wal_elision(void) {
     char *database_path = path_join(root, "ownerless-single-owner-native-support-elision.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     uint64_t page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT] = {0};
+    uint64_t disabled_page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT] = {0};
     uint64_t database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT] = {0};
     uint64_t disabled_database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT] = {0};
     uint64_t disabled_page_write_stats[OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_DISABLED_PROBE_COUNT] = {
@@ -9772,6 +9773,7 @@ static void test_ownerless_single_owner_native_support_page_wal_elision(void) {
     mylite_db *db;
     char sql[256];
     const unsigned rows = 16U;
+    const unsigned disabled_insert_id = rows + 1U;
     uint64_t native_support_published_type_pages;
     uint64_t native_support_elided_type_pages;
     uint64_t native_support_published_system_type_pages;
@@ -9833,10 +9835,28 @@ static void test_ownerless_single_owner_native_support_page_wal_elision(void) {
     mylite_ownerless_database_set_perf_stats_enabled(0);
     mylite_ownerless_innodb_set_page_publish_stats_enabled(0);
     mylite_ownerless_database_reset_perf_stats();
-    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_native_support_elision") == rows);
+    mylite_ownerless_innodb_reset_page_publish_stats();
+    assert(
+        snprintf(
+            sql,
+            sizeof(sql),
+            "INSERT INTO app.ownerless_native_support_elision "
+            "VALUES (%u, REPEAT('d', 4000))",
+            disabled_insert_id
+        ) > 0
+    );
+    exec_ok(db, sql);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_native_support_elision") ==
+        disabled_insert_id
+    );
     mylite_ownerless_database_read_perf_stats(
         disabled_database_stats,
         OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT
+    );
+    mylite_ownerless_innodb_read_page_publish_stats(
+        disabled_page_stats,
+        OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT
     );
 
     assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_CANDIDATES] > 0U);
@@ -9861,6 +9881,17 @@ static void test_ownerless_single_owner_native_support_page_wal_elision(void) {
     assert(
         disabled_database_stats
             [OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_SKIPPED_NATIVE_SUPPORT] == 0U
+    );
+    assert(disabled_page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_CANDIDATES] == 0U);
+    assert(disabled_page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_PUBLISHED] == 0U);
+    assert(disabled_page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT] == 0U);
+    assert(
+        disabled_page_stats
+            [OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_RSEG] == 0U
+    );
+    assert(
+        disabled_page_stats
+            [OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO] == 0U
     );
     assert(disabled_page_write_stats[OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_ENTER_CALLS] == 0U);
     native_support_published_type_pages =
@@ -10096,12 +10127,18 @@ static void test_ownerless_single_owner_native_support_page_wal_elision(void) {
     assert(mylite_close(db) == MYLITE_OK);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
-    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_native_support_elision") == rows);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_native_support_elision") ==
+        disabled_insert_id
+    );
     assert(mylite_close(db) == MYLITE_OK);
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
-    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_native_support_elision") == rows);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_native_support_elision") ==
+        disabled_insert_id
+    );
     assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);
