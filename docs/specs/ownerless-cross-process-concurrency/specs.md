@@ -5320,10 +5320,13 @@ subsystems that this mode needs:
   pages stay standalone and the required rollback-segment plus undo-header
   proof publication remains unchanged. A follow-up delta note slot-reuse slice
   carries the matched process-local delta-base slot index from snapshot lookup
-  into the successful post-append note path and revalidates that slot before
-  falling back to the old fingerprint/probe loop. This keeps the same volatile
-  base-cache rules and durable WAL semantics while trimming duplicate cache
-  lookup work for accepted deltas. A later MTR wrapper fast-path audit rejected
+  into the successful post-append note path and revalidates that slot for both
+  accepted deltas and exact-fallback standalone base refreshes before falling
+  back to the old fingerprint/probe loop. Primitive coverage exercises the
+  standalone-refresh branch through the internal
+  `delta_base_standalone_slot_reuse_records` diagnostic. This keeps the same
+  volatile base-cache rules and durable WAL semantics while trimming duplicate
+  cache lookup work. A later MTR wrapper fast-path audit rejected
   caching
   `ownerless_page_write_uses_transaction_release()` per publish pass or
   reusing the tracked-page lookup for release after ownerless stress found

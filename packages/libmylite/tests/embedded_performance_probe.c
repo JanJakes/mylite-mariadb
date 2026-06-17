@@ -635,6 +635,7 @@ enum page_log_append_perf_stat_index {
     PAGE_LOG_APPEND_PERF_STAT_STANDALONE_SIZE_PROBE_NS,
     PAGE_LOG_APPEND_PERF_STAT_STANDALONE_MATERIALIZE_SKIPPED_RECORDS,
     PAGE_LOG_APPEND_PERF_STAT_STANDALONE_MATERIALIZE_SKIPPED_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_DELTA_BASE_STANDALONE_SLOT_REUSE_RECORDS,
     PAGE_LOG_APPEND_PERF_STAT_PRECOMPUTED_CHECKSUM_RECORDS,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
@@ -8021,6 +8022,11 @@ static void emit_page_log_append_perf_stats(const char *prefix) {
         prefix,
         "delta_base_note",
         values[PAGE_LOG_APPEND_PERF_STAT_DELTA_BASE_NOTE_NS]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "delta_base_standalone_slot_reuse_records",
+        values[PAGE_LOG_APPEND_PERF_STAT_DELTA_BASE_STANDALONE_SLOT_REUSE_RECORDS]
     );
     emit_page_log_append_perf_ms(prefix, "checksum", values[PAGE_LOG_APPEND_PERF_STAT_CHECKSUM_NS]);
     emit_page_log_append_perf_count(

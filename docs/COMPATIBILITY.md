@@ -1225,10 +1225,13 @@ CPU cleanup only; page-log records, marker bits, payload decoding fallback,
 checkpoint proof rules, and replay behavior are unchanged.
 The delta note slot-reuse slice then carries the process-local delta-base slot
 index found during snapshot lookup into the successful post-append note path.
-Delta appends revalidate that preferred slot under the same cache mutex before
-falling back to the existing fingerprint/probe loop. This keeps the same
-non-chained delta records, payload bytes, refresh boundary, checkpoint rewrite,
-and recovery behavior while trimming duplicate volatile cache work.
+Delta appends and exact-fallback standalone base refreshes revalidate that
+preferred slot under the same cache mutex before falling back to the existing
+fingerprint/probe loop. The primitive test covers the standalone-refresh branch
+with the internal `delta_base_standalone_slot_reuse_records` diagnostic. This
+keeps the same non-chained delta records, payload bytes, refresh boundary,
+checkpoint rewrite, and recovery behavior while trimming duplicate volatile
+cache work.
 A local MTR wrapper fast-path prototype that cached
 `ownerless_page_write_uses_transaction_release()` per publish pass and reused
 the tracked-page lookup for release was rejected after stress evidence: one

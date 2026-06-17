@@ -322,6 +322,7 @@ enum PageLogAppendPerfStatIndex : std::size_t {
     PAGE_LOG_APPEND_PERF_STANDALONE_SIZE_PROBE_NS,
     PAGE_LOG_APPEND_PERF_STANDALONE_MATERIALIZE_SKIPPED_RECORDS,
     PAGE_LOG_APPEND_PERF_STANDALONE_MATERIALIZE_SKIPPED_BYTES,
+    PAGE_LOG_APPEND_PERF_DELTA_BASE_STANDALONE_SLOT_REUSE_RECORDS,
     PAGE_LOG_APPEND_PERF_PRECOMPUTED_CHECKSUM_RECORDS,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
@@ -843,7 +844,8 @@ void note_index_delta_base_after_successful_append(
     std::uint64_t observed_standalone_payload_size,
     std::uint32_t delta_flag,
     bool has_preferred_slot_index,
-    std::size_t preferred_slot_index
+    std::size_t preferred_slot_index,
+    bool append_stats_enabled
 );
 std::uint64_t index_delta_base_fingerprint(
     std::uint64_t log_device,
@@ -3301,7 +3303,8 @@ int append_record_at_locked(
             observed_standalone_payload_size,
             page_delta_flag,
             page_delta_snapshot.has_slot_index,
-            page_delta_snapshot.slot_index
+            page_delta_snapshot.slot_index,
+            append_stats_enabled
         );
     }
     page_log_append_perf_add_elapsed_if_enabled(
@@ -6062,7 +6065,8 @@ void note_index_delta_base_after_successful_append(
     std::uint64_t observed_standalone_payload_size,
     std::uint32_t delta_flag,
     bool has_preferred_slot_index,
-    std::size_t preferred_slot_index
+    std::size_t preferred_slot_index,
+    bool append_stats_enabled
 ) {
     if (delta_flag != k_record_flag_index_delta_payload &&
         delta_flag != k_record_flag_undo_delta_payload &&
@@ -6128,6 +6132,62 @@ void note_index_delta_base_after_successful_append(
         return;
     }
 
+    const auto *bytes = static_cast<const unsigned char *>(page);
+    const auto slot_matches_current_base = [&](const IndexPageDeltaBaseSlot &slot) {
+        return slot.valid && slot.log_device == log_device && slot.log_inode == log_inode &&
+               slot.log_offset == log_offset && slot.log_generation == log_generation &&
+               slot.delta_flag == delta_flag && slot.space_id == space_id &&
+               slot.page_no == page_no;
+    };
+    const auto note_standalone_base = [&](IndexPageDeltaBaseSlot &slot, bool matching_slot) {
+        const bool matching_page_size = matching_slot && slot.page_size == page_size &&
+                                        slot.page != nullptr && slot.page->size() == page_size;
+        slot.log_device = log_device;
+        slot.log_inode = log_inode;
+        slot.log_offset = log_offset;
+        slot.log_generation = log_generation;
+        slot.delta_flag = delta_flag;
+        slot.space_id = space_id;
+        slot.page_no = page_no;
+        slot.page_size = page_size;
+        slot.record_offset = record_offset;
+        slot.standalone_payload_size = record_payload_size;
+        if (!matching_page_size) {
+            slot.standalone_observations = 1U;
+        } else if (slot.standalone_observations < std::numeric_limits<std::uint32_t>::max()) {
+            ++slot.standalone_observations;
+        }
+        slot.delta_records_since_base = 0U;
+        try {
+            slot.page = std::make_shared<std::vector<unsigned char>>(bytes, bytes + page_size);
+            slot.valid = true;
+            return true;
+        } catch (const std::bad_alloc &) {
+            slot.valid = false;
+            slot.page_size = 0U;
+            slot.delta_flag = 0U;
+            slot.record_offset = 0U;
+            slot.standalone_payload_size = 0U;
+            slot.standalone_observations = 0U;
+            slot.delta_records_since_base = 0U;
+            slot.page.reset();
+            return false;
+        }
+    };
+    if (has_preferred_slot_index && preferred_slot_index < k_index_delta_base_slot_count) {
+        IndexPageDeltaBaseSlot &slot = index_page_delta_base_slots[preferred_slot_index];
+        if (slot_matches_current_base(slot)) {
+            if (note_standalone_base(slot, true)) {
+                page_log_append_perf_add_if_enabled(
+                    append_stats_enabled,
+                    PAGE_LOG_APPEND_PERF_DELTA_BASE_STANDALONE_SLOT_REUSE_RECORDS,
+                    1U
+                );
+            }
+            return;
+        }
+    }
+
     const std::uint64_t fingerprint = index_delta_base_fingerprint(
         log_device,
         log_inode,
@@ -6139,46 +6199,12 @@ void note_index_delta_base_after_successful_append(
     );
     const std::size_t first_slot =
         static_cast<std::size_t>(fingerprint) & (k_index_delta_base_slot_count - 1U);
-    const auto *bytes = static_cast<const unsigned char *>(page);
     for (std::size_t attempt = 0; attempt < k_index_delta_base_probe_limit; ++attempt) {
         IndexPageDeltaBaseSlot &slot = index_page_delta_base_slots
             [(first_slot + attempt) & (k_index_delta_base_slot_count - 1U)];
-        const bool matching_slot =
-            slot.valid && slot.log_device == log_device && slot.log_inode == log_inode &&
-            slot.log_offset == log_offset && slot.log_generation == log_generation &&
-            slot.delta_flag == delta_flag && slot.space_id == space_id && slot.page_no == page_no;
+        const bool matching_slot = slot_matches_current_base(slot);
         if (matching_slot || !slot.valid) {
-            const bool matching_page_size = matching_slot && slot.page_size == page_size &&
-                                            slot.page != nullptr && slot.page->size() == page_size;
-            slot.log_device = log_device;
-            slot.log_inode = log_inode;
-            slot.log_offset = log_offset;
-            slot.log_generation = log_generation;
-            slot.delta_flag = delta_flag;
-            slot.space_id = space_id;
-            slot.page_no = page_no;
-            slot.page_size = page_size;
-            slot.record_offset = record_offset;
-            slot.standalone_payload_size = record_payload_size;
-            if (!matching_page_size) {
-                slot.standalone_observations = 1U;
-            } else if (slot.standalone_observations < std::numeric_limits<std::uint32_t>::max()) {
-                ++slot.standalone_observations;
-            }
-            slot.delta_records_since_base = 0U;
-            try {
-                slot.page = std::make_shared<std::vector<unsigned char>>(bytes, bytes + page_size);
-                slot.valid = true;
-            } catch (const std::bad_alloc &) {
-                slot.valid = false;
-                slot.page_size = 0U;
-                slot.delta_flag = 0U;
-                slot.record_offset = 0U;
-                slot.standalone_payload_size = 0U;
-                slot.standalone_observations = 0U;
-                slot.delta_records_since_base = 0U;
-                slot.page.reset();
-            }
+            note_standalone_base(slot, matching_slot);
             return;
         }
     }
