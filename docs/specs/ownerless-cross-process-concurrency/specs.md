@@ -4057,7 +4057,11 @@ Tasks:
    deadlock exits. The `ownerless-external-seed-96-127-replay` follow-up
    records the next replay window for seeds `96` through `127` at rounds `2`,
    with FK graph seeds `106`, `113`, and `118` recovering on attempt `2` after
-   transient raw MariaDB `1213` deadlock exits.
+   transient raw MariaDB `1213` deadlock exits. The
+   `ownerless-external-seed-128-159-replay` follow-up records the next replay
+   window for seeds `128` through `159` at rounds `2`, with FK graph seeds
+   `129` and `132` recovering on attempt `2` after transient raw MariaDB
+   `1213` deadlock exits.
    Separate foreign-key graph stress
    coverage runs with
    `MYLITE_OWNERLESS_FK_GRAPH_STRESS_ROUNDS=48`, concurrent ownerless workers
@@ -4301,14 +4305,14 @@ Tasks:
    transaction, DDL stress, and FK graph generated traces for deterministic
    external stress probes, including focused Docker-backed replay for the
    default DDL seed set and contiguous combined random transaction plus DDL
-   seed-sweep replay windows through seed `127`; the `16` through `31`,
-   `32` through `63`, `64` through `95`, and `96` through `127` replays also
-   cover FK graph seeds at rounds `2`. FK graph
+   seed-sweep replay windows through seed `159`; the `16` through `31`,
+   `32` through `63`, `64` through `95`, `96` through `127`, and `128`
+   through `159` replays also cover FK graph seeds at rounds `2`. FK graph
    now participates in the dependency-free combined seed-sweep command-plan
    windows, and focused Docker-backed FK graph seed replay has passed the
    default seed set plus the `16` through `31`, `32` through `63`, and
-   `64` through `95`, and `96` through `127` windows with bounded whole-seed
-   retries for transient raw MariaDB deadlock exits.
+   `64` through `95`, `96` through `127`, and `128` through `159` windows with
+   bounded whole-seed retries for transient raw MariaDB deadlock exits.
 
 Exit criteria:
 

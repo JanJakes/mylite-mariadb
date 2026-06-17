@@ -86,7 +86,9 @@ whole-seed retries recovering transient raw MariaDB `1213` exits for seeds
 `64`, `81`, and `85`. The next replay covers the same three seeded suites over
 seeds `96` through `127` at rounds `2`, with FK graph whole-seed retries
 recovering transient raw MariaDB `1213` exits for seeds `106`, `113`, and
-`118`.
+`118`. The next replay covers seeds `128` through `159` at rounds `2`, with FK
+graph whole-seed retries recovering transient raw MariaDB `1213` exits for
+seeds `129` and `132`.
 Longer randomized external MariaDB/RQG stress remains planned.
 
 Ownerless stale-reader file-lifecycle replay now includes same-schema and
