@@ -143,6 +143,7 @@ static int page_publish_hook(
     uint64_t visible_lsn,
     const void *page,
     uint32_t page_size,
+    uint32_t publish_flags,
     void *context
 );
 static int page_read_hook(
@@ -652,6 +653,7 @@ static int page_publish_hook(
     uint64_t visible_lsn,
     const void *page,
     uint32_t page_size,
+    uint32_t publish_flags,
     void *context
 ) {
     (void)space_id;
@@ -660,6 +662,7 @@ static int page_publish_hook(
     (void)visible_lsn;
     (void)page;
     (void)page_size;
+    (void)publish_flags;
     (void)context;
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
 }
