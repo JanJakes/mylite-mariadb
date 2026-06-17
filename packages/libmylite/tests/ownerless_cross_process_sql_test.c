@@ -2914,6 +2914,7 @@ static void assert_concurrency_wal_retained_for(const char *database_path, unsig
 static unsigned ownerless_blob_size_matrix_payload_bytes(unsigned row);
 static unsigned long long ownerless_blob_size_matrix_total_payload_bytes(void);
 static void remove_concurrency_shm(const char *database_path);
+static void remove_concurrency_wal(const char *database_path);
 static int capture_first_column(void *ctx, int column_count, char **values, char **columns);
 static int capture_ownerless_stress_values(
     void *ctx,
@@ -8868,6 +8869,10 @@ static void test_ownerless_native_file_op_marker_clears_without_page_log(void) {
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(paths);
 
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    assert(mylite_close(db) == MYLITE_OK);
+    remove_concurrency_wal(database_path);
     assert(concurrency_wal_is_checkpointed(database_path));
     write_concurrency_checkpoint_lsns(database_path, 0U, 0U);
     write_concurrency_native_file_op_checkpoint_needed(database_path, 1);
@@ -74354,9 +74359,20 @@ static off_t concurrency_wal_size(const char *database_path) {
 }
 
 static int concurrency_wal_is_checkpointed(const char *database_path) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *wal_path = path_join(concurrency_path, "mylite-concurrency.wal");
+    struct stat wal_stat;
     const off_t empty_log_end =
         MYLITE_TEST_CONCURRENCY_RECOVERY_HEADER_SIZE + MYLITE_TEST_PAGE_LOG_HEADER_SIZE;
-    return concurrency_wal_size(database_path) == empty_log_end;
+    int exists;
+
+    exists = stat(wal_path, &wal_stat) == 0;
+    if (!exists) {
+        assert(errno == ENOENT);
+    }
+    free(wal_path);
+    free(concurrency_path);
+    return !exists || wal_stat.st_size == empty_log_end;
 }
 
 static int wait_for_concurrency_wal_checkpointed(const char *database_path, unsigned timeout_ms) {
@@ -74412,6 +74428,15 @@ static void remove_concurrency_shm(const char *database_path) {
 
     assert(unlink(shm_path) == 0);
     free(shm_path);
+    free(concurrency_path);
+}
+
+static void remove_concurrency_wal(const char *database_path) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *wal_path = path_join(concurrency_path, "mylite-concurrency.wal");
+
+    assert(unlink(wal_path) == 0);
+    free(wal_path);
     free(concurrency_path);
 }
 
