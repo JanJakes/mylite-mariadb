@@ -5534,6 +5534,14 @@ subsystems that this mode needs:
   into compact CI-facing summaries. It does not change page-log write order;
   payloads still reach disk before record headers so crash recovery cannot see
   a valid header for a missing payload.
+  A follow-up native-support record-marker slice adds a page-log metadata bit
+  for ownerless native-support page-version records after the publish hook has
+  already classified the page image. Native checkpoint proof replay and
+  oldest-snapshot boundary checks can skip payload decoding for marked records,
+  while unmarked records fall back to the legacy page-type decode path. The
+  marker survives retained-record checkpoint rewrites and does not change
+  payload bytes, checksums, page-version ordering, or the remaining
+  rollback-segment/undo history-proof requirement.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.

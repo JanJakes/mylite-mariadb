@@ -81,15 +81,21 @@ constexpr std::uint32_t k_record_flag_snapshot_boundary =
     MYLITE_OWNERLESS_PAGE_LOG_RECORD_SNAPSHOT_BOUNDARY;
 constexpr std::uint32_t k_record_flag_external_snapshot_lineage =
     MYLITE_OWNERLESS_PAGE_LOG_RECORD_EXTERNAL_SNAPSHOT_LINEAGE;
+constexpr std::uint32_t k_record_flag_native_support_state =
+    MYLITE_OWNERLESS_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE;
 constexpr std::uint32_t k_record_encoding_flags =
     k_record_flag_trailing_zero_payload | k_record_flag_sparse_zero_payload |
     k_record_flag_compact_sparse_zero_payload | k_record_flag_varint_compact_sparse_zero_payload |
     k_record_flag_fill_sparse_zero_payload | k_record_flag_index_delta_payload |
     k_record_flag_undo_delta_payload | k_record_flag_history_rseg_delta_payload;
-constexpr std::uint32_t k_record_metadata_flags =
-    k_record_flag_snapshot_boundary | k_record_flag_external_snapshot_lineage;
+constexpr std::uint32_t k_record_metadata_flags = k_record_flag_snapshot_boundary |
+                                                  k_record_flag_external_snapshot_lineage |
+                                                  k_record_flag_native_support_state;
 constexpr std::uint32_t k_record_flags_known_mask =
     k_record_encoding_flags | k_record_metadata_flags;
+constexpr std::uint32_t k_append_options_known_mask =
+    MYLITE_OWNERLESS_PAGE_LOG_APPEND_HISTORY_RSEG_DELTA |
+    MYLITE_OWNERLESS_PAGE_LOG_APPEND_NATIVE_SUPPORT_STATE;
 constexpr unsigned char k_fill_sparse_run_kind_raw = 0U;
 constexpr unsigned char k_fill_sparse_run_kind_fill = 1U;
 constexpr std::uint32_t k_fill_sparse_min_fill_run_size = 8U;
@@ -1170,7 +1176,7 @@ int append_at_common(
     if (fd < 0 || commit_lsn == 0U || page == nullptr || page_size == 0U) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
-    if ((append_options & ~MYLITE_OWNERLESS_PAGE_LOG_APPEND_HISTORY_RSEG_DELTA) != 0U) {
+    if ((append_options & ~k_append_options_known_mask) != 0U) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
     if (log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
@@ -1495,6 +1501,37 @@ int mylite_ownerless_page_log_append_external_snapshot_lineage_initialized_at_wi
     );
 }
 
+int mylite_ownerless_page_log_append_external_snapshot_lineage_initialized_at_with_checksum_and_options(
+    int fd,
+    std::uint64_t log_offset,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t page_lsn,
+    std::uint64_t commit_lsn,
+    const void *page,
+    std::uint32_t page_size,
+    std::uint64_t page_checksum,
+    std::uint32_t append_options,
+    std::uint64_t *out_record_offset
+) {
+    return append_at_common(
+        fd,
+        log_offset,
+        space_id,
+        page_no,
+        page_lsn,
+        commit_lsn,
+        page,
+        page_size,
+        out_record_offset,
+        false,
+        k_record_flag_external_snapshot_lineage,
+        true,
+        page_checksum,
+        append_options
+    );
+}
+
 int mylite_ownerless_page_log_append_session_begin_initialized_at(
     int fd,
     std::uint64_t log_offset,
@@ -1585,7 +1622,7 @@ int page_log_append_session_append_common(
         session->log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) ||
         session->next_record_offset >
             static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) ||
-        (append_options & ~MYLITE_OWNERLESS_PAGE_LOG_APPEND_HISTORY_RSEG_DELTA) != 0U) {
+        (append_options & ~k_append_options_known_mask) != 0U) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
 
@@ -1857,6 +1894,28 @@ int mylite_ownerless_page_log_record_is_external_snapshot_lineage_at(
     }
     *out_is_external_snapshot_lineage =
         (record.flags & k_record_flag_external_snapshot_lineage) != 0U ? 1 : 0;
+    return MYLITE_OWNERLESS_PAGE_LOG_OK;
+}
+
+int mylite_ownerless_page_log_record_is_native_support_state_at(
+    int fd,
+    std::uint64_t record_offset,
+    int *out_is_native_support_state
+) {
+    if (out_is_native_support_state != nullptr) {
+        *out_is_native_support_state = 0;
+    }
+    if (fd < 0 || out_is_native_support_state == nullptr ||
+        record_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    PageRecordHeader record = {};
+    if (!read_record_header(fd, static_cast<off_t>(record_offset), record)) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    *out_is_native_support_state =
+        (record.flags & k_record_flag_native_support_state) != 0U ? 1 : 0;
     return MYLITE_OWNERLESS_PAGE_LOG_OK;
 }
 
@@ -2808,7 +2867,7 @@ int append_locked(
     if ((extra_record_flags & ~k_record_metadata_flags) != 0U) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
-    if ((append_options & ~MYLITE_OWNERLESS_PAGE_LOG_APPEND_HISTORY_RSEG_DELTA) != 0U) {
+    if ((append_options & ~k_append_options_known_mask) != 0U) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
     struct stat file_stat = {};
@@ -3115,10 +3174,14 @@ int append_record_at_locked(
     }
 
     PageRecordHeader record = {};
+    std::uint32_t metadata_record_flags = extra_record_flags;
+    if ((append_options & MYLITE_OWNERLESS_PAGE_LOG_APPEND_NATIVE_SUPPORT_STATE) != 0U) {
+        metadata_record_flags |= k_record_flag_native_support_state;
+    }
     record.space_id = space_id;
     record.page_no = page_no;
     record.page_size = page_size;
-    record.flags = record_flags | extra_record_flags;
+    record.flags = record_flags | metadata_record_flags;
     record.page_lsn = page_lsn;
     record.commit_lsn = commit_lsn;
     record.payload_size = encoded_payload_size;
@@ -6905,6 +6968,9 @@ bool record_requires_oldest_snapshot_boundary(
     off_t payload_offset,
     const PageRecordHeader &record
 ) {
+    if ((record.flags & k_record_flag_native_support_state) != 0U) {
+        return false;
+    }
     std::uint16_t page_type = 0;
     if (!read_record_page_type(fd, payload_offset, record, &page_type)) {
         return true;

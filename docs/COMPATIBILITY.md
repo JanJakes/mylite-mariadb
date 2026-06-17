@@ -361,6 +361,13 @@ compact sparse, varint compact sparse, and fill-sparse records by streaming the
 logical full-page checksum instead of reconstructing a full 16 KiB page just to
 prove payload integrity; delta records still use the existing base-page
 reconstruction path because checkpoint rewrite depends on the full image.
+Ownerless native-support page-version records now carry a page-log metadata
+marker set by the publish hook after it classifies the page image. Native
+checkpoint proof replay and oldest-snapshot boundary checks can skip payload
+decoding for marked native-support records, while unmarked records fall back to
+the previous page-type decode path. The marker is preserved by retained-record
+checkpoint rewrites and does not replace the existing rollback-segment/undo
+history proof or broader redo/checkpoint recovery work.
 Ownerless completion still requires the broader recovery, DDL/file-lifecycle,
 active-reader, native history-proof replacement, and external stress gaps
 tracked in the ownerless concurrency spec.

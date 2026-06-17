@@ -2159,6 +2159,7 @@ int append_ownerless_page_version(
     const void *page,
     std::uint32_t page_size,
     std::uint64_t page_checksum,
+    bool native_support_page,
     std::uint32_t publish_flags,
     std::uint64_t *out_record_offset
 );
@@ -10951,6 +10952,19 @@ int collect_ownerless_native_page_checkpoint_record(
         proof->blocked = true;
         return MYLITE_OWNERLESS_PAGE_LOG_OK;
     }
+    int is_native_support_state = 0;
+    const int native_support_result = mylite_ownerless_page_log_record_is_native_support_state_at(
+        proof->runtime->concurrency_wal_fd,
+        record_offset,
+        &is_native_support_state
+    );
+    if (native_support_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        proof->blocked = true;
+        return MYLITE_OWNERLESS_PAGE_LOG_OK;
+    }
+    if (is_native_support_state != 0) {
+        return MYLITE_OWNERLESS_PAGE_LOG_OK;
+    }
     if (ownerless_page_log_record_is_native_support_state(
             *proof->runtime,
             space_id,
@@ -15559,12 +15573,16 @@ int append_ownerless_page_version(
     const void *page,
     std::uint32_t page_size,
     std::uint64_t page_checksum,
+    bool native_support_page,
     std::uint32_t publish_flags,
     std::uint64_t *out_record_offset
 ) {
     std::uint32_t append_options = 0U;
     if ((publish_flags & MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_HISTORY_RSEG) != 0U) {
         append_options |= MYLITE_OWNERLESS_PAGE_LOG_APPEND_HISTORY_RSEG_DELTA;
+    }
+    if (native_support_page) {
+        append_options |= MYLITE_OWNERLESS_PAGE_LOG_APPEND_NATIVE_SUPPORT_STATE;
     }
     if (ownerless_page_log_append_batch.hook == hook) {
         if (ownerless_page_log_append_batch.session.active == 0) {
@@ -15907,9 +15925,11 @@ int ownerless_innodb_page_publish_hook(
         g_runtime.ownerless_runtime_consumed_external_snapshot_page_version_wal.load(
             std::memory_order_relaxed
         );
+    const std::uint32_t native_support_append_options =
+        native_support_page ? MYLITE_OWNERLESS_PAGE_LOG_APPEND_NATIVE_SUPPORT_STATE : 0U;
     const int append_result =
         external_snapshot_lineage_active
-            ? mylite_ownerless_page_log_append_external_snapshot_lineage_initialized_at_with_checksum(
+            ? mylite_ownerless_page_log_append_external_snapshot_lineage_initialized_at_with_checksum_and_options(
                   hook->page_log_fd,
                   hook->page_log_offset,
                   space_id,
@@ -15919,6 +15939,7 @@ int ownerless_innodb_page_publish_hook(
                   page,
                   page_size,
                   page_checksum,
+                  native_support_append_options,
                   &record_offset
               )
             : append_ownerless_page_version(
@@ -15930,6 +15951,7 @@ int ownerless_innodb_page_publish_hook(
                   page,
                   page_size,
                   page_checksum,
+                  native_support_page,
                   publish_flags,
                   &record_offset
               );
