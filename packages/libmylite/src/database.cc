@@ -10930,41 +10930,22 @@ int collect_ownerless_native_page_checkpoint_record(
         page_no < 3U) {
         return MYLITE_OWNERLESS_PAGE_LOG_OK;
     }
-    int is_snapshot_boundary = 0;
-    const int boundary_result = mylite_ownerless_page_log_record_is_snapshot_boundary_at(
+    std::uint32_t metadata_flags = 0U;
+    const int metadata_result = mylite_ownerless_page_log_record_metadata_flags_at(
         proof->runtime->concurrency_wal_fd,
         record_offset,
-        &is_snapshot_boundary
+        &metadata_flags
     );
-    if (boundary_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
+    if (metadata_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
         proof->blocked = true;
         return MYLITE_OWNERLESS_PAGE_LOG_OK;
     }
-    if (is_snapshot_boundary != 0) {
+    if ((metadata_flags & MYLITE_OWNERLESS_PAGE_LOG_RECORD_SNAPSHOT_BOUNDARY) != 0U) {
         return MYLITE_OWNERLESS_PAGE_LOG_OK;
     }
-    int is_external_snapshot_lineage = 0;
-    const int external_lineage_result =
-        mylite_ownerless_page_log_record_is_external_snapshot_lineage_at(
-            proof->runtime->concurrency_wal_fd,
-            record_offset,
-            &is_external_snapshot_lineage
-        );
-    if (external_lineage_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
-        proof->blocked = true;
-        return MYLITE_OWNERLESS_PAGE_LOG_OK;
-    }
-    int is_native_support_state = 0;
-    const int native_support_result = mylite_ownerless_page_log_record_is_native_support_state_at(
-        proof->runtime->concurrency_wal_fd,
-        record_offset,
-        &is_native_support_state
-    );
-    if (native_support_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
-        proof->blocked = true;
-        return MYLITE_OWNERLESS_PAGE_LOG_OK;
-    }
-    if (is_native_support_state != 0) {
+    const bool external_snapshot_lineage =
+        (metadata_flags & MYLITE_OWNERLESS_PAGE_LOG_RECORD_EXTERNAL_SNAPSHOT_LINEAGE) != 0U;
+    if ((metadata_flags & MYLITE_OWNERLESS_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE) != 0U) {
         return MYLITE_OWNERLESS_PAGE_LOG_OK;
     }
     if (ownerless_page_log_record_is_native_support_state(
@@ -10977,14 +10958,8 @@ int collect_ownerless_native_page_checkpoint_record(
         )) {
         return MYLITE_OWNERLESS_PAGE_LOG_OK;
     }
-    OwnerlessNativePageCheckpointRecord record{
-        space_id,
-        page_no,
-        page_lsn,
-        commit_lsn,
-        record_offset,
-        is_external_snapshot_lineage != 0
-    };
+    OwnerlessNativePageCheckpointRecord
+        record{space_id, page_no, page_lsn, commit_lsn, record_offset, external_snapshot_lineage};
     proof->records.push_back(record);
     return MYLITE_OWNERLESS_PAGE_LOG_OK;
 }

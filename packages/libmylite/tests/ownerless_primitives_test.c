@@ -5326,7 +5326,9 @@ static void test_page_log_preserves_external_snapshot_lineage_metadata(void) {
     uint64_t commit_lsn = 0;
     uint32_t out_page_size = 0;
     uint32_t lineage_flags = 0;
+    uint32_t lineage_metadata_flags = 0;
     uint32_t retained_flags = 0;
+    uint32_t retained_metadata_flags = 0;
     int is_lineage = 0;
     int is_snapshot_boundary = 0;
     page_log_checkpoint_index_context checkpoint_context = {0};
@@ -5391,9 +5393,20 @@ static void test_page_log_preserves_external_snapshot_lineage_metadata(void) {
         ) == MYLITE_OWNERLESS_PAGE_LOG_OK
     );
     assert(is_snapshot_boundary == 0);
+    assert(
+        mylite_ownerless_page_log_record_metadata_flags_at(
+            fd,
+            lineage_record_offset,
+            &lineage_metadata_flags
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
     lineage_flags = read_page_log_record_flags(fd, lineage_record_offset);
     assert((lineage_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_EXTERNAL_SNAPSHOT_LINEAGE) != 0U);
     assert((lineage_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_INDEX_DELTA) != 0U);
+    assert(
+        lineage_metadata_flags ==
+        (lineage_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_EXTERNAL_SNAPSHOT_LINEAGE)
+    );
 
     assert(
         mylite_ownerless_page_log_checkpoint(
@@ -5418,6 +5431,17 @@ static void test_page_log_preserves_external_snapshot_lineage_metadata(void) {
         ) == MYLITE_OWNERLESS_PAGE_LOG_OK
     );
     assert(is_lineage == 1);
+    assert(
+        mylite_ownerless_page_log_record_metadata_flags_at(
+            fd,
+            checkpoint_context.retained.records[0].record_offset,
+            &retained_metadata_flags
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        retained_metadata_flags ==
+        (retained_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_EXTERNAL_SNAPSHOT_LINEAGE)
+    );
 
     assert(
         mylite_ownerless_page_log_read_record_at(
@@ -5520,7 +5544,9 @@ static void test_page_log_preserves_native_support_metadata(void) {
     uint64_t commit_lsn = 0;
     uint32_t out_page_size = 0;
     uint32_t native_flags = 0;
+    uint32_t native_metadata_flags = 0;
     uint32_t retained_flags = 0;
+    uint32_t retained_metadata_flags = 0;
     int is_native_support = 0;
     page_log_checkpoint_index_context checkpoint_context = {0};
 
@@ -5576,8 +5602,19 @@ static void test_page_log_preserves_native_support_metadata(void) {
         ) == MYLITE_OWNERLESS_PAGE_LOG_OK
     );
     assert(is_native_support == 1);
+    assert(
+        mylite_ownerless_page_log_record_metadata_flags_at(
+            fd,
+            native_record_offset,
+            &native_metadata_flags
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
     native_flags = read_page_log_record_flags(fd, native_record_offset);
     assert((native_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_NATIVE_SUPPORT_STATE) != 0U);
+    assert(
+        native_metadata_flags ==
+        (native_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_NATIVE_SUPPORT_STATE)
+    );
 
     assert(
         mylite_ownerless_page_log_checkpoint(
@@ -5600,6 +5637,17 @@ static void test_page_log_preserves_native_support_metadata(void) {
         ) == MYLITE_OWNERLESS_PAGE_LOG_OK
     );
     assert(is_native_support == 1);
+    assert(
+        mylite_ownerless_page_log_record_metadata_flags_at(
+            fd,
+            checkpoint_context.retained.records[0].record_offset,
+            &retained_metadata_flags
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        retained_metadata_flags ==
+        (retained_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_NATIVE_SUPPORT_STATE)
+    );
 
     assert(
         mylite_ownerless_page_log_read_record_at(

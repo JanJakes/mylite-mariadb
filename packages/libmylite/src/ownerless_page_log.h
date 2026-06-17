@@ -235,6 +235,11 @@ int mylite_ownerless_page_log_record_is_native_support_state_at(
     uint64_t record_offset,
     int *out_is_native_support_state
 );
+int mylite_ownerless_page_log_record_metadata_flags_at(
+    int fd,
+    uint64_t record_offset,
+    uint32_t *out_metadata_flags
+);
 int mylite_ownerless_page_log_record_next_offset_at(
     int fd,
     uint64_t log_offset,

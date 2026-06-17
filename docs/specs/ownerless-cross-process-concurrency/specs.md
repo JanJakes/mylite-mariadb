@@ -5469,6 +5469,14 @@ subsystems that this mode needs:
   reuses it for those decisions. System-space index pages, unhinted SYS/TRX_SYS
   records, record flags, payload bytes, checkpoint rewrite, replay, and native
   history-proof requirements are unchanged.
+  The page-log metadata flag coalescing slice then added a single helper that
+  reads one page-log record header and returns the metadata bits needed by
+  native checkpoint proof collection. The proof collector now tests
+  snapshot-boundary, external-lineage, and marked native-support state from
+  that one header read, while unmarked records still fall through to the legacy
+  payload classifier before they can become user-page proof records. Page-log
+  bytes, marker preservation, checkpoint proof rules, replay, and recovery
+  behavior are unchanged.
   A no-dirty leave-exhaustion fast path then made the commit-log memo release
   loop stop calling `ownerless_page_write_leave()` after the MTR-owned
   page-write vector has become empty. Pages that are still recorded in the

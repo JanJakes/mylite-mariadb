@@ -1895,16 +1895,16 @@ int mylite_ownerless_page_log_record_is_snapshot_boundary_at(
     if (out_is_snapshot_boundary != nullptr) {
         *out_is_snapshot_boundary = 0;
     }
-    if (fd < 0 || out_is_snapshot_boundary == nullptr ||
-        record_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+    if (out_is_snapshot_boundary == nullptr) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
-
-    PageRecordHeader record = {};
-    if (!read_record_header(fd, static_cast<off_t>(record_offset), record)) {
-        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    std::uint32_t metadata_flags = 0U;
+    const int result =
+        mylite_ownerless_page_log_record_metadata_flags_at(fd, record_offset, &metadata_flags);
+    if (result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        return result;
     }
-    *out_is_snapshot_boundary = (record.flags & k_record_flag_snapshot_boundary) != 0U ? 1 : 0;
+    *out_is_snapshot_boundary = (metadata_flags & k_record_flag_snapshot_boundary) != 0U ? 1 : 0;
     return MYLITE_OWNERLESS_PAGE_LOG_OK;
 }
 
@@ -1916,17 +1916,17 @@ int mylite_ownerless_page_log_record_is_external_snapshot_lineage_at(
     if (out_is_external_snapshot_lineage != nullptr) {
         *out_is_external_snapshot_lineage = 0;
     }
-    if (fd < 0 || out_is_external_snapshot_lineage == nullptr ||
-        record_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+    if (out_is_external_snapshot_lineage == nullptr) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
-
-    PageRecordHeader record = {};
-    if (!read_record_header(fd, static_cast<off_t>(record_offset), record)) {
-        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    std::uint32_t metadata_flags = 0U;
+    const int result =
+        mylite_ownerless_page_log_record_metadata_flags_at(fd, record_offset, &metadata_flags);
+    if (result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        return result;
     }
     *out_is_external_snapshot_lineage =
-        (record.flags & k_record_flag_external_snapshot_lineage) != 0U ? 1 : 0;
+        (metadata_flags & k_record_flag_external_snapshot_lineage) != 0U ? 1 : 0;
     return MYLITE_OWNERLESS_PAGE_LOG_OK;
 }
 
@@ -1938,7 +1938,29 @@ int mylite_ownerless_page_log_record_is_native_support_state_at(
     if (out_is_native_support_state != nullptr) {
         *out_is_native_support_state = 0;
     }
-    if (fd < 0 || out_is_native_support_state == nullptr ||
+    if (out_is_native_support_state == nullptr) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    std::uint32_t metadata_flags = 0U;
+    const int result =
+        mylite_ownerless_page_log_record_metadata_flags_at(fd, record_offset, &metadata_flags);
+    if (result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        return result;
+    }
+    *out_is_native_support_state =
+        (metadata_flags & k_record_flag_native_support_state) != 0U ? 1 : 0;
+    return MYLITE_OWNERLESS_PAGE_LOG_OK;
+}
+
+int mylite_ownerless_page_log_record_metadata_flags_at(
+    int fd,
+    std::uint64_t record_offset,
+    std::uint32_t *out_metadata_flags
+) {
+    if (out_metadata_flags != nullptr) {
+        *out_metadata_flags = 0U;
+    }
+    if (fd < 0 || out_metadata_flags == nullptr ||
         record_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
@@ -1947,8 +1969,7 @@ int mylite_ownerless_page_log_record_is_native_support_state_at(
     if (!read_record_header(fd, static_cast<off_t>(record_offset), record)) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
-    *out_is_native_support_state =
-        (record.flags & k_record_flag_native_support_state) != 0U ? 1 : 0;
+    *out_metadata_flags = record.flags & k_record_metadata_flags;
     return MYLITE_OWNERLESS_PAGE_LOG_OK;
 }
 

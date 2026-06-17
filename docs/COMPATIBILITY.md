@@ -1215,6 +1215,14 @@ standalone, and hinted history rollback-segment pages can still select the
 history-rseg delta format. This is a small append CPU cleanup only; WAL bytes,
 record flags, checkpoint rewrite, replay, and native history-proof
 requirements are unchanged.
+The follow-up page-log metadata flag coalescing slice adds a single metadata
+flag read helper and uses it while collecting native checkpoint proof records,
+so snapshot-boundary, external-lineage, and native-support marker bits no
+longer require three positioned page-log header reads for the same record.
+Unmarked records still use the legacy payload classifier before treating a
+record as a user-page checkpoint proof candidate. This is a checkpoint proof
+CPU cleanup only; page-log records, marker bits, payload decoding fallback,
+checkpoint proof rules, and replay behavior are unchanged.
 The delta note slot-reuse slice then carries the process-local delta-base slot
 index found during snapshot lookup into the successful post-append note path.
 Delta appends revalidate that preferred slot under the same cache mutex before
