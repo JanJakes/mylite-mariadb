@@ -5430,6 +5430,15 @@ subsystems that this mode needs:
   selector now performs a stats-disabled ownerless write and verifies
   representative page-publish counters remain zero, while enabled attribution
   counters remain covered by the same selector and production probe.
+  A matching commit-visibility stats-off fast path now returns immediately
+  from disabled elapsed helpers on the zero timing sentinel and reuses one
+  stats-enabled snapshot for visible-fast and conservative-flush reason
+  counters inside the ownerless commit block. Focused visible-fast SQL coverage
+  proves a stats-disabled ownerless write leaves representative
+  commit-visibility counters at zero, while enabled commit-visibility
+  attribution remains covered by the same selector and production probe. Commit
+  visibility publication, log flush, dirty-page flush, page-visible LSN
+  publication, lock release, and recovery semantics are unchanged.
   The checkpoint legacy-write elision slice then removed the legacy
   latest/visible payload write from advancing checkpoint updates after
   checksum-protected LSN records are initialized, exposing a

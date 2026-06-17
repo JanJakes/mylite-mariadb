@@ -10665,6 +10665,23 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_row_insert_fast_path") == 81U
     );
 
+    mylite_ownerless_innodb_reset_commit_visibility_stats();
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_single_row_insert_fast_path VALUES "
+        "(2, 20, REPEAT('z', 4000))"
+    );
+    mylite_ownerless_innodb_read_commit_visibility_stats(
+        commit_stats,
+        OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT
+    );
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FAST] == 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH] == 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_LOG_FLUSH_NS] == 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_TOTAL_NS] == 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_PUBLISH_TRANSACTION_PAGES_NS] == 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_RELEASE_LOCKS_NS] == 0U);
+
     assert(mylite_close(db) == MYLITE_OK);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);

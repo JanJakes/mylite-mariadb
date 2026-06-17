@@ -98,11 +98,11 @@ std::atomic<bool> mylite_ownerless_innodb_deep_perf_stats_enabled_flag{false};
 static std::atomic<uint64_t> ownerless_innodb_deep_perf_stats
     [MYLITE_OWNERLESS_INNODB_DEEP_PERF_STAT_COUNT];
 
-static void ownerless_commit_visibility_count(
+static void ownerless_commit_visibility_count_if_enabled(
+    bool stats_enabled,
     std::atomic<uint64_t> &counter) noexcept
 {
-  if (ownerless_commit_visibility_stats_enabled.load(
-          std::memory_order_relaxed))
+  if (stats_enabled)
     counter.fetch_add(1, std::memory_order_relaxed);
 }
 
@@ -116,8 +116,9 @@ static uint64_t ownerless_commit_visibility_now_ns() noexcept
 static void ownerless_commit_visibility_add_elapsed(
     std::atomic<uint64_t> &counter, uint64_t start_ns) noexcept
 {
-  if (start_ns != 0 &&
-      ownerless_commit_visibility_stats_enabled.load(
+  if (start_ns == 0)
+    return;
+  if (ownerless_commit_visibility_stats_enabled.load(
           std::memory_order_relaxed))
     counter.fetch_add(ownerless_commit_visibility_now_ns() - start_ns,
                       std::memory_order_relaxed);
@@ -2075,11 +2076,11 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
   {
     const uint64_t mylite_deep_ownerless_start=
         mylite_ownerless_innodb_deep_perf_start_ns();
-    const uint64_t ownerless_visibility_start=
+    const bool ownerless_visibility_stats_enabled=
       ownerless_commit_visibility_stats_enabled.load(
-          std::memory_order_relaxed)
-          ? ownerless_commit_visibility_now_ns()
-          : 0;
+          std::memory_order_relaxed);
+    const uint64_t ownerless_visibility_start=
+      ownerless_visibility_stats_enabled ? ownerless_commit_visibility_now_ns() : 0;
     const bool ownerless_statement_allows_visible_fast_path=
       ownerless_sql_command_allows_visible_fast_path(this);
     const bool publish_ownerless_dirty_pages =
@@ -2113,30 +2114,41 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
         !mylite_ownerless_page_write_publish_failed &&
         mylite_ownerless_page_write_published_page;
       if (publish_ownerless_visible_without_flush)
-        ownerless_commit_visibility_count(ownerless_commit_visibility_fast);
+        ownerless_commit_visibility_count_if_enabled(
+            ownerless_visibility_stats_enabled,
+            ownerless_commit_visibility_fast);
       else
       {
-        ownerless_commit_visibility_count(ownerless_commit_visibility_flush);
+        ownerless_commit_visibility_count_if_enabled(
+            ownerless_visibility_stats_enabled,
+            ownerless_commit_visibility_flush);
         if (ownerless_commit_needs_recovery_lsn)
-          ownerless_commit_visibility_count(
+          ownerless_commit_visibility_count_if_enabled(
+              ownerless_visibility_stats_enabled,
               ownerless_commit_visibility_flush_recovery_lsn);
         if (publish_ownerless_dirty_pages)
-          ownerless_commit_visibility_count(
+          ownerless_commit_visibility_count_if_enabled(
+              ownerless_visibility_stats_enabled,
               ownerless_commit_visibility_flush_dirty_pages);
         if (mylite_ownerless_page_write_trx_id == 0)
-          ownerless_commit_visibility_count(
+          ownerless_commit_visibility_count_if_enabled(
+              ownerless_visibility_stats_enabled,
               ownerless_commit_visibility_flush_no_page_write_trx);
         if (!ownerless_deferred_page_writes_proved)
-          ownerless_commit_visibility_count(
+          ownerless_commit_visibility_count_if_enabled(
+              ownerless_visibility_stats_enabled,
               ownerless_commit_visibility_flush_deferred_pages);
         if (mylite_ownerless_page_write_publish_failed)
-          ownerless_commit_visibility_count(
+          ownerless_commit_visibility_count_if_enabled(
+              ownerless_visibility_stats_enabled,
               ownerless_commit_visibility_flush_publish_failed);
         if (!mylite_ownerless_page_write_published_page)
-          ownerless_commit_visibility_count(
+          ownerless_commit_visibility_count_if_enabled(
+              ownerless_visibility_stats_enabled,
               ownerless_commit_visibility_flush_no_published_pages);
         if (!ownerless_statement_allows_visible_fast_path)
-          ownerless_commit_visibility_count(
+          ownerless_commit_visibility_count_if_enabled(
+              ownerless_visibility_stats_enabled,
               ownerless_commit_visibility_flush_unproven_statement);
       }
       ownerless_stage_start=

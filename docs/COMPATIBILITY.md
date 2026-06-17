@@ -881,6 +881,15 @@ history-proof success marking, checkpoint ordering, and recovery semantics are
 unchanged. Focused SQL coverage proves a stats-disabled ownerless write leaves
 representative page-publish counters at zero while the enabled attribution path
 still reports native-support and history-proof counters.
+The commit-visibility stats-off fast-path slice applies the same rule to the
+ownerless transaction commit visibility diagnostics: disabled elapsed scopes now
+return on the zero timing sentinel before rechecking the stats flag, and
+visible-fast versus conservative-flush reason counters use one enabled-state
+snapshot per ownerless commit block. Focused SQL coverage proves a
+stats-disabled ownerless write leaves representative commit-visibility counters
+at zero while enabled visible-fast attribution remains covered. Commit
+publication, log flush, page-visible LSN publication, page flushing, and lock
+release ordering are unchanged.
 A follow-up production attribution slice now splits native-support page
 publication into published versus elided page classes. The reduced
 stats-enabled sample reported `2.000` published native-support pages per
