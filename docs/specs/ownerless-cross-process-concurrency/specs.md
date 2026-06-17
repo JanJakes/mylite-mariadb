@@ -2065,11 +2065,12 @@ Tasks:
    that visible-anchor path into page-log sync lock/header/data-sync costs plus
    durable `.ckpt` update lock/read/write/data-sync costs before any later
    batching or deferral is considered and reports clean-sync skips separately.
-   Capped implicit/autocommit visible-fast append-batched statements also
-   preserve the first latest-only `.ckpt` update and coalesce later non-durable
-   latest-only updates in the same statement, while explicit transactions,
-   unsafe fault hooks, and final durable latest/visible checkpoint publication
-   keep the previous behavior.
+   Capped visible-fast append-batched statements also preserve the first
+   latest-only `.ckpt` update and coalesce later non-durable latest-only
+   updates in the same statement for implicit/autocommit writes and proven
+   explicit-transaction insert writes, while savepoint-disqualified explicit
+   transaction statements, unsafe fault hooks, and final durable latest/visible
+   checkpoint publication keep the previous behavior.
    The redo segment bookkeeping now lives
    in a first-party primitive that owns latch/refcount handling, latest/visible LSN
    publication, reserved-LSN counters, contiguous written-LSN tracking,
@@ -4950,7 +4951,11 @@ subsystems that this mode needs:
   commit gate instead of reporting `flush_unproven_statement`, and can publish
   the active rollback-segment and undo history pages instead of running the
   ownerless write-history page flush inside
-  `trx_t::write_serialisation_history()`. The reduced stats-enabled sample for
+  `trx_t::write_serialisation_history()`. A follow-up explicit transaction
+  latest-checkpoint coalescing slice then keeps the same statement-local
+  lifetime as visible-fast append batching and coalesces later non-durable
+  latest-only checkpoint rewrites inside each proven insert statement after the
+  first latest update has been preserved. The reduced stats-enabled sample for
   the history-proof slice reported explicit-transaction commit visibility at
   `fast=1.000`, `flush=0.000`, and `unproven=0.000` per transaction, history
   proof publication at `1.000` rollback-segment page and `1.000` undo page per
@@ -4961,8 +4966,10 @@ subsystems that this mode needs:
   `2374.21` ops/s, while ordinary explicit transaction baselines reported
   `3822.45` and `3841.90` ops/s. Savepoint-controlled transactions are
   deliberately disqualified from this proof and remain on the conservative
-  unproven path. Broader redo/checkpoint reconciliation and transaction-scoped
-  append batching remain separate follow-up work. That keeps the next remaining
+  unproven path, and focused coverage verifies coalescing stays disabled after
+  that disqualification point. Broader redo/checkpoint reconciliation and
+  transaction-wide append batching remain separate follow-up work. That keeps
+  the next remaining
   performance slices near native-support proof and InnoDB commit/row-insert
   work rather than PHP/PHPUnit startup or SQL row encoding. The generic InnoDB
   read-complete
@@ -5330,7 +5337,13 @@ subsystems that this mode needs:
   and redo-leave `3.159 ms/transaction`. That separates redo hook overhead from
   page-write publish (`0.094 ms/insert`), commit-log publish
   (`0.095 ms/insert`), page-log append (`0.058 ms/insert`), and checkpoint
-  update (`0.024 ms/insert`) in the same autocommit sample.
+  update (`0.024 ms/insert`) in the same autocommit sample. The explicit
+  transaction latest-checkpoint coalescing follow-up reported `40` coalesced
+  latest-only checkpoint rewrites for `40` prepared inserts, while leaving
+  autocommit coalescing at `2.000` per insert and four-row bulk coalescing at
+  `8.000` per statement. A reduced stats-off 400-row local sample reported
+  ordinary explicit transactions at `4168.89 ops/s`, ownerless explicit
+  transactions at `2880.92 ops/s`, ratio `0.6911`.
   Reduced 50-row stats-enabled probes after
   that split showed both standalone encoding and delta-base note update can be
   visible inside the previous aggregate append total, with small-sample ranking

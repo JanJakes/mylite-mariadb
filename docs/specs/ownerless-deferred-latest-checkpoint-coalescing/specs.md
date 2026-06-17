@@ -55,9 +55,10 @@ Out of scope:
 - Replacing native redo/checkpoint reconciliation or DDL/file lifecycle
   recovery.
 - Extending the parser-proven fast path beyond capped `INSERT ... VALUES`.
-- Coalescing latest-only checkpoint updates inside explicit transactions; those
-  publish a durable visible boundary at transaction commit and need separate
-  proof.
+- Transaction-wide explicit transaction batching; a later
+  `ownerless-explicit-transaction-latest-checkpoint-coalescing` slice extends
+  only the statement-local latest-only checkpoint optimization to proven
+  explicit transaction insert statements.
 
 ## Design
 
@@ -161,8 +162,9 @@ Verification:
 - `build/php-embedded-prod/packages/libmylite/mylite_ownerless_cross_process_sql_test redo-latest-crash`
 - `build/php-embedded-prod/packages/libmylite/mylite_ownerless_cross_process_sql_test redo-latest-checkpoint-crash`
 - `MYLITE_PERF_OPEN_CLOSE_ITERATIONS=1 MYLITE_PERF_SELECT_ITERATIONS=1 MYLITE_PERF_INSERT_ITERATIONS=40 MYLITE_PERF_BULK_INSERT_ROWS_PER_STATEMENT=4 MYLITE_PERF_OWNERLESS_PAGE_PUBLISH_STATS=1 build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe`
-  reported explicit transaction coalescing `0`, autocommit coalescing
-  `2.000` per insert, and four-row bulk coalescing `8.000` per statement.
+  reported explicit transaction coalescing `0` before the later explicit
+  transaction follow-up, autocommit coalescing `2.000` per insert, and four-row
+  bulk coalescing `8.000` per statement.
 - `MYLITE_PERF_OPEN_CLOSE_ITERATIONS=1 MYLITE_PERF_SELECT_ITERATIONS=1 MYLITE_PERF_INSERT_ITERATIONS=400 MYLITE_PERF_BULK_INSERT_ROWS_PER_STATEMENT=4 build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe`
   reported ownerless autocommit `1409.21 ops/s`, ordinary autocommit
   `999.88 ops/s`, ownerless four-row bulk `4025.19 rows/s`, ordinary four-row
@@ -180,6 +182,9 @@ Verification:
 
 - This is not cross-process group commit; every statement still publishes the
   final durable visible checkpoint.
+- The follow-up explicit-transaction latest-checkpoint coalescing slice extends
+  this statement-local optimization to proven explicit transaction insert
+  statements without adding transaction-wide append batching.
 - The broader ownerless performance gap still includes native commit,
   page-version publication, native-support history proof, and remaining
   redo/checkpoint reconciliation work.

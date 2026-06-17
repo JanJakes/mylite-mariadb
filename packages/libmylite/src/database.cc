@@ -2539,6 +2539,11 @@ bool ownerless_statement_allows_append_batch_fast_path(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 );
+bool ownerless_statement_deferred_latest_checkpoint_coalescing_allowed(
+    const mylite_db &db,
+    bool statement_append_batch_fast_path,
+    bool statement_started_in_explicit_transaction
+);
 void reset_ownerless_transaction_visible_fast_proof(mylite_db &db);
 void disqualify_ownerless_transaction_visible_fast_proof(mylite_db &db);
 void update_ownerless_explicit_transaction_visible_fast_proof_before_sql(
@@ -3222,7 +3227,11 @@ int mylite_step(mylite_stmt *stmt) {
         OwnerlessStatementVisibleFastPathScope visible_fast_path(
             statement_visible_fast_path,
             statement_append_batch_fast_path,
-            statement_append_batch_fast_path && !statement_started_in_explicit_transaction
+            ownerless_statement_deferred_latest_checkpoint_coalescing_allowed(
+                *stmt->db,
+                statement_append_batch_fast_path,
+                statement_started_in_explicit_transaction
+            )
         );
         ownerless_stage_start =
             ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
@@ -4529,7 +4538,11 @@ int exec_result_impl(
     OwnerlessStatementVisibleFastPathScope visible_fast_path(
         statement_visible_fast_path,
         statement_append_batch_fast_path,
-        statement_append_batch_fast_path && !statement_started_in_explicit_transaction
+        ownerless_statement_deferred_latest_checkpoint_coalescing_allowed(
+            *db,
+            statement_append_batch_fast_path,
+            statement_started_in_explicit_transaction
+        )
     );
     if (mysql_query(&db->mysql, sql) != 0) {
         set_mariadb_error(*db);
@@ -5221,6 +5234,22 @@ bool ownerless_statement_allows_append_batch_fast_path(
     }
     return ownerless_insert_values_allows_append_batch_fast_path(tokens) &&
            !ownerless_insert_target_has_foreign_keys(db, tokens);
+}
+
+bool ownerless_statement_deferred_latest_checkpoint_coalescing_allowed(
+    const mylite_db &db,
+    bool statement_append_batch_fast_path,
+    bool statement_started_in_explicit_transaction
+) {
+    if (!statement_append_batch_fast_path) {
+        return false;
+    }
+    if (!statement_started_in_explicit_transaction) {
+        return true;
+    }
+    return db.ownerless_transaction_visible_fast_commit_candidate &&
+           !db.ownerless_transaction_visible_fast_commit_disqualified &&
+           !db.ownerless_peer_dictionary_refresh_requires_conservative_write;
 }
 
 bool ownerless_insert_target_table(

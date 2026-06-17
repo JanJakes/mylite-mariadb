@@ -1940,6 +1940,18 @@ static void emit_ownerless_transaction_phase_summary(
         "transaction"
     );
     emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_checkpoint_update_deferred_latest_"
+        "coalesced_per_insert",
+        database_perf[DATABASE_PERF_STAT_CHECKPOINT_UPDATE_DEFERRED_LATEST_COALESCED],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_checkpoint_update_deferred_latest_"
+        "coalesced_per_transaction",
+        database_perf[DATABASE_PERF_STAT_CHECKPOINT_UPDATE_DEFERRED_LATEST_COALESCED],
+        1U
+    );
+    emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_insert_txn_native_support_published_pages_per_insert",
         page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED],
         insert_iterations

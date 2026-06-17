@@ -10105,6 +10105,7 @@ static void test_ownerless_explicit_transaction_undo_wal_elision(void) {
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     uint64_t page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT] = {0};
     uint64_t commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT] = {0};
+    uint64_t database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT] = {0};
     uint64_t deep_stats[OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT] = {0};
     mylite_stmt *stmt = NULL;
     const char *tail = NULL;
@@ -10145,9 +10146,11 @@ static void test_ownerless_explicit_transaction_undo_wal_elision(void) {
 
     mylite_ownerless_innodb_set_page_publish_stats_enabled(1);
     mylite_ownerless_innodb_set_commit_visibility_stats_enabled(1);
+    mylite_ownerless_database_set_perf_stats_enabled(1);
     mylite_ownerless_innodb_deep_set_perf_stats_enabled(1);
     mylite_ownerless_innodb_reset_page_publish_stats();
     mylite_ownerless_innodb_reset_commit_visibility_stats();
+    mylite_ownerless_database_reset_perf_stats();
     mylite_ownerless_innodb_deep_reset_perf_stats();
 
     exec_ok(db, "START TRANSACTION");
@@ -10168,12 +10171,17 @@ static void test_ownerless_explicit_transaction_undo_wal_elision(void) {
         commit_stats,
         OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT
     );
+    mylite_ownerless_database_read_perf_stats(
+        database_stats,
+        OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT
+    );
     mylite_ownerless_innodb_deep_read_perf_stats(
         deep_stats,
         OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT
     );
     mylite_ownerless_innodb_set_page_publish_stats_enabled(0);
     mylite_ownerless_innodb_set_commit_visibility_stats_enabled(0);
+    mylite_ownerless_database_set_perf_stats_enabled(0);
     mylite_ownerless_innodb_deep_set_perf_stats_enabled(0);
     assert(mylite_finalize(stmt) == MYLITE_OK);
     stmt = NULL;
@@ -10209,6 +10217,17 @@ static void test_ownerless_explicit_transaction_undo_wal_elision(void) {
     assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_UNPROVEN_STATEMENT] == 0U);
     assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_PUBLISH_FAILED] == 0U);
     assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_NO_PUBLISHED_PAGES] == 0U);
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    assert(
+        database_stats
+            [OWNERLESS_TEST_DATABASE_PERF_STAT_CHECKPOINT_UPDATE_DEFERRED_LATEST_COALESCED] == 0U
+    );
+#else
+    assert(
+        database_stats
+            [OWNERLESS_TEST_DATABASE_PERF_STAT_CHECKPOINT_UPDATE_DEFERRED_LATEST_COALESCED] > 0U
+    );
+#endif
     assert(
         deep_stats
             [OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES] ==
@@ -10296,6 +10315,8 @@ static void test_ownerless_explicit_transaction_undo_wal_elision(void) {
     );
     exec_ok(db, sql);
     exec_ok(db, "SAVEPOINT ownerless_visible_fast_disqualified");
+    mylite_ownerless_database_set_perf_stats_enabled(1);
+    mylite_ownerless_database_reset_perf_stats();
     assert(
         snprintf(
             sql,
@@ -10309,15 +10330,24 @@ static void test_ownerless_explicit_transaction_undo_wal_elision(void) {
     exec_ok(db, sql);
     exec_ok(db, "ROLLBACK TO ownerless_visible_fast_disqualified");
     exec_ok(db, "COMMIT");
+    mylite_ownerless_database_read_perf_stats(
+        database_stats,
+        OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT
+    );
     mylite_ownerless_innodb_read_commit_visibility_stats(
         commit_stats,
         OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT
     );
+    mylite_ownerless_database_set_perf_stats_enabled(0);
     mylite_ownerless_innodb_set_commit_visibility_stats_enabled(0);
     assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FAST] == 0U);
     assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH] > 0U);
     assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_UNPROVEN_STATEMENT] > 0U);
     assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_PUBLISH_FAILED] == 0U);
+    assert(
+        database_stats
+            [OWNERLESS_TEST_DATABASE_PERF_STAT_CHECKPOINT_UPDATE_DEFERRED_LATEST_COALESCED] == 0U
+    );
 
     assert(mylite_close(db) == MYLITE_OK);
 
