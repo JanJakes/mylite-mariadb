@@ -293,6 +293,7 @@ static void test_page_log_rejects_corrupt_interior_record(void);
 static void test_page_log_checkpoints_retained_records(void);
 static void test_page_log_preserves_oldest_snapshot_boundary(void);
 static void test_page_log_preserves_external_snapshot_lineage_metadata(void);
+static void test_page_log_external_snapshot_lineage_session_append(void);
 static void test_page_log_preserves_native_support_metadata(void);
 static void test_page_log_requires_boundaries_only_for_snapshot_pages(void);
 static void test_page_log_checkpoint_waits_for_readers(void);
@@ -500,6 +501,7 @@ int main(void) {
     test_page_log_checkpoints_retained_records();
     test_page_log_preserves_oldest_snapshot_boundary();
     test_page_log_preserves_external_snapshot_lineage_metadata();
+    test_page_log_external_snapshot_lineage_session_append();
     test_page_log_preserves_native_support_metadata();
     test_page_log_requires_boundaries_only_for_snapshot_pages();
     test_page_log_checkpoint_waits_for_readers();
@@ -5395,6 +5397,71 @@ static void test_page_log_preserves_external_snapshot_lineage_metadata(void) {
     assert(page_lsn == 710U);
     assert(commit_lsn == 710U);
     assert(memcmp(out_page, page_delta, sizeof(page_delta)) == 0);
+
+    assert(close(fd) == 0);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_external_snapshot_lineage_session_append(void) {
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "external-snapshot-lineage-session-page-log.bin");
+    int fd = open_file(log_path);
+    uint8_t page[MYLITE_TEST_PAGE_SIZE];
+    uint64_t record_offset = 0;
+    uint64_t stats[PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
+    mylite_ownerless_page_log_append_session session = {0};
+    int is_lineage = 0;
+    uint32_t flags = 0;
+
+    memset(page, 0x81, sizeof(page));
+    store_test_be32(page, MYLITE_TEST_INNODB_PAGE_OFFSET_OFFSET, 22U);
+    store_test_be64(page, MYLITE_TEST_INNODB_PAGE_LSN_OFFSET, 720U);
+    store_test_be16(page, MYLITE_TEST_INNODB_PAGE_TYPE_OFFSET, MYLITE_TEST_INNODB_PAGE_TYPE_INDEX);
+    store_test_be32(page, MYLITE_TEST_INNODB_PAGE_SPACE_ID_OFFSET, 81U);
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    mylite_ownerless_page_log_reset_append_perf_stats();
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
+    assert(
+        mylite_ownerless_page_log_append_session_begin_initialized_at(fd, 0U, &session) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append_external_snapshot_lineage_session_append_with_checksum_and_options(
+            fd,
+            &session,
+            81U,
+            22U,
+            720U,
+            720U,
+            page,
+            sizeof(page),
+            mylite_ownerless_page_log_checksum_page(page, sizeof(page)),
+            0U,
+            &record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    mylite_ownerless_page_log_append_session_end(fd, &session);
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(0);
+    mylite_ownerless_page_log_read_append_perf_stats(stats, PAGE_LOG_APPEND_PERF_STAT_COUNT);
+
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_CALLS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_DIRECT_APPEND_CALLS] == 0U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_SESSION_APPEND_CALLS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS] == 1U);
+    assert(
+        mylite_ownerless_page_log_record_is_external_snapshot_lineage_at(
+            fd,
+            record_offset,
+            &is_lineage
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(is_lineage == 1);
+    flags = read_page_log_record_flags(fd, record_offset);
+    assert((flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_EXTERNAL_SNAPSHOT_LINEAGE) != 0U);
 
     assert(close(fd) == 0);
     free(log_path);

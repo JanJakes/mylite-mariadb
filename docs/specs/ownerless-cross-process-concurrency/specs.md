@@ -4990,8 +4990,15 @@ subsystems that this mode needs:
   `3822.45` and `3841.90` ops/s. Savepoint-controlled transactions are
   deliberately disqualified from this proof and remain on the conservative
   unproven path, and focused coverage verifies coalescing stays disabled after
-  that disqualification point. Broader redo/checkpoint reconciliation and
-  transaction-wide append batching remain separate follow-up work. That keeps
+  that disqualification point. A later explicit-COMMIT append-batching slice
+  marks only proof-backed COMMIT statements as append-batch eligible, wraps
+  transaction-deferred COMMIT page publication in the native page-publish batch
+  hooks, and lets external-snapshot-lineage records use append sessions, so
+  COMMIT-time transaction-page and history-proof page-version records share a
+  page-log append session without holding the append lock across user
+  transaction work; the reduced production probe moved that phase from 10
+  direct plus 2 session appends to 0 direct plus 12 session appends. Broader
+  redo/checkpoint reconciliation remains separate follow-up work. That keeps
   the next remaining
   performance slices near native-support proof and InnoDB commit/row-insert
   work rather than PHP/PHPUnit startup or SQL row encoding. The generic InnoDB

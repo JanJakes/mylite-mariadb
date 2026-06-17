@@ -1604,6 +1604,7 @@ int page_log_append_session_append_common(
     std::uint32_t page_size,
     bool has_precomputed_checksum,
     std::uint64_t page_checksum,
+    std::uint32_t extra_record_flags,
     std::uint32_t append_options,
     std::uint64_t *out_record_offset
 ) {
@@ -1622,6 +1623,7 @@ int page_log_append_session_append_common(
         session->log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) ||
         session->next_record_offset >
             static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) ||
+        (extra_record_flags & ~k_record_metadata_flags) != 0U ||
         (append_options & ~k_append_options_known_mask) != 0U) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
@@ -1643,7 +1645,7 @@ int page_log_append_session_append_common(
         page_size,
         out_record_offset,
         &next_record_offset,
-        0U,
+        extra_record_flags,
         append_stats_enabled,
         append_detail_stats_enabled,
         has_precomputed_checksum,
@@ -1679,6 +1681,7 @@ int mylite_ownerless_page_log_append_session_append(
         false,
         0U,
         0U,
+        0U,
         out_record_offset
     );
 }
@@ -1706,6 +1709,7 @@ int mylite_ownerless_page_log_append_session_append_with_checksum(
         page_size,
         true,
         page_checksum,
+        0U,
         0U,
         out_record_offset
     );
@@ -1735,6 +1739,37 @@ int mylite_ownerless_page_log_append_session_append_with_checksum_and_options(
         page_size,
         true,
         page_checksum,
+        0U,
+        append_options,
+        out_record_offset
+    );
+}
+
+int mylite_ownerless_page_log_append_external_snapshot_lineage_session_append_with_checksum_and_options(
+    int fd,
+    mylite_ownerless_page_log_append_session *session,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t page_lsn,
+    std::uint64_t commit_lsn,
+    const void *page,
+    std::uint32_t page_size,
+    std::uint64_t page_checksum,
+    std::uint32_t append_options,
+    std::uint64_t *out_record_offset
+) {
+    return page_log_append_session_append_common(
+        fd,
+        session,
+        space_id,
+        page_no,
+        page_lsn,
+        commit_lsn,
+        page,
+        page_size,
+        true,
+        page_checksum,
+        k_record_flag_external_snapshot_lineage,
         append_options,
         out_record_offset
     );

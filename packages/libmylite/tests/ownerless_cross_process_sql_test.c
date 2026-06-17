@@ -10158,6 +10158,7 @@ static void test_ownerless_explicit_transaction_undo_wal_elision(void) {
     char *database_path = path_join(root, "ownerless-explicit-txn-undo-elision.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     uint64_t page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT] = {0};
+    uint64_t page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
     uint64_t commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT] = {0};
     uint64_t database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT] = {0};
     uint64_t deep_stats[OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT] = {0};
@@ -10165,6 +10166,7 @@ static void test_ownerless_explicit_transaction_undo_wal_elision(void) {
     const char *tail = NULL;
     mylite_db *db;
     const unsigned rows = 32U;
+    const unsigned small_rows = 100U;
     const unsigned expected_sum = 10U * rows * (rows + 1U) / 2U;
     const unsigned savepoint_row_id = rows + 1U;
     const unsigned savepoint_row_value = savepoint_row_id * 10U;
@@ -10199,10 +10201,12 @@ static void test_ownerless_explicit_transaction_undo_wal_elision(void) {
     assert(mylite_bind_parameter_count(stmt) == 2U);
 
     mylite_ownerless_innodb_set_page_publish_stats_enabled(1);
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
     mylite_ownerless_innodb_set_commit_visibility_stats_enabled(1);
     mylite_ownerless_database_set_perf_stats_enabled(1);
     mylite_ownerless_innodb_deep_set_perf_stats_enabled(1);
     mylite_ownerless_innodb_reset_page_publish_stats();
+    mylite_ownerless_page_log_reset_append_perf_stats();
     mylite_ownerless_innodb_reset_commit_visibility_stats();
     mylite_ownerless_database_reset_perf_stats();
     mylite_ownerless_innodb_deep_reset_perf_stats();
@@ -10225,6 +10229,10 @@ static void test_ownerless_explicit_transaction_undo_wal_elision(void) {
         commit_stats,
         OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT
     );
+    mylite_ownerless_page_log_read_append_perf_stats(
+        page_log_append_stats,
+        OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_COUNT
+    );
     mylite_ownerless_database_read_perf_stats(
         database_stats,
         OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT
@@ -10234,6 +10242,7 @@ static void test_ownerless_explicit_transaction_undo_wal_elision(void) {
         OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT
     );
     mylite_ownerless_innodb_set_page_publish_stats_enabled(0);
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(0);
     mylite_ownerless_innodb_set_commit_visibility_stats_enabled(0);
     mylite_ownerless_database_set_perf_stats_enabled(0);
     mylite_ownerless_innodb_deep_set_perf_stats_enabled(0);
@@ -10271,6 +10280,21 @@ static void test_ownerless_explicit_transaction_undo_wal_elision(void) {
     assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_UNPROVEN_STATEMENT] == 0U);
     assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_PUBLISH_FAILED] == 0U);
     assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_NO_PUBLISHED_PAGES] == 0U);
+    assert(page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_CALLS] > 0U);
+    assert(
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_DIRECT_APPEND_CALLS] == 0U
+    );
+    assert(
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_APPEND_CALLS] ==
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_CALLS]
+    );
+    assert(
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] > 0U
+    );
+    assert(
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] ==
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS]
+    );
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
     assert(
         database_stats
@@ -10352,6 +10376,86 @@ static void test_ownerless_explicit_transaction_undo_wal_elision(void) {
         page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED] +
             page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED] ==
         page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT]
+    );
+
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_explicit_txn_append_batch ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value VARCHAR(32) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    tail = NULL;
+    assert(
+        mylite_prepare(
+            db,
+            "INSERT INTO app.ownerless_explicit_txn_append_batch (id, value) VALUES (?, ?)",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            &tail
+        ) == MYLITE_OK
+    );
+    assert(stmt != NULL);
+    assert(tail != NULL && *tail == '\0');
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
+    mylite_ownerless_innodb_set_commit_visibility_stats_enabled(1);
+    mylite_ownerless_innodb_deep_set_perf_stats_enabled(1);
+    mylite_ownerless_page_log_reset_append_perf_stats();
+    mylite_ownerless_innodb_reset_commit_visibility_stats();
+    mylite_ownerless_innodb_deep_reset_perf_stats();
+
+    exec_ok(db, "START TRANSACTION");
+    for (unsigned id = 1U; id <= small_rows; ++id) {
+        assert(mylite_bind_uint64(stmt, 1U, id) == MYLITE_OK);
+        assert(
+            mylite_bind_text(stmt, 2U, "mylite-perf", MYLITE_NUL_TERMINATED, MYLITE_STATIC) ==
+            MYLITE_OK
+        );
+        assert(mylite_step(stmt) == MYLITE_DONE);
+        assert(mylite_reset(stmt) == MYLITE_OK);
+        assert(mylite_clear_bindings(stmt) == MYLITE_OK);
+    }
+    exec_ok(db, "COMMIT");
+
+    mylite_ownerless_page_log_read_append_perf_stats(
+        page_log_append_stats,
+        OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_COUNT
+    );
+    mylite_ownerless_innodb_read_commit_visibility_stats(
+        commit_stats,
+        OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT
+    );
+    mylite_ownerless_innodb_deep_read_perf_stats(
+        deep_stats,
+        OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT
+    );
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(0);
+    mylite_ownerless_innodb_set_commit_visibility_stats_enabled(0);
+    mylite_ownerless_innodb_deep_set_perf_stats_enabled(0);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    stmt = NULL;
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_explicit_txn_append_batch") ==
+        small_rows
+    );
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FAST] > 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH] == 0U);
+    assert(page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_CALLS] > 0U);
+    assert(
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_DIRECT_APPEND_CALLS] == 0U
+    );
+    assert(
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_APPEND_CALLS] ==
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_CALLS]
+    );
+    assert(
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] > 0U
+    );
+    assert(
+        deep_stats[OWNERLESS_TEST_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_IMAGE_PUBLISHED] +
+            deep_stats[OWNERLESS_TEST_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_BUFFER_PUBLISHED] +
+            deep_stats[OWNERLESS_TEST_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_BUFFER_RETRY_PUBLISHED] >
+        0U
     );
 
     mylite_ownerless_innodb_set_commit_visibility_stats_enabled(1);

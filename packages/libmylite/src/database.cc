@@ -2160,6 +2160,7 @@ int append_ownerless_page_version(
     std::uint32_t page_size,
     std::uint64_t page_checksum,
     bool native_support_page,
+    bool external_snapshot_lineage,
     std::uint32_t publish_flags,
     std::uint64_t *out_record_offset
 );
@@ -5226,6 +5227,7 @@ OwnerlessStatementFastPathPolicy ownerless_statement_fast_path_policy(
     }
 
     policy.visible_fast_path = ownerless_transaction_commit_allows_visible_fast_path(db, tokens);
+    policy.append_batch_fast_path = policy.visible_fast_path;
     return policy;
 }
 
@@ -15574,11 +15576,13 @@ int append_ownerless_page_version(
     std::uint32_t page_size,
     std::uint64_t page_checksum,
     bool native_support_page,
+    bool external_snapshot_lineage,
     std::uint32_t publish_flags,
     std::uint64_t *out_record_offset
 ) {
     std::uint32_t append_options = 0U;
-    if ((publish_flags & MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_HISTORY_RSEG) != 0U) {
+    if (!external_snapshot_lineage &&
+        (publish_flags & MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_HISTORY_RSEG) != 0U) {
         append_options |= MYLITE_OWNERLESS_PAGE_LOG_APPEND_HISTORY_RSEG_DELTA;
     }
     if (native_support_page) {
@@ -15599,6 +15603,21 @@ int append_ownerless_page_version(
 
     if (ownerless_page_log_append_batch.session.active != 0 &&
         ownerless_page_log_append_batch.hook == hook) {
+        if (external_snapshot_lineage) {
+            return mylite_ownerless_page_log_append_external_snapshot_lineage_session_append_with_checksum_and_options(
+                hook->page_log_fd,
+                &ownerless_page_log_append_batch.session,
+                space_id,
+                page_no,
+                page_lsn,
+                visible_lsn,
+                page,
+                page_size,
+                page_checksum,
+                append_options,
+                out_record_offset
+            );
+        }
         return mylite_ownerless_page_log_append_session_append_with_checksum_and_options(
             hook->page_log_fd,
             &ownerless_page_log_append_batch.session,
@@ -15614,6 +15633,21 @@ int append_ownerless_page_version(
         );
     }
 
+    if (external_snapshot_lineage) {
+        return mylite_ownerless_page_log_append_external_snapshot_lineage_initialized_at_with_checksum_and_options(
+            hook->page_log_fd,
+            hook->page_log_offset,
+            space_id,
+            page_no,
+            page_lsn,
+            visible_lsn,
+            page,
+            page_size,
+            page_checksum,
+            append_options,
+            out_record_offset
+        );
+    }
     return mylite_ownerless_page_log_append_initialized_at_with_checksum_and_options(
         hook->page_log_fd,
         hook->page_log_offset,
@@ -15925,36 +15959,20 @@ int ownerless_innodb_page_publish_hook(
         g_runtime.ownerless_runtime_consumed_external_snapshot_page_version_wal.load(
             std::memory_order_relaxed
         );
-    const std::uint32_t native_support_append_options =
-        native_support_page ? MYLITE_OWNERLESS_PAGE_LOG_APPEND_NATIVE_SUPPORT_STATE : 0U;
-    const int append_result =
-        external_snapshot_lineage_active
-            ? mylite_ownerless_page_log_append_external_snapshot_lineage_initialized_at_with_checksum_and_options(
-                  hook->page_log_fd,
-                  hook->page_log_offset,
-                  space_id,
-                  page_no,
-                  page_lsn,
-                  visible_lsn,
-                  page,
-                  page_size,
-                  page_checksum,
-                  native_support_append_options,
-                  &record_offset
-              )
-            : append_ownerless_page_version(
-                  hook,
-                  space_id,
-                  page_no,
-                  page_lsn,
-                  visible_lsn,
-                  page,
-                  page_size,
-                  page_checksum,
-                  native_support_page,
-                  publish_flags,
-                  &record_offset
-              );
+    const int append_result = append_ownerless_page_version(
+        hook,
+        space_id,
+        page_no,
+        page_lsn,
+        visible_lsn,
+        page,
+        page_size,
+        page_checksum,
+        native_support_page,
+        external_snapshot_lineage_active,
+        publish_flags,
+        &record_offset
+    );
     ownerless_database_perf_add_elapsed(
         OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_APPEND_NS,
         stage_start_ns

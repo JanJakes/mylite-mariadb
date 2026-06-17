@@ -191,6 +191,19 @@ int mylite_ownerless_page_log_append_session_append_with_checksum_and_options(
     uint32_t append_options,
     uint64_t *out_record_offset
 );
+int mylite_ownerless_page_log_append_external_snapshot_lineage_session_append_with_checksum_and_options(
+    int fd,
+    mylite_ownerless_page_log_append_session *session,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t page_lsn,
+    uint64_t commit_lsn,
+    const void *page,
+    uint32_t page_size,
+    uint64_t page_checksum,
+    uint32_t append_options,
+    uint64_t *out_record_offset
+);
 void mylite_ownerless_page_log_append_session_end(
     int fd,
     mylite_ownerless_page_log_append_session *session

@@ -1518,6 +1518,24 @@ mylite_ownerless_innodb_statement_suppress_native_lifecycle_refresh(void)
   return mylite_ownerless_statement_suppress_native_lifecycle_refresh ? 1 : 0;
 }
 
+struct ownerless_page_publish_batch_scope
+{
+  explicit ownerless_page_publish_batch_scope(bool enabled_arg) noexcept
+      : enabled(enabled_arg)
+  {
+    if (enabled)
+      mylite_ownerless_innodb_begin_page_publish_batch();
+  }
+
+  ~ownerless_page_publish_batch_scope()
+  {
+    if (enabled)
+      mylite_ownerless_innodb_end_page_publish_batch();
+  }
+
+  bool enabled;
+};
+
 static void collect_transaction_page_write_pages(
     const trx_t *trx, std::vector<uint64_t> &pages, bool include_dirty_pages)
 {
@@ -1598,6 +1616,7 @@ extern "C" uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
   if (pages.empty() && (images == nullptr || images->empty()))
     return visible_lsn;
 
+  ownerless_page_publish_batch_scope page_publish_batch(true);
   uint64_t maximum_observed_lsn= visible_lsn;
   std::vector<uint64_t> successful_image_pages;
   if (images != nullptr)
