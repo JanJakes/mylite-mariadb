@@ -323,7 +323,8 @@ int refresh_page_for_write(const buf_block_t &block,
                            bool force_page_version= false,
                            bool allow_boundary_newer= false,
                            bool allow_visible_boundary= false,
-                           bool preserve_retained_user_page= false);
+                           bool preserve_retained_user_page= false,
+                           bool skip_page_version= false);
 fil_node_t *find_file_node_for_page(fil_space_t &space, uint32_t *page_no);
 void refresh_buffer_pool_page(uint32_t space_id, uint32_t page_no,
                               bool load_if_missing,
@@ -331,12 +332,14 @@ void refresh_buffer_pool_page(uint32_t space_id, uint32_t page_no,
                               bool evict_clean_page= true,
                               bool allow_boundary_newer= false,
                               bool allow_visible_boundary= false,
-                              bool preserve_retained_user_page= false);
+                              bool preserve_retained_user_page= false,
+                              bool skip_page_version= false);
 void refresh_buffer_pool_pages(bool force_page_version= false,
                                bool evict_clean_pages= true,
                                bool allow_boundary_newer= false,
                                bool allow_visible_boundary= false,
-                               bool preserve_retained_user_page= false);
+                               bool preserve_retained_user_page= false,
+                               bool skip_page_version= false);
 void refresh_replaceable_buffer_pool_pages();
 bool record_bit_set(const ib_lock_t *lock, uint32_t heap_no);
 trx_id_t lock_transaction_id(const ib_lock_t *lock, bool create_transient);
@@ -2021,6 +2024,21 @@ extern "C" void mylite_ownerless_innodb_refresh_buffer_pool_pages_preserve(
   page_visible_lsn= previous_visible_lsn;
 }
 
+extern "C" void
+mylite_ownerless_innodb_refresh_buffer_pool_pages_native_visible_boundary(
+    uint64_t visible_lsn)
+{
+  if (!mylite_ownerless_innodb_lock_has_hooks() || visible_lsn == 0)
+    return;
+  if (ownerless_skip_external_page_refresh())
+    return;
+
+  const uint64_t previous_visible_lsn= page_visible_lsn;
+  page_visible_lsn= visible_lsn;
+  refresh_buffer_pool_pages(true, true, false, true, false, true);
+  page_visible_lsn= previous_visible_lsn;
+}
+
 extern "C" void mylite_ownerless_innodb_refresh_buffer_pool_pages_force_preserve(
     uint64_t visible_lsn)
 {
@@ -3087,7 +3105,8 @@ int refresh_page_for_write(const buf_block_t &block,
                            bool force_page_version,
                            bool allow_boundary_newer,
                            bool allow_visible_boundary,
-                           bool preserve_retained_user_page)
+                           bool preserve_retained_user_page,
+                           bool skip_page_version)
 {
   ownerless_page_write_refresh_count(
       OWNERLESS_PAGE_WRITE_REFRESH_STAT_CALLS);
@@ -3139,7 +3158,7 @@ int refresh_page_for_write(const buf_block_t &block,
     }
   }
 
-  if (!force_page_version &&
+  if (!skip_page_version && !force_page_version &&
       ownerless_page_write_refresh_negative_cache_hit(
           id.space(), id.page_no(), local_lsn, page_visible_lsn))
   {
@@ -3178,27 +3197,34 @@ int refresh_page_for_write(const buf_block_t &block,
       goto exit;
     }
 
-    ownerless_page_write_refresh_count(
-        OWNERLESS_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_READ_CALLS);
-    const uint64_t page_version_read_start_ns=
-        ownerless_page_write_refresh_stats_on() ?
-            ownerless_page_write_refresh_now_ns() :
-            0;
     uint64_t page_version_commit_lsn= 0;
     uint32_t page_version_record_flags= 0;
-    int page_version_result=
-      mylite_ownerless_innodb_read_page_version_with_metadata(
-          id.space(), id.page_no(), external_page, page_size,
-          nullptr, &page_version_commit_lsn, &page_version_record_flags);
+    int page_version_result= MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
     bool page_version_proved_no_newer= false;
-    ownerless_page_write_refresh_add_elapsed(
-        OWNERLESS_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_READ_NS,
-        page_version_read_start_ns);
-    if (page_version_result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+    if (!skip_page_version)
     {
       ownerless_page_write_refresh_count(
-          OWNERLESS_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_MISSES);
-      page_version_proved_no_newer= true;
+          OWNERLESS_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_READ_CALLS);
+      const uint64_t page_version_read_start_ns=
+          ownerless_page_write_refresh_stats_on() ?
+              ownerless_page_write_refresh_now_ns() :
+              0;
+      page_version_result=
+        mylite_ownerless_innodb_read_page_version_with_metadata(
+            id.space(), id.page_no(), external_page, page_size,
+            nullptr, &page_version_commit_lsn, &page_version_record_flags);
+      ownerless_page_write_refresh_add_elapsed(
+          OWNERLESS_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_READ_NS,
+          page_version_read_start_ns);
+    }
+    if (page_version_result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+    {
+      if (!skip_page_version)
+      {
+        ownerless_page_write_refresh_count(
+            OWNERLESS_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_MISSES);
+        page_version_proved_no_newer= true;
+      }
     }
     else if (page_version_result != MYLITE_OWNERLESS_INNODB_LOCK_OK)
     {
@@ -3428,7 +3454,8 @@ void collect_buffer_pool_file_pages(std::vector<uint64_t> &pages)
 void refresh_buffer_pool_pages(bool force_page_version, bool evict_clean_pages,
                                bool allow_boundary_newer,
                                bool allow_visible_boundary,
-                               bool preserve_retained_user_page)
+                               bool preserve_retained_user_page,
+                               bool skip_page_version)
 {
   std::vector<uint64_t> pages;
   collect_buffer_pool_file_pages(pages);
@@ -3442,7 +3469,8 @@ void refresh_buffer_pool_pages(bool force_page_version, bool evict_clean_pages,
     refresh_buffer_pool_page(space_id, page_no, false, force_page_version,
                              evict_clean_pages, allow_boundary_newer,
                              allow_visible_boundary,
-                             preserve_retained_user_page);
+                             preserve_retained_user_page,
+                             skip_page_version);
   }
 }
 
@@ -3487,7 +3515,8 @@ void refresh_buffer_pool_page(uint32_t space_id, uint32_t page_no,
                               bool load_if_missing, bool force_page_version,
                               bool evict_clean_page, bool allow_boundary_newer,
                               bool allow_visible_boundary,
-                              bool preserve_retained_user_page)
+                              bool preserve_retained_user_page,
+                              bool skip_page_version)
 {
   const page_id_t id(space_id, page_no);
 
@@ -3518,7 +3547,7 @@ void refresh_buffer_pool_page(uint32_t space_id, uint32_t page_no,
       static_cast<void>(refresh_page_for_write(
           *block, force_page_version, force_page_version,
           allow_boundary_newer, allow_visible_boundary,
-          preserve_retained_user_page));
+          preserve_retained_user_page, skip_page_version));
   }
   mtr.commit();
 }

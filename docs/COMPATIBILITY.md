@@ -125,6 +125,12 @@ once. The focused trigger DDL refresh case verifies the peer reads the
 trigger-maintained audit table without a manual `FLUSH TABLES` and then
 observes its native tablespace registration. Mutating statements, DDL, and
 explicit-transaction statements do not use this retry path.
+Already-open ownerless peers that observe a dictionary generation change stay
+in conservative native-read mode for table reads, but that native path now
+forces a visible-boundary buffer-pool refresh without consulting page-version
+WAL. This preserves the compressed/rebuilt table guard while allowing peer
+committed foreign-key cascades and deletes to replace locally cached pages on
+the same handle.
 
 Ownerless performance diagnostics now run through production build presets for
 CI-visible timings, and CI separates the stats-off embedded throughput probe

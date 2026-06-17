@@ -77,6 +77,13 @@ space must not be refreshed from retained external state before the external
 pin releases; current page-version publication still records the post-DDL
 write stream for recovery and later conservative reclaim.
 
+For already-open peers that observe a dictionary generation change, conservative
+native-read mode still disables table page-version overlays, but it does not
+preserve stale cached table pages indefinitely. Autocommit no-page-version
+refresh uses a native visible-boundary buffer-pool refresh that skips
+page-version WAL and page-version negative-cache proofs, so peer committed
+row changes are visible while rebuilt/compressed table reads stay native-only.
+
 ## File Lifecycle
 
 The slice does not add files, durable metadata, or directory layout. It changes

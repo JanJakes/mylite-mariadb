@@ -601,7 +601,12 @@ from page 0, and evicts clean external pages. Already-open peers that observe a
 generation change stay in a conservative native-read mode instead of
 immediately re-enabling page-version table reads, because the current
 page-version WAL key is only `(space_id, page_no)` and does not encode a table
-copy/rebuild generation.
+copy/rebuild generation. In that peer-observed conservative mode, autocommit
+statements that refresh current data use a forced native visible-boundary
+buffer-pool refresh that skips page-version WAL and page-version negative-cache
+proofs. That keeps rebuilt/compressed table reads native-only while allowing
+the same handle to observe peer commits, cascades, and deletes even if it
+previously cached the affected pages locally.
 
 ### Mapping Lifecycle
 

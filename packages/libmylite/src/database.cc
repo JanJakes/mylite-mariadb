@@ -1325,6 +1325,7 @@ struct mylite_db {
     std::uint64_t ownerless_observed_dictionary_generation = 0;
     bool ownerless_observed_dictionary_generation_initialized = false;
     bool ownerless_peer_dictionary_refresh_requires_conservative_write = false;
+    bool ownerless_peer_dictionary_refresh_uses_native_visible_boundary = false;
     std::uint64_t ownerless_page_log_limit_bytes = 0;
     std::vector<std::uint64_t> ownerless_page_write_trx_ids;
     std::vector<std::string> ownerless_temporary_table_names;
@@ -12162,7 +12163,14 @@ int refresh_ownerless_external_pages_before_statement(
         db.ownerless_observed_lsn = std::max(db.ownerless_observed_lsn, refresh_lsn);
     } else if (allow_global_refresh && refresh_lsn > db.ownerless_observed_lsn) {
         if (!allow_page_version_reads && !force_native_flush) {
-            mylite_ownerless_innodb_refresh_buffer_pool_pages_preserve(refresh_lsn);
+            if (!explicit_transaction &&
+                db.ownerless_peer_dictionary_refresh_uses_native_visible_boundary) {
+                mylite_ownerless_innodb_refresh_buffer_pool_pages_native_visible_boundary(
+                    refresh_lsn
+                );
+            } else {
+                mylite_ownerless_innodb_refresh_buffer_pool_pages_preserve(refresh_lsn);
+            }
         } else if (retained_page_version_read) {
             mylite_ownerless_innodb_refresh_external_pages_retained(refresh_lsn);
         } else {
@@ -12400,6 +12408,7 @@ int refresh_ownerless_dictionary_before_statement(mylite_db &db, bool allow_glob
         clear_ownerless_insert_foreign_key_cache(db);
         if (db.ownerless_observed_dictionary_generation_initialized) {
             db.ownerless_peer_dictionary_refresh_requires_conservative_write = true;
+            db.ownerless_peer_dictionary_refresh_uses_native_visible_boundary = true;
         }
         db.ownerless_observed_dictionary_generation = generation;
         db.ownerless_observed_dictionary_generation_initialized = true;

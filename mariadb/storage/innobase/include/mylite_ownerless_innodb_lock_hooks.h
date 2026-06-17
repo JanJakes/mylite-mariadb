@@ -401,6 +401,8 @@ void mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_visibl
 void mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_retained_no_skip(
     uint64_t visible_lsn);
 void mylite_ownerless_innodb_refresh_buffer_pool_pages_preserve(uint64_t visible_lsn);
+void mylite_ownerless_innodb_refresh_buffer_pool_pages_native_visible_boundary(
+    uint64_t visible_lsn);
 void mylite_ownerless_innodb_refresh_buffer_pool_pages_force_preserve(
     uint64_t visible_lsn);
 int mylite_ownerless_innodb_refresh_page_for_read(
