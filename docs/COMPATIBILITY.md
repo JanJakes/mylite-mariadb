@@ -1207,6 +1207,14 @@ base snapshot lookup and post-append base-note update. Non-delta-eligible page
 classes now skip the base-note helper entirely. This is a first-party CPU
 cleanup; it does not reduce page-version publication volume or replace the
 remaining history-proof records.
+The follow-up single-pass delta page-type slice keeps the same index, undo,
+and explicit history rollback-segment delta eligibility rules, but loads the
+InnoDB page type once while classifying an appended page image. System-space
+index pages still stay standalone, unhinted SYS/TRX_SYS records still stay
+standalone, and hinted history rollback-segment pages can still select the
+history-rseg delta format. This is a small append CPU cleanup only; WAL bytes,
+record flags, checkpoint rewrite, replay, and native history-proof
+requirements are unchanged.
 The delta note slot-reuse slice then carries the process-local delta-base slot
 index found during snapshot lookup into the successful post-append note path.
 Delta appends revalidate that preferred slot under the same cache mutex before

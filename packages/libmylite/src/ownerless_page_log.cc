@@ -754,8 +754,6 @@ bool record_uses_undo_delta_payload(const PageRecordHeader &record);
 bool record_uses_any_delta_payload(const PageRecordHeader &record);
 bool record_uses_any_sparse_zero_payload(const PageRecordHeader &record);
 bool record_payload_shape_valid(const PageRecordHeader &record);
-bool page_is_innodb_index_page(const void *page, std::uint32_t page_size);
-bool page_is_innodb_undo_log_page(const void *page, std::uint32_t page_size);
 bool page_delta_flag_for_page(
     std::uint32_t space_id,
     const void *page,
@@ -5737,22 +5735,6 @@ std::uint64_t mix64(std::uint64_t value) {
     return value;
 }
 
-bool page_is_innodb_index_page(const void *page, std::uint32_t page_size) {
-    if (page == nullptr || page_size < k_innodb_fil_page_type_offset + sizeof(std::uint16_t)) {
-        return false;
-    }
-    const auto *bytes = static_cast<const unsigned char *>(page);
-    return load_be16(bytes + k_innodb_fil_page_type_offset) == k_innodb_fil_page_index;
-}
-
-bool page_is_innodb_undo_log_page(const void *page, std::uint32_t page_size) {
-    if (page == nullptr || page_size < k_innodb_fil_page_type_offset + sizeof(std::uint16_t)) {
-        return false;
-    }
-    const auto *bytes = static_cast<const unsigned char *>(page);
-    return load_be16(bytes + k_innodb_fil_page_type_offset) == k_innodb_fil_page_undo_log;
-}
-
 bool page_delta_flag_for_page(
     std::uint32_t space_id,
     const void *page,
@@ -5767,25 +5749,25 @@ bool page_delta_flag_for_page(
     if (page_size > std::numeric_limits<std::uint16_t>::max()) {
         return false;
     }
-    if (page_is_innodb_index_page(page, page_size)) {
+    if (page == nullptr || page_size < k_innodb_fil_page_type_offset + sizeof(std::uint16_t)) {
+        return false;
+    }
+
+    const std::uint16_t page_type =
+        load_be16(static_cast<const unsigned char *>(page) + k_innodb_fil_page_type_offset);
+    if (page_type == k_innodb_fil_page_index) {
         if (space_id == k_innodb_system_space_id) {
             return false;
         }
         *out_delta_flag = k_record_flag_index_delta_payload;
         return true;
     }
-    if (page_is_innodb_undo_log_page(page, page_size)) {
+    if (page_type == k_innodb_fil_page_undo_log) {
         *out_delta_flag = k_record_flag_undo_delta_payload;
         return true;
     }
-    if (allow_history_rseg_delta && page != nullptr &&
-        page_size >= k_innodb_fil_page_type_offset + sizeof(std::uint16_t)) {
-        const std::uint16_t page_type =
-            load_be16(static_cast<const unsigned char *>(page) + k_innodb_fil_page_type_offset);
-        if (page_type != k_innodb_fil_page_type_sys &&
-            page_type != k_innodb_fil_page_type_trx_sys) {
-            return false;
-        }
+    if (allow_history_rseg_delta &&
+        (page_type == k_innodb_fil_page_type_sys || page_type == k_innodb_fil_page_type_trx_sys)) {
         *out_delta_flag = k_record_flag_history_rseg_delta_payload;
         return true;
     }

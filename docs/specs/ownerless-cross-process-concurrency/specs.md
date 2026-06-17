@@ -5462,6 +5462,13 @@ subsystems that this mode needs:
   dirty-page tracking. It is another hot-path cleanup only; page-version WAL,
   native history-proof publication, checkpoint ordering, and ownerless lock
   release semantics stay unchanged.
+  The single-pass delta page-type slice then removed repeated InnoDB page-type
+  probes from ownerless page-log append classification. A page image is still
+  eligible for the same index, undo, or explicit history rollback-segment delta
+  record formats as before; the classifier now loads `FIL_PAGE_TYPE` once and
+  reuses it for those decisions. System-space index pages, unhinted SYS/TRX_SYS
+  records, record flags, payload bytes, checkpoint rewrite, replay, and native
+  history-proof requirements are unchanged.
   A no-dirty leave-exhaustion fast path then made the commit-log memo release
   loop stop calling `ownerless_page_write_leave()` after the MTR-owned
   page-write vector has become empty. Pages that are still recorded in the
