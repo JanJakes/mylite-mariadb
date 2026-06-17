@@ -5400,6 +5400,16 @@ subsystems that this mode needs:
   sentinel, avoiding the redundant second disabled-flag load in normal
   production, WordPress PHPUnit, and stats-off embedded timing paths while
   keeping enabled diagnostic counters unchanged.
+  The follow-up native MTR page-write diagnostic gate applies the same
+  principle inside `mtr_t::ownerless_page_write_enter()`,
+  `mtr_t::ownerless_page_write_leave()`, and
+  `mtr_t::ownerless_page_write_publish()`: the functions now return through
+  their existing inactive-hook, zero-commit-LSN, startup, or recovery checks
+  before loading the page-write perf flag or constructing elapsed-time scopes.
+  Enabled ownerless counters still cover active page-write locking and publish
+  work, but ordinary and inactive MTR paths no longer pay disabled diagnostic
+  overhead. This slice deliberately leaves page-version volume, latch release
+  ordering, and redo/checkpoint reconciliation unchanged.
   Reduced 50-row stats-enabled probes after
   that split showed both standalone encoding and delta-base note update can be
   visible inside the previous aggregate append total, with small-sample ranking

@@ -2354,12 +2354,14 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_redo_leave() noexcept
 ATTRIBUTE_NOINLINE bool mtr_t::ownerless_page_write_enter(
     const buf_block_t &block, bool allow_refresh) noexcept
 {
-  ownerless_page_write_perf_add(OWNERLESS_PAGE_WRITE_PERF_ENTER_CALLS, 1);
-  ownerless_page_write_perf_scope perf_scope(
-      OWNERLESS_PAGE_WRITE_PERF_ENTER_TOTAL_NS);
-
   if (UNIV_LIKELY(!ownerless_hooks_enabled()))
     return false;
+
+  const bool page_write_perf_enabled= ownerless_page_write_perf_enabled();
+  ownerless_page_write_perf_add_if_enabled(
+      page_write_perf_enabled, OWNERLESS_PAGE_WRITE_PERF_ENTER_CALLS, 1);
+  ownerless_page_write_perf_scope perf_scope(
+      OWNERLESS_PAGE_WRITE_PERF_ENTER_TOTAL_NS, page_write_perf_enabled);
 
   if (!ownerless_page_write_requires_lock(block.page))
   {
@@ -2600,12 +2602,14 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_refresh(
 ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_leave(
     const mtr_memo_slot_t &slot) noexcept
 {
-  ownerless_page_write_perf_add(OWNERLESS_PAGE_WRITE_PERF_LEAVE_CALLS, 1);
-  ownerless_page_write_perf_scope perf_scope(
-      OWNERLESS_PAGE_WRITE_PERF_LEAVE_TOTAL_NS);
-
   if (UNIV_LIKELY(!ownerless_hooks_enabled()))
     return;
+
+  const bool page_write_perf_enabled= ownerless_page_write_perf_enabled();
+  ownerless_page_write_perf_add_if_enabled(
+      page_write_perf_enabled, OWNERLESS_PAGE_WRITE_PERF_LEAVE_CALLS, 1);
+  ownerless_page_write_perf_scope perf_scope(
+      OWNERLESS_PAGE_WRITE_PERF_LEAVE_TOTAL_NS, page_write_perf_enabled);
 
   if (!(slot.type & (MTR_MEMO_PAGE_X_FIX | MTR_MEMO_PAGE_SX_FIX)))
     return;
@@ -2779,16 +2783,16 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_writes_publish() noexcept
 ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
     const buf_page_t &bpage) noexcept
 {
+  if (UNIV_LIKELY(!ownerless_hooks_enabled()) || m_commit_lsn == 0)
+    return;
+  if (recv_recovery_is_on() || !srv_was_started)
+    return;
+
   const bool page_write_perf_enabled= ownerless_page_write_perf_enabled();
   ownerless_page_write_perf_add_if_enabled(
       page_write_perf_enabled, OWNERLESS_PAGE_WRITE_PERF_PUBLISH_CALLS, 1);
   ownerless_page_write_perf_scope perf_scope(
       OWNERLESS_PAGE_WRITE_PERF_PUBLISH_TOTAL_NS, page_write_perf_enabled);
-
-  if (UNIV_LIKELY(!ownerless_hooks_enabled()) || m_commit_lsn == 0)
-    return;
-  if (recv_recovery_is_on() || !srv_was_started)
-    return;
 
   const bool publish_stats_enabled= ownerless_page_publish_stats_enabled.load(
       std::memory_order_relaxed);

@@ -1144,6 +1144,12 @@ insert, while `page_write_leave_total_ms` moved from `5.554` to `4.911` and
 the no-dirty commit-log loop sample moved from `76.541 ms` to `65.279 ms`.
 This is a bounded hook overhead reduction; the larger targets remain page-log
 encoding, native commit/page-publication, and redo/checkpoint reconciliation.
+The follow-up MTR page-write diagnostic gate moves ownerless page-write
+enter, leave, and publish perf counters behind the existing hooks-active and
+startup/recovery exits. That keeps enabled ownerless diagnostics intact while
+removing disabled stats-flag loads and timer setup from ordinary or inactive
+MTR paths. It is a production-path overhead cleanup, not a change to page
+publication volume, latch ordering, or recovery semantics.
 The ownerless page-publish buffer-reuse slice then removed per-published-page
 scratch allocation/free churn from `mtr_t::ownerless_page_write_publish()` by
 retaining one aligned transient page buffer per publishing thread and physical
