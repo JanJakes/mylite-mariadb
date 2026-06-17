@@ -1032,6 +1032,11 @@ struct SqlPolicyTokens {
     std::array<std::string_view, k_sql_policy_token_count> values;
     std::size_t count = 0;
 };
+
+struct OwnerlessStatementFastPathPolicy {
+    bool visible_fast_path = false;
+    bool append_batch_fast_path = false;
+};
 #endif
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
@@ -2537,18 +2542,11 @@ bool ownerless_prepared_write_defers_native_prepare(
 );
 bool count_sql_parameter_markers(std::string_view sql, std::size_t *out_count);
 bool sql_contains_identifier_token(std::string_view sql, const char *keyword);
-bool ownerless_insert_values_statement_allows_visible_fast_path(const SqlPolicyTokens &tokens);
-bool ownerless_insert_values_allows_append_batch_fast_path(const SqlPolicyTokens &tokens);
-bool ownerless_write_statement_allows_visible_fast_path(
-    mylite_db &db,
-    const SqlPolicyTokens &tokens
-);
 bool ownerless_transaction_commit_allows_visible_fast_path(
     const mylite_db &db,
     const SqlPolicyTokens &tokens
 );
-bool ownerless_statement_allows_visible_fast_path(mylite_db &db, const SqlPolicyTokens &tokens);
-bool ownerless_statement_allows_append_batch_fast_path(
+OwnerlessStatementFastPathPolicy ownerless_statement_fast_path_policy(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 );
@@ -3228,21 +3226,19 @@ int mylite_step(mylite_stmt *stmt) {
             dictionary_ddl_started ||
             stmt->db->ownerless_peer_dictionary_refresh_requires_conservative_write
         );
-        const bool statement_visible_fast_path =
-            ownerless_statement_allows_visible_fast_path(*stmt->db, policy_tokens);
-        const bool statement_append_batch_fast_path =
-            ownerless_statement_allows_append_batch_fast_path(*stmt->db, policy_tokens);
+        const OwnerlessStatementFastPathPolicy fast_path_policy =
+            ownerless_statement_fast_path_policy(*stmt->db, policy_tokens);
         update_ownerless_explicit_transaction_visible_fast_proof_before_sql(
             *stmt->db,
             policy_tokens,
-            statement_visible_fast_path
+            fast_path_policy.visible_fast_path
         );
         OwnerlessStatementVisibleFastPathScope visible_fast_path(
-            statement_visible_fast_path,
-            statement_append_batch_fast_path,
+            fast_path_policy.visible_fast_path,
+            fast_path_policy.append_batch_fast_path,
             ownerless_statement_deferred_latest_checkpoint_coalescing_allowed(
                 *stmt->db,
-                statement_append_batch_fast_path,
+                fast_path_policy.append_batch_fast_path,
                 statement_started_in_explicit_transaction
             )
         );
@@ -4539,21 +4535,19 @@ int exec_result_impl(
     OwnerlessStatementNativeLifecycleRefreshScope native_lifecycle_refresh(
         dictionary_ddl_started || db->ownerless_peer_dictionary_refresh_requires_conservative_write
     );
-    const bool statement_visible_fast_path =
-        ownerless_statement_allows_visible_fast_path(*db, policy_tokens);
-    const bool statement_append_batch_fast_path =
-        ownerless_statement_allows_append_batch_fast_path(*db, policy_tokens);
+    const OwnerlessStatementFastPathPolicy fast_path_policy =
+        ownerless_statement_fast_path_policy(*db, policy_tokens);
     update_ownerless_explicit_transaction_visible_fast_proof_before_sql(
         *db,
         policy_tokens,
-        statement_visible_fast_path
+        fast_path_policy.visible_fast_path
     );
     OwnerlessStatementVisibleFastPathScope visible_fast_path(
-        statement_visible_fast_path,
-        statement_append_batch_fast_path,
+        fast_path_policy.visible_fast_path,
+        fast_path_policy.append_batch_fast_path,
         ownerless_statement_deferred_latest_checkpoint_coalescing_allowed(
             *db,
-            statement_append_batch_fast_path,
+            fast_path_policy.append_batch_fast_path,
             statement_started_in_explicit_transaction
         )
     );
@@ -5195,29 +5189,7 @@ bool ownerless_insert_values_statement_row_count(
     return true;
 }
 
-bool ownerless_insert_values_statement_allows_visible_fast_path(const SqlPolicyTokens &tokens) {
-    std::size_t row_count = 0U;
-    return ownerless_insert_values_statement_row_count(tokens, &row_count) && row_count != 0U;
-}
-
 constexpr std::size_t k_ownerless_append_batch_fast_path_max_insert_values_rows = 4U;
-
-bool ownerless_insert_values_allows_append_batch_fast_path(const SqlPolicyTokens &tokens) {
-    std::size_t row_count = 0U;
-    return ownerless_insert_values_statement_row_count(tokens, &row_count) && row_count != 0U &&
-           row_count <= k_ownerless_append_batch_fast_path_max_insert_values_rows;
-}
-
-bool ownerless_write_statement_allows_visible_fast_path(
-    mylite_db &db,
-    const SqlPolicyTokens &tokens
-) {
-    if (db.ownerless_peer_dictionary_refresh_requires_conservative_write) {
-        return false;
-    }
-    return ownerless_insert_values_statement_allows_visible_fast_path(tokens) &&
-           !ownerless_insert_target_has_foreign_keys(db, tokens);
-}
 
 bool ownerless_transaction_commit_allows_visible_fast_path(
     const mylite_db &db,
@@ -5231,22 +5203,27 @@ bool ownerless_transaction_commit_allows_visible_fast_path(
            !db.ownerless_peer_dictionary_refresh_requires_conservative_write;
 }
 
-bool ownerless_statement_allows_visible_fast_path(mylite_db &db, const SqlPolicyTokens &tokens) {
-    if (ownerless_write_statement_allows_visible_fast_path(db, tokens)) {
-        return true;
-    }
-    return ownerless_transaction_commit_allows_visible_fast_path(db, tokens);
-}
-
-bool ownerless_statement_allows_append_batch_fast_path(
+OwnerlessStatementFastPathPolicy ownerless_statement_fast_path_policy(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 ) {
+    OwnerlessStatementFastPathPolicy policy = {};
     if (db.ownerless_peer_dictionary_refresh_requires_conservative_write) {
-        return false;
+        return policy;
     }
-    return ownerless_insert_values_allows_append_batch_fast_path(tokens) &&
-           !ownerless_insert_target_has_foreign_keys(db, tokens);
+
+    std::size_t row_count = 0U;
+    if (ownerless_insert_values_statement_row_count(tokens, &row_count) && row_count != 0U) {
+        if (!ownerless_insert_target_has_foreign_keys(db, tokens)) {
+            policy.visible_fast_path = true;
+            policy.append_batch_fast_path =
+                row_count <= k_ownerless_append_batch_fast_path_max_insert_values_rows;
+        }
+        return policy;
+    }
+
+    policy.visible_fast_path = ownerless_transaction_commit_allows_visible_fast_path(db, tokens);
+    return policy;
 }
 
 bool ownerless_statement_deferred_latest_checkpoint_coalescing_allowed(

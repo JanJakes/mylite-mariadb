@@ -320,6 +320,11 @@ when the handle has already observed the same stable idle dictionary
 generation. Active dictionary DDL and changed generations still use the
 existing wait and cache-refresh path; this is a statement-boundary overhead
 reduction, not a change to dictionary generation semantics.
+Ownerless direct and prepared statement startup now computes visible-fast
+commit publication and page-log append-batch eligibility together. Eligible
+`INSERT ... VALUES` statements resolve target foreign-key state once per
+statement boundary while preserving the same dictionary-generation cache,
+foreign-key blocking, append-row cap, and explicit-transaction commit proof.
 The slow non-isolated WordPress PHPUnit CI timing step now keeps mysqli
 profiling off by default, so the published test-only timing reflects the
 production-built adapter path rather than diagnostic timer overhead. Diagnostic

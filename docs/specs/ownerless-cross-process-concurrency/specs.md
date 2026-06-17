@@ -5390,6 +5390,12 @@ subsystems that this mode needs:
   dictionary-cache refresh logic. This reduces repeated statement-boundary
   overhead for hot reads and small writes without weakening dictionary
   generation invalidation.
+  Ownerless direct and prepared execution now coalesces visible-fast commit
+  and page-log append-batch policy classification into one private result. For
+  `INSERT ... VALUES`, the row-list shape is parsed once and target
+  foreign-key state is resolved once before applying the existing visible-fast
+  and one-through-four-row append-batch predicates; explicit `COMMIT` keeps
+  the transaction-scoped visible-fast proof and never enables append batching.
   The page-write publish summary slice then promoted existing detailed native
   page-write counters into CI-facing per-insert summary rows for publish
   calls, dirty-page scan work, deferred pages, lookup/allocation/copy/checksum/
