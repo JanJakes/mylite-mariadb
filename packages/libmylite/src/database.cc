@@ -1818,6 +1818,7 @@ int refresh_ownerless_external_pages_before_statement(
 int read_ownerless_pressure_state(mylite_db &db, OwnerlessPressureState &state);
 int enforce_ownerless_page_log_limit_policy(mylite_db &db, const SqlPolicyTokens &tokens);
 int refresh_ownerless_dictionary_before_statement(mylite_db &db, bool allow_global_refresh);
+bool ownerless_observed_dictionary_generation_ready(const mylite_db &db, void *dictionary_state);
 int flush_ownerless_dictionary_cache(mylite_db &db);
 int refresh_ownerless_dictionary_cache_after_stale_engine_error(mylite_db &db);
 void initialize_ownerless_dictionary_generation(mylite_db &db);
@@ -12316,6 +12317,10 @@ int refresh_ownerless_dictionary_before_statement(mylite_db &db, bool allow_glob
         return MYLITE_OK;
     }
 
+    if (ownerless_observed_dictionary_generation_ready(db, dictionary_state)) {
+        return MYLITE_OK;
+    }
+
     std::uint64_t generation = 0;
     const int wait_result = mylite_ownerless_dictionary_state_wait_ready(
         dictionary_state,
@@ -12389,6 +12394,23 @@ int refresh_ownerless_dictionary_before_statement(mylite_db &db, bool allow_glob
         db.ownerless_observed_dictionary_generation_initialized = true;
     }
     return flush_result;
+}
+
+bool ownerless_observed_dictionary_generation_ready(const mylite_db &db, void *dictionary_state) {
+    if (!db.ownerless_observed_dictionary_generation_initialized || dictionary_state == nullptr) {
+        return false;
+    }
+
+    mylite_ownerless_dictionary_state_snapshot snapshot = {};
+    if (mylite_ownerless_dictionary_state_read_snapshot(
+            dictionary_state,
+            k_concurrency_dictionary_state_segment_size,
+            &snapshot
+        ) != MYLITE_OWNERLESS_DICTIONARY_STATE_OK) {
+        return false;
+    }
+    return snapshot.active_owner_id == 0U && (snapshot.generation & 1U) == 0U &&
+           snapshot.generation == db.ownerless_observed_dictionary_generation;
 }
 
 int flush_ownerless_dictionary_cache(mylite_db &db) {

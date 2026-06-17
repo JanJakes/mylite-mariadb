@@ -5383,6 +5383,13 @@ subsystems that this mode needs:
   reduced ownerless stress pass cover the change. This is a broad query
   plumbing cleanup for WordPress-shaped text SQL, not a replacement for the
   remaining ownerless redo/checkpoint and page-publication performance work.
+  Ownerless statement startup now fast-checks the already-observed stable
+  dictionary generation before taking the full dictionary ready-wait path. Any
+  active DDL owner, odd generation, changed generation, unreadable mapping, or
+  uninitialized observation still falls through to the existing wait and
+  dictionary-cache refresh logic. This reduces repeated statement-boundary
+  overhead for hot reads and small writes without weakening dictionary
+  generation invalidation.
   The page-write publish summary slice then promoted existing detailed native
   page-write counters into CI-facing per-insert summary rows for publish
   calls, dirty-page scan work, deferred pages, lookup/allocation/copy/checksum/

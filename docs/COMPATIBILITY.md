@@ -315,6 +315,11 @@ child mode used by CI: parent child-process profiling and defensive static
 `wpdb` scanning are off unless a diagnostic run explicitly sets
 `MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES=1` or
 `MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN=1`.
+Ownerless statement startup now skips the heavier dictionary ready-wait path
+when the handle has already observed the same stable idle dictionary
+generation. Active dictionary DDL and changed generations still use the
+existing wait and cache-refresh path; this is a statement-boundary overhead
+reduction, not a change to dictionary generation semantics.
 The slow non-isolated WordPress PHPUnit CI timing step now keeps mysqli
 profiling off by default, so the published test-only timing reflects the
 production-built adapter path rather than diagnostic timer overhead. Diagnostic
