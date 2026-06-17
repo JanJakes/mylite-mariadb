@@ -148,6 +148,7 @@ enum OwnerlessDatabasePerfStatIndex : std::size_t {
     OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_LEGACY_WRITE_ELIDED,
     OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_NOOP_ELIDED,
     OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_PAGE_LOG_CHECKSUM_NS,
+    OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_INDEX_SKIPPED_NATIVE_SUPPORT,
     OWNERLESS_DATABASE_PERF_STAT_COUNT
 };
 
@@ -15512,8 +15513,9 @@ int ownerless_innodb_page_publish_hook(
     std::uint64_t record_offset = 0;
     std::uint64_t stage_start_ns =
         ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
+    const bool native_support_page = ownerless_page_image_is_native_support_state(page, page_size);
     bool external_snapshot_pin_active = false;
-    if (!ownerless_page_image_is_native_support_state(page, page_size)) {
+    if (!native_support_page) {
         external_snapshot_pin_active = publish_ownerless_snapshot_boundary_if_needed(
             hook,
             space_id,
@@ -15575,6 +15577,13 @@ int ownerless_innodb_page_publish_hook(
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
     pause_for_ownerless_test_fault("page-publish-after-append");
+    if (native_support_page) {
+        ownerless_database_perf_add(
+            OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_INDEX_SKIPPED_NATIVE_SUPPORT,
+            1U
+        );
+        return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+    }
 
     stage_start_ns =
         ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;

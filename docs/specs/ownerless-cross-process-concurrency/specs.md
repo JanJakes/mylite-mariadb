@@ -5026,7 +5026,17 @@ subsystems that this mode needs:
   `1.000` published `FIL_PAGE_UNDO_LOG` page per insert, with both pages also
   counted as blocked from blind native-support elision by the active
   history-proof gate. A future optimization must replace or compress that proof
-  evidence rather than simply eliding these page images. A follow-up
+  evidence rather than simply eliding these page images. A bounded follow-up
+  now keeps those proof images durable in the page-version WAL but skips live
+  shared page-index publication for native-support pages after append. WAL scan
+  remains authoritative on live index miss, and `.shm` replay still indexes the
+  records during rebuild. This removes only live cache churn; it does not reduce
+  the remaining page-version WAL append count. Its first reduced stats-enabled
+  production sample reported `2.010` skipped native-support live-index publishes
+  per autocommit insert and `0.002 ms/insert` in page-publish index time while
+  page-log append remained `0.054 ms/insert`; the companion stats-off
+  production sample reported ownerless single-row autocommit at `1628.66 ops/s`
+  versus ordinary autocommit at `3353.20 ops/s`, ratio `0.4857`. A follow-up
   compact-sparse composition attribution sample reported `6701.610`
   compact-sparse payload bytes per ownerless autocommit insert, split into
   `1266.080` metadata bytes and `5435.530` nonzero data bytes; the SYS

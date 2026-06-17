@@ -238,6 +238,8 @@ enum ownerless_test_database_perf_stat_index {
     OWNERLESS_TEST_DATABASE_PERF_STAT_CHECKPOINT_UPDATE_GENERATION_CACHE_HITS,
     OWNERLESS_TEST_DATABASE_PERF_STAT_CHECKPOINT_UPDATE_LEGACY_WRITE_ELIDED,
     OWNERLESS_TEST_DATABASE_PERF_STAT_CHECKPOINT_UPDATE_NOOP_ELIDED,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_PUBLISH_PAGE_LOG_CHECKSUM_NS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_SKIPPED_NATIVE_SUPPORT,
     OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT
 };
 
@@ -9613,6 +9615,7 @@ static void test_ownerless_single_owner_native_support_page_wal_elision(void) {
     char *database_path = path_join(root, "ownerless-single-owner-native-support-elision.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     uint64_t page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT] = {0};
+    uint64_t database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT] = {0};
     mylite_db *db;
     char sql[256];
     const unsigned rows = 16U;
@@ -9642,7 +9645,9 @@ static void test_ownerless_single_owner_native_support_page_wal_elision(void) {
     );
 
     mylite_ownerless_innodb_set_page_publish_stats_enabled(1);
+    mylite_ownerless_database_set_perf_stats_enabled(1);
     mylite_ownerless_innodb_reset_page_publish_stats();
+    mylite_ownerless_database_reset_perf_stats();
 
     for (unsigned id = 1U; id <= rows; ++id) {
         assert(
@@ -9662,6 +9667,11 @@ static void test_ownerless_single_owner_native_support_page_wal_elision(void) {
         page_stats,
         OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT
     );
+    mylite_ownerless_database_read_perf_stats(
+        database_stats,
+        OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT
+    );
+    mylite_ownerless_database_set_perf_stats_enabled(0);
     mylite_ownerless_innodb_set_page_publish_stats_enabled(0);
 
     assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_CANDIDATES] > 0U);
@@ -9677,6 +9687,11 @@ static void test_ownerless_single_owner_native_support_page_wal_elision(void) {
     assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT] > 0U);
     assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED] > 0U);
     assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED] > 0U);
+    assert(
+        database_stats
+            [OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_SKIPPED_NATIVE_SUPPORT] >=
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED]
+    );
     native_support_published_type_pages =
         page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_UNDO] +
         page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SPACE_METADATA] +
