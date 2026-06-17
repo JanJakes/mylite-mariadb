@@ -191,6 +191,13 @@ ops/s, ratio `0.5640`.
 The stats-off 1000-row run reported explicit transaction throughput at
 `2307.08` ownerless ops/s versus `2708.92` ordinary ops/s, ratio `0.8517`.
 
+The follow-up ownerless explicit transaction history-proof slice replaces this
+remaining write-history flush for the same proven prepared-insert transaction
+shape by publishing the active rollback-segment and undo history pages. The
+visible-fast proof here remains the gate that prevents savepoint-controlled,
+mixed, DDL, locking-read, foreign-key target, and otherwise unproven explicit
+transactions from entering that history proof.
+
 ## Risks And Unresolved Questions
 
 - The first implementation intentionally disqualifies locking reads and all

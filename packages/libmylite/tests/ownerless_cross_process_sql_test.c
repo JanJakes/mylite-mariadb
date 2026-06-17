@@ -10082,7 +10082,8 @@ static void test_ownerless_explicit_transaction_undo_wal_elision(void) {
     assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_NO_PUBLISHED_PAGES] == 0U);
     assert(
         deep_stats
-            [OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES] > 0U
+            [OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES] ==
+        0U
     );
     assert(
         deep_stats[OWNERLESS_TEST_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_IMAGE_ATTEMPTS] +
@@ -10109,11 +10110,11 @@ static void test_ownerless_explicit_transaction_undo_wal_elision(void) {
         page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_HISTORY_PROOF_UNDO_SAMPLES]
     );
     assert(
-        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_RSEG] ==
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_RSEG] >
         0U
     );
     assert(
-        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO] ==
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO] >
         0U
     );
     assert(

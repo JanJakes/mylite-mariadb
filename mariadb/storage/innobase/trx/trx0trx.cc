@@ -184,18 +184,9 @@ static bool ownerless_sql_command_allows_visible_fast_path(const trx_t *trx)
          mylite_ownerless_innodb_statement_visible_fast_path() != 0;
 }
 
-static bool ownerless_sql_command_is_autocommit(const trx_t *trx)
-{
-  return trx != nullptr && trx->mysql_thd != nullptr &&
-         !(trx->mysql_thd->variables.option_bits &
-           (OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN));
-}
-
 static bool ownerless_history_wal_proof_allows_fast_path(const trx_t *trx)
 {
   if (trx == nullptr || trx->read_only || trx->dict_operation)
-    return false;
-  if (!trx->auto_commit && !ownerless_sql_command_is_autocommit(trx))
     return false;
 
   return ownerless_sql_command_allows_visible_fast_path(trx);
