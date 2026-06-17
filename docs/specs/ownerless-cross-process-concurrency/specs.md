@@ -5414,6 +5414,12 @@ subsystems that this mode needs:
   dirty-page tracking. It is another hot-path cleanup only; page-version WAL,
   native history-proof publication, checkpoint ordering, and ownerless lock
   release semantics stay unchanged.
+  A no-dirty leave-exhaustion fast path then made the commit-log memo release
+  loop stop calling `ownerless_page_write_leave()` after the MTR-owned
+  page-write vector has become empty. Pages that are still recorded in the
+  vector keep the same ownerless release path, and native memo release,
+  page-latch release, page publication, redo, checkpoint, and recovery
+  semantics are unchanged.
   The page-write stats-off fast-path slice then made disabled page-write
   elapsed scopes return on the existing zero start-time sentinel before
   rechecking the stats-enabled flag. Focused SQL coverage proves disabled

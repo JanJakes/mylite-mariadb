@@ -193,6 +193,12 @@ write-enter or `transaction_publish` decision when adding pages to
 transaction-deferred dirty publishing. This preserves the same page-version and
 history-proof publication rules while removing another redundant
 classification hop from the ownerless write path.
+The no-dirty page-write commit-log loop now also stops invoking the ownerless
+page-write leave helper after the MTR-owned page-write vector has been
+exhausted. Member page-write lock release, native memo release, page latch
+release, page publication, redo handling, and checkpoint behavior are
+unchanged; the fast path skips only helper calls that would have returned on an
+empty vector.
 Ownerless checkpoint LSN publication now skips rewriting the legacy
 latest/visible payload once a valid checksummed LSN generation record already
 exists. The legacy payload is still initialized for empty-record fallback,

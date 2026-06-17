@@ -3369,7 +3369,7 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
     const bool ownerless_uses_transaction_release=
         ownerless_page_publish &&
         mtr->ownerless_page_write_uses_transaction_release();
-    const bool ownerless_page_leave=
+    bool ownerless_page_leave=
       ownerless_hooks && mtr->m_ownerless_page_write_mtr_pages != nullptr &&
       !mtr->m_ownerless_page_write_mtr_pages->empty();
     if (UNIV_UNLIKELY(ownerless_page_publish))
@@ -3439,7 +3439,12 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
         case MTR_MEMO_PAGE_SX_FIX:
         case MTR_MEMO_PAGE_X_FIX:
           if (UNIV_UNLIKELY(ownerless_page_leave))
+          {
             mtr->ownerless_page_write_leave(slot);
+            ownerless_page_leave=
+                mtr->m_ownerless_page_write_mtr_pages != nullptr &&
+                !mtr->m_ownerless_page_write_mtr_pages->empty();
+          }
           bpage->lock.u_or_x_unlock(latch == MTR_MEMO_PAGE_SX_FIX);
           continue;
         default:
