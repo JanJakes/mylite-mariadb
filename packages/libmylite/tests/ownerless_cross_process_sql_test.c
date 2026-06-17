@@ -8909,6 +8909,10 @@ static void test_ownerless_native_file_op_marker_recovers_from_torn_clear_record
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(paths);
 
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    assert(mylite_close(db) == MYLITE_OK);
+
     assert(concurrency_wal_is_checkpointed(database_path));
     write_concurrency_checkpoint_lsns(database_path, 0U, 0U);
     write_concurrency_native_file_op_checkpoint_needed(database_path, 1);
