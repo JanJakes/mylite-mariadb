@@ -199,6 +199,11 @@ exhausted. Member page-write lock release, native memo release, page latch
 release, page publication, redo handling, and checkpoint behavior are
 unchanged; the fast path skips only helper calls that would have returned on an
 empty vector.
+The same no-dirty release loop then added a caller-side page-write membership
+precheck while the vector is still non-empty, so non-member X/SX page memo
+slots do not enter the ownerless leave helper only to return before release.
+Member pages still use the same leave helper and release ordering before
+native latch unlock.
 Ownerless checkpoint LSN publication now skips rewriting the legacy
 latest/visible payload once a valid checksummed LSN generation record already
 exists. The legacy payload is still initialized for empty-record fallback,

@@ -3438,7 +3438,8 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
           continue;
         case MTR_MEMO_PAGE_SX_FIX:
         case MTR_MEMO_PAGE_X_FIX:
-          if (UNIV_UNLIKELY(ownerless_page_leave))
+          if (UNIV_UNLIKELY(ownerless_page_leave &&
+                            mtr->ownerless_page_write_has_mtr_page(*bpage)))
           {
             mtr->ownerless_page_write_leave(slot);
             ownerless_page_leave=

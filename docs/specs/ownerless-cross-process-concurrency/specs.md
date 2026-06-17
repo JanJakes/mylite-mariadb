@@ -5420,6 +5420,11 @@ subsystems that this mode needs:
   vector keep the same ownerless release path, and native memo release,
   page-latch release, page publication, redo, checkpoint, and recovery
   semantics are unchanged.
+  The same no-dirty release loop then added a caller-side page-write
+  membership precheck while that vector is still non-empty. Non-member X/SX
+  page memo slots no longer enter `ownerless_page_write_leave()` only to
+  return before release; member pages still use the existing helper and release
+  order.
   The page-write stats-off fast-path slice then made disabled page-write
   elapsed scopes return on the existing zero start-time sentinel before
   rechecking the stats-enabled flag. Focused SQL coverage proves disabled
