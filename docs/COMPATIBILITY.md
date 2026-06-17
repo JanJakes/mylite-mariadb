@@ -1185,6 +1185,13 @@ unchanged, but copies raw run bytes into resized vector tails instead of using
 range inserts during standalone encoding. This targets the measured
 standalone-encode subphase without changing sparse record selection, payload
 bytes, replay, checkpoint rewrite, or SQL behavior.
+The follow-up delta eligibility reuse slice keeps the same page-log delta
+flags, payload bytes, base-cache lock, and checkpoint/replay rules, but
+classifies each appended page image once and reuses that delta flag for both
+base snapshot lookup and post-append base-note update. Non-delta-eligible page
+classes now skip the base-note helper entirely. This is a first-party CPU
+cleanup; it does not reduce page-version publication volume or replace the
+remaining history-proof records.
 A local MTR wrapper fast-path prototype that cached
 `ownerless_page_write_uses_transaction_release()` per publish pass and reused
 the tracked-page lookup for release was rejected after stress evidence: one

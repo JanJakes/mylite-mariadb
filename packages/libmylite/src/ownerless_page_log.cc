@@ -795,18 +795,6 @@ bool maybe_encode_page_delta_payload(
     std::uint64_t *out_delta_payload_size,
     std::vector<unsigned char> *out_rejected_payload
 );
-bool index_delta_base_snapshot_for_page(
-    std::uint64_t log_device,
-    std::uint64_t log_inode,
-    std::uint64_t log_offset,
-    std::uint64_t log_generation,
-    std::uint32_t space_id,
-    std::uint32_t page_no,
-    const void *page,
-    std::uint32_t page_size,
-    bool allow_history_rseg_delta,
-    IndexPageDeltaBaseSnapshot *out_snapshot
-);
 bool index_delta_payload_beats_standalone(
     std::size_t delta_payload_size,
     std::uint64_t standalone_payload_size
@@ -847,7 +835,7 @@ void note_index_delta_base_after_successful_append(
     std::uint64_t record_payload_size,
     std::uint32_t record_flags,
     std::uint64_t observed_standalone_payload_size,
-    bool allow_history_rseg_delta
+    std::uint32_t delta_flag
 );
 std::uint64_t index_delta_base_fingerprint(
     std::uint64_t log_device,
@@ -2899,23 +2887,31 @@ int append_record_at_locked(
     std::uint64_t observed_standalone_payload_size = 0U;
     const bool allow_history_rseg_delta =
         (append_options & MYLITE_OWNERLESS_PAGE_LOG_APPEND_HISTORY_RSEG_DELTA) != 0U;
+    std::uint32_t page_delta_flag = 0U;
+    const bool page_delta_eligible = page_delta_flag_for_page(
+        space_id,
+        record_page,
+        page_size,
+        allow_history_rseg_delta,
+        &page_delta_flag
+    );
     try {
         const std::uint64_t stage_start_ns =
             append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
         IndexPageDeltaBaseSnapshot page_delta_snapshot;
         std::uint64_t substage_start_ns = append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
-        const bool has_page_delta_snapshot = index_delta_base_snapshot_for_page(
-            log_device,
-            log_inode,
-            static_cast<std::uint64_t>(log_offset),
-            log_generation,
-            space_id,
-            page_no,
-            record_page,
-            page_size,
-            allow_history_rseg_delta,
-            &page_delta_snapshot
-        );
+        const bool has_page_delta_snapshot =
+            page_delta_eligible && index_delta_base_snapshot(
+                                       log_device,
+                                       log_inode,
+                                       static_cast<std::uint64_t>(log_offset),
+                                       log_generation,
+                                       page_delta_flag,
+                                       space_id,
+                                       page_no,
+                                       page_size,
+                                       &page_delta_snapshot
+                                   );
         page_log_append_perf_add_elapsed_if_enabled(
             append_stats_enabled,
             PAGE_LOG_APPEND_PERF_DELTA_SNAPSHOT_NS,
@@ -3168,21 +3164,23 @@ int append_record_at_locked(
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
     stage_start_ns = append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
-    note_index_delta_base_after_successful_append(
-        log_device,
-        log_inode,
-        static_cast<std::uint64_t>(log_offset),
-        log_generation,
-        space_id,
-        page_no,
-        record_page,
-        page_size,
-        static_cast<std::uint64_t>(record_offset),
-        encoded_payload_size,
-        record_flags,
-        observed_standalone_payload_size,
-        allow_history_rseg_delta
-    );
+    if (page_delta_eligible) {
+        note_index_delta_base_after_successful_append(
+            log_device,
+            log_inode,
+            static_cast<std::uint64_t>(log_offset),
+            log_generation,
+            space_id,
+            page_no,
+            record_page,
+            page_size,
+            static_cast<std::uint64_t>(record_offset),
+            encoded_payload_size,
+            record_flags,
+            observed_standalone_payload_size,
+            page_delta_flag
+        );
+    }
     page_log_append_perf_add_elapsed_if_enabled(
         append_stats_enabled,
         PAGE_LOG_APPEND_PERF_DELTA_BASE_NOTE_NS,
@@ -5767,49 +5765,6 @@ bool maybe_encode_page_delta_payload(
     return true;
 }
 
-bool index_delta_base_snapshot_for_page(
-    std::uint64_t log_device,
-    std::uint64_t log_inode,
-    std::uint64_t log_offset,
-    std::uint64_t log_generation,
-    std::uint32_t space_id,
-    std::uint32_t page_no,
-    const void *page,
-    std::uint32_t page_size,
-    bool allow_history_rseg_delta,
-    IndexPageDeltaBaseSnapshot *out_snapshot
-) {
-    if (out_snapshot == nullptr) {
-        return false;
-    }
-    out_snapshot->found = false;
-    out_snapshot->delta_flag = 0U;
-    out_snapshot->record_offset = 0U;
-    out_snapshot->standalone_payload_size = 0U;
-    out_snapshot->page.reset();
-    std::uint32_t delta_flag = 0U;
-    if (!page_delta_flag_for_page(
-            space_id,
-            page,
-            page_size,
-            allow_history_rseg_delta,
-            &delta_flag
-        )) {
-        return false;
-    }
-    return index_delta_base_snapshot(
-        log_device,
-        log_inode,
-        log_offset,
-        log_generation,
-        delta_flag,
-        space_id,
-        page_no,
-        page_size,
-        out_snapshot
-    );
-}
-
 bool index_delta_payload_beats_standalone(
     std::size_t delta_payload_size,
     std::uint64_t standalone_payload_size
@@ -5989,16 +5944,11 @@ void note_index_delta_base_after_successful_append(
     std::uint64_t record_payload_size,
     std::uint32_t record_flags,
     std::uint64_t observed_standalone_payload_size,
-    bool allow_history_rseg_delta
+    std::uint32_t delta_flag
 ) {
-    std::uint32_t delta_flag = 0U;
-    if (!page_delta_flag_for_page(
-            space_id,
-            page,
-            page_size,
-            allow_history_rseg_delta,
-            &delta_flag
-        )) {
+    if (delta_flag != k_record_flag_index_delta_payload &&
+        delta_flag != k_record_flag_undo_delta_payload &&
+        delta_flag != k_record_flag_history_rseg_delta_payload) {
         return;
     }
     const std::uint32_t record_delta_flag =
