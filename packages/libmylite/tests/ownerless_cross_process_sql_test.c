@@ -10402,6 +10402,10 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
         page_stats,
         OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT
     );
+    mylite_ownerless_page_log_read_append_perf_stats(
+        page_log_append_stats,
+        OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_COUNT
+    );
 
     assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FAST] > 0U);
     assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH] == 0U);
@@ -10444,6 +10448,19 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
         page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO] >
         0U
     );
+    assert(page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_CALLS] > 0U);
+    assert(
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_APPEND_CALLS] +
+            page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_DIRECT_APPEND_CALLS] ==
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_CALLS]
+    );
+    assert(
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_APPEND_CALLS] > 0U
+    );
+    assert(
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] == 1U
+    );
+    assert(page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS] == 1U);
 
     assert(
         query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_multi_row_insert_fast_path") == 3U

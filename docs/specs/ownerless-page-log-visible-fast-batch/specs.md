@@ -54,15 +54,17 @@ recovery safe.
   visibility for statement shapes already proven by
   `ownerless_statement_allows_visible_fast_path()`, currently pure
   `INSERT ... VALUES` without target-table foreign keys. Append-session
-  deferral is narrower and uses a separate MyLite-owned thread-local flag for
-  single-row `INSERT ... VALUES` only, because the first implementation sample
-  showed that holding the append lock through larger multi-row statements
-  regressed bulk insert timing.
+  deferral is narrower and uses a separate MyLite-owned thread-local flag. The
+  initial slice limited deferral to single-row `INSERT ... VALUES`; the capped
+  follow-up in `docs/specs/ownerless-capped-visible-fast-batch/specs.md`
+  extends that to one through four parsed row constructors after the production
+  bulk probe showed avoidable append-session churn in that bounded shape.
 
 ## Design
 
 Defer the ownerless page-log append-session release across mini-transactions
-only while the new single-row visible-fast append-batch flag is active.
+only while the visible-fast append-batch flag is active for a capped
+`INSERT ... VALUES` statement.
 
 The batch end hook changes from unconditional release to:
 
@@ -91,7 +93,8 @@ hook context.
 
 In scope:
 
-- single-row ownerless visible-fast-path `INSERT ... VALUES` statements;
+- one-through-four-row ownerless visible-fast-path `INSERT ... VALUES`
+  statements;
 - append-session lifetime only;
 - focused stats coverage proving session begin/end counts drop while append
   count and existing visibility proof counters remain valid;
@@ -99,8 +102,8 @@ In scope:
 
 Out of scope:
 
-- multi-row `INSERT ... VALUES`, broader DML, `INSERT ... SELECT`, upsert,
-  `RETURNING`, DDL, explicit transaction, or foreign-key fast paths;
+- larger multi-row `INSERT ... VALUES`, broader DML, `INSERT ... SELECT`,
+  upsert, `RETURNING`, DDL, explicit transaction, or foreign-key fast paths;
 - changing page-version WAL record format;
 - changing page-visible LSN publication semantics;
 - group commit across independent SQL statements or processes.
@@ -108,9 +111,9 @@ Out of scope:
 ## Compatibility Impact
 
 No public SQL, C API, PHP API, mysqli, wire-protocol, metadata, or storage
-format behavior changes. Unsupported statement shapes and multi-row VALUES
-lists keep the existing per-mini-transaction append-session release behavior
-even when they still use the broader visible commit fast path.
+format behavior changes. Unsupported statement shapes and row lists above the
+capped fast path keep the existing per-mini-transaction append-session release
+behavior even when they still use the broader visible commit fast path.
 
 ## Directory And Lifecycle Impact
 
@@ -129,13 +132,13 @@ statement and releases it before visible-LSN publication.
 
 The change is in first-party MyLite hook code and focused test code; it should
 not require rebuilding the MariaDB embedded archive unless surrounding MariaDB
-source is touched. The expected stats-enabled signal for a single-row
-visible-fast insert is:
+source is touched. The expected stats-enabled signal for capped visible-fast
+inserts is:
 
-- page-log append calls per insert remain about three;
+- page-log append calls remain stable for the statement shape;
 - session append calls remain equal to appended records;
-- session begin/end calls per pure single-row autocommit insert drop from about
-  two to about one;
+- session begin/end calls per pure capped autocommit insert statement drop
+  toward one;
 - no increase in page-log direct append calls for the visible-fast path.
 
 The end-to-end throughput impact is expected to be modest but measurable
@@ -143,9 +146,8 @@ because encode and payload writes still dominate part of the append cost.
 
 ## Test And Verification Plan
 
-- Extend `single-owner-multi-row-insert-visible-fast-path` to first run a
-  single-row visible-fast insert with page-log append stats enabled and assert
-  successful visible-fast insert batching uses one session begin/end while
+- Extend `single-owner-multi-row-insert-visible-fast-path` to assert single-row
+  and capped multi-row visible-fast inserts use one session begin/end while
   appended records still publish through the session.
 - Verify the conservative upsert branch still falls back to commit-visibility
   flush and does not claim visible-fast batching.
@@ -161,7 +163,7 @@ because encode and payload writes still dominate part of the append cost.
 ## Acceptance Criteria
 
 - The visible-fast-path insert selector proves page-log append sessions are
-  reused across a single-row statement's ownerless mini-transactions.
+  reused across capped visible-fast statements' ownerless mini-transactions.
 - Page-visible publication still releases and syncs the WAL before publishing
   the visible LSN.
 - Error and runtime cleanup paths cannot leave a thread-local append session
@@ -173,7 +175,7 @@ because encode and payload writes still dominate part of the append cost.
 
 - Holding the append lock across a larger insert statement can increase append
   wait time for another writer or for local page-version reads. The scope is
-  deliberately limited to single-row visible-fast-path inserts; multi-row,
+  deliberately capped to small visible-fast-path inserts; larger row lists,
   broader group commit, or statement batching needs separate contention
   evidence.
 - This does not reduce page encoding, checksum, or payload-write work. If

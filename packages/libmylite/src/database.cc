@@ -5145,9 +5145,12 @@ bool ownerless_insert_values_statement_allows_visible_fast_path(const SqlPolicyT
     return ownerless_insert_values_statement_row_count(tokens, &row_count) && row_count != 0U;
 }
 
+constexpr std::size_t k_ownerless_append_batch_fast_path_max_insert_values_rows = 4U;
+
 bool ownerless_insert_values_allows_append_batch_fast_path(const SqlPolicyTokens &tokens) {
     std::size_t row_count = 0U;
-    return ownerless_insert_values_statement_row_count(tokens, &row_count) && row_count == 1U;
+    return ownerless_insert_values_statement_row_count(tokens, &row_count) && row_count != 0U &&
+           row_count <= k_ownerless_append_batch_fast_path_max_insert_values_rows;
 }
 
 bool ownerless_write_statement_allows_visible_fast_path(
