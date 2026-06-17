@@ -63,7 +63,10 @@ step with:
 
 This is a timing split only. It does not remove tests from CI; it makes the
 process-isolated child-process path visible in its own job step with the
-existing child-process timing keys.
+existing child-process timing keys. A later CI timing slice enables the
+lightweight child-process profile on the deferred and eager process-isolated
+steps so those keys are appended to the timing summary by default for CI,
+while leaving the slower static `wpdb` scan disabled.
 
 ## Compatibility Impact
 
@@ -95,7 +98,7 @@ masking it inside the ordinary suite.
 
 - CI has separate WordPress PHPUnit steps for database, process-isolated, and
   non-isolated remaining tests.
-- The process-isolated step uses the existing child-process profile output.
+- The process-isolated steps use the existing child-process profile output.
 - The non-isolated remaining step excludes both `Tests_DB` and the
   process-isolated classes.
 - The split uses the existing production PHP build directory and Release build

@@ -360,6 +360,12 @@ require_wordpress_timing_step_guards \
 require_wordpress_timing_step_guards \
   "Run WordPress PHPUnit process-isolated eager-reconnect suite (test only)"
 require_wordpress_timing_step_guards "Run WordPress PHPUnit non-isolated remaining suite (test only)"
+require_step_literal \
+  "Run WordPress PHPUnit process-isolated deferred-reconnect suite (test only)" \
+  'MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES: "1"'
+require_step_literal \
+  "Run WordPress PHPUnit process-isolated eager-reconnect suite (test only)" \
+  'MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES: "1"'
 forbid_step_literal \
   "Run WordPress PHPUnit non-isolated remaining suite (test only)" \
   'MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI: "1"'

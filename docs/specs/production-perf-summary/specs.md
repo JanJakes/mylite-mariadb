@@ -211,6 +211,12 @@ mode by leaving parent child-process profiling and defensive static `wpdb`
 scanning disabled. Diagnostic runs can still enable those costs explicitly with
 `MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES=1` or
 `MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN=1`.
+The process-isolated CI shards now override only
+`MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES=1` while keeping
+`MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN=0`, so CI timing summaries include
+child count, parent lock-release time, child runtime, reconnect time, and
+per-child averages without enabling the slower reflection scan. The database
+suite and non-isolated suite keep the global disabled default.
 The default CI WordPress PHPUnit path also leaves harness-owned JUnit logging
 disabled so the split test-only step timings stay comparable to trunk; local
 diagnostic runs can still opt into slowest-class and slowest-method reporting

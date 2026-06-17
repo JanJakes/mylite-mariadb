@@ -3,11 +3,15 @@
 ## Problem
 
 The WordPress PHPUnit CI job already runs production builds and explicitly
-disables two diagnostic-only parent-side costs for process-isolated tests:
-child-process profiling and defensive static `wpdb` scanning. Local/default
-harness runs still enabled both diagnostics. That made a default focused
-process-isolated run look slower than the CI timing mode and obscured the
-actual bottleneck, which is the child process's WordPress/MyLite bootstrap.
+disables diagnostic-only parent-side costs by default. At the time of this
+slice, both child-process profiling and defensive static `wpdb` scanning were
+disabled in CI and local/default harness runs still enabled both diagnostics.
+That made a default focused process-isolated run look slower than the CI timing
+mode and obscured the actual bottleneck, which is the child process's
+WordPress/MyLite bootstrap. A later isolated-child timing slice kept the
+reflection-heavy static scan disabled but opted the two process-isolated CI
+steps back into the lightweight child count/runtime counters so CI can report
+per-child attribution.
 
 Current production evidence at `22fa5629`:
 
@@ -34,6 +38,12 @@ behavior. The parent still closes the global WordPress `wpdb` before launching
 PHPUnit children, so process-isolated children can open the ordinary MyLite
 database directory.
 
+The global default remains `0`; CI may override
+`MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES=1` for process-isolated
+timing shards when the static scan remains disabled. That override records
+child count, parent lock-release, child runtime, and reconnect timing without
+enabling the slower reflection scan.
+
 Do not enable CLI OPcache from this slice. The focused A/B did not show a
 clear improvement, and changing PHP opcode-cache assumptions for the WordPress
 suite needs stronger evidence.
@@ -48,9 +58,9 @@ two environment variables no longer reintroduces slower diagnostic defaults.
 ## Build And Performance Impact
 
 No production binary changes. Default local process-isolated PHPUnit runs avoid
-diagnostic reflection/profiling work and align with CI timing. The dominant
-remaining cost is still child runtime, including PHP startup, WordPress
-bootstrap, and ordinary MyLite open/close in the child process.
+diagnostic reflection/profiling work. The dominant remaining cost is still
+child runtime, including PHP startup, WordPress bootstrap, and ordinary MyLite
+open/close in the child process.
 
 ## Test And Verification Plan
 
