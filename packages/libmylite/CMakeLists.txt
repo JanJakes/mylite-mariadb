@@ -403,6 +403,10 @@ if(BUILD_TESTING)
         NAME libmylite.ownerless-platform-probe-failure
         COMMAND mylite_ownerless_cross_process_sql_test platform-probe-failure
       )
+      add_test(
+        NAME libmylite.ownerless-history-proof-publish-failure-fallback
+        COMMAND mylite_ownerless_cross_process_sql_test history-proof-publish-failure-fallback
+      )
     endif()
     add_test(
       NAME libmylite.compat.mariadb-comparison
@@ -616,6 +620,10 @@ if(BUILD_TESTING)
       )
       set_tests_properties(libmylite.ownerless-platform-probe-failure PROPERTIES
         LABELS "compat.concurrency;compat.platform;compat.ownerless-negative-proof"
+      )
+      set_tests_properties(libmylite.ownerless-history-proof-publish-failure-fallback PROPERTIES
+        LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-negative-proof"
+        TIMEOUT 90
       )
     endif()
     set_tests_properties(libmylite.embedded-native-table-operations PROPERTIES

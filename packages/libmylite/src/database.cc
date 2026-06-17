@@ -15661,6 +15661,19 @@ bool ownerless_page_publish_would_regress_physical_lsn(
            record_commit_lsn == existing_commit_lsn && existing_page_size == page_size;
 }
 
+bool ownerless_test_fails_native_support_page_publish(bool native_support_page) {
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    if (!native_support_page || mylite_ownerless_innodb_test_faults_enabled_fast() == 0) {
+        return false;
+    }
+    const char *value = std::getenv("MYLITE_OWNERLESS_TEST_FAIL_NATIVE_SUPPORT_PAGE_PUBLISH");
+    return value != nullptr && std::strcmp(value, "1") == 0;
+#  else
+    (void)native_support_page;
+    return false;
+#  endif
+}
+
 int ownerless_innodb_page_publish_hook(
     std::uint32_t space_id,
     std::uint32_t page_no,
@@ -15700,6 +15713,9 @@ int ownerless_innodb_page_publish_hook(
         ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     const bool native_support_page = ownerless_page_image_is_native_support_state(page, page_size);
     bool external_snapshot_pin_active = false;
+    if (ownerless_test_fails_native_support_page_publish(native_support_page)) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
     if (!native_support_page) {
         external_snapshot_pin_active = publish_ownerless_snapshot_boundary_if_needed(
             hook,

@@ -314,6 +314,10 @@ Roles:
   refresh, and file-read overlay, while current live reads still accept current
   ownerless page images that advance the page. Native undo, system,
   allocation, and recovery pages still use ordinary visible-boundary refresh.
+  The rollback-segment and undo-header history-proof pages remain part of the
+  current ownerless write proof; unsafe-hook coverage now forces native-support
+  page-version publication failure and verifies the native history flush
+  fallback before any smaller replacement proof can be claimed.
   Same-runtime reads covered by the handle's local-native autocommit write
   boundary do not publish a page-version pin or enable the file-read overlay
   while the runtime remains in a continuous single-owner epoch and has not
