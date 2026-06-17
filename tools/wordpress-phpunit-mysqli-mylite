@@ -1665,6 +1665,29 @@ PHP_KEEPALIVE
   if [ -n "${phpunit_shell_overhead_seconds}" ]; then
     phpunit_summary_metrics+=("wordpress_phpunit_shell_overhead_seconds=${phpunit_shell_overhead_seconds}")
   fi
+  phpunit_child_profile_summary_keys=(
+    wordpress_phpunit_child_process_count
+    wordpress_phpunit_child_process_closed_wpdbs
+    wordpress_phpunit_child_process_static_properties
+    wordpress_phpunit_child_process_skipped_static_properties
+    wordpress_phpunit_child_process_lock_release_seconds
+    wordpress_phpunit_child_process_runtime_seconds
+    wordpress_phpunit_child_process_reconnect_seconds
+    wordpress_phpunit_child_process_lock_release_ms_avg
+    wordpress_phpunit_child_process_runtime_ms_avg
+    wordpress_phpunit_child_process_reconnect_ms_avg
+  )
+  for phpunit_child_profile_summary_key in "${phpunit_child_profile_summary_keys[@]}"; do
+    phpunit_child_profile_summary_value="$(
+      sed -n "s/^${phpunit_child_profile_summary_key}=//p" "${phpunit_output}" |
+        tail -n 1
+    )"
+    if [ -n "${phpunit_child_profile_summary_value}" ]; then
+      phpunit_summary_metrics+=(
+        "${phpunit_child_profile_summary_key}=${phpunit_child_profile_summary_value}"
+      )
+    fi
+  done
   if [ "${#phpunit_summary_metrics[@]}" -gt 0 ]; then
     append_timing_summary "${phpunit_summary_metrics[@]}"
   fi
