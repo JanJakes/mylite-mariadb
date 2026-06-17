@@ -797,6 +797,11 @@ static void emit_summary_ms_per_iteration_delta(
 static uint64_t page_publish_sys_identity_space_id(uint64_t identity);
 static uint64_t page_publish_sys_identity_page_no(uint64_t identity);
 static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations);
+static void emit_ownerless_transaction_phase_summary(
+    const uint64_t *ordinary_deep,
+    const uint64_t *ownerless_deep,
+    unsigned insert_iterations
+);
 static void emit_ownerless_bulk_autocommit_phase_summary(
     unsigned insert_rows,
     unsigned insert_statements
@@ -909,6 +914,8 @@ int main(void) {
     double ownerless_insert_autocommit_rate;
     double ownerless_insert_autocommit_bulk_row_rate;
     double ownerless_insert_autocommit_bulk_statement_rate;
+    uint64_t ordinary_txn_innodb_deep[INNODB_DEEP_PERF_STAT_COUNT] = {0};
+    uint64_t ownerless_txn_innodb_deep[INNODB_DEEP_PERF_STAT_COUNT] = {0};
     uint64_t ordinary_autocommit_innodb_deep[INNODB_DEEP_PERF_STAT_COUNT] = {0};
     uint64_t ownerless_autocommit_innodb_deep[INNODB_DEEP_PERF_STAT_COUNT] = {0};
 
@@ -1027,6 +1034,10 @@ int main(void) {
     emit_rate("mylite_perf_ordinary_insert_txn", insert_iterations, seconds);
     if (page_publish_stats) {
         emit_innodb_deep_perf_stats("mylite_perf_ordinary_insert_txn");
+        mylite_ownerless_innodb_deep_read_perf_stats(
+            ordinary_txn_innodb_deep,
+            INNODB_DEEP_PERF_STAT_COUNT
+        );
     }
     ordinary_insert_txn_rate = operations_per_second(insert_iterations, seconds);
     rate = ordinary_insert_txn_rate;
@@ -1111,11 +1122,20 @@ int main(void) {
         emit_sql_handler_perf_stats("mylite_perf_ownerless_insert_txn");
         emit_innodb_handler_perf_stats("mylite_perf_ownerless_insert_txn");
         emit_innodb_deep_perf_stats("mylite_perf_ownerless_insert_txn");
+        mylite_ownerless_innodb_deep_read_perf_stats(
+            ownerless_txn_innodb_deep,
+            INNODB_DEEP_PERF_STAT_COUNT
+        );
         emit_page_write_perf_stats("mylite_perf_ownerless_insert_txn");
         emit_page_write_refresh_stats("mylite_perf_ownerless_insert_txn");
         emit_page_log_append_perf_stats("mylite_perf_ownerless_insert_txn");
         emit_page_log_scan_perf_stats("mylite_perf_ownerless_insert_txn");
         emit_page_log_sync_perf_stats("mylite_perf_ownerless_insert_txn");
+        emit_ownerless_transaction_phase_summary(
+            ordinary_txn_innodb_deep,
+            ownerless_txn_innodb_deep,
+            insert_iterations
+        );
     }
     ownerless_insert_txn_rate = operations_per_second(insert_iterations, seconds);
     rate = ownerless_insert_txn_rate;
@@ -1745,6 +1765,343 @@ static void emit_autocommit_deep_count_comparison(
             insert_iterations
         );
     }
+}
+
+static void emit_ownerless_transaction_phase_summary(
+    const uint64_t *ordinary_deep,
+    const uint64_t *ownerless_deep,
+    unsigned insert_iterations
+) {
+    uint64_t page_publish[PAGE_PUBLISH_STAT_COUNT] = {0};
+    uint64_t database_perf[DATABASE_PERF_STAT_COUNT] = {0};
+    uint64_t commit_visibility[COMMIT_VISIBILITY_STAT_COUNT] = {0};
+    uint64_t page_write[PAGE_WRITE_PERF_STAT_COUNT] = {0};
+    uint64_t page_log_append[PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
+
+    mylite_ownerless_innodb_read_page_publish_stats(page_publish, PAGE_PUBLISH_STAT_COUNT);
+    mylite_ownerless_database_read_perf_stats(database_perf, DATABASE_PERF_STAT_COUNT);
+    mylite_ownerless_innodb_read_commit_visibility_stats(
+        commit_visibility,
+        COMMIT_VISIBILITY_STAT_COUNT
+    );
+    mylite_ownerless_innodb_read_page_write_perf_stats(page_write, PAGE_WRITE_PERF_STAT_COUNT);
+    mylite_ownerless_page_log_read_append_perf_stats(
+        page_log_append,
+        PAGE_LOG_APPEND_PERF_STAT_COUNT
+    );
+
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_versions_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_PUBLISHED],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_versions_per_transaction",
+        page_publish[PAGE_PUBLISH_STAT_PUBLISHED],
+        1U
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_native_support_published_pages_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_native_support_published_pages_per_transaction",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED],
+        1U
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_native_support_published_undo_pages_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_UNDO],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_native_support_published_trx_sys_pages_per_"
+        "insert",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_TRX_SYS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_snapshot_boundary_pages_per_insert",
+        page_publish[PAGE_PUBLISH_STAT_SNAPSHOT_BOUNDARY],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_publish_hook_calls_per_insert",
+        database_perf[DATABASE_PERF_STAT_PAGE_PUBLISH_CALLS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_publish_hook_ms_per_insert",
+        database_perf[DATABASE_PERF_STAT_PAGE_PUBLISH_TOTAL_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_publish_append_ms_per_insert",
+        database_perf[DATABASE_PERF_STAT_PAGE_PUBLISH_APPEND_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_publish_page_log_checksum_ms_per_insert",
+        database_perf[DATABASE_PERF_STAT_PAGE_PUBLISH_PAGE_LOG_CHECKSUM_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_publish_index_ms_per_insert",
+        database_perf[DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_NS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_log_append_calls_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_CALLS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_log_session_begin_calls_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_log_session_append_calls_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_SESSION_APPEND_CALLS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_log_session_end_calls_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_log_append_ms_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_TOTAL_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_log_lock_ms_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_LOCK_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_log_fstat_ms_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_FSTAT_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_log_encode_ms_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_ENCODE_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_log_checksum_ms_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_CHECKSUM_NS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_log_total_record_bytes_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_BYTES] +
+            page_log_append[PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_log_undo_delta_records_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_UNDO_DELTA_RECORDS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_log_undo_delta_payload_bytes_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_UNDO_DELTA_PAYLOAD_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_write_commit_log_calls_per_insert",
+        page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_CALLS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_write_commit_log_made_dirty_calls_per_"
+        "insert",
+        page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_MADE_DIRTY_CALLS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_write_commit_log_no_dirty_calls_per_insert",
+        page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_NO_DIRTY_CALLS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_write_commit_log_ms_per_insert",
+        page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_TOTAL_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_write_commit_log_release_ms_per_insert",
+        page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_RELEASE_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_write_commit_log_redo_leave_ms_per_insert",
+        page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_REDO_LEAVE_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_write_commit_log_publish_ms_per_insert",
+        page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_PUBLISH_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_write_commit_log_no_dirty_loop_ms_per_"
+        "insert",
+        page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_NO_DIRTY_LOOP_NS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_commit_visibility_fast_per_transaction",
+        commit_visibility[COMMIT_VISIBILITY_STAT_FAST],
+        1U
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_commit_visibility_flush_per_transaction",
+        commit_visibility[COMMIT_VISIBILITY_STAT_FLUSH],
+        1U
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_commit_visibility_unproven_per_transaction",
+        commit_visibility[COMMIT_VISIBILITY_STAT_FLUSH_UNPROVEN_STATEMENT],
+        1U
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_commit_visibility_total_ms_per_transaction",
+        commit_visibility[COMMIT_VISIBILITY_STAT_TOTAL_NS],
+        1U
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_commit_visibility_publish_pages_ms_per_"
+        "transaction",
+        commit_visibility[COMMIT_VISIBILITY_STAT_PUBLISH_TRANSACTION_PAGES_NS],
+        1U
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_commit_visibility_flush_dirty_ms_per_"
+        "transaction",
+        commit_visibility[COMMIT_VISIBILITY_STAT_FLUSH_DIRTY_PAGES_NS],
+        1U
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_publish_transaction_image_published_per_"
+        "transaction",
+        ownerless_deep[INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_TRANSACTION_IMAGE_PUBLISHED],
+        1U
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_publish_transaction_buffer_published_per_"
+        "transaction",
+        ownerless_deep[INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_TRANSACTION_BUFFER_PUBLISHED],
+        1U
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_page_publish_dirty_scan_published_per_"
+        "transaction",
+        ownerless_deep[INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_DIRTY_SCAN_PUBLISHED],
+        1U
+    );
+
+    emit_autocommit_deep_ms_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INSERT_FOR_MYSQL_TOTAL_NS,
+        "mylite_perf_summary_ordinary_insert_txn_row_insert_ms_per_insert",
+        "mylite_perf_summary_ownerless_insert_txn_row_insert_ms_per_insert",
+        "mylite_perf_summary_ownerless_minus_ordinary_insert_txn_row_insert_ms_per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_ms_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_TOTAL_NS,
+        "mylite_perf_summary_ordinary_insert_txn_clustered_btree_optimistic_ms_per_insert",
+        "mylite_perf_summary_ownerless_insert_txn_clustered_btree_optimistic_ms_per_insert",
+        "mylite_perf_summary_ownerless_minus_ordinary_insert_txn_clustered_btree_optimistic_ms_"
+        "per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_ms_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_LOCK_UNDO_NS,
+        "mylite_perf_summary_ordinary_insert_txn_clustered_btree_optimistic_lock_undo_ms_per_"
+        "insert",
+        "mylite_perf_summary_ownerless_insert_txn_clustered_btree_optimistic_lock_undo_ms_per_"
+        "insert",
+        "mylite_perf_summary_ownerless_minus_ordinary_insert_txn_clustered_btree_optimistic_"
+        "lock_undo_ms_per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_ms_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_UNDO_REPORT_TOTAL_NS,
+        "mylite_perf_summary_ordinary_insert_txn_undo_report_ms_per_insert",
+        "mylite_perf_summary_ownerless_insert_txn_undo_report_ms_per_insert",
+        "mylite_perf_summary_ownerless_minus_ordinary_insert_txn_undo_report_ms_per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_ms_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_UNDO_REPORT_MTR_COMMIT_NS,
+        "mylite_perf_summary_ordinary_insert_txn_undo_report_mtr_commit_ms_per_insert",
+        "mylite_perf_summary_ownerless_insert_txn_undo_report_mtr_commit_ms_per_insert",
+        "mylite_perf_summary_ownerless_minus_ordinary_insert_txn_undo_report_mtr_commit_ms_"
+        "per_insert",
+        insert_iterations
+    );
+    emit_autocommit_deep_count_comparison(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_UNDO_REPORT_CALLS,
+        "mylite_perf_summary_ordinary_insert_txn_undo_report_calls_per_insert",
+        "mylite_perf_summary_ownerless_insert_txn_undo_report_calls_per_insert",
+        "mylite_perf_summary_ownerless_minus_ordinary_insert_txn_undo_report_calls_per_insert",
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_undo_report_bulk_already_covered_per_insert",
+        ownerless_deep[INNODB_DEEP_PERF_STAT_TRX_UNDO_REPORT_BULK_ALREADY_COVERED],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_undo_assign_existing_log_per_insert",
+        ownerless_deep[INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_EXISTING_LOG],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_undo_assign_cache_reuse_hits_per_insert",
+        ownerless_deep[INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_CACHE_REUSE_HITS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_undo_assign_create_successes_per_insert",
+        ownerless_deep[INNODB_DEEP_PERF_STAT_TRX_UNDO_ASSIGN_CREATE_SUCCESSES],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_write_history_ms_per_transaction",
+        ownerless_deep[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_NS],
+        1U
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_write_history_ownerless_flush_ms_per_"
+        "transaction",
+        ownerless_deep[INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_NS],
+        1U
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_insert_txn_write_history_ownerless_flush_pages_per_"
+        "transaction",
+        ownerless_deep
+            [INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES],
+        1U
+    );
 }
 
 static void emit_autocommit_deep_comparison_summary(

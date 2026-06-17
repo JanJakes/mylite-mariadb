@@ -788,7 +788,10 @@ The design must be fast in the common case:
   through group commit. Current page-visible publication still syncs changed
   page-version WAL before publishing visibility, but may skip the clean sync
   when the current WAL size and page-log header generation exactly match a
-  process-local already-synced anchor.
+  process-local already-synced anchor. Production performance probe output now
+  also summarizes explicit-transaction ownerless insert attribution so per-row
+  undo/MTR/page-log costs and final commit visibility costs are visible
+  separately from autocommit summaries.
 - Page-version lookup should be O(1) average by `(space_id, page_no)` with a
   short version chain filtered by reader end mark.
 - Ordinary exclusive opens must stay on the native MariaDB embedded hot path:
