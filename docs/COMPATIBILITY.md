@@ -210,6 +210,21 @@ publish-total, subphase, and scratch-buffer reuse counters. Page publication,
 history-proof marking, page-log append, checkpoint ordering, and recovery
 semantics are unchanged; the change removes repeated diagnostics-only flag
 loads from stats-disabled production paths.
+Ownerless MTR page-publish loops now also open page-publish batch hooks lazily,
+only when a pass reaches an immediate `ownerless_page_write_publish()` call.
+Transaction-deferred dirty-page passes still record and capture deferred page
+images in the same latch order, while deferred-only passes avoid the batch
+begin/end hook pair. This is a hook-entry overhead reduction and does not
+change page-version volume, native-support/history-proof publication,
+page-log format, checkpoint ordering, or recovery semantics.
+A local production stats-enabled sample after the lazy-batch slice preserved
+explicit-transaction publication at `2` page versions and one page-log append
+session begin/end pair per transaction, autocommit publication at `3.008` page
+versions per insert and `2.004` native-support pages per insert, and the
+four-row bulk shape at one page-log append session begin/end pair per
+statement. The matching stats-off sample reported ownerless explicit
+transactions at `0.6435x` ordinary, ownerless autocommit at `0.4558x`, and
+ownerless four-row bulk rows at `0.4223x`.
 Ownerless checkpoint LSN publication now skips rewriting the legacy
 latest/visible payload once a valid checksummed LSN generation record already
 exists. The legacy payload is still initialized for empty-record fallback,

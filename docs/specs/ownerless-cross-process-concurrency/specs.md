@@ -5431,6 +5431,24 @@ subsystems that this mode needs:
   repeated diagnostics-only flag loads from stats-disabled production paths
   while preserving page publication, history-proof marking, page-log append,
   checkpoint, and recovery semantics.
+  Ownerless page-publish loops then made page-publish batch hooks lazy: the
+  collected-page list publisher, full MTR memo publisher, and no-dirty
+  commit-log publish loop now call
+  `mylite_ownerless_innodb_begin_page_publish_batch()` only before the first
+  immediate `ownerless_page_write_publish()` in that pass, and call the
+  matching end hook only when the begin hook ran. Transaction-deferred pages
+  still record and capture dirty page images in the same latch order, while
+  deferred-only passes avoid the ownerless batch hook pair. Page-version WAL,
+  native-support/history-proof publication, append-session batching for actual
+  page appends, checkpoint ordering, and recovery semantics are unchanged.
+  Its local production stats-enabled sample preserved explicit transaction
+  publication at `2` page versions and one page-log append session begin/end
+  pair per transaction, autocommit publication at `3.008` page versions per
+  insert and `2.004` native-support pages per insert, and the four-row bulk
+  shape at one page-log append session begin/end pair per statement. The
+  matching stats-off sample reported ownerless explicit transactions at
+  `0.6435x` ordinary, ownerless autocommit at `0.4558x`, and ownerless
+  four-row bulk rows at `0.4223x`.
   The page-write stats-off fast-path slice then made disabled page-write
   elapsed scopes return on the existing zero start-time sentinel before
   rechecking the stats-enabled flag. Focused SQL coverage proves disabled
