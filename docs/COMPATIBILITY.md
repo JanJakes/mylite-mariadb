@@ -225,6 +225,22 @@ four-row bulk shape at one page-log append session begin/end pair per
 statement. The matching stats-off sample reported ownerless explicit
 transactions at `0.6435x` ordinary, ownerless autocommit at `0.4558x`, and
 ownerless four-row bulk rows at `0.4223x`.
+Ownerless dirty transaction-page capture now reuses the transaction-publish
+classification already computed by the collected-page publisher, full MTR memo
+publisher, and no-dirty commit-log publish loop. The generic capture entry
+point keeps its hook and transaction-publish checks, while preclassified
+callers avoid recomputing that predicate before the capture helper revalidates
+the transaction pointer, source page, transaction-owned page set, and page LSN.
+This narrows explicit-transaction ownerless publish overhead without changing
+dirty-page ownership, captured page images, page-version publication, WAL
+format, checkpoint ordering, or recovery behavior.
+The stats-enabled production sample after this slice preserved explicit
+transaction publication at `2` page versions per transaction, `6` transaction
+image publishes, `4` transaction buffer publishes, and one page-log append
+session begin/end pair around the actual transaction page appends. Reduced
+stats-off throughput samples were noisy, so this slice does not claim a stable
+throughput win; the useful evidence is the removed duplicate predicate work
+with unchanged publication counters.
 Ownerless checkpoint LSN publication now skips rewriting the legacy
 latest/visible payload once a valid checksummed LSN generation record already
 exists. The legacy payload is still initialized for empty-record fallback,

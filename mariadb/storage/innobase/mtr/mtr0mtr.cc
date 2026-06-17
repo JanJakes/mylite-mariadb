@@ -2727,7 +2727,7 @@ void mtr_t::ownerless_page_writes_publish_list(
     if (transaction_publish)
     {
       ownerless_page_write_note_dirty_transaction_page(*bpage, true);
-      ownerless_page_write_capture_dirty_transaction_page(*bpage);
+      ownerless_page_write_capture_dirty_transaction_page(*bpage, true);
       continue;
     }
 
@@ -2765,7 +2765,7 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_writes_publish() noexcept
     if (transaction_publish)
     {
       ownerless_page_write_note_dirty_transaction_page(*bpage, true);
-      ownerless_page_write_capture_dirty_transaction_page(*bpage);
+      ownerless_page_write_capture_dirty_transaction_page(*bpage, true);
       continue;
     }
 
@@ -3093,7 +3093,14 @@ void mtr_t::ownerless_page_write_capture_dirty_transaction_page(
   if (UNIV_LIKELY(!ownerless_hooks_enabled()))
     return;
 
-  if (!ownerless_page_write_publishes_with_transaction(bpage))
+  ownerless_page_write_capture_dirty_transaction_page(
+      bpage, ownerless_page_write_publishes_with_transaction(bpage));
+}
+
+void mtr_t::ownerless_page_write_capture_dirty_transaction_page(
+    const buf_page_t &bpage, bool transaction_release_holds_page) const noexcept
+{
+  if (!transaction_release_holds_page)
     return;
 
   trx_t *ownerless_trx= ownerless_page_write_trx();
@@ -3452,7 +3459,8 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
             {
               mtr->ownerless_page_write_note_dirty_transaction_page(
                   *bpage, true);
-              mtr->ownerless_page_write_capture_dirty_transaction_page(*bpage);
+              mtr->ownerless_page_write_capture_dirty_transaction_page(
+                  *bpage, true);
             }
             else
             {

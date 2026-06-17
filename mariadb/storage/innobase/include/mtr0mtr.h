@@ -801,6 +801,11 @@ private:
   void ownerless_page_write_capture_dirty_transaction_page(const buf_page_t &bpage)
     const noexcept;
 
+  /** Capture a transaction-deferred page image after classification. */
+  void ownerless_page_write_capture_dirty_transaction_page(
+      const buf_page_t &bpage, bool transaction_release_holds_page)
+    const noexcept;
+
   /** @return whether ownerless page-write locks use transaction cleanup. */
   bool ownerless_page_write_uses_transaction_release() const noexcept;
 

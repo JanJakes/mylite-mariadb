@@ -5449,6 +5449,22 @@ subsystems that this mode needs:
   matching stats-off sample reported ownerless explicit transactions at
   `0.6435x` ordinary, ownerless autocommit at `0.4558x`, and ownerless
   four-row bulk rows at `0.4223x`.
+  Dirty transaction-page capture then reused the transaction-publish
+  classification already computed by the collected-page publisher, full MTR
+  memo publisher, and no-dirty commit-log publish loop. The generic capture
+  entry point still checks hook state and recomputes the predicate, while
+  preclassified callers skip that duplicate predicate work before the capture
+  helper revalidates the transaction pointer, source page, transaction-owned
+  page set, and page LSN. Dirty-page ownership, captured image contents,
+  page-version publication, WAL format, checkpoint ordering, and recovery
+  behavior are unchanged.
+  Its stats-enabled production sample preserved explicit transaction
+  publication at `2` page versions per transaction, `6` transaction image
+  publishes, `4` transaction buffer publishes, and one page-log append session
+  begin/end pair around the actual transaction page appends. Reduced stats-off
+  throughput samples were noisy, so this slice records unchanged publication
+  counters and removed duplicate predicate work rather than claiming a stable
+  throughput win.
   The page-write stats-off fast-path slice then made disabled page-write
   elapsed scopes return on the existing zero start-time sentinel before
   rechecking the stats-enabled flag. Focused SQL coverage proves disabled
