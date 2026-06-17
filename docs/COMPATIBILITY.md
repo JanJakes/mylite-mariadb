@@ -211,6 +211,11 @@ for a live mysqli link. Both paths intentionally continue through
 process-isolated PHPUnit is paying a close-path shape that differs from the
 existing explicit connect/close probe. The probe alternates the two close
 shapes so one loop does not receive all warm filesystem/cache effects.
+Those process-level `wordpress_perf_summary_*` keys are also appended to the
+WordPress timing summary, alongside the in-process connect and SQL probe keys,
+so CI step summaries show PHP startup, extension-load, explicit/implicit
+process connect/close, and active in-process engine timings without log
+scraping.
 Ownerless mini-transaction page-write release now skips transaction lookup and
 external release policy checks when the current MTR has no ownerless
 page-write pages left to release. In the CI-shaped stats-enabled bulk probe,

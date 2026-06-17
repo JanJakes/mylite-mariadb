@@ -1855,6 +1855,13 @@ echo "wordpress_perf_summary_process_iterations=${perf_process_iterations}"
 echo "wordpress_perf_summary_connect_iterations=${perf_connect_iterations}"
 echo "wordpress_perf_summary_sql_iterations=${perf_sql_iterations}"
 echo "wordpress_perf_summary_write_iterations=${perf_write_iterations}"
+perf_summary_metrics=(
+  "wordpress_perf_summary_cmake_build_type=${MYLITE_WORDPRESS_CMAKE_BUILD_TYPE}"
+  "wordpress_perf_summary_process_iterations=${perf_process_iterations}"
+  "wordpress_perf_summary_connect_iterations=${perf_connect_iterations}"
+  "wordpress_perf_summary_sql_iterations=${perf_sql_iterations}"
+  "wordpress_perf_summary_write_iterations=${perf_write_iterations}"
+)
 
 stock_php_process_start_ns="$(date +%s%N)"
 i=0
@@ -1955,6 +1962,21 @@ echo "wordpress_perf_summary_php_connect_process_implicit_minus_explicit_ms_avg=
 echo "wordpress_perf_summary_php_process_connect_close_iterations=${perf_connect_iterations}"
 echo "wordpress_perf_summary_php_process_connect_close_ms_avg=${php_connect_process_ms}"
 echo "wordpress_perf_summary_php_process_connect_close_delta_ms_avg=${php_connect_process_delta_ms}"
+perf_summary_metrics+=(
+  "wordpress_perf_summary_stock_php_process_start_ms_avg=${stock_php_process_ms}"
+  "wordpress_perf_summary_php_process_start_ms_avg=${php_process_ms}"
+  "wordpress_perf_summary_php_extension_process_overhead_ms_avg=${php_extension_process_overhead_ms}"
+  "wordpress_perf_summary_php_connect_process_ms_avg=${php_connect_process_ms}"
+  "wordpress_perf_summary_php_connect_process_explicit_close_ms_avg=${php_connect_process_ms}"
+  "wordpress_perf_summary_php_connect_process_implicit_object_free_ms_avg=${php_connect_process_implicit_ms}"
+  "wordpress_perf_summary_php_connect_process_close_shape_order=alternating"
+  "wordpress_perf_summary_php_connect_process_delta_ms_avg=${php_connect_process_delta_ms}"
+  "wordpress_perf_summary_php_connect_process_implicit_object_free_delta_ms_avg=${php_connect_process_implicit_delta_ms}"
+  "wordpress_perf_summary_php_connect_process_implicit_minus_explicit_ms_avg=${php_connect_process_implicit_minus_explicit_ms}"
+  "wordpress_perf_summary_php_process_connect_close_iterations=${perf_connect_iterations}"
+  "wordpress_perf_summary_php_process_connect_close_ms_avg=${php_connect_process_ms}"
+  "wordpress_perf_summary_php_process_connect_close_delta_ms_avg=${php_connect_process_delta_ms}"
+)
 
 if ! perf_output="$(mktemp "${TMPDIR:-/tmp}/mylite-wordpress-perf.XXXXXX")"; then
   echo "Could not create temporary WordPress perf output capture" >&2
@@ -2149,7 +2171,6 @@ must_query($db, 'DROP TABLE IF EXISTS mylite_perf_probe_autocommit');
 must_query($db, 'DROP TABLE IF EXISTS mylite_perf_probe_direct_autocommit');
 mysqli_close($db);
 PHP_PERF
-perf_summary_metrics=()
 while IFS= read -r perf_metric; do
   perf_summary_metrics+=("${perf_metric}")
 done < <(sed -n 's/^\(wordpress_perf_summary_[^=]*=.*\)$/\1/p' "${perf_output}")

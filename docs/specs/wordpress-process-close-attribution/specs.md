@@ -59,8 +59,9 @@ Add explicit names for both paths:
 - `wordpress_perf_php_connect_process_implicit_minus_explicit_ms_avg`
 - `wordpress_perf_php_connect_process_close_shape_order=alternating`
 
-The same aliases are emitted under `wordpress_perf_summary_*` so CI summaries
-remain grep-friendly.
+The same aliases are emitted under `wordpress_perf_summary_*` and appended to
+the WordPress timing summary so CI step summaries expose the process-level
+startup/close attribution without requiring log scraping.
 
 ## Compatibility Impact
 
