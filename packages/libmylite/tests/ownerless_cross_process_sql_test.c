@@ -151,6 +151,7 @@ extern uint32_t my_crc32c(uint32_t crc, const void *buf, size_t len);
 #define MYLITE_TEST_CHECKSUM_STRESS_ROWS_PER_WORKER 8U
 #define MYLITE_TEST_CHECKSUM_STRESS_ROUNDS 48U
 #define MYLITE_TEST_CHECKSUM_STRESS_ROUNDS_MAX 5000U
+#define MYLITE_TEST_CHECKSUM_STRESS_MAX_ATTEMPTS 5000U
 #define MYLITE_TEST_RANDOM_TX_STRESS_WORKER_COUNT 4U
 #define MYLITE_TEST_RANDOM_TX_STRESS_ROW_COUNT 16U
 #define MYLITE_TEST_RANDOM_TX_STRESS_ROUNDS 24U
@@ -2026,6 +2027,27 @@ static unsigned long long ownerless_tx_stress_delta(unsigned worker_id, unsigned
 static unsigned long long ownerless_tx_stress_delta_sum(unsigned worker_id, unsigned rounds);
 static unsigned ownerless_checksum_stress_row_id(unsigned worker_id, unsigned round);
 static unsigned long long ownerless_checksum_stress_delta(unsigned worker_id, unsigned round);
+static int ownerless_checksum_stress_error_retryable(mylite_db *db, unsigned mariadb_errno);
+static int ownerless_checksum_stress_exec_retryable(
+    mylite_db *db,
+    const char *sql,
+    unsigned worker_id,
+    unsigned round,
+    unsigned attempt
+);
+static int ownerless_checksum_stress_step_retryable(
+    mylite_db *db,
+    mylite_stmt *stmt,
+    int step_result,
+    unsigned worker_id,
+    unsigned round,
+    unsigned attempt
+);
+static void ownerless_checksum_stress_retry_pause(
+    unsigned worker_id,
+    unsigned round,
+    unsigned attempt
+);
 static void ownerless_random_tx_stress_rows(unsigned worker_id, unsigned round, unsigned rows[3]);
 static unsigned long long ownerless_random_tx_stress_delta(
     unsigned worker_id,
@@ -49099,14 +49121,15 @@ static void run_ownerless_checksum_stress_writer(
     const unsigned rounds = ownerless_checksum_stress_rounds();
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
-    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
-    exec_ok(db, "SET SESSION lock_wait_timeout = 30");
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 1");
+    exec_ok(db, "SET SESSION lock_wait_timeout = 0");
     signal_pipe(pipes.ready_write_fd);
     wait_for_pipe(pipes.release_read_fd);
 
     for (unsigned round = 1U; round <= rounds; ++round) {
         const unsigned row_id = ownerless_checksum_stress_row_id(worker_id, round);
         const unsigned long long delta = ownerless_checksum_stress_delta(worker_id, round);
+        int update_finished = 0;
 
         assert(
             snprintf(
@@ -49119,7 +49142,26 @@ static void run_ownerless_checksum_stress_writer(
                 row_id
             ) > 0
         );
-        exec_ok(db, sql);
+        for (unsigned attempt = 1U; attempt <= MYLITE_TEST_CHECKSUM_STRESS_MAX_ATTEMPTS;
+             ++attempt) {
+            if (ownerless_checksum_stress_exec_retryable(db, sql, worker_id, round, attempt)) {
+                assert(mylite_changes(db) == 1);
+                update_finished = 1;
+                break;
+            }
+            ownerless_checksum_stress_retry_pause(worker_id, round, attempt);
+        }
+        if (!update_finished) {
+            fprintf(
+                stderr,
+                "ownerless checksum stress exhausted retries: worker=%u round=%u sql=%s\n",
+                worker_id,
+                round,
+                sql
+            );
+            fflush(stderr);
+        }
+        assert(update_finished);
 
         if (round % 17U == 0U || round == rounds) {
             assert(
@@ -49151,8 +49193,8 @@ static void run_ownerless_prepared_checksum_stress_writer(
     const unsigned rounds = ownerless_checksum_stress_rounds();
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
-    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
-    exec_ok(db, "SET SESSION lock_wait_timeout = 30");
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 1");
+    exec_ok(db, "SET SESSION lock_wait_timeout = 0");
     assert(
         mylite_prepare(
             db,
@@ -49174,28 +49216,58 @@ static void run_ownerless_prepared_checksum_stress_writer(
     for (unsigned round = 1U; round <= rounds; ++round) {
         const unsigned row_id = ownerless_checksum_stress_row_id(worker_id, round);
         const unsigned long long delta = ownerless_checksum_stress_delta(worker_id, round);
-        int step_result;
+        int update_finished = 0;
 
-        assert(mylite_bind_uint64(stmt, 1, delta) == MYLITE_OK);
-        assert(mylite_bind_int64(stmt, 2, (long long)row_id) == MYLITE_OK);
-        step_result = mylite_step(stmt);
-        if (step_result != MYLITE_DONE) {
+        for (unsigned attempt = 1U; attempt <= MYLITE_TEST_CHECKSUM_STRESS_MAX_ATTEMPTS;
+             ++attempt) {
+            int step_result;
+
+            assert(mylite_bind_uint64(stmt, 1, delta) == MYLITE_OK);
+            assert(mylite_bind_int64(stmt, 2, (long long)row_id) == MYLITE_OK);
+            step_result = mylite_step(stmt);
+            if (step_result == MYLITE_DONE) {
+                assert(mylite_changes(db) == 1);
+                assert(mylite_reset(stmt) == MYLITE_OK);
+                update_finished = 1;
+                break;
+            }
+            if (ownerless_checksum_stress_step_retryable(
+                    db,
+                    stmt,
+                    step_result,
+                    worker_id,
+                    round,
+                    attempt
+                )) {
+                ownerless_checksum_stress_retry_pause(worker_id, round, attempt);
+                continue;
+            }
             fprintf(
                 stderr,
-                "ownerless prepared checksum stress step failed: "
-                "worker=%u round=%u result=%d errcode=%d mariadb_errno=%u message=%s\n",
+                "ownerless prepared checksum stress unexpected step failure: "
+                "worker=%u round=%u attempt=%u result=%d errcode=%d mariadb_errno=%u "
+                "message=%s\n",
                 worker_id,
                 round,
+                attempt,
                 step_result,
                 mylite_errcode(db),
                 mylite_mariadb_errno(db),
                 mylite_errmsg(db)
             );
             fflush(stderr);
+            assert(0);
         }
-        assert(step_result == MYLITE_DONE);
-        assert(mylite_changes(db) == 1);
-        assert(mylite_reset(stmt) == MYLITE_OK);
+        if (!update_finished) {
+            fprintf(
+                stderr,
+                "ownerless prepared checksum stress exhausted retries: worker=%u round=%u\n",
+                worker_id,
+                round
+            );
+            fflush(stderr);
+        }
+        assert(update_finished);
 
         if (round % 17U == 0U || round == rounds) {
             assert(
@@ -49858,6 +49930,89 @@ static unsigned ownerless_checksum_stress_row_id(unsigned worker_id, unsigned ro
 
 static unsigned long long ownerless_checksum_stress_delta(unsigned worker_id, unsigned round) {
     return (worker_id * 100000ULL) + (round * 13ULL);
+}
+
+static int ownerless_checksum_stress_error_retryable(mylite_db *db, unsigned mariadb_errno) {
+    return mylite_errcode(db) == MYLITE_BUSY ||
+           mariadb_errno == MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO ||
+           mariadb_errno == MYLITE_TEST_DEADLOCK_ERRNO;
+}
+
+static int ownerless_checksum_stress_exec_retryable(
+    mylite_db *db,
+    const char *sql,
+    unsigned worker_id,
+    unsigned round,
+    unsigned attempt
+) {
+    unsigned mariadb_errno = 0U;
+    const int result = exec_status(db, sql, &mariadb_errno);
+
+    if (result == MYLITE_OK) {
+        return 1;
+    }
+    if (ownerless_checksum_stress_error_retryable(db, mariadb_errno)) {
+        return 0;
+    }
+
+    fprintf(
+        stderr,
+        "ownerless checksum stress unexpected error: worker=%u round=%u attempt=%u "
+        "sql=%s errcode=%d mariadb_errno=%u message=%s\n",
+        worker_id,
+        round,
+        attempt,
+        sql,
+        mylite_errcode(db),
+        mariadb_errno,
+        mylite_errmsg(db) != NULL ? mylite_errmsg(db) : "(null)"
+    );
+    fflush(stderr);
+    assert(0);
+    return 0;
+}
+
+static int ownerless_checksum_stress_step_retryable(
+    mylite_db *db,
+    mylite_stmt *stmt,
+    int step_result,
+    unsigned worker_id,
+    unsigned round,
+    unsigned attempt
+) {
+    const unsigned mariadb_errno = mylite_mariadb_errno(db);
+
+    assert(step_result != MYLITE_DONE);
+    if (!ownerless_checksum_stress_error_retryable(db, mariadb_errno)) {
+        return 0;
+    }
+    if (mylite_reset(stmt) != MYLITE_OK) {
+        fprintf(
+            stderr,
+            "ownerless prepared checksum stress reset after retryable failure failed: "
+            "worker=%u round=%u attempt=%u result=%d errcode=%d mariadb_errno=%u message=%s\n",
+            worker_id,
+            round,
+            attempt,
+            step_result,
+            mylite_errcode(db),
+            mariadb_errno,
+            mylite_errmsg(db) != NULL ? mylite_errmsg(db) : "(null)"
+        );
+        fflush(stderr);
+        assert(0);
+    }
+    return 1;
+}
+
+static void ownerless_checksum_stress_retry_pause(
+    unsigned worker_id,
+    unsigned round,
+    unsigned attempt
+) {
+    const unsigned delay = 1000U * (1U + ((worker_id * 19U + round * 11U + attempt * 5U) % 20U));
+
+    sleep_microseconds(delay);
 }
 
 static void ownerless_random_tx_stress_rows(unsigned worker_id, unsigned round, unsigned rows[3]) {

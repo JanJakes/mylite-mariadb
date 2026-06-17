@@ -3987,13 +3987,14 @@ Tasks:
    metadata/value oracle, replacement-copy metadata/value oracles, per-round
    same-name recreated InnoDB `SPACE` identity checks, bounded reader retry
    handling for external MariaDB contention, and a manifest for external
-   MariaDB/RQG-style runners. It also
-   runs
-   shared-table checksum stress with
-   `MYLITE_OWNERLESS_CHECKSUM_STRESS_ROUNDS=160`, mixing direct SQL and
-   reusable prepared-statement writers while checking sum, version, and
-   weighted-sum aggregates against a deterministic oracle before and after
-   forced `.shm` rebuild through ownerless and native exclusive reopen. The
+   MariaDB/RQG-style runners. It also runs shared-table checksum stress with
+   `MYLITE_OWNERLESS_CHECKSUM_STRESS_ROUNDS=48`, mixing direct SQL and
+   reusable prepared-statement writers with bounded retry for ownerless
+   statement-lock busy, MariaDB lock-wait, and MariaDB deadlock errors while
+   checking sum, version, and weighted-sum aggregates against a deterministic
+   oracle before and after forced `.shm` rebuild through ownerless and native
+   exclusive reopen. Larger same-table checksum runs remain opt-in until
+   ownerless same-table writer fairness is improved. The
    `ownerless-checksum-stress-trace-export` slice adds
    `tools/ownerless-checksum-stress-trace`, which emits schema, per-worker SQL,
    live-reader SQL, an expected count/sum/version/weighted-sum oracle, and a

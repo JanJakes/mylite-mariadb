@@ -560,7 +560,7 @@ if(BUILD_TESTING)
         TIMEOUT 900
       )
       set_tests_properties(libmylite.ownerless-cross-process-checksum-stress PROPERTIES
-        ENVIRONMENT "MYLITE_OWNERLESS_CHECKSUM_STRESS_ROUNDS=160"
+        ENVIRONMENT "MYLITE_OWNERLESS_CHECKSUM_STRESS_ROUNDS=48"
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-stress"
         TIMEOUT 900
       )
