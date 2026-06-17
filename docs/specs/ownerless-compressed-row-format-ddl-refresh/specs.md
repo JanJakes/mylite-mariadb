@@ -75,14 +75,35 @@ The selector mirrors the existing row-format DDL handoff:
    `FIL_PAGE_TYPE_ZBLOB`/`ZBLOB2` page presence through ownerless/native
    reopen before and after forced `.shm` rebuild.
 
-No production change is expected if existing ownerless DDL generation refresh
-and native file lifecycle handling already cover this rebuild path.
+The compressed rebuild exposed a production refresh boundary beyond the test
+selector. A `ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8` rebuild can change the
+tablespace page-0 flags and physical page size observed through the already-open
+peer's `fil_space_t`, while older page-version WAL records remain keyed only by
+`(space_id, page_no)`. After such a table-copy rebuild, a stale page-version
+record from the old table image must not be overlaid onto the rebuilt compressed
+table, because old clustered pages can still reference now-invalid compressed
+BLOB continuation pages.
+
+The peer refresh path therefore handles dictionary-generation changes before
+the statement's page-version read decision. When a generation change is
+observed, the handle releases any page-version pin, closes the current InnoDB
+read view, clears external page observations, resets its page-version/native
+read watermarks, refreshes external space headers, and evicts clean external
+pages. Space-header refresh reads page 0 with up to `UNIV_PAGE_SIZE_MAX` bytes
+and derives the new physical page size from the refreshed flags before updating
+the native `fil_space_t` and file-page counts. The handle then stays in a
+conservative native-read mode for subsequent post-peer-DDL statements instead
+of immediately re-enabling page-version reads over table pages whose rebuild
+generation is not encoded in the page-version WAL key.
 
 ## Compatibility Impact
 
 SQL behavior is unchanged. The slice strengthens partial ownerless DDL
-compatibility for compressed InnoDB table-option rebuilds while keeping the
-broader compressed DDL matrix and durable lifecycle metadata gaps explicit.
+compatibility for compressed InnoDB table-option rebuilds by making already-open
+peers refresh dictionary and space-header state before using the rebuilt table.
+It also explicitly trades some post-peer-DDL page-version acceleration for
+correct native reads until page-version invalidation can become
+rebuild-generation-aware.
 
 ## Directory And Lifecycle Impact
 
@@ -92,9 +113,11 @@ database directory.
 
 ## Native Storage Impact
 
-Native InnoDB storage remains MariaDB-managed. The test verifies compressed
-native page evidence after the rebuild instead of adding MyLite storage-format
-logic.
+Native InnoDB storage remains MariaDB-managed. MyLite refreshes the native
+InnoDB space header from the rebuilt page 0 and avoids applying stale
+page-version table-page images across the dictionary-generation boundary. The
+test verifies compressed native page evidence after the rebuild instead of
+adding MyLite storage-format logic.
 
 ## Public API Impact
 
@@ -102,16 +125,22 @@ No public API changes.
 
 ## Binary Size Impact
 
-No production binary-size impact beyond focused test code and docs.
+The production code change is in existing ownerless refresh paths and does not
+add dependencies or new public entry points.
 
 ## Test Plan
 
-- Build `mylite_ownerless_cross_process_sql_test` in `embedded-dev`.
-- Run focused `compressed-row-format-ddl`.
+- Build `mylite_ownerless_cross_process_sql_test` in `php-embedded-prod`.
+- Run focused `sql-case
+  test_ownerless_compressed_row_format_ddl_refreshes_peer_dictionary`.
+- Run focused `compressed-row-format-ddl` and
+  `compressed-row-format-key-block-ddl`.
 - Run adjacent DDL selectors: `row-format-ddl`, `charset-convert-ddl`,
   `table-comment-ddl`, `force-rebuild-ddl`, and `compressed-blob-page-pressure`.
-- Build and run focused `compressed-row-format-ddl` in `ownerless-test-hooks`.
-- Run `format-check`, `git diff --check`, and cached diff checks.
+- Build and run focused compressed row-format crash selectors in
+  `ownerless-test-hooks` when the hook preset is available.
+- Run `format-check`, production-build guard scripts, `git diff --check`, and
+  cached diff checks.
 
 ## Acceptance Criteria
 
@@ -121,6 +150,9 @@ No production binary-size impact beyond focused test code and docs.
 - The already-open peer can insert a prepared BLOB row after the rebuild.
 - Final rows, compressed metadata, and ZBLOB page evidence survive
   ownerless/native reopen before and after forced `.shm` rebuild.
+- A dictionary-generation refresh updates space-header page-size metadata and
+  prevents stale pre-rebuild page-version records from being overlaid on the
+  rebuilt compressed table.
 
 ## Risks And Follow-Up
 
@@ -131,3 +163,7 @@ No production binary-size impact beyond focused test code and docs.
 - Crash injection during compressed rebuild, durable DDL file-lifecycle
   metadata for every native DDL class, SQL-level table-lock fault injection,
   and external MariaDB/RQG DDL stress remain separate gaps.
+- Conservative native reads after peer DDL are intentionally broader than the
+  compressed-row-format case. A future per-space or per-table rebuild-generation
+  stamp in the page-version index could recover more page-version read
+  acceleration without allowing old table images to cross rebuild boundaries.

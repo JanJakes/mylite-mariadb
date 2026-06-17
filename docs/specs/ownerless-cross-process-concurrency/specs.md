@@ -582,7 +582,15 @@ The dictionary-generation segment serializes ownerless DDL with an odd/even
 generation counter. Peers wait for active DDL to finish before starting a new
 statement; when the generation changes, they flush SQL table caches and evict
 unused InnoDB dictionary-cache entries before reopening tables against the
-latest shared page visibility.
+latest shared page visibility. Generation refresh now runs before the
+statement's page-version read decision, releases any handle page-version pin,
+closes the current InnoDB read view, clears external page observations, resets
+handle page-version/native read watermarks, refreshes external space headers
+from page 0, and evicts clean external pages. Already-open peers that observe a
+generation change stay in a conservative native-read mode instead of
+immediately re-enabling page-version table reads, because the current
+page-version WAL key is only `(space_id, page_no)` and does not encode a table
+copy/rebuild generation.
 
 ### Mapping Lifecycle
 
@@ -1832,7 +1840,15 @@ Tasks:
    startup and recovery keep this hook disabled while redo/log initialization
    is still in progress. Non-forced page-version write refresh uses the same
    monotonic rule and does not overwrite a same-LSN or newer clean local page
-   with a retained page-version image. No-live-process
+   with a retained page-version image. Peer dictionary-generation refresh runs
+   before page-version read eligibility is chosen. It refreshes page-0
+   space-header flags using a max-sized page read so compressed row-format
+   rebuilds can update the native `fil_space_t` page size, then keeps the
+   already-open handle out of page-version table reads while the post-DDL
+   conservative flag is set. This avoids overlaying retained `(space_id,
+   page_no)` records from the pre-rebuild table image onto the rebuilt table,
+   including compressed external BLOB page chains whose continuation pages can
+   be invalid for the new table image. No-live-process
    recovery treats the page-version WAL as the visibility authority and applies
    the latest visible page-version record by the same commit-first ordering as
    page-version reads to existing native InnoDB tablespace files before

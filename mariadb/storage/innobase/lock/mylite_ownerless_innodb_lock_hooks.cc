@@ -2960,24 +2960,29 @@ bool refresh_external_space_header(fil_space_t &space)
   if (node == nullptr || !node->is_open() || node->deferred)
     return false;
 
-  const unsigned page_size= space.physical_size();
-  page_t *page= static_cast<byte*>(aligned_malloc(page_size, page_size));
+  page_t *page= static_cast<byte*>(
+      aligned_malloc(UNIV_PAGE_SIZE_MAX, UNIV_PAGE_SIZE_MAX));
   if (page == nullptr)
     return false;
 
   bool refreshed= false;
+  ulint read_bytes= 0;
   {
     const int page_version_result= mylite_ownerless_innodb_read_page_version(
-        space.id, 0, page, page_size);
+        space.id, 0, page, UNIV_PAGE_SIZE_MAX);
     if (page_version_result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
+    {
       refreshed= true;
+      read_bytes= UNIV_PAGE_SIZE_MAX;
+    }
     else if (page_version_result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
       goto exit;
   }
 
   if (!refreshed)
   {
-    if (os_file_read(IORequestRead, node->handle, page, 0, page_size, nullptr)
+    if (os_file_read(IORequestReadPartial, node->handle, page, 0,
+                     UNIV_PAGE_SIZE_MAX, &read_bytes)
         != DB_SUCCESS)
       goto exit;
   }
@@ -2987,10 +2992,14 @@ bool refresh_external_space_header(fil_space_t &space)
     const uint32_t page_no= mach_read_from_4(page + FIL_PAGE_OFFSET);
     const uint32_t flags= fsp_header_get_flags(page);
     const uint32_t size= fsp_header_get_field(page, FSP_SIZE);
+    const unsigned refreshed_page_size= fil_space_t::physical_size(flags);
 
     if (page_no != 0 || space_id != space.id || size < 4 ||
         !fil_space_t::is_valid_flags(flags, space.id) ||
         fil_space_t::logical_size(flags) != srv_page_size ||
+        refreshed_page_size == 0 ||
+        refreshed_page_size > UNIV_PAGE_SIZE_MAX ||
+        read_bytes < refreshed_page_size ||
         buf_page_is_corrupted(true, page, flags) != NOT_CORRUPTED)
       goto exit;
 
@@ -3005,10 +3014,10 @@ bool refresh_external_space_header(fil_space_t &space)
     if (size_bytes != os_offset_t(-1))
     {
       os_offset_t rounded_size= size_bytes;
-      const ulint mask= page_size * FSP_EXTENT_SIZE - 1;
+      const ulint mask= refreshed_page_size * FSP_EXTENT_SIZE - 1;
       if (rounded_size > mask)
         rounded_size&= ~os_offset_t(mask);
-      const uint32_t file_pages= uint32_t(rounded_size / page_size);
+      const uint32_t file_pages= uint32_t(rounded_size / refreshed_page_size);
       node->size= std::max(node->size, file_pages);
       space.size= std::max(space.size, node->size);
     }

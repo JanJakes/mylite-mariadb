@@ -3017,6 +3017,7 @@ int mylite_step(mylite_stmt *stmt) {
         }
         const bool allow_page_version_reads =
             !statement_uses_temporary_table &&
+            !stmt->db->ownerless_peer_dictionary_refresh_requires_conservative_write &&
             statement_allows_ownerless_page_version_reads(policy_tokens);
         const bool allow_current_read_refresh =
             !statement_uses_temporary_table &&
@@ -3335,13 +3336,6 @@ int mylite_step(mylite_stmt *stmt) {
             policy_tokens,
             statement_started_in_explicit_transaction
         );
-        if (stmt->db->ownerless_peer_dictionary_refresh_requires_conservative_write &&
-            ownerless_insert_values_statement_allows_visible_fast_path(policy_tokens) &&
-            !statement_started_in_explicit_transaction &&
-            !ownerless_runtime_has_external_page_version_pin(g_runtime)) {
-            stmt->db->ownerless_peer_dictionary_refresh_requires_conservative_write = false;
-        }
-
         if (!stmt->ownerless_native_prepare_per_step && !stmt->has_result &&
             mysql_stmt_field_count(stmt->stmt) != 0U) {
             const int result_setup = initialize_statement_results(*stmt, false);
@@ -4373,6 +4367,7 @@ int exec_result_impl(
     }
     const bool allow_page_version_reads =
         !statement_uses_temporary_table &&
+        !db->ownerless_peer_dictionary_refresh_requires_conservative_write &&
         statement_allows_ownerless_page_version_reads(policy_tokens);
     const bool allow_current_read_refresh =
         !statement_uses_temporary_table &&
@@ -4578,13 +4573,6 @@ ownerless_query_success:
         policy_tokens,
         statement_started_in_explicit_transaction
     );
-    if (db->ownerless_peer_dictionary_refresh_requires_conservative_write &&
-        ownerless_insert_values_statement_allows_visible_fast_path(policy_tokens) &&
-        !statement_started_in_explicit_transaction &&
-        !ownerless_runtime_has_external_page_version_pin(g_runtime)) {
-        db->ownerless_peer_dictionary_refresh_requires_conservative_write = false;
-    }
-
     db->changes =
         has_result || affected_rows == static_cast<my_ulonglong>(-1)
             ? 0
@@ -11768,12 +11756,13 @@ int refresh_ownerless_external_pages_before_statement(
         release_ownerless_handle_page_version_pin(db);
     }
 
+    const int dictionary_result =
+        refresh_ownerless_dictionary_before_statement(db, allow_global_refresh);
+    if (dictionary_result != MYLITE_OK) {
+        return dictionary_result;
+    }
+
     if (!allow_page_version_reads && !force_native_flush) {
-        const int dictionary_result =
-            refresh_ownerless_dictionary_before_statement(db, allow_global_refresh);
-        if (dictionary_result != MYLITE_OK) {
-            return dictionary_result;
-        }
         const std::lock_guard<std::mutex> guard(g_runtime.mutex);
         if (ownerless_runtime_in_single_owner_epoch_locked(g_runtime)) {
             return MYLITE_OK;
@@ -12065,7 +12054,7 @@ int refresh_ownerless_external_pages_before_statement(
         db.ownerless_page_version_read_lsn =
             std::max(db.ownerless_page_version_read_lsn, page_version_read_lsn);
     }
-    return refresh_ownerless_dictionary_before_statement(db, allow_global_refresh);
+    return MYLITE_OK;
 }
 
 int read_ownerless_pressure_state(mylite_db &db, OwnerlessPressureState &state) {
@@ -12182,6 +12171,50 @@ int refresh_ownerless_dictionary_before_statement(mylite_db &db, bool allow_glob
     static_cast<void>(mylite_ownerless_innodb_refresh_to_latest_external_lsn());
     const int flush_result = flush_ownerless_dictionary_cache(db);
     if (flush_result == MYLITE_OK) {
+        release_ownerless_handle_page_version_pin(db);
+        mylite_ownerless_innodb_close_current_read_view();
+        mylite_ownerless_innodb_clear_external_page_observations();
+        db.ownerless_page_version_read_lsn = 0;
+        db.ownerless_local_native_read_lsn = 0;
+        db.ownerless_pending_post_open_clean_page_refresh_lsn = 0;
+        db.ownerless_pending_post_open_clean_page_refresh_visible_boundary = false;
+        db.ownerless_pending_post_open_clean_page_refresh_current_boundary = false;
+        std::uint64_t latest_lsn = 0;
+        const int observe_result = mylite_ownerless_innodb_redo_observe(&latest_lsn);
+        if (observe_result == MYLITE_OWNERLESS_INNODB_LOCK_OK && latest_lsn != 0U) {
+            mylite_ownerless_innodb_refresh_external_space_headers();
+            mylite_ownerless_innodb_evict_clean_external_pages();
+            db.ownerless_observed_lsn = std::max(db.ownerless_observed_lsn, latest_lsn);
+            db.ownerless_observed_visible_lsn =
+                std::max(db.ownerless_observed_visible_lsn, latest_lsn);
+            db.ownerless_clean_pages_evicted_lsn =
+                std::max(db.ownerless_clean_pages_evicted_lsn, latest_lsn);
+            std::uint64_t process_generation = 0;
+            std::uint64_t visible_generation = 0;
+            {
+                const std::lock_guard<std::mutex> guard(g_runtime.mutex);
+                unsigned char *registry = runtime_process_registry(g_runtime);
+                if (registry != nullptr) {
+                    process_generation = mylite_ownerless_process_registry_generation(registry);
+                }
+                if (g_runtime.ownerless_innodb_lock_hook.redo_state != nullptr) {
+                    mylite_ownerless_redo_state_snapshot redo_snapshot = {};
+                    if (mylite_ownerless_redo_state_read_snapshot(
+                            g_runtime.ownerless_innodb_lock_hook.redo_state,
+                            g_runtime.ownerless_innodb_lock_hook.redo_state_size,
+                            &redo_snapshot
+                        ) == MYLITE_OWNERLESS_REDO_STATE_OK) {
+                        visible_generation = redo_snapshot.visible_generation;
+                    }
+                }
+            }
+            if (process_generation != 0U) {
+                db.ownerless_clean_pages_evicted_generation = process_generation;
+            }
+            if (visible_generation != 0U) {
+                db.ownerless_clean_pages_evicted_visible_generation = visible_generation;
+            }
+        }
         clear_ownerless_insert_foreign_key_cache(db);
         if (db.ownerless_observed_dictionary_generation_initialized) {
             db.ownerless_peer_dictionary_refresh_requires_conservative_write = true;
