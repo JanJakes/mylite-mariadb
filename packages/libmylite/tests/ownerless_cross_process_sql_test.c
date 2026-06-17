@@ -9765,6 +9765,7 @@ static void test_ownerless_single_owner_native_support_page_wal_elision(void) {
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     uint64_t page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT] = {0};
     uint64_t database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT] = {0};
+    uint64_t disabled_database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT] = {0};
     uint64_t disabled_page_write_stats[OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_DISABLED_PROBE_COUNT] = {
         0
     };
@@ -9831,6 +9832,12 @@ static void test_ownerless_single_owner_native_support_page_wal_elision(void) {
     );
     mylite_ownerless_database_set_perf_stats_enabled(0);
     mylite_ownerless_innodb_set_page_publish_stats_enabled(0);
+    mylite_ownerless_database_reset_perf_stats();
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_native_support_elision") == rows);
+    mylite_ownerless_database_read_perf_stats(
+        disabled_database_stats,
+        OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT
+    );
 
     assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_CANDIDATES] > 0U);
     assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_PUBLISHED] > 0U);
@@ -9849,6 +9856,11 @@ static void test_ownerless_single_owner_native_support_page_wal_elision(void) {
         database_stats
             [OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_SKIPPED_NATIVE_SUPPORT] >=
         page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED]
+    );
+    assert(disabled_database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_CALLS] == 0U);
+    assert(
+        disabled_database_stats
+            [OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_SKIPPED_NATIVE_SUPPORT] == 0U
     );
     assert(disabled_page_write_stats[OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_ENTER_CALLS] == 0U);
     native_support_published_type_pages =

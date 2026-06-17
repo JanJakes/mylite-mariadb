@@ -177,6 +177,11 @@ redo hook counters into compact autocommit and explicit-transaction summary
 rows for enter, observe, reserve, written, and leave calls plus elapsed time,
 so branch/main timing can distinguish redo-state hook work from checkpoint
 updates, page-log append, and page-publication cost.
+First-party database and embedded-open elapsed performance helpers now return
+immediately when their stats-disabled zero sentinel is passed, matching the
+earlier MariaDB page-write perf-helper cleanup. This keeps normal production,
+WordPress PHPUnit, and stats-off embedded timing paths from paying an avoidable
+second disabled-counter check while preserving enabled diagnostic counters.
 Ownerless mini-transaction page-write paths now also cache transaction-release
 classification inside the hot write-enter, page-publish, no-dirty commit-log,
 and unlogged release loops. Statement-visible autocommit writes still use the

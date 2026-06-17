@@ -5344,6 +5344,11 @@ subsystems that this mode needs:
   `8.000` per statement. A reduced stats-off 400-row local sample reported
   ordinary explicit transactions at `4168.89 ops/s`, ownerless explicit
   transactions at `2880.92 ops/s`, ratio `0.6911`.
+  A follow-up first-party database perf stats-off slice made database and
+  embedded-open elapsed helpers return immediately on their disabled zero
+  sentinel, avoiding the redundant second disabled-flag load in normal
+  production, WordPress PHPUnit, and stats-off embedded timing paths while
+  keeping enabled diagnostic counters unchanged.
   Reduced 50-row stats-enabled probes after
   that split showed both standalone encoding and delta-base note update can be
   visible inside the previous aggregate append total, with small-sample ranking

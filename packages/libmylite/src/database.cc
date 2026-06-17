@@ -178,8 +178,14 @@ static void ownerless_database_perf_add_elapsed(
     OwnerlessDatabasePerfStatIndex index,
     std::uint64_t start_ns
 ) {
-    if (start_ns != 0U) {
-        ownerless_database_perf_add(index, ownerless_database_perf_now_ns() - start_ns);
+    if (start_ns == 0U) {
+        return;
+    }
+    if (ownerless_database_perf_stats_are_enabled()) {
+        ownerless_database_perf_stats[index].fetch_add(
+            ownerless_database_perf_now_ns() - start_ns,
+            std::memory_order_relaxed
+        );
     }
 }
 
@@ -309,8 +315,14 @@ static void embedded_open_perf_add_elapsed(
     EmbeddedOpenPerfStatIndex index,
     std::uint64_t start_ns
 ) {
-    if (start_ns != 0U) {
-        embedded_open_perf_add(index, embedded_open_perf_now_ns() - start_ns);
+    if (start_ns == 0U) {
+        return;
+    }
+    if (embedded_open_perf_stats_are_enabled()) {
+        embedded_open_perf_stats[index].fetch_add(
+            embedded_open_perf_now_ns() - start_ns,
+            std::memory_order_relaxed
+        );
     }
 }
 
