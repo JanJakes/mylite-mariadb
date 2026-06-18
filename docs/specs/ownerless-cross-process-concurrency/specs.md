@@ -4190,7 +4190,13 @@ Tasks:
    on attempt `3`, seeds `418` and `419` can recover on attempt `2`, seed
    `420` can recover on attempt `5`, seed `423` can recover on attempt `3`,
    and seeds `425`, `434`, and `436` can recover on attempt `2` after
-   transient raw MariaDB `1213` deadlock exits.
+   transient raw MariaDB `1213` deadlock exits. The
+   `ownerless-external-seed-448-479-replay` follow-up records the next replay
+   window for seeds `448` through `479` at rounds `2`, using the same explicit
+   FK graph whole-seed retry budget of `10` so seed `449` can recover on
+   attempt `3`, seed `456` can recover on attempt `2`, seeds `463`, `466`,
+   `467`, `471`, and `475` can recover on attempt `3`, and seed `477` can
+   recover on attempt `2` after transient raw MariaDB `1213` deadlock exits.
    Separate foreign-key graph stress
    coverage runs with
    `MYLITE_OWNERLESS_FK_GRAPH_STRESS_ROUNDS=48`, concurrent ownerless workers
@@ -4441,11 +4447,12 @@ Tasks:
    transaction, DDL stress, and FK graph generated traces for deterministic
    external stress probes, including focused Docker-backed replay for the
    default DDL seed set and contiguous combined random transaction plus DDL
-   seed-sweep replay windows through seed `447`; the `16` through `31`,
+   seed-sweep replay windows through seed `479`; the `16` through `31`,
    `32` through `63`, `64` through `95`, `96` through `127`, and `128`
    through `159`, `160` through `191`, `192` through `223`, and `224` through
    `255`, `256` through `287`, `288` through `319`, `320` through `351`,
-   `352` through `383`, `384` through `415`, and `416` through `447`
+   `352` through `383`, `384` through `415`, `416` through `447`, and `448`
+   through `479`
    replays also cover FK graph seeds at rounds `2`. FK graph now
    participates in the
    dependency-free combined seed-sweep command-plan windows through seed `63`,
@@ -4454,8 +4461,9 @@ Tasks:
    through `63`, `64` through `95`, `96` through `127`, `128` through `159`,
    `160` through `191`, `192` through `223`, `224` through `255`, and `256`
    through `287`, `288` through `319`, `320` through `351`, `352` through
-   `383`, `384` through `415`, and `416` through `447` windows with bounded
-   whole-seed retries for transient raw MariaDB deadlock exits.
+   `383`, `384` through `415`, `416` through `447`, and `448` through `479`
+   windows with bounded whole-seed retries for transient raw MariaDB deadlock
+   exits.
 
 Exit criteria:
 

@@ -117,7 +117,11 @@ rounds `2` with the same explicit FK graph retry budget, recovering transient
 raw MariaDB `1213` exits for seed `417` on attempt `3`, seed `418` on attempt
 `2`, seed `419` on attempt `2`, seed `420` on attempt `5`, seed `423` on
 attempt `3`, seed `425` on attempt `2`, seed `434` on attempt `2`, and seed
-`436` on attempt `2`.
+`436` on attempt `2`. The next replay covers seeds `448` through `479` at
+rounds `2` with the same explicit FK graph retry budget, recovering transient
+raw MariaDB `1213` exits for seed `449` on attempt `3`, seed `456` on attempt
+`2`, seeds `463`, `466`, `467`, `471`, and `475` on attempt `3`, and seed
+`477` on attempt `2`.
 Longer randomized external MariaDB/RQG stress remains planned.
 
 Ownerless stale-reader file-lifecycle replay now includes same-schema and
