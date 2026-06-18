@@ -363,6 +363,8 @@ void mylite_ownerless_innodb_lock_clear_transaction_wait(struct trx_t *trx);
 void mylite_ownerless_innodb_lock_forget_transaction(struct trx_t *trx);
 int mylite_ownerless_innodb_set_statement_visible_fast_path(int enabled);
 int mylite_ownerless_innodb_statement_visible_fast_path(void);
+int mylite_ownerless_innodb_set_statement_deferred_page_publish(int enabled);
+int mylite_ownerless_innodb_statement_deferred_page_publish(void);
 int mylite_ownerless_innodb_set_statement_plain_read(int enabled);
 int mylite_ownerless_innodb_statement_plain_read(void);
 int mylite_ownerless_innodb_set_statement_plain_read_preserve_local_pages(int enabled);

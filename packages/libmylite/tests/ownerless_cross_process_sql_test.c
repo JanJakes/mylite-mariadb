@@ -10761,6 +10761,13 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
         page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO] >
         0U
     );
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_SNAPSHOT_BOUNDARY] == 0U);
+    assert(
+        deep_stats[OWNERLESS_TEST_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_IMAGE_PUBLISHED] +
+            deep_stats[OWNERLESS_TEST_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_BUFFER_PUBLISHED] +
+            deep_stats[OWNERLESS_TEST_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_BUFFER_RETRY_PUBLISHED] >
+        0U
+    );
     assert(page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_CALLS] > 0U);
     assert(
         page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_APPEND_CALLS] +
@@ -11363,6 +11370,7 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
     assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH] == 0U);
     assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_PUBLISHED] > 0U);
     assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_FAILED] == 0U);
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_SNAPSHOT_BOUNDARY] > 0U);
     assert(
         deep_stats
             [OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES] ==

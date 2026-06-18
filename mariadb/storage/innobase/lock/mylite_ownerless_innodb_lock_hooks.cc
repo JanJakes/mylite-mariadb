@@ -37,6 +37,7 @@ std::atomic<bool> mylite_ownerless_innodb_lock_hooks_enabled{false};
 std::atomic<bool> mylite_ownerless_innodb_autoinc_hooks_enabled{false};
 std::atomic<bool> mylite_ownerless_innodb_test_faults_enabled{false};
 thread_local bool mylite_ownerless_statement_visible_fast_path= false;
+thread_local bool mylite_ownerless_statement_deferred_page_publish= false;
 thread_local bool mylite_ownerless_statement_plain_read= false;
 thread_local bool mylite_ownerless_statement_plain_read_preserve_local_pages=
     false;
@@ -1503,6 +1504,19 @@ mylite_ownerless_innodb_set_statement_visible_fast_path(int enabled)
 extern "C" int mylite_ownerless_innodb_statement_visible_fast_path(void)
 {
   return mylite_ownerless_statement_visible_fast_path ? 1 : 0;
+}
+
+extern "C" int
+mylite_ownerless_innodb_set_statement_deferred_page_publish(int enabled)
+{
+  const bool previous= mylite_ownerless_statement_deferred_page_publish;
+  mylite_ownerless_statement_deferred_page_publish= enabled != 0;
+  return previous ? 1 : 0;
+}
+
+extern "C" int mylite_ownerless_innodb_statement_deferred_page_publish(void)
+{
+  return mylite_ownerless_statement_deferred_page_publish ? 1 : 0;
 }
 
 extern "C" int

@@ -5796,7 +5796,19 @@ subsystems that this mode needs:
   statement, and deferred latest-checkpoint coalescing at `256.000` and
   `512.000` per statement, so the explicit cap moves to 256 with focused
   coverage for the 256-row positive boundary and the 257-row conservative
-  boundary. Larger row lists, broad DML/DDL, and unbounded append-lock hold
+  boundary. A statement-deferred page-publish follow-up then reuses the
+  existing transaction-deferred page publication proof for those same bounded
+  append-batched statements, so repeated user data/index page images are
+  captured and replaced by `(space_id,page_no)` until commit instead of
+  appended at every ownerless mini-transaction. A 256-row production probe
+  moved page-log append calls from `2609` to `68`, page-write publish total
+  from `60.789 ms` to `2.938 ms`, commit-log publish attribution from
+  `61.565 ms` to `6.767 ms`, and ownerless 256-row bulk throughput from
+  `12178.41` to `20008.38` rows/s while keeping visible-fast commit at
+  `1.000` per statement and conservative flush at `0.000`; the 257-row guard
+  shape still reported `2581` append-session begin/end calls, `2619` page-log
+  appends, and `2582` snapshot-boundary page publications for `10`
+  statements. Larger row lists, broad DML/DDL, and unbounded append-lock hold
   times remain out of scope.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained

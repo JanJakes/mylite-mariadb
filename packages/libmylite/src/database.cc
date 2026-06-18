@@ -1488,6 +1488,9 @@ struct OwnerlessStatementVisibleFastPathScope {
         bool coalesce_deferred_latest_checkpoint
     )
         : previous(mylite_ownerless_innodb_set_statement_visible_fast_path(enabled ? 1 : 0)),
+          previous_defer_page_publish(mylite_ownerless_innodb_set_statement_deferred_page_publish(
+              defer_page_log_append_batch ? 1 : 0
+          )),
           previous_defer_page_log_append_batch(ownerless_statement_defers_page_log_append_batch),
           previous_coalesce_deferred_latest_checkpoint(
               ownerless_statement_allows_deferred_latest_checkpoint_coalescing
@@ -1509,11 +1512,13 @@ struct OwnerlessStatementVisibleFastPathScope {
         ownerless_statement_allows_deferred_latest_checkpoint_coalescing =
             previous_coalesce_deferred_latest_checkpoint;
         ownerless_statement_defers_page_log_append_batch = previous_defer_page_log_append_batch;
+        mylite_ownerless_innodb_set_statement_deferred_page_publish(previous_defer_page_publish);
         mylite_ownerless_innodb_set_statement_visible_fast_path(previous);
     }
 
   private:
     int previous = 0;
+    int previous_defer_page_publish = 0;
     bool previous_defer_page_log_append_batch = false;
     bool previous_coalesce_deferred_latest_checkpoint = false;
     bool previous_latest_checkpoint_preserved = false;

@@ -3218,7 +3218,7 @@ bool mtr_t::ownerless_page_write_uses_transaction_release() const noexcept
   if ((ownerless_trx->auto_commit ||
        ownerless_page_write_sql_autocommit(ownerless_trx)) &&
       ownerless_page_write_sql_allows_visible_fast_path(ownerless_trx))
-    return false;
+    return mylite_ownerless_innodb_statement_deferred_page_publish() != 0;
   if (ownerless_trx->id != 0)
     return true;
   if (ownerless_trx->mylite_ownerless_page_write_trx_id != 0)
