@@ -2503,6 +2503,12 @@ void release_statement_results(mylite_stmt &stmt);
 void clear_statement_ownerless_runtime_activity(mylite_stmt &stmt);
 void enable_statement_ownerless_page_visibility(mylite_stmt &stmt, bool enabled);
 void clear_statement_ownerless_page_visibility(mylite_stmt &stmt);
+int retry_ownerless_prepare_after_stale_engine_error(
+    mylite_stmt &stmt,
+    const char *sql,
+    std::size_t sql_len
+);
+int retry_ownerless_prepared_execute_after_stale_engine_error(mylite_stmt &stmt);
 int prepare_ownerless_ephemeral_native_statement(mylite_stmt &stmt);
 void close_ownerless_ephemeral_native_statement(mylite_stmt &stmt);
 int build_ownerless_prepared_text_sql(mylite_stmt &stmt, std::string &out_sql);
@@ -2532,6 +2538,7 @@ int bind_parameters(mylite_stmt &stmt);
 mylite_value_type column_type(const ResultColumn &column);
 const ResultColumn *metadata_column_at(const mylite_stmt *stmt, unsigned column);
 const ResultColumn *value_column_at(const mylite_stmt *stmt, unsigned column);
+void set_mariadb_statement_error(mylite_db &db, MYSQL_STMT *stmt);
 void set_mariadb_statement_error(mylite_stmt &stmt);
 int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql);
 void update_current_schema_after_successful_sql(mylite_db &db, std::string_view sql);
@@ -3341,6 +3348,25 @@ int mylite_step(mylite_stmt *stmt) {
                     policy_tokens,
                     statement_started_in_explicit_transaction
                 );
+                if (ownerless_stale_engine_error_allows_retry(
+                        *stmt->db,
+                        policy_tokens,
+                        statement_started_in_explicit_transaction
+                    ) &&
+                    retry_ownerless_prepared_execute_after_stale_engine_error(*stmt) == MYLITE_OK) {
+                    set_ok(*stmt->db);
+                    ownerless_stage_start = ownerless_database_perf_stats_are_enabled()
+                                                ? ownerless_database_perf_now_ns()
+                                                : 0U;
+                    if (mysql_stmt_execute(stmt->stmt) == 0) {
+                        goto ownerless_prepared_execute_success;
+                    }
+                    ownerless_database_perf_add_elapsed(
+                        OWNERLESS_DATABASE_PERF_PREPARED_STEP_MYSQL_EXECUTE_NS,
+                        ownerless_stage_start
+                    );
+                    set_mariadb_statement_error(*stmt);
+                }
                 const int dictionary_finish_result =
                     ownerless_finish_dictionary_ddl(*stmt->db, dictionary_ddl_started);
                 if (dictionary_finish_result != MYLITE_OK) {
@@ -3363,6 +3389,7 @@ int mylite_step(mylite_stmt *stmt) {
                 clear_statement_ownerless_page_visibility(*stmt);
                 return MYLITE_ERROR;
             }
+        ownerless_prepared_execute_success:
             stmt->db->last_insert_id =
                 static_cast<unsigned long long>(mysql_stmt_insert_id(stmt->stmt));
         }
@@ -4836,9 +4863,12 @@ int prepare_impl(
 
     if (mysql_stmt_prepare(statement->stmt, sql, static_cast<unsigned long>(resolved_len)) != 0) {
         set_mariadb_statement_error(*statement);
-        static_cast<void>(mysql_stmt_close(statement->stmt));
-        statement->stmt = nullptr;
-        return MYLITE_ERROR;
+        if (retry_ownerless_prepare_after_stale_engine_error(*statement, sql, resolved_len) !=
+            MYLITE_OK) {
+            static_cast<void>(mysql_stmt_close(statement->stmt));
+            statement->stmt = nullptr;
+            return MYLITE_ERROR;
+        }
     }
 
     statement->parameters.resize(mysql_stmt_param_count(statement->stmt));
@@ -7335,6 +7365,119 @@ void clear_statement_ownerless_page_visibility(mylite_stmt &stmt) {
             !ownerless_connection_is_in_explicit_transaction(*stmt.db)
         );
     }
+}
+
+int prepare_ownerless_replacement_native_statement(
+    mylite_stmt &stmt,
+    const char *sql,
+    std::size_t sql_len,
+    bool validate_parameter_count,
+    MYSQL_STMT **out_stmt
+) {
+    if (stmt.db == nullptr || sql == nullptr || out_stmt == nullptr || sql_len > ULONG_MAX) {
+        return MYLITE_MISUSE;
+    }
+
+    *out_stmt = nullptr;
+    MYSQL_STMT *replacement = mysql_stmt_init(&stmt.db->mysql);
+    if (replacement == nullptr) {
+        set_error(*stmt.db, MYLITE_NOMEM, "statement could not be allocated");
+        return MYLITE_NOMEM;
+    }
+
+    my_bool update_max_length = 1;
+    static_cast<void>(
+        mysql_stmt_attr_set(replacement, STMT_ATTR_UPDATE_MAX_LENGTH, &update_max_length)
+    );
+
+    if (mysql_stmt_prepare(replacement, sql, static_cast<unsigned long>(sql_len)) != 0) {
+        set_mariadb_statement_error(*stmt.db, replacement);
+        static_cast<void>(mysql_stmt_close(replacement));
+        return MYLITE_ERROR;
+    }
+    if (validate_parameter_count && mysql_stmt_param_count(replacement) != stmt.parameters.size()) {
+        static_cast<void>(mysql_stmt_close(replacement));
+        set_error(
+            *stmt.db,
+            MYLITE_ERROR,
+            "ownerless prepared statement parameter metadata changed during retry"
+        );
+        return MYLITE_ERROR;
+    }
+
+    *out_stmt = replacement;
+    return MYLITE_OK;
+}
+
+int retry_ownerless_prepare_after_stale_engine_error(
+    mylite_stmt &stmt,
+    const char *sql,
+    std::size_t sql_len
+) {
+    if (stmt.db == nullptr || stmt.stmt == nullptr || !stmt.ownerless_policy_tokens_valid) {
+        return MYLITE_ERROR;
+    }
+    if (!ownerless_stale_engine_error_allows_retry(
+            *stmt.db,
+            stmt.ownerless_policy_tokens,
+            ownerless_connection_is_in_explicit_transaction(*stmt.db)
+        )) {
+        return MYLITE_ERROR;
+    }
+
+    const int refresh_result =
+        refresh_ownerless_dictionary_cache_after_stale_engine_error(*stmt.db);
+    if (refresh_result != MYLITE_OK) {
+        return refresh_result;
+    }
+
+    MYSQL_STMT *replacement = nullptr;
+    const int prepare_result =
+        prepare_ownerless_replacement_native_statement(stmt, sql, sql_len, false, &replacement);
+    if (prepare_result != MYLITE_OK) {
+        return prepare_result;
+    }
+
+    static_cast<void>(mysql_stmt_close(stmt.stmt));
+    stmt.stmt = replacement;
+    set_ok(*stmt.db);
+    return MYLITE_OK;
+}
+
+int retry_ownerless_prepared_execute_after_stale_engine_error(mylite_stmt &stmt) {
+    if (stmt.db == nullptr || stmt.stmt == nullptr || stmt.ownerless_sql_text == nullptr ||
+        stmt.ownerless_native_prepare_per_step) {
+        return MYLITE_ERROR;
+    }
+
+    const int refresh_result =
+        refresh_ownerless_dictionary_cache_after_stale_engine_error(*stmt.db);
+    if (refresh_result != MYLITE_OK) {
+        return refresh_result;
+    }
+
+    MYSQL_STMT *replacement = nullptr;
+    const std::string &sql = *stmt.ownerless_sql_text;
+    const int prepare_result = prepare_ownerless_replacement_native_statement(
+        stmt,
+        sql.c_str(),
+        sql.size(),
+        true,
+        &replacement
+    );
+    if (prepare_result != MYLITE_OK) {
+        return prepare_result;
+    }
+
+    release_statement_results(stmt);
+    static_cast<void>(mysql_stmt_close(stmt.stmt));
+    stmt.stmt = replacement;
+
+    const int bind_result = bind_parameters(stmt);
+    if (bind_result != MYLITE_OK) {
+        return bind_result;
+    }
+    return initialize_statement_results(stmt, true);
 }
 
 ParameterBinding *parameter_at(mylite_stmt &stmt, unsigned index) {
@@ -19881,13 +20024,16 @@ void set_mariadb_error(mylite_db &db) {
     db.errmsg = mysql_error(&db.mysql);
 }
 
-void set_mariadb_statement_error(mylite_stmt &stmt) {
-    mylite_db &db = *stmt.db;
+void set_mariadb_statement_error(mylite_db &db, MYSQL_STMT *stmt) {
     db.errcode = MYLITE_ERROR;
     db.extended_errcode = MYLITE_ERROR;
-    db.mariadb_errno = mysql_stmt_errno(stmt.stmt);
-    db.sqlstate = mysql_stmt_sqlstate(stmt.stmt);
-    db.errmsg = mysql_stmt_error(stmt.stmt);
+    db.mariadb_errno = mysql_stmt_errno(stmt);
+    db.sqlstate = mysql_stmt_sqlstate(stmt);
+    db.errmsg = mysql_stmt_error(stmt);
+}
+
+void set_mariadb_statement_error(mylite_stmt &stmt) {
+    set_mariadb_statement_error(*stmt.db, stmt.stmt);
 }
 
 int parse_warning_level(const char *level) {

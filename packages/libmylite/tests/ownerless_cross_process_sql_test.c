@@ -1875,6 +1875,7 @@ static void expect_prepared_int64_step_mariadb_error(
 static void expect_exec_busy(mylite_db *db, const char *sql, const char *message_part);
 static void expect_readonly_exec_error(mylite_db *db, const char *sql);
 static unsigned long long query_unsigned(mylite_db *db, const char *sql);
+static unsigned long long prepared_query_unsigned(mylite_db *db, const char *sql);
 static unsigned long long u64_ull(uint64_t value);
 static unsigned long long query_ownerless_compressed_blob_key_block_matrix_sum(
     mylite_db *db,
@@ -25594,6 +25595,9 @@ static void test_ownerless_trigger_ddl_refreshes_peer_dictionary(void) {
         ) == 1U
     );
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_trigger_base") == 10U);
+    assert(
+        prepared_query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_trigger_audit") == 10U
+    );
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_trigger_audit") == 10U);
     assert(
         query_unsigned(
@@ -58414,6 +58418,54 @@ static unsigned long long query_unsigned(mylite_db *db, const char *sql) {
     }
     assert(errmsg == NULL);
     return result.value;
+}
+
+static unsigned long long prepared_query_unsigned(mylite_db *db, const char *sql) {
+    mylite_stmt *stmt = NULL;
+    const char *tail = NULL;
+    unsigned long long value;
+    int step_result;
+
+    const int prepare_result = mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, &tail);
+    if (prepare_result != MYLITE_OK || stmt == NULL || tail == NULL || *tail != '\0') {
+        fprintf(
+            stderr,
+            "mylite prepared query prepare failed: pid=%ld sql=%s result=%d "
+            "errcode=%d mariadb_errno=%u message=%s\n",
+            (long)getpid(),
+            sql,
+            prepare_result,
+            mylite_errcode(db),
+            mylite_mariadb_errno(db),
+            mylite_errmsg(db)
+        );
+        if (stmt != NULL) {
+            assert(mylite_finalize(stmt) == MYLITE_OK);
+        }
+        assert(0);
+    }
+    assert(mylite_bind_parameter_count(stmt) == 0U);
+
+    step_result = mylite_step(stmt);
+    if (step_result != MYLITE_ROW) {
+        fprintf(
+            stderr,
+            "mylite prepared query step failed: pid=%ld sql=%s result=%d "
+            "errcode=%d mariadb_errno=%u message=%s\n",
+            (long)getpid(),
+            sql,
+            step_result,
+            mylite_errcode(db),
+            mylite_mariadb_errno(db),
+            mylite_errmsg(db)
+        );
+        assert(mylite_finalize(stmt) == MYLITE_OK);
+        assert(0);
+    }
+    value = mylite_column_uint64(stmt, 0);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    return value;
 }
 
 static unsigned long long query_ownerless_compressed_blob_key_block_matrix_sum(

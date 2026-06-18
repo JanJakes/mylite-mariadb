@@ -607,6 +607,14 @@ buffer-pool refresh that skips page-version WAL and page-version negative-cache
 proofs. That keeps rebuilt/compressed table reads native-only while allowing
 the same handle to observe peer commits, cascades, and deletes even if it
 previously cached the affected pages locally.
+If an ownerless autocommit plain read still reaches MariaDB errno `1932`
+against a peer-created file-per-table InnoDB table, direct and prepared
+`SELECT`/`WITH` statements refresh native pages, flush SQL table caches, evict
+unused InnoDB dictionary-cache entries, clear MyLite's ownerless FK cache, and
+retry once. Prepared retry uses the saved SQL text and parameter bindings to
+prepare a replacement native statement before the second execute. Mutating
+statements, DDL, locking reads, and explicit-transaction statements do not use
+this retry path.
 
 ### Mapping Lifecycle
 
@@ -4665,6 +4673,9 @@ transaction first-read/repeatable-snapshot behavior, reads inside transactions
 after local writes, and no-live-process page-version replay; true
 InnoDB `innodb_read_only` startup, ownerless cross-process dirty reads, and full
 live-peer DDL/file-lifecycle tablespace crash recovery remain planned.
+Ownerless read/write prepared plain reads now also share the one-shot stale
+InnoDB dictionary-cache `1932` recovery path with direct plain reads for the
+tested trigger DDL peer-created tablespace case.
 Ownerless no-result prepared `INSERT`, `UPDATE`, `DELETE`, and `REPLACE`
 now avoid native MariaDB `MYSQL_STMT` creation in ownerless read/write mode.
 MyLite counts `?` parameter markers for that subset with its SQL tokenizer at

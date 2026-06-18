@@ -139,6 +139,8 @@ InnoDB redo/checkpoint recovery and does not change the on-disk storage format.
   pressure follow-up. A broader proof relaxation was rejected during this slice
   because it could lose commit-race updates and make independent-table stress
   readers observe decreasing totals.
-- Prepared-statement stale-cache recovery remains a separate follow-up. A
-  prepare retry can make `mysql_stmt_prepare()` succeed, but stepping the
-  statement on an already-open handle still needs a separate visibility design.
+- Prepared-statement stale-cache recovery for the same ownerless plain-read
+  boundary is covered by
+  `docs/specs/ownerless-prepared-stale-tablespace-cache-retry/specs.md`.
+  Broader prepared writes, DDL, explicit transactions, and wider DDL file
+  lifecycle recovery remain separate follow-up work.
