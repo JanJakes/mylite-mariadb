@@ -1,3 +1,11 @@
+if(MYLITE_WITH_MARIADB_EMBEDDED)
+  add_executable(mylite_public_open_close_bench
+    mylite-public-open-close-bench.c
+  )
+  target_link_libraries(mylite_public_open_close_bench PRIVATE MyLite::mylite)
+  mylite_configure_c_target(mylite_public_open_close_bench)
+endif()
+
 if(BUILD_TESTING)
   add_test(
     NAME tools.ci-production-builds

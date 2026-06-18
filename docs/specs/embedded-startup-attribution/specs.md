@@ -125,6 +125,17 @@ The startup bottleneck is therefore native storage-engine startup inside
 MariaDB plugin initialization, primarily InnoDB `srv_start()`, with a smaller
 fixed contribution from common variable initialization and Aria startup.
 
+A later public API branch/main parity sample recorded in
+`docs/specs/embedded-public-open-close-parity/specs.md` compared the current
+ownerless branch against `origin/main` with a portable benchmark that uses only
+`mylite_open()`, `mylite_exec()`, and `mylite_close()`. Warmed local
+20-iteration samples reported branch warm open/close at `141.430-144.442 ms`
+and main at `346.062-347.400 ms`; the matching branch internal probe reported
+`138.025 ms` warm open/close, `112.727 ms` open, `25.295 ms` close, and
+`0.891 ms` active-runtime reconnect. This confirms the ownerless branch is not
+behind main on process-style startup, and that remaining branch startup work
+should target native MariaDB/InnoDB lifecycle cost.
+
 ## Risks And Follow-Up
 
 The counters may identify startup as mostly native InnoDB `srv_start()` or

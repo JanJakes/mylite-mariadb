@@ -4969,6 +4969,20 @@ subsystems that this mode needs:
   `concurrency/mylite-ownerless-platform.meta` exists, then measures cached
   warm ownerless open/close after the proof file is available, keeping the
   one-time filesystem proof cost separate from recurring ownerless startup.
+  A public API parity benchmark is now also available as
+  `tools/mylite_public_open_close_bench`, using only `mylite_open()`,
+  `mylite_exec()`, and `mylite_close()` over an InnoDB table so the same source
+  can be compiled against refs that predate branch-only internal probes. A
+  local warmed comparison of current `ownerless-concurrency`
+  (`793a085c2c2d25b74610ae1df1f965569bfe4013`) against `origin/main`
+  (`4760d5128096e4560bc62cc19f7066bc15ff07d8`) reported branch warm
+  open/close at `141.430-144.442 ms` for two 20-iteration samples, while main
+  reported `346.062-347.400 ms`. A matching branch internal probe reported
+  ordinary warm open/close at `138.025 ms`, open/startup at `112.727 ms`,
+  close at `25.295 ms`, and active-runtime reconnect at `0.891 ms`. This keeps
+  the current performance diagnosis focused on process-isolated embedded
+  MariaDB/InnoDB lifecycle startup, not ownerless coordination setup and not
+  active in-process reconnect.
   The current production branch probe after the transaction-page publish dedup
   slice reported ordinary active-runtime reconnect at `1.222 ms`, ownerless
   active-runtime reconnect at `0.971 ms`, ordinary prepared `SELECT 1` at

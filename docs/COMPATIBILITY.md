@@ -964,6 +964,17 @@ reported `start_mysql_server_init_ms_avg=94.364`,
 `startup_server_components_plugin_init_ms_avg=52.325`,
 `startup_storage_engine_init_innodb_ms_avg=45.038`, and
 `startup_innodb_init_srv_start_ms_avg=44.983`.
+A follow-up public API branch/main parity benchmark now builds
+`tools/mylite_public_open_close_bench` and measures only portable
+`mylite_open()` plus `mylite_close()` behavior over an InnoDB table. Against
+`origin/main` (`4760d5128096e4560bc62cc19f7066bc15ff07d8`), the current
+ownerless branch (`793a085c2c2d25b74610ae1df1f965569bfe4013`) was faster in
+two warmed 20-iteration local samples: `141.430-144.442 ms` per warm
+open/close versus main at `346.062-347.400 ms`. A matching internal branch
+probe reported ordinary warm open/close at `138.025 ms`, with `112.727 ms`
+open, `25.295 ms` close, and active-runtime reconnect at `0.891 ms`, so the
+current performance focus remains native MariaDB/InnoDB process lifecycle
+startup rather than ownerless coordination or active in-process reconnect.
 The WordPress PHPUnit CI filters now use exact method-level process-isolated
 shards instead of broad mixed-class filters, while the two class-level
 `@runTestsInSeparateProcesses` files stay excluded from the non-isolated
