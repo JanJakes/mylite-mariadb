@@ -21,6 +21,7 @@ phpunit_profile_mysqli="${MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI:-0}"
 phpunit_keepalive="${MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE:-0}"
 phpunit_static_wpdb_scan="${MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN:-0}"
 phpunit_reconnect_after_child="${MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD:-1}"
+phpunit_child_skip_install="${MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL:-0}"
 require_release_build="${MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD:-0}"
 require_external_db_dir="${MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR:-0}"
 db_dir="${MYLITE_WORDPRESS_DB_DIR:-${TMPDIR:-/tmp}/mylite-wordpress-tests-${root_hash}.mylite}"
@@ -118,6 +119,14 @@ case "${phpunit_reconnect_after_child}" in
     ;;
   *)
     echo "MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD must be 0 or 1" >&2
+    exit 1
+    ;;
+esac
+case "${phpunit_child_skip_install}" in
+  0 | 1)
+    ;;
+  *)
+    echo "MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL must be 0 or 1" >&2
     exit 1
     ;;
 esac
@@ -411,6 +420,7 @@ run_suite() {
     -e MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE="${phpunit_keepalive}" \
     -e MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN="${phpunit_static_wpdb_scan}" \
     -e MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD="${phpunit_reconnect_after_child}" \
+    -e MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL="${phpunit_child_skip_install}" \
     -e MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD="${require_release_build}" \
     -e MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR="${require_external_db_dir}" \
     -e MYLITE_WORDPRESS_DB_DIR="${container_db_dir}" \
@@ -624,6 +634,7 @@ echo "wordpress_phpunit_profile_mysqli=${MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI
 echo "wordpress_phpunit_keepalive=${MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE}"
 echo "wordpress_phpunit_static_wpdb_scan=${MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN}"
 echo "wordpress_phpunit_reconnect_after_child=${MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD}"
+echo "wordpress_phpunit_child_skip_install=${MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL}"
 echo "wordpress_require_release_build=${MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD}"
 echo "wordpress_require_external_db_dir=${MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR}"
 echo "wordpress_db_dir=${MYLITE_WORDPRESS_DB_DIR}"
@@ -755,6 +766,7 @@ $childScriptEnvMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_ENV_SETUP';
 $childScriptSummaryMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_PARENT_SUMMARY';
 $childScriptSummaryReadMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_SUMMARY_READ';
 $childMysqliProfileContextMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_MYSQLI_PROFILE_CONTEXT';
+$childSkipInstallMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL_ENV';
 
 $hasTimingMarker = str_contains($source, $timingMarker);
 $hasChildProcessAverageMarker = str_contains($source, $childProcessAverageMarker);
@@ -769,6 +781,7 @@ $hasChildScriptEnvMarker = str_contains($source, $childScriptEnvMarker);
 $hasChildScriptSummaryMarker = str_contains($source, $childScriptSummaryMarker);
 $hasChildScriptSummaryReadMarker = str_contains($source, $childScriptSummaryReadMarker);
 $hasChildMysqliProfileContextMarker = str_contains($source, $childMysqliProfileContextMarker);
+$hasChildSkipInstallMarker = str_contains($source, $childSkipInstallMarker);
 $hasChildRuntimeTiming =
     str_contains($source, "\$myliteWordPressChildStats['child_process_seconds'] +=");
 $hasChildReconnectTiming =
@@ -787,6 +800,7 @@ if ($hasTimingMarker &&
     $hasChildScriptSummaryMarker &&
     $hasChildScriptSummaryReadMarker &&
     $hasChildMysqliProfileContextMarker &&
+    $hasChildSkipInstallMarker &&
     $hasChildRuntimeTiming &&
     $hasChildReconnectTiming) {
     exit(0);
@@ -865,6 +879,23 @@ $childMysqliProfileContextSetup = <<<'PATCH'
                 }
             }
             $env['MYLITE_MYSQLI_PROFILE_CONTEXT'] = 'wordpress_phpunit_child';
+        }
+
+PATCH;
+
+$childSkipInstallSetup = <<<'PATCH'
+        // MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL_ENV
+        if (\getenv('MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL') === '1') {
+            if ($env === null) {
+                $env = $_SERVER ?? [];
+                unset($env['argv'], $env['argc']);
+                foreach ($env as $envKey => $envVar) {
+                    if (\is_array($envVar)) {
+                        unset($env[$envKey]);
+                    }
+                }
+            }
+            $env['WP_TESTS_SKIP_INSTALL'] = '1';
         }
 
 PATCH;
@@ -1500,6 +1531,19 @@ if (!str_contains($patched, $childMysqliProfileContextMarker)) {
         exit(1);
     }
     $patched = $patchedWithChildMysqliProfileContext;
+}
+
+if (!str_contains($patched, $childSkipInstallMarker)) {
+    $patchedWithChildSkipInstall = str_replace(
+        "        \$process = proc_open(\n",
+        $childSkipInstallSetup . "        \$process = proc_open(\n",
+        $patched
+    );
+    if ($patchedWithChildSkipInstall === $patched) {
+        fwrite(STDERR, "Could not add PHPUnit child WordPress install skip setup.\n");
+        exit(1);
+    }
+    $patched = $patchedWithChildSkipInstall;
 }
 
 if (!str_contains($patched, $keepaliveMarker)) {

@@ -920,7 +920,14 @@ child-only MyLite open/close/query cost from parent and setup PHP processes. A
 focused production profiled emoji method reported child-only mysqli totals of
 `1.685s` open, `1.338s` close, and `1.484s` query work inside `6.050s` of
 child script runtime, keeping the next optimization target on child
-open/close/query execution rather than parent `proc_open()` overhead.
+open/close/query execution rather than parent `proc_open()` overhead. The
+eager process-isolated CI shard now sets
+`MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL=1`, which maps to WordPress'
+`WP_TESTS_SKIP_INSTALL=1` only inside PHPUnit children; focused emoji coverage
+dropped child script time to `1.776s`, and the full eager filter passed `22`
+tests in `56.294s` reported time. The deferred-reconnect filter remains on
+normal child install behavior after a negative rollout check produced
+WordPress factory data-shape errors.
 The long non-isolated shard now also excludes the whole `Tests_DB*` class
 family with a leading `^(?!Tests_DB)` negative lookahead, matching the
 dedicated `^Tests_DB` database shard and preventing database-prefix tests such

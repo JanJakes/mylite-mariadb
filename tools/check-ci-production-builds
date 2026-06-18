@@ -293,6 +293,7 @@ require_literal 'MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES: "0"'
 require_literal 'MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI: "0"'
 require_literal 'MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE: "0"'
 require_literal 'MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN: "0"'
+require_literal 'MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL: "0"'
 require_literal "MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_FILTER:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_EAGER_RECONNECT_FILTER:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER:"
@@ -366,6 +367,18 @@ forbid_step_literal \
 forbid_step_literal \
   "Run WordPress PHPUnit process-isolated eager-reconnect suite (test only)" \
   'MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES: "1"'
+forbid_step_literal \
+  "Run WordPress PHPUnit process-isolated deferred-reconnect suite (test only)" \
+  'MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL: "1"'
+require_step_literal \
+  "Run WordPress PHPUnit process-isolated eager-reconnect suite (test only)" \
+  'MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL: "1"'
+forbid_step_literal \
+  "Run WordPress PHPUnit database suite (test only)" \
+  'MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL: "1"'
+forbid_step_literal \
+  "Run WordPress PHPUnit non-isolated remaining suite (test only)" \
+  'MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL: "1"'
 forbid_step_literal \
   "Run WordPress PHPUnit non-isolated remaining suite (test only)" \
   'MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI: "1"'
