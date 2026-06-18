@@ -1055,9 +1055,20 @@ eager process-isolated CI shard now sets
 `MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL=1`, which maps to WordPress'
 `WP_TESTS_SKIP_INSTALL=1` only inside PHPUnit children; focused emoji coverage
 dropped child script time to `1.776s`, and the full eager filter passed `22`
-tests in `56.294s` reported time. The deferred-reconnect filter remains on
-normal child install behavior after a negative rollout check produced
-WordPress factory data-shape errors.
+tests in `56.294s` reported time. Direct child skip-install remains unsafe for
+factory-heavy deferred tests: on 2026-06-18, `Tests_Admin_ExportWp` and the two
+process-isolated `Tests_Sitemaps_Sitemaps` methods both reproduced the
+WordPress factory data-shape failure where a `WP_Error` object reaches
+`wpdb::prepare()`. The harness therefore adds
+`MYLITE_WORDPRESS_PHPUNIT_CHILD_RESTORE_BASELINE=1` for that shard. With the
+parent `wpdb` handles closed, PHPUnit restores the prepared MyLite baseline
+directory before each child and then runs the child with
+`WP_TESTS_SKIP_INSTALL=1`. The exact deferred factory-heavy filter passed `13`
+tests in `46.688s` shell real, with `13` baseline restores totaling `2.936861s`
+(`225.912 ms` per child), compared with the previous install-required local
+sample at `110.170s` shell real. CI uses that baseline-restored deferred shard
+while keeping the already-safe deferred skip-install and eager skip-install
+shards unchanged.
 The long non-isolated shard now also excludes the whole `Tests_DB*` class
 family with a leading `^(?!Tests_DB)` negative lookahead, matching the
 dedicated `^Tests_DB` database shard and preventing database-prefix tests such

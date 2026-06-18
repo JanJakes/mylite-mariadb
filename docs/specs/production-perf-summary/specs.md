@@ -211,12 +211,21 @@ mode by leaving parent child-process profiling and defensive static `wpdb`
 scanning disabled. Diagnostic runs can still enable those costs explicitly with
 `MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES=1` or
 `MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN=1`.
-The process-isolated CI shards now override only
-`MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES=1` while keeping
-`MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN=0`, so CI timing summaries include
-child count, parent lock-release time, child runtime, reconnect time, and
-per-child averages without enabling the slower reflection scan. The database
-suite and non-isolated suite keep the global disabled default.
+The process-isolated CI shards keep
+`MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES=0` and
+`MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN=0`, while enabling the lightweight
+child timing summary. CI timing summaries include child count, parent
+lock-release time, optional per-child baseline-restore time, child runtime,
+reconnect time, and per-child averages without enabling the slower reflection
+scan or child-body profiling. The database suite and non-isolated suite keep
+the global disabled default.
+The factory-heavy deferred-reconnect shard now enables
+`MYLITE_WORDPRESS_PHPUNIT_CHILD_RESTORE_BASELINE=1` together with child
+skip-install. The parent closes WordPress/MyLite handles, restores the prepared
+MyLite baseline database directory, and then starts the PHPUnit child with
+`WP_TESTS_SKIP_INSTALL=1`. This keeps factory sequence state fresh for
+`Tests_Admin_ExportWp` and the process-isolated Sitemaps methods without
+running WordPress `install.php` in every child.
 The default CI WordPress PHPUnit path also leaves harness-owned JUnit logging
 disabled so the split test-only step timings stay comparable to trunk; local
 diagnostic runs can still opt into slowest-class and slowest-method reporting
@@ -778,6 +787,9 @@ values are timing smoke evidence, not a replacement for CI-sized samples.
   database artifacts before they start measuring.
 - CI process-isolated WordPress PHPUnit logs include per-child average timing
   keys in addition to total child-process counters.
+- CI process-isolated WordPress PHPUnit logs include per-child prepared
+  database baseline restore count, total time, and average time when the
+  baseline-restored child mode is enabled.
 - CI's long non-isolated WordPress PHPUnit shard excludes the full
   `Tests_DB*` class family so database-prefix tests are not duplicated between
   the database and remaining test-only steps.

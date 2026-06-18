@@ -23,6 +23,7 @@ phpunit_keepalive="${MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE:-0}"
 phpunit_static_wpdb_scan="${MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN:-0}"
 phpunit_reconnect_after_child="${MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD:-1}"
 phpunit_child_skip_install="${MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL:-0}"
+phpunit_child_restore_baseline="${MYLITE_WORDPRESS_PHPUNIT_CHILD_RESTORE_BASELINE:-0}"
 phpunit_skip_install="${MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL:-0}"
 require_release_build="${MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD:-0}"
 require_external_db_dir="${MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR:-0}"
@@ -141,6 +142,14 @@ case "${phpunit_child_skip_install}" in
     exit 1
     ;;
 esac
+case "${phpunit_child_restore_baseline}" in
+  0 | 1)
+    ;;
+  *)
+    echo "MYLITE_WORDPRESS_PHPUNIT_CHILD_RESTORE_BASELINE must be 0 or 1" >&2
+    exit 1
+    ;;
+esac
 case "${phpunit_skip_install}" in
   0 | 1)
     ;;
@@ -149,6 +158,11 @@ case "${phpunit_skip_install}" in
     exit 1
     ;;
 esac
+if [[ "${phpunit_child_restore_baseline}" == "1" &&
+      ( "${phpunit_child_skip_install}" != "1" || "${phpunit_skip_install}" != "1" ) ]]; then
+  echo "MYLITE_WORDPRESS_PHPUNIT_CHILD_RESTORE_BASELINE=1 requires child and parent skip-install" >&2
+  exit 1
+fi
 if [[ "${phase}" == "docker-image" && "${skip_docker_build}" == "1" ]]; then
   echo "MYLITE_WORDPRESS_PHASE=docker-image cannot skip the Docker build" >&2
   exit 1
@@ -477,6 +491,7 @@ run_suite() {
     -e MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN="${phpunit_static_wpdb_scan}" \
     -e MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD="${phpunit_reconnect_after_child}" \
     -e MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL="${phpunit_child_skip_install}" \
+    -e MYLITE_WORDPRESS_PHPUNIT_CHILD_RESTORE_BASELINE="${phpunit_child_restore_baseline}" \
     -e MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL="${phpunit_skip_install}" \
     -e MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD="${require_release_build}" \
     -e MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR="${require_external_db_dir}" \
@@ -733,6 +748,7 @@ echo "wordpress_phpunit_keepalive=${MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE}"
 echo "wordpress_phpunit_static_wpdb_scan=${MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN}"
 echo "wordpress_phpunit_reconnect_after_child=${MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD}"
 echo "wordpress_phpunit_child_skip_install=${MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL}"
+echo "wordpress_phpunit_child_restore_baseline=${MYLITE_WORDPRESS_PHPUNIT_CHILD_RESTORE_BASELINE}"
 echo "wordpress_phpunit_skip_install=${MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL}"
 echo "wordpress_require_release_build=${MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD}"
 echo "wordpress_require_external_db_dir=${MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR}"
@@ -874,6 +890,7 @@ $childScriptAverageProfileGuardMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_A
 $childMysqliProfileContextMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_MYSQLI_PROFILE_CONTEXT';
 $childSkipInstallMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL_ENV';
 $parentSkipInstallMarker = 'MYLITE_WORDPRESS_PHPUNIT_PARENT_SKIP_INSTALL_ENV';
+$childBaselineRestoreMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_RESTORE_BASELINE';
 
 $hasTimingMarker = str_contains($source, $timingMarker);
 $hasChildTimingSummaryMarker = str_contains($source, $childTimingSummaryMarker);
@@ -894,6 +911,7 @@ $hasChildScriptAverageProfileGuardMarker = str_contains($source, $childScriptAve
 $hasChildMysqliProfileContextMarker = str_contains($source, $childMysqliProfileContextMarker);
 $hasChildSkipInstallMarker = str_contains($source, $childSkipInstallMarker);
 $hasParentSkipInstallMarker = str_contains($source, $parentSkipInstallMarker);
+$hasChildBaselineRestoreMarker = str_contains($source, $childBaselineRestoreMarker);
 $hasChildRuntimeTiming =
     str_contains($source, "\$myliteWordPressChildStats['child_process_seconds'] +=");
 $hasChildReconnectTiming =
@@ -918,6 +936,7 @@ if ($hasTimingMarker &&
     $hasChildMysqliProfileContextMarker &&
     $hasChildSkipInstallMarker &&
     $hasParentSkipInstallMarker &&
+    $hasChildBaselineRestoreMarker &&
     $hasChildRuntimeTiming &&
     $hasChildReconnectTiming) {
     exit(0);
@@ -1055,6 +1074,54 @@ $childSkipInstallSetup = <<<'PATCH'
                 }
             }
             $env['WP_TESTS_SKIP_INSTALL'] = '0';
+        }
+
+PATCH;
+
+$childBaselineRestore = <<<'PATCH'
+        // MYLITE_WORDPRESS_PHPUNIT_CHILD_RESTORE_BASELINE
+        if (\getenv('MYLITE_WORDPRESS_PHPUNIT_CHILD_RESTORE_BASELINE') === '1') {
+            $myliteWordPressDbDir = \getenv('MYLITE_WORDPRESS_DB_DIR');
+            $myliteWordPressBaselineDir = \getenv('MYLITE_WORDPRESS_DB_BASELINE_DIR');
+            if (!\is_string($myliteWordPressDbDir) ||
+                $myliteWordPressDbDir === '' ||
+                $myliteWordPressDbDir === '/' ||
+                !\is_string($myliteWordPressBaselineDir) ||
+                $myliteWordPressBaselineDir === '' ||
+                $myliteWordPressBaselineDir === '/' ||
+                $myliteWordPressDbDir === $myliteWordPressBaselineDir) {
+                throw new \RuntimeException('Valid MYLITE_WORDPRESS_DB_DIR and MYLITE_WORDPRESS_DB_BASELINE_DIR are required for child baseline restore.');
+            }
+            if (!\is_dir($myliteWordPressBaselineDir)) {
+                throw new \RuntimeException(
+                    \sprintf('Prepared WordPress baseline database is missing: %s', $myliteWordPressBaselineDir)
+                );
+            }
+
+            $myliteWordPressBaselineRestoreStart = \microtime(true);
+            $myliteWordPressRestoreOutput = [];
+            $myliteWordPressRestoreStatus = 0;
+            \exec(
+                'rm -rf -- ' . \escapeshellarg($myliteWordPressDbDir) .
+                    ' && cp -a -- ' . \escapeshellarg($myliteWordPressBaselineDir) .
+                    ' ' . \escapeshellarg($myliteWordPressDbDir) . ' 2>&1',
+                $myliteWordPressRestoreOutput,
+                $myliteWordPressRestoreStatus
+            );
+            if ($myliteWordPressRestoreStatus !== 0) {
+                throw new \RuntimeException(
+                    \sprintf(
+                        'Could not restore WordPress baseline database before child process: status=%d output=%s',
+                        $myliteWordPressRestoreStatus,
+                        \implode("\n", $myliteWordPressRestoreOutput)
+                    )
+                );
+            }
+            if (isset($myliteWordPressChildStats)) {
+                ++$myliteWordPressChildStats['baseline_restore_count'];
+                $myliteWordPressChildStats['baseline_restore_seconds'] +=
+                    \microtime(true) - $myliteWordPressBaselineRestoreStart;
+            }
         }
 
 PATCH;
@@ -1359,6 +1426,8 @@ $closeWpdbs = <<<'PATCH'
                     'closed_wpdbs' => 0,
                     'static_properties' => 0,
                     'skipped_static_properties' => 0,
+                    'baseline_restore_count' => 0,
+                    'baseline_restore_seconds' => 0.0,
                     'lock_release_seconds' => 0.0,
                     'child_process_seconds' => 0.0,
                     'reconnect_seconds' => 0.0,
@@ -1388,6 +1457,16 @@ $closeWpdbs = <<<'PATCH'
                         \STDERR,
                         "wordpress_phpunit_child_process_skipped_static_properties=%d\n",
                         (int) $stats['skipped_static_properties']
+                    );
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_process_baseline_restore_count=%d\n",
+                        (int) ($stats['baseline_restore_count'] ?? 0)
+                    );
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_process_baseline_restore_seconds=%.6f\n",
+                        (float) ($stats['baseline_restore_seconds'] ?? 0.0)
                     );
                     \fprintf(
                         \STDERR,
@@ -1437,6 +1516,12 @@ $closeWpdbs = <<<'PATCH'
                         \STDERR,
                         "wordpress_phpunit_child_process_lock_release_ms_avg=%.3f\n",
                         ((float) $stats['lock_release_seconds'] * 1000.0) / $myliteWordPressChildProcessCount
+                    );
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_process_baseline_restore_ms_avg=%.3f\n",
+                        ((float) ($stats['baseline_restore_seconds'] ?? 0.0) * 1000.0) /
+                            \max((int) ($stats['baseline_restore_count'] ?? 0), 1)
                     );
                     \fprintf(
                         \STDERR,
@@ -1922,6 +2007,78 @@ if (!str_contains($patched, $childSkipInstallMarker)) {
         exit(1);
     }
     $patched = $patchedWithChildSkipInstall;
+}
+
+if (!str_contains($patched, "wordpress_phpunit_child_process_baseline_restore_seconds")) {
+    $patchedWithBaselineStats = str_replace(
+        "                    'lock_release_seconds' => 0.0,\n",
+        "                    'baseline_restore_count' => 0,\n" .
+        "                    'baseline_restore_seconds' => 0.0,\n" .
+        "                    'lock_release_seconds' => 0.0,\n",
+        $patched
+    );
+    $patchedWithBaselineStats = str_replace(
+        "                    \\fprintf(\n" .
+        "                        \\STDERR,\n" .
+        "                        \"wordpress_phpunit_child_process_lock_release_seconds=%.6f\\n\",\n" .
+        "                        (float) \$stats['lock_release_seconds']\n" .
+        "                    );\n",
+        "                    \\fprintf(\n" .
+        "                        \\STDERR,\n" .
+        "                        \"wordpress_phpunit_child_process_baseline_restore_count=%d\\n\",\n" .
+        "                        (int) (\$stats['baseline_restore_count'] ?? 0)\n" .
+        "                    );\n" .
+        "                    \\fprintf(\n" .
+        "                        \\STDERR,\n" .
+        "                        \"wordpress_phpunit_child_process_baseline_restore_seconds=%.6f\\n\",\n" .
+        "                        (float) (\$stats['baseline_restore_seconds'] ?? 0.0)\n" .
+        "                    );\n" .
+        "                    \\fprintf(\n" .
+        "                        \\STDERR,\n" .
+        "                        \"wordpress_phpunit_child_process_lock_release_seconds=%.6f\\n\",\n" .
+        "                        (float) \$stats['lock_release_seconds']\n" .
+        "                    );\n",
+        $patchedWithBaselineStats
+    );
+    $patchedWithBaselineStats = str_replace(
+        "                    \\fprintf(\n" .
+        "                        \\STDERR,\n" .
+        "                        \"wordpress_phpunit_child_process_runtime_ms_avg=%.3f\\n\",\n" .
+        "                        ((float) \$stats['child_process_seconds'] * 1000.0) / \$myliteWordPressChildProcessCount\n" .
+        "                    );\n",
+        "                    \\fprintf(\n" .
+        "                        \\STDERR,\n" .
+        "                        \"wordpress_phpunit_child_process_baseline_restore_ms_avg=%.3f\\n\",\n" .
+        "                        ((float) (\$stats['baseline_restore_seconds'] ?? 0.0) * 1000.0) /\n" .
+        "                            \\max((int) (\$stats['baseline_restore_count'] ?? 0), 1)\n" .
+        "                    );\n" .
+        "                    \\fprintf(\n" .
+        "                        \\STDERR,\n" .
+        "                        \"wordpress_phpunit_child_process_runtime_ms_avg=%.3f\\n\",\n" .
+        "                        ((float) \$stats['child_process_seconds'] * 1000.0) / \$myliteWordPressChildProcessCount\n" .
+        "                    );\n",
+        $patchedWithBaselineStats
+    );
+    if ($patchedWithBaselineStats === $patched ||
+        !str_contains($patchedWithBaselineStats, "wordpress_phpunit_child_process_baseline_restore_seconds") ||
+        !str_contains($patchedWithBaselineStats, "wordpress_phpunit_child_process_baseline_restore_ms_avg")) {
+        fwrite(STDERR, "Could not add PHPUnit child baseline restore timing summary.\n");
+        exit(1);
+    }
+    $patched = $patchedWithBaselineStats;
+}
+
+if (!str_contains($patched, $childBaselineRestoreMarker)) {
+    $patchedWithChildBaselineRestore = str_replace(
+        "        \$process = proc_open(\n",
+        $childBaselineRestore . "        \$process = proc_open(\n",
+        $patched
+    );
+    if ($patchedWithChildBaselineRestore === $patched) {
+        fwrite(STDERR, "Could not add PHPUnit child baseline restore setup.\n");
+        exit(1);
+    }
+    $patched = $patchedWithChildBaselineRestore;
 }
 
 if (!str_contains($patched, $keepaliveMarker)) {
@@ -2597,6 +2754,8 @@ PHP_KEEPALIVE
     wordpress_phpunit_child_process_closed_wpdbs
     wordpress_phpunit_child_process_static_properties
     wordpress_phpunit_child_process_skipped_static_properties
+    wordpress_phpunit_child_process_baseline_restore_count
+    wordpress_phpunit_child_process_baseline_restore_seconds
     wordpress_phpunit_child_process_lock_release_seconds
     wordpress_phpunit_child_process_runtime_seconds
     wordpress_phpunit_child_process_reconnect_seconds
@@ -2604,6 +2763,7 @@ PHP_KEEPALIVE
     wordpress_phpunit_child_script_seconds
     wordpress_phpunit_child_process_outer_minus_script_seconds
     wordpress_phpunit_child_process_lock_release_ms_avg
+    wordpress_phpunit_child_process_baseline_restore_ms_avg
     wordpress_phpunit_child_process_runtime_ms_avg
     wordpress_phpunit_child_process_reconnect_ms_avg
     wordpress_phpunit_child_script_ms_avg
@@ -3371,6 +3531,8 @@ echo "wordpress_host_phpunit_reconnect_after_child=${phpunit_reconnect_after_chi
 echo "wordpress_host_phpunit_child_timing_summary=${phpunit_child_timing_summary}"
 echo "wordpress_host_phpunit_profile_mysqli=${phpunit_profile_mysqli}"
 echo "wordpress_host_phpunit_keepalive=${phpunit_keepalive}"
+echo "wordpress_host_phpunit_child_skip_install=${phpunit_child_skip_install}"
+echo "wordpress_host_phpunit_child_restore_baseline=${phpunit_child_restore_baseline}"
 echo "wordpress_host_phpunit_skip_install=${phpunit_skip_install}"
 echo "wordpress_host_require_release_build=${require_release_build}"
 echo "wordpress_host_require_external_db_dir=${require_external_db_dir}"
