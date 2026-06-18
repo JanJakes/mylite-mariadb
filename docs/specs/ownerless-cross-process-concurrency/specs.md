@@ -826,7 +826,11 @@ The design must be fast in the common case:
   attribution then narrows that cost further to storage-engine plugin
   deinitialization in the `reap_plugins()` path: a reduced production sample
   reported `223.800 ms` across 9 storage-engine deinit calls while
-  information-schema plugin deinit remained `0.008 ms`.
+  information-schema plugin deinit remained `0.008 ms`. Storage-engine
+  finalization attribution then identifies InnoDB handlerton panic shutdown as
+  the owner of that cost: a reduced production sample reported `216.159 ms`
+  across 9 storage-engine finalizers, `216.142 ms` in `hton->panic`, and
+  `215.685 ms` in the single InnoDB finalizer.
 - Page-version lookup should be O(1) average by `(space_id, page_no)` with a
   short version chain filtered by reader end mark.
 - Ordinary exclusive opens must stay on the native MariaDB embedded hot path:

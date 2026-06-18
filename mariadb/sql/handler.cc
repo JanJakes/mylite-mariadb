@@ -43,6 +43,7 @@
 #include <mysql/psi/mysql_table.h>
 #include <pfs_transaction_provider.h>
 #include <mysql/psi/mysql_transaction.h>
+#include <mylite_embedded_shutdown_perf.h>
 #include "debug_sync.h"         // DEBUG_SYNC
 #include "debug.h"              // debug_decrement_counter
 #include "sql_audit.h"
@@ -109,6 +110,49 @@
   Remove when legacy_db_type is finally gone
 */
 st_plugin_int *hton2plugin[MAX_HA];
+
+static bool mylite_storage_engine_name_eq(const LEX_CSTRING *name,
+                                          const char *literal)
+{
+  const size_t literal_length= strlen(literal);
+  return name->length == literal_length &&
+         memcmp(name->str, literal, literal_length) == 0;
+}
+
+static size_t mylite_storage_engine_finalize_call_index(const LEX_CSTRING *name)
+{
+  if (mylite_storage_engine_name_eq(name, "InnoDB"))
+    return MYLITE_EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_INNODB_CALLS;
+  if (mylite_storage_engine_name_eq(name, "Aria"))
+    return MYLITE_EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_ARIA_CALLS;
+  if (mylite_storage_engine_name_eq(name, "MyISAM"))
+    return MYLITE_EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_MYISAM_CALLS;
+  if (mylite_storage_engine_name_eq(name, "MEMORY"))
+    return MYLITE_EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_MEMORY_CALLS;
+  if (mylite_storage_engine_name_eq(name, "CSV"))
+    return MYLITE_EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_CSV_CALLS;
+  if (mylite_storage_engine_name_eq(name, "partition"))
+    return MYLITE_EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_PARTITION_CALLS;
+  if (mylite_storage_engine_name_eq(name, "SQL_SEQUENCE"))
+    return MYLITE_EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_SQL_SEQUENCE_CALLS;
+  if (mylite_storage_engine_name_eq(name, "SEQUENCE"))
+    return MYLITE_EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_SEQUENCE_CALLS;
+  if (mylite_storage_engine_name_eq(name, "MRG_MyISAM"))
+    return MYLITE_EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_MRG_MYISAM_CALLS;
+  if (mylite_storage_engine_name_eq(name, "PERFORMANCE_SCHEMA"))
+    return MYLITE_EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_PERFORMANCE_SCHEMA_CALLS;
+  return MYLITE_EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_OTHER_CALLS;
+}
+
+static void mylite_storage_engine_finalize_count(const LEX_CSTRING *name,
+                                                 uint64_t start_ns)
+{
+  if (start_ns == 0)
+    return;
+  const size_t call_index= mylite_storage_engine_finalize_call_index(name);
+  mylite_embedded_shutdown_perf_add(call_index, 1);
+  mylite_embedded_shutdown_perf_add_elapsed(call_index + 1, start_ns);
+}
 
 enum mylite_sql_handler_perf_stat_index {
   MYLITE_SQL_HANDLER_PERF_HA_COMMIT_TRANS_CALLS= 0,
@@ -687,31 +731,66 @@ int ha_finalize_handlerton(void *plugin_)
   st_plugin_int *plugin= static_cast<st_plugin_int *>(plugin_);
   int deinit_status= 0;
   handlerton *hton= (handlerton *)plugin->data;
+  uint64_t mylite_finalize_start, mylite_stage_start;
   DBUG_ENTER("ha_finalize_handlerton");
+
+  mylite_embedded_shutdown_perf_count(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_CALLS);
+  mylite_finalize_start= mylite_embedded_shutdown_perf_start_ns();
 
   /* hton can be NULL here, if ha_initialize_handlerton() failed. */
   if (!hton)
+  {
+    mylite_embedded_shutdown_perf_count(
+        MYLITE_EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_NULL_HTON_CALLS);
     goto end;
+  }
 
+  mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
   if (installed_htons[hton->db_type] == hton)
     installed_htons[hton->db_type]= NULL;
+  mylite_embedded_shutdown_perf_add_elapsed(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_UNREGISTER_NS,
+      mylite_stage_start);
 
   if (hton->panic)
+  {
+    mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
     hton->panic(hton, HA_PANIC_CLOSE);
+    mylite_embedded_shutdown_perf_add_elapsed(
+        MYLITE_EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_PANIC_NS,
+        mylite_stage_start);
+  }
 
   if (plugin->plugin->deinit)
+  {
+    mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
     deinit_status= plugin->plugin->deinit(NULL);
+    mylite_embedded_shutdown_perf_add_elapsed(
+        MYLITE_EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_PLUGIN_DEINIT_NS,
+        mylite_stage_start);
+  }
 
+  mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
   free_sysvar_table_options(hton->table_options);
   free_sysvar_table_options(hton->field_options);
   free_sysvar_table_options(hton->index_options);
+  mylite_embedded_shutdown_perf_add_elapsed(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_TABLE_OPTIONS_NS,
+      mylite_stage_start);
+
+  mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
   update_discovery_counters(hton, -1);
+  mylite_embedded_shutdown_perf_add_elapsed(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_DISCOVERY_COUNTERS_NS,
+      mylite_stage_start);
 
   /*
     In case a plugin is uninstalled and re-installed later, it should
     reuse an array slot. Otherwise the number of uninstall/install
     cycles would be limited.
   */
+  mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
   if (hton->slot != HA_SLOT_UNDEF)
   {
     /* Make sure we are not unpluging another plugin */
@@ -719,10 +798,21 @@ int ha_finalize_handlerton(void *plugin_)
     DBUG_ASSERT(hton->slot < MAX_HA);
     hton2plugin[hton->slot]= NULL;
   }
+  mylite_embedded_shutdown_perf_add_elapsed(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_SLOT_CLEAR_NS,
+      mylite_stage_start);
 
+  mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
   my_free(hton);
+  mylite_embedded_shutdown_perf_add_elapsed(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_FREE_HTON_NS,
+      mylite_stage_start);
 
  end:
+  mylite_embedded_shutdown_perf_add_elapsed(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_TOTAL_NS,
+      mylite_finalize_start);
+  mylite_storage_engine_finalize_count(&plugin->name, mylite_finalize_start);
   DBUG_RETURN(deinit_status);
 }
 

@@ -176,7 +176,11 @@ dominant process-isolated lifecycle cost to storage-engine plugin
 deinitialization during `reap_plugins()`: `plugin_shutdown_total_ms_avg` was
 `223.868`, `plugin_shutdown_reap_deinitialize_ms_avg` was `223.822`, and 9
 storage-engine deinit calls consumed `223.800 ms`, while 31 information-schema
-deinit calls consumed `0.008 ms`.
+deinit calls consumed `0.008 ms`. Follow-up storage-engine attribution
+identified InnoDB handlerton panic shutdown as the dominant engine work:
+`storage_engine_finalize_total_ms` was `216.159`, `storage_engine_finalize_panic_ms`
+was `216.142`, and the single InnoDB finalizer consumed `215.685 ms`; Aria
+consumed `0.458 ms` and other fixed engine buckets were below `0.006 ms`.
 The probe also reports direct multi-row `INSERT ... VALUES` row-list timing
 with `mylite_perf_bulk_insert_rows_per_statement`,
 ordinary/ownerless bulk row and statement throughput, ownerless/ordinary bulk

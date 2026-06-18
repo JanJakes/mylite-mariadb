@@ -786,6 +786,38 @@ enum embedded_shutdown_perf_stat_index {
     EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_DATA_TYPE_NS,
     EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_FUNCTION_CALLS,
     EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_FUNCTION_NS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_TOTAL_NS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_NULL_HTON_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_UNREGISTER_NS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_PANIC_NS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_PLUGIN_DEINIT_NS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_TABLE_OPTIONS_NS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_DISCOVERY_COUNTERS_NS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_SLOT_CLEAR_NS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_FREE_HTON_NS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_INNODB_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_INNODB_NS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_ARIA_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_ARIA_NS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_MYISAM_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_MYISAM_NS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_MEMORY_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_MEMORY_NS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_CSV_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_CSV_NS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_PARTITION_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_PARTITION_NS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_SQL_SEQUENCE_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_SQL_SEQUENCE_NS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_SEQUENCE_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_SEQUENCE_NS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_MRG_MYISAM_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_MRG_MYISAM_NS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_PERFORMANCE_SCHEMA_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_PERFORMANCE_SCHEMA_NS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_OTHER_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_OTHER_NS,
     EMBEDDED_SHUTDOWN_PERF_STAT_COUNT
 };
 
@@ -6321,6 +6353,7 @@ static void emit_embedded_shutdown_perf_summary(const char *prefix) {
     uint64_t end_embedded_server_calls;
     uint64_t clean_up_calls;
     uint64_t plugin_shutdown_calls;
+    uint64_t storage_engine_finalize_calls;
 
     mylite_embedded_shutdown_perf_read(values, EMBEDDED_SHUTDOWN_PERF_STAT_COUNT);
 
@@ -6328,6 +6361,7 @@ static void emit_embedded_shutdown_perf_summary(const char *prefix) {
     end_embedded_server_calls = values[EMBEDDED_SHUTDOWN_PERF_END_EMBEDDED_SERVER_CALLS];
     clean_up_calls = values[EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_CALLS];
     plugin_shutdown_calls = values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_CALLS];
+    storage_engine_finalize_calls = values[EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_CALLS];
 
     emit_embedded_shutdown_perf_summary_ms(
         prefix,
@@ -6437,6 +6471,54 @@ static void emit_embedded_shutdown_perf_summary(const char *prefix) {
         values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_INFORMATION_SCHEMA_NS],
         values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_INFORMATION_SCHEMA_CALLS]
     );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "storage_engine_finalize_total",
+        values[EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_TOTAL_NS],
+        storage_engine_finalize_calls
+    );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "storage_engine_finalize_panic",
+        values[EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_PANIC_NS],
+        storage_engine_finalize_calls
+    );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "storage_engine_finalize_plugin_deinit",
+        values[EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_PLUGIN_DEINIT_NS],
+        storage_engine_finalize_calls
+    );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "storage_engine_finalize_innodb",
+        values[EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_INNODB_NS],
+        values[EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_INNODB_CALLS]
+    );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "storage_engine_finalize_aria",
+        values[EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_ARIA_NS],
+        values[EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_ARIA_CALLS]
+    );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "storage_engine_finalize_myisam",
+        values[EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_MYISAM_NS],
+        values[EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_MYISAM_CALLS]
+    );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "storage_engine_finalize_memory",
+        values[EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_MEMORY_NS],
+        values[EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_MEMORY_CALLS]
+    );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "storage_engine_finalize_csv",
+        values[EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_CSV_NS],
+        values[EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_CSV_CALLS]
+    );
 }
 
 static void emit_embedded_shutdown_plugin_type_perf(
@@ -6456,12 +6538,30 @@ static void emit_embedded_shutdown_plugin_type_perf(
     emit_embedded_shutdown_perf_ms(prefix, time_name, values[ns_index], calls);
 }
 
+static void emit_embedded_shutdown_storage_engine_perf(
+    const char *prefix,
+    const char *name,
+    const uint64_t *values,
+    size_t calls_index,
+    size_t ns_index
+) {
+    const uint64_t calls = values[calls_index];
+    char calls_name[128];
+    char time_name[128];
+
+    snprintf(calls_name, sizeof(calls_name), "storage_engine_finalize_%s_calls", name);
+    snprintf(time_name, sizeof(time_name), "storage_engine_finalize_%s", name);
+    emit_embedded_shutdown_perf_value(prefix, calls_name, calls);
+    emit_embedded_shutdown_perf_ms(prefix, time_name, values[ns_index], calls);
+}
+
 static void emit_embedded_shutdown_perf_stats(const char *prefix) {
     uint64_t values[EMBEDDED_SHUTDOWN_PERF_STAT_COUNT] = {0};
     uint64_t server_end_calls;
     uint64_t end_embedded_server_calls;
     uint64_t clean_up_calls;
     uint64_t plugin_shutdown_calls;
+    uint64_t storage_engine_finalize_calls;
 
     mylite_embedded_shutdown_perf_read(values, EMBEDDED_SHUTDOWN_PERF_STAT_COUNT);
 
@@ -6469,6 +6569,7 @@ static void emit_embedded_shutdown_perf_stats(const char *prefix) {
     end_embedded_server_calls = values[EMBEDDED_SHUTDOWN_PERF_END_EMBEDDED_SERVER_CALLS];
     clean_up_calls = values[EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_CALLS];
     plugin_shutdown_calls = values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_CALLS];
+    storage_engine_finalize_calls = values[EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_CALLS];
 
     emit_embedded_shutdown_perf_value(prefix, "server_end_calls", server_end_calls);
     emit_embedded_shutdown_perf_ms(
@@ -6762,6 +6863,142 @@ static void emit_embedded_shutdown_perf_stats(const char *prefix) {
         values,
         EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_FUNCTION_CALLS,
         EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_FUNCTION_NS
+    );
+
+    emit_embedded_shutdown_perf_value(
+        prefix,
+        "storage_engine_finalize_calls",
+        storage_engine_finalize_calls
+    );
+    emit_embedded_shutdown_perf_value(
+        prefix,
+        "storage_engine_finalize_null_hton_calls",
+        values[EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_NULL_HTON_CALLS]
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "storage_engine_finalize_total",
+        values[EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_TOTAL_NS],
+        storage_engine_finalize_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "storage_engine_finalize_unregister",
+        values[EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_UNREGISTER_NS],
+        storage_engine_finalize_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "storage_engine_finalize_panic",
+        values[EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_PANIC_NS],
+        storage_engine_finalize_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "storage_engine_finalize_plugin_deinit",
+        values[EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_PLUGIN_DEINIT_NS],
+        storage_engine_finalize_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "storage_engine_finalize_table_options",
+        values[EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_TABLE_OPTIONS_NS],
+        storage_engine_finalize_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "storage_engine_finalize_discovery_counters",
+        values[EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_DISCOVERY_COUNTERS_NS],
+        storage_engine_finalize_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "storage_engine_finalize_slot_clear",
+        values[EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_SLOT_CLEAR_NS],
+        storage_engine_finalize_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "storage_engine_finalize_free_hton",
+        values[EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_FREE_HTON_NS],
+        storage_engine_finalize_calls
+    );
+    emit_embedded_shutdown_storage_engine_perf(
+        prefix,
+        "innodb",
+        values,
+        EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_INNODB_CALLS,
+        EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_INNODB_NS
+    );
+    emit_embedded_shutdown_storage_engine_perf(
+        prefix,
+        "aria",
+        values,
+        EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_ARIA_CALLS,
+        EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_ARIA_NS
+    );
+    emit_embedded_shutdown_storage_engine_perf(
+        prefix,
+        "myisam",
+        values,
+        EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_MYISAM_CALLS,
+        EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_MYISAM_NS
+    );
+    emit_embedded_shutdown_storage_engine_perf(
+        prefix,
+        "memory",
+        values,
+        EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_MEMORY_CALLS,
+        EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_MEMORY_NS
+    );
+    emit_embedded_shutdown_storage_engine_perf(
+        prefix,
+        "csv",
+        values,
+        EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_CSV_CALLS,
+        EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_CSV_NS
+    );
+    emit_embedded_shutdown_storage_engine_perf(
+        prefix,
+        "partition",
+        values,
+        EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_PARTITION_CALLS,
+        EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_PARTITION_NS
+    );
+    emit_embedded_shutdown_storage_engine_perf(
+        prefix,
+        "sql_sequence",
+        values,
+        EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_SQL_SEQUENCE_CALLS,
+        EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_SQL_SEQUENCE_NS
+    );
+    emit_embedded_shutdown_storage_engine_perf(
+        prefix,
+        "sequence",
+        values,
+        EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_SEQUENCE_CALLS,
+        EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_SEQUENCE_NS
+    );
+    emit_embedded_shutdown_storage_engine_perf(
+        prefix,
+        "mrg_myisam",
+        values,
+        EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_MRG_MYISAM_CALLS,
+        EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_MRG_MYISAM_NS
+    );
+    emit_embedded_shutdown_storage_engine_perf(
+        prefix,
+        "performance_schema",
+        values,
+        EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_PERFORMANCE_SCHEMA_CALLS,
+        EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_PERFORMANCE_SCHEMA_NS
+    );
+    emit_embedded_shutdown_storage_engine_perf(
+        prefix,
+        "other",
+        values,
+        EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_OTHER_CALLS,
+        EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_OTHER_NS
     );
 }
 
