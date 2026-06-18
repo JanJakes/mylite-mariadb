@@ -815,7 +815,11 @@ The design must be fast in the common case:
   process-local already-synced anchor. Production performance probe output now
   also summarizes explicit-transaction ownerless insert attribution so per-row
   undo/MTR/page-log costs and final commit visibility costs are visible
-  separately from autocommit summaries.
+  separately from autocommit summaries. The same production probe also splits
+  ordinary embedded release shutdown into `mysql_thread_end()` and
+  `mysql_server_end()` timing while retaining the existing aggregate shutdown
+  counter, so process-isolated PHPUnit lifecycle cost can be attributed before
+  any MariaDB cleanup trimming work.
 - Page-version lookup should be O(1) average by `(space_id, page_no)` with a
   short version chain filtered by reader end mark.
 - Ordinary exclusive opens must stay on the native MariaDB embedded hot path:

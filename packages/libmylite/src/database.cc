@@ -283,6 +283,8 @@ enum EmbeddedOpenPerfStatIndex : std::size_t {
     EMBEDDED_OPEN_PERF_RELEASE_RECLAIM_NS,
     EMBEDDED_OPEN_PERF_RELEASE_REDO_CAPTURE_NS,
     EMBEDDED_OPEN_PERF_RELEASE_RESET_HOOKS_NS,
+    EMBEDDED_OPEN_PERF_RELEASE_MYSQL_THREAD_END_NS,
+    EMBEDDED_OPEN_PERF_RELEASE_MYSQL_SERVER_END_NS,
     EMBEDDED_OPEN_PERF_RELEASE_MYSQL_SHUTDOWN_NS,
     EMBEDDED_OPEN_PERF_RELEASE_REDO_RESTORE_NS,
     EMBEDDED_OPEN_PERF_RELEASE_UNMAP_NS,
@@ -19479,10 +19481,17 @@ void release_runtime(void) {
         reset_ownerless_runtime_hooks(g_runtime);
     }
     embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_RELEASE_RESET_HOOKS_NS, stage_start_ns);
-    stage_start_ns = embedded_open_perf_start_ns();
+    const std::uint64_t mysql_shutdown_start_ns = embedded_open_perf_start_ns();
+    stage_start_ns = mysql_shutdown_start_ns;
     mysql_thread_end();
+    embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_RELEASE_MYSQL_THREAD_END_NS, stage_start_ns);
+    stage_start_ns = embedded_open_perf_start_ns();
     mysql_server_end();
-    embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_RELEASE_MYSQL_SHUTDOWN_NS, stage_start_ns);
+    embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_RELEASE_MYSQL_SERVER_END_NS, stage_start_ns);
+    embedded_open_perf_add_elapsed(
+        EMBEDDED_OPEN_PERF_RELEASE_MYSQL_SHUTDOWN_NS,
+        mysql_shutdown_start_ns
+    );
     if (ownerless_concurrency_runtime_mapped) {
         clear_ownerless_native_hook_contexts(g_runtime);
     }

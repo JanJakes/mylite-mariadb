@@ -916,6 +916,10 @@ redo capture, and unmap phases, proving fresh ordinary opens no longer create
 or map ownerless coordination files. Ordinary active-runtime reconnect stayed
 cheap at `0.829 ms`. The remaining process-isolated cost is therefore MariaDB
 embedded lifecycle startup/shutdown, not ownerless SHM/WAL/checkpoint setup.
+The embedded shutdown attribution probe now emits `release_mysql_thread_end`
+and `release_mysql_server_end` alongside the retained
+`release_mysql_shutdown` aggregate so future shutdown work can target the
+MariaDB cleanup side only when measured evidence points there.
 The WordPress PHPUnit CI filters now use exact method-level process-isolated
 shards instead of broad mixed-class filters, while the two class-level
 `@runTestsInSeparateProcesses` files stay excluded from the non-isolated

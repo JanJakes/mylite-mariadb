@@ -714,6 +714,8 @@ enum embedded_open_perf_stat_index {
     EMBEDDED_OPEN_PERF_RELEASE_RECLAIM_NS,
     EMBEDDED_OPEN_PERF_RELEASE_REDO_CAPTURE_NS,
     EMBEDDED_OPEN_PERF_RELEASE_RESET_HOOKS_NS,
+    EMBEDDED_OPEN_PERF_RELEASE_MYSQL_THREAD_END_NS,
+    EMBEDDED_OPEN_PERF_RELEASE_MYSQL_SERVER_END_NS,
     EMBEDDED_OPEN_PERF_RELEASE_MYSQL_SHUTDOWN_NS,
     EMBEDDED_OPEN_PERF_RELEASE_REDO_RESTORE_NS,
     EMBEDDED_OPEN_PERF_RELEASE_UNMAP_NS,
@@ -6170,6 +6172,18 @@ static void emit_embedded_open_perf_summary(const char *prefix) {
     );
     emit_embedded_open_perf_summary_ms(
         prefix,
+        "release_mysql_thread_end",
+        values[EMBEDDED_OPEN_PERF_RELEASE_MYSQL_THREAD_END_NS],
+        release_calls
+    );
+    emit_embedded_open_perf_summary_ms(
+        prefix,
+        "release_mysql_server_end",
+        values[EMBEDDED_OPEN_PERF_RELEASE_MYSQL_SERVER_END_NS],
+        release_calls
+    );
+    emit_embedded_open_perf_summary_ms(
+        prefix,
         "release_mysql_shutdown",
         values[EMBEDDED_OPEN_PERF_RELEASE_MYSQL_SHUTDOWN_NS],
         release_calls
@@ -6458,6 +6472,18 @@ static void emit_embedded_open_perf_stats(const char *prefix) {
         prefix,
         "release_reset_hooks",
         values[EMBEDDED_OPEN_PERF_RELEASE_RESET_HOOKS_NS],
+        release_calls
+    );
+    emit_embedded_open_perf_ms(
+        prefix,
+        "release_mysql_thread_end",
+        values[EMBEDDED_OPEN_PERF_RELEASE_MYSQL_THREAD_END_NS],
+        release_calls
+    );
+    emit_embedded_open_perf_ms(
+        prefix,
+        "release_mysql_server_end",
+        values[EMBEDDED_OPEN_PERF_RELEASE_MYSQL_SERVER_END_NS],
         release_calls
     );
     emit_embedded_open_perf_ms(
