@@ -12843,6 +12843,21 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     );
     expect_exec_error_containing(
         db,
+        "CREATE TABLE app.ownerless_pressure_partitioned ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB "
+        "PARTITION BY HASH(id) PARTITIONS 2",
+        "partitioned table DDL"
+    );
+    expect_exec_error_containing(
+        db,
+        "ALTER TABLE app.ownerless_pressure_policy "
+        "PARTITION BY HASH(id) PARTITIONS 2",
+        "partitioned table DDL"
+    );
+    expect_exec_error_containing(
+        db,
         "CREATE SEQUENCE app.ownerless_pressure_sequence_created "
         "START WITH 7 INCREMENT BY 7 NOCACHE",
         "sequence SQL"
@@ -12937,6 +12952,26 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
             "SELECT COUNT(*) FROM information_schema.tables "
             "WHERE table_schema = 'app' "
             "AND table_name = 'ownerless_pressure_unsupported_storage'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_partitioned'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.partitions "
+            "WHERE table_schema = 'app' "
+            "AND table_name IN ("
+            "'ownerless_pressure_policy', "
+            "'ownerless_pressure_partitioned'"
+            ") "
+            "AND partition_name IS NOT NULL"
         ) == 0U
     );
     assert(
@@ -58977,6 +59012,26 @@ static void assert_ownerless_pressure_write_policy_state(
             "'ownerless_pressure_policy_event', "
             "'ownerless_pressure_policy_prepared_event'"
             ")"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_partitioned'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.partitions "
+            "WHERE table_schema = 'app' "
+            "AND table_name IN ("
+            "'ownerless_pressure_policy', "
+            "'ownerless_pressure_partitioned'"
+            ") "
+            "AND partition_name IS NOT NULL"
         ) == 0U
     );
     assert(mylite_close(db) == MYLITE_OK);

@@ -63,11 +63,12 @@ In scope:
   `ANALYZE TABLE`, `LOCK TABLES`, `FLUSH TABLES ... WITH READ LOCK`,
   `SELECT ... INTO OUTFILE`, `SELECT ... INTO DUMPFILE`, CTE export spelling,
   prepared host-file exports, `LOAD DATA`, `LOAD DATA LOCAL`, `LOAD XML`,
-  `ALTER TABLE ... DISCARD TABLESPACE`, and a rejected table storage option.
+  `ALTER TABLE ... DISCARD TABLESPACE`, partitioned-table DDL, and a rejected
+  table storage option.
 - Cover direct event DDL, event metadata, and scheduler variable rejection plus
   prepared event DDL/metadata rejection under the same active pressure limit.
-- Verify rejected storage-option and event statements do not create table or
-  event metadata.
+- Verify rejected storage-option, partition, and event statements do not create
+  table, partition, or event metadata.
 
 Out of scope:
 
@@ -87,10 +88,10 @@ Extend the existing `active-reader-pressure-write-policy` selector:
    WAL size.
 3. Keep the existing supported write-class checks that expect `MYLITE_BUSY`.
 4. Add policy-error checks for representative unsupported ownerless SQL,
-   server-owned host-file exports and imports, event/scheduler SQL, and
-   prepared event SQL while pressure is active.
-5. Assert the rejected storage-option table and rejected event metadata are
-   absent.
+   server-owned host-file exports and imports, partitioned-table DDL,
+   event/scheduler SQL, and prepared event SQL while pressure is active.
+5. Assert the rejected storage-option table, partition metadata, and rejected
+   event metadata are absent.
 6. Release the reader and keep the existing final ownerless/native reopen and
    forced `.shm` rebuild checks.
 
@@ -141,6 +142,8 @@ coverage only.
 - Representative unsupported ownerless statements and server-owned host-file
   exports/imports return `MYLITE_ERROR`, have MariaDB errno zero, and include
   their explicit policy diagnostic while the same pressure limit is active.
+- Partitioned-table DDL returns the ownerless partition policy diagnostic and
+  leaves rejected table and partition metadata absent.
 - Direct and prepared event SQL plus scheduler-variable SQL return the
   server-surface policy diagnostic rather than `MYLITE_BUSY`.
 - The rejected storage-option create statement leaves no table metadata, and

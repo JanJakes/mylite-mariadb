@@ -2262,8 +2262,11 @@ Tasks:
    same retained-WAL pressure and leave no `information_schema.events` rows, and
    that top-level sequence DDL/value SQL keeps the sequence policy diagnostic
    before pressure handling or prepared-statement allocation without advancing
-   sequence/default-table state. The
-   `ownerless-pressure-host-file-export-policy` slice adds representative
+   sequence/default-table state. The `ownerless-pressure-partition-policy`
+   follow-up proves partitioned-table DDL keeps the ownerless partition policy
+   diagnostic under the same retained-WAL pressure and leaves rejected
+   table/partition metadata absent through the existing reopen checks.
+   The `ownerless-pressure-host-file-export-policy` slice adds representative
    direct `SELECT ... INTO OUTFILE`, direct `SELECT ... INTO DUMPFILE`, CTE
    export spelling, and prepared export checks proving host-file export SQL also
    keeps the server-surface diagnostic under that same retained-WAL pressure.
@@ -4330,7 +4333,7 @@ Tasks:
    explicit policy-before-pressure rejection for representative
    process-control, account/grant, plugin, binlog, logging, query-cache,
    event/scheduler, host-file import, table-admin, locked-table, flush-lock,
-   tablespace, storage-option, and sequence SQL,
+   tablespace, partitioned-table DDL, storage-option, and sequence SQL,
    local post-DDL conservative-write coverage for rename-away plus same-name
    recreate under an active retained page-version pin,
    plus the
