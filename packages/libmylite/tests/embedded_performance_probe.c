@@ -818,6 +818,33 @@ enum embedded_shutdown_perf_stat_index {
     EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_PERFORMANCE_SCHEMA_NS,
     EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_OTHER_CALLS,
     EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_OTHER_NS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_TOTAL_NS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_PRESHUTDOWN_NS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_LOGS_EMPTY_NS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_RESTORE_FLUSH_NS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_AIO_FIL_CLOSE_NS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_THREADS_NS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_FILES_NS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_DICT_STATS_NS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_FIL_CRYPT_NS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_AHI_DISABLE_NS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_CORE_CLOSE_NS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_BUF_POOL_CLOSE_NS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_TABLESPACES_NS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_THREAD_POOL_END_NS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_FLAGS_NS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_TOTAL_NS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_SETUP_NS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_LOOP_SLEEP_NS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_ACTIVE_TRX_NS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_BACKGROUND_WAIT_NS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_BUF_DUMP_ROLLBACK_NS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_BUF_FLUSH_NS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_FAST_SHUTDOWN_NS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_CHECKPOINT_NS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_FINAL_CHECKS_NS,
     EMBEDDED_SHUTDOWN_PERF_STAT_COUNT
 };
 
@@ -6354,6 +6381,8 @@ static void emit_embedded_shutdown_perf_summary(const char *prefix) {
     uint64_t clean_up_calls;
     uint64_t plugin_shutdown_calls;
     uint64_t storage_engine_finalize_calls;
+    uint64_t innodb_shutdown_calls;
+    uint64_t innodb_logs_empty_calls;
 
     mylite_embedded_shutdown_perf_read(values, EMBEDDED_SHUTDOWN_PERF_STAT_COUNT);
 
@@ -6362,6 +6391,8 @@ static void emit_embedded_shutdown_perf_summary(const char *prefix) {
     clean_up_calls = values[EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_CALLS];
     plugin_shutdown_calls = values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_CALLS];
     storage_engine_finalize_calls = values[EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_CALLS];
+    innodb_shutdown_calls = values[EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_CALLS];
+    innodb_logs_empty_calls = values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_CALLS];
 
     emit_embedded_shutdown_perf_summary_ms(
         prefix,
@@ -6519,6 +6550,42 @@ static void emit_embedded_shutdown_perf_summary(const char *prefix) {
         values[EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_CSV_NS],
         values[EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_CSV_CALLS]
     );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "innodb_shutdown_total",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_TOTAL_NS],
+        innodb_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "innodb_shutdown_logs_empty",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_LOGS_EMPTY_NS],
+        innodb_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "innodb_shutdown_core_close",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_CORE_CLOSE_NS],
+        innodb_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "innodb_shutdown_buf_pool_close",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_BUF_POOL_CLOSE_NS],
+        innodb_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "innodb_logs_empty_sleep",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_LOOP_SLEEP_NS],
+        innodb_logs_empty_calls
+    );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "innodb_logs_empty_checkpoint",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_CHECKPOINT_NS],
+        innodb_logs_empty_calls
+    );
 }
 
 static void emit_embedded_shutdown_plugin_type_perf(
@@ -6562,6 +6629,8 @@ static void emit_embedded_shutdown_perf_stats(const char *prefix) {
     uint64_t clean_up_calls;
     uint64_t plugin_shutdown_calls;
     uint64_t storage_engine_finalize_calls;
+    uint64_t innodb_shutdown_calls;
+    uint64_t innodb_logs_empty_calls;
 
     mylite_embedded_shutdown_perf_read(values, EMBEDDED_SHUTDOWN_PERF_STAT_COUNT);
 
@@ -6570,6 +6639,8 @@ static void emit_embedded_shutdown_perf_stats(const char *prefix) {
     clean_up_calls = values[EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_CALLS];
     plugin_shutdown_calls = values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_CALLS];
     storage_engine_finalize_calls = values[EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_CALLS];
+    innodb_shutdown_calls = values[EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_CALLS];
+    innodb_logs_empty_calls = values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_CALLS];
 
     emit_embedded_shutdown_perf_value(prefix, "server_end_calls", server_end_calls);
     emit_embedded_shutdown_perf_ms(
@@ -6999,6 +7070,160 @@ static void emit_embedded_shutdown_perf_stats(const char *prefix) {
         values,
         EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_OTHER_CALLS,
         EMBEDDED_SHUTDOWN_PERF_STORAGE_ENGINE_FINALIZE_OTHER_NS
+    );
+
+    emit_embedded_shutdown_perf_value(prefix, "innodb_shutdown_calls", innodb_shutdown_calls);
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "innodb_shutdown_total",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_TOTAL_NS],
+        innodb_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "innodb_shutdown_preshutdown",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_PRESHUTDOWN_NS],
+        innodb_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "innodb_shutdown_logs_empty",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_LOGS_EMPTY_NS],
+        innodb_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "innodb_shutdown_restore_flush",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_RESTORE_FLUSH_NS],
+        innodb_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "innodb_shutdown_aio_fil_close",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_AIO_FIL_CLOSE_NS],
+        innodb_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "innodb_shutdown_threads",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_THREADS_NS],
+        innodb_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "innodb_shutdown_files",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_FILES_NS],
+        innodb_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "innodb_shutdown_dict_stats",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_DICT_STATS_NS],
+        innodb_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "innodb_shutdown_fil_crypt",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_FIL_CRYPT_NS],
+        innodb_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "innodb_shutdown_ahi_disable",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_AHI_DISABLE_NS],
+        innodb_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "innodb_shutdown_core_close",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_CORE_CLOSE_NS],
+        innodb_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "innodb_shutdown_buf_pool_close",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_BUF_POOL_CLOSE_NS],
+        innodb_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "innodb_shutdown_tablespaces",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_TABLESPACES_NS],
+        innodb_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "innodb_shutdown_thread_pool_end",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_THREAD_POOL_END_NS],
+        innodb_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "innodb_shutdown_flags",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_FLAGS_NS],
+        innodb_shutdown_calls
+    );
+
+    emit_embedded_shutdown_perf_value(prefix, "innodb_logs_empty_calls", innodb_logs_empty_calls);
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "innodb_logs_empty_total",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_TOTAL_NS],
+        innodb_logs_empty_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "innodb_logs_empty_setup",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_SETUP_NS],
+        innodb_logs_empty_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "innodb_logs_empty_sleep",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_LOOP_SLEEP_NS],
+        innodb_logs_empty_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "innodb_logs_empty_active_trx",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_ACTIVE_TRX_NS],
+        innodb_logs_empty_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "innodb_logs_empty_background_wait",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_BACKGROUND_WAIT_NS],
+        innodb_logs_empty_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "innodb_logs_empty_buf_dump_rollback",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_BUF_DUMP_ROLLBACK_NS],
+        innodb_logs_empty_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "innodb_logs_empty_buf_flush",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_BUF_FLUSH_NS],
+        innodb_logs_empty_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "innodb_logs_empty_fast_shutdown",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_FAST_SHUTDOWN_NS],
+        innodb_logs_empty_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "innodb_logs_empty_checkpoint",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_CHECKPOINT_NS],
+        innodb_logs_empty_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "innodb_logs_empty_final_checks",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_FINAL_CHECKS_NS],
+        innodb_logs_empty_calls
     );
 }
 

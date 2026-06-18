@@ -181,6 +181,11 @@ identified InnoDB handlerton panic shutdown as the dominant engine work:
 `storage_engine_finalize_total_ms` was `216.159`, `storage_engine_finalize_panic_ms`
 was `216.142`, and the single InnoDB finalizer consumed `215.685 ms`; Aria
 consumed `0.458 ms` and other fixed engine buckets were below `0.006 ms`.
+InnoDB shutdown attribution then narrowed the dominant cost to
+`logs_empty_and_mark_files_at_shutdown()` waiting: `innodb_shutdown_total_ms`
+was `248.695`, `innodb_shutdown_logs_empty_ms` was `232.035`, and the fixed
+shutdown-loop sleep consumed `200.309 ms`, while checkpoint work consumed
+`0.011 ms`.
 The probe also reports direct multi-row `INSERT ... VALUES` row-list timing
 with `mylite_perf_bulk_insert_rows_per_statement`,
 ordinary/ownerless bulk row and statement throughput, ownerless/ordinary bulk

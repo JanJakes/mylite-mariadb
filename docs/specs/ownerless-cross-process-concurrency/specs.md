@@ -830,7 +830,12 @@ The design must be fast in the common case:
   finalization attribution then identifies InnoDB handlerton panic shutdown as
   the owner of that cost: a reduced production sample reported `216.159 ms`
   across 9 storage-engine finalizers, `216.142 ms` in `hton->panic`, and
-  `215.685 ms` in the single InnoDB finalizer.
+  `215.685 ms` in the single InnoDB finalizer. InnoDB shutdown attribution then
+  points at `logs_empty_and_mark_files_at_shutdown()` waiting rather than dirty
+  flush/checkpoint work: a reduced production sample reported
+  `248.695 ms` in `innodb_shutdown()`, `232.035 ms` in log-empty shutdown, and
+  `200.309 ms` in the fixed shutdown-loop sleep while checkpoint work was
+  `0.011 ms`.
 - Page-version lookup should be O(1) average by `(space_id, page_no)` with a
   short version chain filtered by reader end mark.
 - Ordinary exclusive opens must stay on the native MariaDB embedded hot path:

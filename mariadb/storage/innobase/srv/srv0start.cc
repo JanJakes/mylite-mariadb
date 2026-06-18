@@ -37,6 +37,7 @@ Created 2/16/1996 Heikki Tuuri
 #include "mysqld.h"
 #include "mysql/psi/mysql_stage.h"
 #include "mysql/psi/psi.h"
+#include <mylite_embedded_shutdown_perf.h>
 
 #include "row0ftsort.h"
 #include "ut0mem.h"
@@ -2089,7 +2090,17 @@ void innodb_preshutdown()
 /** Shut down InnoDB. */
 void innodb_shutdown()
 {
+	uint64_t mylite_shutdown_start, mylite_stage_start;
+	mylite_embedded_shutdown_perf_count(
+		MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_CALLS);
+	mylite_shutdown_start = mylite_embedded_shutdown_perf_start_ns();
+
+	mylite_stage_start = mylite_embedded_shutdown_perf_start_ns();
 	innodb_preshutdown();
+	mylite_embedded_shutdown_perf_add_elapsed(
+		MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_PRESHUTDOWN_NS,
+		mylite_stage_start);
+
 	ut_ad(!srv_undo_sources);
 	switch (srv_operation) {
 	case SRV_OPERATION_BACKUP:
@@ -2098,6 +2109,7 @@ void innodb_shutdown()
 		break;
 	case SRV_OPERATION_RESTORE:
 	case SRV_OPERATION_RESTORE_EXPORT:
+		mylite_stage_start = mylite_embedded_shutdown_perf_start_ns();
 		mysql_mutex_lock(&buf_pool.flush_list_mutex);
 		srv_shutdown_state = SRV_SHUTDOWN_CLEANUP;
 		while (buf_page_cleaner_is_active) {
@@ -2106,19 +2118,36 @@ void innodb_shutdown()
 				     &buf_pool.flush_list_mutex.m_mutex);
 		}
 		mysql_mutex_unlock(&buf_pool.flush_list_mutex);
+		mylite_embedded_shutdown_perf_add_elapsed(
+			MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_RESTORE_FLUSH_NS,
+			mylite_stage_start);
 		break;
 	case SRV_OPERATION_NORMAL:
 	case SRV_OPERATION_EXPORT_RESTORED:
 		/* Shut down the persistent files. */
+		mylite_stage_start = mylite_embedded_shutdown_perf_start_ns();
 		logs_empty_and_mark_files_at_shutdown();
+		mylite_embedded_shutdown_perf_add_elapsed(
+			MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_LOGS_EMPTY_NS,
+			mylite_stage_start);
 	}
 
+	mylite_stage_start = mylite_embedded_shutdown_perf_start_ns();
 	os_aio_free();
 	fil_space_t::close_all();
+	mylite_embedded_shutdown_perf_add_elapsed(
+		MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_AIO_FIL_CLOSE_NS,
+		mylite_stage_start);
+
 	/* Exit any remaining threads. */
 	ut_ad(!buf_page_cleaner_is_active);
+	mylite_stage_start = mylite_embedded_shutdown_perf_start_ns();
 	srv_shutdown_threads();
+	mylite_embedded_shutdown_perf_add_elapsed(
+		MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_THREADS_NS,
+		mylite_stage_start);
 
+	mylite_stage_start = mylite_embedded_shutdown_perf_start_ns();
 	if (srv_monitor_file) {
 		my_fclose(srv_monitor_file, MYF(MY_WME));
 		srv_monitor_file = 0;
@@ -2132,6 +2161,9 @@ void innodb_shutdown()
 		my_fclose(srv_misc_tmpfile, MYF(MY_WME));
 		srv_misc_tmpfile = 0;
 	}
+	mylite_embedded_shutdown_perf_add_elapsed(
+		MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_FILES_NS,
+		mylite_stage_start);
 
 	ut_ad(dict_sys.is_initialised() || !srv_was_started);
 	ut_ad(trx_sys.is_initialised() || !srv_was_started);
@@ -2141,14 +2173,22 @@ void innodb_shutdown()
 	ut_ad(lock_sys.is_initialised() || !srv_was_started);
 	ut_ad(log_sys.is_initialised() || !srv_was_started);
 
+	mylite_stage_start = mylite_embedded_shutdown_perf_start_ns();
 	dict_stats_deinit();
+	mylite_embedded_shutdown_perf_add_elapsed(
+		MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_DICT_STATS_NS,
+		mylite_stage_start);
 
 	if (srv_started_redo) {
 		ut_ad(!srv_read_only_mode);
 		/* srv_shutdown_bg_undo_sources() already invoked
 		fts_optimize_shutdown(); dict_stats_shutdown(); */
 
+		mylite_stage_start = mylite_embedded_shutdown_perf_start_ns();
 		fil_crypt_threads_cleanup();
+		mylite_embedded_shutdown_perf_add_elapsed(
+			MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_FIL_CRYPT_NS,
+			mylite_stage_start);
 	}
 
 	/* This must be disabled before closing the buffer pool
@@ -2156,9 +2196,14 @@ void innodb_shutdown()
 
 #ifdef BTR_CUR_HASH_ADAPT
 	if (dict_sys.is_initialised()) {
+		mylite_stage_start = mylite_embedded_shutdown_perf_start_ns();
 		btr_search.disable();
+		mylite_embedded_shutdown_perf_add_elapsed(
+			MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_AHI_DISABLE_NS,
+			mylite_stage_start);
 	}
 #endif /* BTR_CUR_HASH_ADAPT */
+	mylite_stage_start = mylite_embedded_shutdown_perf_start_ns();
 	log_sys.close();
 	purge_sys.close();
 	trx_sys.close();
@@ -2177,10 +2222,18 @@ void innodb_shutdown()
 	fil_system.close();
 	pars_lexer_close();
 	recv_sys.close();
+	mylite_embedded_shutdown_perf_add_elapsed(
+		MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_CORE_CLOSE_NS,
+		mylite_stage_start);
 
 	ut_ad(buf_pool.is_initialised() || !srv_was_started);
+	mylite_stage_start = mylite_embedded_shutdown_perf_start_ns();
 	buf_pool.close();
+	mylite_embedded_shutdown_perf_add_elapsed(
+		MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_BUF_POOL_CLOSE_NS,
+		mylite_stage_start);
 
+	mylite_stage_start = mylite_embedded_shutdown_perf_start_ns();
 	srv_sys_space.shutdown();
 	if (srv_tmp_space.get_sanity_check_status()) {
 		if (fil_system.temp_space) {
@@ -2189,6 +2242,9 @@ void innodb_shutdown()
 		srv_tmp_space.delete_files();
 	}
 	srv_tmp_space.shutdown();
+	mylite_embedded_shutdown_perf_add_elapsed(
+		MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_TABLESPACES_NS,
+		mylite_stage_start);
 
 	if (srv_stats.pages_page_compression_error)
 		ib::warn() << "Page compression errors: "
@@ -2199,13 +2255,25 @@ void innodb_shutdown()
 			   << srv_shutdown_lsn
 			   << "; transaction id " << trx_sys.get_max_trx_id();
 	}
+	mylite_stage_start = mylite_embedded_shutdown_perf_start_ns();
 	srv_thread_pool_end();
+	mylite_embedded_shutdown_perf_add_elapsed(
+		MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_THREAD_POOL_END_NS,
+		mylite_stage_start);
+
+	mylite_stage_start = mylite_embedded_shutdown_perf_start_ns();
 	srv_started_redo = false;
 	srv_was_started = false;
 	srv_start_has_been_called = false;
 #ifdef EMBEDDED_LIBRARY
 	innodb_preshutdown_done = false;
 #endif
+	mylite_embedded_shutdown_perf_add_elapsed(
+		MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_FLAGS_NS,
+		mylite_stage_start);
+	mylite_embedded_shutdown_perf_add_elapsed(
+		MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_TOTAL_NS,
+		mylite_shutdown_start);
 }
 
 /** Get the meta-data filename from the table name for a

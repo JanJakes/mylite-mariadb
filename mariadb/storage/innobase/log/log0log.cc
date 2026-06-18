@@ -27,6 +27,7 @@ Created 12/9/1995 Heikki Tuuri
 #include "univ.i"
 #include <debug_sync.h>
 #include <my_service_manager.h>
+#include <mylite_embedded_shutdown_perf.h>
 
 #include "log0log.h"
 #include "log0crypt.h"
@@ -1373,7 +1374,12 @@ ATTRIBUTE_COLD void logs_empty_and_mark_files_at_shutdown() noexcept
 {
 	lsn_t			lsn;
 	ulint			count = 0;
+	uint64_t		mylite_logs_start, mylite_stage_start;
 
+	mylite_embedded_shutdown_perf_count(
+		MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_CALLS);
+	mylite_logs_start = mylite_embedded_shutdown_perf_start_ns();
+	mylite_stage_start = mylite_embedded_shutdown_perf_start_ns();
 	ib::info() << "Starting shutdown...";
 
 	/* Wait until the master task and all other operations are idle: our
@@ -1392,6 +1398,9 @@ ATTRIBUTE_COLD void logs_empty_and_mark_files_at_shutdown() noexcept
 		buf_dump_start();
 	}
 	srv_monitor_timer.reset();
+	mylite_embedded_shutdown_perf_add_elapsed(
+		MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_SETUP_NS,
+		mylite_stage_start);
 
 loop:
 	ut_ad(lock_sys.is_initialised() || !srv_was_started);
@@ -1400,7 +1409,11 @@ loop:
 
 #define COUNT_INTERVAL 600U
 #define CHECK_INTERVAL 100000U
+	mylite_stage_start = mylite_embedded_shutdown_perf_start_ns();
 	std::this_thread::sleep_for(std::chrono::microseconds(CHECK_INTERVAL));
+	mylite_embedded_shutdown_perf_add_elapsed(
+		MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_LOOP_SLEEP_NS,
+		mylite_stage_start);
 
 	count++;
 
@@ -1409,10 +1422,10 @@ loop:
 	shutdown, because the InnoDB layer may have committed or
 	prepared transactions and we don't want to lose them. */
 
+	mylite_stage_start = mylite_embedded_shutdown_perf_start_ns();
 	if (ulint total_trx = srv_was_started && !srv_read_only_mode
 	    && srv_force_recovery < SRV_FORCE_NO_TRX_UNDO
 	    ? trx_sys.any_active_transactions() : 0) {
-
 		if (srv_print_verbose_log && count > COUNT_INTERVAL) {
 			service_manager_extend_timeout(
 				COUNT_INTERVAL * CHECK_INTERVAL/1000000 * 2,
@@ -1424,12 +1437,19 @@ loop:
 			count = 0;
 		}
 
+		mylite_embedded_shutdown_perf_add_elapsed(
+			MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_ACTIVE_TRX_NS,
+			mylite_stage_start);
 		goto loop;
 	}
+	mylite_embedded_shutdown_perf_add_elapsed(
+		MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_ACTIVE_TRX_NS,
+		mylite_stage_start);
 
 	/* We need these threads to stop early in shutdown. */
 	const char* thread_name= nullptr;
 
+	mylite_stage_start = mylite_embedded_shutdown_perf_start_ns();
 	if (thread_name) {
 		ut_ad(!srv_read_only_mode);
 wait_suspend_loop:
@@ -1441,6 +1461,9 @@ wait_suspend_loop:
 				   << " to exit";
 			count = 0;
 		}
+		mylite_embedded_shutdown_perf_add_elapsed(
+			MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_BACKGROUND_WAIT_NS,
+			mylite_stage_start);
 		goto loop;
 	}
 
@@ -1458,16 +1481,28 @@ wait_suspend_loop:
 		pthread_cond_signal(&buf_pool.do_flush_list);
 		goto wait_suspend_loop;
 	}
+	mylite_embedded_shutdown_perf_add_elapsed(
+		MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_BACKGROUND_WAIT_NS,
+		mylite_stage_start);
 
+	mylite_stage_start = mylite_embedded_shutdown_perf_start_ns();
 	buf_load_dump_end();
 	rollback_all_recovered_task.wait();
+	mylite_embedded_shutdown_perf_add_elapsed(
+		MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_BUF_DUMP_ROLLBACK_NS,
+		mylite_stage_start);
 
+	mylite_stage_start = mylite_embedded_shutdown_perf_start_ns();
 	if (!buf_pool.is_initialised()) {
 		ut_ad(!srv_was_started);
 	} else {
 		buf_flush_buffer_pool();
 	}
+	mylite_embedded_shutdown_perf_add_elapsed(
+		MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_BUF_FLUSH_NS,
+		mylite_stage_start);
 
+	mylite_stage_start = mylite_embedded_shutdown_perf_start_ns();
 	if (srv_fast_shutdown == 2 || !srv_was_started) {
 		if (!srv_read_only_mode && srv_was_started) {
 			sql_print_information(
@@ -1485,9 +1520,19 @@ wait_suspend_loop:
 		}
 
 		srv_shutdown_state = SRV_SHUTDOWN_LAST_PHASE;
+		mylite_embedded_shutdown_perf_add_elapsed(
+			MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_FAST_SHUTDOWN_NS,
+			mylite_stage_start);
+		mylite_embedded_shutdown_perf_add_elapsed(
+			MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_TOTAL_NS,
+			mylite_logs_start);
 		return;
 	}
+	mylite_embedded_shutdown_perf_add_elapsed(
+		MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_FAST_SHUTDOWN_NS,
+		mylite_stage_start);
 
+	mylite_stage_start = mylite_embedded_shutdown_perf_start_ns();
 	if (!srv_read_only_mode) {
 		service_manager_extend_timeout(INNODB_EXTEND_TIMEOUT_INTERVAL,
 			"ensuring dirty buffer pool are written to log");
@@ -1508,12 +1553,19 @@ wait_suspend_loop:
 		log_sys.latch.wr_unlock();
 
 		if (lsn_changed) {
+			mylite_embedded_shutdown_perf_add_elapsed(
+				MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_CHECKPOINT_NS,
+				mylite_stage_start);
 			goto loop;
 		}
 	} else {
 		lsn = recv_sys.lsn;
 	}
+	mylite_embedded_shutdown_perf_add_elapsed(
+		MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_CHECKPOINT_NS,
+		mylite_stage_start);
 
+	mylite_stage_start = mylite_embedded_shutdown_perf_start_ns();
 	srv_shutdown_state = SRV_SHUTDOWN_LAST_PHASE;
 
 	/* Make some checks that the server really is quiet */
@@ -1539,6 +1591,12 @@ wait_suspend_loop:
 
 	ut_a(lsn == log_get_lsn()
 	     || srv_force_recovery == SRV_FORCE_NO_LOG_REDO);
+	mylite_embedded_shutdown_perf_add_elapsed(
+		MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_FINAL_CHECKS_NS,
+		mylite_stage_start);
+	mylite_embedded_shutdown_perf_add_elapsed(
+		MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_TOTAL_NS,
+		mylite_logs_start);
 }
 
 /******************************************************//**
