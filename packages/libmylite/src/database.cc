@@ -371,6 +371,78 @@ extern "C" void mylite_embedded_open_perf_read(std::uint64_t *out_values, std::s
 }
 #endif
 
+enum ExecResultPerfStatIndex : std::size_t {
+    EXEC_RESULT_PERF_CALLS = 0,
+    EXEC_RESULT_PERF_MYSQL_QUERY_NS,
+    EXEC_RESULT_PERF_MYSQL_QUERY_ERRORS,
+    EXEC_RESULT_PERF_AFFECTED_ROWS_NS,
+    EXEC_RESULT_PERF_STORE_RESULT_NS,
+    EXEC_RESULT_PERF_RESULT_SETS,
+    EXEC_RESULT_PERF_NO_RESULT_SETS,
+    EXEC_RESULT_PERF_CURRENT_SCHEMA_NS,
+    EXEC_RESULT_PERF_STATUS_UPDATE_NS,
+    EXEC_RESULT_PERF_STAT_COUNT
+};
+
+static std::atomic<bool> exec_result_perf_stats_enabled{false};
+static std::atomic<std::uint64_t> exec_result_perf_stats[EXEC_RESULT_PERF_STAT_COUNT];
+
+static bool exec_result_perf_stats_are_enabled() {
+    return exec_result_perf_stats_enabled.load(std::memory_order_relaxed);
+}
+
+static std::uint64_t exec_result_perf_now_ns() {
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
+    return static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(now).count()
+    );
+}
+
+static std::uint64_t exec_result_perf_start_ns() {
+    return exec_result_perf_stats_are_enabled() ? exec_result_perf_now_ns() : 0U;
+}
+
+static void exec_result_perf_add(ExecResultPerfStatIndex index, std::uint64_t value) {
+    if (exec_result_perf_stats_are_enabled()) {
+        exec_result_perf_stats[index].fetch_add(value, std::memory_order_relaxed);
+    }
+}
+
+static void exec_result_perf_add_elapsed(ExecResultPerfStatIndex index, std::uint64_t start_ns) {
+    if (start_ns == 0U) {
+        return;
+    }
+    if (exec_result_perf_stats_are_enabled()) {
+        exec_result_perf_stats[index].fetch_add(
+            exec_result_perf_now_ns() - start_ns,
+            std::memory_order_relaxed
+        );
+    }
+}
+
+extern "C" MYLITE_API void mylite_exec_result_perf_set_enabled(int enabled) {
+    exec_result_perf_stats_enabled.store(enabled != 0, std::memory_order_relaxed);
+}
+
+extern "C" MYLITE_API void mylite_exec_result_perf_reset(void) {
+    for (std::size_t i = 0; i < EXEC_RESULT_PERF_STAT_COUNT; ++i) {
+        exec_result_perf_stats[i].store(0, std::memory_order_relaxed);
+    }
+}
+
+extern "C" MYLITE_API void mylite_exec_result_perf_read(
+    std::uint64_t *out_values,
+    std::size_t value_count
+) {
+    if (out_values == nullptr || value_count == 0U) {
+        return;
+    }
+    const std::size_t copy_count = std::min<std::size_t>(value_count, EXEC_RESULT_PERF_STAT_COUNT);
+    for (std::size_t i = 0; i < copy_count; ++i) {
+        out_values[i] = exec_result_perf_stats[i].load(std::memory_order_relaxed);
+    }
+}
+
 #ifndef MYLITE_MARIADB_MESSAGES_DIR
 #  define MYLITE_MARIADB_MESSAGES_DIR ""
 #endif
@@ -4467,6 +4539,7 @@ int exec_result_impl(
     set_error(*db, MYLITE_ERROR, "MariaDB embedded backend is not enabled");
     return copy_error_message(*db, errmsg);
 #else
+    exec_result_perf_add(EXEC_RESULT_PERF_CALLS, 1U);
     set_ok(*db);
     if (reject_unsupported_sql_policy(*db, sql) != MYLITE_OK) {
         return copy_error_message(*db, errmsg);
@@ -4476,22 +4549,37 @@ int exec_result_impl(
         OwnerlessStatementPlainReadScope native_startup_plain_read(
             db->ownerless_native_startup_refresh_lsn != 0U
         );
+        std::uint64_t stage_start_ns = exec_result_perf_start_ns();
         if (mysql_query(&db->mysql, sql) != 0) {
+            exec_result_perf_add_elapsed(EXEC_RESULT_PERF_MYSQL_QUERY_NS, stage_start_ns);
+            exec_result_perf_add(EXEC_RESULT_PERF_MYSQL_QUERY_ERRORS, 1U);
             set_mariadb_error(*db);
             return copy_error_message(*db, errmsg);
         }
+        exec_result_perf_add_elapsed(EXEC_RESULT_PERF_MYSQL_QUERY_NS, stage_start_ns);
+        stage_start_ns = exec_result_perf_start_ns();
         const my_ulonglong affected_rows = mysql_affected_rows(&db->mysql);
         const unsigned long long insert_id =
             static_cast<unsigned long long>(mysql_insert_id(&db->mysql));
+        exec_result_perf_add_elapsed(EXEC_RESULT_PERF_AFFECTED_ROWS_NS, stage_start_ns);
 
         bool has_result = false;
+        stage_start_ns = exec_result_perf_start_ns();
         const int result =
             store_and_emit_result(*db, metadata_callback, row_callback, ctx, &has_result);
+        exec_result_perf_add_elapsed(EXEC_RESULT_PERF_STORE_RESULT_NS, stage_start_ns);
         if (result != MYLITE_OK) {
             return copy_error_message(*db, errmsg);
         }
+        exec_result_perf_add(
+            has_result ? EXEC_RESULT_PERF_RESULT_SETS : EXEC_RESULT_PERF_NO_RESULT_SETS,
+            1U
+        );
+        stage_start_ns = exec_result_perf_start_ns();
         update_current_schema_after_successful_sql(*db, sql);
+        exec_result_perf_add_elapsed(EXEC_RESULT_PERF_CURRENT_SCHEMA_NS, stage_start_ns);
 
+        stage_start_ns = exec_result_perf_start_ns();
         db->changes =
             has_result || affected_rows == static_cast<my_ulonglong>(-1)
                 ? 0
@@ -4499,6 +4587,7 @@ int exec_result_impl(
                       std::min<my_ulonglong>(affected_rows, static_cast<my_ulonglong>(LLONG_MAX))
                   );
         db->last_insert_id = insert_id;
+        exec_result_perf_add_elapsed(EXEC_RESULT_PERF_STATUS_UPDATE_NS, stage_start_ns);
         return MYLITE_OK;
     }
 
@@ -4608,7 +4697,10 @@ int exec_result_impl(
             statement_started_in_explicit_transaction
         )
     );
+    std::uint64_t stage_start_ns = exec_result_perf_start_ns();
     if (mysql_query(&db->mysql, sql) != 0) {
+        exec_result_perf_add_elapsed(EXEC_RESULT_PERF_MYSQL_QUERY_NS, stage_start_ns);
+        exec_result_perf_add(EXEC_RESULT_PERF_MYSQL_QUERY_ERRORS, 1U);
         set_mariadb_error(*db);
         disqualify_ownerless_explicit_transaction_visible_fast_proof_after_failed_sql(
             *db,
@@ -4622,9 +4714,13 @@ int exec_result_impl(
             ) &&
             refresh_ownerless_dictionary_cache_after_stale_engine_error(*db) == MYLITE_OK) {
             set_ok(*db);
+            stage_start_ns = exec_result_perf_start_ns();
             if (mysql_query(&db->mysql, sql) == 0) {
+                exec_result_perf_add_elapsed(EXEC_RESULT_PERF_MYSQL_QUERY_NS, stage_start_ns);
                 goto ownerless_query_success;
             }
+            exec_result_perf_add_elapsed(EXEC_RESULT_PERF_MYSQL_QUERY_NS, stage_start_ns);
+            exec_result_perf_add(EXEC_RESULT_PERF_MYSQL_QUERY_ERRORS, 1U);
             set_mariadb_error(*db);
         }
         const int dictionary_finish_result =
@@ -4652,15 +4748,20 @@ int exec_result_impl(
         rollback_active_transaction_after_deadlock(*db);
         return copy_error_message(*db, errmsg);
     }
+    exec_result_perf_add_elapsed(EXEC_RESULT_PERF_MYSQL_QUERY_NS, stage_start_ns);
 ownerless_query_success:
     refresh_ownerless_pending_post_open_clean_pages(*db);
+    stage_start_ns = exec_result_perf_start_ns();
     const my_ulonglong affected_rows = mysql_affected_rows(&db->mysql);
     const unsigned long long insert_id =
         static_cast<unsigned long long>(mysql_insert_id(&db->mysql));
+    exec_result_perf_add_elapsed(EXEC_RESULT_PERF_AFFECTED_ROWS_NS, stage_start_ns);
 
     bool has_result = false;
+    stage_start_ns = exec_result_perf_start_ns();
     const int result =
         store_and_emit_result(*db, metadata_callback, row_callback, ctx, &has_result);
+    exec_result_perf_add_elapsed(EXEC_RESULT_PERF_STORE_RESULT_NS, stage_start_ns);
     if (result != MYLITE_OK) {
         disqualify_ownerless_explicit_transaction_visible_fast_proof_after_failed_sql(
             *db,
@@ -4678,11 +4779,19 @@ ownerless_query_success:
         }
         return copy_error_message(*db, errmsg);
     }
+    exec_result_perf_add(
+        has_result ? EXEC_RESULT_PERF_RESULT_SETS : EXEC_RESULT_PERF_NO_RESULT_SETS,
+        1U
+    );
+    stage_start_ns = exec_result_perf_start_ns();
     update_current_schema_after_successful_sql(*db, policy_tokens);
+    exec_result_perf_add_elapsed(EXEC_RESULT_PERF_CURRENT_SCHEMA_NS, stage_start_ns);
+    stage_start_ns = exec_result_perf_start_ns();
     update_ownerless_statement_lock_timeout_after_successful_sql(*db, policy_tokens);
     update_ownerless_temporary_table_state_after_successful_sql(*db, policy_tokens);
     const int transaction_state_result =
         update_ownerless_transaction_state_after_successful_sql(*db, policy_tokens);
+    exec_result_perf_add_elapsed(EXEC_RESULT_PERF_STATUS_UPDATE_NS, stage_start_ns);
     if (transaction_state_result != MYLITE_OK) {
         if (page_version_reads_enabled) {
             release_ownerless_completed_statement_page_visibility(
@@ -4742,6 +4851,7 @@ ownerless_query_success:
             db->ownerless_peer_dictionary_refresh_requires_conservative_write = true;
         }
     }
+    stage_start_ns = exec_result_perf_start_ns();
     advance_ownerless_handle_read_lsn_after_autocommit_write(
         *db,
         policy_tokens,
@@ -4754,6 +4864,7 @@ ownerless_query_success:
                   std::min<my_ulonglong>(affected_rows, static_cast<my_ulonglong>(LLONG_MAX))
               );
     db->last_insert_id = insert_id;
+    exec_result_perf_add_elapsed(EXEC_RESULT_PERF_STATUS_UPDATE_NS, stage_start_ns);
     if (page_version_reads_enabled) {
         release_ownerless_completed_statement_page_visibility(
             *db,

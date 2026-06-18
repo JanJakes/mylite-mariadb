@@ -22,6 +22,23 @@
 #define PHP_MYSQLI_MYLITE_EXT_VERSION "0.1.0"
 #define PHP_MYLITE_MYSQLI_QUERY_CACHE_CAPACITY 8U
 
+enum php_mylite_mysqli_libmylite_exec_result_profile_index {
+    PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_CALLS = 0,
+    PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_MYSQL_QUERY_NS,
+    PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_MYSQL_QUERY_ERRORS,
+    PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_AFFECTED_ROWS_NS,
+    PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_STORE_RESULT_NS,
+    PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_RESULT_SETS,
+    PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_NO_RESULT_SETS,
+    PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_CURRENT_SCHEMA_NS,
+    PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_STATUS_UPDATE_NS,
+    PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_COUNT
+};
+
+void mylite_exec_result_perf_set_enabled(int enabled);
+void mylite_exec_result_perf_reset(void);
+void mylite_exec_result_perf_read(uint64_t *out_values, size_t value_count);
+
 typedef struct php_mylite_mysqli_query_cache_entry {
     mylite_stmt *stmt;
     zend_string *sql;
@@ -120,6 +137,15 @@ typedef struct php_mylite_mysqli_profile_stats {
     uint64_t exec_result_callback_ns;
     uint64_t exec_no_result_calls;
     uint64_t exec_no_result_ns;
+    uint64_t libmylite_exec_result_calls;
+    uint64_t libmylite_exec_result_mysql_query_ns;
+    uint64_t libmylite_exec_result_mysql_query_errors;
+    uint64_t libmylite_exec_result_affected_rows_ns;
+    uint64_t libmylite_exec_result_store_result_ns;
+    uint64_t libmylite_exec_result_result_sets;
+    uint64_t libmylite_exec_result_no_result_sets;
+    uint64_t libmylite_exec_result_current_schema_ns;
+    uint64_t libmylite_exec_result_status_update_ns;
     uint64_t explicit_prepare_calls;
     uint64_t explicit_prepare_successes;
     uint64_t explicit_prepare_failures;
@@ -190,6 +216,7 @@ static void php_mylite_mysqli_profile_print_average_millis(
     uint64_t ns,
     uint64_t count
 );
+static void php_mylite_mysqli_profile_read_libmylite_exec_result(void);
 static int php_mylite_mysqli_profile_finish_query(int status, uint64_t start);
 static int php_mylite_mysqli_profile_finish_prepare(int status, uint64_t start);
 static int php_mylite_mysqli_profile_finish_stmt_execute(int status, uint64_t start);
@@ -1949,6 +1976,8 @@ PHP_MINIT_FUNCTION(mysqli_mylite) {
 
     memset(&php_mylite_mysqli_profile, 0, sizeof(php_mylite_mysqli_profile));
     php_mylite_mysqli_profile_enabled = php_mylite_mysqli_profile_env_enabled();
+    mylite_exec_result_perf_reset();
+    mylite_exec_result_perf_set_enabled(php_mylite_mysqli_profile_enabled ? 1 : 0);
     php_mylite_mysqli_prepared_query_results_enabled =
         php_mylite_mysqli_prepared_query_results_env_enabled();
 
@@ -1988,7 +2017,10 @@ PHP_MINIT_FUNCTION(mysqli_mylite) {
 PHP_MSHUTDOWN_FUNCTION(mysqli_mylite) {
     (void)type;
     (void)module_number;
+    php_mylite_mysqli_profile_read_libmylite_exec_result();
     php_mylite_mysqli_profile_print();
+    mylite_exec_result_perf_set_enabled(0);
+    mylite_exec_result_perf_reset();
     return SUCCESS;
 }
 
@@ -2245,6 +2277,35 @@ static void php_mylite_mysqli_profile_print_average_millis(
     fprintf(output, "mylite_mysqli_profile_%s=%.3f\n", name, average);
 }
 
+static void php_mylite_mysqli_profile_read_libmylite_exec_result(void) {
+    if (!php_mylite_mysqli_profile_enabled) {
+        mylite_exec_result_perf_set_enabled(0);
+        return;
+    }
+
+    uint64_t values[PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_COUNT] = {0};
+    mylite_exec_result_perf_set_enabled(0);
+    mylite_exec_result_perf_read(values, PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_COUNT);
+    php_mylite_mysqli_profile.libmylite_exec_result_calls =
+        values[PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_CALLS];
+    php_mylite_mysqli_profile.libmylite_exec_result_mysql_query_ns =
+        values[PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_MYSQL_QUERY_NS];
+    php_mylite_mysqli_profile.libmylite_exec_result_mysql_query_errors =
+        values[PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_MYSQL_QUERY_ERRORS];
+    php_mylite_mysqli_profile.libmylite_exec_result_affected_rows_ns =
+        values[PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_AFFECTED_ROWS_NS];
+    php_mylite_mysqli_profile.libmylite_exec_result_store_result_ns =
+        values[PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_STORE_RESULT_NS];
+    php_mylite_mysqli_profile.libmylite_exec_result_result_sets =
+        values[PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_RESULT_SETS];
+    php_mylite_mysqli_profile.libmylite_exec_result_no_result_sets =
+        values[PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_NO_RESULT_SETS];
+    php_mylite_mysqli_profile.libmylite_exec_result_current_schema_ns =
+        values[PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_CURRENT_SCHEMA_NS];
+    php_mylite_mysqli_profile.libmylite_exec_result_status_update_ns =
+        values[PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_STATUS_UPDATE_NS];
+}
+
 static void php_mylite_mysqli_profile_print(void) {
     if (!php_mylite_mysqli_profile_enabled) {
         return;
@@ -2468,6 +2529,42 @@ static void php_mylite_mysqli_profile_print(void) {
     php_mylite_mysqli_profile_print_millis(
         "exec_no_result_ms_total",
         php_mylite_mysqli_profile.exec_no_result_ns
+    );
+    php_mylite_mysqli_profile_print_counter(
+        "libmylite_exec_result_calls",
+        php_mylite_mysqli_profile.libmylite_exec_result_calls
+    );
+    php_mylite_mysqli_profile_print_millis(
+        "libmylite_exec_result_mysql_query_ms_total",
+        php_mylite_mysqli_profile.libmylite_exec_result_mysql_query_ns
+    );
+    php_mylite_mysqli_profile_print_counter(
+        "libmylite_exec_result_mysql_query_errors",
+        php_mylite_mysqli_profile.libmylite_exec_result_mysql_query_errors
+    );
+    php_mylite_mysqli_profile_print_millis(
+        "libmylite_exec_result_affected_rows_ms_total",
+        php_mylite_mysqli_profile.libmylite_exec_result_affected_rows_ns
+    );
+    php_mylite_mysqli_profile_print_millis(
+        "libmylite_exec_result_store_result_ms_total",
+        php_mylite_mysqli_profile.libmylite_exec_result_store_result_ns
+    );
+    php_mylite_mysqli_profile_print_counter(
+        "libmylite_exec_result_result_sets",
+        php_mylite_mysqli_profile.libmylite_exec_result_result_sets
+    );
+    php_mylite_mysqli_profile_print_counter(
+        "libmylite_exec_result_no_result_sets",
+        php_mylite_mysqli_profile.libmylite_exec_result_no_result_sets
+    );
+    php_mylite_mysqli_profile_print_millis(
+        "libmylite_exec_result_current_schema_ms_total",
+        php_mylite_mysqli_profile.libmylite_exec_result_current_schema_ns
+    );
+    php_mylite_mysqli_profile_print_millis(
+        "libmylite_exec_result_status_update_ms_total",
+        php_mylite_mysqli_profile.libmylite_exec_result_status_update_ns
     );
     php_mylite_mysqli_profile_print_counter(
         "explicit_prepare_calls",

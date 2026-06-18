@@ -479,6 +479,13 @@ remained much larger. The current WordPress performance target is therefore
 MariaDB/libmylite query execution and prepared-statement lifecycle cost, not
 PHP fetch-object conversion. Other WordPress CI timing steps keep that profile
 disabled unless a diagnostic run explicitly opts in.
+The same opt-in profile now also emits `libmylite_exec_result_*` rows that
+separate direct text execution into native `mysql_query()`, affected-row and
+insert-id capture, result draining, result/no-result classification,
+current-schema update, and handle status-update buckets. These rows are
+diagnostics for profiled WordPress and mysqli runs only; they do not change SQL
+semantics, public C API compatibility, native storage behavior, or default CI
+timing overhead.
 The stats-enabled embedded performance probe now also reports ownerless
 prepared-DML native `mysql_stmt_prepare()` and `mysql_stmt_close()` call counts
 and elapsed time, plus per-insert summaries, so the remaining prepared-write

@@ -61,7 +61,8 @@ profile blocks in the phase output, then derives aggregate averages:
 - open and close calls, close-kind calls, total milliseconds, and average
   milliseconds;
 - query call mix, query milliseconds, query average milliseconds, cache,
-  prepare, status-sync, result/no-result, row, and fetch-object totals.
+  prepare, status-sync, result/no-result, direct libmylite text-execution
+  subphase, row, and fetch-object totals.
 
 Do not aggregate per-process average rows directly. Compute aggregate averages
 from summed totals divided by summed call counts.
