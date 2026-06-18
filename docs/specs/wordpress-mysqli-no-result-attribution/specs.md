@@ -156,6 +156,7 @@ MyLite and a fresh production-guarded MariaDB embedded archive.
   --output-on-failure` passed.
 - `LD_LIBRARY_PATH=/tmp/clang-format-18-root/usr/lib/x86_64-linux-gnu
   cmake --build --preset format-check-prod` passed.
+- `cmake --build --preset tidy-prod` passed.
 - `git diff --check` passed.
 - `nm -D build/php-embedded-prod/packages/php-ext-mylite/mylite.so` showed the
   diagnostic `mylite_exec_result_perf_{set_enabled,reset,read}` symbols

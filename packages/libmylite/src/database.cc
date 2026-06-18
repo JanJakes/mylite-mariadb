@@ -384,8 +384,10 @@ enum ExecResultPerfStatIndex : std::size_t {
     EXEC_RESULT_PERF_STAT_COUNT
 };
 
-static std::atomic<bool> exec_result_perf_stats_enabled{false};
-static std::atomic<std::uint64_t> exec_result_perf_stats[EXEC_RESULT_PERF_STAT_COUNT];
+namespace {
+std::atomic<bool> exec_result_perf_stats_enabled{false};
+std::atomic<std::uint64_t> exec_result_perf_stats[EXEC_RESULT_PERF_STAT_COUNT];
+} // namespace
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
 static bool exec_result_perf_stats_are_enabled() {
