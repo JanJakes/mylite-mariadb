@@ -4953,7 +4953,12 @@ subsystems that this mode needs:
   production-like; explicitly profiled diagnostic runs still copy selected
   `mylite_mysqli_profile_*` profile totals from captured PHPUnit output, using
   the last profile summary when bootstrap emits an earlier process-local
-  profile. The embedded ownerless SQL CI step now also prints the direct
+  profile. Process-isolated WordPress PHPUnit CI now enables the lightweight
+  `MYLITE_WORDPRESS_PHPUNIT_CHILD_TIMING_SUMMARY` mode while keeping
+  heavyweight child profiling off, so the shared timing summary reports
+  parent-side child count, runtime, lock-release, and reconnect averages
+  without injecting child-body instrumentation into the production timing
+  shards. The embedded ownerless SQL CI step now also prints the direct
   `sql-case` count, emits per-case start and status/seconds log markers, and
   appends a case-index timing table to the GitHub step summary while preserving
   the failing case's exit status. This keeps long ownerless correctness
