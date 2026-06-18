@@ -748,6 +748,44 @@ enum embedded_shutdown_perf_stat_index {
     EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_MYSQL_LIBRARY_END_NS,
     EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_ERROR_CHARSET_NS,
     EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_FINAL_FREE_NS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_TOTAL_NS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_FREE_AUTO_PLUGINS_NS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_REAP_LOOP_NS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_REAP_DEINITIALIZE_NS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_REAP_DELETE_NS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_FORCE_PREPARE_NS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINITIALIZE_NS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_REF_CHECK_DELETE_NS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_CLEANUP_VARIABLES_NS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_MUTEX_DESTROY_NS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DISPOSE_HASHES_NS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_FREE_DYNAMIC_PLUGINS_NS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_FREE_ROOTS_NS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_UDF_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_UDF_NS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_STORAGE_ENGINE_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_STORAGE_ENGINE_NS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_FTPARSER_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_FTPARSER_NS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_DAEMON_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_DAEMON_NS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_INFORMATION_SCHEMA_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_INFORMATION_SCHEMA_NS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_AUDIT_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_AUDIT_NS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_REPLICATION_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_REPLICATION_NS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_AUTHENTICATION_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_AUTHENTICATION_NS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_PASSWORD_VALIDATION_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_PASSWORD_VALIDATION_NS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_ENCRYPTION_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_ENCRYPTION_NS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_DATA_TYPE_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_DATA_TYPE_NS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_FUNCTION_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_FUNCTION_NS,
     EMBEDDED_SHUTDOWN_PERF_STAT_COUNT
 };
 
@@ -6282,12 +6320,14 @@ static void emit_embedded_shutdown_perf_summary(const char *prefix) {
     uint64_t server_end_calls;
     uint64_t end_embedded_server_calls;
     uint64_t clean_up_calls;
+    uint64_t plugin_shutdown_calls;
 
     mylite_embedded_shutdown_perf_read(values, EMBEDDED_SHUTDOWN_PERF_STAT_COUNT);
 
     server_end_calls = values[EMBEDDED_SHUTDOWN_PERF_SERVER_END_CALLS];
     end_embedded_server_calls = values[EMBEDDED_SHUTDOWN_PERF_END_EMBEDDED_SERVER_CALLS];
     clean_up_calls = values[EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_CALLS];
+    plugin_shutdown_calls = values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_CALLS];
 
     emit_embedded_shutdown_perf_summary_ms(
         prefix,
@@ -6361,6 +6401,59 @@ static void emit_embedded_shutdown_perf_summary(const char *prefix) {
         values[EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_ERROR_CHARSET_NS],
         clean_up_calls
     );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "plugin_shutdown_total",
+        values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_TOTAL_NS],
+        plugin_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "plugin_shutdown_deinitialize",
+        values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINITIALIZE_NS],
+        plugin_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "plugin_shutdown_reap_deinitialize",
+        values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_REAP_DEINITIALIZE_NS],
+        plugin_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "plugin_shutdown_ref_check_delete",
+        values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_REF_CHECK_DELETE_NS],
+        plugin_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "plugin_deinit_storage_engine",
+        values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_STORAGE_ENGINE_NS],
+        values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_STORAGE_ENGINE_CALLS]
+    );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "plugin_deinit_information_schema",
+        values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_INFORMATION_SCHEMA_NS],
+        values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_INFORMATION_SCHEMA_CALLS]
+    );
+}
+
+static void emit_embedded_shutdown_plugin_type_perf(
+    const char *prefix,
+    const char *name,
+    const uint64_t *values,
+    size_t calls_index,
+    size_t ns_index
+) {
+    const uint64_t calls = values[calls_index];
+    char calls_name[128];
+    char time_name[128];
+
+    snprintf(calls_name, sizeof(calls_name), "plugin_deinit_%s_calls", name);
+    snprintf(time_name, sizeof(time_name), "plugin_deinit_%s", name);
+    emit_embedded_shutdown_perf_value(prefix, calls_name, calls);
+    emit_embedded_shutdown_perf_ms(prefix, time_name, values[ns_index], calls);
 }
 
 static void emit_embedded_shutdown_perf_stats(const char *prefix) {
@@ -6368,12 +6461,14 @@ static void emit_embedded_shutdown_perf_stats(const char *prefix) {
     uint64_t server_end_calls;
     uint64_t end_embedded_server_calls;
     uint64_t clean_up_calls;
+    uint64_t plugin_shutdown_calls;
 
     mylite_embedded_shutdown_perf_read(values, EMBEDDED_SHUTDOWN_PERF_STAT_COUNT);
 
     server_end_calls = values[EMBEDDED_SHUTDOWN_PERF_SERVER_END_CALLS];
     end_embedded_server_calls = values[EMBEDDED_SHUTDOWN_PERF_END_EMBEDDED_SERVER_CALLS];
     clean_up_calls = values[EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_CALLS];
+    plugin_shutdown_calls = values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_CALLS];
 
     emit_embedded_shutdown_perf_value(prefix, "server_end_calls", server_end_calls);
     emit_embedded_shutdown_perf_ms(
@@ -6503,6 +6598,170 @@ static void emit_embedded_shutdown_perf_stats(const char *prefix) {
         "clean_up_final_free",
         values[EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_FINAL_FREE_NS],
         clean_up_calls
+    );
+
+    emit_embedded_shutdown_perf_value(prefix, "plugin_shutdown_calls", plugin_shutdown_calls);
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "plugin_shutdown_total",
+        values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_TOTAL_NS],
+        plugin_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "plugin_shutdown_free_auto_plugins",
+        values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_FREE_AUTO_PLUGINS_NS],
+        plugin_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "plugin_shutdown_reap_loop",
+        values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_REAP_LOOP_NS],
+        plugin_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "plugin_shutdown_reap_deinitialize",
+        values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_REAP_DEINITIALIZE_NS],
+        plugin_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "plugin_shutdown_reap_delete",
+        values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_REAP_DELETE_NS],
+        plugin_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "plugin_shutdown_force_prepare",
+        values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_FORCE_PREPARE_NS],
+        plugin_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "plugin_shutdown_deinitialize",
+        values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINITIALIZE_NS],
+        plugin_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "plugin_shutdown_ref_check_delete",
+        values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_REF_CHECK_DELETE_NS],
+        plugin_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "plugin_shutdown_cleanup_variables",
+        values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_CLEANUP_VARIABLES_NS],
+        plugin_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "plugin_shutdown_mutex_destroy",
+        values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_MUTEX_DESTROY_NS],
+        plugin_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "plugin_shutdown_dispose_hashes",
+        values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DISPOSE_HASHES_NS],
+        plugin_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "plugin_shutdown_free_dynamic_plugins",
+        values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_FREE_DYNAMIC_PLUGINS_NS],
+        plugin_shutdown_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "plugin_shutdown_free_roots",
+        values[EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_FREE_ROOTS_NS],
+        plugin_shutdown_calls
+    );
+    emit_embedded_shutdown_plugin_type_perf(
+        prefix,
+        "udf",
+        values,
+        EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_UDF_CALLS,
+        EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_UDF_NS
+    );
+    emit_embedded_shutdown_plugin_type_perf(
+        prefix,
+        "storage_engine",
+        values,
+        EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_STORAGE_ENGINE_CALLS,
+        EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_STORAGE_ENGINE_NS
+    );
+    emit_embedded_shutdown_plugin_type_perf(
+        prefix,
+        "ftparser",
+        values,
+        EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_FTPARSER_CALLS,
+        EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_FTPARSER_NS
+    );
+    emit_embedded_shutdown_plugin_type_perf(
+        prefix,
+        "daemon",
+        values,
+        EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_DAEMON_CALLS,
+        EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_DAEMON_NS
+    );
+    emit_embedded_shutdown_plugin_type_perf(
+        prefix,
+        "information_schema",
+        values,
+        EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_INFORMATION_SCHEMA_CALLS,
+        EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_INFORMATION_SCHEMA_NS
+    );
+    emit_embedded_shutdown_plugin_type_perf(
+        prefix,
+        "audit",
+        values,
+        EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_AUDIT_CALLS,
+        EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_AUDIT_NS
+    );
+    emit_embedded_shutdown_plugin_type_perf(
+        prefix,
+        "replication",
+        values,
+        EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_REPLICATION_CALLS,
+        EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_REPLICATION_NS
+    );
+    emit_embedded_shutdown_plugin_type_perf(
+        prefix,
+        "authentication",
+        values,
+        EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_AUTHENTICATION_CALLS,
+        EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_AUTHENTICATION_NS
+    );
+    emit_embedded_shutdown_plugin_type_perf(
+        prefix,
+        "password_validation",
+        values,
+        EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_PASSWORD_VALIDATION_CALLS,
+        EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_PASSWORD_VALIDATION_NS
+    );
+    emit_embedded_shutdown_plugin_type_perf(
+        prefix,
+        "encryption",
+        values,
+        EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_ENCRYPTION_CALLS,
+        EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_ENCRYPTION_NS
+    );
+    emit_embedded_shutdown_plugin_type_perf(
+        prefix,
+        "data_type",
+        values,
+        EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_DATA_TYPE_CALLS,
+        EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_DATA_TYPE_NS
+    );
+    emit_embedded_shutdown_plugin_type_perf(
+        prefix,
+        "function",
+        values,
+        EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_FUNCTION_CALLS,
+        EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_FUNCTION_NS
     );
 }
 

@@ -169,6 +169,14 @@ their duration is recorded.
 The embedded performance and attribution probes run before embedded correctness
 tests, so production throughput and attribution numbers remain visible even
 when a later ownerless SQL case fails.
+Ordinary embedded shutdown attribution now splits release teardown through
+`mysql_thread_end()`, `mysql_server_end()`, `end_embedded_server()`,
+`clean_up()`, and `plugin_shutdown()`. A reduced production sample narrowed the
+dominant process-isolated lifecycle cost to storage-engine plugin
+deinitialization during `reap_plugins()`: `plugin_shutdown_total_ms_avg` was
+`223.868`, `plugin_shutdown_reap_deinitialize_ms_avg` was `223.822`, and 9
+storage-engine deinit calls consumed `223.800 ms`, while 31 information-schema
+deinit calls consumed `0.008 ms`.
 The probe also reports direct multi-row `INSERT ... VALUES` row-list timing
 with `mylite_perf_bulk_insert_rows_per_statement`,
 ordinary/ownerless bulk row and statement throughput, ownerless/ordinary bulk

@@ -39,6 +39,7 @@
 #include <mysql/plugin_encryption.h>
 #include <mysql/plugin_data_type.h>
 #include <mysql/plugin_function.h>
+#include <mylite_embedded_shutdown_perf.h>
 #include "sql_plugin_compat.h"
 #include "wsrep_mysqld.h"
 
@@ -164,6 +165,26 @@ static int plugin_type_initialization_order[MYSQL_MAX_PLUGIN_TYPE_NUM]=
   MYSQL_REPLICATION_PLUGIN,
   MYSQL_UDF_PLUGIN
 };
+
+static_assert(MYSQL_MAX_PLUGIN_TYPE_NUM == 12,
+              "MyLite plugin shutdown perf counters assume 12 plugin types");
+
+static size_t mylite_plugin_shutdown_deinit_call_index(uint plugin_type)
+{
+  return MYLITE_EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINIT_UDF_CALLS +
+         (plugin_type * 2);
+}
+
+static void mylite_plugin_shutdown_count_deinit(uint plugin_type,
+                                                uint64_t start_ns)
+{
+  if (plugin_type >= MYSQL_MAX_PLUGIN_TYPE_NUM)
+    return;
+  const size_t call_index=
+      mylite_plugin_shutdown_deinit_call_index(plugin_type);
+  mylite_embedded_shutdown_perf_add(call_index, 1);
+  mylite_embedded_shutdown_perf_add_elapsed(call_index + 1, start_ns);
+}
 
 #if MYLITE_HAVE_DYNAMIC_PLUGIN_LOADING
 static const char *plugin_interface_version_sym=
@@ -1327,6 +1348,7 @@ static void reap_plugins(void)
 {
   size_t count;
   struct st_plugin_int *plugin, **reap, **list;
+  uint64_t mylite_stage_start, mylite_plugin_start;
 
   mysql_mutex_assert_owner(&LOCK_plugin);
 
@@ -1355,14 +1377,28 @@ static void reap_plugins(void)
 
   mysql_mutex_unlock(&LOCK_plugin);
 
+  mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
   list= reap;
   while ((plugin= *(--list)))
+  {
+    uint mylite_plugin_type= plugin->plugin->type;
+    mylite_plugin_start= mylite_embedded_shutdown_perf_start_ns();
     plugin_deinitialize(plugin, true);
+    mylite_plugin_shutdown_count_deinit(mylite_plugin_type,
+                                        mylite_plugin_start);
+  }
+  mylite_embedded_shutdown_perf_add_elapsed(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_REAP_DEINITIALIZE_NS,
+      mylite_stage_start);
 
   mysql_mutex_lock(&LOCK_plugin);
 
+  mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
   while ((plugin= *(--reap)))
     plugin_del(plugin, 0);
+  mylite_embedded_shutdown_perf_add_elapsed(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_REAP_DELETE_NS,
+      mylite_stage_start);
 
   my_afree(reap);
 }
@@ -2107,16 +2143,25 @@ void plugin_shutdown(void)
   size_t i, count= plugin_array.elements;
   struct st_plugin_int **plugins, *plugin;
   struct st_plugin_dl **dl;
+  uint64_t mylite_shutdown_start, mylite_stage_start, mylite_plugin_start;
   DBUG_ENTER("plugin_shutdown");
 
+  mylite_embedded_shutdown_perf_count(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_CALLS);
+  mylite_shutdown_start= mylite_embedded_shutdown_perf_start_ns();
   if (initialized)
   {
     if (opt_gtid_pos_auto_plugins)
     {
+      mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
       free_engine_list(opt_gtid_pos_auto_plugins);
       opt_gtid_pos_auto_plugins= NULL;
+      mylite_embedded_shutdown_perf_add_elapsed(
+          MYLITE_EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_FREE_AUTO_PLUGINS_NS,
+          mylite_stage_start);
     }
 
+    mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
     mysql_mutex_lock(&LOCK_plugin);
 
     reap_needed= true;
@@ -2149,7 +2194,11 @@ void plugin_shutdown(void)
         unlock_variables(NULL, &max_system_variables);
       }
     }
+    mylite_embedded_shutdown_perf_add_elapsed(
+        MYLITE_EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_REAP_LOOP_NS,
+        mylite_stage_start);
 
+    mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
     plugins= (struct st_plugin_int **) my_alloca(sizeof(void*) * (count+1));
 
     /*
@@ -2165,10 +2214,14 @@ void plugin_shutdown(void)
         plugins[i]->state= PLUGIN_IS_DYING;
     }
     mysql_mutex_unlock(&LOCK_plugin);
+    mylite_embedded_shutdown_perf_add_elapsed(
+        MYLITE_EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_FORCE_PREPARE_NS,
+        mylite_stage_start);
 
     /*
       We loop through all plugins and call deinit() if they have one.
     */
+    mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
     for (i= 0; i < count; i++)
       if (!(plugins[i]->state & (PLUGIN_IS_UNINITIALIZED | PLUGIN_IS_FREED |
                                  PLUGIN_IS_DISABLED)))
@@ -2177,14 +2230,22 @@ void plugin_shutdown(void)
           We are forcing deinit on plugins so we don't want to do a ref_count
           check until we have processed all the plugins.
         */
+        uint mylite_plugin_type= plugins[i]->plugin->type;
+        mylite_plugin_start= mylite_embedded_shutdown_perf_start_ns();
         plugin_deinitialize(plugins[i], false);
+        mylite_plugin_shutdown_count_deinit(mylite_plugin_type,
+                                            mylite_plugin_start);
       }
+    mylite_embedded_shutdown_perf_add_elapsed(
+        MYLITE_EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DEINITIALIZE_NS,
+        mylite_stage_start);
 
     /*
       It's perfectly safe not to lock LOCK_plugin, as there're no
       concurrent threads anymore. But some functions called from here
       use mysql_mutex_assert_owner(), so we lock the mutex to satisfy it
     */
+    mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
     mysql_mutex_lock(&LOCK_plugin);
 
     /*
@@ -2198,27 +2259,43 @@ void plugin_shutdown(void)
                         plugins[i]->name.str, plugins[i]->ref_count);
       plugin_del(plugins[i], PLUGIN_IS_DYING);
     }
+    mylite_embedded_shutdown_perf_add_elapsed(
+        MYLITE_EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_REF_CHECK_DELETE_NS,
+        mylite_stage_start);
 
     /*
       Now we can deallocate all memory.
     */
 
+    mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
     cleanup_variables(&global_system_variables);
     cleanup_variables(&max_system_variables);
     mysql_mutex_unlock(&LOCK_plugin);
+    mylite_embedded_shutdown_perf_add_elapsed(
+        MYLITE_EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_CLEANUP_VARIABLES_NS,
+        mylite_stage_start);
 
+    mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
     initialized= 0;
     mysql_mutex_destroy(&LOCK_plugin);
 
     my_afree(plugins);
+    mylite_embedded_shutdown_perf_add_elapsed(
+        MYLITE_EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_MUTEX_DESTROY_NS,
+        mylite_stage_start);
   }
 
   /* Dispose of the memory */
 
+  mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
   for (i= 0; i < MYSQL_MAX_PLUGIN_TYPE_NUM; i++)
     my_hash_free(&plugin_hash[i]);
   delete_dynamic(&plugin_array);
+  mylite_embedded_shutdown_perf_add_elapsed(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_DISPOSE_HASHES_NS,
+      mylite_stage_start);
 
+  mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
   count= plugin_dl_array.elements;
   dl= (struct st_plugin_dl **)my_alloca(sizeof(void*) * count);
   for (i= 0; i < count; i++)
@@ -2227,13 +2304,23 @@ void plugin_shutdown(void)
     free_plugin_mem(dl[i]);
   my_afree(dl);
   delete_dynamic(&plugin_dl_array);
+  mylite_embedded_shutdown_perf_add_elapsed(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_FREE_DYNAMIC_PLUGINS_NS,
+      mylite_stage_start);
 
+  mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
   my_hash_free(&bookmark_hash);
   free_root(&plugin_mem_root, MYF(0));
   free_root(&plugin_vars_mem_root, MYF(0));
 
   global_variables_dynamic_size= 0;
+  mylite_embedded_shutdown_perf_add_elapsed(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_FREE_ROOTS_NS,
+      mylite_stage_start);
 
+  mylite_embedded_shutdown_perf_add_elapsed(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_PLUGIN_SHUTDOWN_TOTAL_NS,
+      mylite_shutdown_start);
   DBUG_VOID_RETURN;
 }
 
