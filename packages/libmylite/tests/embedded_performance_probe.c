@@ -234,6 +234,26 @@ enum database_perf_stat_index {
     DATABASE_PERF_STAT_COUNT
 };
 
+enum exec_result_perf_stat_index {
+    EXEC_RESULT_PERF_CALLS = 0,
+    EXEC_RESULT_PERF_MYSQL_QUERY_NS,
+    EXEC_RESULT_PERF_MYSQL_QUERY_ERRORS,
+    EXEC_RESULT_PERF_AFFECTED_ROWS_NS,
+    EXEC_RESULT_PERF_STORE_RESULT_NS,
+    EXEC_RESULT_PERF_RESULT_SETS,
+    EXEC_RESULT_PERF_NO_RESULT_SETS,
+    EXEC_RESULT_PERF_CURRENT_SCHEMA_NS,
+    EXEC_RESULT_PERF_STATUS_UPDATE_NS,
+    EXEC_RESULT_PERF_NATIVE_CONTROL_CALLS,
+    EXEC_RESULT_PERF_NATIVE_CONTROL_NS,
+    EXEC_RESULT_PERF_NATIVE_CONTROL_ERRORS,
+    EXEC_RESULT_PERF_NATIVE_CONTROL_AUTOCOMMIT_NOOPS,
+    EXEC_RESULT_PERF_NATIVE_CONTROL_START_TRANSACTION_CALLS,
+    EXEC_RESULT_PERF_NATIVE_CONTROL_COMMIT_CALLS,
+    EXEC_RESULT_PERF_NATIVE_CONTROL_ROLLBACK_CALLS,
+    EXEC_RESULT_PERF_STAT_COUNT
+};
+
 enum page_write_perf_stat_index {
     PAGE_WRITE_PERF_STAT_ENTER_CALLS = 0,
     PAGE_WRITE_PERF_STAT_ENTER_TOTAL_NS,
@@ -965,6 +985,9 @@ void mylite_ownerless_innodb_read_commit_visibility_stats(uint64_t *out_values, 
 void mylite_ownerless_database_set_perf_stats_enabled(int enabled);
 void mylite_ownerless_database_reset_perf_stats(void);
 void mylite_ownerless_database_read_perf_stats(uint64_t *out_values, size_t value_count);
+void mylite_exec_result_perf_set_enabled(int enabled);
+void mylite_exec_result_perf_reset(void);
+void mylite_exec_result_perf_read(uint64_t *out_values, size_t value_count);
 void mylite_ownerless_page_log_set_append_perf_stats_enabled(int enabled);
 void mylite_ownerless_page_log_set_append_detail_perf_stats_enabled(int enabled);
 void mylite_ownerless_page_log_reset_append_perf_stats(void);
@@ -1042,6 +1065,8 @@ static void emit_ownerless_bulk_autocommit_phase_summary(
     unsigned insert_rows,
     unsigned insert_statements
 );
+static void emit_ownerless_direct_select_summary(unsigned select_iterations);
+static void emit_ownerless_prepared_select_summary(unsigned select_iterations);
 static void emit_autocommit_deep_comparison_summary(
     const uint64_t *ordinary_deep,
     const uint64_t *ownerless_deep,
@@ -1050,6 +1075,7 @@ static void emit_autocommit_deep_comparison_summary(
 static void emit_page_publish_stats(const char *prefix);
 static void emit_commit_visibility_stats(const char *prefix);
 static void emit_database_perf_stats(const char *prefix);
+static void emit_exec_result_perf_stats(const char *prefix);
 static void emit_embedded_open_perf_stats(const char *prefix);
 static void emit_embedded_open_perf_summary(const char *prefix);
 static void emit_embedded_startup_perf_stats(const char *prefix);
@@ -1068,6 +1094,7 @@ static void check_max_ms(const char *env_name, double seconds, unsigned iteratio
 static void check_min_rate(const char *env_name, double rate);
 static void append_sql_or_exit(char *sql, size_t capacity, size_t *offset, const char *format, ...);
 static unsigned bulk_statement_count(unsigned rows, unsigned rows_per_statement);
+static void reset_ownerless_read_stats(void);
 static void reset_ownerless_insert_stats(void);
 static mylite_db *open_database(
     const performance_paths *paths,
@@ -1353,14 +1380,35 @@ int main(void) {
     close_database(db);
 
     db = open_database(&paths, ownerless_flags, &config);
+    if (page_publish_stats) {
+        reset_ownerless_read_stats();
+        mylite_ownerless_database_set_perf_stats_enabled(1);
+        mylite_exec_result_perf_set_enabled(1);
+    }
     seconds = measure_direct_select(db, select_iterations);
     emit_rate("mylite_perf_ownerless_direct_select1", select_iterations, seconds);
+    if (page_publish_stats) {
+        mylite_exec_result_perf_set_enabled(0);
+        mylite_ownerless_database_set_perf_stats_enabled(0);
+        emit_exec_result_perf_stats("mylite_perf_ownerless_direct_select1");
+        emit_database_perf_stats("mylite_perf_ownerless_direct_select1");
+        emit_ownerless_direct_select_summary(select_iterations);
+    }
     ownerless_direct_select1_rate = operations_per_second(select_iterations, seconds);
     rate = ownerless_direct_select1_rate;
     check_min_rate("MYLITE_PERF_MIN_OWNERLESS_DIRECT_SELECT1_OPS", rate);
 
+    if (page_publish_stats) {
+        reset_ownerless_read_stats();
+        mylite_ownerless_database_set_perf_stats_enabled(1);
+    }
     seconds = measure_prepared_select(db, select_iterations);
     emit_rate("mylite_perf_ownerless_prepared_select1", select_iterations, seconds);
+    if (page_publish_stats) {
+        mylite_ownerless_database_set_perf_stats_enabled(0);
+        emit_database_perf_stats("mylite_perf_ownerless_prepared_select1");
+        emit_ownerless_prepared_select_summary(select_iterations);
+    }
     ownerless_prepared_select1_rate = operations_per_second(select_iterations, seconds);
     rate = ownerless_prepared_select1_rate;
     check_min_rate("MYLITE_PERF_MIN_OWNERLESS_PREPARED_SELECT1_OPS", rate);
@@ -1978,6 +2026,122 @@ static void emit_redo_hook_summary(
         "redo_leave",
         iterations,
         unit
+    );
+}
+
+static void emit_ownerless_direct_select_summary(unsigned select_iterations) {
+    uint64_t database_perf[DATABASE_PERF_STAT_COUNT] = {0};
+    uint64_t exec_result_perf[EXEC_RESULT_PERF_STAT_COUNT] = {0};
+
+    mylite_ownerless_database_read_perf_stats(database_perf, DATABASE_PERF_STAT_COUNT);
+    mylite_exec_result_perf_read(exec_result_perf, EXEC_RESULT_PERF_STAT_COUNT);
+
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_direct_select1_exec_calls_per_select",
+        exec_result_perf[EXEC_RESULT_PERF_CALLS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_direct_select1_mysql_query_ms_per_select",
+        exec_result_perf[EXEC_RESULT_PERF_MYSQL_QUERY_NS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_direct_select1_store_result_ms_per_select",
+        exec_result_perf[EXEC_RESULT_PERF_STORE_RESULT_NS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_direct_select1_current_schema_ms_per_select",
+        exec_result_perf[EXEC_RESULT_PERF_CURRENT_SCHEMA_NS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_direct_select1_status_update_ms_per_select",
+        exec_result_perf[EXEC_RESULT_PERF_STATUS_UPDATE_NS],
+        select_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_direct_select1_page_reads_per_select",
+        database_perf[DATABASE_PERF_STAT_PAGE_READ_CALLS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_direct_select1_page_read_ms_per_select",
+        database_perf[DATABASE_PERF_STAT_PAGE_READ_TOTAL_NS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_direct_select1_page_read_wal_scan_ms_per_select",
+        database_perf[DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_NS],
+        select_iterations
+    );
+}
+
+static void emit_ownerless_prepared_select_summary(unsigned select_iterations) {
+    uint64_t database_perf[DATABASE_PERF_STAT_COUNT] = {0};
+
+    mylite_ownerless_database_read_perf_stats(database_perf, DATABASE_PERF_STAT_COUNT);
+
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_prepared_select1_step_calls_per_select",
+        database_perf[DATABASE_PERF_STAT_PREPARED_STEP_CALLS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_prepared_select1_step_total_ms_per_select",
+        database_perf[DATABASE_PERF_STAT_PREPARED_STEP_TOTAL_NS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_prepared_select1_step_pressure_ms_per_select",
+        database_perf[DATABASE_PERF_STAT_PREPARED_STEP_PRESSURE_NS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_prepared_select1_step_statement_lock_ms_per_select",
+        database_perf[DATABASE_PERF_STAT_PREPARED_STEP_STATEMENT_LOCK_NS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_prepared_select1_step_refresh_ms_per_select",
+        database_perf[DATABASE_PERF_STAT_PREPARED_STEP_REFRESH_NS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_prepared_select1_step_snapshot_pin_ms_per_select",
+        database_perf[DATABASE_PERF_STAT_PREPARED_STEP_SNAPSHOT_PIN_NS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_prepared_select1_step_mysql_execute_ms_per_select",
+        database_perf[DATABASE_PERF_STAT_PREPARED_STEP_MYSQL_EXECUTE_NS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_prepared_select1_step_post_state_ms_per_select",
+        database_perf[DATABASE_PERF_STAT_PREPARED_STEP_POST_STATE_NS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_prepared_select1_step_reclaim_ms_per_select",
+        database_perf[DATABASE_PERF_STAT_PREPARED_STEP_RECLAIM_NS],
+        select_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_prepared_select1_page_reads_per_select",
+        database_perf[DATABASE_PERF_STAT_PAGE_READ_CALLS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_prepared_select1_page_read_ms_per_select",
+        database_perf[DATABASE_PERF_STAT_PAGE_READ_TOTAL_NS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_prepared_select1_page_read_wal_scan_ms_per_select",
+        database_perf[DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_NS],
+        select_iterations
     );
 }
 
@@ -7932,6 +8096,88 @@ static void emit_embedded_shutdown_perf_stats(const char *prefix) {
     );
 }
 
+static void emit_exec_result_perf_stats(const char *prefix) {
+    uint64_t values[EXEC_RESULT_PERF_STAT_COUNT] = {0};
+
+    mylite_exec_result_perf_read(values, EXEC_RESULT_PERF_STAT_COUNT);
+    printf("%s_exec_result_calls=%" PRIu64 "\n", prefix, values[EXEC_RESULT_PERF_CALLS]);
+    printf(
+        "%s_exec_result_mysql_query_ms=%.3f\n",
+        prefix,
+        (double)values[EXEC_RESULT_PERF_MYSQL_QUERY_NS] / 1000000.0
+    );
+    printf(
+        "%s_exec_result_mysql_query_errors=%" PRIu64 "\n",
+        prefix,
+        values[EXEC_RESULT_PERF_MYSQL_QUERY_ERRORS]
+    );
+    printf(
+        "%s_exec_result_affected_rows_ms=%.3f\n",
+        prefix,
+        (double)values[EXEC_RESULT_PERF_AFFECTED_ROWS_NS] / 1000000.0
+    );
+    printf(
+        "%s_exec_result_store_result_ms=%.3f\n",
+        prefix,
+        (double)values[EXEC_RESULT_PERF_STORE_RESULT_NS] / 1000000.0
+    );
+    printf(
+        "%s_exec_result_result_sets=%" PRIu64 "\n",
+        prefix,
+        values[EXEC_RESULT_PERF_RESULT_SETS]
+    );
+    printf(
+        "%s_exec_result_no_result_sets=%" PRIu64 "\n",
+        prefix,
+        values[EXEC_RESULT_PERF_NO_RESULT_SETS]
+    );
+    printf(
+        "%s_exec_result_current_schema_ms=%.3f\n",
+        prefix,
+        (double)values[EXEC_RESULT_PERF_CURRENT_SCHEMA_NS] / 1000000.0
+    );
+    printf(
+        "%s_exec_result_status_update_ms=%.3f\n",
+        prefix,
+        (double)values[EXEC_RESULT_PERF_STATUS_UPDATE_NS] / 1000000.0
+    );
+    printf(
+        "%s_exec_result_native_control_calls=%" PRIu64 "\n",
+        prefix,
+        values[EXEC_RESULT_PERF_NATIVE_CONTROL_CALLS]
+    );
+    printf(
+        "%s_exec_result_native_control_ms=%.3f\n",
+        prefix,
+        (double)values[EXEC_RESULT_PERF_NATIVE_CONTROL_NS] / 1000000.0
+    );
+    printf(
+        "%s_exec_result_native_control_errors=%" PRIu64 "\n",
+        prefix,
+        values[EXEC_RESULT_PERF_NATIVE_CONTROL_ERRORS]
+    );
+    printf(
+        "%s_exec_result_native_control_autocommit_noops=%" PRIu64 "\n",
+        prefix,
+        values[EXEC_RESULT_PERF_NATIVE_CONTROL_AUTOCOMMIT_NOOPS]
+    );
+    printf(
+        "%s_exec_result_native_control_start_transaction_calls=%" PRIu64 "\n",
+        prefix,
+        values[EXEC_RESULT_PERF_NATIVE_CONTROL_START_TRANSACTION_CALLS]
+    );
+    printf(
+        "%s_exec_result_native_control_commit_calls=%" PRIu64 "\n",
+        prefix,
+        values[EXEC_RESULT_PERF_NATIVE_CONTROL_COMMIT_CALLS]
+    );
+    printf(
+        "%s_exec_result_native_control_rollback_calls=%" PRIu64 "\n",
+        prefix,
+        values[EXEC_RESULT_PERF_NATIVE_CONTROL_ROLLBACK_CALLS]
+    );
+}
+
 static void emit_embedded_open_perf_stats(const char *prefix) {
     uint64_t values[EMBEDDED_OPEN_PERF_STAT_COUNT] = {0};
     uint64_t open_calls;
@@ -10390,6 +10636,11 @@ static unsigned bulk_statement_count(unsigned rows, unsigned rows_per_statement)
         rows_per_statement = 1U;
     }
     return (rows + rows_per_statement - 1U) / rows_per_statement;
+}
+
+static void reset_ownerless_read_stats(void) {
+    mylite_ownerless_database_reset_perf_stats();
+    mylite_exec_result_perf_reset();
 }
 
 static void reset_ownerless_insert_stats(void) {
