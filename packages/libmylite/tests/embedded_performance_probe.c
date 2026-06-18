@@ -16,6 +16,7 @@
 #define MYLITE_PERF_DEFAULT_SELECT_ITERATIONS 1000U
 #define MYLITE_PERF_DEFAULT_INSERT_ITERATIONS 200U
 #define MYLITE_PERF_DEFAULT_BULK_INSERT_ROWS_PER_STATEMENT 4U
+#define MYLITE_PERF_POINT_SELECT_ROWS 16U
 
 typedef struct performance_paths {
     char *root;
@@ -1067,6 +1068,8 @@ static void emit_ownerless_bulk_autocommit_phase_summary(
 );
 static void emit_ownerless_direct_select_summary(unsigned select_iterations);
 static void emit_ownerless_prepared_select_summary(unsigned select_iterations);
+static void emit_ownerless_direct_point_select_summary(unsigned select_iterations);
+static void emit_ownerless_prepared_point_select_summary(unsigned select_iterations);
 static void emit_autocommit_deep_comparison_summary(
     const uint64_t *ordinary_deep,
     const uint64_t *ownerless_deep,
@@ -1117,6 +1120,17 @@ static double measure_active_runtime_reconnect(
 );
 static double measure_direct_select(mylite_db *db, unsigned iterations);
 static double measure_prepared_select(mylite_db *db, unsigned iterations);
+static void prepare_point_select_table(mylite_db *db, const char *table_name);
+static double measure_direct_point_select(
+    mylite_db *db,
+    const char *table_name,
+    unsigned iterations
+);
+static double measure_prepared_point_select(
+    mylite_db *db,
+    const char *table_name,
+    unsigned iterations
+);
 static double measure_transactional_insert(
     mylite_db *db,
     const char *table_name,
@@ -1183,12 +1197,16 @@ int main(void) {
     double ownerless_active_runtime_reconnect_ms;
     double ordinary_direct_select1_rate;
     double ordinary_prepared_select1_rate;
+    double ordinary_direct_point_select_rate;
+    double ordinary_prepared_point_select_rate;
     double ordinary_insert_txn_rate;
     double ordinary_insert_autocommit_rate;
     double ordinary_insert_autocommit_bulk_row_rate;
     double ordinary_insert_autocommit_bulk_statement_rate;
     double ownerless_direct_select1_rate;
     double ownerless_prepared_select1_rate;
+    double ownerless_direct_point_select_rate;
+    double ownerless_prepared_point_select_rate;
     double ownerless_insert_txn_rate;
     double ownerless_insert_autocommit_rate;
     double ownerless_insert_autocommit_bulk_row_rate;
@@ -1320,6 +1338,17 @@ int main(void) {
     rate = ordinary_prepared_select1_rate;
     check_min_rate("MYLITE_PERF_MIN_ORDINARY_PREPARED_SELECT1_OPS", rate);
 
+    prepare_point_select_table(db, "mylite_perf_ordinary_point_select");
+    seconds =
+        measure_direct_point_select(db, "mylite_perf_ordinary_point_select", select_iterations);
+    emit_rate("mylite_perf_ordinary_direct_point_select", select_iterations, seconds);
+    ordinary_direct_point_select_rate = operations_per_second(select_iterations, seconds);
+
+    seconds =
+        measure_prepared_point_select(db, "mylite_perf_ordinary_point_select", select_iterations);
+    emit_rate("mylite_perf_ordinary_prepared_point_select", select_iterations, seconds);
+    ordinary_prepared_point_select_rate = operations_per_second(select_iterations, seconds);
+
     if (page_publish_stats) {
         mylite_ownerless_innodb_deep_set_perf_stats_enabled(1);
     }
@@ -1412,6 +1441,38 @@ int main(void) {
     ownerless_prepared_select1_rate = operations_per_second(select_iterations, seconds);
     rate = ownerless_prepared_select1_rate;
     check_min_rate("MYLITE_PERF_MIN_OWNERLESS_PREPARED_SELECT1_OPS", rate);
+
+    prepare_point_select_table(db, "mylite_perf_ownerless_point_select");
+    if (page_publish_stats) {
+        reset_ownerless_read_stats();
+        mylite_ownerless_database_set_perf_stats_enabled(1);
+        mylite_exec_result_perf_set_enabled(1);
+    }
+    seconds =
+        measure_direct_point_select(db, "mylite_perf_ownerless_point_select", select_iterations);
+    emit_rate("mylite_perf_ownerless_direct_point_select", select_iterations, seconds);
+    if (page_publish_stats) {
+        mylite_exec_result_perf_set_enabled(0);
+        mylite_ownerless_database_set_perf_stats_enabled(0);
+        emit_exec_result_perf_stats("mylite_perf_ownerless_direct_point_select");
+        emit_database_perf_stats("mylite_perf_ownerless_direct_point_select");
+        emit_ownerless_direct_point_select_summary(select_iterations);
+    }
+    ownerless_direct_point_select_rate = operations_per_second(select_iterations, seconds);
+
+    if (page_publish_stats) {
+        reset_ownerless_read_stats();
+        mylite_ownerless_database_set_perf_stats_enabled(1);
+    }
+    seconds =
+        measure_prepared_point_select(db, "mylite_perf_ownerless_point_select", select_iterations);
+    emit_rate("mylite_perf_ownerless_prepared_point_select", select_iterations, seconds);
+    if (page_publish_stats) {
+        mylite_ownerless_database_set_perf_stats_enabled(0);
+        emit_database_perf_stats("mylite_perf_ownerless_prepared_point_select");
+        emit_ownerless_prepared_point_select_summary(select_iterations);
+    }
+    ownerless_prepared_point_select_rate = operations_per_second(select_iterations, seconds);
 
     if (page_publish_stats) {
         mylite_ownerless_innodb_set_page_publish_stats_enabled(1);
@@ -1596,6 +1657,32 @@ int main(void) {
         "mylite_perf_summary_ownerless_prepared_select1_ratio",
         ownerless_prepared_select1_rate,
         ordinary_prepared_select1_rate
+    );
+    emit_summary_rate(
+        "mylite_perf_summary_ordinary_direct_point_select_ops_per_second",
+        ordinary_direct_point_select_rate
+    );
+    emit_summary_rate(
+        "mylite_perf_summary_ownerless_direct_point_select_ops_per_second",
+        ownerless_direct_point_select_rate
+    );
+    emit_summary_ratio(
+        "mylite_perf_summary_ownerless_direct_point_select_ratio",
+        ownerless_direct_point_select_rate,
+        ordinary_direct_point_select_rate
+    );
+    emit_summary_rate(
+        "mylite_perf_summary_ordinary_prepared_point_select_ops_per_second",
+        ordinary_prepared_point_select_rate
+    );
+    emit_summary_rate(
+        "mylite_perf_summary_ownerless_prepared_point_select_ops_per_second",
+        ownerless_prepared_point_select_rate
+    );
+    emit_summary_ratio(
+        "mylite_perf_summary_ownerless_prepared_point_select_ratio",
+        ownerless_prepared_point_select_rate,
+        ordinary_prepared_point_select_rate
     );
     emit_summary_rate(
         "mylite_perf_summary_ordinary_insert_txn_ops_per_second",
@@ -2140,6 +2227,122 @@ static void emit_ownerless_prepared_select_summary(unsigned select_iterations) {
     );
     emit_summary_ms_per_iteration(
         "mylite_perf_summary_ownerless_prepared_select1_page_read_wal_scan_ms_per_select",
+        database_perf[DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_NS],
+        select_iterations
+    );
+}
+
+static void emit_ownerless_direct_point_select_summary(unsigned select_iterations) {
+    uint64_t database_perf[DATABASE_PERF_STAT_COUNT] = {0};
+    uint64_t exec_result_perf[EXEC_RESULT_PERF_STAT_COUNT] = {0};
+
+    mylite_ownerless_database_read_perf_stats(database_perf, DATABASE_PERF_STAT_COUNT);
+    mylite_exec_result_perf_read(exec_result_perf, EXEC_RESULT_PERF_STAT_COUNT);
+
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_direct_point_select_exec_calls_per_select",
+        exec_result_perf[EXEC_RESULT_PERF_CALLS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_direct_point_select_mysql_query_ms_per_select",
+        exec_result_perf[EXEC_RESULT_PERF_MYSQL_QUERY_NS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_direct_point_select_store_result_ms_per_select",
+        exec_result_perf[EXEC_RESULT_PERF_STORE_RESULT_NS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_direct_point_select_current_schema_ms_per_select",
+        exec_result_perf[EXEC_RESULT_PERF_CURRENT_SCHEMA_NS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_direct_point_select_status_update_ms_per_select",
+        exec_result_perf[EXEC_RESULT_PERF_STATUS_UPDATE_NS],
+        select_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_direct_point_select_page_reads_per_select",
+        database_perf[DATABASE_PERF_STAT_PAGE_READ_CALLS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_direct_point_select_page_read_ms_per_select",
+        database_perf[DATABASE_PERF_STAT_PAGE_READ_TOTAL_NS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_direct_point_select_page_read_wal_scan_ms_per_select",
+        database_perf[DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_NS],
+        select_iterations
+    );
+}
+
+static void emit_ownerless_prepared_point_select_summary(unsigned select_iterations) {
+    uint64_t database_perf[DATABASE_PERF_STAT_COUNT] = {0};
+
+    mylite_ownerless_database_read_perf_stats(database_perf, DATABASE_PERF_STAT_COUNT);
+
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_prepared_point_select_step_calls_per_select",
+        database_perf[DATABASE_PERF_STAT_PREPARED_STEP_CALLS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_prepared_point_select_step_total_ms_per_select",
+        database_perf[DATABASE_PERF_STAT_PREPARED_STEP_TOTAL_NS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_prepared_point_select_step_pressure_ms_per_select",
+        database_perf[DATABASE_PERF_STAT_PREPARED_STEP_PRESSURE_NS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_prepared_point_select_step_statement_lock_ms_per_select",
+        database_perf[DATABASE_PERF_STAT_PREPARED_STEP_STATEMENT_LOCK_NS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_prepared_point_select_step_refresh_ms_per_select",
+        database_perf[DATABASE_PERF_STAT_PREPARED_STEP_REFRESH_NS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_prepared_point_select_step_snapshot_pin_ms_per_select",
+        database_perf[DATABASE_PERF_STAT_PREPARED_STEP_SNAPSHOT_PIN_NS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_prepared_point_select_step_mysql_execute_ms_per_select",
+        database_perf[DATABASE_PERF_STAT_PREPARED_STEP_MYSQL_EXECUTE_NS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_prepared_point_select_step_post_state_ms_per_select",
+        database_perf[DATABASE_PERF_STAT_PREPARED_STEP_POST_STATE_NS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_prepared_point_select_step_reclaim_ms_per_select",
+        database_perf[DATABASE_PERF_STAT_PREPARED_STEP_RECLAIM_NS],
+        select_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_prepared_point_select_page_reads_per_select",
+        database_perf[DATABASE_PERF_STAT_PAGE_READ_CALLS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_prepared_point_select_page_read_ms_per_select",
+        database_perf[DATABASE_PERF_STAT_PAGE_READ_TOTAL_NS],
+        select_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_prepared_point_select_page_read_wal_scan_ms_per_select",
         database_perf[DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_NS],
         select_iterations
     );
@@ -10785,6 +10988,116 @@ static double measure_prepared_select(mylite_db *db, unsigned iterations) {
     end_ns = monotonic_ns();
     if (mylite_finalize(stmt) != MYLITE_OK) {
         fprintf(stderr, "finalize SELECT 1 failed\n");
+        exit(1);
+    }
+    return elapsed_seconds(start_ns, end_ns);
+}
+
+static void prepare_point_select_table(mylite_db *db, const char *table_name) {
+    char sql[1024];
+    size_t offset = 0U;
+    unsigned row;
+
+    (void)snprintf(sql, sizeof(sql), "DROP TABLE IF EXISTS app.%s", table_name);
+    exec_ok(db, sql);
+    (void)snprintf(
+        sql,
+        sizeof(sql),
+        "CREATE TABLE app.%s ("
+        "id INT PRIMARY KEY, value INT NOT NULL, payload VARCHAR(32) NOT NULL"
+        ") ENGINE=InnoDB",
+        table_name
+    );
+    exec_ok(db, sql);
+
+    append_sql_or_exit(
+        sql,
+        sizeof(sql),
+        &offset,
+        "INSERT INTO app.%s (id, value, payload) VALUES ",
+        table_name
+    );
+    for (row = 1U; row <= MYLITE_PERF_POINT_SELECT_ROWS; ++row) {
+        append_sql_or_exit(
+            sql,
+            sizeof(sql),
+            &offset,
+            "%s(%u, %u, 'mylite-point')",
+            row == 1U ? "" : ", ",
+            row,
+            row * 10U
+        );
+    }
+    exec_ok(db, sql);
+}
+
+static double measure_direct_point_select(
+    mylite_db *db,
+    const char *table_name,
+    unsigned iterations
+) {
+    char sql[256];
+    uint64_t start_ns;
+    uint64_t end_ns;
+    unsigned index;
+
+    (void)snprintf(sql, sizeof(sql), "SELECT value FROM app.%s WHERE id = 1", table_name);
+    start_ns = monotonic_ns();
+    for (index = 0; index < iterations; ++index) {
+        exec_ok(db, sql);
+    }
+    end_ns = monotonic_ns();
+    return elapsed_seconds(start_ns, end_ns);
+}
+
+static double measure_prepared_point_select(
+    mylite_db *db,
+    const char *table_name,
+    unsigned iterations
+) {
+    char sql[256];
+    const char *tail = NULL;
+    mylite_stmt *stmt = NULL;
+    uint64_t start_ns;
+    uint64_t end_ns;
+    unsigned index;
+
+    (void)snprintf(sql, sizeof(sql), "SELECT value FROM app.%s WHERE id = ?", table_name);
+    if (mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, &tail) != MYLITE_OK) {
+        fprintf(stderr, "prepare point select failed: %s\n", mylite_errmsg(db));
+        exit(1);
+    }
+    if (tail == NULL || tail[0] != '\0') {
+        fprintf(stderr, "prepare point select left unexpected tail\n");
+        exit(1);
+    }
+
+    start_ns = monotonic_ns();
+    for (index = 0; index < iterations; ++index) {
+        if (mylite_bind_int64(stmt, 1U, 1) != MYLITE_OK) {
+            fprintf(stderr, "point select bind failed\n");
+            exit(1);
+        }
+        if (mylite_step(stmt) != MYLITE_ROW) {
+            fprintf(stderr, "prepared point select did not return a row\n");
+            exit(1);
+        }
+        if (mylite_column_int64(stmt, 0) != 10) {
+            fprintf(stderr, "prepared point select returned an unexpected value\n");
+            exit(1);
+        }
+        if (mylite_step(stmt) != MYLITE_DONE) {
+            fprintf(stderr, "prepared point select did not finish\n");
+            exit(1);
+        }
+        if (mylite_reset(stmt) != MYLITE_OK || mylite_clear_bindings(stmt) != MYLITE_OK) {
+            fprintf(stderr, "prepared point select reset failed\n");
+            exit(1);
+        }
+    }
+    end_ns = monotonic_ns();
+    if (mylite_finalize(stmt) != MYLITE_OK) {
+        fprintf(stderr, "finalize point select failed\n");
         exit(1);
     }
     return elapsed_seconds(start_ns, end_ns);

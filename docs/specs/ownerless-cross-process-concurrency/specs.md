@@ -869,6 +869,11 @@ The design must be fast in the common case:
   reduced production sample after the fast-path moved the direct ratio to
   `0.7871` and the prepared ratio to `0.9292`, leaving write-path
   page-publication/checkpoint work as the larger remaining performance gap.
+  The production probe also carries real InnoDB primary-key point-select timing
+  for ordinary and ownerless direct/prepared reads, plus ownerless direct exec,
+  prepared-step, and page-version read-hook attribution under the existing
+  stats flag, so tableless probe overhead can be separated from real-table read
+  overhead before changing refresh policy.
 - Page-version lookup should be O(1) average by `(space_id, page_no)` with a
   short version chain filtered by reader end mark.
 - Ordinary exclusive opens must stay on the native MariaDB embedded hot path:
