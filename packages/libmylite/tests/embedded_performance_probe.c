@@ -252,6 +252,31 @@ enum database_perf_stat_index {
     DATABASE_PERF_STAT_CHECKPOINT_UPDATE_DEFERRED_LATEST_COALESCED,
     DATABASE_PERF_STAT_PAGE_PUBLISH_PAGE_LOG_CHECKSUM_NS,
     DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_SKIPPED_NATIVE_SUPPORT,
+    DATABASE_PERF_STAT_REFRESH_CALLS,
+    DATABASE_PERF_STAT_REFRESH_TOTAL_NS,
+    DATABASE_PERF_STAT_REFRESH_DICTIONARY_NS,
+    DATABASE_PERF_STAT_REFRESH_SHARED_SNAPSHOT_NS,
+    DATABASE_PERF_STAT_REFRESH_PIN_SNAPSHOT_NS,
+    DATABASE_PERF_STAT_REFRESH_BASELINE_PIN_CALLS,
+    DATABASE_PERF_STAT_REFRESH_BASELINE_PIN_NS,
+    DATABASE_PERF_STAT_REFRESH_ADVANCE_TRX_HORIZON_CALLS,
+    DATABASE_PERF_STAT_REFRESH_ADVANCE_TRX_HORIZON_NS,
+    DATABASE_PERF_STAT_REFRESH_CLOSE_READ_VIEW_CALLS,
+    DATABASE_PERF_STAT_REFRESH_CLOSE_READ_VIEW_NS,
+    DATABASE_PERF_STAT_REFRESH_NATIVE_FLUSH_CALLS,
+    DATABASE_PERF_STAT_REFRESH_NATIVE_FLUSH_NS,
+    DATABASE_PERF_STAT_REFRESH_EXTERNAL_REFRESH_CALLS,
+    DATABASE_PERF_STAT_REFRESH_EXTERNAL_REFRESH_NS,
+    DATABASE_PERF_STAT_REFRESH_HANDLE_PIN_CALLS,
+    DATABASE_PERF_STAT_REFRESH_HANDLE_PIN_NS,
+    DATABASE_PERF_STAT_REFRESH_CLEAN_PAGE_REFRESH_CALLS,
+    DATABASE_PERF_STAT_REFRESH_CLEAN_PAGE_REFRESH_NS,
+    DATABASE_PERF_STAT_REFRESH_VISIBILITY_PUSH_CALLS,
+    DATABASE_PERF_STAT_REFRESH_VISIBILITY_PUSH_NS,
+    DATABASE_PERF_STAT_REFRESH_VISIBILITY_ENABLE_CALLS,
+    DATABASE_PERF_STAT_REFRESH_VISIBILITY_ENABLE_NS,
+    DATABASE_PERF_STAT_REFRESH_LOCAL_NATIVE_CURRENT_READ,
+    DATABASE_PERF_STAT_REFRESH_PAGE_VERSION_READS_ENABLED,
     DATABASE_PERF_STAT_COUNT
 };
 
@@ -2258,6 +2283,189 @@ static void emit_ownerless_native_hook_summary(
     );
 }
 
+static void emit_ownerless_refresh_summary(
+    const char *prefix,
+    const uint64_t *database_perf,
+    unsigned iterations,
+    const char *unit
+) {
+    emit_summary_count_per_named_unit(
+        prefix,
+        "refresh_calls",
+        database_perf[DATABASE_PERF_STAT_REFRESH_CALLS],
+        iterations,
+        unit
+    );
+    emit_summary_ms_per_named_unit(
+        prefix,
+        "refresh_total_ms",
+        database_perf[DATABASE_PERF_STAT_REFRESH_TOTAL_NS],
+        iterations,
+        unit
+    );
+    emit_summary_ms_per_named_unit(
+        prefix,
+        "refresh_dictionary_ms",
+        database_perf[DATABASE_PERF_STAT_REFRESH_DICTIONARY_NS],
+        iterations,
+        unit
+    );
+    emit_summary_ms_per_named_unit(
+        prefix,
+        "refresh_shared_snapshot_ms",
+        database_perf[DATABASE_PERF_STAT_REFRESH_SHARED_SNAPSHOT_NS],
+        iterations,
+        unit
+    );
+    emit_summary_ms_per_named_unit(
+        prefix,
+        "refresh_pin_snapshot_ms",
+        database_perf[DATABASE_PERF_STAT_REFRESH_PIN_SNAPSHOT_NS],
+        iterations,
+        unit
+    );
+    emit_summary_count_per_named_unit(
+        prefix,
+        "refresh_baseline_pin_calls",
+        database_perf[DATABASE_PERF_STAT_REFRESH_BASELINE_PIN_CALLS],
+        iterations,
+        unit
+    );
+    emit_summary_ms_per_named_unit(
+        prefix,
+        "refresh_baseline_pin_ms",
+        database_perf[DATABASE_PERF_STAT_REFRESH_BASELINE_PIN_NS],
+        iterations,
+        unit
+    );
+    emit_summary_count_per_named_unit(
+        prefix,
+        "refresh_advance_trx_horizon_calls",
+        database_perf[DATABASE_PERF_STAT_REFRESH_ADVANCE_TRX_HORIZON_CALLS],
+        iterations,
+        unit
+    );
+    emit_summary_ms_per_named_unit(
+        prefix,
+        "refresh_advance_trx_horizon_ms",
+        database_perf[DATABASE_PERF_STAT_REFRESH_ADVANCE_TRX_HORIZON_NS],
+        iterations,
+        unit
+    );
+    emit_summary_count_per_named_unit(
+        prefix,
+        "refresh_close_read_view_calls",
+        database_perf[DATABASE_PERF_STAT_REFRESH_CLOSE_READ_VIEW_CALLS],
+        iterations,
+        unit
+    );
+    emit_summary_ms_per_named_unit(
+        prefix,
+        "refresh_close_read_view_ms",
+        database_perf[DATABASE_PERF_STAT_REFRESH_CLOSE_READ_VIEW_NS],
+        iterations,
+        unit
+    );
+    emit_summary_count_per_named_unit(
+        prefix,
+        "refresh_native_flush_calls",
+        database_perf[DATABASE_PERF_STAT_REFRESH_NATIVE_FLUSH_CALLS],
+        iterations,
+        unit
+    );
+    emit_summary_ms_per_named_unit(
+        prefix,
+        "refresh_native_flush_ms",
+        database_perf[DATABASE_PERF_STAT_REFRESH_NATIVE_FLUSH_NS],
+        iterations,
+        unit
+    );
+    emit_summary_count_per_named_unit(
+        prefix,
+        "refresh_external_refresh_calls",
+        database_perf[DATABASE_PERF_STAT_REFRESH_EXTERNAL_REFRESH_CALLS],
+        iterations,
+        unit
+    );
+    emit_summary_ms_per_named_unit(
+        prefix,
+        "refresh_external_refresh_ms",
+        database_perf[DATABASE_PERF_STAT_REFRESH_EXTERNAL_REFRESH_NS],
+        iterations,
+        unit
+    );
+    emit_summary_count_per_named_unit(
+        prefix,
+        "refresh_handle_pin_calls",
+        database_perf[DATABASE_PERF_STAT_REFRESH_HANDLE_PIN_CALLS],
+        iterations,
+        unit
+    );
+    emit_summary_ms_per_named_unit(
+        prefix,
+        "refresh_handle_pin_ms",
+        database_perf[DATABASE_PERF_STAT_REFRESH_HANDLE_PIN_NS],
+        iterations,
+        unit
+    );
+    emit_summary_count_per_named_unit(
+        prefix,
+        "refresh_clean_page_refresh_calls",
+        database_perf[DATABASE_PERF_STAT_REFRESH_CLEAN_PAGE_REFRESH_CALLS],
+        iterations,
+        unit
+    );
+    emit_summary_ms_per_named_unit(
+        prefix,
+        "refresh_clean_page_refresh_ms",
+        database_perf[DATABASE_PERF_STAT_REFRESH_CLEAN_PAGE_REFRESH_NS],
+        iterations,
+        unit
+    );
+    emit_summary_count_per_named_unit(
+        prefix,
+        "refresh_visibility_push_calls",
+        database_perf[DATABASE_PERF_STAT_REFRESH_VISIBILITY_PUSH_CALLS],
+        iterations,
+        unit
+    );
+    emit_summary_ms_per_named_unit(
+        prefix,
+        "refresh_visibility_push_ms",
+        database_perf[DATABASE_PERF_STAT_REFRESH_VISIBILITY_PUSH_NS],
+        iterations,
+        unit
+    );
+    emit_summary_count_per_named_unit(
+        prefix,
+        "refresh_visibility_enable_calls",
+        database_perf[DATABASE_PERF_STAT_REFRESH_VISIBILITY_ENABLE_CALLS],
+        iterations,
+        unit
+    );
+    emit_summary_ms_per_named_unit(
+        prefix,
+        "refresh_visibility_enable_ms",
+        database_perf[DATABASE_PERF_STAT_REFRESH_VISIBILITY_ENABLE_NS],
+        iterations,
+        unit
+    );
+    emit_summary_count_per_named_unit(
+        prefix,
+        "refresh_local_native_current_read",
+        database_perf[DATABASE_PERF_STAT_REFRESH_LOCAL_NATIVE_CURRENT_READ],
+        iterations,
+        unit
+    );
+    emit_summary_count_per_named_unit(
+        prefix,
+        "refresh_page_version_reads_enabled",
+        database_perf[DATABASE_PERF_STAT_REFRESH_PAGE_VERSION_READS_ENABLED],
+        iterations,
+        unit
+    );
+}
+
 static void emit_ownerless_direct_select_summary(unsigned select_iterations) {
     uint64_t database_perf[DATABASE_PERF_STAT_COUNT] = {0};
     uint64_t exec_result_perf[EXEC_RESULT_PERF_STAT_COUNT] = {0};
@@ -2306,6 +2514,12 @@ static void emit_ownerless_direct_select_summary(unsigned select_iterations) {
         select_iterations
     );
     emit_ownerless_native_hook_summary(
+        "mylite_perf_summary_ownerless_direct_select1",
+        database_perf,
+        select_iterations,
+        "select"
+    );
+    emit_ownerless_refresh_summary(
         "mylite_perf_summary_ownerless_direct_select1",
         database_perf,
         select_iterations,
@@ -2384,6 +2598,12 @@ static void emit_ownerless_prepared_select_summary(unsigned select_iterations) {
         select_iterations,
         "select"
     );
+    emit_ownerless_refresh_summary(
+        "mylite_perf_summary_ownerless_prepared_select1",
+        database_perf,
+        select_iterations,
+        "select"
+    );
 }
 
 static void emit_ownerless_direct_point_select_summary(unsigned select_iterations) {
@@ -2434,6 +2654,12 @@ static void emit_ownerless_direct_point_select_summary(unsigned select_iteration
         select_iterations
     );
     emit_ownerless_native_hook_summary(
+        "mylite_perf_summary_ownerless_direct_point_select",
+        database_perf,
+        select_iterations,
+        "select"
+    );
+    emit_ownerless_refresh_summary(
         "mylite_perf_summary_ownerless_direct_point_select",
         database_perf,
         select_iterations,
@@ -2507,6 +2733,12 @@ static void emit_ownerless_prepared_point_select_summary(unsigned select_iterati
         select_iterations
     );
     emit_ownerless_native_hook_summary(
+        "mylite_perf_summary_ownerless_prepared_point_select",
+        database_perf,
+        select_iterations,
+        "select"
+    );
+    emit_ownerless_refresh_summary(
         "mylite_perf_summary_ownerless_prepared_point_select",
         database_perf,
         select_iterations,

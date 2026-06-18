@@ -884,6 +884,12 @@ The design must be fast in the common case:
   roughly one MDL acquire/release, one transaction snapshot, and one read-view
   register/deregister per point select, and about `0.008-0.011 ms/select` in
   those hook callback bodies.
+  A refresh attribution follow-up then split the ownerless statement-boundary
+  refresh stage itself. A reduced 100-select production sample reported
+  tableless reads doing no shared snapshot, pin, clean-page refresh, visibility,
+  or native flush work, while point selects used the local-native-current-read
+  path and spent nearly all refresh time in the shared
+  redo/process/transaction snapshot (`0.034-0.035 ms/select`).
 - Page-version lookup should be O(1) average by `(space_id, page_no)` with a
   short version chain filtered by reader end mark.
 - Ordinary exclusive opens must stay on the native MariaDB embedded hot path:
