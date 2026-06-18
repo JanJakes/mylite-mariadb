@@ -566,6 +566,18 @@ require_path() {
   fi
 }
 
+require_nonempty_file() {
+  local path="$1"
+  local phase_name="$2"
+  local description="$3"
+  require_path "${path}" "${phase_name}" "${description}"
+  if [ ! -s "${path}" ]; then
+    echo "Empty ${description}: ${path}" >&2
+    echo "Run MYLITE_WORDPRESS_PHASE=${phase_name} before MYLITE_WORDPRESS_PHASE=${MYLITE_WORDPRESS_PHASE}." >&2
+    exit 1
+  fi
+}
+
 require_executable() {
   local path="$1"
   local phase_name="$2"
@@ -653,11 +665,32 @@ require_build_php_artifacts() {
 
 require_phpunit_artifacts() {
   require_path "${MYLITE_WORDPRESS_DIR}/.git" fetch "WordPress checkout"
+  require_nonempty_file \
+    "${MYLITE_WORDPRESS_DIR}/src/wp-includes/js/wp-embed.js" \
+    fetch \
+    "WordPress generated embed script required by REST schema fixtures"
   require_executable \
     "${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}/vendor/bin/phpunit" \
     dependencies \
     "PHPUnit binary"
   require_path "${MYLITE_WORDPRESS_DIR}/vendor/autoload.php" dependencies "WordPress Composer install"
+}
+
+stage_wordpress_phpunit_source_artifacts() {
+  local embed_source
+  local embed_destination
+
+  embed_source="${MYLITE_WORDPRESS_DIR}/src/js/_enqueues/wp/embed.js"
+  embed_destination="${MYLITE_WORDPRESS_DIR}/src/wp-includes/js/wp-embed.js"
+  require_nonempty_file "${embed_source}" fetch "WordPress embed script source"
+  mkdir -p "$(dirname "${embed_destination}")"
+  if [ ! -s "${embed_destination}" ] ||
+     ! cmp -s "${embed_source}" "${embed_destination}"; then
+    install -m 0644 "${embed_source}" "${embed_destination}"
+    echo "wordpress_phpunit_source_asset_staged=${embed_destination}"
+  else
+    echo "wordpress_phpunit_source_asset_present=${embed_destination}"
+  fi
 }
 
 require_prepared_database() {
@@ -730,6 +763,7 @@ if [ ! -d "${MYLITE_WORDPRESS_DIR}/.git" ]; then
 fi
 git -C "${MYLITE_WORDPRESS_DIR}" fetch --depth 1 origin "${MYLITE_WORDPRESS_REF}"
 git -C "${MYLITE_WORDPRESS_DIR}" checkout --detach FETCH_HEAD
+stage_wordpress_phpunit_source_artifacts
 wordpress_sha="$(git -C "${MYLITE_WORDPRESS_DIR}" rev-parse HEAD)"
 wordpress_fetch_seconds="$(seconds_since "${fetch_start}")"
 echo "wordpress_sha=${wordpress_sha}"
@@ -803,6 +837,7 @@ if [ "${MYLITE_WORDPRESS_PHASE}" = "all" ] ||
    [ "${MYLITE_WORDPRESS_PHASE}" = "dependencies" ]; then
 phase "Install WordPress PHPUnit dependencies"
 deps_start="$(date +%s)"
+stage_wordpress_phpunit_source_artifacts
 wordpress_composer_install_start="$(date +%s)"
 composer --working-dir="${MYLITE_WORDPRESS_DIR}" install --no-interaction --no-progress --prefer-dist
 wordpress_composer_install_seconds="$(seconds_since "${wordpress_composer_install_start}")"

@@ -41,12 +41,20 @@ derive three visible timing filters from it:
 - Query/theme/block/token shard: positive lookahead for
   `Tests_Query|Test_Query|Tests_Canonical|Tests_Theme|Tests_WpTokenMap|Tests_Block|WP_Block|Tests_Blocks`,
   then the existing non-isolated exclusions.
-- Remaining shard: negative lookahead for both positive-prefix groups, then
-  the existing non-isolated exclusions.
+- Remaining shard: contains-style negative lookahead for both positive-prefix
+  groups, then the existing non-isolated exclusions.
 
 This keeps the split as a partition of the previous non-isolated step while
 preserving the dedicated `Tests_DB*` shard and the process-isolated class and
 method exclusions.
+
+The REST shard includes
+`WP_Test_REST_Schema_Initialization::test_build_wp_api_client_fixtures`, which
+dispatches oEmbed responses and reads WordPress' generated
+`src/wp-includes/js/wp-embed.js` asset. The MyLite PHP-only WordPress harness
+does not run the full npm/grunt source build, so the fetch/dependency phases
+stage that single asset from WordPress' own `src/js/_enqueues/wp/embed.js`
+source mapping before test-only phases run.
 
 ## Compatibility Impact
 
@@ -69,12 +77,39 @@ the Release/MinSizeRel guards, `MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL=1`,
 ## Test And Verification Plan
 
 - Run `bash -n tools/check-ci-production-builds`.
+- Run `bash -n tools/wordpress-phpunit-mysqli-mylite`.
 - Run `tools/check-ci-production-builds`.
+- Run a focused PHP PCRE sample for the REST, query/theme/block/token, and
+  remaining shard filters.
+- Run a focused `MYLITE_WORDPRESS_PHASE=fetch` check and confirm the
+  WordPress embed asset is staged for REST schema fixture generation.
 - Run `git diff --check`.
 - Run a focused YAML/script inspection to confirm the three filters derive
   from `MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER`.
 - Let CI report the first real shard timings, since the full non-isolated
   suite is too slow to duplicate locally for this workflow-only slice.
+
+## Verification Results
+
+Follow-up verification on 2026-06-18 after the first REST-shard CI run failed
+on a missing `src/wp-includes/js/wp-embed.js` asset:
+
+- `bash -n tools/wordpress-phpunit-mysqli-mylite` passed.
+- `bash -n tools/check-ci-production-builds` passed.
+- `tools/check-ci-production-builds` passed.
+- A focused PHP PCRE sample confirmed
+  `WP_Test_REST_Schema_Initialization::test_build_wp_api_client_fixtures`,
+  `Tests_REST*`, and contains-style `WP_REST` names match only the REST shard;
+  `Tests_Query*` and `Tests_Block*` names match only the query/theme/block/token
+  shard; ordinary names match only the remaining shard; and `Tests_DB` plus the
+  process-isolated exclusions match none of the non-isolated shards.
+- A focused `MYLITE_WORDPRESS_PHASE=fetch` run against WordPress ref
+  `6ddfc9d9b532c6e95c1266165149815895e2eb56` passed with
+  `MYLITE_WORDPRESS_SKIP_DOCKER_BUILD=1` and staged
+  `src/wp-includes/js/wp-embed.js`.
+- A local `cmp` confirmed the staged `src/wp-includes/js/wp-embed.js` matches
+  WordPress' `src/js/_enqueues/wp/embed.js` source file.
+- `git diff --check` passed.
 
 ## Risks And Follow-Up
 

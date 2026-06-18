@@ -190,6 +190,16 @@ The latest green pre-split run reported the single non-isolated step at
 show which broad class family owns that time before any parallel-matrix or
 query-path optimization is attempted.
 
+The first REST-shard CI run exposed a WordPress source-preparation issue rather
+than a MyLite SQL/runtime failure:
+`WP_Test_REST_Schema_Initialization::test_build_wp_api_client_fixtures`
+dispatches oEmbed responses that read `src/wp-includes/js/wp-embed.js`.
+WordPress' Grunt build copies that file from
+`src/js/_enqueues/wp/embed.js`, but the MyLite PHP-only timing harness does not
+run the full JavaScript build. The harness now stages that single asset during
+fetch/dependency phases and the `phpunit` phase treats a missing or empty asset
+as an explicit fetch-boundary error.
+
 ## Optimization Assessment
 
 The fresh ordinary WordPress and C API numbers remain in the documented trunk

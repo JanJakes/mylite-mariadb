@@ -388,7 +388,7 @@ jobs:
           set -euo pipefail
           tools/require-cmake-build-type MinSizeRel build/wordpress-mariadb-embedded
           tools/require-cmake-release-build build/wordpress-php-embedded-prod
-          non_isolated_filter="^(?!(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_BLOCK_TOKEN_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
+          non_isolated_filter="^(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_BLOCK_TOKEN_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
           tools/wordpress-phpunit-mysqli-mylite --filter "$non_isolated_filter"
 
       - name: Show WordPress timing summary
