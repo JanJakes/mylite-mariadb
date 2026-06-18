@@ -340,6 +340,12 @@ require_literal_count_at_least "MYLITE_WORDPRESS_PHASE: phpunit" 5
 require_literal_count_at_least 'MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"' 8
 
 require_literal "ownerless_sql_test=build/php-embedded-prod/packages/libmylite/mylite_ownerless_cross_process_sql_test"
+require_literal 'ownerless_sql_timing_summary="${GITHUB_STEP_SUMMARY:-}"'
+require_literal "ownerless_sql_case_count="
+require_literal "ownerless_sql_case_start index="
+require_literal "ownerless_sql_case_seconds index="
+require_literal "status=\${case_status} seconds=\${case_seconds}"
+require_literal "Embedded ownerless SQL case timings"
 require_literal "build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe"
 require_step_order "Run embedded performance probe" "Run embedded non-ownerless tests"
 require_step_order "Run embedded ownerless attribution probe" "Run embedded non-ownerless tests"

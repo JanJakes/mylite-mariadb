@@ -145,9 +145,36 @@ jobs:
           tools/require-cmake-release-build build/php-embedded-prod
           ownerless_sql_test=build/php-embedded-prod/packages/libmylite/mylite_ownerless_cross_process_sql_test
           ownerless_sql_case_count="$("$ownerless_sql_test" sql-case-count)"
+          ownerless_sql_timing_summary="${GITHUB_STEP_SUMMARY:-}"
+          echo "ownerless_sql_case_count=${ownerless_sql_case_count}"
+          if [ -n "${ownerless_sql_timing_summary}" ]; then
+            {
+              printf '\n### Embedded ownerless SQL case timings\n\n'
+              printf '| Case | Status | Seconds |\n'
+              printf '| --- | --- | --- |\n'
+            } >> "${ownerless_sql_timing_summary}"
+          fi
           for case_index in $(seq 0 "$((ownerless_sql_case_count - 1))"); do
+            case_start="$(date +%s)"
+            echo "ownerless_sql_case_start index=${case_index}"
             rm -rf /tmp/mylite-ownerless-sql.*
-            "$ownerless_sql_test" sql-case "$case_index"
+            if "$ownerless_sql_test" sql-case "$case_index"; then
+              case_status=0
+            else
+              case_status="$?"
+            fi
+            case_end="$(date +%s)"
+            case_seconds="$((case_end - case_start))"
+            echo "ownerless_sql_case_seconds index=${case_index} status=${case_status} seconds=${case_seconds}"
+            if [ -n "${ownerless_sql_timing_summary}" ]; then
+              printf '| %s | %s | %s |\n' \
+                "${case_index}" \
+                "${case_status}" \
+                "${case_seconds}" >> "${ownerless_sql_timing_summary}"
+            fi
+            if [ "${case_status}" -ne 0 ]; then
+              exit "${case_status}"
+            fi
           done
 
   wordpress-phpunit:

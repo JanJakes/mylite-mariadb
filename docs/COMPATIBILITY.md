@@ -162,6 +162,10 @@ Those phases append compact timing rows into
 `build/wordpress-phpunit-reports/timing-summary.md`, and CI publishes that
 Markdown table to the GitHub step summary so setup, build, probe, and each
 PHPUnit shard can be compared without scraping separate step logs.
+The embedded ownerless SQL CI step also records the direct `sql-case` count,
+prints per-case start and status/seconds markers, and appends a case-index
+timing table to the GitHub step summary. Failed cases still fail the step after
+their duration is recorded.
 The embedded performance and attribution probes run before embedded correctness
 tests, so production throughput and attribution numbers remain visible even
 when a later ownerless SQL case fails.

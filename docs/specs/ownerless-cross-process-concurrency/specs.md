@@ -4953,7 +4953,12 @@ subsystems that this mode needs:
   production-like; explicitly profiled diagnostic runs still copy selected
   `mylite_mysqli_profile_*` profile totals from captured PHPUnit output, using
   the last profile summary when bootstrap emits an earlier process-local
-  profile. A fresh guarded
+  profile. The embedded ownerless SQL CI step now also prints the direct
+  `sql-case` count, emits per-case start and status/seconds log markers, and
+  appends a case-index timing table to the GitHub step summary while preserving
+  the failing case's exit status. This keeps long ownerless correctness
+  coverage tied to case-level performance evidence rather than a single opaque
+  step duration. A fresh guarded
   sample on 2026-06-10 reported ordinary embedded warm open/close at
   `361.594 ms`, with `mysql_server_init()` at `125.794 ms` and
   `mysql_server_end()` at `228.758 ms`, while active-runtime reconnect stayed
