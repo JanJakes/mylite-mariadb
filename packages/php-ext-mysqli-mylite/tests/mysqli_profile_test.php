@@ -32,11 +32,13 @@ $db = new MyLite\MySQLi($path);
 expect_true($db->query('CREATE DATABASE app') === true, 'CREATE DATABASE failed');
 expect_true($db->query('USE app') === true, 'USE failed');
 expect_true($db->query('SET autocommit = 0') === true, 'SET autocommit off failed');
+expect_true($db->query('SET autocommit = 0') === true, 'SET autocommit off no-op failed');
 expect_true($db->query('START TRANSACTION') === true, 'START TRANSACTION failed');
 expect_true($db->query('SAVEPOINT profile_probe') === true, 'SAVEPOINT failed');
 expect_true($db->query('RELEASE SAVEPOINT profile_probe') === true, 'RELEASE SAVEPOINT failed');
 expect_true($db->query('ROLLBACK') === true, 'ROLLBACK failed');
 expect_true($db->query('SET autocommit = 1') === true, 'SET autocommit on failed');
+expect_true($db->query('SET autocommit = 1') === true, 'SET autocommit on no-op failed');
 expect_true(
     $db->query(
         'CREATE TABLE profile_notes (id INT PRIMARY KEY, body VARCHAR(32)) ENGINE=MyISAM'

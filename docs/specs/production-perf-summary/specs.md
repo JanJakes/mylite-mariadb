@@ -244,6 +244,19 @@ with `120.397 ms` in `mysql_stmt_reset()`. The post-change sample reported
 500 ownerless autocommit resets taking `0.064 ms` total with `0.000 ms` in
 `mysql_stmt_reset()`.
 
+The autocommit no-op fast path keeps the existing exact native-control
+classifier but skips non-ownerless `SET autocommit = 0|1` only when
+`MYSQL::server_status` already reports the requested state. The PHP mysqli
+profile and WordPress timing-summary extraction now expose
+`libmylite_exec_result_native_control_autocommit_noops`. A focused production
+WordPress `^Tests_DB` sample passed 651 tests with 3 skips and reported
+`libmylite_exec_result_native_control_calls=1310`,
+`libmylite_exec_result_native_control_autocommit_noops=644`,
+`libmylite_exec_result_native_control_ms_total=742.014`,
+`query_ms_total=5207.110`, and `wordpress_phpunit_reported_seconds=7.798`.
+The previous native-control fast-path sample had the same 1310 native-control
+call volume with `libmylite_exec_result_native_control_ms_total=1404.955`.
+
 The embedded job keeps the default stats-off performance probe as the
 throughput signal and runs a second reduced
 `MYLITE_PERF_OWNERLESS_PAGE_PUBLISH_STATS=1` attribution probe so CI logs also

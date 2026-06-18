@@ -198,6 +198,10 @@ git diff --check
 
 ## Risks And Follow-Up
 
+- The `libmylite-autocommit-noop-fast-path` follow-up now skips exact
+  repeated `SET autocommit = 0|1` no-ops when the embedded handle already
+  reports the requested state, while preserving MariaDB execution for
+  changed-state statements.
 - The fast path intentionally does not cover `START TRANSACTION`, `BEGIN`,
   `COMMIT AND CHAIN`, `ROLLBACK TO SAVEPOINT`, extended transaction-start
   forms, or general `SET` expressions.

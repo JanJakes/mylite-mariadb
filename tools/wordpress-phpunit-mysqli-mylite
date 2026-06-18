@@ -2842,6 +2842,7 @@ PHP_KEEPALIVE
     mylite_mysqli_profile_libmylite_exec_result_native_control_calls
     mylite_mysqli_profile_libmylite_exec_result_native_control_ms_total
     mylite_mysqli_profile_libmylite_exec_result_native_control_errors
+    mylite_mysqli_profile_libmylite_exec_result_native_control_autocommit_noops
     mylite_mysqli_profile_query_result_rows
     mylite_mysqli_profile_fetch_object_calls
     mylite_mysqli_profile_fetch_object_ms_total
@@ -2900,6 +2901,7 @@ PHP_KEEPALIVE
         profile_keys = profile_keys " libmylite_exec_result_native_control_calls";
         profile_keys = profile_keys " libmylite_exec_result_native_control_ms_total";
         profile_keys = profile_keys " libmylite_exec_result_native_control_errors";
+        profile_keys = profile_keys " libmylite_exec_result_native_control_autocommit_noops";
         profile_keys = profile_keys " query_result_rows fetch_object_calls";
         profile_keys = profile_keys " fetch_object_ms_total";
         key_count = split(profile_keys, keys, " ");

@@ -384,6 +384,7 @@ enum ExecResultPerfStatIndex : std::size_t {
     EXEC_RESULT_PERF_NATIVE_CONTROL_CALLS,
     EXEC_RESULT_PERF_NATIVE_CONTROL_NS,
     EXEC_RESULT_PERF_NATIVE_CONTROL_ERRORS,
+    EXEC_RESULT_PERF_NATIVE_CONTROL_AUTOCOMMIT_NOOPS,
     EXEC_RESULT_PERF_STAT_COUNT
 };
 
@@ -2588,6 +2589,7 @@ bool sql_tokens_have_only_optional_trailing_semicolon(
     std::size_t required_count
 );
 int execute_native_control_statement(mylite_db &db, NativeControlStatement statement);
+bool native_control_autocommit_is_noop(const mylite_db &db, NativeControlStatement statement);
 void rollback_active_transaction_after_deadlock(mylite_db &db);
 void rollback_failed_ownerless_implicit_statement(
     mylite_db &db,
@@ -4576,7 +4578,11 @@ int exec_result_impl(
         std::uint64_t stage_start_ns = exec_result_perf_start_ns();
         if (native_control_statement != NativeControlStatement::None) {
             exec_result_perf_add(EXEC_RESULT_PERF_NATIVE_CONTROL_CALLS, 1U);
-            if (execute_native_control_statement(*db, native_control_statement) != MYLITE_OK) {
+            if (native_control_autocommit_is_noop(*db, native_control_statement)) {
+                exec_result_perf_add(EXEC_RESULT_PERF_NATIVE_CONTROL_AUTOCOMMIT_NOOPS, 1U);
+            } else if (
+                execute_native_control_statement(*db, native_control_statement) != MYLITE_OK
+            ) {
                 exec_result_perf_add_elapsed(EXEC_RESULT_PERF_NATIVE_CONTROL_NS, stage_start_ns);
                 exec_result_perf_add(EXEC_RESULT_PERF_NATIVE_CONTROL_ERRORS, 1U);
                 set_mariadb_error(*db);
@@ -7405,6 +7411,21 @@ int execute_native_control_statement(mylite_db &db, NativeControlStatement state
         break;
     }
     return MYLITE_MISUSE;
+}
+
+bool native_control_autocommit_is_noop(const mylite_db &db, NativeControlStatement statement) {
+    const bool server_autocommit = (db.mysql.server_status & SERVER_STATUS_AUTOCOMMIT) != 0U;
+    switch (statement) {
+    case NativeControlStatement::AutocommitOff:
+        return !server_autocommit;
+    case NativeControlStatement::AutocommitOn:
+        return server_autocommit;
+    case NativeControlStatement::Commit:
+    case NativeControlStatement::Rollback:
+    case NativeControlStatement::None:
+        break;
+    }
+    return false;
 }
 
 void rollback_active_transaction_after_deadlock(mylite_db &db) {

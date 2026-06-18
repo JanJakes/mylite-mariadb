@@ -527,6 +527,18 @@ reported `query_transaction_start_calls=651`,
 `wordpress_phpunit_reported_seconds=8.195`, showing the remaining transaction
 cost is split nearly evenly between transaction start and transaction end in
 that workload.
+The autocommit no-op fast-path follow-up now skips exact repeated
+`SET autocommit = 0|1` statements in non-ownerless direct execution when
+`MYSQL::server_status` already reports the requested autocommit state, while
+changed-state forms still call MariaDB's `mysql_autocommit()` wrapper and
+ownerless execution stays on the existing SQL/locking path. Profiled mysqli
+and WordPress timing summaries now include
+`libmylite_exec_result_native_control_autocommit_noops`. A focused production
+WordPress `^Tests_DB` run passed 651 tests with 3 skips and reported
+`libmylite_exec_result_native_control_calls=1310`,
+`libmylite_exec_result_native_control_autocommit_noops=644`,
+`libmylite_exec_result_native_control_ms_total=742.014`,
+`query_ms_total=5207.110`, and `wordpress_phpunit_reported_seconds=7.798`.
 The stats-enabled embedded performance probe now also reports ownerless
 prepared-DML native `mysql_stmt_prepare()` and `mysql_stmt_close()` call counts
 and elapsed time, plus per-insert summaries, so the remaining prepared-write

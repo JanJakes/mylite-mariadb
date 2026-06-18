@@ -39,6 +39,7 @@ enum exec_result_perf_stat_index {
     EXEC_RESULT_PERF_NATIVE_CONTROL_CALLS,
     EXEC_RESULT_PERF_NATIVE_CONTROL_NS,
     EXEC_RESULT_PERF_NATIVE_CONTROL_ERRORS,
+    EXEC_RESULT_PERF_NATIVE_CONTROL_AUTOCOMMIT_NOOPS,
     EXEC_RESULT_PERF_STAT_COUNT
 };
 
@@ -329,6 +330,7 @@ static void test_native_control_fast_path(void) {
     exec_ok(db, "CREATE DATABASE app");
     exec_ok(db, "CREATE TABLE app.native_control_probe (id INT PRIMARY KEY) ENGINE=InnoDB");
     exec_ok(db, "SET autocommit = 0");
+    exec_ok(db, "SET autocommit = 0");
     assert(mylite_changes(db) == 0);
     exec_ok(db, "START TRANSACTION");
     exec_ok(db, "INSERT INTO app.native_control_probe VALUES (1)");
@@ -350,9 +352,11 @@ static void test_native_control_fast_path(void) {
     expect_scalar(db, "SELECT COUNT(*) FROM app.native_control_probe", "1");
 
     exec_ok(db, "SET autocommit = 1;");
+    exec_ok(db, "SET autocommit = 1;");
     assert(mylite_changes(db) == 0);
 
     exec_ok(db, "SET autocommit = 0");
+    exec_ok(db, "SET autocommit = 0;");
     exec_ok(db, "INSERT INTO app.native_control_probe VALUES (2)");
     exec_ok(db, "SET autocommit = 1;");
     exec_ok(db, "ROLLBACK");
@@ -360,9 +364,10 @@ static void test_native_control_fast_path(void) {
 
     mylite_exec_result_perf_set_enabled(0);
     mylite_exec_result_perf_read(perf, EXEC_RESULT_PERF_STAT_COUNT);
-    assert(perf[EXEC_RESULT_PERF_NATIVE_CONTROL_CALLS] == 7U);
+    assert(perf[EXEC_RESULT_PERF_NATIVE_CONTROL_CALLS] == 10U);
     assert(perf[EXEC_RESULT_PERF_NATIVE_CONTROL_NS] > 0U);
     assert(perf[EXEC_RESULT_PERF_NATIVE_CONTROL_ERRORS] == 0U);
+    assert(perf[EXEC_RESULT_PERF_NATIVE_CONTROL_AUTOCOMMIT_NOOPS] == 3U);
 
     assert(mylite_close(db) == MYLITE_OK);
     free(database_path);
