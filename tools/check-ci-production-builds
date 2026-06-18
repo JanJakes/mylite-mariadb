@@ -295,10 +295,12 @@ require_literal 'MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE: "0"'
 require_literal 'MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN: "0"'
 require_literal 'MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL: "0"'
 require_literal "MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_FILTER:"
+require_literal "MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_SKIP_INSTALL_FILTER:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_EAGER_RECONNECT_FILTER:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER: '^(?!Tests_DB)"
-require_literal "Tests_Admin_ExportWp|Tests_oEmbed_HTTP_Headers"
+require_literal "MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_FILTER: '^Tests_Admin_ExportWp"
+require_literal "MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_SKIP_INSTALL_FILTER: '^Tests_oEmbed_HTTP_Headers"
 require_literal "Tests_Filesystem_WpFilesystemDirect_Chmod::test_should_handle_set_mode_when_not_passed"
 require_literal "Tests_Admin_WpUpgrader::test_maintenance_mode_should_create_maintenance_file_with_boolean"
 require_literal "Tests_Formatting_Emoji::test_print_emoji_detection_script_on_front_end_after_footer_scripts_printed"
@@ -310,7 +312,8 @@ require_literal "Install WordPress PHPUnit dependencies"
 require_literal "Prepare WordPress PHPUnit database"
 require_literal "Run WordPress mysqli performance probe"
 require_literal "Run WordPress PHPUnit database suite (test only)"
-require_literal "Run WordPress PHPUnit process-isolated deferred-reconnect suite (test only)"
+require_literal "Run WordPress PHPUnit process-isolated deferred-reconnect install-required suite (test only)"
+require_literal "Run WordPress PHPUnit process-isolated deferred-reconnect skip-install suite (test only)"
 require_literal "Run WordPress PHPUnit process-isolated eager-reconnect suite (test only)"
 require_literal "Run WordPress PHPUnit non-isolated remaining suite (test only)"
 require_literal "Show WordPress timing summary"
@@ -327,11 +330,12 @@ require_literal "MYLITE_WORDPRESS_TIMING_LABEL: dependencies"
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: prepare-db"
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: perf-probe"
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-db"
-require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-deferred-reconnect"
+require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-deferred-reconnect-install-required"
+require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-deferred-reconnect-skip-install"
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-eager-reconnect"
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-non-isolated"
 require_literal 'cat "${summary}" >> "${GITHUB_STEP_SUMMARY}"'
-require_literal_count_at_least "MYLITE_WORDPRESS_PHASE: phpunit" 4
+require_literal_count_at_least "MYLITE_WORDPRESS_PHASE: phpunit" 5
 require_literal_count_at_least 'MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"' 8
 
 require_literal "ownerless_sql_test=build/php-embedded-prod/packages/libmylite/mylite_ownerless_cross_process_sql_test"
@@ -357,18 +361,32 @@ require_wordpress_timing_step_guards "Prepare WordPress PHPUnit database"
 require_wordpress_timing_step_guards "Run WordPress mysqli performance probe"
 require_wordpress_timing_step_guards "Run WordPress PHPUnit database suite (test only)"
 require_wordpress_timing_step_guards \
-  "Run WordPress PHPUnit process-isolated deferred-reconnect suite (test only)"
+  "Run WordPress PHPUnit process-isolated deferred-reconnect install-required suite (test only)"
+require_wordpress_timing_step_guards \
+  "Run WordPress PHPUnit process-isolated deferred-reconnect skip-install suite (test only)"
 require_wordpress_timing_step_guards \
   "Run WordPress PHPUnit process-isolated eager-reconnect suite (test only)"
 require_wordpress_timing_step_guards "Run WordPress PHPUnit non-isolated remaining suite (test only)"
 forbid_step_literal \
-  "Run WordPress PHPUnit process-isolated deferred-reconnect suite (test only)" \
+  "Run WordPress PHPUnit process-isolated deferred-reconnect install-required suite (test only)" \
+  'MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES: "1"'
+forbid_step_literal \
+  "Run WordPress PHPUnit process-isolated deferred-reconnect skip-install suite (test only)" \
   'MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES: "1"'
 forbid_step_literal \
   "Run WordPress PHPUnit process-isolated eager-reconnect suite (test only)" \
   'MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES: "1"'
 forbid_step_literal \
-  "Run WordPress PHPUnit process-isolated deferred-reconnect suite (test only)" \
+  "Run WordPress PHPUnit process-isolated deferred-reconnect install-required suite (test only)" \
+  'MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL: "1"'
+require_step_literal \
+  "Run WordPress PHPUnit process-isolated deferred-reconnect install-required suite (test only)" \
+  'MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD: "0"'
+require_step_literal \
+  "Run WordPress PHPUnit process-isolated deferred-reconnect skip-install suite (test only)" \
+  'MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD: "0"'
+require_step_literal \
+  "Run WordPress PHPUnit process-isolated deferred-reconnect skip-install suite (test only)" \
   'MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL: "1"'
 require_step_literal \
   "Run WordPress PHPUnit process-isolated eager-reconnect suite (test only)" \

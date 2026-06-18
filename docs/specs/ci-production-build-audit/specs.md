@@ -72,6 +72,10 @@ Add `tools/check-ci-production-builds`, a small static workflow audit that:
 - rejects the stale broad isolated-class filter and requires exact
   method-level process-isolated WordPress PHPUnit shard markers, so mixed
   classes do not inflate process-isolated timings with ordinary tests;
+- requires the deferred-reconnect process-isolated shard to stay split between
+  install-required tests and child-install-skip-safe tests, with
+  `MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL=1` confined to the skip-safe
+  deferred and eager process-isolated steps;
 - requires the embedded ownerless SQL and embedded performance probes to run
   from `build/php-embedded-prod`.
 
@@ -204,6 +208,26 @@ the critical WordPress PHPUnit timing steps:
   `wordpress_phpunit_reported_seconds=9.373`.
 - `git diff --check`: passed.
 
+Follow-up verification after splitting the deferred-reconnect process-isolated
+shard into install-required and child-install-skip-safe steps:
+
+- `bash -n tools/check-ci-production-builds
+  tools/wordpress-phpunit-mysqli-mylite`: passed.
+- `tools/check-ci-production-builds`: passed and reported
+  `ci_production_build_audit_ok`.
+- `ctest --preset prod -R '^tools\.ci-production-builds$'
+  --output-on-failure`: passed, 1/1 tests.
+- The pinned CI WordPress ref
+  `6ddfc9d9b532c6e95c1266165149815895e2eb56` was fetched, and
+  `MYLITE_WORDPRESS_PHASE=prepare-db` refreshed the external MyLite test
+  database.
+- The install-required deferred shard passed with child install skip disabled:
+  13 tests, 37 assertions, `wordpress_phpunit_reported_seconds=97.503`.
+- The child-install-skip-safe deferred shard passed with child install skip
+  enabled: 18 tests, 44 assertions, 5 upstream PHPUnit warnings, 1 skipped,
+  `wordpress_phpunit_reported_seconds=42.089`.
+- `cmake --build --preset format-check-prod` and `git diff --check`: passed.
+
 ## Acceptance Criteria
 
 - CI has a visible production-build audit step after checkout in the normal
@@ -219,6 +243,9 @@ the critical WordPress PHPUnit timing steps:
   inherited PHPUnit config logger on the critical CI timing path.
 - The audit fails if the process-isolated WordPress PHPUnit timing steps enable
   child-process profiling on the critical CI timing path.
+- The audit fails if the deferred-reconnect install-required shard enables
+  child install skip, or if the deferred-reconnect skip-safe shard loses child
+  install skip.
 - The audit fails if a workflow CTest command reintroduces parallel MariaDB
   embedded runtime execution.
 - The audit fails if the WordPress job stops excluding the full `Tests_DB*`

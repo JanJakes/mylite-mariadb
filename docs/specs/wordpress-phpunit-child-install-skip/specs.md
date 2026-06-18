@@ -113,6 +113,9 @@ shell/PHP harness patching and CI/audit configuration.
 - Run the CI deferred-reconnect process-isolated filter with child install skip
   as a negative rollout check.
 - Run the CI eager-reconnect process-isolated filter with child install skip.
+- Split the deferred-reconnect process-isolated filter into install-required
+  and child-install-skip-safe subsets, then run both subsets with their CI
+  settings.
 - Run `tools/check-ci-production-builds`.
 - Run `ctest --preset prod -R '^tools\.ci-production-builds$'
   --output-on-failure`.
@@ -205,6 +208,27 @@ wordpress_phpunit_reported_seconds=56.294
 wordpress_phpunit_shell_real_seconds=70.917
 ```
 
+A follow-up split keeps the deferred-reconnect tests that failed with child
+install skip in the install-required shard and moves the remaining deferred
+tests to a child-install-skip-safe shard:
+
+```text
+MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD=0 \
+MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL=0 \
+tools/wordpress-phpunit-mysqli-mylite \
+  --filter '^Tests_Admin_ExportWp(::|$)|Tests_Sitemaps_Sitemaps::test_disable_sitemap_should_return_404|Tests_Sitemaps_Sitemaps::test_empty_url_list_should_return_404'
+
+MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD=0 \
+MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL=1 \
+tools/wordpress-phpunit-mysqli-mylite \
+  --filter '^Tests_oEmbed_HTTP_Headers(::|$)|Tests_Filesystem_WpFilesystemDirect_Chmod::test_should_handle_set_mode_when_not_passed|Tests_Functions_WpUniquePrefixedId::test_should_create_unique_prefixed_ids|Tests_Functions_WpUniquePrefixedId::test_should_raise_notice_and_use_empty_string_prefix_when_nonstring_given|Tests_Functions_WpUniquePrefixedId::test_same_prefixes_should_generate_unique_ids'
+```
+
+The install-required subset passed with 13 tests and
+`wordpress_phpunit_reported_seconds=97.503`. The skip-safe subset passed with
+18 tests, 5 upstream PHPUnit warnings, 1 skipped test, and
+`wordpress_phpunit_reported_seconds=42.089`.
+
 The production CI guard and format checks passed:
 
 ```text
@@ -226,8 +250,8 @@ git diff --check
   bootstrap.
 - The explicit CI eager process-isolated filter passes with child install
   skipped.
-- CI audit prevents accidental rollout to deferred, database, or non-isolated
-  PHPUnit steps.
+- CI audit confines child install skip to the verified eager-reconnect step and
+  the verified deferred-reconnect skip-safe shard.
 - Timing summary still reports production build and PHPUnit phase metrics.
 
 ## Risks And Follow-Up
