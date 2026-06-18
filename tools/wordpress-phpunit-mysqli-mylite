@@ -694,6 +694,7 @@ require_phpunit_artifacts() {
 stage_wordpress_phpunit_source_artifacts() {
   local embed_source
   local embed_destination
+  local connector_settings_test
 
   embed_source="${MYLITE_WORDPRESS_DIR}/src/js/_enqueues/wp/embed.js"
   embed_destination="${MYLITE_WORDPRESS_DIR}/src/wp-includes/js/wp-embed.js"
@@ -706,6 +707,33 @@ stage_wordpress_phpunit_source_artifacts() {
   else
     echo "wordpress_phpunit_source_asset_present=${embed_destination}"
   fi
+
+  connector_settings_test="${MYLITE_WORDPRESS_DIR}/tests/phpunit/tests/connectors/wpRegisterDefaultConnectorSettings.php"
+  require_nonempty_file \
+    "${connector_settings_test}" \
+    fetch \
+    "WordPress connector registered settings test"
+  WORDPRESS_CONNECTOR_SETTINGS_TEST="${connector_settings_test}" /usr/local/bin/php <<'PHP'
+<?php
+$file = getenv('WORDPRESS_CONNECTOR_SETTINGS_TEST');
+$source = file_get_contents($file);
+$marker = 'MYLITE_WORDPRESS_REGISTERED_SETTINGS_SNAPSHOT';
+if (str_contains($source, $marker)) {
+    echo "wordpress_phpunit_connector_settings_patch=present\n";
+    exit(0);
+}
+$needle = "\t\t\$this->original_registered_settings = \$wp_registered_settings;\n";
+$replacement =
+    "\t\t// {$marker}\n" .
+    "\t\t\$this->original_registered_settings = get_registered_settings();\n";
+$patched = str_replace($needle, $replacement, $source, $count);
+if ($count !== 1) {
+    fwrite(STDERR, "Could not patch WordPress connector registered settings snapshot\n");
+    exit(1);
+}
+file_put_contents($file, $patched);
+echo "wordpress_phpunit_connector_settings_patch=applied\n";
+PHP
 }
 
 require_prepared_database() {
