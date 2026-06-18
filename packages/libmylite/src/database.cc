@@ -2674,6 +2674,7 @@ bool ownerless_transaction_commit_allows_visible_fast_path(
 );
 OwnerlessStatementFastPathPolicy ownerless_statement_fast_path_policy(
     mylite_db &db,
+    std::string_view sql,
     const SqlPolicyTokens &tokens
 );
 bool ownerless_statement_deferred_latest_checkpoint_coalescing_allowed(
@@ -3369,7 +3370,11 @@ int mylite_step(mylite_stmt *stmt) {
             stmt->db->ownerless_peer_dictionary_refresh_requires_conservative_write
         );
         const OwnerlessStatementFastPathPolicy fast_path_policy =
-            ownerless_statement_fast_path_policy(*stmt->db, policy_tokens);
+            ownerless_statement_fast_path_policy(
+                *stmt->db,
+                ownerless_prepared_text_sql,
+                policy_tokens
+            );
         update_ownerless_explicit_transaction_visible_fast_proof_before_sql(
             *stmt->db,
             policy_tokens,
@@ -4753,7 +4758,7 @@ int exec_result_impl(
         dictionary_ddl_started || db->ownerless_peer_dictionary_refresh_requires_conservative_write
     );
     const OwnerlessStatementFastPathPolicy fast_path_policy =
-        ownerless_statement_fast_path_policy(*db, policy_tokens);
+        ownerless_statement_fast_path_policy(*db, sql, policy_tokens);
     update_ownerless_explicit_transaction_visible_fast_proof_before_sql(
         *db,
         policy_tokens,
@@ -5344,22 +5349,21 @@ bool sql_contains_identifier_token(std::string_view sql, const char *keyword) {
     return false;
 }
 
-bool ownerless_insert_values_statement_row_count(
-    const SqlPolicyTokens &tokens,
-    std::size_t *out_row_count
-) {
-    if (!token_equals(identifier_token_at(tokens, 0), "INSERT")) {
-        return false;
-    }
+bool ownerless_insert_values_statement_row_count(std::string_view sql, std::size_t *out_row_count) {
     if (out_row_count == nullptr) {
         return false;
     }
     *out_row_count = 0U;
 
+    std::size_t offset = 0;
+    std::string_view token;
+    if (!next_sql_token(sql, offset, token) || !identifier_token_equals(token, "INSERT")) {
+        return false;
+    }
+
     int paren_depth = 0;
-    std::size_t values_index = tokens.count;
-    for (std::size_t index = 1U; index < tokens.count; ++index) {
-        const std::string_view token = tokens.values[index];
+    bool found_values = false;
+    while (next_sql_token(sql, offset, token)) {
         if (token_equals(token, "(")) {
             ++paren_depth;
             continue;
@@ -5372,19 +5376,18 @@ bool ownerless_insert_values_statement_row_count(
         }
         if (paren_depth == 0 &&
             (identifier_token_equals(token, "VALUE") || identifier_token_equals(token, "VALUES"))) {
-            values_index = index;
+            found_values = true;
             break;
         }
     }
-    if (values_index == tokens.count) {
+    if (!found_values) {
         return false;
     }
 
     bool saw_row = false;
     bool expect_row = true;
     paren_depth = 0;
-    for (std::size_t index = values_index + 1U; index < tokens.count; ++index) {
-        const std::string_view token = tokens.values[index];
+    while (next_sql_token(sql, offset, token)) {
         if (expect_row) {
             if (token_equals(token, "(")) {
                 saw_row = true;
@@ -5431,7 +5434,7 @@ bool ownerless_insert_values_statement_row_count(
     return true;
 }
 
-constexpr std::size_t k_ownerless_append_batch_fast_path_max_insert_values_rows = 64U;
+constexpr std::size_t k_ownerless_append_batch_fast_path_max_insert_values_rows = 256U;
 
 bool ownerless_transaction_commit_allows_visible_fast_path(
     const mylite_db &db,
@@ -5447,6 +5450,7 @@ bool ownerless_transaction_commit_allows_visible_fast_path(
 
 OwnerlessStatementFastPathPolicy ownerless_statement_fast_path_policy(
     mylite_db &db,
+    std::string_view sql,
     const SqlPolicyTokens &tokens
 ) {
     OwnerlessStatementFastPathPolicy policy = {};
@@ -5455,7 +5459,7 @@ OwnerlessStatementFastPathPolicy ownerless_statement_fast_path_policy(
     }
 
     std::size_t row_count = 0U;
-    if (ownerless_insert_values_statement_row_count(tokens, &row_count) && row_count != 0U) {
+    if (ownerless_insert_values_statement_row_count(sql, &row_count) && row_count != 0U) {
         if (ownerless_insert_statement_has_target_column_list(tokens)) {
             bool single_owner_epoch = false;
             {

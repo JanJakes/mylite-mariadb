@@ -5788,8 +5788,16 @@ subsystems that this mode needs:
   kept the same `669` page-log appends but reduced append-session begin/end
   calls to `10`, enabled `1280` deferred latest-checkpoint coalesces, and moved
   ownerless 64-row bulk throughput from `9856.67` to `11755.40` rows/s on the
-  same local shape. Larger row lists, broad DML/DDL, and unbounded append-lock
-  hold times remain out of scope.
+  same local shape. The streamed row-count follow-up then replaces the fixed
+  policy-token row counter with a full SQL-text scan so larger row lists cannot
+  be append-batched through token-window undercounting; 128-row and 256-row
+  production probes at the previous head had already shown `10` append-session
+  begin/end calls for `10` statements, visible-fast commit at `1.000` per
+  statement, and deferred latest-checkpoint coalescing at `256.000` and
+  `512.000` per statement, so the explicit cap moves to 256 with focused
+  coverage for the 256-row positive boundary and the 257-row conservative
+  boundary. Larger row lists, broad DML/DDL, and unbounded append-lock hold
+  times remain out of scope.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.
