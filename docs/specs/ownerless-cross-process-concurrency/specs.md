@@ -4166,7 +4166,13 @@ Tasks:
    FK graph whole-seed retry budget of `10` so seed `354` can recover on
    attempt `4`, seeds `357` and `365` can recover on attempt `3`, and seeds
    `358`, `362`, `363`, `368`, `369`, `371`, `375`, and `379` can recover on
-   attempt `2` after transient raw MariaDB `1213` deadlock exits.
+   attempt `2` after transient raw MariaDB `1213` deadlock exits. The
+   `ownerless-external-seed-384-415-replay` follow-up records the next replay
+   window for seeds `384` through `415` at rounds `2`, using the same explicit
+   FK graph whole-seed retry budget of `10` so seed `403` can recover on
+   attempt `3`, seed `405` can recover on attempt `2`, seed `406` can recover on
+   attempt `5`, seed `408` can recover on attempt `3`, and seed `413` can
+   recover on attempt `2` after transient raw MariaDB `1213` deadlock exits.
    Separate foreign-key graph stress
    coverage runs with
    `MYLITE_OWNERLESS_FK_GRAPH_STRESS_ROUNDS=48`, concurrent ownerless workers
