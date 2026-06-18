@@ -27,6 +27,13 @@ error.
 - `mariadb/sql/sql_reload.cc` implements `FLUSH TABLES ... WITH READ LOCK` and
   `FLUSH TABLES ... FOR EXPORT` with global read-lock, locked-table, and
   export/quiesce behavior.
+- `mariadb/sql/sql_yacc.yy:8927-8956` parses `SELECT ... INTO` and CTE
+  `WITH ... SELECT ... INTO` query forms; `mariadb/sql/sql_yacc.yy:13378-13397`
+  routes `INTO OUTFILE` and `INTO DUMPFILE` into file-export result sinks.
+- `mariadb/sql/sql_class.cc:3899-3916` contains MyLite's embedded archive
+  `select_export::prepare()` and `select_dump::prepare()` stubs that reject
+  `SELECT INTO OUTFILE` and `SELECT INTO DUMPFILE` if policy filtering is not
+  reached first.
 - `mariadb/sql/sql_yacc.yy` parses `LOAD DATA` and `LOAD XML` into host-file
   import command classes that can read caller-named server files or
   client-protocol streams outside the `libmylite` parameter API.
@@ -54,7 +61,8 @@ In scope:
   the explicit policy error instead of `MYLITE_BUSY`.
 - Cover representative unsupported classes that overlap write-like SQL:
   `ANALYZE TABLE`, `LOCK TABLES`, `FLUSH TABLES ... WITH READ LOCK`,
-  `LOAD DATA`, `LOAD DATA LOCAL`, `LOAD XML`,
+  `SELECT ... INTO OUTFILE`, `SELECT ... INTO DUMPFILE`, CTE export spelling,
+  prepared host-file exports, `LOAD DATA`, `LOAD DATA LOCAL`, `LOAD XML`,
   `ALTER TABLE ... DISCARD TABLESPACE`, and a rejected table storage option.
 - Cover direct event DDL, event metadata, and scheduler variable rejection plus
   prepared event DDL/metadata rejection under the same active pressure limit.
@@ -79,8 +87,8 @@ Extend the existing `active-reader-pressure-write-policy` selector:
    WAL size.
 3. Keep the existing supported write-class checks that expect `MYLITE_BUSY`.
 4. Add policy-error checks for representative unsupported ownerless SQL,
-   server-owned host-file imports, event/scheduler SQL, and prepared event SQL
-   while pressure is active.
+   server-owned host-file exports and imports, event/scheduler SQL, and
+   prepared event SQL while pressure is active.
 5. Assert the rejected storage-option table and rejected event metadata are
    absent.
 6. Release the reader and keep the existing final ownerless/native reopen and
@@ -131,8 +139,8 @@ coverage only.
 - Supported write statements still return `MYLITE_BUSY` with the pressure-limit
   diagnostic while retained WAL is at the configured limit.
 - Representative unsupported ownerless statements and server-owned host-file
-  imports return `MYLITE_ERROR`, have MariaDB errno zero, and include their
-  explicit policy diagnostic while the same pressure limit is active.
+  exports/imports return `MYLITE_ERROR`, have MariaDB errno zero, and include
+  their explicit policy diagnostic while the same pressure limit is active.
 - Direct and prepared event SQL plus scheduler-variable SQL return the
   server-surface policy diagnostic rather than `MYLITE_BUSY`.
 - The rejected storage-option create statement leaves no table metadata, and

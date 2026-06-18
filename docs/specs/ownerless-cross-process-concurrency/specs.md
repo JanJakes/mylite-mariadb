@@ -2262,7 +2262,11 @@ Tasks:
    same retained-WAL pressure and leave no `information_schema.events` rows, and
    that top-level sequence DDL/value SQL keeps the sequence policy diagnostic
    before pressure handling or prepared-statement allocation without advancing
-   sequence/default-table state.
+   sequence/default-table state. The
+   `ownerless-pressure-host-file-export-policy` slice adds representative
+   direct `SELECT ... INTO OUTFILE`, direct `SELECT ... INTO DUMPFILE`, CTE
+   export spelling, and prepared export checks proving host-file export SQL also
+   keeps the server-surface diagnostic under that same retained-WAL pressure.
    The `ownerless-pressure-diagnostics` slice exposes the same active pin
    count, oldest pin LSN, raw WAL byte count, configured limit, and
    throttle-reached state through `mylite_ownerless_pressure_status()`.
@@ -2899,8 +2903,8 @@ Tasks:
    These unsupported ownerless policy gates are ordered before active-reader
    pressure throttling, so retained page-version WAL pressure does not turn
    deliberately unsupported table-admin, locked-table, flush lock/export,
-   host-file import, tablespace detach/import, or storage-option SQL into a
-   generic busy error.
+   host-file export/import, tablespace detach/import, or storage-option SQL
+   into a generic busy error.
    Unsafe-hook coverage kills a process
    after dictionary DDL is marked
    active but before MariaDB executes it, after successful DDL execution but

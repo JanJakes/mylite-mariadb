@@ -12782,6 +12782,37 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     );
     expect_exec_error_containing(
         db,
+        "SELECT * FROM app.ownerless_pressure_policy "
+        "INTO OUTFILE '/tmp/mylite-ownerless-pressure-outfile.txt'",
+        "server-owned SQL surface"
+    );
+    expect_exec_error_containing(
+        db,
+        "SELECT * FROM app.ownerless_pressure_policy "
+        "INTO DUMPFILE '/tmp/mylite-ownerless-pressure-dumpfile.txt'",
+        "server-owned SQL surface"
+    );
+    expect_exec_error_containing(
+        db,
+        "WITH pressure_export AS (SELECT id FROM app.ownerless_pressure_policy) "
+        "SELECT id FROM pressure_export "
+        "INTO OUTFILE '/tmp/mylite-ownerless-pressure-cte-outfile.txt'",
+        "server-owned SQL surface"
+    );
+    expect_prepare_error_containing(
+        db,
+        "SELECT * FROM app.ownerless_pressure_policy "
+        "INTO OUTFILE '/tmp/mylite-ownerless-pressure-prepared-outfile.txt'",
+        "server-owned SQL surface"
+    );
+    expect_prepare_error_containing(
+        db,
+        "SELECT * FROM app.ownerless_pressure_policy "
+        "INTO DUMPFILE '/tmp/mylite-ownerless-pressure-prepared-dumpfile.txt'",
+        "server-owned SQL surface"
+    );
+    expect_exec_error_containing(
+        db,
         "LOAD DATA INFILE '/tmp/mylite-ownerless-pressure-load.csv' "
         "INTO TABLE app.ownerless_pressure_policy",
         "server-owned SQL surface"
