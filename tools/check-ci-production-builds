@@ -294,6 +294,7 @@ require_literal 'MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI: "0"'
 require_literal 'MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE: "0"'
 require_literal 'MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN: "0"'
 require_literal 'MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL: "0"'
+require_literal 'MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL: "0"'
 require_literal "MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_FILTER:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_SKIP_INSTALL_FILTER:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_EAGER_RECONNECT_FILTER:"
@@ -367,6 +368,16 @@ require_wordpress_timing_step_guards \
 require_wordpress_timing_step_guards \
   "Run WordPress PHPUnit process-isolated eager-reconnect suite (test only)"
 require_wordpress_timing_step_guards "Run WordPress PHPUnit non-isolated remaining suite (test only)"
+require_step_literal "Prepare WordPress PHPUnit database" 'MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL: "1"'
+for phpunit_step in \
+  "Run WordPress PHPUnit database suite (test only)" \
+  "Run WordPress PHPUnit process-isolated deferred-reconnect install-required suite (test only)" \
+  "Run WordPress PHPUnit process-isolated deferred-reconnect skip-install suite (test only)" \
+  "Run WordPress PHPUnit process-isolated eager-reconnect suite (test only)" \
+  "Run WordPress PHPUnit non-isolated remaining suite (test only)"
+do
+  require_step_literal "${phpunit_step}" 'MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL: "1"'
+done
 forbid_step_literal \
   "Run WordPress PHPUnit process-isolated deferred-reconnect install-required suite (test only)" \
   'MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES: "1"'

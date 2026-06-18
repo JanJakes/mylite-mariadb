@@ -22,9 +22,11 @@ phpunit_keepalive="${MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE:-0}"
 phpunit_static_wpdb_scan="${MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN:-0}"
 phpunit_reconnect_after_child="${MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD:-1}"
 phpunit_child_skip_install="${MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL:-0}"
+phpunit_skip_install="${MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL:-0}"
 require_release_build="${MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD:-0}"
 require_external_db_dir="${MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR:-0}"
 db_dir="${MYLITE_WORDPRESS_DB_DIR:-${TMPDIR:-/tmp}/mylite-wordpress-tests-${root_hash}.mylite}"
+db_baseline_dir="${MYLITE_WORDPRESS_DB_BASELINE_DIR:-${db_dir}.baseline}"
 build_targets="${MYLITE_WORDPRESS_BUILD_TARGETS:-mylite_php_extension mylite_mysqli_php_extension}"
 phase="${MYLITE_WORDPRESS_PHASE:-all}"
 timing_label="${MYLITE_WORDPRESS_TIMING_LABEL:-${phase}}"
@@ -130,6 +132,14 @@ case "${phpunit_child_skip_install}" in
     exit 1
     ;;
 esac
+case "${phpunit_skip_install}" in
+  0 | 1)
+    ;;
+  *)
+    echo "MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL must be 0 or 1" >&2
+    exit 1
+    ;;
+esac
 if [[ "${phase}" == "docker-image" && "${skip_docker_build}" == "1" ]]; then
   echo "MYLITE_WORDPRESS_PHASE=docker-image cannot skip the Docker build" >&2
   exit 1
@@ -168,10 +178,44 @@ fi
 db_parent_dir="$(mkdir -p "$(dirname "${db_dir}")" && cd "$(dirname "${db_dir}")" && pwd)"
 db_basename="$(basename "${db_dir}")"
 db_dir="${db_parent_dir}/${db_basename}"
+if [[ "${db_baseline_dir}" != /* ]]; then
+  db_baseline_dir="${root_dir}/${db_baseline_dir}"
+fi
+db_baseline_parent_dir="$(mkdir -p "$(dirname "${db_baseline_dir}")" && cd "$(dirname "${db_baseline_dir}")" && pwd)"
+db_baseline_basename="$(basename "${db_baseline_dir}")"
+db_baseline_dir="${db_baseline_parent_dir}/${db_baseline_basename}"
+if [[ "${db_baseline_dir}" == "${db_dir}" ||
+      "${db_baseline_dir}" == "${db_dir}"/* ||
+      "${db_dir}" == "${db_baseline_dir}"/* ]]; then
+  echo "MYLITE_WORDPRESS_DB_BASELINE_DIR must be separate from MYLITE_WORDPRESS_DB_DIR." >&2
+  echo "MYLITE_WORDPRESS_DB_DIR=${db_dir}" >&2
+  echo "MYLITE_WORDPRESS_DB_BASELINE_DIR=${db_baseline_dir}" >&2
+  exit 1
+fi
 if [[ "${require_external_db_dir}" == "1" &&
       ( "${db_dir}" == "${root_dir}" || "${db_dir}" == "${root_dir}"/* ) ]]; then
   echo "MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR requires MYLITE_WORDPRESS_DB_DIR outside ${root_dir}." >&2
   echo "Current MYLITE_WORDPRESS_DB_DIR=${db_dir}" >&2
+  exit 1
+fi
+if [[ "${require_external_db_dir}" == "1" &&
+      ( "${db_baseline_dir}" == "${root_dir}" || "${db_baseline_dir}" == "${root_dir}"/* ) ]]; then
+  echo "MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR requires MYLITE_WORDPRESS_DB_BASELINE_DIR outside ${root_dir}." >&2
+  echo "Current MYLITE_WORDPRESS_DB_BASELINE_DIR=${db_baseline_dir}" >&2
+  exit 1
+fi
+if [[ "${db_dir}" != "${root_dir}"/* &&
+      "${db_baseline_parent_dir}" != "${db_parent_dir}" ]]; then
+  echo "External MYLITE_WORDPRESS_DB_BASELINE_DIR must share MYLITE_WORDPRESS_DB_DIR's parent directory." >&2
+  echo "MYLITE_WORDPRESS_DB_DIR=${db_dir}" >&2
+  echo "MYLITE_WORDPRESS_DB_BASELINE_DIR=${db_baseline_dir}" >&2
+  exit 1
+fi
+if [[ "${db_dir}" == "${root_dir}"/* &&
+      "${db_baseline_dir}" != "${root_dir}"/* ]]; then
+  echo "Repository-local MYLITE_WORDPRESS_DB_DIR requires MYLITE_WORDPRESS_DB_BASELINE_DIR inside ${root_dir}." >&2
+  echo "MYLITE_WORDPRESS_DB_DIR=${db_dir}" >&2
+  echo "MYLITE_WORDPRESS_DB_BASELINE_DIR=${db_baseline_dir}" >&2
   exit 1
 fi
 composer_cache_dir="$(mkdir -p "${composer_cache_dir}" && cd "${composer_cache_dir}" && pwd)"
@@ -187,9 +231,11 @@ container_timing_summary_path="${container_root}${timing_summary_path#"${root_di
 db_mount_args=()
 if [[ "${db_dir}" == "${root_dir}"/* ]]; then
   container_db_dir="${container_root}${db_dir#"${root_dir}"}"
+  container_db_baseline_dir="${container_root}${db_baseline_dir#"${root_dir}"}"
 else
   container_db_parent="/mylite-wordpress-db"
   container_db_dir="${container_db_parent}/${db_basename}"
+  container_db_baseline_dir="${container_db_parent}/${db_baseline_basename}"
   db_mount_args=(-v "${db_parent_dir}:${container_db_parent}")
 fi
 
@@ -421,9 +467,11 @@ run_suite() {
     -e MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN="${phpunit_static_wpdb_scan}" \
     -e MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD="${phpunit_reconnect_after_child}" \
     -e MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL="${phpunit_child_skip_install}" \
+    -e MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL="${phpunit_skip_install}" \
     -e MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD="${require_release_build}" \
     -e MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR="${require_external_db_dir}" \
     -e MYLITE_WORDPRESS_DB_DIR="${container_db_dir}" \
+    -e MYLITE_WORDPRESS_DB_BASELINE_DIR="${container_db_baseline_dir}" \
     -e MYLITE_WORDPRESS_BUILD_TARGETS="${build_targets}" \
     -e MYLITE_WORDPRESS_PHASE="${phase}" \
     -e MYLITE_WORDPRESS_PERF_PROCESS_ITERATIONS="${MYLITE_WORDPRESS_PERF_PROCESS_ITERATIONS:-5}" \
@@ -605,6 +653,12 @@ require_phpunit_artifacts() {
 require_prepared_database() {
   require_path "${MYLITE_WORDPRESS_DIR}/wp-tests-config.php" prepare-db "WordPress test config"
   require_path "${MYLITE_WORDPRESS_DB_DIR}" prepare-db "prepared MyLite database directory"
+  if [ "${MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL}" = "1" ]; then
+    require_path \
+      "${MYLITE_WORDPRESS_DB_BASELINE_DIR}" \
+      prepare-db \
+      "prepared MyLite WordPress baseline database directory"
+  fi
 }
 
 mkdir -p \
@@ -635,9 +689,11 @@ echo "wordpress_phpunit_keepalive=${MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE}"
 echo "wordpress_phpunit_static_wpdb_scan=${MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN}"
 echo "wordpress_phpunit_reconnect_after_child=${MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD}"
 echo "wordpress_phpunit_child_skip_install=${MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL}"
+echo "wordpress_phpunit_skip_install=${MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL}"
 echo "wordpress_require_release_build=${MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD}"
 echo "wordpress_require_external_db_dir=${MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR}"
 echo "wordpress_db_dir=${MYLITE_WORDPRESS_DB_DIR}"
+echo "wordpress_db_baseline_dir=${MYLITE_WORDPRESS_DB_BASELINE_DIR}"
 echo "wordpress_db_parent_dir=${wordpress_db_parent_dir}"
 echo "wordpress_db_parent_filesystem_type=$(stat -f -c %T "${wordpress_db_parent_dir}" 2>/dev/null || echo unknown)"
 echo "wordpress_phpunit_args=$*"
@@ -767,6 +823,7 @@ $childScriptSummaryMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_PARENT_SUMMAR
 $childScriptSummaryReadMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_SUMMARY_READ';
 $childMysqliProfileContextMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_MYSQLI_PROFILE_CONTEXT';
 $childSkipInstallMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL_ENV';
+$parentSkipInstallMarker = 'MYLITE_WORDPRESS_PHPUNIT_PARENT_SKIP_INSTALL_ENV';
 
 $hasTimingMarker = str_contains($source, $timingMarker);
 $hasChildProcessAverageMarker = str_contains($source, $childProcessAverageMarker);
@@ -782,6 +839,7 @@ $hasChildScriptSummaryMarker = str_contains($source, $childScriptSummaryMarker);
 $hasChildScriptSummaryReadMarker = str_contains($source, $childScriptSummaryReadMarker);
 $hasChildMysqliProfileContextMarker = str_contains($source, $childMysqliProfileContextMarker);
 $hasChildSkipInstallMarker = str_contains($source, $childSkipInstallMarker);
+$hasParentSkipInstallMarker = str_contains($source, $parentSkipInstallMarker);
 $hasChildRuntimeTiming =
     str_contains($source, "\$myliteWordPressChildStats['child_process_seconds'] +=");
 $hasChildReconnectTiming =
@@ -801,6 +859,7 @@ if ($hasTimingMarker &&
     $hasChildScriptSummaryReadMarker &&
     $hasChildMysqliProfileContextMarker &&
     $hasChildSkipInstallMarker &&
+    $hasParentSkipInstallMarker &&
     $hasChildRuntimeTiming &&
     $hasChildReconnectTiming) {
     exit(0);
@@ -884,6 +943,35 @@ $childMysqliProfileContextSetup = <<<'PATCH'
 PATCH;
 
 $childSkipInstallSetup = <<<'PATCH'
+        // MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL_ENV
+        // MYLITE_WORDPRESS_PHPUNIT_PARENT_SKIP_INSTALL_ENV
+        if (\getenv('MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL') === '1') {
+            if ($env === null) {
+                $env = $_SERVER ?? [];
+                unset($env['argv'], $env['argc']);
+                foreach ($env as $envKey => $envVar) {
+                    if (\is_array($envVar)) {
+                        unset($env[$envKey]);
+                    }
+                }
+            }
+            $env['WP_TESTS_SKIP_INSTALL'] = '1';
+        } elseif (\getenv('MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL') === '1') {
+            if ($env === null) {
+                $env = $_SERVER ?? [];
+                unset($env['argv'], $env['argc']);
+                foreach ($env as $envKey => $envVar) {
+                    if (\is_array($envVar)) {
+                        unset($env[$envKey]);
+                    }
+                }
+            }
+            $env['WP_TESTS_SKIP_INSTALL'] = '0';
+        }
+
+PATCH;
+
+$oldChildSkipInstallSetup = <<<'PATCH'
         // MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL_ENV
         if (\getenv('MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL') === '1') {
             if ($env === null) {
@@ -1533,6 +1621,20 @@ if (!str_contains($patched, $childMysqliProfileContextMarker)) {
     $patched = $patchedWithChildMysqliProfileContext;
 }
 
+if (str_contains($patched, $childSkipInstallMarker) &&
+    !str_contains($patched, $parentSkipInstallMarker)) {
+    $patchedWithParentSkipInstall = str_replace(
+        $oldChildSkipInstallSetup,
+        $childSkipInstallSetup,
+        $patched
+    );
+    if ($patchedWithParentSkipInstall === $patched) {
+        fwrite(STDERR, "Could not upgrade PHPUnit child WordPress install skip setup.\n");
+        exit(1);
+    }
+    $patched = $patchedWithParentSkipInstall;
+}
+
 if (!str_contains($patched, $childSkipInstallMarker)) {
     $patchedWithChildSkipInstall = str_replace(
         "        \$process = proc_open(\n",
@@ -1921,6 +2023,8 @@ phase "Prepare MyLite database"
 require_build_php_artifacts
 prepare_start="$(date +%s)"
 rm -rf "${MYLITE_WORDPRESS_DB_DIR}"
+rm -rf "${MYLITE_WORDPRESS_DB_BASELINE_DIR}"
+wordpress_prepare_db_create_start="$(date +%s)"
 "${php_wrapper}" -r '
 $db = mysqli_connect($argv[1]);
 if (!$db) {
@@ -1932,6 +2036,7 @@ if (!mysqli_query($db, "CREATE DATABASE IF NOT EXISTS wordpress_tests")) {
     exit(1);
 }
 ' "${MYLITE_WORDPRESS_DB_DIR}"
+wordpress_prepare_db_create_seconds="$(seconds_since "${wordpress_prepare_db_create_start}")"
 
 cat > "${MYLITE_WORDPRESS_DIR}/wp-tests-config.php" <<PHP
 <?php
@@ -1959,10 +2064,37 @@ define( 'WP_TESTS_TITLE', 'Test Blog' );
 define( 'WP_PHP_BINARY', '${php_wrapper}' );
 define( 'WPLANG', '' );
 PHP
+wordpress_prepare_db_metrics=(
+  "wordpress_prepare_db_create_seconds=${wordpress_prepare_db_create_seconds}"
+)
+if [ "${MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL}" = "1" ]; then
+  wordpress_prepare_db_install_start="$(date +%s)"
+  "${php_wrapper}" \
+    "${MYLITE_WORDPRESS_DIR}/tests/phpunit/includes/install.php" \
+    "${MYLITE_WORDPRESS_DIR}/wp-tests-config.php" \
+    no_ms_tests \
+    run_core_tests
+  wordpress_prepare_db_install_seconds="$(seconds_since "${wordpress_prepare_db_install_start}")"
+  wordpress_prepare_db_baseline_copy_start="$(date +%s)"
+  cp -a "${MYLITE_WORDPRESS_DB_DIR}" "${MYLITE_WORDPRESS_DB_BASELINE_DIR}"
+  wordpress_prepare_db_baseline_copy_seconds="$(seconds_since "${wordpress_prepare_db_baseline_copy_start}")"
+  wordpress_prepare_db_metrics+=(
+    "wordpress_prepare_db_install_seconds=${wordpress_prepare_db_install_seconds}"
+    "wordpress_prepare_db_baseline_copy_seconds=${wordpress_prepare_db_baseline_copy_seconds}"
+  )
+fi
 wordpress_prepare_db_seconds="$(seconds_since "${prepare_start}")"
+echo "wordpress_prepare_db_create_seconds=${wordpress_prepare_db_create_seconds}"
+if [ "${MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL}" = "1" ]; then
+  echo "wordpress_prepare_db_install_seconds=${wordpress_prepare_db_install_seconds}"
+  echo "wordpress_prepare_db_baseline_copy_seconds=${wordpress_prepare_db_baseline_copy_seconds}"
+fi
 echo "wordpress_prepare_db_seconds=${wordpress_prepare_db_seconds}"
-append_timing_summary \
+wordpress_prepare_db_metrics+=(
   "wordpress_prepare_db_seconds=${wordpress_prepare_db_seconds}"
+)
+append_timing_summary \
+  "${wordpress_prepare_db_metrics[@]}"
 fi
 
 if [ "${MYLITE_WORDPRESS_PHASE}" = "all" ] ||
@@ -1972,6 +2104,14 @@ if [ "${MYLITE_WORDPRESS_PHASE}" = "phpunit" ]; then
   require_build_php_artifacts
   require_phpunit_artifacts
   require_prepared_database
+fi
+phpunit_baseline_restore_seconds=
+if [ "${MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL}" = "1" ]; then
+  phpunit_baseline_restore_start="$(date +%s)"
+  rm -rf "${MYLITE_WORDPRESS_DB_DIR}"
+  cp -a "${MYLITE_WORDPRESS_DB_BASELINE_DIR}" "${MYLITE_WORDPRESS_DB_DIR}"
+  phpunit_baseline_restore_seconds="$(seconds_since "${phpunit_baseline_restore_start}")"
+  echo "wordpress_phpunit_baseline_restore_seconds=${phpunit_baseline_restore_seconds}"
 fi
 suite_start="$(date +%s)"
 set +e
@@ -2036,6 +2176,11 @@ set +e
     exit 1
   fi
   phpunit_env=()
+  if [ "${MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL}" = "1" ]; then
+    phpunit_env+=(
+      WP_TESTS_SKIP_INSTALL=1
+    )
+  fi
   mysqli_profile_output=
   if [ "${MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI}" = "1" ]; then
     if ! mysqli_profile_output="$(mktemp "${TMPDIR:-/tmp}/mylite-wordpress-mysqli-profile.XXXXXX")"; then
@@ -2159,6 +2304,9 @@ PHP_KEEPALIVE
     echo "wordpress_phpunit_shell_overhead_seconds=${phpunit_shell_overhead_seconds}"
   fi
   phpunit_summary_metrics=()
+  if [ -n "${phpunit_baseline_restore_seconds}" ]; then
+    phpunit_summary_metrics+=("wordpress_phpunit_baseline_restore_seconds=${phpunit_baseline_restore_seconds}")
+  fi
   if [ -n "${phpunit_shell_real_seconds}" ]; then
     phpunit_summary_metrics+=("wordpress_phpunit_shell_real_seconds=${phpunit_shell_real_seconds}")
   fi
@@ -2871,11 +3019,14 @@ echo "wordpress_host_composer_cache_dir=${composer_cache_dir}"
 echo "wordpress_host_phpunit_report_dir=${phpunit_report_dir}"
 echo "wordpress_host_timing_summary_path=${timing_summary_path}"
 echo "wordpress_host_db_dir=${db_dir}"
+echo "wordpress_host_db_baseline_dir=${db_baseline_dir}"
 echo "wordpress_container_db_dir=${container_db_dir}"
+echo "wordpress_container_db_baseline_dir=${container_db_baseline_dir}"
 echo "wordpress_host_timing_label=${timing_label}"
 echo "wordpress_host_phpunit_reconnect_after_child=${phpunit_reconnect_after_child}"
 echo "wordpress_host_phpunit_profile_mysqli=${phpunit_profile_mysqli}"
 echo "wordpress_host_phpunit_keepalive=${phpunit_keepalive}"
+echo "wordpress_host_phpunit_skip_install=${phpunit_skip_install}"
 echo "wordpress_host_require_release_build=${require_release_build}"
 echo "wordpress_host_require_external_db_dir=${require_external_db_dir}"
 if [[ "${skip_docker_build}" == "1" ]]; then
