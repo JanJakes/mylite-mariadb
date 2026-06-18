@@ -123,6 +123,13 @@ the default external tmpfs WordPress MyLite database path.
   `MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_AVERAGE_PROFILE_GUARD` into
   `DefaultPhpProcess.php`. A repeat dependency phase also passed, proving the
   patch is idempotent on the upgraded vendor file.
+- A follow-up fresh-vendor check after CI exposed the pristine-install branch
+  verified that an empty `build/wordpress-phpunit-tools-fresh` directory can
+  install PHPUnit 9.6.34 and receive the same child timing, child-script profile
+  guard, child-script output guard, and child-script average guard markers. The
+  patcher now upgrades existing unguarded child-script env blocks only when
+  that block is already present; pristine vendor installs use the normal
+  guarded env insertion path.
 - Focused production process-isolated PHPUnit smoke passed with
   `MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES=0`,
   `MYLITE_WORDPRESS_PHPUNIT_CHILD_TIMING_SUMMARY=1`,

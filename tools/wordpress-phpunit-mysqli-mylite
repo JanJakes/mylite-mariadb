@@ -1658,7 +1658,8 @@ if (!str_contains($patched, $childTimingSummaryMarker)) {
     $patched = $patchedWithChildTimingSummary;
 }
 
-if (!str_contains($patched, $childScriptProfileGuardMarker)) {
+if (str_contains($patched, $childScriptEnvMarker) &&
+    !str_contains($patched, $childScriptProfileGuardMarker)) {
     $patchedWithProfileGuardedChildScript = str_replace(
         $profileUnguardedChildScriptEnv,
         $profileGuardedChildScriptEnv,
