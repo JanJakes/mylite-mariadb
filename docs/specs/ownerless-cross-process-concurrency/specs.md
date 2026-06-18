@@ -5798,9 +5798,12 @@ subsystems that this mode needs:
   coverage for the 256-row positive boundary and the 257-row conservative
   boundary. A statement-deferred page-publish follow-up then reuses the
   existing transaction-deferred page publication proof for those same bounded
-  append-batched statements, so repeated user data/index page images are
-  captured and replaced by `(space_id,page_no)` until commit instead of
-  appended at every ownerless mini-transaction. A 256-row production probe
+  append-batched statements while the process registry proves a single-owner
+  epoch, so repeated user data/index page images are captured and replaced by
+  `(space_id,page_no)` until commit instead of appended at every ownerless
+  mini-transaction. Peer-present ownerless statements keep immediate page
+  publication while retaining the append-session batching guard. A 256-row
+  production probe
   moved page-log append calls from `2609` to `68`, page-write publish total
   from `60.789 ms` to `2.938 ms`, commit-log publish attribution from
   `61.565 ms` to `6.767 ms`, and ownerless 256-row bulk throughput from

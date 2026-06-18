@@ -65,6 +65,8 @@ current eligibility guards:
 - no foreign-key target tables;
 - explicit target column lists that can touch `AUTO_INCREMENT` remain
   conservative outside a single-owner epoch;
+- transaction-deferred page publication is enabled only while the process
+  registry proves a single-owner epoch;
 - row lists above 256, upsert, `INSERT ... SELECT`, `RETURNING`, broader DML,
   DDL, and locking reads do not use this path.
 
@@ -74,15 +76,17 @@ publish machinery. Commit still calls
 `mylite_ownerless_innodb_publish_transaction_pages_to_lsn()` before publishing
 the page-visible LSN. If captured images or buffer-pool fallback cannot prove
 the deferred pages, the existing conservative flush counters and path remain
-active.
+active. Peer-present ownerless statements retain the append-session batching
+guard but publish user pages through the immediate path until broader
+cross-process redo/checkpoint reconciliation is proven.
 
 ## Scope And Non-Goals
 
 In scope:
 
 - bounded visible-fast append-batched `INSERT ... VALUES` statements;
-- statement-scoped page-image coalescing through existing transaction-deferred
-  publication;
+- single-owner statement-scoped page-image coalescing through existing
+  transaction-deferred publication;
 - focused 256-row positive and 257-row conservative boundary coverage;
 - production probe evidence for the 256-row bulk shape.
 
@@ -155,6 +159,8 @@ Expected 256-row probe signal:
 - The 256-row focused case proves transaction-deferred publication is used.
 - The 257-row focused case proves the cap still keeps larger row lists outside
   append batching and deferred checkpoint coalescing.
+- Peer-open truncate/allocation coverage keeps large single-row visible-fast
+  inserts on the immediate page-publication path.
 - Production probe evidence shows reduced 256-row page-log append volume and
   ownerless bulk throughput improvement.
 
@@ -166,7 +172,9 @@ The implementation adds a statement-local InnoDB hook flag:
 - `mylite_ownerless_innodb_statement_deferred_page_publish()`.
 
 `OwnerlessStatementVisibleFastPathScope` sets the flag only when
-`fast_path_policy.append_batch_fast_path` is true. InnoDB
+`fast_path_policy.deferred_page_publish_fast_path` is true. The policy keeps
+that flag separate from append-session batching and enables it for bounded
+implicit row-list inserts only in a single-owner epoch. InnoDB
 `ownerless_page_write_uses_transaction_release()` then allows visible-fast
 autocommit MTRs to use transaction-deferred page-write release only under that
 statement flag.

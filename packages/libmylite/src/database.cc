@@ -1122,6 +1122,7 @@ struct SqlPolicyTokens {
 struct OwnerlessStatementFastPathPolicy {
     bool visible_fast_path = false;
     bool append_batch_fast_path = false;
+    bool deferred_page_publish_fast_path = false;
 };
 #endif
 
@@ -1485,11 +1486,12 @@ struct OwnerlessStatementVisibleFastPathScope {
     explicit OwnerlessStatementVisibleFastPathScope(
         bool enabled,
         bool defer_page_log_append_batch,
+        bool defer_page_publish,
         bool coalesce_deferred_latest_checkpoint
     )
         : previous(mylite_ownerless_innodb_set_statement_visible_fast_path(enabled ? 1 : 0)),
           previous_defer_page_publish(mylite_ownerless_innodb_set_statement_deferred_page_publish(
-              defer_page_log_append_batch ? 1 : 0
+              defer_page_publish ? 1 : 0
           )),
           previous_defer_page_log_append_batch(ownerless_statement_defers_page_log_append_batch),
           previous_coalesce_deferred_latest_checkpoint(
@@ -1575,10 +1577,12 @@ struct OwnerlessStatementVisibleFastPathScope {
     explicit OwnerlessStatementVisibleFastPathScope(
         bool enabled,
         bool defer_page_log_append_batch,
+        bool defer_page_publish,
         bool coalesce_deferred_latest_checkpoint
     ) {
         (void)enabled;
         (void)defer_page_log_append_batch;
+        (void)defer_page_publish;
         (void)coalesce_deferred_latest_checkpoint;
     }
 };
@@ -3388,6 +3392,7 @@ int mylite_step(mylite_stmt *stmt) {
         OwnerlessStatementVisibleFastPathScope visible_fast_path(
             fast_path_policy.visible_fast_path,
             fast_path_policy.append_batch_fast_path,
+            fast_path_policy.deferred_page_publish_fast_path,
             ownerless_statement_deferred_latest_checkpoint_coalescing_allowed(
                 *stmt->db,
                 fast_path_policy.append_batch_fast_path,
@@ -4772,6 +4777,7 @@ int exec_result_impl(
     OwnerlessStatementVisibleFastPathScope visible_fast_path(
         fast_path_policy.visible_fast_path,
         fast_path_policy.append_batch_fast_path,
+        fast_path_policy.deferred_page_publish_fast_path,
         ownerless_statement_deferred_latest_checkpoint_coalescing_allowed(
             *db,
             fast_path_policy.append_batch_fast_path,
@@ -5465,12 +5471,12 @@ OwnerlessStatementFastPathPolicy ownerless_statement_fast_path_policy(
 
     std::size_t row_count = 0U;
     if (ownerless_insert_values_statement_row_count(sql, &row_count) && row_count != 0U) {
+        bool single_owner_epoch = false;
+        {
+            const std::lock_guard<std::mutex> guard(g_runtime.mutex);
+            single_owner_epoch = ownerless_runtime_in_single_owner_epoch_locked(g_runtime);
+        }
         if (ownerless_insert_statement_has_target_column_list(tokens)) {
-            bool single_owner_epoch = false;
-            {
-                const std::lock_guard<std::mutex> guard(g_runtime.mutex);
-                single_owner_epoch = ownerless_runtime_in_single_owner_epoch_locked(g_runtime);
-            }
             if (!single_owner_epoch && ownerless_insert_target_has_auto_increment(db, tokens)) {
                 return policy;
             }
@@ -5479,12 +5485,15 @@ OwnerlessStatementFastPathPolicy ownerless_statement_fast_path_policy(
             policy.visible_fast_path = true;
             policy.append_batch_fast_path =
                 row_count <= k_ownerless_append_batch_fast_path_max_insert_values_rows;
+            policy.deferred_page_publish_fast_path =
+                policy.append_batch_fast_path && single_owner_epoch;
         }
         return policy;
     }
 
     policy.visible_fast_path = ownerless_transaction_commit_allows_visible_fast_path(db, tokens);
     policy.append_batch_fast_path = policy.visible_fast_path;
+    policy.deferred_page_publish_fast_path = policy.visible_fast_path;
     return policy;
 }
 
