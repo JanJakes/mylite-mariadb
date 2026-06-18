@@ -4596,13 +4596,18 @@ int exec_result_impl(
             }
             if (native_control_autocommit_is_noop(*db, native_control_statement)) {
                 exec_result_perf_add(EXEC_RESULT_PERF_NATIVE_CONTROL_AUTOCOMMIT_NOOPS, 1U);
-            } else if (
-                execute_native_control_statement(*db, native_control_statement) != MYLITE_OK
-            ) {
-                exec_result_perf_add_elapsed(EXEC_RESULT_PERF_NATIVE_CONTROL_NS, stage_start_ns);
-                exec_result_perf_add(EXEC_RESULT_PERF_NATIVE_CONTROL_ERRORS, 1U);
-                set_mariadb_error(*db);
-                return copy_error_message(*db, errmsg);
+            } else {
+                const int native_control_result =
+                    execute_native_control_statement(*db, native_control_statement);
+                if (native_control_result != MYLITE_OK) {
+                    exec_result_perf_add_elapsed(
+                        EXEC_RESULT_PERF_NATIVE_CONTROL_NS,
+                        stage_start_ns
+                    );
+                    exec_result_perf_add(EXEC_RESULT_PERF_NATIVE_CONTROL_ERRORS, 1U);
+                    set_mariadb_error(*db);
+                    return copy_error_message(*db, errmsg);
+                }
             }
             exec_result_perf_add_elapsed(EXEC_RESULT_PERF_NATIVE_CONTROL_NS, stage_start_ns);
             exec_result_perf_add(EXEC_RESULT_PERF_NO_RESULT_SETS, 1U);
