@@ -5766,8 +5766,15 @@ subsystems that this mode needs:
   `INSERT ... VALUES` cap from four to eight rows after an eight-row production
   probe showed the statement already used visible-fast commit publication but
   fell back to per-mini-transaction append sessions and disabled deferred
-  latest-checkpoint coalescing. Larger row lists, broad DML/DDL, and unbounded
-  append-lock hold times remain out of scope.
+  latest-checkpoint coalescing. A bounded sixteen-row follow-up applies the
+  same proof to the next measured bulk shape after a production probe reported
+  visible-fast commit at `1.000` per statement but `171` append-session
+  begin/end calls for `10` statements and zero coalesces under the eight-row
+  cap; the post-slice production probe kept the same `185` page-log appends
+  but reduced append-session begin/end calls to `10`, enabled `320` deferred
+  latest-checkpoint coalesces, and moved ownerless 16-row bulk throughput from
+  `7223.47` to `10655.43` rows/s on the same local shape. Larger row lists,
+  broad DML/DDL, and unbounded append-lock hold times remain out of scope.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.
