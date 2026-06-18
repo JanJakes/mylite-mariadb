@@ -49,6 +49,9 @@ oracle space for the FK graph surface.
 - Extend `tools/ownerless-external-mariadb-seed-sweep` so the combined sweep can
   include random transaction, DDL, and FK graph seeded suites in one disposable
   external MariaDB server.
+- Let the combined sweep pass an explicit FK graph whole-seed replay-attempt
+  budget through `--fk-graph-replay-attempts` while leaving the random
+  transaction and DDL suite replay behavior unchanged.
 
 ## Compatibility Impact
 
@@ -92,8 +95,8 @@ replay remains environment-owned and is not required for default CI.
 - Seed `0` remains valid and preserves the default graph schedule.
 - Nonzero seeds produce distinct manifest/oracle values and validate through the
   trace runner.
-- The combined external seed sweep records FK graph suite rounds, output paths,
-  and seed lists in its manifest.
+- The combined external seed sweep records FK graph suite rounds, replay
+  attempts, output paths, and seed lists in its manifest.
 - Default dependency-free CMake checks cover the new FK graph seed-suite command
   plans.
 - Optional Docker-backed replay can run the same seed set through a disposable

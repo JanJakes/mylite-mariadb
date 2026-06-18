@@ -11,6 +11,7 @@ check=0
 random_tx_rounds=8
 ddl_rounds=8
 fk_graph_rounds=8
+fk_graph_replay_attempts=3
 seeds=()
 seed_ranges=()
 suites=()
@@ -34,6 +35,9 @@ Options:
   --random-tx-rounds N      Rounds for random transaction traces
   --ddl-rounds N            Rounds for DDL stress traces
   --fk-graph-rounds N       Rounds for foreign-key graph traces
+  --fk-graph-replay-attempts N
+                           Whole-seed FK graph replay attempts for transient
+                           MariaDB 1205/1213 escapes (1-10, default: 3)
   --seed N                  Seed to replay; repeatable
   --seed-range START:END    Inclusive seed range; repeatable
   --check                   Validate the command plan without using Docker
@@ -86,6 +90,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --fk-graph-rounds)
       fk_graph_rounds="${2:-}"
+      shift 2
+      ;;
+    --fk-graph-replay-attempts)
+      fk_graph_replay_attempts="${2:-}"
       shift 2
       ;;
     --seed)
@@ -161,6 +169,7 @@ validate_positive_integer "--startup-timeout" "${startup_timeout}" 3600
 validate_positive_integer "--random-tx-rounds" "${random_tx_rounds}" 5000
 validate_positive_integer "--ddl-rounds" "${ddl_rounds}" 200
 validate_positive_integer "--fk-graph-rounds" "${fk_graph_rounds}" 2000
+validate_positive_integer "--fk-graph-replay-attempts" "${fk_graph_replay_attempts}" 10
 
 for seed_range in "${seed_ranges[@]}"; do
   case "${seed_range}" in
@@ -295,6 +304,7 @@ write_manifest() {
           ;;
         fk-graph)
           echo "suite_fk_graph_rounds=${fk_graph_rounds}"
+          echo "suite_fk_graph_replay_attempts=${fk_graph_replay_attempts}"
           if [ "${check}" -eq 1 ]; then
             echo "suite_fk_graph_output=${output_dir}/fk-graph-check"
           else
@@ -434,6 +444,9 @@ run_seed_suite() {
     --client-arg "-p${root_password}"
   )
   args+=("${seed_args[@]}")
+  if [ "${suite}" = "fk-graph" ]; then
+    args+=(--replay-attempts "${fk_graph_replay_attempts}")
+  fi
   "${suite_tool}" "${args[@]}"
 }
 
