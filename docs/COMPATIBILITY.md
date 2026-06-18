@@ -185,7 +185,11 @@ InnoDB shutdown attribution then narrowed the dominant cost to
 `logs_empty_and_mark_files_at_shutdown()` waiting: `innodb_shutdown_total_ms`
 was `248.695`, `innodb_shutdown_logs_empty_ms` was `232.035`, and the fixed
 shutdown-loop sleep consumed `200.309 ms`, while checkpoint work consumed
-`0.011 ms`.
+`0.011 ms`. Embedded builds now skip the first log-empty sleep before running
+the existing quiet-state checks; a reduced production sample after that change
+reported `innodb_shutdown_total_ms=125.473`,
+`innodb_shutdown_logs_empty_ms=101.397`, and
+`innodb_logs_empty_sleep_ms=100.470`, with checkpoint work still `0.017 ms`.
 The probe also reports direct multi-row `INSERT ... VALUES` row-list timing
 with `mylite_perf_bulk_insert_rows_per_statement`,
 ordinary/ownerless bulk row and statement throughput, ownerless/ordinary bulk

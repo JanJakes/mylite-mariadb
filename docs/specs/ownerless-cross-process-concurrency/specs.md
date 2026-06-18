@@ -835,7 +835,11 @@ The design must be fast in the common case:
   flush/checkpoint work: a reduced production sample reported
   `248.695 ms` in `innodb_shutdown()`, `232.035 ms` in log-empty shutdown, and
   `200.309 ms` in the fixed shutdown-loop sleep while checkpoint work was
-  `0.011 ms`.
+  `0.011 ms`. Embedded builds now skip the first log-empty sleep and immediately
+  run the existing quiet-state checks; a reduced production sample after that
+  change reported `125.473 ms` in `innodb_shutdown()`, `101.397 ms` in
+  log-empty shutdown, and `100.470 ms` remaining in the retry sleep while
+  checkpoint work remained `0.017 ms`.
 - Page-version lookup should be O(1) average by `(space_id, page_no)` with a
   short version chain filtered by reader end mark.
 - Ordinary exclusive opens must stay on the native MariaDB embedded hot path:

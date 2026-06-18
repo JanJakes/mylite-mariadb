@@ -1375,6 +1375,9 @@ ATTRIBUTE_COLD void logs_empty_and_mark_files_at_shutdown() noexcept
 	lsn_t			lsn;
 	ulint			count = 0;
 	uint64_t		mylite_logs_start, mylite_stage_start;
+#ifdef EMBEDDED_LIBRARY
+	bool			mylite_skip_initial_sleep = true;
+#endif
 
 	mylite_embedded_shutdown_perf_count(
 		MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_CALLS);
@@ -1409,11 +1412,20 @@ loop:
 
 #define COUNT_INTERVAL 600U
 #define CHECK_INTERVAL 100000U
-	mylite_stage_start = mylite_embedded_shutdown_perf_start_ns();
-	std::this_thread::sleep_for(std::chrono::microseconds(CHECK_INTERVAL));
-	mylite_embedded_shutdown_perf_add_elapsed(
-		MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_LOOP_SLEEP_NS,
-		mylite_stage_start);
+#ifdef EMBEDDED_LIBRARY
+	/* MyLite embedded close can prove an already-idle shutdown below. */
+	if (mylite_skip_initial_sleep) {
+		mylite_skip_initial_sleep = false;
+	} else
+#endif
+	{
+		mylite_stage_start = mylite_embedded_shutdown_perf_start_ns();
+		std::this_thread::sleep_for(
+			std::chrono::microseconds(CHECK_INTERVAL));
+		mylite_embedded_shutdown_perf_add_elapsed(
+			MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_LOOP_SLEEP_NS,
+			mylite_stage_start);
+	}
 
 	count++;
 
