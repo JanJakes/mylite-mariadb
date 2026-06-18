@@ -62,15 +62,6 @@ Created 10/25/1995 Heikki Tuuri
 #include <mylite_ownerless_file_lock_policy.h>
 #include <mylite_ownerless_innodb_lock_hooks.h>
 
-static bool mylite_ownerless_path_separator(char c) noexcept
-{
-  return c == '/'
-#ifdef _WIN32
-         || c == '\\'
-#endif
-         ;
-}
-
 static const char *mylite_ownerless_file_op_redo_path(
     const char *path,
     char *relative_path,
@@ -85,26 +76,10 @@ static const char *mylite_ownerless_file_op_redo_path(
   if (datadir == nullptr || !*datadir)
     return path;
 
-  size_t datadir_len= strlen(datadir);
-  while (datadir_len > 0 &&
-         mylite_ownerless_path_separator(datadir[datadir_len - 1]))
-    --datadir_len;
-  if (datadir_len == 0 || strncmp(path, datadir, datadir_len) ||
-      !mylite_ownerless_path_separator(path[datadir_len]))
-    return path;
-
-  const char *relative= path + datadir_len;
-  while (mylite_ownerless_path_separator(*relative))
-    ++relative;
-
-  const size_t relative_len= strlen(relative);
-  if (relative_len < strlen(DOT_IBD) || relative_len >= relative_path_size ||
-      strchr(relative, '/') == nullptr ||
-      strcmp(&relative[relative_len - strlen(DOT_IBD)], DOT_IBD))
-    return path;
-
-  memcpy(relative_path, relative, relative_len + 1);
-  return relative_path;
+  return mylite_ownerless_innodb_file_op_redo_relative_path(
+             datadir, path, relative_path, relative_path_size)
+             ? relative_path
+             : path;
 }
 
 ATTRIBUTE_COLD bool fil_space_t::set_corrupted() const noexcept

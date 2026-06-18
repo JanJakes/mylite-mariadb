@@ -1,6 +1,7 @@
 #ifndef MYLITE_OWNERLESS_INNODB_LOCK_HOOKS_H
 #define MYLITE_OWNERLESS_INNODB_LOCK_HOOKS_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -259,6 +260,11 @@ void mylite_ownerless_innodb_set_checkpoint_suppression(int suppressed);
 int mylite_ownerless_innodb_checkpoint_suppressed(void);
 void mylite_ownerless_innodb_set_relative_file_op_redo_paths(int enabled);
 int mylite_ownerless_innodb_relative_file_op_redo_paths(void);
+int mylite_ownerless_innodb_file_op_redo_relative_path(
+    const char *datadir,
+    const char *path,
+    char *relative_path,
+    size_t relative_path_size);
 void mylite_ownerless_innodb_set_uncheckpointed_file_rename_recovery(int enabled);
 int mylite_ownerless_innodb_uncheckpointed_file_rename_recovery(void);
 void mylite_ownerless_innodb_note_file_rename_redo(void);

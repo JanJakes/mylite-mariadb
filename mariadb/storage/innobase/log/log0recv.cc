@@ -717,6 +717,12 @@ static std::string mylite_ownerless_recovery_file_name(const char *name,
   if (datadir.empty())
     return file_name;
 
+  char relative_path[OS_FILE_MAX_PATH];
+  if (mylite_ownerless_innodb_file_op_redo_relative_path(
+          datadir.c_str(), file_name.c_str(), relative_path,
+          sizeof relative_path))
+    return datadir + "/" + relative_path;
+
   return datadir + "/" + file_name;
 }
 

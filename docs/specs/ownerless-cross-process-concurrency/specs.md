@@ -4200,7 +4200,9 @@ Tasks:
    embedded teardown leaves `ib_logfile0` without startup-checkpoint evidence,
    and
    lets ownerless uncheckpointed file-operation recovery resolve relative FILE
-   redo paths, synthesize a missing checkpoint boundary only at a clean
+   redo paths, normalize datadir-prefixed `.ibd` FILE redo names including the
+   observed leading-separator-stripped datadir form before prepending the active
+   datadir, synthesize a missing checkpoint boundary only at a clean
    EOF/no-corrupt-FS recovery boundary, and drop the redo latch around
    doublewrite recovery before reacquiring it. The no-argument aggregate harness remains
    available for manual runs, while CTest registers the normal ownerless SQL

@@ -52,6 +52,26 @@ constexpr trx_id_t k_transient_lock_trx_id_flag =
 constexpr size_t k_page_write_refresh_negative_cache_entries= 64;
 constexpr size_t k_external_page_observation_entries= 128;
 
+bool ownerless_path_separator(char c) noexcept
+{
+  return c == '/'
+#ifdef _WIN32
+         || c == '\\'
+#endif
+      ;
+}
+
+bool ownerless_valid_file_op_relative_path(const char *relative,
+                                           size_t relative_path_size) noexcept
+{
+  constexpr const char suffix[]= ".ibd";
+  constexpr size_t suffix_len= sizeof(suffix) - 1;
+  const size_t relative_len= strlen(relative);
+  return relative_len >= suffix_len && relative_len < relative_path_size &&
+         strchr(relative, '/') != nullptr &&
+         strcmp(&relative[relative_len - suffix_len], suffix) == 0;
+}
+
 std::atomic<mylite_ownerless_innodb_lock_acquire_table_callback>
     acquire_table_callback{nullptr};
 std::atomic<mylite_ownerless_innodb_lock_release_table_callback>
@@ -544,6 +564,50 @@ extern "C" void mylite_ownerless_innodb_set_relative_file_op_redo_paths(int enab
 extern "C" int mylite_ownerless_innodb_relative_file_op_redo_paths(void)
 {
   return relative_file_op_redo_paths.load(std::memory_order_acquire) ? 1 : 0;
+}
+
+extern "C" int mylite_ownerless_innodb_file_op_redo_relative_path(
+    const char *datadir,
+    const char *path,
+    char *relative_path,
+    size_t relative_path_size)
+{
+  if (datadir == nullptr || path == nullptr || relative_path == nullptr ||
+      relative_path_size == 0 || !*datadir || !*path)
+    return 0;
+
+  const size_t path_len= strlen(path);
+  size_t datadir_len= strlen(datadir);
+  while (datadir_len > 0 && ownerless_path_separator(datadir[datadir_len - 1]))
+    --datadir_len;
+  if (datadir_len == 0)
+    return 0;
+
+  const char *relative= nullptr;
+  if (path_len > datadir_len && strncmp(path, datadir, datadir_len) == 0 &&
+      ownerless_path_separator(path[datadir_len]))
+    relative= path + datadir_len;
+  else
+  {
+    const char *datadir_without_root= datadir;
+    while (ownerless_path_separator(*datadir_without_root))
+      ++datadir_without_root;
+    const size_t stripped_len=
+        datadir_len - size_t(datadir_without_root - datadir);
+    if (stripped_len == 0 || path_len <= stripped_len ||
+        strncmp(path, datadir_without_root, stripped_len) != 0 ||
+        !ownerless_path_separator(path[stripped_len]))
+      return 0;
+    relative= path + stripped_len;
+  }
+
+  while (ownerless_path_separator(*relative))
+    ++relative;
+  if (!ownerless_valid_file_op_relative_path(relative, relative_path_size))
+    return 0;
+
+  strcpy(relative_path, relative);
+  return 1;
 }
 
 extern "C" void mylite_ownerless_innodb_set_uncheckpointed_file_rename_recovery(
