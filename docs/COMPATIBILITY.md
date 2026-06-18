@@ -1485,6 +1485,15 @@ with the internal `delta_base_standalone_slot_reuse_records` diagnostic. This
 keeps the same non-chained delta records, payload bytes, refresh boundary,
 checkpoint rewrite, and recovery behavior while trimming duplicate volatile
 cache work.
+The follow-up delta-base buffer reuse slice keeps the same cache keys,
+admission policy, page-log records, payload bytes, and checkpoint/replay rules,
+but refreshes a standalone base by resizing and copying into the existing
+unshared cached page buffer when possible. The primitive standalone-refresh
+coverage now asserts the diagnostic `delta_base_page_buffer_reuse_records`
+counter, and the production performance probe reports the same counter. This
+targets allocation churn in the volatile delta-base note phase only; it does
+not reduce ownerless page-version volume or replace the remaining history-proof
+publication work.
 A local MTR wrapper fast-path prototype that cached
 `ownerless_page_write_uses_transaction_release()` per publish pass and reused
 the tracked-page lookup for release was rejected after stress evidence: one

@@ -323,6 +323,7 @@ enum PageLogAppendPerfStatIndex : std::size_t {
     PAGE_LOG_APPEND_PERF_STANDALONE_MATERIALIZE_SKIPPED_RECORDS,
     PAGE_LOG_APPEND_PERF_STANDALONE_MATERIALIZE_SKIPPED_BYTES,
     PAGE_LOG_APPEND_PERF_DELTA_BASE_STANDALONE_SLOT_REUSE_RECORDS,
+    PAGE_LOG_APPEND_PERF_DELTA_BASE_PAGE_BUFFER_REUSE_RECORDS,
     PAGE_LOG_APPEND_PERF_PRECOMPUTED_CHECKSUM_RECORDS,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
@@ -3288,6 +3289,12 @@ int append_record_at_locked(
     }
     stage_start_ns = append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
     if (page_delta_eligible) {
+        const std::uint32_t record_delta_flags =
+            record_flags & (k_record_flag_index_delta_payload | k_record_flag_undo_delta_payload |
+                            k_record_flag_history_rseg_delta_payload);
+        if (record_delta_flags == 0U) {
+            page_delta_snapshot.page.reset();
+        }
         note_index_delta_base_after_successful_append(
             log_device,
             log_inode,
@@ -6159,7 +6166,23 @@ void note_index_delta_base_after_successful_append(
         }
         slot.delta_records_since_base = 0U;
         try {
-            slot.page = std::make_shared<std::vector<unsigned char>>(bytes, bytes + page_size);
+            const bool can_reuse_page = slot.page != nullptr && slot.page.use_count() == 1U;
+            const bool can_reuse_buffer = can_reuse_page && slot.page->capacity() >= page_size;
+            if (can_reuse_page) {
+                std::shared_ptr<std::vector<unsigned char>> mutable_page =
+                    std::const_pointer_cast<std::vector<unsigned char>>(slot.page);
+                mutable_page->resize(page_size);
+                std::memcpy(mutable_page->data(), bytes, page_size);
+                if (can_reuse_buffer) {
+                    page_log_append_perf_add_if_enabled(
+                        append_stats_enabled,
+                        PAGE_LOG_APPEND_PERF_DELTA_BASE_PAGE_BUFFER_REUSE_RECORDS,
+                        1U
+                    );
+                }
+            } else {
+                slot.page = std::make_shared<std::vector<unsigned char>>(bytes, bytes + page_size);
+            }
             slot.valid = true;
             return true;
         } catch (const std::bad_alloc &) {

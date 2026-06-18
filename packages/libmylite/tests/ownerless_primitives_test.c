@@ -213,6 +213,7 @@ enum page_log_append_perf_stat_index {
     PAGE_LOG_APPEND_PERF_STAT_STANDALONE_MATERIALIZE_SKIPPED_RECORDS,
     PAGE_LOG_APPEND_PERF_STAT_STANDALONE_MATERIALIZE_SKIPPED_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_DELTA_BASE_STANDALONE_SLOT_REUSE_RECORDS,
+    PAGE_LOG_APPEND_PERF_STAT_DELTA_BASE_PAGE_BUFFER_REUSE_RECORDS,
     PAGE_LOG_APPEND_PERF_STAT_PRECOMPUTED_CHECKSUM_RECORDS,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
@@ -3684,6 +3685,7 @@ static void test_page_log_reuses_delta_base_slot_for_standalone_refresh(void) {
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_REJECTED_STANDALONE_RECORDS] == 1U);
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_STANDALONE_SIZE_PROBE_CALLS] == 1U);
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_DELTA_BASE_STANDALONE_SLOT_REUSE_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_DELTA_BASE_PAGE_BUFFER_REUSE_RECORDS] == 1U);
     assert(
         (read_page_log_record_flags(fd, refresh_record_offset) &
          MYLITE_TEST_PAGE_LOG_RECORD_FLAG_INDEX_DELTA) == 0U
@@ -3726,6 +3728,7 @@ static void test_page_log_reuses_delta_base_slot_for_standalone_refresh(void) {
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_RECORDS] == 1U);
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_RECORDS] == 1U);
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_DELTA_BASE_STANDALONE_SLOT_REUSE_RECORDS] == 0U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_DELTA_BASE_PAGE_BUFFER_REUSE_RECORDS] == 0U);
     assert(
         (read_page_log_record_flags(fd, after_refresh_record_offset) &
          MYLITE_TEST_PAGE_LOG_RECORD_FLAG_INDEX_DELTA) != 0U

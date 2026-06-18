@@ -5481,7 +5481,12 @@ subsystems that this mode needs:
   standalone-refresh branch through the internal
   `delta_base_standalone_slot_reuse_records` diagnostic. This keeps the same
   volatile base-cache rules and durable WAL semantics while trimming duplicate
-  cache lookup work. A later MTR wrapper fast-path audit rejected
+  cache lookup work. A follow-up delta-base buffer reuse slice preserves the
+  same cache admission, durable records, payload bytes, replay, and checkpoint
+  behavior, but standalone base refreshes now reuse an existing unshared cached
+  page buffer instead of allocating a new page vector. Primitive coverage
+  asserts the `delta_base_page_buffer_reuse_records` diagnostic and production
+  probes expose it for attribution. A later MTR wrapper fast-path audit rejected
   caching
   `ownerless_page_write_uses_transaction_release()` per publish pass or
   reusing the tracked-page lookup for release after ownerless stress found
