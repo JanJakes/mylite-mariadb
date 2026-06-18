@@ -2205,8 +2205,8 @@ Tasks:
    stale-reader `.shm` rebuilds
    checkpoint retained reader-boundary WAL before segment rebuild, with focused
    dropped, same-schema and cross-schema same-statement multi-dropped,
-   renamed, truncated, force-rebuilt file-per-table, multi-rename swap, and
-   multi-table schema-drop SQL coverage.
+   renamed, truncated, force-rebuilt file-per-table, same-schema and
+   cross-schema multi-rename swap, and multi-table schema-drop SQL coverage.
    Native InnoDB redo/checkpoint reconciliation is still incomplete:
    MyLite now reclaims retained page-version records on non-read-only runtime
    close after forcing a native InnoDB checkpoint, advancing local native LSN
