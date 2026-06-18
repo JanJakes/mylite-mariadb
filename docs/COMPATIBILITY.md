@@ -482,15 +482,30 @@ disabled unless a diagnostic run explicitly opts in.
 The same opt-in profile now also emits `libmylite_exec_result_*` rows that
 separate direct text execution into native `mysql_query()`, affected-row and
 insert-id capture, result draining, result/no-result classification,
-current-schema update, and handle status-update buckets. These rows are
-diagnostics for profiled WordPress and mysqli runs only; they do not change SQL
-semantics, public C API compatibility, native storage behavior, or default CI
-timing overhead.
+current-schema update, handle status-update buckets, and native-control
+fast-path calls. These rows are diagnostics for profiled WordPress and mysqli
+runs only; they do not change SQL semantics, public C API compatibility, native
+storage behavior, or default CI timing overhead.
 Profiled mysqli runs also split total query elapsed time into
 `query_verb_*` buckets for result queries, DML, DDL, connection state,
 transaction, lock, call, and other first-keyword classes so WordPress timing
 summaries can identify which SQL class dominates native execution time before
 choosing an optimization target.
+Non-ownerless direct execution now fast-paths exact simple `COMMIT`, full
+`ROLLBACK`, and `SET autocommit = 0|1` text statements through MariaDB's native
+C API after the query-verb profile showed repeated WordPress PHPUnit
+transaction scaffolding dominating native `mysql_query()` time. Broader SQL
+forms such as `START TRANSACTION`, `COMMIT AND CHAIN`, `ROLLBACK TO SAVEPOINT`,
+and general `SET` expressions still use MariaDB SQL parsing, and ownerless
+execution keeps the existing statement-lock, page-version, and publication
+path. A focused production profiled `^Tests_DB` sample after the fast path
+reported `libmylite_exec_result_native_control_calls=1310`,
+`libmylite_exec_result_native_control_ms_total=1404.955`,
+`libmylite_exec_result_mysql_query_ms_total=3946.376`,
+`query_ms_total=5432.945`, and
+`wordpress_phpunit_reported_seconds=7.914`; the preceding query-verb sample
+reported `libmylite_exec_result_mysql_query_ms_total=6891.775`,
+`query_ms_total=6979.728`, and `wordpress_phpunit_reported_seconds=9.596`.
 The stats-enabled embedded performance probe now also reports ownerless
 prepared-DML native `mysql_stmt_prepare()` and `mysql_stmt_close()` call counts
 and elapsed time, plus per-insert summaries, so the remaining prepared-write

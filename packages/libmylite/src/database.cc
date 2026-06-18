@@ -381,6 +381,9 @@ enum ExecResultPerfStatIndex : std::size_t {
     EXEC_RESULT_PERF_NO_RESULT_SETS,
     EXEC_RESULT_PERF_CURRENT_SCHEMA_NS,
     EXEC_RESULT_PERF_STATUS_UPDATE_NS,
+    EXEC_RESULT_PERF_NATIVE_CONTROL_CALLS,
+    EXEC_RESULT_PERF_NATIVE_CONTROL_NS,
+    EXEC_RESULT_PERF_NATIVE_CONTROL_ERRORS,
     EXEC_RESULT_PERF_STAT_COUNT
 };
 
@@ -1372,6 +1375,14 @@ enum class OwnerlessTransactionIsolation {
     ReadCommitted,
     RepeatableRead,
     Serializable,
+};
+
+enum class NativeControlStatement {
+    None,
+    Commit,
+    Rollback,
+    AutocommitOff,
+    AutocommitOn,
 };
 
 struct mylite_db {
@@ -2570,6 +2581,13 @@ int store_and_emit_result(
     bool *has_result
 );
 int drain_remaining_query_results(mylite_db &db);
+NativeControlStatement classify_native_control_statement(std::string_view sql);
+bool sql_tokens_have_only_optional_trailing_semicolon(
+    const std::array<std::string_view, 6> &tokens,
+    std::size_t token_count,
+    std::size_t required_count
+);
+int execute_native_control_statement(mylite_db &db, NativeControlStatement statement);
 void rollback_active_transaction_after_deadlock(mylite_db &db);
 void rollback_failed_ownerless_implicit_statement(
     mylite_db &db,
@@ -4553,7 +4571,27 @@ int exec_result_impl(
         OwnerlessStatementPlainReadScope native_startup_plain_read(
             db->ownerless_native_startup_refresh_lsn != 0U
         );
+        const NativeControlStatement native_control_statement =
+            classify_native_control_statement(sql);
         std::uint64_t stage_start_ns = exec_result_perf_start_ns();
+        if (native_control_statement != NativeControlStatement::None) {
+            exec_result_perf_add(EXEC_RESULT_PERF_NATIVE_CONTROL_CALLS, 1U);
+            if (execute_native_control_statement(*db, native_control_statement) != MYLITE_OK) {
+                exec_result_perf_add_elapsed(EXEC_RESULT_PERF_NATIVE_CONTROL_NS, stage_start_ns);
+                exec_result_perf_add(EXEC_RESULT_PERF_NATIVE_CONTROL_ERRORS, 1U);
+                set_mariadb_error(*db);
+                return copy_error_message(*db, errmsg);
+            }
+            exec_result_perf_add_elapsed(EXEC_RESULT_PERF_NATIVE_CONTROL_NS, stage_start_ns);
+            exec_result_perf_add(EXEC_RESULT_PERF_NO_RESULT_SETS, 1U);
+            stage_start_ns = exec_result_perf_start_ns();
+            db->changes = 0;
+            db->last_insert_id = static_cast<unsigned long long>(mysql_insert_id(&db->mysql));
+            exec_result_perf_add_elapsed(EXEC_RESULT_PERF_STATUS_UPDATE_NS, stage_start_ns);
+            return MYLITE_OK;
+        }
+
+        stage_start_ns = exec_result_perf_start_ns();
         if (mysql_query(&db->mysql, sql) != 0) {
             exec_result_perf_add_elapsed(EXEC_RESULT_PERF_MYSQL_QUERY_NS, stage_start_ns);
             exec_result_perf_add(EXEC_RESULT_PERF_MYSQL_QUERY_ERRORS, 1U);
@@ -7295,6 +7333,78 @@ int drain_remaining_query_results(mylite_db &db) {
         }
     }
     return MYLITE_OK;
+}
+
+NativeControlStatement classify_native_control_statement(std::string_view sql) {
+    std::size_t offset = 0;
+    std::array<std::string_view, 6> tokens;
+    std::size_t token_count = 0;
+    if (!next_sql_token(sql, offset, tokens[token_count])) {
+        return NativeControlStatement::None;
+    }
+    ++token_count;
+    if (!token_in(tokens[0], "COMMIT", "ROLLBACK", "SET")) {
+        return NativeControlStatement::None;
+    }
+
+    while (token_count < tokens.size() && next_sql_token(sql, offset, tokens[token_count])) {
+        ++token_count;
+    }
+    std::string_view extra_token;
+    if (next_sql_token(sql, offset, extra_token)) {
+        return NativeControlStatement::None;
+    }
+
+    if (sql_tokens_have_only_optional_trailing_semicolon(tokens, token_count, 1U)) {
+        if (token_equals(tokens[0], "COMMIT")) {
+            return NativeControlStatement::Commit;
+        }
+        if (token_equals(tokens[0], "ROLLBACK")) {
+            return NativeControlStatement::Rollback;
+        }
+    }
+
+    if (!sql_tokens_have_only_optional_trailing_semicolon(tokens, token_count, 4U)) {
+        return NativeControlStatement::None;
+    }
+    if (!token_equals(tokens[0], "SET") || !token_equals(tokens[1], "AUTOCOMMIT") ||
+        !token_equals(tokens[2], "=")) {
+        return NativeControlStatement::None;
+    }
+    if (token_equals(tokens[3], "0")) {
+        return NativeControlStatement::AutocommitOff;
+    }
+    if (token_equals(tokens[3], "1")) {
+        return NativeControlStatement::AutocommitOn;
+    }
+    return NativeControlStatement::None;
+}
+
+bool sql_tokens_have_only_optional_trailing_semicolon(
+    const std::array<std::string_view, 6> &tokens,
+    std::size_t token_count,
+    std::size_t required_count
+) {
+    if (token_count == required_count) {
+        return true;
+    }
+    return token_count == required_count + 1U && token_equals(tokens[required_count], ";");
+}
+
+int execute_native_control_statement(mylite_db &db, NativeControlStatement statement) {
+    switch (statement) {
+    case NativeControlStatement::Commit:
+        return mysql_commit(&db.mysql) == 0 ? MYLITE_OK : MYLITE_ERROR;
+    case NativeControlStatement::Rollback:
+        return mysql_rollback(&db.mysql) == 0 ? MYLITE_OK : MYLITE_ERROR;
+    case NativeControlStatement::AutocommitOff:
+        return mysql_autocommit(&db.mysql, 0) == 0 ? MYLITE_OK : MYLITE_ERROR;
+    case NativeControlStatement::AutocommitOn:
+        return mysql_autocommit(&db.mysql, 1) == 0 ? MYLITE_OK : MYLITE_ERROR;
+    case NativeControlStatement::None:
+        break;
+    }
+    return MYLITE_MISUSE;
 }
 
 void rollback_active_transaction_after_deadlock(mylite_db &db) {

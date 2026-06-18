@@ -31,6 +31,9 @@ register_shutdown_function('remove_tree', $path);
 $db = new MyLite\MySQLi($path);
 expect_true($db->query('CREATE DATABASE app') === true, 'CREATE DATABASE failed');
 expect_true($db->query('USE app') === true, 'USE failed');
+expect_true($db->query('SET autocommit = 0') === true, 'SET autocommit off failed');
+expect_true($db->query('ROLLBACK') === true, 'ROLLBACK failed');
+expect_true($db->query('SET autocommit = 1') === true, 'SET autocommit on failed');
 expect_true(
     $db->query(
         'CREATE TABLE profile_notes (id INT PRIMARY KEY, body VARCHAR(32)) ENGINE=MyISAM'

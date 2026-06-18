@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <dirent.h>
 #include <ftw.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,9 +17,30 @@ typedef struct select_context {
     const char *expected_label;
 } select_context;
 
+typedef struct scalar_context {
+    int rows;
+    const char *expected_value;
+} scalar_context;
+
 typedef struct metadata_context {
     int rows;
 } metadata_context;
+
+enum exec_result_perf_stat_index {
+    EXEC_RESULT_PERF_CALLS = 0,
+    EXEC_RESULT_PERF_MYSQL_QUERY_NS,
+    EXEC_RESULT_PERF_MYSQL_QUERY_ERRORS,
+    EXEC_RESULT_PERF_AFFECTED_ROWS_NS,
+    EXEC_RESULT_PERF_STORE_RESULT_NS,
+    EXEC_RESULT_PERF_RESULT_SETS,
+    EXEC_RESULT_PERF_NO_RESULT_SETS,
+    EXEC_RESULT_PERF_CURRENT_SCHEMA_NS,
+    EXEC_RESULT_PERF_STATUS_UPDATE_NS,
+    EXEC_RESULT_PERF_NATIVE_CONTROL_CALLS,
+    EXEC_RESULT_PERF_NATIVE_CONTROL_NS,
+    EXEC_RESULT_PERF_NATIVE_CONTROL_ERRORS,
+    EXEC_RESULT_PERF_STAT_COUNT
+};
 
 typedef struct metadata_only_context {
     int metadata_calls;
@@ -32,7 +54,9 @@ static void test_ordinary_write_does_not_publish_ownerless_page_log(void);
 static void test_stored_procedure_call_callback(void);
 static void test_callback_abort(void);
 static void test_syntax_error_diagnostics(void);
+static void test_native_control_fast_path(void);
 static int select_callback(void *ctx, int column_count, char **values, char **column_names);
+static int scalar_callback(void *ctx, int column_count, char **values, char **column_names);
 static int metadata_callback(
     void *ctx,
     int column_count,
@@ -61,6 +85,7 @@ static int stored_procedure_callback(
 static int abort_callback(void *ctx, int column_count, char **values, char **column_names);
 static mylite_db *open_database(const char *root, char **database_path);
 static void exec_ok(mylite_db *db, const char *sql);
+static void expect_scalar(mylite_db *db, const char *sql, const char *expected_value);
 static char *make_temp_root(void);
 static char *path_join(const char *directory, const char *name);
 static int is_directory(const char *path);
@@ -73,6 +98,9 @@ static int remove_tree_entry(
     int type_flag,
     struct FTW *walk
 );
+void mylite_exec_result_perf_set_enabled(int enabled);
+void mylite_exec_result_perf_reset(void);
+void mylite_exec_result_perf_read(uint64_t *out_values, size_t value_count);
 
 int main(void) {
     test_select_callback();
@@ -82,6 +110,7 @@ int main(void) {
     test_stored_procedure_call_callback();
     test_callback_abort();
     test_syntax_error_diagnostics();
+    test_native_control_fast_path();
     return 0;
 }
 
@@ -287,6 +316,60 @@ static void test_syntax_error_diagnostics(void) {
     free(root);
 }
 
+static void test_native_control_fast_path(void) {
+    char *root = make_temp_root();
+    char *database_path = NULL;
+    mylite_db *db = open_database(root, &database_path);
+    uint64_t perf[EXEC_RESULT_PERF_STAT_COUNT] = {0};
+    uint64_t native_control_calls_before_rollback_to = 0;
+
+    mylite_exec_result_perf_reset();
+    mylite_exec_result_perf_set_enabled(1);
+
+    exec_ok(db, "CREATE DATABASE app");
+    exec_ok(db, "CREATE TABLE app.native_control_probe (id INT PRIMARY KEY) ENGINE=InnoDB");
+    exec_ok(db, "SET autocommit = 0");
+    assert(mylite_changes(db) == 0);
+    exec_ok(db, "START TRANSACTION");
+    exec_ok(db, "INSERT INTO app.native_control_probe VALUES (1)");
+    exec_ok(db, "ROLLBACK");
+    assert(mylite_changes(db) == 0);
+    expect_scalar(db, "SELECT COUNT(*) FROM app.native_control_probe", "0");
+
+    exec_ok(db, "START TRANSACTION");
+    exec_ok(db, "INSERT INTO app.native_control_probe VALUES (1)");
+    exec_ok(db, "SAVEPOINT before_extra");
+    exec_ok(db, "INSERT INTO app.native_control_probe VALUES (2)");
+    mylite_exec_result_perf_read(perf, EXEC_RESULT_PERF_STAT_COUNT);
+    native_control_calls_before_rollback_to = perf[EXEC_RESULT_PERF_NATIVE_CONTROL_CALLS];
+    exec_ok(db, "ROLLBACK TO SAVEPOINT before_extra");
+    mylite_exec_result_perf_read(perf, EXEC_RESULT_PERF_STAT_COUNT);
+    assert(perf[EXEC_RESULT_PERF_NATIVE_CONTROL_CALLS] == native_control_calls_before_rollback_to);
+    exec_ok(db, "COMMIT");
+    assert(mylite_changes(db) == 0);
+    expect_scalar(db, "SELECT COUNT(*) FROM app.native_control_probe", "1");
+
+    exec_ok(db, "SET autocommit = 1;");
+    assert(mylite_changes(db) == 0);
+
+    exec_ok(db, "SET autocommit = 0");
+    exec_ok(db, "INSERT INTO app.native_control_probe VALUES (2)");
+    exec_ok(db, "SET autocommit = 1;");
+    exec_ok(db, "ROLLBACK");
+    expect_scalar(db, "SELECT COUNT(*) FROM app.native_control_probe", "2");
+
+    mylite_exec_result_perf_set_enabled(0);
+    mylite_exec_result_perf_read(perf, EXEC_RESULT_PERF_STAT_COUNT);
+    assert(perf[EXEC_RESULT_PERF_NATIVE_CONTROL_CALLS] == 7U);
+    assert(perf[EXEC_RESULT_PERF_NATIVE_CONTROL_NS] > 0U);
+    assert(perf[EXEC_RESULT_PERF_NATIVE_CONTROL_ERRORS] == 0U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(database_path);
+    remove_tree(root);
+    free(root);
+}
+
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): required callback signature.
 static int select_callback(void *ctx, int column_count, char **values, char **column_names) {
     select_context *select_ctx = (select_context *)ctx;
@@ -297,6 +380,18 @@ static int select_callback(void *ctx, int column_count, char **values, char **co
     assert(strcmp(values[0], "1") == 0);
     assert(values[1] == NULL);
     ++select_ctx->rows;
+    return 0;
+}
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): required callback signature.
+static int scalar_callback(void *ctx, int column_count, char **values, char **column_names) {
+    scalar_context *scalar_ctx = (scalar_context *)ctx;
+    (void)column_names;
+
+    assert(column_count == 1);
+    assert(values[0] != NULL);
+    assert(strcmp(values[0], scalar_ctx->expected_value) == 0);
+    ++scalar_ctx->rows;
     return 0;
 }
 
@@ -432,6 +527,12 @@ static mylite_db *open_database(const char *root, char **database_path) {
 
 static void exec_ok(mylite_db *db, const char *sql) {
     assert(mylite_exec(db, sql, NULL, NULL, NULL) == MYLITE_OK);
+}
+
+static void expect_scalar(mylite_db *db, const char *sql, const char *expected_value) {
+    scalar_context ctx = {.rows = 0, .expected_value = expected_value};
+    assert(mylite_exec(db, sql, scalar_callback, &ctx, NULL) == MYLITE_OK);
+    assert(ctx.rows == 1);
 }
 
 static char *make_temp_root(void) {

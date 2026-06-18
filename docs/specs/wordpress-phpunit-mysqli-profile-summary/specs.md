@@ -54,7 +54,8 @@ The selected keys summarize the major buckets needed for the next optimization
 decision: open/close, query call mix, query total/average, cache hits/misses,
 query-verb totals, prepare/cache clear/status sync, result/no-result execution,
 result row count, fetch-object conversion, and direct libmylite text-execution
-subphases when the bundled libmylite profile counters are available.
+subphases, including native-control fast-path calls, when the bundled libmylite
+profile counters are available.
 
 ## Compatibility Impact
 
@@ -171,3 +172,7 @@ git diff --check
   the non-isolated shard and ownerless/native page-publication cost, not PHP
   fetch-object conversion or repeated full open/close in the keepalive-enabled
   non-isolated shard.
+- The later `libmylite-native-control-fast-path` slice added last-profile
+  direct-execution native-control rows to the same selected summary set so
+  profiled WordPress runs can show how many exact control statements bypassed
+  native text parsing.
