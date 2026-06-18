@@ -1976,6 +1976,8 @@ bool ownerless_connection_is_in_explicit_transaction(const mylite_db &db);
 bool ownerless_transaction_has_local_write_or_locking_read(const mylite_db &db);
 bool ownerless_connection_allows_global_refresh(const mylite_db &db, bool allow_page_version_reads);
 bool statement_allows_ownerless_page_version_reads(const SqlPolicyTokens &tokens);
+bool statement_is_tableless_ownerless_plain_read(const SqlPolicyTokens &tokens);
+bool ownerless_select_statement_has_table_reference(const SqlPolicyTokens &tokens);
 std::uint64_t ownerless_handle_observed_read_lsn(const mylite_db &db);
 std::uint64_t ownerless_monotonic_page_version_read_lsn(
     const mylite_db &db,
@@ -3229,13 +3231,15 @@ int mylite_step(mylite_stmt *stmt) {
             !statement_uses_temporary_table &&
             (sql_statement_needs_ownerless_current_read_refresh(policy_tokens) ||
              ownerless_transaction_end_has_local_write(*stmt->db, policy_tokens));
+        const bool tableless_ownerless_plain_read =
+            statement_is_tableless_ownerless_plain_read(policy_tokens);
         ownerless_stage_start =
             ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
         bool page_version_reads_enabled = false;
         const int refresh_result = refresh_ownerless_external_pages_before_statement(
             *stmt->db,
             allow_page_version_reads,
-            !statement_uses_temporary_table &&
+            !statement_uses_temporary_table && !tableless_ownerless_plain_read &&
                 (ownerless_connection_allows_global_refresh(*stmt->db, allow_page_version_reads) ||
                  allow_current_read_refresh),
             ownerless_dictionary_ddl_statement(policy_tokens),
@@ -4674,11 +4678,13 @@ int exec_result_impl(
         !statement_uses_temporary_table &&
         (sql_statement_needs_ownerless_current_read_refresh(policy_tokens) ||
          ownerless_transaction_end_has_local_write(*db, policy_tokens));
+    const bool tableless_ownerless_plain_read =
+        statement_is_tableless_ownerless_plain_read(policy_tokens);
     bool page_version_reads_enabled = false;
     const int refresh_result = refresh_ownerless_external_pages_before_statement(
         *db,
         allow_page_version_reads,
-        !statement_uses_temporary_table &&
+        !statement_uses_temporary_table && !tableless_ownerless_plain_read &&
             (ownerless_connection_allows_global_refresh(*db, allow_page_version_reads) ||
              allow_current_read_refresh),
         ownerless_dictionary_ddl_statement(policy_tokens),
@@ -13855,9 +13861,32 @@ bool statement_allows_ownerless_page_version_reads(const SqlPolicyTokens &tokens
     if (!token_in(first, "SELECT", "WITH")) {
         return false;
     }
+    if (!ownerless_select_statement_has_table_reference(tokens)) {
+        return false;
+    }
 
     return !has_identifier_token(tokens, "UPDATE", 1) &&
            !has_identifier_token(tokens, "SHARE", 1) && !has_identifier_token(tokens, "LOCK", 1);
+}
+
+bool statement_is_tableless_ownerless_plain_read(const SqlPolicyTokens &tokens) {
+    const std::string_view first = identifier_token_at(tokens, 0);
+    if (!token_in(first, "SELECT", "WITH")) {
+        return false;
+    }
+    if (ownerless_select_statement_has_table_reference(tokens)) {
+        return false;
+    }
+    return !sql_statement_uses_locking_read(tokens);
+}
+
+bool ownerless_select_statement_has_table_reference(const SqlPolicyTokens &tokens) {
+    for (std::size_t index = 1U; index < tokens.count; ++index) {
+        if (token_in(tokens.values[index], "FROM", "JOIN")) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool ownerless_connection_is_in_explicit_transaction(const mylite_db &db) {

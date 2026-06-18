@@ -693,6 +693,7 @@ static void test_ownerless_live_snapshot_pin_synthesizes_page_boundary(void);
 static void test_killed_ownerless_snapshot_pin_allows_live_page_log_reclaim(void);
 static void test_process_reads_committed_external_update(void);
 static void test_prepared_process_reads_committed_external_update(void);
+static void test_ownerless_tableless_select_skips_page_visibility(void);
 static void test_ownerless_peer_uncommitted_update_stays_hidden(void);
 static void test_transaction_first_read_sees_committed_external_update(void);
 static void test_prepared_transaction_first_read_sees_committed_external_update(void);
@@ -3655,6 +3656,10 @@ int main(int argc, char **argv) {
         test_prepared_process_reads_committed_external_update();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "tableless-select-fast-path") == 0) {
+        test_ownerless_tableless_select_skips_page_visibility();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "uncommitted-peer-hidden") == 0) {
         test_ownerless_peer_uncommitted_update_stays_hidden();
         return 0;
@@ -4776,7 +4781,8 @@ int main(int argc, char **argv) {
             stderr
         );
         fputs(
-            "prepared-committed-read|local-write-first-read|isolation|"
+            "prepared-committed-read|tableless-select-fast-path|"
+            "local-write-first-read|isolation|"
             "shared-readonly|checkpoint-evidence|checkpoint-lsn-noop-elision|native-reclaim|"
             "native-file-op-marker-drain|"
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
@@ -4943,6 +4949,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_purge_preserves_cross_process_snapshot),
     OWNERLESS_SQL_TEST_CASE(test_process_reads_committed_external_update),
     OWNERLESS_SQL_TEST_CASE(test_prepared_process_reads_committed_external_update),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_tableless_select_skips_page_visibility),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_peer_uncommitted_update_stays_hidden),
     OWNERLESS_SQL_TEST_CASE(test_transaction_first_read_sees_committed_external_update),
     OWNERLESS_SQL_TEST_CASE(test_prepared_transaction_first_read_sees_committed_external_update),
@@ -7934,6 +7941,49 @@ static void test_prepared_process_reads_committed_external_update(void) {
     assert(mylite_step(stmt) == MYLITE_DONE);
     assert(mylite_finalize(stmt) == MYLITE_OK);
     assert(mylite_close(reader) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_tableless_select_skips_page_visibility(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-tableless-select.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    mylite_stmt *stmt;
+    const char *tail;
+    mylite_ownerless_pressure_info info = {0};
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT 1") == 1U);
+    info.size = sizeof(info);
+    assert(mylite_ownerless_pressure_status(db, &info) == MYLITE_OK);
+    assert(info.active_page_version_pin_count == 0U);
+    assert(info.oldest_page_version_pin_lsn == 0U);
+
+    stmt = NULL;
+    tail = NULL;
+    assert(mylite_prepare(db, "SELECT 1", MYLITE_NUL_TERMINATED, &stmt, &tail) == MYLITE_OK);
+    assert(stmt != NULL);
+    assert(tail != NULL && *tail == '\0');
+    assert(mylite_step(stmt) == MYLITE_ROW);
+    assert(mylite_column_uint64(stmt, 0) == 1U);
+    memset(&info, 0, sizeof(info));
+    info.size = sizeof(info);
+    assert(mylite_ownerless_pressure_status(db, &info) == MYLITE_OK);
+    assert(info.active_page_version_pin_count == 0U);
+    assert(info.oldest_page_version_pin_lsn == 0U);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+
+    assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);
     free(runtime_root);

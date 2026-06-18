@@ -192,12 +192,13 @@ records while retaining newer page-version offsets in the shared index.
 No-live-process ownerless recovery applies visible page-version records to
 existing native InnoDB tablespace files before rebuilding `.shm`, using the
 same commit-first latest-visible ordering as page-version reads. Non-locking
-direct or prepared `SELECT` statements may read page versions at the
-page-visible LSN in autocommit mode and active transactions. Transactions that
-already performed local writes or locking reads evict only clean buffer-pool
-pages before those reads, preserving dirty local pages; locking reads, DML,
-DDL, and DDL-created tablespace replay still use the conservative native-file
-bridge.
+direct or prepared `SELECT` statements with table references may read page
+versions at the page-visible LSN in autocommit mode and active transactions;
+tableless probe reads such as `SELECT 1` skip ownerless page-version setup.
+Transactions that already performed local writes or locking reads evict only
+clean buffer-pool pages before those reads, preserving dirty local pages;
+locking reads, DML, DDL, and DDL-created tablespace replay still use the
+conservative native-file bridge.
 Guarded ownerless SQL opens serialize core `mysql.*` compatibility-table
 bootstrap through `mylite-concurrency.lock` and serialize the wider embedded
 runtime startup, connection, dictionary-generation initialization, and final
@@ -377,9 +378,10 @@ Initial implementation status: `mylite_prepare()` wraps MariaDB prepared
 statements in embedded builds. `tail` is set to the end of the resolved SQL
 text on successful single-statement prepares. `mylite_close()` returns
 `MYLITE_BUSY` while statements are active. Ownerless non-locking prepared
-`SELECT` execution uses the same committed page-version visibility setup as
-direct `mylite_exec()` statements for autocommit reads and active
-transactions. `mylite_reset()` preserves the MariaDB reset/drain path for
+`SELECT` execution with table references uses the same committed page-version
+visibility setup as direct `mylite_exec()` statements for autocommit reads and
+active transactions, while tableless prepared reads skip that ownerless
+visibility setup. `mylite_reset()` preserves the MariaDB reset/drain path for
 result-bearing or failed statements; completed no-result statements may be made
 ready for re-execution through MyLite's local statement state when no result
 metadata remains. Prepared `CALL` statements are currently rejected; use direct

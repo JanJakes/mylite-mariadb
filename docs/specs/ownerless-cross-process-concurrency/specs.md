@@ -543,13 +543,17 @@ not rebuild live peer state from stale file-cache observations. Page-version
 segments are active in the production `.shm` layout for rebuild and checkpoint
 bookkeeping, and `.shm` rebuilds replay durable page-version WAL records back
 into that index. Guarded ownerless SQL allows page-version reads for direct or
-prepared `SELECT`/`WITH` statements at a live page-version read LSN while the
-page-visible LSN remains the durable recovery/checkpoint boundary. Eligible
+prepared `SELECT`/`WITH` statements with table references at a live
+page-version read LSN while the page-visible LSN remains the durable
+recovery/checkpoint boundary. Non-locking tableless `SELECT`/`WITH`
+statements with no `FROM` or `JOIN` token skip page-version reads and global
+page refresh because MariaDB has no storage table to open for them. Eligible
 handles keep the page-version read LSN monotonic and open a shared read pin
 before clean-page refresh. The zero-boundary path also opens the baseline read
-pin and enables the plain-read scope for eligible `SELECT`/`WITH` statements
-without enabling external page visibility. Successful direct reads keep that
-pin until a replacement read, non-read/current-read statement, error, or close;
+pin and enables the plain-read scope for eligible table-reading
+`SELECT`/`WITH` statements without enabling external page visibility.
+Successful direct reads keep that pin until a replacement read,
+non-read/current-read statement, error, or close;
 autocommit live raw-latest promotion is disabled while another active native
 transaction or an active redo reservation is present. A separate repeatable-read
 snapshot pin only retains WAL for that reader, and can permit unrelated
@@ -857,7 +861,14 @@ The design must be fast in the common case:
   `mysql_server_init()`, `52.325 ms` in server-component plugin
   initialization, `45.038 ms` in InnoDB storage-engine initialization, and
   `44.983 ms` in InnoDB `srv_start()`, keeping the remaining startup target on
-  native MariaDB/InnoDB startup rather than ownerless coordination.
+  native MariaDB/InnoDB startup rather than ownerless coordination. Ownerless
+  direct/prepared tableless `SELECT 1` probes now skip page-version read setup
+  and global page refresh. A fresh reduced production sample before that
+  fast-path showed sub-millisecond active runtime reconnects, but ownerless
+  direct/prepared `SELECT 1` throughput at only about `0.66x` ordinary. A
+  reduced production sample after the fast-path moved the direct ratio to
+  `0.7871` and the prepared ratio to `0.9292`, leaving write-path
+  page-publication/checkpoint work as the larger remaining performance gap.
 - Page-version lookup should be O(1) average by `(space_id, page_no)` with a
   short version chain filtered by reader end mark.
 - Ordinary exclusive opens must stay on the native MariaDB embedded hot path:
