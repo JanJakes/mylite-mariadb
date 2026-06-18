@@ -4114,7 +4114,11 @@ Tasks:
    window for seeds `288` through `319` at rounds `2`, using the same explicit
    FK graph whole-seed retry budget of `10` so seeds `288`, `294`, `298`,
    `304`, `308`, and `310` can recover after transient raw MariaDB `1213`
-   deadlock exits.
+   deadlock exits. The `ownerless-external-seed-320-351-replay` follow-up
+   records the next replay window for seeds `320` through `351` at rounds `2`,
+   using the same explicit FK graph whole-seed retry budget of `10` so seed
+   `344` can recover on attempt `3` and seed `348` can recover on attempt `2`
+   after transient raw MariaDB `1213` deadlock exits.
    Separate foreign-key graph stress
    coverage runs with
    `MYLITE_OWNERLESS_FK_GRAPH_STRESS_ROUNDS=48`, concurrent ownerless workers
@@ -4365,19 +4369,19 @@ Tasks:
    transaction, DDL stress, and FK graph generated traces for deterministic
    external stress probes, including focused Docker-backed replay for the
    default DDL seed set and contiguous combined random transaction plus DDL
-   seed-sweep replay windows through seed `319`; the `16` through `31`,
+   seed-sweep replay windows through seed `351`; the `16` through `31`,
    `32` through `63`, `64` through `95`, `96` through `127`, and `128`
    through `159`, `160` through `191`, `192` through `223`, and `224` through
-   `255`, `256` through `287`, and `288` through `319` replays also cover FK
-   graph seeds at rounds `2`. FK graph now
+   `255`, `256` through `287`, `288` through `319`, and `320` through `351`
+   replays also cover FK graph seeds at rounds `2`. FK graph now
    participates in the
    dependency-free combined seed-sweep command-plan windows through seed `63`,
    and focused Docker-backed FK graph seed
    replay has passed the default seed set plus the `16` through `31`, `32`
    through `63`, `64` through `95`, `96` through `127`, `128` through `159`,
    `160` through `191`, `192` through `223`, `224` through `255`, and `256`
-   through `287`, and `288` through `319` windows with bounded whole-seed
-   retries for transient raw MariaDB deadlock exits.
+   through `287`, `288` through `319`, and `320` through `351` windows with
+   bounded whole-seed retries for transient raw MariaDB deadlock exits.
 
 Exit criteria:
 
