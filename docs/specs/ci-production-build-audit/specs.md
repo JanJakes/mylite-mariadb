@@ -180,6 +180,30 @@ CMake-backed CI job:
 - `cmake --build --preset format-check-prod`: passed.
 - `git diff --check`: passed.
 
+Follow-up verification after forbidding process-isolated child profiling in
+the critical WordPress PHPUnit timing steps:
+
+- `bash -n tools/check-ci-production-builds`: passed.
+- `tools/check-ci-production-builds`: passed and reported
+  `ci_production_build_audit_ok`.
+- `ctest --preset prod -R '^tools\.ci-production-builds$'
+  --output-on-failure`: passed, 1/1 tests, `1.06 sec`.
+- Guarded production WordPress focused deferred-reconnect run with
+  `MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES=0`,
+  `MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD=0`, and
+  `--filter
+  Tests_Functions_WpUniquePrefixedId::test_should_create_unique_prefixed_ids`:
+  passed, 7 tests, `wordpress_phpunit_shell_real_seconds=47.274`, and
+  `wordpress_phpunit_reported_seconds=27.837`.
+- Guarded production WordPress focused eager-reconnect run with
+  `MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES=0`,
+  `MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD=1`, and
+  `--filter
+  Tests_Formatting_Emoji::test_print_emoji_detection_script_on_front_end`:
+  passed, 2 tests, `wordpress_phpunit_shell_real_seconds=20.408`, and
+  `wordpress_phpunit_reported_seconds=9.373`.
+- `git diff --check`: passed.
+
 ## Acceptance Criteria
 
 - CI has a visible production-build audit step after checkout in the normal
@@ -193,6 +217,8 @@ CMake-backed CI job:
   JUnit slow-test timing report on the critical CI timing path.
 - The audit fails if production WordPress PHPUnit phases stop suppressing the
   inherited PHPUnit config logger on the critical CI timing path.
+- The audit fails if the process-isolated WordPress PHPUnit timing steps enable
+  child-process profiling on the critical CI timing path.
 - The audit fails if a workflow CTest command reintroduces parallel MariaDB
   embedded runtime execution.
 - The audit fails if the WordPress job stops excluding the full `Tests_DB*`

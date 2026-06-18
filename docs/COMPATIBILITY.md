@@ -386,6 +386,11 @@ child mode used by CI: parent child-process profiling and defensive static
 `wpdb` scanning are off unless a diagnostic run explicitly sets
 `MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES=1` or
 `MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN=1`.
+The CI audit also forbids the deferred- and eager-reconnect process-isolated
+timing steps from overriding child-process profiling back on, so their
+published wall timings stay on the lean production path; step-level timings
+and the shared timing summary remain visible without per-child diagnostic
+instrumentation.
 Ownerless statement startup now skips the heavier dictionary ready-wait path
 when the handle has already observed the same stable idle dictionary
 generation. Active dictionary DDL and changed generations still use the
@@ -890,7 +895,10 @@ eager-reconnect shard as 22 tests in `121.294s` shell real, and the
 non-isolated remaining shard as 28,687 tests in `2757.813s` shell real. This
 does not reduce the ordinary WordPress suite volume, but it keeps
 process-isolated timing from being inflated by unrelated non-isolated methods
-in large mixed classes.
+in large mixed classes. The current CI path keeps those exact filters but runs
+without child-process profiling by default; diagnostic child averages remain
+available through `MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES=1` outside
+the critical timing steps.
 The long non-isolated shard now also excludes the whole `Tests_DB*` class
 family with a leading `^(?!Tests_DB)` negative lookahead, matching the
 dedicated `^Tests_DB` database shard and preventing database-prefix tests such

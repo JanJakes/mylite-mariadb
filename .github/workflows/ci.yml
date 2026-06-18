@@ -275,7 +275,6 @@ jobs:
           MYLITE_WORDPRESS_PHASE: phpunit
           MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
           MYLITE_WORDPRESS_TIMING_LABEL: phpunit-deferred-reconnect
-          MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES: "1"
           MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD: "0"
         run: |
           set -euo pipefail
@@ -288,7 +287,6 @@ jobs:
           MYLITE_WORDPRESS_PHASE: phpunit
           MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
           MYLITE_WORDPRESS_TIMING_LABEL: phpunit-eager-reconnect
-          MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES: "1"
           MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD: "1"
         run: |
           set -euo pipefail
