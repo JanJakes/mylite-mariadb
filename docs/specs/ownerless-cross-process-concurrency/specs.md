@@ -1643,7 +1643,13 @@ Tasks:
    from an existing AUTO_INCREMENT column while retaining a unique secondary
    index, verifies the live peer sees the replacement clustered key, and
    preserves InnoDB's no-reuse gap after a duplicate replacement-key write
-   consumes an AUTO_INCREMENT value.
+   consumes an AUTO_INCREMENT value. The registry header now carries a shared
+   native-checkpoint pending bit that is set only when an ownerless publish
+   creates or raises a table high watermark; the final no-live ownerless close
+   path drains that bit through the existing native checkpoint/reclaim flow
+   before clearing it, so forced `.shm` rebuild seeds from native pages that
+   include consumed AUTO_INCREMENT reservations without adding per-insert
+   durable writes.
    Traditional native `LOCK_AUTO_INC` table locks
    continue to mirror through the shared InnoDB lock registry.
    Ownerless embedded waits use the current SQL thread's session lock-wait

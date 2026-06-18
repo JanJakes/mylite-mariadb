@@ -35,6 +35,12 @@ the new primary key and still receives the next implicit AUTO_INCREMENT value.
   `get_auto_increment()` against InnoDB table metadata, while MyLite's
   ownerless AUTO_INCREMENT registry seeds and publishes a table-ID-keyed
   monotonic high watermark across processes.
+- `mariadb/storage/innobase/row/row0ins.cc` can persist
+  `PAGE_ROOT_AUTO_INC` as part of clustered insert work, but ownerless shutdown
+  can suppress ordinary native checkpoint publication unless a durable or shared
+  checkpoint reason tells the no-live close path to drain native state. A
+  volatile-only ownerless registry is therefore not enough when `.shm` is later
+  rebuilt from native InnoDB pages.
 - Existing ownerless dictionary-generation refresh flushes peer table metadata
   before statements that observe a newer stable generation.
 
@@ -84,8 +90,14 @@ Add a selector named `primary-key-autoinc-ddl`:
 7. Insert after forced `.shm` rebuild and verify the next implicit ID is `5`
    and no row reused the consumed `id = 4`.
 
-The slice should require no product-code change if the existing dictionary
-refresh and AUTO_INCREMENT registry seeding paths are correct.
+The ownerless AUTO_INCREMENT registry header carries a shared native-checkpoint
+pending bit. `mylite_ownerless_autoinc_registry_publish()` sets the bit only
+when a publish creates or raises a table high watermark, reusing the registry
+latch and avoiding per-insert durable writes. Final no-live ownerless shutdown
+reads that bit and routes through the existing native checkpoint/reclaim path;
+after the checkpoint succeeds, it clears the bit. This lets forced `.shm`
+rebuild seed from native InnoDB state that includes AUTO_INCREMENT values
+consumed by failed duplicate-key writes.
 
 ## Compatibility Impact
 
@@ -95,15 +107,18 @@ claim the full primary-key option matrix.
 
 ## Directory And Lifecycle Impact
 
-No new files or layout changes. MariaDB/InnoDB owns the native table rebuild
-inside the MyLite database directory. The final state is verified through
-ownerless and native reopen plus forced volatile shared-memory rebuild.
+No new files or directory entries. The existing autoinc `.shm` registry header
+uses a previously reserved word for the native-checkpoint pending bit.
+MariaDB/InnoDB owns the native table rebuild inside the MyLite database directory.
+The final state is verified through ownerless and native reopen plus forced
+volatile shared-memory rebuild.
 
 ## Native Storage Impact
 
 Native InnoDB storage format is unchanged. The slice exercises a clustered
 index replacement while retaining a secondary unique index on the
-AUTO_INCREMENT column.
+AUTO_INCREMENT column, then proves the no-live ownerless close path checkpointed
+native AUTO_INCREMENT state before the shared-memory registry was rebuilt.
 
 ## Public API Impact
 

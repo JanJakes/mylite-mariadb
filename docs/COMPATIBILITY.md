@@ -117,6 +117,12 @@ checksummed generation records after the LSN records; runtime marker reads
 prefer the highest valid record, fall back to the legacy marker only before any
 marker record has been written, and treat corrupt marker-record-only evidence
 as checkpoint-needed so a torn clear cannot suppress required native drain.
+Ownerless AUTO_INCREMENT publishes now also mark a shared registry
+native-checkpoint pending bit when they raise a table high watermark. The
+final no-live ownerless close path drains that bit through the existing native
+checkpoint/reclaim path before clearing it, preserving duplicate-key-consumed
+AUTO_INCREMENT gaps across forced `.shm` rebuild without adding per-insert
+durable checkpoint writes.
 Already-open ownerless peers now also recover a stale InnoDB dictionary-cache
 miss for a peer-created file-per-table table after trigger DDL: ownerless text
 reads that hit MariaDB errno `1932` refresh native pages, evict the SQL and

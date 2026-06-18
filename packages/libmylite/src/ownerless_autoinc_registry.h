@@ -38,6 +38,19 @@ int mylite_ownerless_autoinc_registry_publish(
     uint64_t table_id,
     uint64_t next_value
 );
+int mylite_ownerless_autoinc_registry_checkpoint_pending(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t owner_id,
+    uint64_t owner_generation,
+    int *out_pending
+);
+int mylite_ownerless_autoinc_registry_clear_checkpoint_pending(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t owner_id,
+    uint64_t owner_generation
+);
 
 #ifdef __cplusplus
 }

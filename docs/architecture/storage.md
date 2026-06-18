@@ -188,7 +188,8 @@ app.mylite/
   ownerless activity.
   Final no-live ownerless read/write shutdown also holds
   `mylite-runtime-startup.lock` while publishing a native checkpoint for
-  completed DDL file-operation redo or ownerless `ALTER TABLE ... AUTO_INCREMENT` checkpoint markers,
+  completed DDL file-operation redo, ownerless `ALTER TABLE ... AUTO_INCREMENT`
+  checkpoint markers, or a shared ownerless AUTO_INCREMENT registry pending bit,
   forcing native checkpoint proof for retained page-version WAL after active
   pins release, stopping MariaDB, and restoring the 12 KiB redo startup prefix
   if embedded teardown leaves `ib_logfile0` without startup-checkpoint evidence

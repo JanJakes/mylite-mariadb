@@ -10908,6 +10908,7 @@ static void test_autoinc_registry_preserves_high_watermarks(void) {
     int fd = open_file(shm_path);
     void *registry;
     uint64_t next_value = 0U;
+    int checkpoint_pending = 1;
 
     truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
     registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
@@ -10918,6 +10919,16 @@ static void test_autoinc_registry_preserves_high_watermarks(void) {
             MYLITE_TEST_AUTOINC_REGISTRY_SLOT_COUNT
         ) == MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK
     );
+    assert(
+        mylite_ownerless_autoinc_registry_checkpoint_pending(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            MYLITE_TEST_OWNER_GENERATION(1U),
+            &checkpoint_pending
+        ) == MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK
+    );
+    assert(checkpoint_pending == 0);
     assert(
         mylite_ownerless_autoinc_registry_read_or_seed(
             registry,
@@ -10941,6 +10952,35 @@ static void test_autoinc_registry_preserves_high_watermarks(void) {
         ) == MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK
     );
     assert(
+        mylite_ownerless_autoinc_registry_checkpoint_pending(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            MYLITE_TEST_OWNER_GENERATION(1U),
+            &checkpoint_pending
+        ) == MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK
+    );
+    assert(checkpoint_pending == 1);
+    assert(
+        mylite_ownerless_autoinc_registry_clear_checkpoint_pending(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            MYLITE_TEST_OWNER_GENERATION(1U)
+        ) == MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK
+    );
+    checkpoint_pending = 1;
+    assert(
+        mylite_ownerless_autoinc_registry_checkpoint_pending(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            MYLITE_TEST_OWNER_GENERATION(1U),
+            &checkpoint_pending
+        ) == MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK
+    );
+    assert(checkpoint_pending == 0);
+    assert(
         mylite_ownerless_autoinc_registry_read_or_seed(
             registry,
             MYLITE_TEST_PAGE_SIZE,
@@ -10962,6 +11002,16 @@ static void test_autoinc_registry_preserves_high_watermarks(void) {
             10U
         ) == MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK
     );
+    assert(
+        mylite_ownerless_autoinc_registry_checkpoint_pending(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            MYLITE_TEST_OWNER_GENERATION(2U),
+            &checkpoint_pending
+        ) == MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK
+    );
+    assert(checkpoint_pending == 0);
     assert(
         mylite_ownerless_autoinc_registry_read_or_seed(
             registry,

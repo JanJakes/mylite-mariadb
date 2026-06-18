@@ -1678,6 +1678,8 @@ bool ownerless_page_log_has_uncheckpointed_records(RuntimeState &runtime);
 bool ownerless_page_log_has_payload_records(RuntimeState &runtime);
 bool ownerless_runtime_has_live_shared_readonly_peer(RuntimeState &runtime);
 bool clear_ownerless_native_file_op_checkpoint_without_page_log(RuntimeState &runtime);
+bool ownerless_autoinc_checkpoint_pending(RuntimeState &runtime);
+bool clear_ownerless_autoinc_checkpoint_pending(RuntimeState &runtime);
 bool seed_ownerless_runtime_redo_state_checkpoint(
     RuntimeState &runtime,
     std::uint64_t latest_lsn,
@@ -9688,12 +9690,16 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
         !consumed_current_page_version_wal) {
         return;
     }
-    bool native_file_op_checkpoint_needed = false;
+    bool native_file_op_checkpoint_marker_needed = false;
+    bool autoinc_checkpoint_needed = false;
     if (no_live_peers) {
         static_cast<void>(read_concurrency_native_file_op_checkpoint_needed(
             runtime.concurrency_checkpoint_fd,
-            &native_file_op_checkpoint_needed
+            &native_file_op_checkpoint_marker_needed
         ));
+        autoinc_checkpoint_needed = ownerless_autoinc_checkpoint_pending(runtime);
+        const bool force_native_checkpoint =
+            native_file_op_checkpoint_marker_needed || autoinc_checkpoint_needed;
         const bool retained_page_log_records =
             ownerless_page_log_has_uncheckpointed_records(runtime);
         static_cast<void>(advance_ownerless_no_live_page_visible_lsn_for_reclaim(
@@ -9701,7 +9707,7 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
             latest_lsn,
             visible_lsn,
             &visible_lsn,
-            native_file_op_checkpoint_needed || retained_page_log_records
+            force_native_checkpoint || retained_page_log_records
         ));
         latest_lsn = std::max(latest_lsn, visible_lsn);
         static_cast<void>(
@@ -9750,7 +9756,9 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
     const bool skip_external_refresh =
         no_live_peers &&
         ((single_owner_epoch && !consumed_page_version_wal) || reader_only_page_version_consumer);
-    const bool require_native_page_lsn_proof = !no_live_peers || !native_file_op_checkpoint_needed;
+    const bool native_checkpoint_marker_needed =
+        native_file_op_checkpoint_marker_needed || autoinc_checkpoint_needed;
+    const bool require_native_page_lsn_proof = !no_live_peers || !native_checkpoint_marker_needed;
     /*
      * A runtime that only read peer page-version WAL does not own the native
      * dirty-page handoff. A newer native page LSN is therefore not proof that
@@ -9783,10 +9791,13 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
             );
         }
     }
-    if (native_file_op_checkpoint_needed) {
+    if (native_file_op_checkpoint_marker_needed) {
         static_cast<void>(
             clear_concurrency_native_file_op_checkpoint_needed(runtime.concurrency_checkpoint_fd)
         );
+    }
+    if (autoinc_checkpoint_needed) {
+        static_cast<void>(clear_ownerless_autoinc_checkpoint_pending(runtime));
     }
 
     const auto checkpoint_page_log_at_visible_lsn = [&](std::uint64_t checkpoint_visible_lsn) {
@@ -9905,18 +9916,65 @@ bool clear_ownerless_native_file_op_checkpoint_without_page_log(RuntimeState &ru
     }
 
     bool native_file_op_checkpoint_needed = false;
+    const bool autoinc_checkpoint_needed = ownerless_autoinc_checkpoint_pending(runtime);
     if (!read_concurrency_native_file_op_checkpoint_needed(
             runtime.concurrency_checkpoint_fd,
             &native_file_op_checkpoint_needed
         ) ||
-        !native_file_op_checkpoint_needed) {
+        (!native_file_op_checkpoint_needed && !autoinc_checkpoint_needed)) {
         return false;
     }
 
     if (mylite_ownerless_innodb_make_checkpoint() != MYLITE_OWNERLESS_INNODB_LOCK_OK) {
         return false;
     }
-    return clear_concurrency_native_file_op_checkpoint_needed(runtime.concurrency_checkpoint_fd);
+    bool cleared = true;
+    if (native_file_op_checkpoint_needed) {
+        cleared =
+            clear_concurrency_native_file_op_checkpoint_needed(runtime.concurrency_checkpoint_fd) &&
+            cleared;
+    }
+    if (autoinc_checkpoint_needed) {
+        cleared = clear_ownerless_autoinc_checkpoint_pending(runtime) && cleared;
+    }
+    return cleared;
+}
+
+bool ownerless_autoinc_checkpoint_pending(RuntimeState &runtime) {
+    void *registry = runtime.ownerless_innodb_lock_hook.autoinc_registry;
+    const std::size_t registry_size = runtime.ownerless_innodb_lock_hook.autoinc_registry_size;
+    if (registry == nullptr || registry_size == 0U ||
+        runtime.ownerless_innodb_lock_hook.owner_id == 0U ||
+        runtime.ownerless_innodb_lock_hook.owner_generation == 0U) {
+        return false;
+    }
+
+    int pending = 0;
+    return mylite_ownerless_autoinc_registry_checkpoint_pending(
+               registry,
+               registry_size,
+               runtime.ownerless_innodb_lock_hook.owner_id,
+               runtime.ownerless_innodb_lock_hook.owner_generation,
+               &pending
+           ) == MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK &&
+           pending != 0;
+}
+
+bool clear_ownerless_autoinc_checkpoint_pending(RuntimeState &runtime) {
+    void *registry = runtime.ownerless_innodb_lock_hook.autoinc_registry;
+    const std::size_t registry_size = runtime.ownerless_innodb_lock_hook.autoinc_registry_size;
+    if (registry == nullptr || registry_size == 0U ||
+        runtime.ownerless_innodb_lock_hook.owner_id == 0U ||
+        runtime.ownerless_innodb_lock_hook.owner_generation == 0U) {
+        return false;
+    }
+
+    return mylite_ownerless_autoinc_registry_clear_checkpoint_pending(
+               registry,
+               registry_size,
+               runtime.ownerless_innodb_lock_hook.owner_id,
+               runtime.ownerless_innodb_lock_hook.owner_generation
+           ) == MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK;
 }
 
 bool seed_ownerless_runtime_redo_state_checkpoint(

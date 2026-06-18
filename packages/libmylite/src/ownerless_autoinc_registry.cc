@@ -13,6 +13,7 @@ namespace {
 
 constexpr std::size_t k_header_slot_count_offset = 0;
 constexpr std::size_t k_header_slot_size_offset = 4;
+constexpr std::size_t k_header_checkpoint_pending_offset = 8;
 constexpr std::size_t k_header_latch_offset = 32;
 constexpr std::size_t k_slot_table_id_offset = 0;
 constexpr std::size_t k_slot_next_value_offset = 8;
@@ -131,6 +132,7 @@ int mylite_ownerless_autoinc_registry_publish(
     }
 
     unsigned char *slot = find_slot(registry, mapping_size, table_id);
+    bool advanced = false;
     if (slot == nullptr) {
         slot = find_free_slot(registry, mapping_size);
         if (slot == nullptr) {
@@ -140,10 +142,60 @@ int mylite_ownerless_autoinc_registry_publish(
         store64(slot, k_slot_table_id_offset, table_id);
         store64(slot, k_slot_next_value_offset, next_value);
         store32(slot, k_slot_state_offset, k_slot_state_active);
+        advanced = true;
     } else if (next_value > load64(slot, k_slot_next_value_offset)) {
         store64(slot, k_slot_next_value_offset, next_value);
+        advanced = true;
+    }
+    if (advanced) {
+        store64(registry, k_header_checkpoint_pending_offset, 1U);
     }
 
+    release_registry_latch(registry, owner_id, owner_generation);
+    return MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK;
+}
+
+int mylite_ownerless_autoinc_registry_checkpoint_pending(
+    void *mapping,
+    std::size_t mapping_size,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
+    int *out_pending
+) {
+    if (!mapping_can_hold_registry(mapping, mapping_size) || owner_id == 0U ||
+        owner_generation == 0U || out_pending == nullptr) {
+        return MYLITE_OWNERLESS_AUTOINC_REGISTRY_ERROR;
+    }
+
+    auto *registry = static_cast<unsigned char *>(mapping);
+    const int latch_result = acquire_registry_latch(registry, owner_id, owner_generation);
+    if (latch_result != MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK) {
+        return latch_result;
+    }
+
+    *out_pending = load64(registry, k_header_checkpoint_pending_offset) != 0U ? 1 : 0;
+    release_registry_latch(registry, owner_id, owner_generation);
+    return MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK;
+}
+
+int mylite_ownerless_autoinc_registry_clear_checkpoint_pending(
+    void *mapping,
+    std::size_t mapping_size,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation
+) {
+    if (!mapping_can_hold_registry(mapping, mapping_size) || owner_id == 0U ||
+        owner_generation == 0U) {
+        return MYLITE_OWNERLESS_AUTOINC_REGISTRY_ERROR;
+    }
+
+    auto *registry = static_cast<unsigned char *>(mapping);
+    const int latch_result = acquire_registry_latch(registry, owner_id, owner_generation);
+    if (latch_result != MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK) {
+        return latch_result;
+    }
+
+    store64(registry, k_header_checkpoint_pending_offset, 0U);
     release_registry_latch(registry, owner_id, owner_generation);
     return MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK;
 }
