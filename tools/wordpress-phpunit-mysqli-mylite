@@ -750,6 +750,10 @@ $keepaliveMarker = 'MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE_LOCK_RELEASE';
 $keepaliveReconnectMarker = 'myliteWordPressReopenKeepaliveForChild();';
 $reconnectAfterChildMarker = '// MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD';
 $legacyReconnectGuardMarker = '// MYLITE_WORDPRESS_PHPUNIT_RECONNECT_GUARD';
+$childScriptJobMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_JOB_WRAPPER';
+$childScriptEnvMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_ENV_SETUP';
+$childScriptSummaryMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_PARENT_SUMMARY';
+$childScriptSummaryReadMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_SUMMARY_READ';
 
 $hasTimingMarker = str_contains($source, $timingMarker);
 $hasChildProcessAverageMarker = str_contains($source, $childProcessAverageMarker);
@@ -759,6 +763,10 @@ $hasStaticScanGuardMarker = str_contains($source, $staticScanGuardMarker);
 $hasKeepaliveMarker = str_contains($source, $keepaliveMarker);
 $hasKeepaliveReconnectMarker = str_contains($source, $keepaliveReconnectMarker);
 $hasReconnectAfterChildMarker = str_contains($source, $reconnectAfterChildMarker);
+$hasChildScriptJobMarker = str_contains($source, $childScriptJobMarker);
+$hasChildScriptEnvMarker = str_contains($source, $childScriptEnvMarker);
+$hasChildScriptSummaryMarker = str_contains($source, $childScriptSummaryMarker);
+$hasChildScriptSummaryReadMarker = str_contains($source, $childScriptSummaryReadMarker);
 $hasChildRuntimeTiming =
     str_contains($source, "\$myliteWordPressChildStats['child_process_seconds'] +=");
 $hasChildReconnectTiming =
@@ -772,10 +780,107 @@ if ($hasTimingMarker &&
     $hasKeepaliveMarker &&
     $hasKeepaliveReconnectMarker &&
     $hasReconnectAfterChildMarker &&
+    $hasChildScriptJobMarker &&
+    $hasChildScriptEnvMarker &&
+    $hasChildScriptSummaryMarker &&
+    $hasChildScriptSummaryReadMarker &&
     $hasChildRuntimeTiming &&
     $hasChildReconnectTiming) {
     exit(0);
 }
+
+$childScriptJobWrapper = <<<'PATCH'
+        // MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_JOB_WRAPPER
+        if (\getenv('MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES') !== '0') {
+            $myliteWordPressChildScriptPrelude = <<<'MYLITE_CHILD_SCRIPT'
+$myliteWordPressChildScriptStart = \microtime(true);
+\register_shutdown_function(static function () use ($myliteWordPressChildScriptStart): void {
+    $myliteWordPressChildScriptTimingFile = \getenv('MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_TIMING_FILE');
+    if (!\is_string($myliteWordPressChildScriptTimingFile) || $myliteWordPressChildScriptTimingFile === '') {
+        return;
+    }
+
+    \file_put_contents(
+        $myliteWordPressChildScriptTimingFile,
+        \sprintf("%.6f\n", \max(0.0, \microtime(true) - $myliteWordPressChildScriptStart)),
+        \FILE_APPEND
+    );
+});
+
+MYLITE_CHILD_SCRIPT;
+            foreach ([
+                "<?php declare(strict_types=1);\n",
+                "<?php declare(strict_types=1);\r\n",
+                "<?php\n",
+                "<?php\r\n",
+                "<?php ",
+            ] as $myliteWordPressChildScriptPrefix) {
+                if (\strncmp($job, $myliteWordPressChildScriptPrefix, \strlen($myliteWordPressChildScriptPrefix)) === 0) {
+                    $job = $myliteWordPressChildScriptPrefix .
+                        $myliteWordPressChildScriptPrelude .
+                        \substr($job, \strlen($myliteWordPressChildScriptPrefix));
+                    break;
+                }
+            }
+        }
+
+PATCH;
+
+$childScriptEnvSetup = <<<'PATCH'
+        // MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_ENV_SETUP
+        $myliteWordPressChildScriptTimingFile = null;
+        if (isset($myliteWordPressChildStats)) {
+            $myliteWordPressChildScriptTimingFile = \tempnam(\sys_get_temp_dir(), 'mylite-wordpress-child-script-');
+            if (\is_string($myliteWordPressChildScriptTimingFile)) {
+                if ($env === null) {
+                    $env = $_SERVER ?? [];
+                    unset($env['argv'], $env['argc']);
+                    foreach ($env as $envKey => $envVar) {
+                        if (\is_array($envVar)) {
+                            unset($env[$envKey]);
+                        }
+                    }
+                }
+                $env['MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_TIMING_FILE'] = $myliteWordPressChildScriptTimingFile;
+            } else {
+                $myliteWordPressChildScriptTimingFile = null;
+            }
+        }
+
+PATCH;
+
+$childScriptFailureCleanup = <<<'PATCH'
+            if (\is_string($myliteWordPressChildScriptTimingFile)) {
+                @\unlink($myliteWordPressChildScriptTimingFile);
+            }
+
+PATCH;
+
+$childScriptSummaryRead = <<<'PATCH'
+        // MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_SUMMARY_READ
+        if (isset($myliteWordPressChildStats) && \is_string($myliteWordPressChildScriptTimingFile)) {
+            $myliteWordPressChildScriptTimingContents = @\file_get_contents($myliteWordPressChildScriptTimingFile);
+            if (\is_string($myliteWordPressChildScriptTimingContents)) {
+                $myliteWordPressChildScriptTimingLines =
+                    \preg_split('/\R+/', \trim($myliteWordPressChildScriptTimingContents));
+                if (\is_array($myliteWordPressChildScriptTimingLines)) {
+                    foreach ($myliteWordPressChildScriptTimingLines as $myliteWordPressChildScriptTimingLine) {
+                        if ($myliteWordPressChildScriptTimingLine === '' ||
+                            !\is_numeric($myliteWordPressChildScriptTimingLine)) {
+                            continue;
+                        }
+                        $myliteWordPressChildStats['child_script_seconds'] =
+                            (float) ($myliteWordPressChildStats['child_script_seconds'] ?? 0.0) +
+                            \max(0.0, (float) $myliteWordPressChildScriptTimingLine);
+                        $myliteWordPressChildStats['child_script_count'] =
+                            (int) ($myliteWordPressChildStats['child_script_count'] ?? 0) + 1;
+                    }
+                }
+            }
+            @\unlink($myliteWordPressChildScriptTimingFile);
+        }
+
+PATCH;
 
 $oldCloseWpdbs = <<<'PATCH'
         // MYLITE_WORDPRESS_RELEASE_DB_LOCKS_FOR_CHILD_PROCESSES
@@ -1028,6 +1133,8 @@ $closeWpdbs = <<<'PATCH'
                     'lock_release_seconds' => 0.0,
                     'child_process_seconds' => 0.0,
                     'reconnect_seconds' => 0.0,
+                    'child_script_count' => 0,
+                    'child_script_seconds' => 0.0,
                 ];
             }
             if (empty($GLOBALS['myliteWordPressChildProcessStatsRegistered'])) {
@@ -1068,8 +1175,31 @@ $closeWpdbs = <<<'PATCH'
                         "wordpress_phpunit_child_process_reconnect_seconds=%.6f\n",
                         (float) $stats['reconnect_seconds']
                     );
+                    // MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_PARENT_SUMMARY
+                    $myliteWordPressChildScriptCount = (int) ($stats['child_script_count'] ?? 0);
+                    $myliteWordPressChildScriptSeconds = (float) ($stats['child_script_seconds'] ?? 0.0);
+                    $myliteWordPressChildOuterMinusScriptSeconds = \max(
+                        0.0,
+                        (float) $stats['child_process_seconds'] - $myliteWordPressChildScriptSeconds
+                    );
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_script_count=%d\n",
+                        $myliteWordPressChildScriptCount
+                    );
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_script_seconds=%.6f\n",
+                        $myliteWordPressChildScriptSeconds
+                    );
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_process_outer_minus_script_seconds=%.6f\n",
+                        $myliteWordPressChildOuterMinusScriptSeconds
+                    );
                     // MYLITE_WORDPRESS_PHPUNIT_CHILD_PROCESS_AVERAGES
                     $myliteWordPressChildProcessCount = \max((int) $stats['count'], 1);
+                    $myliteWordPressChildScriptAverageCount = \max($myliteWordPressChildScriptCount, 1);
                     \fprintf(
                         \STDERR,
                         "wordpress_phpunit_child_process_lock_release_ms_avg=%.3f\n",
@@ -1084,6 +1214,16 @@ $closeWpdbs = <<<'PATCH'
                         \STDERR,
                         "wordpress_phpunit_child_process_reconnect_ms_avg=%.3f\n",
                         ((float) $stats['reconnect_seconds'] * 1000.0) / $myliteWordPressChildProcessCount
+                    );
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_script_ms_avg=%.3f\n",
+                        ($myliteWordPressChildScriptSeconds * 1000.0) / $myliteWordPressChildScriptAverageCount
+                    );
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_process_outer_minus_script_ms_avg=%.3f\n",
+                        ($myliteWordPressChildOuterMinusScriptSeconds * 1000.0) / $myliteWordPressChildProcessCount
                     );
                 });
             }
@@ -1300,6 +1440,33 @@ if ($hasTimingMarker) {
         $closeWpdbs . "        \$process = proc_open(\n",
         $source
     );
+}
+
+if (!str_contains($patched, $childScriptJobMarker)) {
+    $runJobInsertAfter = "    public function runJob(string \$job, array \$settings = []): array\n    {\n";
+    $patchedWithChildJobWrapper = str_replace(
+        $runJobInsertAfter,
+        $runJobInsertAfter . $childScriptJobWrapper,
+        $patched
+    );
+    if ($patchedWithChildJobWrapper === $patched) {
+        fwrite(STDERR, "Could not add PHPUnit child script timing job wrapper.\n");
+        exit(1);
+    }
+    $patched = $patchedWithChildJobWrapper;
+}
+
+if (!str_contains($patched, $childScriptEnvMarker)) {
+    $patchedWithChildScriptEnv = str_replace(
+        "        \$process = proc_open(\n",
+        $childScriptEnvSetup . "        \$process = proc_open(\n",
+        $patched
+    );
+    if ($patchedWithChildScriptEnv === $patched) {
+        fwrite(STDERR, "Could not add PHPUnit child script timing environment setup.\n");
+        exit(1);
+    }
+    $patched = $patchedWithChildScriptEnv;
 }
 
 if (!str_contains($patched, $keepaliveMarker)) {
@@ -1532,6 +1699,125 @@ PATCH;
 PATCH;
 
     $patched = str_replace($oldChildProcessTotals, $childProcessTotalsWithAverages, $patched);
+}
+
+if (!str_contains($patched, $childScriptSummaryMarker)) {
+    $oldChildReconnectTotal = <<<'PATCH'
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_process_reconnect_seconds=%.6f\n",
+                        (float) $stats['reconnect_seconds']
+                    );
+PATCH;
+
+    $childReconnectTotalWithScriptSummary = <<<'PATCH'
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_process_reconnect_seconds=%.6f\n",
+                        (float) $stats['reconnect_seconds']
+                    );
+                    // MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_PARENT_SUMMARY
+                    $myliteWordPressChildScriptCount = (int) ($stats['child_script_count'] ?? 0);
+                    $myliteWordPressChildScriptSeconds = (float) ($stats['child_script_seconds'] ?? 0.0);
+                    $myliteWordPressChildOuterMinusScriptSeconds = \max(
+                        0.0,
+                        (float) $stats['child_process_seconds'] - $myliteWordPressChildScriptSeconds
+                    );
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_script_count=%d\n",
+                        $myliteWordPressChildScriptCount
+                    );
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_script_seconds=%.6f\n",
+                        $myliteWordPressChildScriptSeconds
+                    );
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_process_outer_minus_script_seconds=%.6f\n",
+                        $myliteWordPressChildOuterMinusScriptSeconds
+                    );
+PATCH;
+
+    $patchedWithChildScriptSummary = str_replace(
+        $oldChildReconnectTotal,
+        $childReconnectTotalWithScriptSummary,
+        $patched
+    );
+    if ($patchedWithChildScriptSummary === $patched) {
+        fwrite(STDERR, "Could not add PHPUnit child script timing summary output.\n");
+        exit(1);
+    }
+    $patched = $patchedWithChildScriptSummary;
+}
+
+if (!str_contains($patched, $childScriptSummaryReadMarker)) {
+    $patchedWithChildScriptSummaryRead = str_replace(
+        "        proc_close(\$process);\n",
+        "        proc_close(\$process);\n" . $childScriptSummaryRead,
+        $patched
+    );
+    if ($patchedWithChildScriptSummaryRead === $patched) {
+        fwrite(STDERR, "Could not add PHPUnit child script timing readback.\n");
+        exit(1);
+    }
+    $patched = $patchedWithChildScriptSummaryRead;
+}
+
+if (!str_contains($patched, "wordpress_phpunit_child_script_ms_avg")) {
+    $oldChildReconnectAverage = <<<'PATCH'
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_process_reconnect_ms_avg=%.3f\n",
+                        ((float) $stats['reconnect_seconds'] * 1000.0) / $myliteWordPressChildProcessCount
+                    );
+PATCH;
+
+    $childReconnectAverageWithScript = <<<'PATCH'
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_process_reconnect_ms_avg=%.3f\n",
+                        ((float) $stats['reconnect_seconds'] * 1000.0) / $myliteWordPressChildProcessCount
+                    );
+                    $myliteWordPressChildScriptAverageCount = \max($myliteWordPressChildScriptCount, 1);
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_script_ms_avg=%.3f\n",
+                        ($myliteWordPressChildScriptSeconds * 1000.0) / $myliteWordPressChildScriptAverageCount
+                    );
+                    \fprintf(
+                        \STDERR,
+                        "wordpress_phpunit_child_process_outer_minus_script_ms_avg=%.3f\n",
+                        ($myliteWordPressChildOuterMinusScriptSeconds * 1000.0) / $myliteWordPressChildProcessCount
+                    );
+PATCH;
+
+    $patchedWithChildScriptAverages = str_replace(
+        $oldChildReconnectAverage,
+        $childReconnectAverageWithScript,
+        $patched
+    );
+    if ($patchedWithChildScriptAverages === $patched) {
+        fwrite(STDERR, "Could not add PHPUnit child script timing averages.\n");
+        exit(1);
+    }
+    $patched = $patchedWithChildScriptAverages;
+}
+
+if (str_contains($patched, $childScriptEnvMarker) &&
+    !str_contains($patched, "myliteWordPressChildScriptTimingFile)) {\n                @\\unlink")) {
+    $patchedWithChildScriptFailureCleanup = str_replace(
+        "            throw new Exception(\n                'Unable to spawn worker process',\n            );\n",
+        $childScriptFailureCleanup .
+        "            throw new Exception(\n                'Unable to spawn worker process',\n            );\n",
+        $patched
+    );
+    if ($patchedWithChildScriptFailureCleanup === $patched) {
+        fwrite(STDERR, "Could not add PHPUnit child script timing failure cleanup.\n");
+        exit(1);
+    }
+    $patched = $patchedWithChildScriptFailureCleanup;
 }
 
 if ($patched === $source) {
@@ -1813,9 +2099,14 @@ PHP_KEEPALIVE
     wordpress_phpunit_child_process_lock_release_seconds
     wordpress_phpunit_child_process_runtime_seconds
     wordpress_phpunit_child_process_reconnect_seconds
+    wordpress_phpunit_child_script_count
+    wordpress_phpunit_child_script_seconds
+    wordpress_phpunit_child_process_outer_minus_script_seconds
     wordpress_phpunit_child_process_lock_release_ms_avg
     wordpress_phpunit_child_process_runtime_ms_avg
     wordpress_phpunit_child_process_reconnect_ms_avg
+    wordpress_phpunit_child_script_ms_avg
+    wordpress_phpunit_child_process_outer_minus_script_ms_avg
   )
   for phpunit_child_profile_summary_key in "${phpunit_child_profile_summary_keys[@]}"; do
     phpunit_child_profile_summary_value="$(

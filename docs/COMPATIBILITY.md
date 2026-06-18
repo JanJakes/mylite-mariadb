@@ -908,7 +908,11 @@ process-isolated timing from being inflated by unrelated non-isolated methods
 in large mixed classes. The current CI path keeps those exact filters but runs
 without child-process profiling by default; diagnostic child averages remain
 available through `MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES=1` outside
-the critical timing steps.
+the critical timing steps. Diagnostic child profiling now also records
+child-script runtime through a per-child temp file instead of child stderr; a
+focused production process-isolated emoji method reported `3.951s` of child
+script time inside `4.335s` of child-process runtime, leaving about `0.384s`
+of outer process/pipe overhead for that child.
 The long non-isolated shard now also excludes the whole `Tests_DB*` class
 family with a leading `^(?!Tests_DB)` negative lookahead, matching the
 dedicated `^Tests_DB` database shard and preventing database-prefix tests such
