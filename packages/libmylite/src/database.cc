@@ -12735,23 +12735,47 @@ int refresh_ownerless_external_pages_before_statement(
         }
         unsigned char *registry = runtime_process_registry(g_runtime);
         if (registry != nullptr) {
+            const std::uint64_t process_active_count =
+                mylite_ownerless_process_registry_active_count(registry);
             process_generation = mylite_ownerless_process_registry_generation(registry);
+            single_owner_epoch =
+                process_active_count == 1U &&
+                process_generation == g_runtime.concurrency_process_slot_generation;
             owner_id = ownerless_owner_id_from_slot_index(g_runtime.concurrency_process_slot_index);
-            no_other_live_explicit_transactions =
-                !ownerless_process_registry_has_other_live_explicit_transactions(
-                    registry,
-                    k_concurrency_process_registry_size,
-                    owner_id
-                );
+            if (single_owner_epoch) {
+                const std::size_t owner_slot_offset =
+                    k_concurrency_process_registry_header_size +
+                    (static_cast<std::size_t>(g_runtime.concurrency_process_slot_index) *
+                     k_concurrency_process_slot_size);
+                const std::uint64_t owner_explicit_transaction_count =
+                    owner_slot_offset + k_concurrency_process_slot_size <=
+                            k_concurrency_process_registry_size
+                        ? load_le64(
+                              registry + owner_slot_offset,
+                              k_concurrency_process_slot_explicit_transaction_count_offset
+                          )
+                        : 1U;
+                no_other_live_explicit_transactions = true;
+                no_live_explicit_transactions = owner_explicit_transaction_count == 0U;
+            } else {
+                no_other_live_explicit_transactions =
+                    !ownerless_process_registry_has_other_live_explicit_transactions(
+                        registry,
+                        k_concurrency_process_registry_size,
+                        owner_id
+                    );
+            }
         }
         owner_generation = g_runtime.concurrency_process_slot_generation;
         page_pin_registry = runtime_page_pin_registry(g_runtime);
-        no_other_active_transactions = !ownerless_trx_registry_has_other_active_transactions(
-            &g_runtime.ownerless_innodb_lock_hook
-        );
-        no_live_explicit_transactions =
-            ownerless_runtime_has_no_live_explicit_transactions(g_runtime);
-        single_owner_epoch = ownerless_runtime_in_single_owner_epoch_locked(g_runtime);
+        no_other_active_transactions =
+            single_owner_epoch || !ownerless_trx_registry_has_other_active_transactions(
+                                      &g_runtime.ownerless_innodb_lock_hook
+                                  );
+        if (!single_owner_epoch) {
+            no_live_explicit_transactions =
+                ownerless_runtime_has_no_live_explicit_transactions(g_runtime);
+        }
         runtime_started_with_page_version_wal =
             g_runtime.ownerless_runtime_started_with_page_version_wal;
         runtime_consumed_page_version_wal =

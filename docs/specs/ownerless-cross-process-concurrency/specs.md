@@ -890,6 +890,12 @@ The design must be fast in the common case:
   or native flush work, while point selects used the local-native-current-read
   path and spent nearly all refresh time in the shared
   redo/process/transaction snapshot (`0.034-0.035 ms/select`).
+  The single-owner refresh-snapshot fast path then used process active
+  count/generation to infer the negative peer checks without scanning process
+  and transaction registries when the current owner is alone. A reduced
+  stats-enabled point-select sample moved shared-snapshot time to
+  `0.001 ms/select`, and a 1000-select stats-off sample reported direct
+  point-select ratio `0.9028` and prepared point-select ratio `0.7707`.
 - Page-version lookup should be O(1) average by `(space_id, page_no)` with a
   short version chain filtered by reader end mark.
 - Ordinary exclusive opens must stay on the native MariaDB embedded hot path:
