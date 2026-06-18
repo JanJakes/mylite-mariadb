@@ -10624,6 +10624,36 @@ static void test_ownerless_explicit_transaction_undo_wal_elision(void) {
     free(root);
 }
 
+static void exec_ownerless_simple_multi_row_insert(
+    mylite_db *db,
+    const char *table_name,
+    unsigned rows
+) {
+    const size_t table_name_len = strlen(table_name);
+    const size_t capacity = table_name_len + 128U + ((size_t)rows * 64U);
+    char *sql = malloc(capacity);
+    size_t offset = 0U;
+    int written;
+
+    assert(sql != NULL);
+    written = snprintf(sql, capacity, "INSERT INTO app.%s (id, value) VALUES ", table_name);
+    assert(written > 0 && (size_t)written < capacity);
+    offset = (size_t)written;
+    for (unsigned row = 1U; row <= rows; ++row) {
+        written = snprintf(
+            sql + offset,
+            capacity - offset,
+            "%s(%u, 'mylite-perf')",
+            row == 1U ? "" : ", ",
+            row
+        );
+        assert(written > 0 && (size_t)written < capacity - offset);
+        offset += (size_t)written;
+    }
+    exec_ok(db, sql);
+    free(sql);
+}
+
 static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -11101,6 +11131,94 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
     assert(
         query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_thirty_two_row_insert_fast_path") ==
         528U
+    );
+
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_sixty_four_row_insert_fast_path ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value VARCHAR(32) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    mylite_ownerless_innodb_reset_commit_visibility_stats();
+    mylite_ownerless_page_log_reset_append_perf_stats();
+    mylite_ownerless_innodb_reset_page_publish_stats();
+    mylite_ownerless_innodb_deep_reset_perf_stats();
+    mylite_ownerless_database_set_perf_stats_enabled(1);
+    mylite_ownerless_database_reset_perf_stats();
+
+    exec_ownerless_simple_multi_row_insert(db, "ownerless_sixty_four_row_insert_fast_path", 64U);
+
+    mylite_ownerless_innodb_read_commit_visibility_stats(
+        commit_stats,
+        OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT
+    );
+    mylite_ownerless_innodb_deep_read_perf_stats(
+        deep_stats,
+        OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT
+    );
+    mylite_ownerless_innodb_read_page_publish_stats(
+        page_stats,
+        OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT
+    );
+    mylite_ownerless_page_log_read_append_perf_stats(
+        page_log_append_stats,
+        OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_COUNT
+    );
+    mylite_ownerless_database_read_perf_stats(
+        database_stats,
+        OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT
+    );
+    mylite_ownerless_database_set_perf_stats_enabled(0);
+
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FAST] > 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH] == 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_DEFERRED_PAGES] == 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_UNPROVEN_STATEMENT] == 0U);
+    assert(
+        deep_stats
+            [OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES] ==
+        0U
+    );
+    assert(
+        deep_stats
+            [OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_PAGES] ==
+        0U
+    );
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_PUBLISHED] > 0U);
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_FAILED] == 0U);
+    assert(
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_RSEG] >
+        0U
+    );
+    assert(
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO] >
+        0U
+    );
+    assert(page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_CALLS] > 0U);
+    assert(
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_APPEND_CALLS] +
+            page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_DIRECT_APPEND_CALLS] ==
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_CALLS]
+    );
+    assert(
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_APPEND_CALLS] > 0U
+    );
+    assert(
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] == 1U
+    );
+    assert(page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS] == 1U);
+    assert(
+        database_stats
+            [OWNERLESS_TEST_DATABASE_PERF_STAT_CHECKPOINT_UPDATE_DEFERRED_LATEST_COALESCED] > 0U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sixty_four_row_insert_fast_path") ==
+        64U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_sixty_four_row_insert_fast_path") ==
+        2080U
     );
 
     exec_ok(
