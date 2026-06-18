@@ -500,15 +500,18 @@ choosing an optimization target. The transaction bucket is further split into
 timing summaries can separate `BEGIN`/`START`, `COMMIT`/`ROLLBACK`, and
 `SAVEPOINT`/`RELEASE` cost while preserving the existing aggregate
 `query_verb_transaction_*` totals.
-Non-ownerless direct execution now fast-paths exact simple `COMMIT`, full
-`ROLLBACK`, and `SET autocommit = 0|1` text statements through the
+Non-ownerless direct execution now fast-paths exact simple `START TRANSACTION`,
+`COMMIT`, full `ROLLBACK`, and `SET autocommit = 0|1` text statements through the
 native-control result path after the query-verb profile showed repeated
 WordPress PHPUnit transaction scaffolding dominating native `mysql_query()`
 time. In embedded MariaDB, `mysql_commit()`, `mysql_rollback()`, and
 `mysql_autocommit()` are still public C API wrappers around
 `mysql_real_query()`, so this path avoids MyLite's outer result/status work for
-those exact statements but does not bypass MariaDB SQL parsing for those
-wrappers. Broader SQL forms such as `START TRANSACTION`, `COMMIT AND CHAIN`,
+those exact wrappers. Exact `START TRANSACTION` uses a MyLite-owned embedded
+helper that calls MariaDB's `trans_begin(thd, 0)`, finalizes through the
+embedded OK/error protocol, and reads the result back into `MYSQL`; option-bearing
+forms such as `START TRANSACTION READ ONLY` or
+`START TRANSACTION WITH CONSISTENT SNAPSHOT`, plus `COMMIT AND CHAIN`,
 `ROLLBACK TO SAVEPOINT`, and general `SET` expressions still use MariaDB SQL
 parsing, and ownerless execution keeps the existing statement-lock,
 page-version, and publication path. A focused production profiled `^Tests_DB`
@@ -533,8 +536,19 @@ The autocommit no-op fast-path follow-up now skips exact repeated
 changed-state forms still call MariaDB's `mysql_autocommit()` wrapper and
 ownerless execution stays on the existing SQL/locking path. Profiled mysqli
 and WordPress timing summaries now include
-`libmylite_exec_result_native_control_autocommit_noops`. A focused production
-WordPress `^Tests_DB` run passed 651 tests with 3 skips and reported
+`libmylite_exec_result_native_control_autocommit_noops`; the
+start-transaction fast-path follow-up also exposes
+`libmylite_exec_result_native_control_start_transaction_calls`. The focused
+production WordPress `^Tests_DB` run for the start-transaction follow-up passed
+651 tests with 3 skips and reported
+`libmylite_exec_result_native_control_start_transaction_calls=651`,
+`query_transaction_start_ms_total=725.444`,
+`query_transaction_end_ms_total=707.323`,
+`libmylite_exec_result_native_control_ms_total=1426.880`, and
+`wordpress_phpunit_reported_seconds=8.252`, keeping transaction-start cost near
+the prior measured range while making the fast-path hit count visible. The
+previous autocommit no-op focused production WordPress `^Tests_DB` run passed
+651 tests with 3 skips and reported
 `libmylite_exec_result_native_control_calls=1310`,
 `libmylite_exec_result_native_control_autocommit_noops=644`,
 `libmylite_exec_result_native_control_ms_total=742.014`,

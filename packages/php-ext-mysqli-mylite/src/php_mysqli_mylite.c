@@ -36,6 +36,7 @@ enum php_mylite_mysqli_libmylite_exec_result_profile_index {
     PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_NATIVE_CONTROL_NS,
     PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_NATIVE_CONTROL_ERRORS,
     PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_NATIVE_CONTROL_AUTOCOMMIT_NOOPS,
+    PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_NATIVE_CONTROL_START_TRANSACTION_CALLS,
     PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_COUNT
 };
 
@@ -179,6 +180,7 @@ typedef struct php_mylite_mysqli_profile_stats {
     uint64_t libmylite_exec_result_native_control_ns;
     uint64_t libmylite_exec_result_native_control_errors;
     uint64_t libmylite_exec_result_native_control_autocommit_noops;
+    uint64_t libmylite_exec_result_native_control_start_transaction_calls;
     uint64_t explicit_prepare_calls;
     uint64_t explicit_prepare_successes;
     uint64_t explicit_prepare_failures;
@@ -2415,6 +2417,11 @@ static void php_mylite_mysqli_profile_read_libmylite_exec_result(void) {
         values[PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_NATIVE_CONTROL_ERRORS];
     php_mylite_mysqli_profile.libmylite_exec_result_native_control_autocommit_noops =
         values[PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_NATIVE_CONTROL_AUTOCOMMIT_NOOPS];
+    const enum php_mylite_mysqli_libmylite_exec_result_profile_index start_index =
+        PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_NATIVE_CONTROL_START_TRANSACTION_CALLS;
+    const uint64_t native_control_start_transaction_calls = values[start_index];
+    php_mylite_mysqli_profile.libmylite_exec_result_native_control_start_transaction_calls =
+        native_control_start_transaction_calls;
 }
 
 static void php_mylite_mysqli_profile_print(void) {
@@ -2703,6 +2710,10 @@ static void php_mylite_mysqli_profile_print(void) {
     php_mylite_mysqli_profile_print_counter(
         "libmylite_exec_result_native_control_autocommit_noops",
         php_mylite_mysqli_profile.libmylite_exec_result_native_control_autocommit_noops
+    );
+    php_mylite_mysqli_profile_print_counter(
+        "libmylite_exec_result_native_control_start_transaction_calls",
+        php_mylite_mysqli_profile.libmylite_exec_result_native_control_start_transaction_calls
     );
     php_mylite_mysqli_profile_print_counter(
         "explicit_prepare_calls",

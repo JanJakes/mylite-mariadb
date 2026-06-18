@@ -58,6 +58,7 @@
 #  include "ownerless_wait.h"
 #  include <mysql.h>
 extern "C" std::uint32_t my_crc32c(std::uint32_t crc, const void *buf, std::size_t len);
+extern "C" my_bool mylite_embedded_start_transaction(MYSQL *mysql);
 #endif
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
@@ -385,6 +386,7 @@ enum ExecResultPerfStatIndex : std::size_t {
     EXEC_RESULT_PERF_NATIVE_CONTROL_NS,
     EXEC_RESULT_PERF_NATIVE_CONTROL_ERRORS,
     EXEC_RESULT_PERF_NATIVE_CONTROL_AUTOCOMMIT_NOOPS,
+    EXEC_RESULT_PERF_NATIVE_CONTROL_START_TRANSACTION_CALLS,
     EXEC_RESULT_PERF_STAT_COUNT
 };
 
@@ -1384,6 +1386,7 @@ enum class NativeControlStatement {
     Rollback,
     AutocommitOff,
     AutocommitOn,
+    StartTransaction,
 };
 
 struct mylite_db {
@@ -4578,6 +4581,9 @@ int exec_result_impl(
         std::uint64_t stage_start_ns = exec_result_perf_start_ns();
         if (native_control_statement != NativeControlStatement::None) {
             exec_result_perf_add(EXEC_RESULT_PERF_NATIVE_CONTROL_CALLS, 1U);
+            if (native_control_statement == NativeControlStatement::StartTransaction) {
+                exec_result_perf_add(EXEC_RESULT_PERF_NATIVE_CONTROL_START_TRANSACTION_CALLS, 1U);
+            }
             if (native_control_autocommit_is_noop(*db, native_control_statement)) {
                 exec_result_perf_add(EXEC_RESULT_PERF_NATIVE_CONTROL_AUTOCOMMIT_NOOPS, 1U);
             } else if (
@@ -7349,7 +7355,7 @@ NativeControlStatement classify_native_control_statement(std::string_view sql) {
         return NativeControlStatement::None;
     }
     ++token_count;
-    if (!token_in(tokens[0], "COMMIT", "ROLLBACK", "SET")) {
+    if (!token_in(tokens[0], "COMMIT", "ROLLBACK", "SET", "START")) {
         return NativeControlStatement::None;
     }
 
@@ -7368,6 +7374,11 @@ NativeControlStatement classify_native_control_statement(std::string_view sql) {
         if (token_equals(tokens[0], "ROLLBACK")) {
             return NativeControlStatement::Rollback;
         }
+    }
+
+    if (sql_tokens_have_only_optional_trailing_semicolon(tokens, token_count, 2U) &&
+        token_equals(tokens[0], "START") && token_equals(tokens[1], "TRANSACTION")) {
+        return NativeControlStatement::StartTransaction;
     }
 
     if (!sql_tokens_have_only_optional_trailing_semicolon(tokens, token_count, 4U)) {
@@ -7407,6 +7418,8 @@ int execute_native_control_statement(mylite_db &db, NativeControlStatement state
         return mysql_autocommit(&db.mysql, 0) == 0 ? MYLITE_OK : MYLITE_ERROR;
     case NativeControlStatement::AutocommitOn:
         return mysql_autocommit(&db.mysql, 1) == 0 ? MYLITE_OK : MYLITE_ERROR;
+    case NativeControlStatement::StartTransaction:
+        return mylite_embedded_start_transaction(&db.mysql) == 0 ? MYLITE_OK : MYLITE_ERROR;
     case NativeControlStatement::None:
         break;
     }
@@ -7422,6 +7435,7 @@ bool native_control_autocommit_is_noop(const mylite_db &db, NativeControlStateme
         return server_autocommit;
     case NativeControlStatement::Commit:
     case NativeControlStatement::Rollback:
+    case NativeControlStatement::StartTransaction:
     case NativeControlStatement::None:
         break;
     }

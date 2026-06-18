@@ -1020,6 +1020,74 @@ err:
 }
 #endif
 
+my_bool mylite_embedded_start_transaction(MYSQL *mysql)
+{
+  my_bool result= 1, command_error= 1;
+  THD *thd= (THD*) mysql->thd, *old_current_thd= current_thd;
+  NET *net= &mysql->net;
+
+  if (thd && thd->killed != NOT_KILLED)
+  {
+    if (thd->killed < KILL_CONNECTION)
+      thd->killed= NOT_KILLED;
+    else
+    {
+      free_embedded_thd(mysql);
+      if (old_current_thd == thd)
+        old_current_thd= 0;
+      thd= 0;
+    }
+  }
+
+  if (!thd)
+  {
+    if (mysql_reconnect(mysql))
+      return 1;
+    thd= (THD*) mysql->thd;
+  }
+
+  thd->clear_data_list();
+  if (mysql->status != MYSQL_STATUS_READY)
+  {
+    set_mysql_error(mysql, CR_COMMANDS_OUT_OF_SYNC, unknown_sqlstate);
+    goto end;
+  }
+
+  thd->clear_error(1);
+  mysql->affected_rows= ~(my_ulonglong) 0;
+  mysql->field_count= 0;
+  net_clear_error(net);
+  thd->current_stmt= NULL;
+
+  thd->thread_stack= (char*) &thd;
+  thd->store_globals();
+  free_old_query(mysql);
+
+  thd->set_time();
+  thd->set_query_id(next_query_id());
+  if (trans_begin(thd, 0))
+  {
+    thd->release_transactional_locks();
+  }
+  else
+  {
+    my_ok(thd);
+    command_error= 0;
+  }
+
+  thd->update_server_status();
+  thd->protocol->end_statement();
+  result= MY_TEST(command_error || emb_read_query_result(mysql));
+  thd->cur_data= 0;
+  thd->mysys_var= NULL;
+
+end:
+  thd->reset_globals();
+  if (old_current_thd)
+    old_current_thd->store_globals();
+  return result;
+}
+
 C_MODE_END
 
 void THD::clear_data_list()

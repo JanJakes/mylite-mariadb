@@ -40,6 +40,7 @@ enum exec_result_perf_stat_index {
     EXEC_RESULT_PERF_NATIVE_CONTROL_NS,
     EXEC_RESULT_PERF_NATIVE_CONTROL_ERRORS,
     EXEC_RESULT_PERF_NATIVE_CONTROL_AUTOCOMMIT_NOOPS,
+    EXEC_RESULT_PERF_NATIVE_CONTROL_START_TRANSACTION_CALLS,
     EXEC_RESULT_PERF_STAT_COUNT
 };
 
@@ -323,6 +324,8 @@ static void test_native_control_fast_path(void) {
     mylite_db *db = open_database(root, &database_path);
     uint64_t perf[EXEC_RESULT_PERF_STAT_COUNT] = {0};
     uint64_t native_control_calls_before_rollback_to = 0;
+    uint64_t native_control_calls_before_start_options = 0;
+    uint64_t native_start_calls_before_start_options = 0;
 
     mylite_exec_result_perf_reset();
     mylite_exec_result_perf_set_enabled(1);
@@ -337,6 +340,21 @@ static void test_native_control_fast_path(void) {
     exec_ok(db, "ROLLBACK");
     assert(mylite_changes(db) == 0);
     expect_scalar(db, "SELECT COUNT(*) FROM app.native_control_probe", "0");
+
+    mylite_exec_result_perf_read(perf, EXEC_RESULT_PERF_STAT_COUNT);
+    native_control_calls_before_start_options = perf[EXEC_RESULT_PERF_NATIVE_CONTROL_CALLS];
+    native_start_calls_before_start_options =
+        perf[EXEC_RESULT_PERF_NATIVE_CONTROL_START_TRANSACTION_CALLS];
+    exec_ok(db, "START TRANSACTION READ ONLY");
+    mylite_exec_result_perf_read(perf, EXEC_RESULT_PERF_STAT_COUNT);
+    assert(
+        perf[EXEC_RESULT_PERF_NATIVE_CONTROL_CALLS] == native_control_calls_before_start_options
+    );
+    assert(
+        perf[EXEC_RESULT_PERF_NATIVE_CONTROL_START_TRANSACTION_CALLS] ==
+        native_start_calls_before_start_options
+    );
+    exec_ok(db, "ROLLBACK");
 
     exec_ok(db, "START TRANSACTION");
     exec_ok(db, "INSERT INTO app.native_control_probe VALUES (1)");
@@ -364,10 +382,11 @@ static void test_native_control_fast_path(void) {
 
     mylite_exec_result_perf_set_enabled(0);
     mylite_exec_result_perf_read(perf, EXEC_RESULT_PERF_STAT_COUNT);
-    assert(perf[EXEC_RESULT_PERF_NATIVE_CONTROL_CALLS] == 10U);
+    assert(perf[EXEC_RESULT_PERF_NATIVE_CONTROL_CALLS] == 13U);
     assert(perf[EXEC_RESULT_PERF_NATIVE_CONTROL_NS] > 0U);
     assert(perf[EXEC_RESULT_PERF_NATIVE_CONTROL_ERRORS] == 0U);
     assert(perf[EXEC_RESULT_PERF_NATIVE_CONTROL_AUTOCOMMIT_NOOPS] == 3U);
+    assert(perf[EXEC_RESULT_PERF_NATIVE_CONTROL_START_TRANSACTION_CALLS] == 2U);
 
     assert(mylite_close(db) == MYLITE_OK);
     free(database_path);

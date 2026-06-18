@@ -178,7 +178,7 @@ path and leaves changed-state/native transaction calls on the MariaDB path.
 
 ## Risks And Follow-Up
 
-- This is a narrow WordPress-shaped optimization. It does not address the
-  remaining `START TRANSACTION` cost because no public MariaDB embedded C API
-  provides a simple equivalent.
-- Broader transaction-start optimization remains a separate design problem.
+- This is a narrow WordPress-shaped optimization. The follow-up
+  `libmylite-start-transaction-fast-path` slice addresses exact non-ownerless
+  `START TRANSACTION` with an embedded helper, but option-bearing transaction
+  starts still require MariaDB SQL parsing.
