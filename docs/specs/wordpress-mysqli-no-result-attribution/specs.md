@@ -128,6 +128,9 @@ MyLite and a fresh production-guarded MariaDB embedded archive.
 
 - `cmake --build --preset php-embedded-prod --target
   mylite_mysqli_php_extension -j2` passed.
+- `cmake --build --preset prod -j2` passed after the diagnostic helper
+  functions were limited to embedded builds so non-embedded production builds
+  do not fail `-Werror=unused-function`.
 - `ctest --preset php-embedded-prod -R
   '^php-ext-mysqli-mylite\.profile$' -V` passed. The profile emitted
   `mylite_mysqli_profile_libmylite_exec_result_calls=14`,

@@ -387,6 +387,7 @@ enum ExecResultPerfStatIndex : std::size_t {
 static std::atomic<bool> exec_result_perf_stats_enabled{false};
 static std::atomic<std::uint64_t> exec_result_perf_stats[EXEC_RESULT_PERF_STAT_COUNT];
 
+#if MYLITE_WITH_MARIADB_EMBEDDED
 static bool exec_result_perf_stats_are_enabled() {
     return exec_result_perf_stats_enabled.load(std::memory_order_relaxed);
 }
@@ -419,6 +420,7 @@ static void exec_result_perf_add_elapsed(ExecResultPerfStatIndex index, std::uin
         );
     }
 }
+#endif
 
 extern "C" MYLITE_API void mylite_exec_result_perf_set_enabled(int enabled) {
     exec_result_perf_stats_enabled.store(enabled != 0, std::memory_order_relaxed);
