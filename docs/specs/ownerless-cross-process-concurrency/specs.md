@@ -839,7 +839,10 @@ The design must be fast in the common case:
   run the existing quiet-state checks; a reduced production sample after that
   change reported `125.473 ms` in `innodb_shutdown()`, `101.397 ms` in
   log-empty shutdown, and `100.470 ms` remaining in the retry sleep while
-  checkpoint work remained `0.017 ms`.
+  checkpoint work remained `0.017 ms`. A follow-up embedded-only bounded
+  immediate-retry budget removes the remaining fixed sleep for the ordinary
+  warm sample: `innodb_shutdown()` dropped to `16.315 ms`, log-empty shutdown
+  dropped to `1.569 ms`, and `innodb_logs_empty_sleep_ms` was `0.000`.
 - Page-version lookup should be O(1) average by `(space_id, page_no)` with a
   short version chain filtered by reader end mark.
 - Ordinary exclusive opens must stay on the native MariaDB embedded hot path:

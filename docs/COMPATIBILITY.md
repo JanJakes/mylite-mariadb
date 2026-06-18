@@ -190,6 +190,10 @@ the existing quiet-state checks; a reduced production sample after that change
 reported `innodb_shutdown_total_ms=125.473`,
 `innodb_shutdown_logs_empty_ms=101.397`, and
 `innodb_logs_empty_sleep_ms=100.470`, with checkpoint work still `0.017 ms`.
+A follow-up embedded-only bounded immediate-retry budget removes the remaining
+fixed sleep for the ordinary warm sample: `innodb_shutdown_total_ms=16.315`,
+`innodb_shutdown_logs_empty_ms=1.569`, and
+`innodb_logs_empty_sleep_ms=0.000`, with checkpoint work still `0.012 ms`.
 The probe also reports direct multi-row `INSERT ... VALUES` row-list timing
 with `mylite_perf_bulk_insert_rows_per_statement`,
 ordinary/ownerless bulk row and statement throughput, ownerless/ordinary bulk

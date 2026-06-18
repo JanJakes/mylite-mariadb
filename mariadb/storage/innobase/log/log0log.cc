@@ -1376,7 +1376,8 @@ ATTRIBUTE_COLD void logs_empty_and_mark_files_at_shutdown() noexcept
 	ulint			count = 0;
 	uint64_t		mylite_logs_start, mylite_stage_start;
 #ifdef EMBEDDED_LIBRARY
-	bool			mylite_skip_initial_sleep = true;
+	bool			mylite_skip_next_sleep = true;
+	ulint			mylite_immediate_retry_sleep_skip_budget = 64;
 #endif
 
 	mylite_embedded_shutdown_perf_count(
@@ -1413,9 +1414,9 @@ loop:
 #define COUNT_INTERVAL 600U
 #define CHECK_INTERVAL 100000U
 #ifdef EMBEDDED_LIBRARY
-	/* MyLite embedded close can prove an already-idle shutdown below. */
-	if (mylite_skip_initial_sleep) {
-		mylite_skip_initial_sleep = false;
+	/* MyLite embedded close can prove idle shutdown without the first wait. */
+	if (mylite_skip_next_sleep) {
+		mylite_skip_next_sleep = false;
 	} else
 #endif
 	{
@@ -1452,6 +1453,12 @@ loop:
 		mylite_embedded_shutdown_perf_add_elapsed(
 			MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_ACTIVE_TRX_NS,
 			mylite_stage_start);
+#ifdef EMBEDDED_LIBRARY
+		if (mylite_immediate_retry_sleep_skip_budget) {
+			mylite_skip_next_sleep = true;
+			mylite_immediate_retry_sleep_skip_budget--;
+		}
+#endif
 		goto loop;
 	}
 	mylite_embedded_shutdown_perf_add_elapsed(
@@ -1476,6 +1483,12 @@ wait_suspend_loop:
 		mylite_embedded_shutdown_perf_add_elapsed(
 			MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_BACKGROUND_WAIT_NS,
 			mylite_stage_start);
+#ifdef EMBEDDED_LIBRARY
+		if (mylite_immediate_retry_sleep_skip_budget) {
+			mylite_skip_next_sleep = true;
+			mylite_immediate_retry_sleep_skip_budget--;
+		}
+#endif
 		goto loop;
 	}
 
@@ -1568,6 +1581,12 @@ wait_suspend_loop:
 			mylite_embedded_shutdown_perf_add_elapsed(
 				MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_CHECKPOINT_NS,
 				mylite_stage_start);
+#ifdef EMBEDDED_LIBRARY
+			if (mylite_immediate_retry_sleep_skip_budget) {
+				mylite_skip_next_sleep = true;
+				mylite_immediate_retry_sleep_skip_budget--;
+			}
+#endif
 			goto loop;
 		}
 	} else {
