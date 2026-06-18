@@ -40,6 +40,7 @@ C_MODE_START
 #include "errmsg.h"
 #include "embedded_priv.h"
 #include <mylite_embedded_shutdown_perf.h>
+#include <mylite_embedded_startup_perf.h>
 
 extern unsigned int mysql_server_last_errno;
 extern char mysql_server_last_error[MYSQL_ERRMSG_SIZE];
@@ -532,6 +533,7 @@ char **		copy_arguments_ptr= 0;
 
 int init_embedded_server(int argc, char **argv, char **groups)
 {
+  uint64_t mylite_startup_start, mylite_stage_start;
   /*
     This mess is to allow people to call the init function without
     having to mess with a fake argv
@@ -542,13 +544,40 @@ int init_embedded_server(int argc, char **argv, char **groups)
   const char *fake_groups[] = { "server", "embedded", 0 };
   my_bool acl_error;
 
+  mylite_embedded_startup_perf_count(
+      MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_CALLS);
+  mylite_startup_start= mylite_embedded_startup_perf_start_ns();
   DBUG_ASSERT(mysql_embedded_init == 0);
   embedded_print_errors= 1;
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
   if (my_thread_init())
+  {
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_THREAD_INIT_NS,
+        mylite_stage_start);
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_TOTAL_NS,
+        mylite_startup_start);
     return 1;
+  }
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_THREAD_INIT_NS,
+      mylite_stage_start);
 
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
   if (init_early_variables())
+  {
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_EARLY_VARIABLES_NS,
+        mylite_stage_start);
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_TOTAL_NS,
+        mylite_startup_start);
     return 1;
+  }
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_EARLY_VARIABLES_NS,
+      mylite_stage_start);
 
   if (!argc)
   {
@@ -568,36 +597,75 @@ int init_embedded_server(int argc, char **argv, char **groups)
     Perform basic logger initialization logger. Should be called after
     MY_INIT, as it initializes mutexes. Log tables are inited later.
   */
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
   logger.init_base();
 
   orig_argc= *argcp;
   orig_argv= *argvp;
   if (load_defaults("my", (const char **)groups, argcp, argvp))
+  {
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_LOAD_DEFAULTS_NS,
+        mylite_stage_start);
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_TOTAL_NS,
+        mylite_startup_start);
     return 1;
+  }
   defaults_argc= *argcp;
   defaults_argv= *argvp;
   remaining_argc= *argcp;
   remaining_argv= *argvp;
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_LOAD_DEFAULTS_NS,
+      mylite_stage_start);
 
   /* Must be initialized early for comparison of options name */
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
   system_charset_info= &my_charset_utf8mb3_general_ci;
   sys_var_init();
 
   int ho_error= handle_early_options();
   if (ho_error != 0)
-    return 1;
-
-  my_timer_init(&sys_timer_info);
-
-  if (init_common_variables())
   {
-    mysql_server_end();
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_SYSVAR_OPTIONS_NS,
+        mylite_stage_start);
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_TOTAL_NS,
+        mylite_startup_start);
     return 1;
   }
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_SYSVAR_OPTIONS_NS,
+      mylite_stage_start);
+
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
+  my_timer_init(&sys_timer_info);
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_TIMER_NS,
+      mylite_stage_start);
+
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
+  if (init_common_variables())
+  {
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_COMMON_VARIABLES_NS,
+        mylite_stage_start);
+    mysql_server_end();
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_TOTAL_NS,
+        mylite_startup_start);
+    return 1;
+  }
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_COMMON_VARIABLES_NS,
+      mylite_stage_start);
 
   mysql_data_home= mysql_real_data_home;
   mysql_data_home_len= mysql_real_data_home_len;
 
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
   /* Get default temporary directory */
   opt_mysql_tmpdir=getenv("TMPDIR");	/* Use this if possible */
 #if defined(_WIN32)
@@ -611,29 +679,57 @@ int init_embedded_server(int argc, char **argv, char **groups)
 
   init_ssl();
   umask(((~my_umask) & 0666));
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_TMPDIR_SSL_UMASK_NS,
+      mylite_stage_start);
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
   if (init_server_components())
   {
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_COMPONENTS_NS,
+        mylite_stage_start);
     mysql_server_end();
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_TOTAL_NS,
+        mylite_startup_start);
     return 1;
   }
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_COMPONENTS_NS,
+      mylite_stage_start);
 
   /* 
     set error_handler_hook to embedded_error_handler wrapper.
   */
   error_handler_hook= embedded_error_handler;
 
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
   acl_error= 0;
 #ifndef NO_EMBEDDED_ACCESS_CHECKS
   if (!(acl_error= acl_init(opt_noacl)) &&
       !opt_noacl)
     (void) grant_init();
 #endif
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_ACL_GRANT_NS,
+      mylite_stage_start);
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
   if (acl_error || my_tz_init((THD *)0, default_tz_name, opt_bootstrap))
   {
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_TIMEZONE_NS,
+        mylite_stage_start);
     mysql_server_end();
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_TOTAL_NS,
+        mylite_startup_start);
     return 1;
   }
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_TIMEZONE_NS,
+      mylite_stage_start);
 
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
   init_max_user_conn();
   init_update_queries();
 
@@ -651,22 +747,48 @@ int init_embedded_server(int argc, char **argv, char **groups)
   //       corresponding delete is in clean_up()
   if(!binlog_filter) binlog_filter = new Rpl_filter;
   if(!global_rpl_filter) global_rpl_filter = new Rpl_filter;
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_STATUS_UDF_FILTERS_NS,
+      mylite_stage_start);
 
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
   if (opt_init_file)
   {
     if (read_init_file(opt_init_file))
     {
+      mylite_embedded_startup_perf_add_elapsed(
+          MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_INIT_FILE_NS,
+          mylite_stage_start);
       mysql_server_end();
+      mylite_embedded_startup_perf_add_elapsed(
+          MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_TOTAL_NS,
+          mylite_startup_start);
       return 1;
     }
   }
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_INIT_FILE_NS,
+      mylite_stage_start);
 
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
   if (ddl_log_execute_recovery() > 0)
   {
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_DDL_RECOVERY_NS,
+        mylite_stage_start);
     mysql_server_end();
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_TOTAL_NS,
+        mylite_startup_start);
     return 1;
   }
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_DDL_RECOVERY_NS,
+      mylite_stage_start);
   mysql_embedded_init= 1;
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_TOTAL_NS,
+      mylite_startup_start);
   return 0;
 }
 

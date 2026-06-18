@@ -44,6 +44,7 @@
 #include <pfs_transaction_provider.h>
 #include <mysql/psi/mysql_transaction.h>
 #include <mylite_embedded_shutdown_perf.h>
+#include <mylite_embedded_startup_perf.h>
 #include "debug_sync.h"         // DEBUG_SYNC
 #include "debug.h"              // debug_decrement_counter
 #include "sql_audit.h"
@@ -152,6 +153,41 @@ static void mylite_storage_engine_finalize_count(const LEX_CSTRING *name,
   const size_t call_index= mylite_storage_engine_finalize_call_index(name);
   mylite_embedded_shutdown_perf_add(call_index, 1);
   mylite_embedded_shutdown_perf_add_elapsed(call_index + 1, start_ns);
+}
+
+static size_t mylite_storage_engine_init_call_index(const LEX_CSTRING *name)
+{
+  if (mylite_storage_engine_name_eq(name, "InnoDB"))
+    return MYLITE_EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_INNODB_CALLS;
+  if (mylite_storage_engine_name_eq(name, "Aria"))
+    return MYLITE_EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_ARIA_CALLS;
+  if (mylite_storage_engine_name_eq(name, "MyISAM"))
+    return MYLITE_EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_MYISAM_CALLS;
+  if (mylite_storage_engine_name_eq(name, "MEMORY"))
+    return MYLITE_EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_MEMORY_CALLS;
+  if (mylite_storage_engine_name_eq(name, "CSV"))
+    return MYLITE_EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_CSV_CALLS;
+  if (mylite_storage_engine_name_eq(name, "partition"))
+    return MYLITE_EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_PARTITION_CALLS;
+  if (mylite_storage_engine_name_eq(name, "SQL_SEQUENCE"))
+    return MYLITE_EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_SQL_SEQUENCE_CALLS;
+  if (mylite_storage_engine_name_eq(name, "SEQUENCE"))
+    return MYLITE_EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_SEQUENCE_CALLS;
+  if (mylite_storage_engine_name_eq(name, "MRG_MyISAM"))
+    return MYLITE_EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_MRG_MYISAM_CALLS;
+  if (mylite_storage_engine_name_eq(name, "PERFORMANCE_SCHEMA"))
+    return MYLITE_EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_PERFORMANCE_SCHEMA_CALLS;
+  return MYLITE_EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_OTHER_CALLS;
+}
+
+static void mylite_storage_engine_init_count(const LEX_CSTRING *name,
+                                             uint64_t start_ns)
+{
+  if (start_ns == 0)
+    return;
+  const size_t call_index= mylite_storage_engine_init_call_index(name);
+  mylite_embedded_startup_perf_add(call_index, 1);
+  mylite_embedded_startup_perf_add_elapsed(call_index + 1, start_ns);
 }
 
 enum mylite_sql_handler_perf_stat_index {
@@ -905,8 +941,12 @@ int ha_initialize_handlerton(void *plugin_)
   st_plugin_int *plugin= static_cast<st_plugin_int *>(plugin_);
   handlerton *hton;
   int ret= 0;
+  uint64_t mylite_startup_start;
   DBUG_ENTER("ha_initialize_handlerton");
   DBUG_PRINT("plugin", ("initialize plugin: '%s'", plugin->name.str));
+  mylite_embedded_startup_perf_count(
+      MYLITE_EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_CALLS);
+  mylite_startup_start= mylite_embedded_startup_perf_start_ns();
 
   hton= (handlerton *)my_malloc(key_memory_handlerton, sizeof(handlerton),
                                 MYF(MY_WME | MY_ZEROFILL));
@@ -1010,6 +1050,10 @@ int ha_initialize_handlerton(void *plugin_)
   if (ddl_recovery_done && hton->signal_ddl_recovery_done)
     ret= hton->signal_ddl_recovery_done(hton);
 
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_TOTAL_NS,
+      mylite_startup_start);
+  mylite_storage_engine_init_count(&plugin->name, mylite_startup_start);
   DBUG_RETURN(ret);
 
 err_deinit:
@@ -1028,6 +1072,10 @@ err:
   my_free(hton);
 err_no_hton_memory:
   plugin->data= NULL;
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_TOTAL_NS,
+      mylite_startup_start);
+  mylite_storage_engine_init_count(&plugin->name, mylite_startup_start);
   DBUG_RETURN(ret);
 }
 

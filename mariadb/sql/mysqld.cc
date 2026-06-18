@@ -88,6 +88,7 @@
 #include "sql_callback.h"
 #include "threadpool.h"
 #include <mylite_embedded_shutdown_perf.h>
+#include <mylite_embedded_startup_perf.h>
 
 #include <atomic>
 #include <chrono>
@@ -108,6 +109,72 @@ static std::atomic<bool> mylite_embedded_shutdown_perf_stats_enabled_flag{
     false};
 static std::atomic<uint64_t> mylite_embedded_shutdown_perf_stats
     [MYLITE_EMBEDDED_SHUTDOWN_PERF_STAT_COUNT];
+static std::atomic<bool> mylite_embedded_startup_perf_stats_enabled_flag{
+    false};
+static std::atomic<uint64_t> mylite_embedded_startup_perf_stats
+    [MYLITE_EMBEDDED_STARTUP_PERF_STAT_COUNT];
+
+extern "C" void mylite_embedded_startup_perf_set_enabled(int enabled)
+{
+  mylite_embedded_startup_perf_stats_enabled_flag.store(
+      enabled != 0, std::memory_order_relaxed);
+}
+
+extern "C" void mylite_embedded_startup_perf_reset(void)
+{
+  for (size_t i= 0; i < MYLITE_EMBEDDED_STARTUP_PERF_STAT_COUNT; ++i)
+    mylite_embedded_startup_perf_stats[i].store(
+        0, std::memory_order_relaxed);
+}
+
+extern "C" void mylite_embedded_startup_perf_read(uint64_t *out_values,
+                                                  size_t value_count)
+{
+  if (!out_values || value_count == 0)
+    return;
+
+  const size_t copy_count=
+      value_count < MYLITE_EMBEDDED_STARTUP_PERF_STAT_COUNT
+          ? value_count
+          : MYLITE_EMBEDDED_STARTUP_PERF_STAT_COUNT;
+  for (size_t i= 0; i < copy_count; ++i)
+    out_values[i]=
+        mylite_embedded_startup_perf_stats[i].load(
+            std::memory_order_relaxed);
+}
+
+extern "C" int mylite_embedded_startup_perf_stats_enabled(void)
+{
+  return mylite_embedded_startup_perf_stats_enabled_flag.load(
+      std::memory_order_relaxed)
+             ? 1
+             : 0;
+}
+
+extern "C" uint64_t mylite_embedded_startup_perf_now_ns(void)
+{
+  const auto now= std::chrono::steady_clock::now().time_since_epoch();
+  return static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
+}
+
+extern "C" void mylite_embedded_startup_perf_add(size_t index,
+                                                 uint64_t value)
+{
+  if (index < MYLITE_EMBEDDED_STARTUP_PERF_STAT_COUNT &&
+      mylite_embedded_startup_perf_stats_enabled_flag.load(
+          std::memory_order_relaxed))
+    mylite_embedded_startup_perf_stats[index].fetch_add(
+        value, std::memory_order_relaxed);
+}
+
+extern "C" void mylite_embedded_startup_perf_add_elapsed(size_t index,
+                                                         uint64_t start_ns)
+{
+  if (start_ns != 0)
+    mylite_embedded_startup_perf_add(
+        index, mylite_embedded_startup_perf_now_ns() - start_ns);
+}
 
 extern "C" void mylite_embedded_shutdown_perf_set_enabled(int enabled)
 {
@@ -5109,7 +5176,13 @@ static int adjust_optimizer_costs(const LEX_CSTRING *, OPTIMIZER_COSTS *oc, TABL
 
 static int init_server_components()
 {
+  uint64_t mylite_startup_start, mylite_stage_start;
+
   DBUG_ENTER("init_server_components");
+  mylite_embedded_startup_perf_count(
+      MYLITE_EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_CALLS);
+  mylite_startup_start= mylite_embedded_startup_perf_start_ns();
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
   /*
     We need to call each of these following functions to ensure that
     all things are initialized so that unireg_abort() doesn't fail
@@ -5144,9 +5217,13 @@ static int init_server_components()
 
   my_uuid_init((ulong) (my_rnd(&sql_rand))*12345,12345);
   wt_init();
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_CORE_NS,
+      mylite_stage_start);
 
   /* Setup logs */
 
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
   setup_log_handling();
 
   /*
@@ -5233,6 +5310,10 @@ static int init_server_components()
 #endif
 
   xid_cache_init();
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_LOGGING_NS,
+      mylite_stage_start);
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
 
   /*
     Do not open binlong when doing bootstrap.
@@ -5466,6 +5547,9 @@ static int init_server_components()
     us_to_ms(global_system_variables.optimizer_where_cost);
     us_to_ms(global_system_variables.optimizer_scan_setup_cost);
   }
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_PRE_PLUGIN_NS,
+      mylite_stage_start);
 
   /*
     Plugins may not be completed because system table DDLs are only
@@ -5475,13 +5559,23 @@ static int init_server_components()
     done and nothing else, and definitely not anything assuming that
     all plugins have been initialised.
   */
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
   if (plugin_init(&remaining_argc, remaining_argv,
                   (opt_noacl ? PLUGIN_INIT_SKIP_PLUGIN_TABLE : 0) |
                   (opt_abort ? PLUGIN_INIT_SKIP_INITIALIZATION : 0)))
   {
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_PLUGIN_INIT_NS,
+        mylite_stage_start);
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_TOTAL_NS,
+        mylite_startup_start);
     sql_print_error("Failed to initialize plugins.");
     unireg_abort(1);
   }
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_PLUGIN_INIT_NS,
+      mylite_stage_start);
   plugins_are_initialized= TRUE;  /* Don't separate from init function */
 
 #ifdef HAVE_REPLICATION
@@ -5658,12 +5752,23 @@ static int init_server_components()
     unireg_abort(1);  
 
   /* We have to initialize the storage engines before CSV logging */
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
   if (ha_init())
   {
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_HA_INIT_NS,
+        mylite_stage_start);
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_TOTAL_NS,
+        mylite_startup_start);
     sql_print_error("Can't init databases");
     unireg_abort(1);
   }
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_HA_INIT_NS,
+      mylite_stage_start);
 
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
   if (opt_bootstrap)
     log_output_options= LOG_FILE;
   else
@@ -5717,6 +5822,9 @@ static int init_server_components()
 
   if (init_gtid_pos_auto_engines())
     unireg_abort(1);
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_DEFAULT_ENGINES_NS,
+      mylite_stage_start);
 
 #ifdef USE_ARIA_FOR_TMP_TABLES
   if (!ha_storage_engine_is_enabled(maria_hton) && !opt_bootstrap)
@@ -5750,6 +5858,7 @@ static int init_server_components()
   start_handle_manager();
 #endif
 
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
   tc_log= get_tc_log_implementation();
 
   if (tc_log->open(opt_bin_log ? opt_bin_logname : opt_tc_log_file))
@@ -5801,9 +5910,17 @@ static int init_server_components()
   }
 #endif
 
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_TC_LOG_RECOVERY_NS,
+      mylite_stage_start);
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
+
   if (ddl_log_execute_recovery() > 0)
     unireg_abort(1);
   ha_signal_ddl_recovery_done();
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_DDL_RECOVERY_NS,
+      mylite_stage_start);
 
   if (opt_myisam_log)
     (void) mi_log(1);
@@ -5846,6 +5963,7 @@ static int init_server_components()
   prctl(PR_SET_THP_DISABLE, 1, 0, 0, 0);
 #endif
 
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
   ft_init_stopwords();
 
   init_max_user_conn();
@@ -5857,6 +5975,12 @@ static int init_server_components()
   Item_false= new (&read_only_root) Item_bool_static("FALSE", 0);
   Item_true=  new (&read_only_root) Item_bool_static("TRUE", 1);
   DBUG_ASSERT(Item_false);
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_FINAL_STATUS_NS,
+      mylite_stage_start);
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_TOTAL_NS,
+      mylite_startup_start);
 
   DBUG_RETURN(0);
 }

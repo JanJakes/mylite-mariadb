@@ -859,12 +859,93 @@ enum embedded_shutdown_perf_stat_index {
     EMBEDDED_SHUTDOWN_PERF_STAT_COUNT
 };
 
+enum embedded_startup_perf_stat_index {
+    EMBEDDED_STARTUP_PERF_SERVER_INIT_CALLS = 0,
+    EMBEDDED_STARTUP_PERF_SERVER_INIT_TOTAL_NS,
+    EMBEDDED_STARTUP_PERF_SERVER_INIT_MY_INIT_NS,
+    EMBEDDED_STARTUP_PERF_SERVER_INIT_CLIENT_ERRS_NS,
+    EMBEDDED_STARTUP_PERF_SERVER_INIT_CLIENT_PLUGIN_INIT_NS,
+    EMBEDDED_STARTUP_PERF_SERVER_INIT_PORTS_NS,
+    EMBEDDED_STARTUP_PERF_SERVER_INIT_DEBUG_SIGNAL_NS,
+    EMBEDDED_STARTUP_PERF_SERVER_INIT_EMBEDDED_SERVER_NS,
+    EMBEDDED_STARTUP_PERF_SERVER_INIT_THREAD_INIT_NS,
+    EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_CALLS,
+    EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_TOTAL_NS,
+    EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_THREAD_INIT_NS,
+    EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_EARLY_VARIABLES_NS,
+    EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_LOAD_DEFAULTS_NS,
+    EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_SYSVAR_OPTIONS_NS,
+    EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_TIMER_NS,
+    EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_COMMON_VARIABLES_NS,
+    EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_TMPDIR_SSL_UMASK_NS,
+    EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_COMPONENTS_NS,
+    EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_ACL_GRANT_NS,
+    EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_TIMEZONE_NS,
+    EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_STATUS_UDF_FILTERS_NS,
+    EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_INIT_FILE_NS,
+    EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_DDL_RECOVERY_NS,
+    EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_CALLS,
+    EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_TOTAL_NS,
+    EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_CORE_NS,
+    EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_LOGGING_NS,
+    EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_PRE_PLUGIN_NS,
+    EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_PLUGIN_INIT_NS,
+    EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_HA_INIT_NS,
+    EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_DEFAULT_ENGINES_NS,
+    EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_TC_LOG_RECOVERY_NS,
+    EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_DDL_RECOVERY_NS,
+    EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_FINAL_STATUS_NS,
+    EMBEDDED_STARTUP_PERF_PLUGIN_INIT_CALLS,
+    EMBEDDED_STARTUP_PERF_PLUGIN_INIT_TOTAL_NS,
+    EMBEDDED_STARTUP_PERF_PLUGIN_INIT_SETUP_NS,
+    EMBEDDED_STARTUP_PERF_PLUGIN_INIT_REGISTER_BUILTINS_NS,
+    EMBEDDED_STARTUP_PERF_PLUGIN_INIT_MYISAM_NS,
+    EMBEDDED_STARTUP_PERF_PLUGIN_INIT_REMAINING_NS,
+    EMBEDDED_STARTUP_PERF_PLUGIN_INIT_RETRY_NS,
+    EMBEDDED_STARTUP_PERF_PLUGIN_INIT_REAP_NS,
+    EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_CALLS,
+    EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_TOTAL_NS,
+    EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_INNODB_CALLS,
+    EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_INNODB_NS,
+    EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_ARIA_CALLS,
+    EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_ARIA_NS,
+    EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_MYISAM_CALLS,
+    EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_MYISAM_NS,
+    EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_MEMORY_CALLS,
+    EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_MEMORY_NS,
+    EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_CSV_CALLS,
+    EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_CSV_NS,
+    EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_PARTITION_CALLS,
+    EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_PARTITION_NS,
+    EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_SQL_SEQUENCE_CALLS,
+    EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_SQL_SEQUENCE_NS,
+    EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_SEQUENCE_CALLS,
+    EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_SEQUENCE_NS,
+    EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_MRG_MYISAM_CALLS,
+    EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_MRG_MYISAM_NS,
+    EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_PERFORMANCE_SCHEMA_CALLS,
+    EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_PERFORMANCE_SCHEMA_NS,
+    EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_OTHER_CALLS,
+    EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_OTHER_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_INIT_CALLS,
+    EMBEDDED_STARTUP_PERF_INNODB_INIT_TOTAL_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_INIT_PARAMS_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_INIT_PFS_REGISTER_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_INIT_CHECK_FILE_SPEC_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_INIT_SRV_START_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_INIT_POST_START_NS,
+    EMBEDDED_STARTUP_PERF_STAT_COUNT
+};
+
 void mylite_embedded_open_perf_set_enabled(int enabled);
 void mylite_embedded_open_perf_reset(void);
 void mylite_embedded_open_perf_read(uint64_t *out_values, size_t value_count);
 void mylite_embedded_shutdown_perf_set_enabled(int enabled);
 void mylite_embedded_shutdown_perf_reset(void);
 void mylite_embedded_shutdown_perf_read(uint64_t *out_values, size_t value_count);
+void mylite_embedded_startup_perf_set_enabled(int enabled);
+void mylite_embedded_startup_perf_reset(void);
+void mylite_embedded_startup_perf_read(uint64_t *out_values, size_t value_count);
 void mylite_ownerless_innodb_set_page_publish_stats_enabled(int enabled);
 void mylite_ownerless_innodb_reset_page_publish_stats(void);
 void mylite_ownerless_innodb_read_page_publish_stats(uint64_t *out_values, size_t value_count);
@@ -970,6 +1051,8 @@ static void emit_commit_visibility_stats(const char *prefix);
 static void emit_database_perf_stats(const char *prefix);
 static void emit_embedded_open_perf_stats(const char *prefix);
 static void emit_embedded_open_perf_summary(const char *prefix);
+static void emit_embedded_startup_perf_stats(const char *prefix);
+static void emit_embedded_startup_perf_summary(const char *prefix);
 static void emit_embedded_shutdown_perf_stats(const char *prefix);
 static void emit_embedded_shutdown_perf_summary(const char *prefix);
 static void emit_page_write_perf_stats(const char *prefix);
@@ -1028,11 +1111,13 @@ static double measure_bulk_autocommit_insert(
 
 static void reset_embedded_lifecycle_perf_stats(void) {
     mylite_embedded_open_perf_reset();
+    mylite_embedded_startup_perf_reset();
     mylite_embedded_shutdown_perf_reset();
 }
 
 static void set_embedded_lifecycle_perf_stats_enabled(int enabled) {
     mylite_embedded_open_perf_set_enabled(enabled);
+    mylite_embedded_startup_perf_set_enabled(enabled);
     mylite_embedded_shutdown_perf_set_enabled(enabled);
 }
 
@@ -1118,6 +1203,8 @@ int main(void) {
     emit_ms("mylite_perf_ordinary_warm_open_close", seconds, open_close_iterations);
     emit_embedded_open_perf_stats("mylite_perf_ordinary_warm_open_close");
     emit_embedded_open_perf_summary("mylite_perf_summary_ordinary_warm_open_close");
+    emit_embedded_startup_perf_stats("mylite_perf_ordinary_warm_open_close");
+    emit_embedded_startup_perf_summary("mylite_perf_summary_ordinary_warm_open_close");
     emit_embedded_shutdown_perf_stats("mylite_perf_ordinary_warm_open_close");
     emit_embedded_shutdown_perf_summary("mylite_perf_summary_ordinary_warm_open_close");
     check_max_ms("MYLITE_PERF_MAX_ORDINARY_WARM_OPEN_CLOSE_MS", seconds, open_close_iterations);
@@ -1132,6 +1219,8 @@ int main(void) {
     emit_ms("mylite_perf_ordinary_active_runtime_reconnect", seconds, open_close_iterations);
     emit_embedded_open_perf_stats("mylite_perf_ordinary_active_runtime_reconnect");
     emit_embedded_open_perf_summary("mylite_perf_summary_ordinary_active_runtime_reconnect");
+    emit_embedded_startup_perf_stats("mylite_perf_ordinary_active_runtime_reconnect");
+    emit_embedded_startup_perf_summary("mylite_perf_summary_ordinary_active_runtime_reconnect");
     emit_embedded_shutdown_perf_stats("mylite_perf_ordinary_active_runtime_reconnect");
     emit_embedded_shutdown_perf_summary("mylite_perf_summary_ordinary_active_runtime_reconnect");
     check_max_ms(
@@ -1149,6 +1238,8 @@ int main(void) {
     emit_ms("mylite_perf_ownerless_first_probe_open_close", seconds, 1U);
     emit_embedded_open_perf_stats("mylite_perf_ownerless_first_probe_open_close");
     emit_embedded_open_perf_summary("mylite_perf_summary_ownerless_first_probe_open_close");
+    emit_embedded_startup_perf_stats("mylite_perf_ownerless_first_probe_open_close");
+    emit_embedded_startup_perf_summary("mylite_perf_summary_ownerless_first_probe_open_close");
     emit_embedded_shutdown_perf_stats("mylite_perf_ownerless_first_probe_open_close");
     emit_embedded_shutdown_perf_summary("mylite_perf_summary_ownerless_first_probe_open_close");
     check_max_ms("MYLITE_PERF_MAX_OWNERLESS_FIRST_PROBE_OPEN_CLOSE_MS", seconds, 1U);
@@ -1161,6 +1252,8 @@ int main(void) {
     emit_ms("mylite_perf_ownerless_warm_open_close", seconds, open_close_iterations);
     emit_embedded_open_perf_stats("mylite_perf_ownerless_warm_open_close");
     emit_embedded_open_perf_summary("mylite_perf_summary_ownerless_warm_open_close");
+    emit_embedded_startup_perf_stats("mylite_perf_ownerless_warm_open_close");
+    emit_embedded_startup_perf_summary("mylite_perf_summary_ownerless_warm_open_close");
     emit_embedded_shutdown_perf_stats("mylite_perf_ownerless_warm_open_close");
     emit_embedded_shutdown_perf_summary("mylite_perf_summary_ownerless_warm_open_close");
     check_max_ms("MYLITE_PERF_MAX_OWNERLESS_WARM_OPEN_CLOSE_MS", seconds, open_close_iterations);
@@ -1175,6 +1268,8 @@ int main(void) {
     emit_ms("mylite_perf_ownerless_active_runtime_reconnect", seconds, open_close_iterations);
     emit_embedded_open_perf_stats("mylite_perf_ownerless_active_runtime_reconnect");
     emit_embedded_open_perf_summary("mylite_perf_summary_ownerless_active_runtime_reconnect");
+    emit_embedded_startup_perf_stats("mylite_perf_ownerless_active_runtime_reconnect");
+    emit_embedded_startup_perf_summary("mylite_perf_summary_ownerless_active_runtime_reconnect");
     emit_embedded_shutdown_perf_stats("mylite_perf_ownerless_active_runtime_reconnect");
     emit_embedded_shutdown_perf_summary("mylite_perf_summary_ownerless_active_runtime_reconnect");
     check_max_ms(
@@ -6347,6 +6442,463 @@ static void emit_embedded_open_perf_summary(const char *prefix) {
         "release_mysql_shutdown",
         values[EMBEDDED_OPEN_PERF_RELEASE_MYSQL_SHUTDOWN_NS],
         release_calls
+    );
+}
+
+static void emit_embedded_startup_perf_value(const char *prefix, const char *name, uint64_t value) {
+    printf("%s_startup_phase_%s=%" PRIu64 "\n", prefix, name, value);
+}
+
+static void emit_embedded_startup_perf_ms(
+    const char *prefix,
+    const char *name,
+    uint64_t value_ns,
+    uint64_t calls
+) {
+    const double total_ms = (double)value_ns / 1000000.0;
+    const double average_ms = calls > 0U ? total_ms / (double)calls : 0.0;
+
+    printf("%s_startup_phase_%s_ms=%.3f\n", prefix, name, total_ms);
+    printf("%s_startup_phase_%s_ms_avg=%.3f\n", prefix, name, average_ms);
+}
+
+static void emit_embedded_startup_perf_summary_ms(
+    const char *prefix,
+    const char *name,
+    uint64_t value_ns,
+    uint64_t calls
+) {
+    printf(
+        "%s_startup_%s_ms_avg=%.3f\n",
+        prefix,
+        name,
+        embedded_open_perf_average_ms(value_ns, calls)
+    );
+}
+
+static void emit_embedded_startup_storage_engine_perf(
+    const char *prefix,
+    const char *name,
+    const uint64_t *values,
+    size_t calls_index,
+    size_t ns_index
+) {
+    const uint64_t calls = values[calls_index];
+    char calls_name[128];
+    char time_name[128];
+
+    snprintf(calls_name, sizeof(calls_name), "storage_engine_init_%s_calls", name);
+    snprintf(time_name, sizeof(time_name), "storage_engine_init_%s", name);
+    emit_embedded_startup_perf_value(prefix, calls_name, calls);
+    emit_embedded_startup_perf_ms(prefix, time_name, values[ns_index], calls);
+}
+
+static void emit_embedded_startup_perf_summary(const char *prefix) {
+    uint64_t values[EMBEDDED_STARTUP_PERF_STAT_COUNT] = {0};
+    uint64_t server_init_calls;
+    uint64_t embedded_server_calls;
+    uint64_t server_components_calls;
+    uint64_t plugin_init_calls;
+    uint64_t storage_engine_init_calls;
+    uint64_t innodb_init_calls;
+
+    mylite_embedded_startup_perf_read(values, EMBEDDED_STARTUP_PERF_STAT_COUNT);
+
+    server_init_calls = values[EMBEDDED_STARTUP_PERF_SERVER_INIT_CALLS];
+    embedded_server_calls = values[EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_CALLS];
+    server_components_calls = values[EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_CALLS];
+    plugin_init_calls = values[EMBEDDED_STARTUP_PERF_PLUGIN_INIT_CALLS];
+    storage_engine_init_calls = values[EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_CALLS];
+    innodb_init_calls = values[EMBEDDED_STARTUP_PERF_INNODB_INIT_CALLS];
+
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "server_init_total",
+        values[EMBEDDED_STARTUP_PERF_SERVER_INIT_TOTAL_NS],
+        server_init_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "server_init_embedded_server",
+        values[EMBEDDED_STARTUP_PERF_SERVER_INIT_EMBEDDED_SERVER_NS],
+        embedded_server_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "embedded_server_total",
+        values[EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_TOTAL_NS],
+        embedded_server_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "embedded_server_common_variables",
+        values[EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_COMMON_VARIABLES_NS],
+        embedded_server_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "embedded_server_components",
+        values[EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_COMPONENTS_NS],
+        embedded_server_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "server_components_total",
+        values[EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_TOTAL_NS],
+        server_components_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "server_components_plugin_init",
+        values[EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_PLUGIN_INIT_NS],
+        server_components_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "server_components_ha_init",
+        values[EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_HA_INIT_NS],
+        server_components_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "server_components_default_engines",
+        values[EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_DEFAULT_ENGINES_NS],
+        server_components_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "server_components_tc_log_recovery",
+        values[EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_TC_LOG_RECOVERY_NS],
+        server_components_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "plugin_init_total",
+        values[EMBEDDED_STARTUP_PERF_PLUGIN_INIT_TOTAL_NS],
+        plugin_init_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "plugin_init_myisam",
+        values[EMBEDDED_STARTUP_PERF_PLUGIN_INIT_MYISAM_NS],
+        plugin_init_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "plugin_init_remaining",
+        values[EMBEDDED_STARTUP_PERF_PLUGIN_INIT_REMAINING_NS],
+        plugin_init_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "storage_engine_init_total",
+        values[EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_TOTAL_NS],
+        storage_engine_init_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "storage_engine_init_innodb",
+        values[EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_INNODB_NS],
+        values[EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_INNODB_CALLS]
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "storage_engine_init_aria",
+        values[EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_ARIA_NS],
+        values[EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_ARIA_CALLS]
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "storage_engine_init_myisam",
+        values[EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_MYISAM_NS],
+        values[EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_MYISAM_CALLS]
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_init_total",
+        values[EMBEDDED_STARTUP_PERF_INNODB_INIT_TOTAL_NS],
+        innodb_init_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_init_params",
+        values[EMBEDDED_STARTUP_PERF_INNODB_INIT_PARAMS_NS],
+        innodb_init_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_init_check_file_spec",
+        values[EMBEDDED_STARTUP_PERF_INNODB_INIT_CHECK_FILE_SPEC_NS],
+        innodb_init_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_init_srv_start",
+        values[EMBEDDED_STARTUP_PERF_INNODB_INIT_SRV_START_NS],
+        innodb_init_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_init_post_start",
+        values[EMBEDDED_STARTUP_PERF_INNODB_INIT_POST_START_NS],
+        innodb_init_calls
+    );
+}
+
+static void emit_embedded_startup_perf_stats(const char *prefix) {
+    uint64_t values[EMBEDDED_STARTUP_PERF_STAT_COUNT] = {0};
+    uint64_t server_init_calls;
+    uint64_t embedded_server_calls;
+    uint64_t server_components_calls;
+    uint64_t plugin_init_calls;
+    uint64_t storage_engine_init_calls;
+    uint64_t innodb_init_calls;
+
+    mylite_embedded_startup_perf_read(values, EMBEDDED_STARTUP_PERF_STAT_COUNT);
+
+    server_init_calls = values[EMBEDDED_STARTUP_PERF_SERVER_INIT_CALLS];
+    embedded_server_calls = values[EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_CALLS];
+    server_components_calls = values[EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_CALLS];
+    plugin_init_calls = values[EMBEDDED_STARTUP_PERF_PLUGIN_INIT_CALLS];
+    storage_engine_init_calls = values[EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_CALLS];
+    innodb_init_calls = values[EMBEDDED_STARTUP_PERF_INNODB_INIT_CALLS];
+
+    emit_embedded_startup_perf_value(prefix, "server_init_calls", server_init_calls);
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "server_init_total",
+        values[EMBEDDED_STARTUP_PERF_SERVER_INIT_TOTAL_NS],
+        server_init_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "server_init_embedded_server",
+        values[EMBEDDED_STARTUP_PERF_SERVER_INIT_EMBEDDED_SERVER_NS],
+        embedded_server_calls
+    );
+
+    emit_embedded_startup_perf_value(prefix, "embedded_server_calls", embedded_server_calls);
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "embedded_server_total",
+        values[EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_TOTAL_NS],
+        embedded_server_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "embedded_server_common_variables",
+        values[EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_COMMON_VARIABLES_NS],
+        embedded_server_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "embedded_server_components",
+        values[EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_COMPONENTS_NS],
+        embedded_server_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "embedded_server_acl_grant",
+        values[EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_ACL_GRANT_NS],
+        embedded_server_calls
+    );
+
+    emit_embedded_startup_perf_value(prefix, "server_components_calls", server_components_calls);
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "server_components_total",
+        values[EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_TOTAL_NS],
+        server_components_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "server_components_core",
+        values[EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_CORE_NS],
+        server_components_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "server_components_logging",
+        values[EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_LOGGING_NS],
+        server_components_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "server_components_pre_plugin",
+        values[EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_PRE_PLUGIN_NS],
+        server_components_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "server_components_plugin_init",
+        values[EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_PLUGIN_INIT_NS],
+        server_components_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "server_components_ha_init",
+        values[EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_HA_INIT_NS],
+        server_components_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "server_components_default_engines",
+        values[EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_DEFAULT_ENGINES_NS],
+        server_components_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "server_components_tc_log_recovery",
+        values[EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_TC_LOG_RECOVERY_NS],
+        server_components_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "server_components_ddl_recovery",
+        values[EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_DDL_RECOVERY_NS],
+        server_components_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "server_components_final_status",
+        values[EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_FINAL_STATUS_NS],
+        server_components_calls
+    );
+
+    emit_embedded_startup_perf_value(prefix, "plugin_init_calls", plugin_init_calls);
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "plugin_init_total",
+        values[EMBEDDED_STARTUP_PERF_PLUGIN_INIT_TOTAL_NS],
+        plugin_init_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "plugin_init_setup",
+        values[EMBEDDED_STARTUP_PERF_PLUGIN_INIT_SETUP_NS],
+        plugin_init_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "plugin_init_register_builtins",
+        values[EMBEDDED_STARTUP_PERF_PLUGIN_INIT_REGISTER_BUILTINS_NS],
+        plugin_init_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "plugin_init_myisam",
+        values[EMBEDDED_STARTUP_PERF_PLUGIN_INIT_MYISAM_NS],
+        plugin_init_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "plugin_init_remaining",
+        values[EMBEDDED_STARTUP_PERF_PLUGIN_INIT_REMAINING_NS],
+        plugin_init_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "plugin_init_retry",
+        values[EMBEDDED_STARTUP_PERF_PLUGIN_INIT_RETRY_NS],
+        plugin_init_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "plugin_init_reap",
+        values[EMBEDDED_STARTUP_PERF_PLUGIN_INIT_REAP_NS],
+        plugin_init_calls
+    );
+
+    emit_embedded_startup_perf_value(
+        prefix,
+        "storage_engine_init_calls",
+        storage_engine_init_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "storage_engine_init_total",
+        values[EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_TOTAL_NS],
+        storage_engine_init_calls
+    );
+    emit_embedded_startup_storage_engine_perf(
+        prefix,
+        "innodb",
+        values,
+        EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_INNODB_CALLS,
+        EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_INNODB_NS
+    );
+    emit_embedded_startup_storage_engine_perf(
+        prefix,
+        "aria",
+        values,
+        EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_ARIA_CALLS,
+        EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_ARIA_NS
+    );
+    emit_embedded_startup_storage_engine_perf(
+        prefix,
+        "myisam",
+        values,
+        EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_MYISAM_CALLS,
+        EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_MYISAM_NS
+    );
+    emit_embedded_startup_storage_engine_perf(
+        prefix,
+        "memory",
+        values,
+        EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_MEMORY_CALLS,
+        EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_MEMORY_NS
+    );
+    emit_embedded_startup_storage_engine_perf(
+        prefix,
+        "csv",
+        values,
+        EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_CSV_CALLS,
+        EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_CSV_NS
+    );
+    emit_embedded_startup_storage_engine_perf(
+        prefix,
+        "other",
+        values,
+        EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_OTHER_CALLS,
+        EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_OTHER_NS
+    );
+
+    emit_embedded_startup_perf_value(prefix, "innodb_init_calls", innodb_init_calls);
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_init_total",
+        values[EMBEDDED_STARTUP_PERF_INNODB_INIT_TOTAL_NS],
+        innodb_init_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_init_params",
+        values[EMBEDDED_STARTUP_PERF_INNODB_INIT_PARAMS_NS],
+        innodb_init_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_init_pfs_register",
+        values[EMBEDDED_STARTUP_PERF_INNODB_INIT_PFS_REGISTER_NS],
+        innodb_init_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_init_check_file_spec",
+        values[EMBEDDED_STARTUP_PERF_INNODB_INIT_CHECK_FILE_SPEC_NS],
+        innodb_init_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_init_srv_start",
+        values[EMBEDDED_STARTUP_PERF_INNODB_INIT_SRV_START_NS],
+        innodb_init_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_init_post_start",
+        values[EMBEDDED_STARTUP_PERF_INNODB_INIT_POST_START_NS],
+        innodb_init_calls
     );
 }
 

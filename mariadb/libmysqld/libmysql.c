@@ -66,6 +66,7 @@
 #include "client_settings.h"
 #include "embedded_priv.h"
 #include <mylite_embedded_shutdown_perf.h>
+#include <mylite_embedded_startup_perf.h>
 
 #undef net_buffer_length
 #undef max_allowed_packet
@@ -129,15 +130,49 @@ int STDCALL mysql_server_init(int argc __attribute__((unused)),
                               char **groups __attribute__((unused)))
 {
   int result= 0;
+  uint64_t mylite_startup_start, mylite_stage_start;
+
+  mylite_embedded_startup_perf_count(
+      MYLITE_EMBEDDED_STARTUP_PERF_SERVER_INIT_CALLS);
+  mylite_startup_start= mylite_embedded_startup_perf_start_ns();
   if (!mysql_client_init)
   {
     mysql_client_init=1;
     org_my_init_done=my_init_done;
+    mylite_stage_start= mylite_embedded_startup_perf_start_ns();
     if (my_init())				/* Will init threads */
+    {
+      mylite_embedded_startup_perf_add_elapsed(
+          MYLITE_EMBEDDED_STARTUP_PERF_SERVER_INIT_MY_INIT_NS,
+          mylite_stage_start);
+      mylite_embedded_startup_perf_add_elapsed(
+          MYLITE_EMBEDDED_STARTUP_PERF_SERVER_INIT_TOTAL_NS,
+          mylite_startup_start);
       return 1;
+    }
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_SERVER_INIT_MY_INIT_NS,
+        mylite_stage_start);
+    mylite_stage_start= mylite_embedded_startup_perf_start_ns();
     init_client_errs();
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_SERVER_INIT_CLIENT_ERRS_NS,
+        mylite_stage_start);
+    mylite_stage_start= mylite_embedded_startup_perf_start_ns();
     if (mysql_client_plugin_init())
+    {
+      mylite_embedded_startup_perf_add_elapsed(
+          MYLITE_EMBEDDED_STARTUP_PERF_SERVER_INIT_CLIENT_PLUGIN_INIT_NS,
+          mylite_stage_start);
+      mylite_embedded_startup_perf_add_elapsed(
+          MYLITE_EMBEDDED_STARTUP_PERF_SERVER_INIT_TOTAL_NS,
+          mylite_startup_start);
       return 1;
+    }
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_SERVER_INIT_CLIENT_PLUGIN_INIT_NS,
+        mylite_stage_start);
+    mylite_stage_start= mylite_embedded_startup_perf_start_ns();
     if (!mysql_port)
     {
       char *env;
@@ -176,17 +211,39 @@ int STDCALL mysql_server_init(int argc __attribute__((unused)),
       if ((env = getenv("MYSQL_UNIX_PORT")))
 	mysql_unix_port = env;
     }
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_SERVER_INIT_PORTS_NS,
+        mylite_stage_start);
+    mylite_stage_start= mylite_embedded_startup_perf_start_ns();
     mysql_debug(NullS);
 #if defined(SIGPIPE) && !defined(_WIN32)
     (void) signal(SIGPIPE, SIG_IGN);
 #endif
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_SERVER_INIT_DEBUG_SIGNAL_NS,
+        mylite_stage_start);
 #ifdef EMBEDDED_LIBRARY
     if (argc > -1)
+    {
+       mylite_stage_start= mylite_embedded_startup_perf_start_ns();
        result= init_embedded_server(argc, argv, groups);
+       mylite_embedded_startup_perf_add_elapsed(
+           MYLITE_EMBEDDED_STARTUP_PERF_SERVER_INIT_EMBEDDED_SERVER_NS,
+           mylite_stage_start);
+    }
 #endif
   }
   else
+  {
+    mylite_stage_start= mylite_embedded_startup_perf_start_ns();
     result= (int)my_thread_init();         /* Init if new thread */
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_SERVER_INIT_THREAD_INIT_NS,
+        mylite_stage_start);
+  }
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_SERVER_INIT_TOTAL_NS,
+      mylite_startup_start);
   return result;
 }
 

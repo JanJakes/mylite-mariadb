@@ -850,6 +850,14 @@ The design must be fast in the common case:
   sleep now uses a `1 ms` poll after the immediate retry budget is exhausted;
   a ten-iteration sample after that change reported `11.280 ms` total
   log-empty sleep and `54.854 ms` total log-empty shutdown.
+  Startup attribution now splits `mysql_server_init()` through embedded server
+  startup, server components, plugin initialization, storage-engine
+  handlerton initialization, and InnoDB `srv_start()`. A reduced production
+  sample after the shutdown fixes reported `94.364 ms` average in
+  `mysql_server_init()`, `52.325 ms` in server-component plugin
+  initialization, `45.038 ms` in InnoDB storage-engine initialization, and
+  `44.983 ms` in InnoDB `srv_start()`, keeping the remaining startup target on
+  native MariaDB/InnoDB startup rather than ownerless coordination.
 - Page-version lookup should be O(1) average by `(space_id, page_no)` with a
   short version chain filtered by reader end mark.
 - Ordinary exclusive opens must stay on the native MariaDB embedded hot path:

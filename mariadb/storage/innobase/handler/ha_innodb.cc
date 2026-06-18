@@ -88,6 +88,7 @@ extern my_bool opt_readonly;
 #include "lock0lock.h"
 #include "log0crypt.h"
 #include "mtr0mtr.h"
+#include <mylite_embedded_startup_perf.h>
 #include "mylite_ownerless_innodb_lock_hooks.h"
 #include "os0file.h"
 #include "page0zip.h"
@@ -4229,7 +4230,12 @@ static void innobase_update_optimizer_costs(OPTIMIZER_COSTS *costs)
 @retval 0 on success */
 static int innodb_init(void* p)
 {
+	uint64_t	mylite_startup_start, mylite_stage_start;
+
 	DBUG_ENTER("innodb_init");
+	mylite_embedded_startup_perf_count(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_INIT_CALLS);
+	mylite_startup_start = mylite_embedded_startup_perf_start_ns();
 	handlerton* innobase_hton= static_cast<handlerton*>(p);
 	innodb_hton_ptr = innobase_hton;
 
@@ -4319,15 +4325,26 @@ static int innodb_init(void* p)
 
 	/* Setup the memory alloc/free tracing mechanisms before calling
 	any functions that could possibly allocate memory. */
+	mylite_stage_start = mylite_embedded_startup_perf_start_ns();
 	ut_new_boot();
 
 	if (int error = innodb_init_params()) {
+		mylite_embedded_startup_perf_add_elapsed(
+			MYLITE_EMBEDDED_STARTUP_PERF_INNODB_INIT_PARAMS_NS,
+			mylite_stage_start);
+		mylite_embedded_startup_perf_add_elapsed(
+			MYLITE_EMBEDDED_STARTUP_PERF_INNODB_INIT_TOTAL_NS,
+			mylite_startup_start);
 		DBUG_RETURN(error);
 	}
+	mylite_embedded_startup_perf_add_elapsed(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_INIT_PARAMS_NS,
+		mylite_stage_start);
 
 	/* After this point, error handling has to use
 	innodb_init_abort(). */
 
+	mylite_stage_start = mylite_embedded_startup_perf_start_ns();
 #ifdef HAVE_PSI_INTERFACE
 	/* Register keys with MySQL performance schema */
 	int	count;
@@ -4352,23 +4369,47 @@ static int innodb_init(void* p)
 	mysql_file_register("innodb", all_innodb_files, count);
 # endif /* UNIV_PFS_IO */
 #endif /* HAVE_PSI_INTERFACE */
+	mylite_embedded_startup_perf_add_elapsed(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_INIT_PFS_REGISTER_NS,
+		mylite_stage_start);
 
 	bool	create_new_db = false;
 
 	/* Check whether the data files exist. */
+	mylite_stage_start = mylite_embedded_startup_perf_start_ns();
 	dberr_t	err = srv_sys_space.check_file_spec(&create_new_db, 5U << 20);
 
 	if (err != DB_SUCCESS) {
+		mylite_embedded_startup_perf_add_elapsed(
+			MYLITE_EMBEDDED_STARTUP_PERF_INNODB_INIT_CHECK_FILE_SPEC_NS,
+			mylite_stage_start);
+		mylite_embedded_startup_perf_add_elapsed(
+			MYLITE_EMBEDDED_STARTUP_PERF_INNODB_INIT_TOTAL_NS,
+			mylite_startup_start);
 		DBUG_RETURN(innodb_init_abort());
 	}
+	mylite_embedded_startup_perf_add_elapsed(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_INIT_CHECK_FILE_SPEC_NS,
+		mylite_stage_start);
 
+	mylite_stage_start = mylite_embedded_startup_perf_start_ns();
 	err = srv_start(create_new_db);
 
 	if (err != DB_SUCCESS) {
+		mylite_embedded_startup_perf_add_elapsed(
+			MYLITE_EMBEDDED_STARTUP_PERF_INNODB_INIT_SRV_START_NS,
+			mylite_stage_start);
 		innodb_shutdown();
+		mylite_embedded_startup_perf_add_elapsed(
+			MYLITE_EMBEDDED_STARTUP_PERF_INNODB_INIT_TOTAL_NS,
+			mylite_startup_start);
 		DBUG_RETURN(innodb_init_abort());
 	}
+	mylite_embedded_startup_perf_add_elapsed(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_INIT_SRV_START_NS,
+		mylite_stage_start);
 
+	mylite_stage_start = mylite_embedded_startup_perf_start_ns();
 	srv_was_started = true;
 	innodb_params_adjust();
 
@@ -4417,6 +4458,12 @@ static int innodb_init(void* p)
 # endif /* HAVE_UT_CHRONO_T */
 #endif /* UNIV_ENABLE_UNIT_TEST_ROW_RAW_FORMAT_INT */
 
+	mylite_embedded_startup_perf_add_elapsed(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_INIT_POST_START_NS,
+		mylite_stage_start);
+	mylite_embedded_startup_perf_add_elapsed(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_INIT_TOTAL_NS,
+		mylite_startup_start);
 	DBUG_RETURN(0);
 }
 

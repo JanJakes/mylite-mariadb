@@ -40,6 +40,7 @@
 #include <mysql/plugin_data_type.h>
 #include <mysql/plugin_function.h>
 #include <mylite_embedded_shutdown_perf.h>
+#include <mylite_embedded_startup_perf.h>
 #include "sql_plugin_compat.h"
 #include "wsrep_mysqld.h"
 
@@ -1632,6 +1633,7 @@ static void init_plugin_psi_keys(void) {}
 */
 int plugin_init(int *argc, char **argv, int flags)
 {
+  uint64_t mylite_startup_start, mylite_stage_start, mylite_retry_start;
   size_t i;
   struct st_maria_plugin **builtins;
   struct st_maria_plugin *plugin;
@@ -1647,9 +1649,18 @@ int plugin_init(int *argc, char **argv, int flags)
   LEX_CSTRING MyISAM= { STRING_WITH_LEN("MyISAM") };
   DBUG_ENTER("plugin_init");
 
+  mylite_embedded_startup_perf_count(
+      MYLITE_EMBEDDED_STARTUP_PERF_PLUGIN_INIT_CALLS);
+  mylite_startup_start= mylite_embedded_startup_perf_start_ns();
   if (initialized)
+  {
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_PLUGIN_INIT_TOTAL_NS,
+        mylite_startup_start);
     DBUG_RETURN(0);
+  }
 
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
   dlopen_count =0;
 
   init_plugin_psi_keys();
@@ -1693,10 +1704,14 @@ int plugin_init(int *argc, char **argv, int flags)
   mysql_mutex_lock(&LOCK_plugin);
 
   initialized= 1;
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_PLUGIN_INIT_SETUP_NS,
+      mylite_stage_start);
 
   /*
     First we register builtin plugins
   */
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
   if (global_system_variables.log_warnings >= 9)
     sql_print_information("Initializing built-in plugins");
 
@@ -1738,6 +1753,9 @@ int plugin_init(int *argc, char **argv, int flags)
         goto err_unlock;
     }
   }
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_PLUGIN_INIT_REGISTER_BUILTINS_NS,
+      mylite_stage_start);
 
   /*
     First, we initialize only MyISAM - that should almost always succeed
@@ -1747,10 +1765,19 @@ int plugin_init(int *argc, char **argv, int flags)
   DBUG_ASSERT(plugin_ptr || !mysql_mandatory_plugins[0]);
   if (plugin_ptr)
   {
+    mylite_stage_start= mylite_embedded_startup_perf_start_ns();
     DBUG_ASSERT(plugin_ptr->load_option == PLUGIN_FORCE);
 
     if (plugin_initialize(&tmp_root, plugin_ptr, argc, argv, false))
+    {
+      mylite_embedded_startup_perf_add_elapsed(
+          MYLITE_EMBEDDED_STARTUP_PERF_PLUGIN_INIT_MYISAM_NS,
+          mylite_stage_start);
       goto err_unlock;
+    }
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_PLUGIN_INIT_MYISAM_NS,
+        mylite_stage_start);
 
     /*
       set the global default storage engine variable so that it will
@@ -1791,6 +1818,7 @@ int plugin_init(int *argc, char **argv, int flags)
   retry_start= retry_end=
     (st_plugin_int **) my_alloca((plugin_array.elements+1) * sizeof(void*));
 
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
   for(;;)
   {
     int error;
@@ -1823,6 +1851,7 @@ int plugin_init(int *argc, char **argv, int flags)
       }
     }
     /* Retry plugins that asked for it */
+    mylite_retry_start= mylite_embedded_startup_perf_start_ns();
     while (retry_start < retry_end)
     {
       st_plugin_int **to_re_retry, **retrying;
@@ -1853,6 +1882,9 @@ int plugin_init(int *argc, char **argv, int flags)
         }
       retry_end= to_re_retry;
     }
+    mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_PLUGIN_INIT_RETRY_NS,
+        mylite_retry_start);
 
     /* load and init plugins from the plugin table (unless done already) */
     if (flags & PLUGIN_INIT_SKIP_PLUGIN_TABLE)
@@ -1867,10 +1899,14 @@ int plugin_init(int *argc, char **argv, int flags)
     flags|= PLUGIN_INIT_SKIP_PLUGIN_TABLE;
 #endif
   }
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_PLUGIN_INIT_REMAINING_NS,
+      mylite_stage_start);
 
   /*
     Check if any plugins have to be reaped
   */
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
   while ((plugin_ptr= *(--reap)))
   {
     mysql_mutex_unlock(&LOCK_plugin);
@@ -1880,6 +1916,9 @@ int plugin_init(int *argc, char **argv, int flags)
     mysql_mutex_lock(&LOCK_plugin);
     plugin_del(plugin_ptr, 0);
   }
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_PLUGIN_INIT_REAP_NS,
+      mylite_stage_start);
 
   mysql_mutex_unlock(&LOCK_plugin);
   my_afree(retry_start);
@@ -1889,12 +1928,18 @@ int plugin_init(int *argc, char **argv, int flags)
 
   free_root(&tmp_root, MYF(0));
 
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_PLUGIN_INIT_TOTAL_NS,
+      mylite_startup_start);
   DBUG_RETURN(0);
 
 err_unlock:
   mysql_mutex_unlock(&LOCK_plugin);
 err:
   free_root(&tmp_root, MYF(0));
+  mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_PLUGIN_INIT_TOTAL_NS,
+      mylite_startup_start);
   DBUG_RETURN(1);
 }
 

@@ -957,6 +957,13 @@ cleanup-attribution probe on 2026-06-18 split `mysql_server_end()` and reported
 `219.581 ms` in `clean_up()`, of which `219.017 ms` was
 `plugin_shutdown()`; the process-isolated optimization target is therefore
 MariaDB plugin teardown, not MyLite ownerless coordination or steady SQL.
+After the embedded shutdown retry optimizations, startup attribution narrowed
+the remaining ordinary process-style startup cost to native storage-engine
+startup inside MariaDB plugin initialization: a reduced production sample
+reported `start_mysql_server_init_ms_avg=94.364`,
+`startup_server_components_plugin_init_ms_avg=52.325`,
+`startup_storage_engine_init_innodb_ms_avg=45.038`, and
+`startup_innodb_init_srv_start_ms_avg=44.983`.
 The WordPress PHPUnit CI filters now use exact method-level process-isolated
 shards instead of broad mixed-class filters, while the two class-level
 `@runTestsInSeparateProcesses` files stay excluded from the non-isolated
