@@ -439,6 +439,14 @@ decoding for marked native-support records, while unmarked records fall back to
 the previous page-type decode path. The marker is preserved by retained-record
 checkpoint rewrites and does not replace the existing rollback-segment/undo
 history proof or broader redo/checkpoint recovery work.
+Ownerless page-log append batching and deferred latest-checkpoint coalescing
+now stay enabled in unsafe hook builds unless an ownerless fault name is
+actually configured with `MYLITE_OWNERLESS_TEST_FAULT`. The hook preset enables
+fault infrastructure globally so crash tests can arm faults, but ordinary
+focused correctness and performance selectors should still exercise the same
+visible-fast append-batch path as production. When a named fault is configured,
+batching and coalescing remain conservative so page-publish and checkpoint
+fault windows stay individually observable.
 Ownerless completion still requires the broader recovery, DDL/file-lifecycle,
 active-reader, native history-proof replacement, and external stress gaps
 tracked in the ownerless concurrency spec.

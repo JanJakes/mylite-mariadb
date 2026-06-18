@@ -5731,6 +5731,13 @@ subsystems that this mode needs:
   marker survives retained-record checkpoint rewrites and does not change
   payload bytes, checksums, page-version ordering, or the remaining
   rollback-segment/undo history-proof requirement.
+  The append-batch fault-guard slice then narrowed unsafe-hook checks to
+  actual configured ownerless fault names. Hook builds still enable fault
+  infrastructure globally, but visible-fast correctness selectors and
+  production-shaped performance probes now keep page-log append batching and
+  deferred latest-checkpoint coalescing unless `MYLITE_OWNERLESS_TEST_FAULT`
+  names an active fault. Named fault runs remain conservative so page-publish
+  and checkpoint crash windows are individually observable.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.

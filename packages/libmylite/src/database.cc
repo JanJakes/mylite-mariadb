@@ -16051,6 +16051,15 @@ void ownerless_innodb_pages_visible_hook(std::uint64_t visible_lsn, void *ctx) {
 #  endif
 }
 
+bool ownerless_test_fault_is_configured() {
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    const char *fault_name = std::getenv("MYLITE_OWNERLESS_TEST_FAULT");
+    return fault_name != nullptr && fault_name[0] != '\0';
+#  else
+    return false;
+#  endif
+}
+
 bool ownerless_checkpoint_update_allows_deferred_latest_coalescing(
     std::uint64_t latest_lsn,
     std::uint64_t visible_lsn,
@@ -16059,7 +16068,7 @@ bool ownerless_checkpoint_update_allows_deferred_latest_coalescing(
     return !durable && latest_lsn != 0U && visible_lsn == 0U &&
            ownerless_statement_defers_page_log_append_batch &&
            ownerless_statement_allows_deferred_latest_checkpoint_coalescing &&
-           mylite_ownerless_innodb_test_faults_enabled_fast() == 0;
+           !ownerless_test_fault_is_configured();
 }
 
 void ownerless_persist_redo_checkpoint(
@@ -16114,7 +16123,7 @@ void ownerless_persist_redo_checkpoint(
 void ownerless_innodb_page_publish_batch_begin_hook(void *ctx) {
     auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
     if (hook == nullptr || ownerless_page_log_append_batch.session.active != 0 ||
-        mylite_ownerless_innodb_test_faults_enabled_fast() != 0 || !hook->page_versioning_enabled ||
+        ownerless_test_fault_is_configured() || !hook->page_versioning_enabled ||
         hook->page_log_fd < 0 || hook->page_log_offset == 0U) {
         return;
     }
