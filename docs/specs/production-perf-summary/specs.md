@@ -272,6 +272,22 @@ after the reduced helper passed 651 tests with 3 skips and reported
 `wordpress_phpunit_reported_seconds=8.252`; this keeps the transaction-start
 path near the prior measured range rather than proving a major standalone win.
 
+The transaction-end profile follow-up exposes
+`libmylite_exec_result_native_control_commit_calls` and
+`libmylite_exec_result_native_control_rollback_calls` in the PHP mysqli profile
+and WordPress timing summary. It deliberately leaves transaction-end execution
+on MariaDB's `mysql_commit()` and `mysql_rollback()` parser wrappers because an
+embedded helper prototype for exact default `COMMIT`/`ROLLBACK` regressed the
+focused production WordPress `^Tests_DB` sample and a local parser-control
+micro-benchmark. Future transaction-end optimization needs to beat those
+controls before replacing the wrapper path. The accepted focused production
+WordPress `^Tests_DB` profile rerun passed 651 tests with 3 skips and reported
+`libmylite_exec_result_native_control_commit_calls=8`,
+`libmylite_exec_result_native_control_rollback_calls=651`,
+`query_transaction_start_ms_total=828.318`,
+`query_transaction_end_ms_total=810.402`, and
+`wordpress_phpunit_reported_seconds=8.314`.
+
 The embedded job keeps the default stats-off performance probe as the
 throughput signal and runs a second reduced
 `MYLITE_PERF_OWNERLESS_PAGE_PUBLISH_STATS=1` attribution probe so CI logs also

@@ -27,7 +27,7 @@ if(BUILD_TESTING)
   set_tests_properties(php-ext-mysqli-mylite.profile PROPERTIES
     ENVIRONMENT "MYLITE_MYSQLI_PROFILE=1"
     PASS_REGULAR_EXPRESSION
-      "mylite_mysqli_profile_libmylite_exec_result_calls=[1-9][0-9]*;mylite_mysqli_profile_query_verb_dml_calls=[1-9][0-9]*;mylite_mysqli_profile_libmylite_exec_result_native_control_calls=[1-9][0-9]*;mylite_mysqli_profile_libmylite_exec_result_native_control_autocommit_noops=[1-9][0-9]*;mylite_mysqli_profile_libmylite_exec_result_native_control_start_transaction_calls=[1-9][0-9]*;mylite_mysqli_profile_query_transaction_start_calls=[1-9][0-9]*;mylite_mysqli_profile_query_transaction_end_calls=[1-9][0-9]*;mylite_mysqli_profile_query_transaction_savepoint_calls=[1-9][0-9]*"
+      "mylite_mysqli_profile_libmylite_exec_result_calls=[1-9][0-9]*;mylite_mysqli_profile_query_verb_dml_calls=[1-9][0-9]*;mylite_mysqli_profile_libmylite_exec_result_native_control_calls=[1-9][0-9]*;mylite_mysqli_profile_libmylite_exec_result_native_control_autocommit_noops=[1-9][0-9]*;mylite_mysqli_profile_libmylite_exec_result_native_control_start_transaction_calls=[1-9][0-9]*;mylite_mysqli_profile_libmylite_exec_result_native_control_commit_calls=[1-9][0-9]*;mylite_mysqli_profile_libmylite_exec_result_native_control_rollback_calls=[1-9][0-9]*;mylite_mysqli_profile_query_transaction_start_calls=[1-9][0-9]*;mylite_mysqli_profile_query_transaction_end_calls=[1-9][0-9]*;mylite_mysqli_profile_query_transaction_savepoint_calls=[1-9][0-9]*"
   )
   mylite_add_php_test(
     php-ext-mysqli-mylite.profile-context

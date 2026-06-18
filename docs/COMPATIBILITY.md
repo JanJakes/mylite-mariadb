@@ -509,8 +509,11 @@ time. In embedded MariaDB, `mysql_commit()`, `mysql_rollback()`, and
 `mysql_real_query()`, so this path avoids MyLite's outer result/status work for
 those exact wrappers. Exact `START TRANSACTION` uses a MyLite-owned embedded
 helper that calls MariaDB's `trans_begin(thd, 0)`, finalizes through the
-embedded OK/error protocol, and reads the result back into `MYSQL`; option-bearing
-forms such as `START TRANSACTION READ ONLY` or
+embedded OK/error protocol, and reads the result back into `MYSQL`.
+`COMMIT` and `ROLLBACK` still use MariaDB's public embedded wrappers after a
+native transaction-end helper prototype failed the performance gate, preserving
+MariaDB parser-owned `completion_type`, `AND CHAIN`, and `RELEASE` behavior.
+Option-bearing forms such as `START TRANSACTION READ ONLY` or
 `START TRANSACTION WITH CONSISTENT SNAPSHOT`, plus `COMMIT AND CHAIN`,
 `ROLLBACK TO SAVEPOINT`, and general `SET` expressions still use MariaDB SQL
 parsing, and ownerless execution keeps the existing statement-lock,
@@ -538,7 +541,22 @@ ownerless execution stays on the existing SQL/locking path. Profiled mysqli
 and WordPress timing summaries now include
 `libmylite_exec_result_native_control_autocommit_noops`; the
 start-transaction fast-path follow-up also exposes
-`libmylite_exec_result_native_control_start_transaction_calls`. The focused
+`libmylite_exec_result_native_control_start_transaction_calls`. The
+transaction-end profile follow-up exposes
+`libmylite_exec_result_native_control_commit_calls`,
+`libmylite_exec_result_native_control_rollback_calls` so profiled runs can
+distinguish exact transaction-end volume from starts and autocommit controls
+without changing transaction-end execution.
+The accepted transaction-end profile rerun of focused production WordPress
+`^Tests_DB` passed 651 tests with 3 skips and reported
+`libmylite_exec_result_native_control_start_transaction_calls=651`,
+`libmylite_exec_result_native_control_commit_calls=8`,
+`libmylite_exec_result_native_control_rollback_calls=651`, and
+`libmylite_exec_result_native_control_errors=0`,
+`query_transaction_start_ms_total=828.318`,
+`query_transaction_end_ms_total=810.402`, and
+`wordpress_phpunit_reported_seconds=8.314`, keeping transaction-end work
+visible while leaving MariaDB's wrapper path intact. The focused
 production WordPress `^Tests_DB` run for the start-transaction follow-up passed
 651 tests with 3 skips and reported
 `libmylite_exec_result_native_control_start_transaction_calls=651`,

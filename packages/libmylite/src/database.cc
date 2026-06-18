@@ -387,6 +387,8 @@ enum ExecResultPerfStatIndex : std::size_t {
     EXEC_RESULT_PERF_NATIVE_CONTROL_ERRORS,
     EXEC_RESULT_PERF_NATIVE_CONTROL_AUTOCOMMIT_NOOPS,
     EXEC_RESULT_PERF_NATIVE_CONTROL_START_TRANSACTION_CALLS,
+    EXEC_RESULT_PERF_NATIVE_CONTROL_COMMIT_CALLS,
+    EXEC_RESULT_PERF_NATIVE_CONTROL_ROLLBACK_CALLS,
     EXEC_RESULT_PERF_STAT_COUNT
 };
 
@@ -4583,6 +4585,10 @@ int exec_result_impl(
             exec_result_perf_add(EXEC_RESULT_PERF_NATIVE_CONTROL_CALLS, 1U);
             if (native_control_statement == NativeControlStatement::StartTransaction) {
                 exec_result_perf_add(EXEC_RESULT_PERF_NATIVE_CONTROL_START_TRANSACTION_CALLS, 1U);
+            } else if (native_control_statement == NativeControlStatement::Commit) {
+                exec_result_perf_add(EXEC_RESULT_PERF_NATIVE_CONTROL_COMMIT_CALLS, 1U);
+            } else if (native_control_statement == NativeControlStatement::Rollback) {
+                exec_result_perf_add(EXEC_RESULT_PERF_NATIVE_CONTROL_ROLLBACK_CALLS, 1U);
             }
             if (native_control_autocommit_is_noop(*db, native_control_statement)) {
                 exec_result_perf_add(EXEC_RESULT_PERF_NATIVE_CONTROL_AUTOCOMMIT_NOOPS, 1U);

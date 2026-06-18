@@ -220,6 +220,7 @@ The timing summary also recorded
 - This helper intentionally mirrors only the embedded no-result lifecycle needed
   for exact `START TRANSACTION`. Broader transaction option support would need a
   separate design because parser flags matter.
-- The next performance target after this slice is likely transaction end/native
-  commit cost or ownerless page-publication cost, depending on the post-change
-  WordPress timing sample.
+- The transaction-end profiling follow-up is tracked in
+  `docs/specs/libmylite-transaction-end-profile/specs.md`; remaining broader
+  performance targets are ownerless page-publication and native
+  redo/checkpoint reconciliation costs.
