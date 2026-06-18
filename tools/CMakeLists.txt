@@ -328,6 +328,19 @@ if(BUILD_TESTING)
     LABELS "tools;compat.concurrency"
   )
   add_test(
+    NAME tools.ownerless-compressed-row-format-trace
+    COMMAND
+      "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-compressed-row-format-trace"
+      --rounds 3
+      --rows 2
+      --payload-bytes 12000
+      --output "${CMAKE_CURRENT_BINARY_DIR}/ownerless-compressed-row-format-trace-smoke"
+      --check
+  )
+  set_tests_properties(tools.ownerless-compressed-row-format-trace PROPERTIES
+    LABELS "tools;compat.concurrency"
+  )
+  add_test(
     NAME tools.ownerless-blob-pressure-trace
     COMMAND
       "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-blob-pressure-trace"

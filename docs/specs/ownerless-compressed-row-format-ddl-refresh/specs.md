@@ -162,7 +162,8 @@ add dependencies or new public entry points.
   `ownerless-compressed-row-format-key-block-ddl`.
 - Crash injection during compressed rebuild, durable DDL file-lifecycle
   metadata for every native DDL class, SQL-level table-lock fault injection,
-  and external MariaDB/RQG DDL stress remain separate gaps.
+  full external replay of compressed row-format DDL traces, and external
+  MariaDB/RQG DDL stress remain separate gaps.
 - Conservative native reads after peer DDL are intentionally broader than the
   compressed-row-format case. A future per-space or per-table rebuild-generation
   stamp in the page-version index could recover more page-version read

@@ -160,6 +160,7 @@ trace_names=(
   transaction-stress
   temporary-table-stress
   active-reader-pressure
+  compressed-row-format-ddl
   blob-pressure
 )
 
@@ -252,6 +253,12 @@ run_selected_exporter \
   --rounds $((4 * scale)) \
   --rows $((4 * scale)) \
   --reader-polls $((8 * scale))
+run_selected_exporter \
+  compressed-row-format-ddl \
+  "${script_dir}/ownerless-compressed-row-format-trace" \
+  --rounds $((4 * scale)) \
+  --rows $((2 * scale)) \
+  --payload-bytes 12000
 run_selected_exporter \
   blob-pressure \
   "${script_dir}/ownerless-blob-pressure-trace" \

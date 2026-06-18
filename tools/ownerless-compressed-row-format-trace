@@ -1,0 +1,365 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+rounds=4
+rows=3
+payload_bytes=12000
+output_dir=""
+check=0
+retry_limit=40
+key_blocks=(8 4 16)
+
+usage() {
+  cat <<EOF
+Usage: tools/ownerless-compressed-row-format-trace --output DIR [options]
+
+Generate deterministic SQL traces for compressed InnoDB row-format DDL. The
+trace starts with a ROW_FORMAT=DYNAMIC table, rebuilds it through a deterministic
+ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE cycle, updates large BLOB payloads, and
+runs a repeatable-read reader concurrently.
+
+Options:
+  --rounds N         Number of compressed rebuild rounds (default: ${rounds})
+  --rows N           Rows in the compressed table (default: ${rows})
+  --payload-bytes N  LONGBLOB payload length in bytes (default: ${payload_bytes})
+  --check            Validate generated files without running SQL
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output)
+      output_dir="${2:-}"
+      shift 2
+      ;;
+    --rounds)
+      rounds="${2:-}"
+      shift 2
+      ;;
+    --rows)
+      rows="${2:-}"
+      shift 2
+      ;;
+    --payload-bytes)
+      payload_bytes="${2:-}"
+      shift 2
+      ;;
+    --check)
+      check=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "${output_dir}" ]; then
+  echo "--output is required" >&2
+  usage >&2
+  exit 2
+fi
+
+validate_positive_int() {
+  local name="$1"
+  local value="$2"
+  local max="$3"
+
+  case "${value}" in
+    ''|*[!0-9]*)
+      echo "${name} must be a positive integer" >&2
+      exit 2
+      ;;
+  esac
+  if [ "${value}" -le 0 ] || [ "${value}" -gt "${max}" ]; then
+    echo "${name} must be between 1 and ${max}" >&2
+    exit 2
+  fi
+}
+
+validate_positive_int "--rounds" "${rounds}" 1000
+validate_positive_int "--rows" "${rows}" 1000
+validate_positive_int "--payload-bytes" "${payload_bytes}" 1048576
+
+ascii_code() {
+  local char="$1"
+
+  printf '%d' "'${char}"
+}
+
+payload_char_for_round() {
+  local round="$1"
+  local offset=$(((round - 1) % 24))
+
+  printf "\\$(printf '%03o' $((98 + offset)))"
+}
+
+key_block_for_round() {
+  local round="$1"
+  local index=$(((round - 1) % ${#key_blocks[@]}))
+
+  echo "${key_blocks[${index}]}"
+}
+
+key_block_cycle() {
+  local joined=""
+  local key_block
+
+  for key_block in "${key_blocks[@]}"; do
+    if [ -n "${joined}" ]; then
+      joined="${joined},${key_block}"
+    else
+      joined="${key_block}"
+    fi
+  done
+  echo "${joined}"
+}
+
+reader_polls=$((rounds * 8))
+initial_value_sum="${rows}"
+expected_delta=$((rows * rounds * (rounds + 1) / 2))
+expected_value_sum=$((initial_value_sum + expected_delta))
+expected_version_sum=$((rows * rounds))
+expected_payload_bytes=$((rows * payload_bytes))
+expected_anchor_total=$((30 + rounds))
+final_payload_char="$(payload_char_for_round "${rounds}")"
+expected_first_byte_sum=$((rows * $(ascii_code "${final_payload_char}")))
+key_block_cycle_value="$(key_block_cycle)"
+
+mkdir -p "${output_dir}"
+
+schema_sql="${output_dir}/schema.sql"
+worker_sql="${output_dir}/worker-1.sql"
+reader_sql="${output_dir}/reader.sql"
+expected_sql="${output_dir}/expected.sql"
+manifest="${output_dir}/manifest.txt"
+
+{
+  echo "CREATE DATABASE IF NOT EXISTS app;"
+  echo "USE app;"
+  echo "DROP PROCEDURE IF EXISTS ownerless_compressed_row_format_trace_reader;"
+  echo "DROP TABLE IF EXISTS ownerless_compressed_row_format_trace;"
+  echo "DROP TABLE IF EXISTS ownerless_compressed_row_format_anchor;"
+  echo "CREATE TABLE ownerless_compressed_row_format_anchor ("
+  echo "  id INT NOT NULL PRIMARY KEY,"
+  echo "  value INT NOT NULL"
+  echo ") ENGINE=InnoDB;"
+  echo "INSERT INTO ownerless_compressed_row_format_anchor VALUES (1, 10), (2, 20);"
+  echo "CREATE TABLE ownerless_compressed_row_format_trace ("
+  echo "  id INT NOT NULL PRIMARY KEY,"
+  echo "  value INT NOT NULL,"
+  echo "  version INT NOT NULL,"
+  echo "  payload LONGBLOB NOT NULL,"
+  echo "  KEY ownerless_compressed_row_format_value_idx (value)"
+  echo ") ENGINE=InnoDB ROW_FORMAT=DYNAMIC;"
+  for row_id in $(seq 1 "${rows}"); do
+    echo "INSERT INTO ownerless_compressed_row_format_trace VALUES (${row_id}, 1, 0, REPEAT('a', ${payload_bytes}));"
+  done
+  echo "DELIMITER //"
+  echo "DROP PROCEDURE IF EXISTS ownerless_compressed_row_format_trace_reader//"
+  echo "CREATE PROCEDURE ownerless_compressed_row_format_trace_reader()"
+  echo "BEGIN"
+  echo "  DECLARE ownerless_compressed_retry BOOL DEFAULT FALSE;"
+  echo "  DECLARE ownerless_compressed_attempts INT DEFAULT 0;"
+  echo "  DECLARE ownerless_compressed_retries INT DEFAULT 0;"
+  echo "  DECLARE ownerless_compressed_poll INT DEFAULT 1;"
+  echo "  DECLARE ownerless_compressed_previous_anchor BIGINT DEFAULT 30;"
+  echo "  DECLARE ownerless_compressed_anchor BIGINT DEFAULT 30;"
+  echo "  DECLARE ownerless_compressed_count BIGINT DEFAULT 0;"
+  echo "  DECLARE ownerless_compressed_value_sum BIGINT DEFAULT 0;"
+  echo "  DECLARE ownerless_compressed_version_sum BIGINT DEFAULT 0;"
+  echo "  DECLARE ownerless_compressed_payload_bytes BIGINT DEFAULT 0;"
+  echo "  WHILE ownerless_compressed_poll <= ${reader_polls} DO"
+  echo "    SET ownerless_compressed_attempts = 0;"
+  echo "    ownerless_compressed_reader_poll: LOOP"
+  echo "      SET ownerless_compressed_retry = FALSE;"
+  echo "      SET ownerless_compressed_attempts = ownerless_compressed_attempts + 1;"
+  echo "      BEGIN"
+  echo "        DECLARE EXIT HANDLER FOR 1020, 1205, 1213, 1412, SQLSTATE '40001'"
+  echo "        BEGIN"
+  echo "          SET ownerless_compressed_retry = TRUE;"
+  echo "          SET ownerless_compressed_retries = ownerless_compressed_retries + 1;"
+  echo "          ROLLBACK;"
+  echo "        END;"
+  echo "        SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ;"
+  echo "        START TRANSACTION WITH CONSISTENT SNAPSHOT;"
+  echo "        SELECT SUM(value)"
+  echo "          INTO ownerless_compressed_anchor"
+  echo "          FROM ownerless_compressed_row_format_anchor;"
+  echo "        SELECT"
+  echo "          COUNT(*),"
+  echo "          COALESCE(SUM(value), 0),"
+  echo "          COALESCE(SUM(version), 0),"
+  echo "          COALESCE(SUM(LENGTH(payload)), 0)"
+  echo "          INTO"
+  echo "            ownerless_compressed_count,"
+  echo "            ownerless_compressed_value_sum,"
+  echo "            ownerless_compressed_version_sum,"
+  echo "            ownerless_compressed_payload_bytes"
+  echo "          FROM ownerless_compressed_row_format_trace;"
+  echo "        SELECT CASE"
+  echo "          WHEN ownerless_compressed_anchor >= ownerless_compressed_previous_anchor"
+  echo "           AND ownerless_compressed_anchor <= ${expected_anchor_total}"
+  echo "           AND ownerless_compressed_count = ${rows}"
+  echo "           AND ownerless_compressed_value_sum >= ${initial_value_sum}"
+  echo "           AND ownerless_compressed_value_sum <= ${expected_value_sum}"
+  echo "           AND ownerless_compressed_version_sum >= 0"
+  echo "           AND ownerless_compressed_version_sum <= ${expected_version_sum}"
+  echo "           AND ownerless_compressed_payload_bytes = ${expected_payload_bytes}"
+  echo "          THEN 'ok'"
+  echo "          ELSE 'mismatch'"
+  echo "        END AS ownerless_compressed_row_format_trace_reader_check;"
+  echo "        COMMIT;"
+  echo "      END;"
+  echo "      IF ownerless_compressed_retry = FALSE THEN"
+  echo "        SET ownerless_compressed_previous_anchor = ownerless_compressed_anchor;"
+  echo "        LEAVE ownerless_compressed_reader_poll;"
+  echo "      END IF;"
+  echo "      IF ownerless_compressed_attempts >= ${retry_limit} THEN"
+  echo "        SIGNAL SQLSTATE '45000'"
+  echo "          SET MESSAGE_TEXT = 'ownerless compressed row-format reader retry limit reached';"
+  echo "      END IF;"
+  echo "      DO SLEEP(0.02);"
+  echo "    END LOOP;"
+  echo "    SET ownerless_compressed_poll = ownerless_compressed_poll + 1;"
+  echo "  END WHILE;"
+  echo "  SELECT ownerless_compressed_retries AS ownerless_compressed_row_format_trace_reader_retries;"
+  echo "END//"
+  echo "DELIMITER ;"
+} >"${schema_sql}"
+
+{
+  echo "USE app;"
+  echo "SET SESSION innodb_lock_wait_timeout = 30;"
+  echo "SET SESSION lock_wait_timeout = 30;"
+  for round in $(seq 1 "${rounds}"); do
+    key_block="$(key_block_for_round "${round}")"
+    payload_char="$(payload_char_for_round "${round}")"
+    round_value_sum=$((initial_value_sum + (rows * round * (round + 1) / 2)))
+    round_version_sum=$((rows * round))
+    round_first_byte_sum=$((rows * $(ascii_code "${payload_char}")))
+
+    echo "ALTER TABLE ownerless_compressed_row_format_trace"
+    echo "  ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=${key_block};"
+    echo "UPDATE ownerless_compressed_row_format_trace"
+    echo "  SET value = value + ${round},"
+    echo "      version = version + 1,"
+    echo "      payload = REPEAT('${payload_char}', ${payload_bytes});"
+    echo "UPDATE ownerless_compressed_row_format_anchor"
+    echo "  SET value = value + 1 WHERE id = 1;"
+    echo "SELECT CASE"
+    echo "  WHEN (SELECT COUNT(*)"
+    echo "        FROM information_schema.TABLES"
+    echo "        WHERE table_schema = 'app'"
+    echo "          AND table_name = 'ownerless_compressed_row_format_trace'"
+    echo "          AND row_format = 'Compressed') = 1"
+    echo "   AND (SELECT COUNT(*)"
+    echo "        FROM information_schema.INNODB_SYS_TABLES"
+    echo "        WHERE NAME = 'app/ownerless_compressed_row_format_trace'"
+    echo "          AND ROW_FORMAT = 'Compressed') = 1"
+    echo "  THEN 'ok'"
+    echo "  ELSE 'mismatch'"
+    echo "END AS ownerless_compressed_row_format_metadata_check;"
+    echo "SELECT CASE"
+    echo "  WHEN COUNT(*) = ${rows}"
+    echo "   AND SUM(value) = ${round_value_sum}"
+    echo "   AND SUM(version) = ${round_version_sum}"
+    echo "   AND SUM(LENGTH(payload)) = ${expected_payload_bytes}"
+    echo "   AND SUM(ASCII(SUBSTRING(payload, 1, 1))) = ${round_first_byte_sum}"
+    echo "  THEN 'ok'"
+    echo "  ELSE 'mismatch'"
+    echo "END AS ownerless_compressed_row_format_round_check"
+    echo "FROM ownerless_compressed_row_format_trace;"
+    echo
+  done
+} >"${worker_sql}"
+
+{
+  echo "USE app;"
+  echo "CALL ownerless_compressed_row_format_trace_reader();"
+} >"${reader_sql}"
+
+{
+  echo "USE app;"
+  echo "-- expected_rows=${rows}"
+  echo "-- expected_value_sum=${expected_value_sum}"
+  echo "-- expected_version_sum=${expected_version_sum}"
+  echo "-- expected_payload_bytes=${expected_payload_bytes}"
+  echo "-- expected_first_byte_sum=${expected_first_byte_sum}"
+  echo "-- expected_anchor_total=${expected_anchor_total}"
+  echo "SELECT"
+  echo "  COUNT(*) AS observed_rows,"
+  echo "  SUM(value) AS observed_value_sum,"
+  echo "  SUM(version) AS observed_version_sum,"
+  echo "  SUM(LENGTH(payload)) AS observed_payload_bytes,"
+  echo "  SUM(ASCII(SUBSTRING(payload, 1, 1))) AS observed_first_byte_sum"
+  echo "FROM ownerless_compressed_row_format_trace;"
+  echo "SELECT CASE"
+  echo "  WHEN COUNT(*) = ${rows}"
+  echo "   AND SUM(value) = ${expected_value_sum}"
+  echo "   AND SUM(version) = ${expected_version_sum}"
+  echo "   AND SUM(LENGTH(payload)) = ${expected_payload_bytes}"
+  echo "   AND SUM(ASCII(SUBSTRING(payload, 1, 1))) = ${expected_first_byte_sum}"
+  echo "   AND (SELECT SUM(value) FROM ownerless_compressed_row_format_anchor) = ${expected_anchor_total}"
+  echo "   AND (SELECT COUNT(*)"
+  echo "        FROM information_schema.TABLES"
+  echo "        WHERE table_schema = 'app'"
+  echo "          AND table_name = 'ownerless_compressed_row_format_trace'"
+  echo "          AND row_format = 'Compressed') = 1"
+  echo "   AND (SELECT COUNT(*)"
+  echo "        FROM information_schema.INNODB_SYS_TABLES"
+  echo "        WHERE NAME = 'app/ownerless_compressed_row_format_trace'"
+  echo "          AND ROW_FORMAT = 'Compressed') = 1"
+  echo "  THEN 'ok'"
+  echo "  ELSE 'mismatch'"
+  echo "END AS ownerless_compressed_row_format_trace_check"
+  echo "FROM ownerless_compressed_row_format_trace;"
+} >"${expected_sql}"
+
+{
+  echo "rounds=${rounds}"
+  echo "rows=${rows}"
+  echo "payload_bytes=${payload_bytes}"
+  echo "reader_polls=${reader_polls}"
+  echo "retry_limit=${retry_limit}"
+  echo "key_block_cycle=${key_block_cycle_value}"
+  echo "expected_rows=${rows}"
+  echo "expected_value_sum=${expected_value_sum}"
+  echo "expected_version_sum=${expected_version_sum}"
+  echo "expected_payload_bytes=${expected_payload_bytes}"
+  echo "expected_first_byte_sum=${expected_first_byte_sum}"
+  echo "expected_anchor_total=${expected_anchor_total}"
+} >"${manifest}"
+
+if [ "${check}" -eq 1 ]; then
+  test -s "${schema_sql}"
+  test -s "${worker_sql}"
+  test -s "${reader_sql}"
+  test -s "${expected_sql}"
+  test -s "${manifest}"
+  grep -q "ROW_FORMAT=DYNAMIC" "${schema_sql}"
+  grep -q "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8" "${worker_sql}"
+  if [ "${rounds}" -ge 2 ]; then
+    grep -q "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=4" "${worker_sql}"
+  fi
+  if [ "${rounds}" -ge 3 ]; then
+    grep -q "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=16" "${worker_sql}"
+  fi
+  grep -q "DECLARE EXIT HANDLER FOR 1020, 1205, 1213, 1412, SQLSTATE '40001'" "${schema_sql}"
+  grep -q "START TRANSACTION WITH CONSISTENT SNAPSHOT" "${schema_sql}"
+  grep -q "ownerless_compressed_row_format_trace_check" "${expected_sql}"
+  grep -q "key_block_cycle=${key_block_cycle_value}" "${manifest}"
+fi
+
+echo "trace_dir=${output_dir}"
+echo "rounds=${rounds}"
+echo "rows=${rows}"
+echo "payload_bytes=${payload_bytes}"
+echo "reader_polls=${reader_polls}"
+echo "expected_value_sum=${expected_value_sum}"
