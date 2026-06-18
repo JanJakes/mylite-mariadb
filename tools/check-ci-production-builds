@@ -259,9 +259,6 @@ reject_regex \
 reject_regex \
   'MYLITE_WORDPRESS_PHPUNIT_ISOLATED_FILTER' \
   "WordPress PHPUnit CI must not keep the stale broad isolated-class filter"
-reject_regex \
-  'ctest[^#[:cntrl:]]*--parallel[[:space:]]+[0-9]+' \
-  "CI must not parallelize MariaDB embedded CTest processes"
 
 require_literal "cmake --preset prod"
 require_literal "cmake --build --preset prod"
@@ -348,13 +345,10 @@ require_literal 'cat "${summary}" >> "${GITHUB_STEP_SUMMARY}"'
 require_literal_count_at_least "MYLITE_WORDPRESS_PHASE: phpunit" 7
 require_literal_count_at_least 'MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"' 10
 
-require_literal "ownerless_sql_test=build/php-embedded-prod/packages/libmylite/mylite_ownerless_cross_process_sql_test"
-require_literal 'ownerless_sql_timing_summary="${GITHUB_STEP_SUMMARY:-}"'
-require_literal "ownerless_sql_case_count="
-require_literal "ownerless_sql_case_start index="
-require_literal "ownerless_sql_case_seconds index="
-require_literal "status=\${case_status} seconds=\${case_seconds}"
-require_literal "Embedded ownerless SQL case timings"
+require_literal "Embedded ownerless SQL weighted shards"
+require_literal "ctest --preset php-embedded-prod"
+require_literal "-R '^libmylite\\.ownerless-cross-process-sql\\.'"
+require_literal "--parallel 2"
 require_literal "build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe"
 require_step_order "Run embedded performance probe" "Run embedded non-ownerless tests"
 require_step_order "Run embedded ownerless attribution probe" "Run embedded non-ownerless tests"
@@ -368,7 +362,9 @@ require_step_timeout "Run embedded ownerless SQL tests" 45
 require_step_timeout "Build MyLite PHP extensions for WordPress PHPUnit" 30
 
 require_step_literal "Test" "tools/require-cmake-release-build build/prod"
+forbid_step_literal "Test" "--parallel"
 require_embedded_timing_step_guards "Run embedded non-ownerless tests"
+forbid_step_literal "Run embedded non-ownerless tests" "--parallel"
 require_embedded_timing_step_guards "Run embedded ownerless SQL tests"
 require_embedded_timing_step_guards "Run embedded performance probe"
 require_embedded_timing_step_guards "Run embedded ownerless attribution probe"

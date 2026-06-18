@@ -157,3 +157,17 @@ Total Test time (real) = 329.84 sec
 - If CI still sees direct-case timeouts, the next slice should gather in-child
   diagnostics at the active SQL wait boundary rather than further weakening the
   test harness.
+
+## Follow-Up CI Adoption
+
+`docs/specs/ci-ownerless-sql-weighted-shards/specs.md` records the follow-up
+CI change that moved the production `ubuntu-embedded` ownerless SQL step from a
+serial direct `sql-case` loop to the registered sixteen-shard CTest selector:
+
+```text
+ctest --preset php-embedded-prod -R '^libmylite\.ownerless-cross-process-sql\.' --parallel 2 --output-on-failure
+```
+
+That follow-up changes CI scheduling and timing visibility only; the shard
+count, weighted assignment, per-case child wrapper, and 300-second watchdog
+remain the behavior from this slice.
