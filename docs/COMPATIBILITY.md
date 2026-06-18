@@ -70,7 +70,7 @@ Dependency-free CTest
 check-mode coverage validates the random transaction, DDL, and FK graph seeded
 wrappers plus their external wrapper plans with the same seed set, plus the
 combined seed-sweep wrapper over seeds `0` through `15` at rounds `3` and a
-wider combined seed-sweep wrapper over seeds `0` through `31` at rounds `2`;
+wider combined seed-sweep wrapper over seeds `0` through `63` at rounds `2`;
 a focused seed-sweep replay through one disposable MariaDB 11.8 server covers
 the random transaction and DDL seeded suites over seeds `0`
 through `7` at rounds `4`, and a follow-up replay covers seeds `8` through
@@ -90,7 +90,10 @@ recovering transient raw MariaDB `1213` exits for seeds `106`, `113`, and
 graph whole-seed retries recovering transient raw MariaDB `1213` exits for
 seeds `129` and `132`. A further replay covers seeds `160` through `191` at
 rounds `2`, with FK graph whole-seed retries recovering transient raw MariaDB
-`1213` exits for seeds `160`, `162`, `164`, `168`, `170`, and `176`.
+`1213` exits for seeds `160`, `162`, `164`, `168`, `170`, and `176`. The next
+replay covers seeds `192` through `223` at rounds `2`, with FK graph
+whole-seed retries recovering transient raw MariaDB `1213` exits for seeds
+`211`, `213`, `218`, and `219`.
 Longer randomized external MariaDB/RQG stress remains planned.
 
 Ownerless stale-reader file-lifecycle replay now includes same-schema and

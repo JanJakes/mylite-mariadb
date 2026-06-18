@@ -105,7 +105,7 @@ if(BUILD_TESTING)
       --random-tx-rounds 2
       --ddl-rounds 2
       --fk-graph-rounds 2
-      --seed-range 0:31
+      --seed-range 0:63
       --check
   )
   set_tests_properties(tools.ownerless-external-mariadb-seed-sweep-wide-check PROPERTIES
