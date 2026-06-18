@@ -88,6 +88,26 @@ enum OwnerlessDatabasePerfStatIndex : std::size_t {
     OWNERLESS_DATABASE_PERF_RECORD_LOCK_ACQUIRE_NS,
     OWNERLESS_DATABASE_PERF_RECORD_LOCK_RELEASE_CALLS,
     OWNERLESS_DATABASE_PERF_RECORD_LOCK_RELEASE_NS,
+    OWNERLESS_DATABASE_PERF_MDL_ACQUIRE_CALLS,
+    OWNERLESS_DATABASE_PERF_MDL_ACQUIRE_NS,
+    OWNERLESS_DATABASE_PERF_MDL_RELEASE_CALLS,
+    OWNERLESS_DATABASE_PERF_MDL_RELEASE_NS,
+    OWNERLESS_DATABASE_PERF_TRX_ALLOCATE_CALLS,
+    OWNERLESS_DATABASE_PERF_TRX_ALLOCATE_NS,
+    OWNERLESS_DATABASE_PERF_TRX_REGISTER_CALLS,
+    OWNERLESS_DATABASE_PERF_TRX_REGISTER_NS,
+    OWNERLESS_DATABASE_PERF_TRX_ASSIGN_NO_CALLS,
+    OWNERLESS_DATABASE_PERF_TRX_ASSIGN_NO_NS,
+    OWNERLESS_DATABASE_PERF_TRX_DEREGISTER_CALLS,
+    OWNERLESS_DATABASE_PERF_TRX_DEREGISTER_NS,
+    OWNERLESS_DATABASE_PERF_TRX_SNAPSHOT_CALLS,
+    OWNERLESS_DATABASE_PERF_TRX_SNAPSHOT_NS,
+    OWNERLESS_DATABASE_PERF_READ_VIEW_REGISTER_CALLS,
+    OWNERLESS_DATABASE_PERF_READ_VIEW_REGISTER_NS,
+    OWNERLESS_DATABASE_PERF_READ_VIEW_DEREGISTER_CALLS,
+    OWNERLESS_DATABASE_PERF_READ_VIEW_DEREGISTER_NS,
+    OWNERLESS_DATABASE_PERF_READ_VIEW_SNAPSHOT_CALLS,
+    OWNERLESS_DATABASE_PERF_READ_VIEW_SNAPSHOT_NS,
     OWNERLESS_DATABASE_PERF_REDO_ENTER_CALLS,
     OWNERLESS_DATABASE_PERF_REDO_ENTER_NS,
     OWNERLESS_DATABASE_PERF_REDO_OBSERVE_CALLS,
@@ -207,6 +227,38 @@ class OwnerlessDatabasePerfScope {
 
   private:
     OwnerlessDatabasePerfStatIndex index_;
+    std::uint64_t start_ns_;
+};
+
+class OwnerlessDatabasePerfCountedScope {
+  public:
+    OwnerlessDatabasePerfCountedScope(
+        OwnerlessDatabasePerfStatIndex count_index,
+        OwnerlessDatabasePerfStatIndex ns_index
+    )
+        : ns_index_(ns_index), enabled_(ownerless_database_perf_stats_are_enabled()),
+          start_ns_(enabled_ ? ownerless_database_perf_now_ns() : 0U) {
+        if (enabled_) {
+            ownerless_database_perf_stats[count_index].fetch_add(1U, std::memory_order_relaxed);
+        }
+    }
+
+    ~OwnerlessDatabasePerfCountedScope() {
+        if (enabled_) {
+            ownerless_database_perf_stats[ns_index_].fetch_add(
+                ownerless_database_perf_now_ns() - start_ns_,
+                std::memory_order_relaxed
+            );
+        }
+    }
+
+    OwnerlessDatabasePerfCountedScope(const OwnerlessDatabasePerfCountedScope &) = delete;
+    OwnerlessDatabasePerfCountedScope &operator=(const OwnerlessDatabasePerfCountedScope &) =
+        delete;
+
+  private:
+    OwnerlessDatabasePerfStatIndex ns_index_;
+    bool enabled_;
     std::uint64_t start_ns_;
 };
 
@@ -14823,6 +14875,10 @@ int ownerless_mdl_acquire_hook(
     double lock_wait_timeout,
     void *ctx
 ) {
+    OwnerlessDatabasePerfCountedScope perf_scope(
+        OWNERLESS_DATABASE_PERF_MDL_ACQUIRE_CALLS,
+        OWNERLESS_DATABASE_PERF_MDL_ACQUIRE_NS
+    );
     if (key == nullptr || ctx == nullptr) {
         return MYLITE_OWNERLESS_MDL_ERROR;
     }
@@ -14850,6 +14906,10 @@ int ownerless_mdl_acquire_hook(
 }
 
 void ownerless_mdl_release_hook(const mylite_ownerless_mdl_key_view *key, void *ctx) {
+    OwnerlessDatabasePerfCountedScope perf_scope(
+        OWNERLESS_DATABASE_PERF_MDL_RELEASE_CALLS,
+        OWNERLESS_DATABASE_PERF_MDL_RELEASE_NS
+    );
     if (key == nullptr || ctx == nullptr) {
         return;
     }
@@ -14899,6 +14959,10 @@ int ownerless_mdl_result_from_lock_table_result(int lock_table_result) {
 }
 
 int ownerless_trx_allocate_hook(std::uint64_t *out_trx_id, void *ctx) {
+    OwnerlessDatabasePerfCountedScope perf_scope(
+        OWNERLESS_DATABASE_PERF_TRX_ALLOCATE_CALLS,
+        OWNERLESS_DATABASE_PERF_TRX_ALLOCATE_NS
+    );
     if (out_trx_id == nullptr || ctx == nullptr) {
         return MYLITE_OWNERLESS_TRX_ERROR;
     }
@@ -14919,6 +14983,10 @@ int ownerless_trx_allocate_hook(std::uint64_t *out_trx_id, void *ctx) {
 }
 
 int ownerless_trx_register_hook(std::uint64_t *out_trx_id, void *ctx) {
+    OwnerlessDatabasePerfCountedScope perf_scope(
+        OWNERLESS_DATABASE_PERF_TRX_REGISTER_CALLS,
+        OWNERLESS_DATABASE_PERF_TRX_REGISTER_NS
+    );
     if (out_trx_id == nullptr || ctx == nullptr) {
         return MYLITE_OWNERLESS_TRX_ERROR;
     }
@@ -14950,6 +15018,10 @@ int ownerless_trx_register_hook(std::uint64_t *out_trx_id, void *ctx) {
 }
 
 int ownerless_trx_assign_no_hook(std::uint64_t trx_id, std::uint64_t *out_trx_no, void *ctx) {
+    OwnerlessDatabasePerfCountedScope perf_scope(
+        OWNERLESS_DATABASE_PERF_TRX_ASSIGN_NO_CALLS,
+        OWNERLESS_DATABASE_PERF_TRX_ASSIGN_NO_NS
+    );
     if (out_trx_no == nullptr || ctx == nullptr) {
         return MYLITE_OWNERLESS_TRX_ERROR;
     }
@@ -14981,6 +15053,10 @@ int ownerless_trx_assign_no_hook(std::uint64_t trx_id, std::uint64_t *out_trx_no
 }
 
 int ownerless_trx_deregister_hook(std::uint64_t trx_id, void *ctx) {
+    OwnerlessDatabasePerfCountedScope perf_scope(
+        OWNERLESS_DATABASE_PERF_TRX_DEREGISTER_CALLS,
+        OWNERLESS_DATABASE_PERF_TRX_DEREGISTER_NS
+    );
     if (ctx == nullptr) {
         return MYLITE_OWNERLESS_TRX_ERROR;
     }
@@ -15010,6 +15086,10 @@ int ownerless_trx_snapshot_hook(
     std::uint64_t *out_min_trx_no,
     void *ctx
 ) {
+    OwnerlessDatabasePerfCountedScope perf_scope(
+        OWNERLESS_DATABASE_PERF_TRX_SNAPSHOT_CALLS,
+        OWNERLESS_DATABASE_PERF_TRX_SNAPSHOT_NS
+    );
     if (ctx == nullptr) {
         return MYLITE_OWNERLESS_TRX_ERROR;
     }
@@ -15061,6 +15141,10 @@ int ownerless_read_view_register_hook(
     std::uint64_t *out_slot_generation,
     void *ctx
 ) {
+    OwnerlessDatabasePerfCountedScope perf_scope(
+        OWNERLESS_DATABASE_PERF_READ_VIEW_REGISTER_CALLS,
+        OWNERLESS_DATABASE_PERF_READ_VIEW_REGISTER_NS
+    );
     if (out_slot_index == nullptr || out_slot_generation == nullptr || ctx == nullptr) {
         return MYLITE_OWNERLESS_READ_VIEW_ERROR;
     }
@@ -15090,6 +15174,10 @@ int ownerless_read_view_deregister_hook(
     std::uint64_t slot_generation,
     void *ctx
 ) {
+    OwnerlessDatabasePerfCountedScope perf_scope(
+        OWNERLESS_DATABASE_PERF_READ_VIEW_DEREGISTER_CALLS,
+        OWNERLESS_DATABASE_PERF_READ_VIEW_DEREGISTER_NS
+    );
     if (ctx == nullptr) {
         return MYLITE_OWNERLESS_READ_VIEW_ERROR;
     }
@@ -15120,6 +15208,10 @@ int ownerless_read_view_snapshot_hook(
     std::uint64_t *out_low_limit_no,
     void *ctx
 ) {
+    OwnerlessDatabasePerfCountedScope perf_scope(
+        OWNERLESS_DATABASE_PERF_READ_VIEW_SNAPSHOT_CALLS,
+        OWNERLESS_DATABASE_PERF_READ_VIEW_SNAPSHOT_NS
+    );
     if (ctx == nullptr) {
         return MYLITE_OWNERLESS_READ_VIEW_ERROR;
     }

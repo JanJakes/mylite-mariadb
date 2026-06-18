@@ -874,6 +874,16 @@ The design must be fast in the common case:
   prepared-step, and page-version read-hook attribution under the existing
   stats flag, so tableless probe overhead can be separated from real-table read
   overhead before changing refresh policy.
+  A follow-up read-hook attribution slice extends the same read windows with
+  ownerless MDL, transaction, and read-view callback counts and elapsed time,
+  separating native hook cost inside `mysql_query()`/`mysql_stmt_execute()`
+  from page-version WAL reads and statement-boundary refresh. It is
+  diagnostics-only and does not change ownerless snapshot publication, MDL
+  blocking, DDL, active-reader, or peer join/leave policy. A reduced
+  100-select production sample reported zero native hooks for tableless reads,
+  roughly one MDL acquire/release, one transaction snapshot, and one read-view
+  register/deregister per point select, and about `0.008-0.011 ms/select` in
+  those hook callback bodies.
 - Page-version lookup should be O(1) average by `(space_id, page_no)` with a
   short version chain filtered by reader end mark.
 - Ordinary exclusive opens must stay on the native MariaDB embedded hot path:

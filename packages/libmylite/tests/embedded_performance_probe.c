@@ -169,6 +169,26 @@ enum database_perf_stat_index {
     DATABASE_PERF_STAT_RECORD_LOCK_ACQUIRE_NS,
     DATABASE_PERF_STAT_RECORD_LOCK_RELEASE_CALLS,
     DATABASE_PERF_STAT_RECORD_LOCK_RELEASE_NS,
+    DATABASE_PERF_STAT_MDL_ACQUIRE_CALLS,
+    DATABASE_PERF_STAT_MDL_ACQUIRE_NS,
+    DATABASE_PERF_STAT_MDL_RELEASE_CALLS,
+    DATABASE_PERF_STAT_MDL_RELEASE_NS,
+    DATABASE_PERF_STAT_TRX_ALLOCATE_CALLS,
+    DATABASE_PERF_STAT_TRX_ALLOCATE_NS,
+    DATABASE_PERF_STAT_TRX_REGISTER_CALLS,
+    DATABASE_PERF_STAT_TRX_REGISTER_NS,
+    DATABASE_PERF_STAT_TRX_ASSIGN_NO_CALLS,
+    DATABASE_PERF_STAT_TRX_ASSIGN_NO_NS,
+    DATABASE_PERF_STAT_TRX_DEREGISTER_CALLS,
+    DATABASE_PERF_STAT_TRX_DEREGISTER_NS,
+    DATABASE_PERF_STAT_TRX_SNAPSHOT_CALLS,
+    DATABASE_PERF_STAT_TRX_SNAPSHOT_NS,
+    DATABASE_PERF_STAT_READ_VIEW_REGISTER_CALLS,
+    DATABASE_PERF_STAT_READ_VIEW_REGISTER_NS,
+    DATABASE_PERF_STAT_READ_VIEW_DEREGISTER_CALLS,
+    DATABASE_PERF_STAT_READ_VIEW_DEREGISTER_NS,
+    DATABASE_PERF_STAT_READ_VIEW_SNAPSHOT_CALLS,
+    DATABASE_PERF_STAT_READ_VIEW_SNAPSHOT_NS,
     DATABASE_PERF_STAT_REDO_ENTER_CALLS,
     DATABASE_PERF_STAT_REDO_ENTER_NS,
     DATABASE_PERF_STAT_REDO_OBSERVE_CALLS,
@@ -2116,6 +2136,128 @@ static void emit_redo_hook_summary(
     );
 }
 
+static void emit_ownerless_native_hook_metric_summary(
+    const char *prefix,
+    const uint64_t *database_perf,
+    size_t calls_index,
+    size_t ns_index,
+    const char *metric,
+    unsigned iterations,
+    const char *unit
+) {
+    char calls_metric[96];
+    char ms_metric[96];
+
+    snprintf(calls_metric, sizeof(calls_metric), "%s_calls", metric);
+    snprintf(ms_metric, sizeof(ms_metric), "%s_ms", metric);
+    emit_summary_count_per_named_unit(
+        prefix,
+        calls_metric,
+        database_perf[calls_index],
+        iterations,
+        unit
+    );
+    emit_summary_ms_per_named_unit(prefix, ms_metric, database_perf[ns_index], iterations, unit);
+}
+
+static void emit_ownerless_native_hook_summary(
+    const char *prefix,
+    const uint64_t *database_perf,
+    unsigned iterations,
+    const char *unit
+) {
+    emit_ownerless_native_hook_metric_summary(
+        prefix,
+        database_perf,
+        DATABASE_PERF_STAT_MDL_ACQUIRE_CALLS,
+        DATABASE_PERF_STAT_MDL_ACQUIRE_NS,
+        "mdl_acquire",
+        iterations,
+        unit
+    );
+    emit_ownerless_native_hook_metric_summary(
+        prefix,
+        database_perf,
+        DATABASE_PERF_STAT_MDL_RELEASE_CALLS,
+        DATABASE_PERF_STAT_MDL_RELEASE_NS,
+        "mdl_release",
+        iterations,
+        unit
+    );
+    emit_ownerless_native_hook_metric_summary(
+        prefix,
+        database_perf,
+        DATABASE_PERF_STAT_TRX_ALLOCATE_CALLS,
+        DATABASE_PERF_STAT_TRX_ALLOCATE_NS,
+        "trx_allocate",
+        iterations,
+        unit
+    );
+    emit_ownerless_native_hook_metric_summary(
+        prefix,
+        database_perf,
+        DATABASE_PERF_STAT_TRX_REGISTER_CALLS,
+        DATABASE_PERF_STAT_TRX_REGISTER_NS,
+        "trx_register",
+        iterations,
+        unit
+    );
+    emit_ownerless_native_hook_metric_summary(
+        prefix,
+        database_perf,
+        DATABASE_PERF_STAT_TRX_ASSIGN_NO_CALLS,
+        DATABASE_PERF_STAT_TRX_ASSIGN_NO_NS,
+        "trx_assign_no",
+        iterations,
+        unit
+    );
+    emit_ownerless_native_hook_metric_summary(
+        prefix,
+        database_perf,
+        DATABASE_PERF_STAT_TRX_DEREGISTER_CALLS,
+        DATABASE_PERF_STAT_TRX_DEREGISTER_NS,
+        "trx_deregister",
+        iterations,
+        unit
+    );
+    emit_ownerless_native_hook_metric_summary(
+        prefix,
+        database_perf,
+        DATABASE_PERF_STAT_TRX_SNAPSHOT_CALLS,
+        DATABASE_PERF_STAT_TRX_SNAPSHOT_NS,
+        "trx_snapshot",
+        iterations,
+        unit
+    );
+    emit_ownerless_native_hook_metric_summary(
+        prefix,
+        database_perf,
+        DATABASE_PERF_STAT_READ_VIEW_REGISTER_CALLS,
+        DATABASE_PERF_STAT_READ_VIEW_REGISTER_NS,
+        "read_view_register",
+        iterations,
+        unit
+    );
+    emit_ownerless_native_hook_metric_summary(
+        prefix,
+        database_perf,
+        DATABASE_PERF_STAT_READ_VIEW_DEREGISTER_CALLS,
+        DATABASE_PERF_STAT_READ_VIEW_DEREGISTER_NS,
+        "read_view_deregister",
+        iterations,
+        unit
+    );
+    emit_ownerless_native_hook_metric_summary(
+        prefix,
+        database_perf,
+        DATABASE_PERF_STAT_READ_VIEW_SNAPSHOT_CALLS,
+        DATABASE_PERF_STAT_READ_VIEW_SNAPSHOT_NS,
+        "read_view_snapshot",
+        iterations,
+        unit
+    );
+}
+
 static void emit_ownerless_direct_select_summary(unsigned select_iterations) {
     uint64_t database_perf[DATABASE_PERF_STAT_COUNT] = {0};
     uint64_t exec_result_perf[EXEC_RESULT_PERF_STAT_COUNT] = {0};
@@ -2162,6 +2304,12 @@ static void emit_ownerless_direct_select_summary(unsigned select_iterations) {
         "mylite_perf_summary_ownerless_direct_select1_page_read_wal_scan_ms_per_select",
         database_perf[DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_NS],
         select_iterations
+    );
+    emit_ownerless_native_hook_summary(
+        "mylite_perf_summary_ownerless_direct_select1",
+        database_perf,
+        select_iterations,
+        "select"
     );
 }
 
@@ -2230,6 +2378,12 @@ static void emit_ownerless_prepared_select_summary(unsigned select_iterations) {
         database_perf[DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_NS],
         select_iterations
     );
+    emit_ownerless_native_hook_summary(
+        "mylite_perf_summary_ownerless_prepared_select1",
+        database_perf,
+        select_iterations,
+        "select"
+    );
 }
 
 static void emit_ownerless_direct_point_select_summary(unsigned select_iterations) {
@@ -2278,6 +2432,12 @@ static void emit_ownerless_direct_point_select_summary(unsigned select_iteration
         "mylite_perf_summary_ownerless_direct_point_select_page_read_wal_scan_ms_per_select",
         database_perf[DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_NS],
         select_iterations
+    );
+    emit_ownerless_native_hook_summary(
+        "mylite_perf_summary_ownerless_direct_point_select",
+        database_perf,
+        select_iterations,
+        "select"
     );
 }
 
@@ -2345,6 +2505,12 @@ static void emit_ownerless_prepared_point_select_summary(unsigned select_iterati
         "mylite_perf_summary_ownerless_prepared_point_select_page_read_wal_scan_ms_per_select",
         database_perf[DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_NS],
         select_iterations
+    );
+    emit_ownerless_native_hook_summary(
+        "mylite_perf_summary_ownerless_prepared_point_select",
+        database_perf,
+        select_iterations,
+        "select"
     );
 }
 
@@ -6415,6 +6581,106 @@ static void emit_database_perf_stats(const char *prefix) {
         "%s_record_lock_release_ms=%.3f\n",
         prefix,
         (double)values[DATABASE_PERF_STAT_RECORD_LOCK_RELEASE_NS] / 1000000.0
+    );
+    printf(
+        "%s_mdl_acquire_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_MDL_ACQUIRE_CALLS]
+    );
+    printf(
+        "%s_mdl_acquire_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_MDL_ACQUIRE_NS] / 1000000.0
+    );
+    printf(
+        "%s_mdl_release_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_MDL_RELEASE_CALLS]
+    );
+    printf(
+        "%s_mdl_release_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_MDL_RELEASE_NS] / 1000000.0
+    );
+    printf(
+        "%s_trx_allocate_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_TRX_ALLOCATE_CALLS]
+    );
+    printf(
+        "%s_trx_allocate_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TRX_ALLOCATE_NS] / 1000000.0
+    );
+    printf(
+        "%s_trx_register_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_TRX_REGISTER_CALLS]
+    );
+    printf(
+        "%s_trx_register_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TRX_REGISTER_NS] / 1000000.0
+    );
+    printf(
+        "%s_trx_assign_no_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_TRX_ASSIGN_NO_CALLS]
+    );
+    printf(
+        "%s_trx_assign_no_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TRX_ASSIGN_NO_NS] / 1000000.0
+    );
+    printf(
+        "%s_trx_deregister_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_TRX_DEREGISTER_CALLS]
+    );
+    printf(
+        "%s_trx_deregister_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TRX_DEREGISTER_NS] / 1000000.0
+    );
+    printf(
+        "%s_trx_snapshot_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_TRX_SNAPSHOT_CALLS]
+    );
+    printf(
+        "%s_trx_snapshot_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TRX_SNAPSHOT_NS] / 1000000.0
+    );
+    printf(
+        "%s_read_view_register_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_READ_VIEW_REGISTER_CALLS]
+    );
+    printf(
+        "%s_read_view_register_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_READ_VIEW_REGISTER_NS] / 1000000.0
+    );
+    printf(
+        "%s_read_view_deregister_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_READ_VIEW_DEREGISTER_CALLS]
+    );
+    printf(
+        "%s_read_view_deregister_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_READ_VIEW_DEREGISTER_NS] / 1000000.0
+    );
+    printf(
+        "%s_read_view_snapshot_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_READ_VIEW_SNAPSHOT_CALLS]
+    );
+    printf(
+        "%s_read_view_snapshot_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_READ_VIEW_SNAPSHOT_NS] / 1000000.0
     );
     printf(
         "%s_redo_enter_calls=%" PRIu64 "\n",
