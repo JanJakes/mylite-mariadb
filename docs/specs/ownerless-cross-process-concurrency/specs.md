@@ -5762,6 +5762,12 @@ subsystems that this mode needs:
   deferred latest-checkpoint coalescing unless `MYLITE_OWNERLESS_TEST_FAULT`
   names an active fault. Named fault runs remain conservative so page-publish
   and checkpoint crash windows are individually observable.
+  The eight-row visible-fast append-batch slice then raises the parser-proven
+  `INSERT ... VALUES` cap from four to eight rows after an eight-row production
+  probe showed the statement already used visible-fast commit publication but
+  fell back to per-mini-transaction append sessions and disabled deferred
+  latest-checkpoint coalescing. Larger row lists, broad DML/DDL, and unbounded
+  append-lock hold times remain out of scope.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.
