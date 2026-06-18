@@ -843,6 +843,13 @@ The design must be fast in the common case:
   immediate-retry budget removes the remaining fixed sleep for the ordinary
   warm sample: `innodb_shutdown()` dropped to `16.315 ms`, log-empty shutdown
   dropped to `1.569 ms`, and `innodb_logs_empty_sleep_ms` was `0.000`.
+  Repeated open/close attribution then showed the remaining fixed sleeps were
+  background-thread waits, not active-transaction or checkpoint retries: a
+  ten-iteration reduced production sample reported 9 sleeps after background
+  retries and `902.541 ms` total sleep time. Embedded background-thread retry
+  sleep now uses a `1 ms` poll after the immediate retry budget is exhausted;
+  a ten-iteration sample after that change reported `11.280 ms` total
+  log-empty sleep and `54.854 ms` total log-empty shutdown.
 - Page-version lookup should be O(1) average by `(space_id, page_no)` with a
   short version chain filtered by reader end mark.
 - Ordinary exclusive opens must stay on the native MariaDB embedded hot path:

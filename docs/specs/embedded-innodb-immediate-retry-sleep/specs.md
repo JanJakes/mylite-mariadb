@@ -111,4 +111,7 @@ longer-lived shutdown conditions.
 If active transactions, background work, or checkpoint movement exceed the retry
 budget in larger workloads, fixed sleeps may remain. Further retry-policy
 changes would need broader recovery and shutdown evidence, not just the reduced
-probe.
+probe. The follow-up
+`docs/specs/embedded-innodb-retry-attribution/specs.md` slice added repeated
+open/close retry-reason counters before narrowing the remaining embedded
+background-thread retry sleep.

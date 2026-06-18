@@ -1376,7 +1376,16 @@ ATTRIBUTE_COLD void logs_empty_and_mark_files_at_shutdown() noexcept
 	ulint			count = 0;
 	uint64_t		mylite_logs_start, mylite_stage_start;
 #ifdef EMBEDDED_LIBRARY
+	enum mylite_logs_empty_retry_reason {
+		MYLITE_LOGS_EMPTY_RETRY_NONE,
+		MYLITE_LOGS_EMPTY_RETRY_ACTIVE_TRX,
+		MYLITE_LOGS_EMPTY_RETRY_BACKGROUND,
+		MYLITE_LOGS_EMPTY_RETRY_CHECKPOINT
+	};
+
 	bool			mylite_skip_next_sleep = true;
+	mylite_logs_empty_retry_reason mylite_last_retry_reason =
+		MYLITE_LOGS_EMPTY_RETRY_NONE;
 	ulint			mylite_immediate_retry_sleep_skip_budget = 64;
 #endif
 
@@ -1410,19 +1419,47 @@ loop:
 	ut_ad(lock_sys.is_initialised() || !srv_was_started);
 	ut_ad(log_sys.is_initialised() || !srv_was_started);
 	ut_ad(fil_system.is_initialised() || !srv_was_started);
+	mylite_embedded_shutdown_perf_count(
+		MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_LOOP_ITERATIONS);
 
 #define COUNT_INTERVAL 600U
 #define CHECK_INTERVAL 100000U
+#define MYLITE_BACKGROUND_CHECK_INTERVAL 1000U
 #ifdef EMBEDDED_LIBRARY
 	/* MyLite embedded close can prove idle shutdown without the first wait. */
 	if (mylite_skip_next_sleep) {
+		mylite_embedded_shutdown_perf_count(
+			MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_SKIPPED_SLEEP_CALLS);
 		mylite_skip_next_sleep = false;
 	} else
 #endif
 	{
+		ulint mylite_sleep_interval = CHECK_INTERVAL;
+		mylite_embedded_shutdown_perf_count(
+			MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_SLEEP_CALLS);
+#ifdef EMBEDDED_LIBRARY
+		switch (mylite_last_retry_reason) {
+		case MYLITE_LOGS_EMPTY_RETRY_ACTIVE_TRX:
+			mylite_embedded_shutdown_perf_count(
+				MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_SLEEP_AFTER_ACTIVE_TRX);
+			break;
+		case MYLITE_LOGS_EMPTY_RETRY_BACKGROUND:
+			mylite_embedded_shutdown_perf_count(
+				MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_SLEEP_AFTER_BACKGROUND);
+			mylite_sleep_interval = MYLITE_BACKGROUND_CHECK_INTERVAL;
+			break;
+		case MYLITE_LOGS_EMPTY_RETRY_CHECKPOINT:
+			mylite_embedded_shutdown_perf_count(
+				MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_SLEEP_AFTER_CHECKPOINT);
+			break;
+		case MYLITE_LOGS_EMPTY_RETRY_NONE:
+			break;
+		}
+		mylite_last_retry_reason = MYLITE_LOGS_EMPTY_RETRY_NONE;
+#endif
 		mylite_stage_start = mylite_embedded_shutdown_perf_start_ns();
 		std::this_thread::sleep_for(
-			std::chrono::microseconds(CHECK_INTERVAL));
+			std::chrono::microseconds(mylite_sleep_interval));
 		mylite_embedded_shutdown_perf_add_elapsed(
 			MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_LOOP_SLEEP_NS,
 			mylite_stage_start);
@@ -1454,9 +1491,17 @@ loop:
 			MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_ACTIVE_TRX_NS,
 			mylite_stage_start);
 #ifdef EMBEDDED_LIBRARY
+		mylite_last_retry_reason = MYLITE_LOGS_EMPTY_RETRY_ACTIVE_TRX;
+		mylite_embedded_shutdown_perf_count(
+			MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_ACTIVE_TRX_RETRIES);
 		if (mylite_immediate_retry_sleep_skip_budget) {
+			mylite_embedded_shutdown_perf_count(
+				MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_RETRY_SKIP_GRANTS);
 			mylite_skip_next_sleep = true;
 			mylite_immediate_retry_sleep_skip_budget--;
+		} else {
+			mylite_embedded_shutdown_perf_count(
+				MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_RETRY_SKIP_BUDGET_EXHAUSTED);
 		}
 #endif
 		goto loop;
@@ -1484,9 +1529,17 @@ wait_suspend_loop:
 			MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_BACKGROUND_WAIT_NS,
 			mylite_stage_start);
 #ifdef EMBEDDED_LIBRARY
+		mylite_last_retry_reason = MYLITE_LOGS_EMPTY_RETRY_BACKGROUND;
+		mylite_embedded_shutdown_perf_count(
+			MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_BACKGROUND_RETRIES);
 		if (mylite_immediate_retry_sleep_skip_budget) {
+			mylite_embedded_shutdown_perf_count(
+				MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_RETRY_SKIP_GRANTS);
 			mylite_skip_next_sleep = true;
 			mylite_immediate_retry_sleep_skip_budget--;
+		} else {
+			mylite_embedded_shutdown_perf_count(
+				MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_RETRY_SKIP_BUDGET_EXHAUSTED);
 		}
 #endif
 		goto loop;
@@ -1582,9 +1635,17 @@ wait_suspend_loop:
 				MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_CHECKPOINT_NS,
 				mylite_stage_start);
 #ifdef EMBEDDED_LIBRARY
+			mylite_last_retry_reason = MYLITE_LOGS_EMPTY_RETRY_CHECKPOINT;
+			mylite_embedded_shutdown_perf_count(
+				MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_CHECKPOINT_RETRIES);
 			if (mylite_immediate_retry_sleep_skip_budget) {
+				mylite_embedded_shutdown_perf_count(
+					MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_RETRY_SKIP_GRANTS);
 				mylite_skip_next_sleep = true;
 				mylite_immediate_retry_sleep_skip_budget--;
+			} else {
+				mylite_embedded_shutdown_perf_count(
+					MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_RETRY_SKIP_BUDGET_EXHAUSTED);
 			}
 #endif
 			goto loop;

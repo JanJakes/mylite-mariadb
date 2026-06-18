@@ -835,6 +835,17 @@ enum embedded_shutdown_perf_stat_index {
     EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_THREAD_POOL_END_NS,
     EMBEDDED_SHUTDOWN_PERF_INNODB_SHUTDOWN_FLAGS_NS,
     EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_LOOP_ITERATIONS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_SLEEP_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_SKIPPED_SLEEP_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_RETRY_SKIP_GRANTS,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_RETRY_SKIP_BUDGET_EXHAUSTED,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_ACTIVE_TRX_RETRIES,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_BACKGROUND_RETRIES,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_CHECKPOINT_RETRIES,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_SLEEP_AFTER_ACTIVE_TRX,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_SLEEP_AFTER_BACKGROUND,
+    EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_SLEEP_AFTER_CHECKPOINT,
     EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_TOTAL_NS,
     EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_SETUP_NS,
     EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_LOOP_SLEEP_NS,
@@ -6374,6 +6385,20 @@ static void emit_embedded_shutdown_perf_summary_ms(
     );
 }
 
+static void emit_embedded_shutdown_perf_summary_count_avg(
+    const char *prefix,
+    const char *name,
+    uint64_t value,
+    uint64_t calls
+) {
+    printf(
+        "%s_shutdown_%s_avg=%.3f\n",
+        prefix,
+        name,
+        calls > 0U ? (double)value / (double)calls : 0.0
+    );
+}
+
 static void emit_embedded_shutdown_perf_summary(const char *prefix) {
     uint64_t values[EMBEDDED_SHUTDOWN_PERF_STAT_COUNT] = {0};
     uint64_t server_end_calls;
@@ -6578,6 +6603,72 @@ static void emit_embedded_shutdown_perf_summary(const char *prefix) {
         prefix,
         "innodb_logs_empty_sleep",
         values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_LOOP_SLEEP_NS],
+        innodb_logs_empty_calls
+    );
+    emit_embedded_shutdown_perf_summary_count_avg(
+        prefix,
+        "innodb_logs_empty_loop_iterations",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_LOOP_ITERATIONS],
+        innodb_logs_empty_calls
+    );
+    emit_embedded_shutdown_perf_summary_count_avg(
+        prefix,
+        "innodb_logs_empty_sleep_calls",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_SLEEP_CALLS],
+        innodb_logs_empty_calls
+    );
+    emit_embedded_shutdown_perf_summary_count_avg(
+        prefix,
+        "innodb_logs_empty_skipped_sleep_calls",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_SKIPPED_SLEEP_CALLS],
+        innodb_logs_empty_calls
+    );
+    emit_embedded_shutdown_perf_summary_count_avg(
+        prefix,
+        "innodb_logs_empty_retry_skip_grants",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_RETRY_SKIP_GRANTS],
+        innodb_logs_empty_calls
+    );
+    emit_embedded_shutdown_perf_summary_count_avg(
+        prefix,
+        "innodb_logs_empty_retry_skip_budget_exhausted",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_RETRY_SKIP_BUDGET_EXHAUSTED],
+        innodb_logs_empty_calls
+    );
+    emit_embedded_shutdown_perf_summary_count_avg(
+        prefix,
+        "innodb_logs_empty_active_trx_retries",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_ACTIVE_TRX_RETRIES],
+        innodb_logs_empty_calls
+    );
+    emit_embedded_shutdown_perf_summary_count_avg(
+        prefix,
+        "innodb_logs_empty_background_retries",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_BACKGROUND_RETRIES],
+        innodb_logs_empty_calls
+    );
+    emit_embedded_shutdown_perf_summary_count_avg(
+        prefix,
+        "innodb_logs_empty_checkpoint_retries",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_CHECKPOINT_RETRIES],
+        innodb_logs_empty_calls
+    );
+    emit_embedded_shutdown_perf_summary_count_avg(
+        prefix,
+        "innodb_logs_empty_sleep_after_active_trx",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_SLEEP_AFTER_ACTIVE_TRX],
+        innodb_logs_empty_calls
+    );
+    emit_embedded_shutdown_perf_summary_count_avg(
+        prefix,
+        "innodb_logs_empty_sleep_after_background",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_SLEEP_AFTER_BACKGROUND],
+        innodb_logs_empty_calls
+    );
+    emit_embedded_shutdown_perf_summary_count_avg(
+        prefix,
+        "innodb_logs_empty_sleep_after_checkpoint",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_SLEEP_AFTER_CHECKPOINT],
         innodb_logs_empty_calls
     );
     emit_embedded_shutdown_perf_summary_ms(
@@ -7165,6 +7256,61 @@ static void emit_embedded_shutdown_perf_stats(const char *prefix) {
     );
 
     emit_embedded_shutdown_perf_value(prefix, "innodb_logs_empty_calls", innodb_logs_empty_calls);
+    emit_embedded_shutdown_perf_value(
+        prefix,
+        "innodb_logs_empty_loop_iterations",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_LOOP_ITERATIONS]
+    );
+    emit_embedded_shutdown_perf_value(
+        prefix,
+        "innodb_logs_empty_sleep_calls",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_SLEEP_CALLS]
+    );
+    emit_embedded_shutdown_perf_value(
+        prefix,
+        "innodb_logs_empty_skipped_sleep_calls",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_SKIPPED_SLEEP_CALLS]
+    );
+    emit_embedded_shutdown_perf_value(
+        prefix,
+        "innodb_logs_empty_retry_skip_grants",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_RETRY_SKIP_GRANTS]
+    );
+    emit_embedded_shutdown_perf_value(
+        prefix,
+        "innodb_logs_empty_retry_skip_budget_exhausted",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_RETRY_SKIP_BUDGET_EXHAUSTED]
+    );
+    emit_embedded_shutdown_perf_value(
+        prefix,
+        "innodb_logs_empty_active_trx_retries",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_ACTIVE_TRX_RETRIES]
+    );
+    emit_embedded_shutdown_perf_value(
+        prefix,
+        "innodb_logs_empty_background_retries",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_BACKGROUND_RETRIES]
+    );
+    emit_embedded_shutdown_perf_value(
+        prefix,
+        "innodb_logs_empty_checkpoint_retries",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_CHECKPOINT_RETRIES]
+    );
+    emit_embedded_shutdown_perf_value(
+        prefix,
+        "innodb_logs_empty_sleep_after_active_trx",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_SLEEP_AFTER_ACTIVE_TRX]
+    );
+    emit_embedded_shutdown_perf_value(
+        prefix,
+        "innodb_logs_empty_sleep_after_background",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_SLEEP_AFTER_BACKGROUND]
+    );
+    emit_embedded_shutdown_perf_value(
+        prefix,
+        "innodb_logs_empty_sleep_after_checkpoint",
+        values[EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_SLEEP_AFTER_CHECKPOINT]
+    );
     emit_embedded_shutdown_perf_ms(
         prefix,
         "innodb_logs_empty_total",

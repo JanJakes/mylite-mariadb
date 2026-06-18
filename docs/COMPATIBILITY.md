@@ -194,6 +194,14 @@ A follow-up embedded-only bounded immediate-retry budget removes the remaining
 fixed sleep for the ordinary warm sample: `innodb_shutdown_total_ms=16.315`,
 `innodb_shutdown_logs_empty_ms=1.569`, and
 `innodb_logs_empty_sleep_ms=0.000`, with checkpoint work still `0.012 ms`.
+Repeated open/close attribution then showed the remaining fixed sleeps were
+background-thread waits, not active transactions or checkpoint movement: a
+ten-iteration reduced production sample reported 9 sleeps after background
+retries and `902.541 ms` total sleep time. Embedded background-thread retry
+sleep now uses a `1 ms` poll after the immediate retry budget is exhausted; a
+ten-iteration sample after that change reported
+`innodb_logs_empty_sleep_ms=11.280`, `innodb_logs_empty_total_ms=54.854`, and
+no active-transaction or checkpoint retries.
 The probe also reports direct multi-row `INSERT ... VALUES` row-list timing
 with `mylite_perf_bulk_insert_rows_per_statement`,
 ordinary/ownerless bulk row and statement throughput, ownerless/ordinary bulk
