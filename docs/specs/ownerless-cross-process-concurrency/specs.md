@@ -896,6 +896,15 @@ The design must be fast in the common case:
   stats-enabled point-select sample moved shared-snapshot time to
   `0.001 ms/select`, and a 1000-select stats-off sample reported direct
   point-select ratio `0.9028` and prepared point-select ratio `0.7707`.
+  A follow-up point-select engine attribution slice added opt-in SQL handler
+  `ha_index_read_*()` and InnoDB `index_read()` child-stage counters to the
+  production probe. Its first reduced stats-enabled sample reported ordinary
+  direct/prepared point-select `row_search_mvcc()` at about
+  `0.006 ms/select`, ownerless direct/prepared point-select
+  `row_search_mvcc()` at about `0.012 ms/select`, no page-version reads, zero
+  native prepared reprepare/close calls, and ownerless prepared-step native
+  execute at `0.303 ms/select`; a stats-off 3000-select sample reported
+  point-select direct/prepared ratios of `0.8475`/`0.8276`.
 - Page-version lookup should be O(1) average by `(space_id, page_no)` with a
   short version chain filtered by reader end mark.
 - Ordinary exclusive opens must stay on the native MariaDB embedded hot path:

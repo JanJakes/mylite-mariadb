@@ -177,6 +177,11 @@ enum mylite_innodb_handler_perf_stat_index {
   MYLITE_INNODB_HANDLER_PERF_EXTERNAL_LOCK_CALLS,
   MYLITE_INNODB_HANDLER_PERF_EXTERNAL_LOCK_TOTAL_NS,
   MYLITE_INNODB_HANDLER_PERF_EXTERNAL_LOCK_COMMIT_NS,
+  MYLITE_INNODB_HANDLER_PERF_INDEX_READ_CALLS,
+  MYLITE_INNODB_HANDLER_PERF_INDEX_READ_TOTAL_NS,
+  MYLITE_INNODB_HANDLER_PERF_INDEX_READ_BUILD_TEMPLATE_NS,
+  MYLITE_INNODB_HANDLER_PERF_INDEX_READ_CONVERT_KEY_NS,
+  MYLITE_INNODB_HANDLER_PERF_INDEX_READ_ROW_SEARCH_NS,
   MYLITE_INNODB_HANDLER_PERF_WRITE_ROW_CALLS,
   MYLITE_INNODB_HANDLER_PERF_WRITE_ROW_TOTAL_NS,
   MYLITE_INNODB_HANDLER_PERF_WRITE_ROW_AUTOINC_NS,
@@ -9258,6 +9263,10 @@ ha_innobase::index_read(
 {
 	DBUG_ENTER("index_read");
 	DEBUG_SYNC_C("ha_innobase_index_read_begin");
+	mylite_innodb_handler_perf_add(
+		MYLITE_INNODB_HANDLER_PERF_INDEX_READ_CALLS, 1);
+	mylite_innodb_handler_perf_scope mylite_perf_scope(
+		MYLITE_INNODB_HANDLER_PERF_INDEX_READ_TOTAL_NS);
 
 	ut_ad(m_prebuilt->trx == thd_to_trx(m_user_thd));
 
@@ -9297,10 +9306,21 @@ ha_innobase::index_read(
 	necessarily m_prebuilt->index, but can also be the clustered index */
 
 	if (m_prebuilt->sql_stat_start) {
+		const uint64_t template_start =
+			mylite_innodb_handler_perf_enabled()
+				? mylite_innodb_handler_perf_now_ns()
+				: 0;
 		build_template(false);
+		mylite_innodb_handler_perf_add_elapsed(
+			MYLITE_INNODB_HANDLER_PERF_INDEX_READ_BUILD_TEMPLATE_NS,
+			template_start);
 	}
 
 	if (key_len) {
+		const uint64_t convert_key_start =
+			mylite_innodb_handler_perf_enabled()
+				? mylite_innodb_handler_perf_now_ns()
+				: 0;
 		ut_ad(key_ptr);
 		/* Convert the search key value to InnoDB format into
 		m_prebuilt->search_tuple */
@@ -9312,6 +9332,9 @@ ha_innobase::index_read(
 			index,
 			(byte*) key_ptr,
 			key_len);
+		mylite_innodb_handler_perf_add_elapsed(
+			MYLITE_INNODB_HANDLER_PERF_INDEX_READ_CONVERT_KEY_NS,
+			convert_key_start);
 
 		DBUG_ASSERT(m_prebuilt->search_tuple->n_fields > 0);
 	} else {
@@ -9333,8 +9356,15 @@ ha_innobase::index_read(
 	mylite_ownerless_innodb_refresh_statement_plain_read_pages_once();
 
 	mariadb_set_stats temp(m_prebuilt->trx, handler_stats);
+	const uint64_t row_search_start =
+		mylite_innodb_handler_perf_enabled()
+			? mylite_innodb_handler_perf_now_ns()
+			: 0;
 	dberr_t ret =
 		row_search_mvcc(buf, mode, m_prebuilt, m_last_match_mode, 0);
+	mylite_innodb_handler_perf_add_elapsed(
+		MYLITE_INNODB_HANDLER_PERF_INDEX_READ_ROW_SEARCH_NS,
+		row_search_start);
 
 	DBUG_EXECUTE_IF("ib_select_query_failure", ret = DB_ERROR;);
 

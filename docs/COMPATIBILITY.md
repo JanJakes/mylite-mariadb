@@ -830,6 +830,17 @@ point-select refresh dropped to `0.002 ms/select` with only
 reported ownerless direct point-select ratio `0.9028` and prepared point-select
 ratio `0.7707`, leaving prepared native execute overhead as the next read-path
 target.
+Point-select engine attribution now adds opt-in production-probe counters at
+the SQL handler `ha_index_read_*()` boundary and InnoDB `index_read()` child
+stages. A reduced stats-enabled sample reported no page-version reads, no
+per-step native reprepare, ownerless prepared-step total at
+`0.313 ms/select` with `0.303 ms/select` in native execute, and InnoDB
+`row_search_mvcc()` timing of about `0.012 ms/select` for ownerless direct and
+prepared point selects versus `0.006 ms/select` for ordinary point selects,
+keeping the next optimization target inside native row-search/read-view
+lifecycle rather than MyLite wrapper setup. A 3000-select stats-off sample from
+the same build reported tableless direct/prepared ratios of `0.9221`/`0.8666`
+and point-select direct/prepared ratios of `0.8475`/`0.8276`.
 It also splits the exact native history flush into dirty-page needs checks,
 known-page flush try time, exact-write AIO wait time, the AIO wait's
 write-slot and doublewrite-buffer child waits, space-wide fallback time, and

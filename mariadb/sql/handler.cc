@@ -200,6 +200,10 @@ enum mylite_sql_handler_perf_stat_index {
   MYLITE_SQL_HANDLER_PERF_COMMIT_ONE_PHASE_2_ENGINE_COMMIT_CALLS,
   MYLITE_SQL_HANDLER_PERF_COMMIT_ONE_PHASE_2_ENGINE_COMMIT_NS,
   MYLITE_SQL_HANDLER_PERF_COMMIT_ONE_PHASE_2_CLEANUP_NS,
+  MYLITE_SQL_HANDLER_PERF_HA_INDEX_READ_MAP_CALLS,
+  MYLITE_SQL_HANDLER_PERF_HA_INDEX_READ_MAP_NS,
+  MYLITE_SQL_HANDLER_PERF_HA_INDEX_READ_IDX_MAP_CALLS,
+  MYLITE_SQL_HANDLER_PERF_HA_INDEX_READ_IDX_MAP_NS,
   MYLITE_SQL_HANDLER_PERF_STAT_COUNT
 };
 
@@ -4203,6 +4207,10 @@ int handler::ha_index_read_map(uchar *buf, const uchar *key,
 {
   int result;
   DBUG_ENTER("handler::ha_index_read_map");
+  mylite_sql_handler_perf_add(
+      MYLITE_SQL_HANDLER_PERF_HA_INDEX_READ_MAP_CALLS, 1);
+  mylite_sql_handler_perf_scope mylite_perf_scope(
+      MYLITE_SQL_HANDLER_PERF_HA_INDEX_READ_MAP_NS);
   DBUG_ASSERT(table_share->tmp_table != NO_TMP_TABLE ||
               m_lock_type != F_UNLCK);
   DBUG_ASSERT(inited==INDEX);
@@ -4238,6 +4246,10 @@ int handler::ha_index_read_idx_map(uchar *buf, uint index, const uchar *key,
                                           enum ha_rkey_function find_flag)
 {
   int result;
+  mylite_sql_handler_perf_add(
+      MYLITE_SQL_HANDLER_PERF_HA_INDEX_READ_IDX_MAP_CALLS, 1);
+  mylite_sql_handler_perf_scope mylite_perf_scope(
+      MYLITE_SQL_HANDLER_PERF_HA_INDEX_READ_IDX_MAP_NS);
   DBUG_ASSERT(inited==NONE);
   DBUG_ASSERT(table_share->tmp_table != NO_TMP_TABLE ||
               m_lock_type != F_UNLCK);

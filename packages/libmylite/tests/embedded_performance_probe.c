@@ -378,6 +378,10 @@ enum sql_handler_perf_stat_index {
     SQL_HANDLER_PERF_STAT_COMMIT_ONE_PHASE_2_ENGINE_COMMIT_CALLS,
     SQL_HANDLER_PERF_STAT_COMMIT_ONE_PHASE_2_ENGINE_COMMIT_NS,
     SQL_HANDLER_PERF_STAT_COMMIT_ONE_PHASE_2_CLEANUP_NS,
+    SQL_HANDLER_PERF_STAT_HA_INDEX_READ_MAP_CALLS,
+    SQL_HANDLER_PERF_STAT_HA_INDEX_READ_MAP_NS,
+    SQL_HANDLER_PERF_STAT_HA_INDEX_READ_IDX_MAP_CALLS,
+    SQL_HANDLER_PERF_STAT_HA_INDEX_READ_IDX_MAP_NS,
     SQL_HANDLER_PERF_STAT_COUNT
 };
 
@@ -387,6 +391,11 @@ enum innodb_handler_perf_stat_index {
     INNODB_HANDLER_PERF_STAT_EXTERNAL_LOCK_CALLS,
     INNODB_HANDLER_PERF_STAT_EXTERNAL_LOCK_TOTAL_NS,
     INNODB_HANDLER_PERF_STAT_EXTERNAL_LOCK_COMMIT_NS,
+    INNODB_HANDLER_PERF_STAT_INDEX_READ_CALLS,
+    INNODB_HANDLER_PERF_STAT_INDEX_READ_TOTAL_NS,
+    INNODB_HANDLER_PERF_STAT_INDEX_READ_BUILD_TEMPLATE_NS,
+    INNODB_HANDLER_PERF_STAT_INDEX_READ_CONVERT_KEY_NS,
+    INNODB_HANDLER_PERF_STAT_INDEX_READ_ROW_SEARCH_NS,
     INNODB_HANDLER_PERF_STAT_WRITE_ROW_CALLS,
     INNODB_HANDLER_PERF_STAT_WRITE_ROW_TOTAL_NS,
     INNODB_HANDLER_PERF_STAT_WRITE_ROW_AUTOINC_NS,
@@ -1093,6 +1102,18 @@ static void emit_summary_ms_per_iteration_delta(
     uint64_t right_ns,
     unsigned iterations
 );
+static void emit_prefixed_count_per_iteration(
+    const char *prefix,
+    const char *suffix,
+    uint64_t count,
+    unsigned iterations
+);
+static void emit_prefixed_ms_per_iteration(
+    const char *prefix,
+    const char *suffix,
+    uint64_t value_ns,
+    unsigned iterations
+);
 static void emit_redo_hook_summary(
     const char *prefix,
     const uint64_t *database_perf,
@@ -1115,6 +1136,7 @@ static void emit_ownerless_direct_select_summary(unsigned select_iterations);
 static void emit_ownerless_prepared_select_summary(unsigned select_iterations);
 static void emit_ownerless_direct_point_select_summary(unsigned select_iterations);
 static void emit_ownerless_prepared_point_select_summary(unsigned select_iterations);
+static void emit_point_select_engine_summary(const char *prefix, unsigned select_iterations);
 static void emit_autocommit_deep_comparison_summary(
     const uint64_t *ordinary_deep,
     const uint64_t *ownerless_deep,
@@ -1384,14 +1406,44 @@ int main(void) {
     check_min_rate("MYLITE_PERF_MIN_ORDINARY_PREPARED_SELECT1_OPS", rate);
 
     prepare_point_select_table(db, "mylite_perf_ordinary_point_select");
+    if (page_publish_stats) {
+        reset_ownerless_read_stats();
+        mylite_ownerless_sql_handler_set_perf_stats_enabled(1);
+        mylite_ownerless_innodb_handler_set_perf_stats_enabled(1);
+    }
     seconds =
         measure_direct_point_select(db, "mylite_perf_ordinary_point_select", select_iterations);
     emit_rate("mylite_perf_ordinary_direct_point_select", select_iterations, seconds);
+    if (page_publish_stats) {
+        mylite_ownerless_sql_handler_set_perf_stats_enabled(0);
+        mylite_ownerless_innodb_handler_set_perf_stats_enabled(0);
+        emit_sql_handler_perf_stats("mylite_perf_ordinary_direct_point_select");
+        emit_innodb_handler_perf_stats("mylite_perf_ordinary_direct_point_select");
+        emit_point_select_engine_summary(
+            "mylite_perf_summary_ordinary_direct_point_select",
+            select_iterations
+        );
+    }
     ordinary_direct_point_select_rate = operations_per_second(select_iterations, seconds);
 
+    if (page_publish_stats) {
+        reset_ownerless_read_stats();
+        mylite_ownerless_sql_handler_set_perf_stats_enabled(1);
+        mylite_ownerless_innodb_handler_set_perf_stats_enabled(1);
+    }
     seconds =
         measure_prepared_point_select(db, "mylite_perf_ordinary_point_select", select_iterations);
     emit_rate("mylite_perf_ordinary_prepared_point_select", select_iterations, seconds);
+    if (page_publish_stats) {
+        mylite_ownerless_sql_handler_set_perf_stats_enabled(0);
+        mylite_ownerless_innodb_handler_set_perf_stats_enabled(0);
+        emit_sql_handler_perf_stats("mylite_perf_ordinary_prepared_point_select");
+        emit_innodb_handler_perf_stats("mylite_perf_ordinary_prepared_point_select");
+        emit_point_select_engine_summary(
+            "mylite_perf_summary_ordinary_prepared_point_select",
+            select_iterations
+        );
+    }
     ordinary_prepared_point_select_rate = operations_per_second(select_iterations, seconds);
 
     if (page_publish_stats) {
@@ -1492,6 +1544,8 @@ int main(void) {
         reset_ownerless_read_stats();
         mylite_ownerless_database_set_perf_stats_enabled(1);
         mylite_exec_result_perf_set_enabled(1);
+        mylite_ownerless_sql_handler_set_perf_stats_enabled(1);
+        mylite_ownerless_innodb_handler_set_perf_stats_enabled(1);
     }
     seconds =
         measure_direct_point_select(db, "mylite_perf_ownerless_point_select", select_iterations);
@@ -1499,8 +1553,12 @@ int main(void) {
     if (page_publish_stats) {
         mylite_exec_result_perf_set_enabled(0);
         mylite_ownerless_database_set_perf_stats_enabled(0);
+        mylite_ownerless_sql_handler_set_perf_stats_enabled(0);
+        mylite_ownerless_innodb_handler_set_perf_stats_enabled(0);
         emit_exec_result_perf_stats("mylite_perf_ownerless_direct_point_select");
         emit_database_perf_stats("mylite_perf_ownerless_direct_point_select");
+        emit_sql_handler_perf_stats("mylite_perf_ownerless_direct_point_select");
+        emit_innodb_handler_perf_stats("mylite_perf_ownerless_direct_point_select");
         emit_ownerless_direct_point_select_summary(select_iterations);
     }
     ownerless_direct_point_select_rate = operations_per_second(select_iterations, seconds);
@@ -1508,13 +1566,19 @@ int main(void) {
     if (page_publish_stats) {
         reset_ownerless_read_stats();
         mylite_ownerless_database_set_perf_stats_enabled(1);
+        mylite_ownerless_sql_handler_set_perf_stats_enabled(1);
+        mylite_ownerless_innodb_handler_set_perf_stats_enabled(1);
     }
     seconds =
         measure_prepared_point_select(db, "mylite_perf_ownerless_point_select", select_iterations);
     emit_rate("mylite_perf_ownerless_prepared_point_select", select_iterations, seconds);
     if (page_publish_stats) {
         mylite_ownerless_database_set_perf_stats_enabled(0);
+        mylite_ownerless_sql_handler_set_perf_stats_enabled(0);
+        mylite_ownerless_innodb_handler_set_perf_stats_enabled(0);
         emit_database_perf_stats("mylite_perf_ownerless_prepared_point_select");
+        emit_sql_handler_perf_stats("mylite_perf_ownerless_prepared_point_select");
+        emit_innodb_handler_perf_stats("mylite_perf_ownerless_prepared_point_select");
         emit_ownerless_prepared_point_select_summary(select_iterations);
     }
     ownerless_prepared_point_select_rate = operations_per_second(select_iterations, seconds);
@@ -2059,6 +2123,27 @@ static void emit_summary_ms_per_iteration_delta(
     const double average_ms = iterations > 0U ? total_ms / (double)iterations : 0.0;
 
     printf("%s=%.3f\n", name, average_ms);
+}
+
+static void emit_prefixed_count_per_iteration(
+    const char *prefix,
+    const char *suffix,
+    uint64_t count,
+    unsigned iterations
+) {
+    const double average = iterations > 0U ? (double)count / (double)iterations : 0.0;
+    printf("%s_%s=%.3f\n", prefix, suffix, average);
+}
+
+static void emit_prefixed_ms_per_iteration(
+    const char *prefix,
+    const char *suffix,
+    uint64_t value_ns,
+    unsigned iterations
+) {
+    const double total_ms = (double)value_ns / 1000000.0;
+    const double average_ms = iterations > 0U ? total_ms / (double)iterations : 0.0;
+    printf("%s_%s=%.3f\n", prefix, suffix, average_ms);
 }
 
 static void emit_summary_count_per_named_unit(
@@ -2665,6 +2750,10 @@ static void emit_ownerless_direct_point_select_summary(unsigned select_iteration
         select_iterations,
         "select"
     );
+    emit_point_select_engine_summary(
+        "mylite_perf_summary_ownerless_direct_point_select",
+        select_iterations
+    );
 }
 
 static void emit_ownerless_prepared_point_select_summary(unsigned select_iterations) {
@@ -2743,6 +2832,73 @@ static void emit_ownerless_prepared_point_select_summary(unsigned select_iterati
         database_perf,
         select_iterations,
         "select"
+    );
+    emit_point_select_engine_summary(
+        "mylite_perf_summary_ownerless_prepared_point_select",
+        select_iterations
+    );
+}
+
+static void emit_point_select_engine_summary(const char *prefix, unsigned select_iterations) {
+    uint64_t sql_handler[SQL_HANDLER_PERF_STAT_COUNT] = {0};
+    uint64_t innodb_handler[INNODB_HANDLER_PERF_STAT_COUNT] = {0};
+
+    mylite_ownerless_sql_handler_read_perf_stats(sql_handler, SQL_HANDLER_PERF_STAT_COUNT);
+    mylite_ownerless_innodb_handler_read_perf_stats(innodb_handler, INNODB_HANDLER_PERF_STAT_COUNT);
+
+    emit_prefixed_count_per_iteration(
+        prefix,
+        "sql_handler_index_read_map_calls_per_select",
+        sql_handler[SQL_HANDLER_PERF_STAT_HA_INDEX_READ_MAP_CALLS],
+        select_iterations
+    );
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "sql_handler_index_read_map_ms_per_select",
+        sql_handler[SQL_HANDLER_PERF_STAT_HA_INDEX_READ_MAP_NS],
+        select_iterations
+    );
+    emit_prefixed_count_per_iteration(
+        prefix,
+        "sql_handler_index_read_idx_map_calls_per_select",
+        sql_handler[SQL_HANDLER_PERF_STAT_HA_INDEX_READ_IDX_MAP_CALLS],
+        select_iterations
+    );
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "sql_handler_index_read_idx_map_ms_per_select",
+        sql_handler[SQL_HANDLER_PERF_STAT_HA_INDEX_READ_IDX_MAP_NS],
+        select_iterations
+    );
+    emit_prefixed_count_per_iteration(
+        prefix,
+        "innodb_handler_index_read_calls_per_select",
+        innodb_handler[INNODB_HANDLER_PERF_STAT_INDEX_READ_CALLS],
+        select_iterations
+    );
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "innodb_handler_index_read_ms_per_select",
+        innodb_handler[INNODB_HANDLER_PERF_STAT_INDEX_READ_TOTAL_NS],
+        select_iterations
+    );
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "innodb_handler_index_read_build_template_ms_per_select",
+        innodb_handler[INNODB_HANDLER_PERF_STAT_INDEX_READ_BUILD_TEMPLATE_NS],
+        select_iterations
+    );
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "innodb_handler_index_read_convert_key_ms_per_select",
+        innodb_handler[INNODB_HANDLER_PERF_STAT_INDEX_READ_CONVERT_KEY_NS],
+        select_iterations
+    );
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "innodb_handler_index_read_row_search_ms_per_select",
+        innodb_handler[INNODB_HANDLER_PERF_STAT_INDEX_READ_ROW_SEARCH_NS],
+        select_iterations
     );
 }
 
@@ -9576,6 +9732,26 @@ static void emit_sql_handler_perf_stats(const char *prefix) {
         "commit_one_phase_2_cleanup",
         values[SQL_HANDLER_PERF_STAT_COMMIT_ONE_PHASE_2_CLEANUP_NS]
     );
+    emit_sql_handler_perf_value(
+        prefix,
+        "ha_index_read_map_calls",
+        values[SQL_HANDLER_PERF_STAT_HA_INDEX_READ_MAP_CALLS]
+    );
+    emit_sql_handler_perf_ms(
+        prefix,
+        "ha_index_read_map",
+        values[SQL_HANDLER_PERF_STAT_HA_INDEX_READ_MAP_NS]
+    );
+    emit_sql_handler_perf_value(
+        prefix,
+        "ha_index_read_idx_map_calls",
+        values[SQL_HANDLER_PERF_STAT_HA_INDEX_READ_IDX_MAP_CALLS]
+    );
+    emit_sql_handler_perf_ms(
+        prefix,
+        "ha_index_read_idx_map",
+        values[SQL_HANDLER_PERF_STAT_HA_INDEX_READ_IDX_MAP_NS]
+    );
 }
 
 static void emit_innodb_handler_perf_value(const char *prefix, const char *name, uint64_t value) {
@@ -9614,6 +9790,31 @@ static void emit_innodb_handler_perf_stats(const char *prefix) {
         prefix,
         "external_lock_commit",
         values[INNODB_HANDLER_PERF_STAT_EXTERNAL_LOCK_COMMIT_NS]
+    );
+    emit_innodb_handler_perf_value(
+        prefix,
+        "index_read_calls",
+        values[INNODB_HANDLER_PERF_STAT_INDEX_READ_CALLS]
+    );
+    emit_innodb_handler_perf_ms(
+        prefix,
+        "index_read_total",
+        values[INNODB_HANDLER_PERF_STAT_INDEX_READ_TOTAL_NS]
+    );
+    emit_innodb_handler_perf_ms(
+        prefix,
+        "index_read_build_template",
+        values[INNODB_HANDLER_PERF_STAT_INDEX_READ_BUILD_TEMPLATE_NS]
+    );
+    emit_innodb_handler_perf_ms(
+        prefix,
+        "index_read_convert_key",
+        values[INNODB_HANDLER_PERF_STAT_INDEX_READ_CONVERT_KEY_NS]
+    );
+    emit_innodb_handler_perf_ms(
+        prefix,
+        "index_read_row_search",
+        values[INNODB_HANDLER_PERF_STAT_INDEX_READ_ROW_SEARCH_NS]
     );
     emit_innodb_handler_perf_value(
         prefix,
@@ -11342,6 +11543,8 @@ static unsigned bulk_statement_count(unsigned rows, unsigned rows_per_statement)
 static void reset_ownerless_read_stats(void) {
     mylite_ownerless_database_reset_perf_stats();
     mylite_exec_result_perf_reset();
+    mylite_ownerless_sql_handler_reset_perf_stats();
+    mylite_ownerless_innodb_handler_reset_perf_stats();
 }
 
 static void reset_ownerless_insert_stats(void) {
