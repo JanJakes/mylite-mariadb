@@ -724,9 +724,39 @@ enum embedded_open_perf_stat_index {
     EMBEDDED_OPEN_PERF_STAT_COUNT
 };
 
+enum embedded_shutdown_perf_stat_index {
+    EMBEDDED_SHUTDOWN_PERF_SERVER_END_CALLS = 0,
+    EMBEDDED_SHUTDOWN_PERF_SERVER_END_TOTAL_NS,
+    EMBEDDED_SHUTDOWN_PERF_SERVER_END_CLIENT_PLUGIN_DEINIT_NS,
+    EMBEDDED_SHUTDOWN_PERF_SERVER_END_FINISH_CLIENT_ERRS_NS,
+    EMBEDDED_SHUTDOWN_PERF_SERVER_END_VIO_END_NS,
+    EMBEDDED_SHUTDOWN_PERF_SERVER_END_EMBEDDED_SERVER_NS,
+    EMBEDDED_SHUTDOWN_PERF_SERVER_END_MY_END_NS,
+    EMBEDDED_SHUTDOWN_PERF_END_EMBEDDED_SERVER_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_END_EMBEDDED_SERVER_TOTAL_NS,
+    EMBEDDED_SHUTDOWN_PERF_END_EMBEDDED_SERVER_FREE_ARGS_NS,
+    EMBEDDED_SHUTDOWN_PERF_END_EMBEDDED_SERVER_CLEAN_UP_NS,
+    EMBEDDED_SHUTDOWN_PERF_END_EMBEDDED_SERVER_CLEAN_UP_MUTEXES_NS,
+    EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_CALLS,
+    EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_TOTAL_NS,
+    EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_EARLY_NS,
+    EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_PLUGIN_SHUTDOWN_NS,
+    EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_HANDLER_END_NS,
+    EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_TDC_MDL_NS,
+    EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_CACHE_STATUS_NS,
+    EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_SCHEDULER_NS,
+    EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_MYSQL_LIBRARY_END_NS,
+    EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_ERROR_CHARSET_NS,
+    EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_FINAL_FREE_NS,
+    EMBEDDED_SHUTDOWN_PERF_STAT_COUNT
+};
+
 void mylite_embedded_open_perf_set_enabled(int enabled);
 void mylite_embedded_open_perf_reset(void);
 void mylite_embedded_open_perf_read(uint64_t *out_values, size_t value_count);
+void mylite_embedded_shutdown_perf_set_enabled(int enabled);
+void mylite_embedded_shutdown_perf_reset(void);
+void mylite_embedded_shutdown_perf_read(uint64_t *out_values, size_t value_count);
 void mylite_ownerless_innodb_set_page_publish_stats_enabled(int enabled);
 void mylite_ownerless_innodb_reset_page_publish_stats(void);
 void mylite_ownerless_innodb_read_page_publish_stats(uint64_t *out_values, size_t value_count);
@@ -832,6 +862,8 @@ static void emit_commit_visibility_stats(const char *prefix);
 static void emit_database_perf_stats(const char *prefix);
 static void emit_embedded_open_perf_stats(const char *prefix);
 static void emit_embedded_open_perf_summary(const char *prefix);
+static void emit_embedded_shutdown_perf_stats(const char *prefix);
+static void emit_embedded_shutdown_perf_summary(const char *prefix);
 static void emit_page_write_perf_stats(const char *prefix);
 static void emit_page_write_refresh_stats(const char *prefix);
 static void emit_sql_handler_perf_stats(const char *prefix);
@@ -885,6 +917,16 @@ static double measure_bulk_autocommit_insert(
     unsigned rows_per_statement,
     int reset_page_publish_stats
 );
+
+static void reset_embedded_lifecycle_perf_stats(void) {
+    mylite_embedded_open_perf_reset();
+    mylite_embedded_shutdown_perf_reset();
+}
+
+static void set_embedded_lifecycle_perf_stats_enabled(int enabled) {
+    mylite_embedded_open_perf_set_enabled(enabled);
+    mylite_embedded_shutdown_perf_set_enabled(enabled);
+}
 
 int main(void) {
     performance_paths paths = make_performance_paths();
@@ -960,26 +1002,30 @@ int main(void) {
     seconds = elapsed_seconds(start_ns, end_ns);
     emit_ms("mylite_perf_ordinary_cold_create_open_close", seconds, 1U);
 
-    mylite_embedded_open_perf_reset();
-    mylite_embedded_open_perf_set_enabled(1);
+    reset_embedded_lifecycle_perf_stats();
+    set_embedded_lifecycle_perf_stats_enabled(1);
     seconds = measure_open_close(&paths, ordinary_flags, &config, open_close_iterations);
-    mylite_embedded_open_perf_set_enabled(0);
+    set_embedded_lifecycle_perf_stats_enabled(0);
     ordinary_warm_open_close_ms = average_ms(seconds, open_close_iterations);
     emit_ms("mylite_perf_ordinary_warm_open_close", seconds, open_close_iterations);
     emit_embedded_open_perf_stats("mylite_perf_ordinary_warm_open_close");
     emit_embedded_open_perf_summary("mylite_perf_summary_ordinary_warm_open_close");
+    emit_embedded_shutdown_perf_stats("mylite_perf_ordinary_warm_open_close");
+    emit_embedded_shutdown_perf_summary("mylite_perf_summary_ordinary_warm_open_close");
     check_max_ms("MYLITE_PERF_MAX_ORDINARY_WARM_OPEN_CLOSE_MS", seconds, open_close_iterations);
 
     db = open_database(&paths, ordinary_flags, &config);
-    mylite_embedded_open_perf_reset();
-    mylite_embedded_open_perf_set_enabled(1);
+    reset_embedded_lifecycle_perf_stats();
+    set_embedded_lifecycle_perf_stats_enabled(1);
     seconds =
         measure_active_runtime_reconnect(&paths, ordinary_flags, &config, open_close_iterations);
-    mylite_embedded_open_perf_set_enabled(0);
+    set_embedded_lifecycle_perf_stats_enabled(0);
     ordinary_active_runtime_reconnect_ms = average_ms(seconds, open_close_iterations);
     emit_ms("mylite_perf_ordinary_active_runtime_reconnect", seconds, open_close_iterations);
     emit_embedded_open_perf_stats("mylite_perf_ordinary_active_runtime_reconnect");
     emit_embedded_open_perf_summary("mylite_perf_summary_ordinary_active_runtime_reconnect");
+    emit_embedded_shutdown_perf_stats("mylite_perf_ordinary_active_runtime_reconnect");
+    emit_embedded_shutdown_perf_summary("mylite_perf_summary_ordinary_active_runtime_reconnect");
     check_max_ms(
         "MYLITE_PERF_MAX_ORDINARY_ACTIVE_RUNTIME_RECONNECT_MS",
         seconds,
@@ -987,36 +1033,42 @@ int main(void) {
     );
     close_database(db);
 
-    mylite_embedded_open_perf_reset();
-    mylite_embedded_open_perf_set_enabled(1);
+    reset_embedded_lifecycle_perf_stats();
+    set_embedded_lifecycle_perf_stats_enabled(1);
     seconds = measure_open_close(&paths, ownerless_flags, &config, 1U);
-    mylite_embedded_open_perf_set_enabled(0);
+    set_embedded_lifecycle_perf_stats_enabled(0);
     ownerless_first_probe_open_close_ms = average_ms(seconds, 1U);
     emit_ms("mylite_perf_ownerless_first_probe_open_close", seconds, 1U);
     emit_embedded_open_perf_stats("mylite_perf_ownerless_first_probe_open_close");
     emit_embedded_open_perf_summary("mylite_perf_summary_ownerless_first_probe_open_close");
+    emit_embedded_shutdown_perf_stats("mylite_perf_ownerless_first_probe_open_close");
+    emit_embedded_shutdown_perf_summary("mylite_perf_summary_ownerless_first_probe_open_close");
     check_max_ms("MYLITE_PERF_MAX_OWNERLESS_FIRST_PROBE_OPEN_CLOSE_MS", seconds, 1U);
 
-    mylite_embedded_open_perf_reset();
-    mylite_embedded_open_perf_set_enabled(1);
+    reset_embedded_lifecycle_perf_stats();
+    set_embedded_lifecycle_perf_stats_enabled(1);
     seconds = measure_open_close(&paths, ownerless_flags, &config, open_close_iterations);
-    mylite_embedded_open_perf_set_enabled(0);
+    set_embedded_lifecycle_perf_stats_enabled(0);
     ownerless_warm_open_close_ms = average_ms(seconds, open_close_iterations);
     emit_ms("mylite_perf_ownerless_warm_open_close", seconds, open_close_iterations);
     emit_embedded_open_perf_stats("mylite_perf_ownerless_warm_open_close");
     emit_embedded_open_perf_summary("mylite_perf_summary_ownerless_warm_open_close");
+    emit_embedded_shutdown_perf_stats("mylite_perf_ownerless_warm_open_close");
+    emit_embedded_shutdown_perf_summary("mylite_perf_summary_ownerless_warm_open_close");
     check_max_ms("MYLITE_PERF_MAX_OWNERLESS_WARM_OPEN_CLOSE_MS", seconds, open_close_iterations);
 
     db = open_database(&paths, ownerless_flags, &config);
-    mylite_embedded_open_perf_reset();
-    mylite_embedded_open_perf_set_enabled(1);
+    reset_embedded_lifecycle_perf_stats();
+    set_embedded_lifecycle_perf_stats_enabled(1);
     seconds =
         measure_active_runtime_reconnect(&paths, ownerless_flags, &config, open_close_iterations);
-    mylite_embedded_open_perf_set_enabled(0);
+    set_embedded_lifecycle_perf_stats_enabled(0);
     ownerless_active_runtime_reconnect_ms = average_ms(seconds, open_close_iterations);
     emit_ms("mylite_perf_ownerless_active_runtime_reconnect", seconds, open_close_iterations);
     emit_embedded_open_perf_stats("mylite_perf_ownerless_active_runtime_reconnect");
     emit_embedded_open_perf_summary("mylite_perf_summary_ownerless_active_runtime_reconnect");
+    emit_embedded_shutdown_perf_stats("mylite_perf_ownerless_active_runtime_reconnect");
+    emit_embedded_shutdown_perf_summary("mylite_perf_summary_ownerless_active_runtime_reconnect");
     check_max_ms(
         "MYLITE_PERF_MAX_OWNERLESS_ACTIVE_RUNTIME_RECONNECT_MS",
         seconds,
@@ -6187,6 +6239,270 @@ static void emit_embedded_open_perf_summary(const char *prefix) {
         "release_mysql_shutdown",
         values[EMBEDDED_OPEN_PERF_RELEASE_MYSQL_SHUTDOWN_NS],
         release_calls
+    );
+}
+
+static void emit_embedded_shutdown_perf_value(
+    const char *prefix,
+    const char *name,
+    uint64_t value
+) {
+    printf("%s_shutdown_phase_%s=%" PRIu64 "\n", prefix, name, value);
+}
+
+static void emit_embedded_shutdown_perf_ms(
+    const char *prefix,
+    const char *name,
+    uint64_t value_ns,
+    uint64_t calls
+) {
+    const double total_ms = (double)value_ns / 1000000.0;
+    const double average_ms = calls > 0U ? total_ms / (double)calls : 0.0;
+
+    printf("%s_shutdown_phase_%s_ms=%.3f\n", prefix, name, total_ms);
+    printf("%s_shutdown_phase_%s_ms_avg=%.3f\n", prefix, name, average_ms);
+}
+
+static void emit_embedded_shutdown_perf_summary_ms(
+    const char *prefix,
+    const char *name,
+    uint64_t value_ns,
+    uint64_t calls
+) {
+    printf(
+        "%s_shutdown_%s_ms_avg=%.3f\n",
+        prefix,
+        name,
+        embedded_open_perf_average_ms(value_ns, calls)
+    );
+}
+
+static void emit_embedded_shutdown_perf_summary(const char *prefix) {
+    uint64_t values[EMBEDDED_SHUTDOWN_PERF_STAT_COUNT] = {0};
+    uint64_t server_end_calls;
+    uint64_t end_embedded_server_calls;
+    uint64_t clean_up_calls;
+
+    mylite_embedded_shutdown_perf_read(values, EMBEDDED_SHUTDOWN_PERF_STAT_COUNT);
+
+    server_end_calls = values[EMBEDDED_SHUTDOWN_PERF_SERVER_END_CALLS];
+    end_embedded_server_calls = values[EMBEDDED_SHUTDOWN_PERF_END_EMBEDDED_SERVER_CALLS];
+    clean_up_calls = values[EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_CALLS];
+
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "server_end_total",
+        values[EMBEDDED_SHUTDOWN_PERF_SERVER_END_TOTAL_NS],
+        server_end_calls
+    );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "server_end_embedded_server",
+        values[EMBEDDED_SHUTDOWN_PERF_SERVER_END_EMBEDDED_SERVER_NS],
+        server_end_calls
+    );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "end_embedded_server_total",
+        values[EMBEDDED_SHUTDOWN_PERF_END_EMBEDDED_SERVER_TOTAL_NS],
+        end_embedded_server_calls
+    );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "end_embedded_server_clean_up",
+        values[EMBEDDED_SHUTDOWN_PERF_END_EMBEDDED_SERVER_CLEAN_UP_NS],
+        end_embedded_server_calls
+    );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "clean_up_total",
+        values[EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_TOTAL_NS],
+        clean_up_calls
+    );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "clean_up_early",
+        values[EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_EARLY_NS],
+        clean_up_calls
+    );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "clean_up_plugin_shutdown",
+        values[EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_PLUGIN_SHUTDOWN_NS],
+        clean_up_calls
+    );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "clean_up_handler_end",
+        values[EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_HANDLER_END_NS],
+        clean_up_calls
+    );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "clean_up_tdc_mdl",
+        values[EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_TDC_MDL_NS],
+        clean_up_calls
+    );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "clean_up_cache_status",
+        values[EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_CACHE_STATUS_NS],
+        clean_up_calls
+    );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "clean_up_mysql_library_end",
+        values[EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_MYSQL_LIBRARY_END_NS],
+        clean_up_calls
+    );
+    emit_embedded_shutdown_perf_summary_ms(
+        prefix,
+        "clean_up_error_charset",
+        values[EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_ERROR_CHARSET_NS],
+        clean_up_calls
+    );
+}
+
+static void emit_embedded_shutdown_perf_stats(const char *prefix) {
+    uint64_t values[EMBEDDED_SHUTDOWN_PERF_STAT_COUNT] = {0};
+    uint64_t server_end_calls;
+    uint64_t end_embedded_server_calls;
+    uint64_t clean_up_calls;
+
+    mylite_embedded_shutdown_perf_read(values, EMBEDDED_SHUTDOWN_PERF_STAT_COUNT);
+
+    server_end_calls = values[EMBEDDED_SHUTDOWN_PERF_SERVER_END_CALLS];
+    end_embedded_server_calls = values[EMBEDDED_SHUTDOWN_PERF_END_EMBEDDED_SERVER_CALLS];
+    clean_up_calls = values[EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_CALLS];
+
+    emit_embedded_shutdown_perf_value(prefix, "server_end_calls", server_end_calls);
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "server_end_total",
+        values[EMBEDDED_SHUTDOWN_PERF_SERVER_END_TOTAL_NS],
+        server_end_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "server_end_client_plugin_deinit",
+        values[EMBEDDED_SHUTDOWN_PERF_SERVER_END_CLIENT_PLUGIN_DEINIT_NS],
+        server_end_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "server_end_finish_client_errs",
+        values[EMBEDDED_SHUTDOWN_PERF_SERVER_END_FINISH_CLIENT_ERRS_NS],
+        server_end_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "server_end_vio_end",
+        values[EMBEDDED_SHUTDOWN_PERF_SERVER_END_VIO_END_NS],
+        server_end_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "server_end_embedded_server",
+        values[EMBEDDED_SHUTDOWN_PERF_SERVER_END_EMBEDDED_SERVER_NS],
+        server_end_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "server_end_my_end",
+        values[EMBEDDED_SHUTDOWN_PERF_SERVER_END_MY_END_NS],
+        server_end_calls
+    );
+
+    emit_embedded_shutdown_perf_value(
+        prefix,
+        "end_embedded_server_calls",
+        end_embedded_server_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "end_embedded_server_total",
+        values[EMBEDDED_SHUTDOWN_PERF_END_EMBEDDED_SERVER_TOTAL_NS],
+        end_embedded_server_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "end_embedded_server_free_args",
+        values[EMBEDDED_SHUTDOWN_PERF_END_EMBEDDED_SERVER_FREE_ARGS_NS],
+        end_embedded_server_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "end_embedded_server_clean_up",
+        values[EMBEDDED_SHUTDOWN_PERF_END_EMBEDDED_SERVER_CLEAN_UP_NS],
+        end_embedded_server_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "end_embedded_server_clean_up_mutexes",
+        values[EMBEDDED_SHUTDOWN_PERF_END_EMBEDDED_SERVER_CLEAN_UP_MUTEXES_NS],
+        end_embedded_server_calls
+    );
+
+    emit_embedded_shutdown_perf_value(prefix, "clean_up_calls", clean_up_calls);
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "clean_up_total",
+        values[EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_TOTAL_NS],
+        clean_up_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "clean_up_early",
+        values[EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_EARLY_NS],
+        clean_up_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "clean_up_plugin_shutdown",
+        values[EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_PLUGIN_SHUTDOWN_NS],
+        clean_up_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "clean_up_handler_end",
+        values[EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_HANDLER_END_NS],
+        clean_up_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "clean_up_tdc_mdl",
+        values[EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_TDC_MDL_NS],
+        clean_up_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "clean_up_cache_status",
+        values[EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_CACHE_STATUS_NS],
+        clean_up_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "clean_up_scheduler",
+        values[EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_SCHEDULER_NS],
+        clean_up_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "clean_up_mysql_library_end",
+        values[EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_MYSQL_LIBRARY_END_NS],
+        clean_up_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "clean_up_error_charset",
+        values[EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_ERROR_CHARSET_NS],
+        clean_up_calls
+    );
+    emit_embedded_shutdown_perf_ms(
+        prefix,
+        "clean_up_final_free",
+        values[EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_FINAL_FREE_NS],
+        clean_up_calls
     );
 }
 

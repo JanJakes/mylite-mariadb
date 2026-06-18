@@ -65,6 +65,7 @@
 #include <sql_common.h>
 #include "client_settings.h"
 #include "embedded_priv.h"
+#include <mylite_embedded_shutdown_perf.h>
 
 #undef net_buffer_length
 #undef max_allowed_packet
@@ -204,22 +205,54 @@ int STDCALL mysql_server_init(int argc __attribute__((unused)),
 
 void STDCALL mysql_server_end()
 {
+  uint64_t mylite_shutdown_start, mylite_stage_start;
+
+  mylite_embedded_shutdown_perf_count(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_SERVER_END_CALLS);
+  mylite_shutdown_start= mylite_embedded_shutdown_perf_start_ns();
   if (!mysql_client_init)
+  {
+    mylite_embedded_shutdown_perf_add_elapsed(
+        MYLITE_EMBEDDED_SHUTDOWN_PERF_SERVER_END_TOTAL_NS,
+        mylite_shutdown_start);
     return;
+  }
 
+  mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
   mysql_client_plugin_deinit();
+  mylite_embedded_shutdown_perf_add_elapsed(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_SERVER_END_CLIENT_PLUGIN_DEINIT_NS,
+      mylite_stage_start);
 
+  mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
   finish_client_errs();
+  mylite_embedded_shutdown_perf_add_elapsed(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_SERVER_END_FINISH_CLIENT_ERRS_NS,
+      mylite_stage_start);
   if (mariadb_deinitialize_ssl)
+  {
+    mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
     vio_end();
+    mylite_embedded_shutdown_perf_add_elapsed(
+        MYLITE_EMBEDDED_SHUTDOWN_PERF_SERVER_END_VIO_END_NS,
+        mylite_stage_start);
+  }
 #ifdef EMBEDDED_LIBRARY
+  mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
   end_embedded_server();
+  mylite_embedded_shutdown_perf_add_elapsed(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_SERVER_END_EMBEDDED_SERVER_NS,
+      mylite_stage_start);
 #endif
 
   /* If library called my_init(), free memory allocated by it */
   if (!org_my_init_done)
   {
+    mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
     my_end(0);
+    mylite_embedded_shutdown_perf_add_elapsed(
+        MYLITE_EMBEDDED_SHUTDOWN_PERF_SERVER_END_MY_END_NS,
+        mylite_stage_start);
   }
 #ifdef NOT_NEEDED
   /*
@@ -236,6 +269,9 @@ void STDCALL mysql_server_end()
 #endif
 
   mysql_client_init= org_my_init_done= 0;
+  mylite_embedded_shutdown_perf_add_elapsed(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_SERVER_END_TOTAL_NS,
+      mylite_shutdown_start);
 }
 
 static MYSQL_PARAMETERS mysql_internal_parameters=

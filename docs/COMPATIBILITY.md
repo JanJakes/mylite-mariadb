@@ -919,7 +919,11 @@ embedded lifecycle startup/shutdown, not ownerless SHM/WAL/checkpoint setup.
 The embedded shutdown attribution probe now emits `release_mysql_thread_end`
 and `release_mysql_server_end` alongside the retained
 `release_mysql_shutdown` aggregate so future shutdown work can target the
-MariaDB cleanup side only when measured evidence points there.
+MariaDB cleanup side only when measured evidence points there. A follow-up
+cleanup-attribution probe on 2026-06-18 split `mysql_server_end()` and reported
+`219.581 ms` in `clean_up()`, of which `219.017 ms` was
+`plugin_shutdown()`; the process-isolated optimization target is therefore
+MariaDB plugin teardown, not MyLite ownerless coordination or steady SQL.
 The WordPress PHPUnit CI filters now use exact method-level process-isolated
 shards instead of broad mixed-class filters, while the two class-level
 `@runTestsInSeparateProcesses` files stay excluded from the non-isolated

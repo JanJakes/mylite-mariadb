@@ -39,6 +39,7 @@ C_MODE_START
 #undef ER
 #include "errmsg.h"
 #include "embedded_priv.h"
+#include <mylite_embedded_shutdown_perf.h>
 
 extern unsigned int mysql_server_last_errno;
 extern char mysql_server_last_error[MYSQL_ERRMSG_SIZE];
@@ -671,14 +672,34 @@ int init_embedded_server(int argc, char **argv, char **groups)
 
 void end_embedded_server()
 {
+  uint64_t mylite_shutdown_start, mylite_stage_start;
+
+  mylite_embedded_shutdown_perf_count(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_END_EMBEDDED_SERVER_CALLS);
+  mylite_shutdown_start= mylite_embedded_shutdown_perf_start_ns();
   if (mysql_embedded_init)
   {
+    mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
     my_free(copy_arguments_ptr);
     copy_arguments_ptr=0;
+    mylite_embedded_shutdown_perf_add_elapsed(
+        MYLITE_EMBEDDED_SHUTDOWN_PERF_END_EMBEDDED_SERVER_FREE_ARGS_NS,
+        mylite_stage_start);
+    mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
     clean_up(0);
+    mylite_embedded_shutdown_perf_add_elapsed(
+        MYLITE_EMBEDDED_SHUTDOWN_PERF_END_EMBEDDED_SERVER_CLEAN_UP_NS,
+        mylite_stage_start);
+    mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
     clean_up_mutexes();
+    mylite_embedded_shutdown_perf_add_elapsed(
+        MYLITE_EMBEDDED_SHUTDOWN_PERF_END_EMBEDDED_SERVER_CLEAN_UP_MUTEXES_NS,
+        mylite_stage_start);
     mysql_embedded_init= 0;
   }
+  mylite_embedded_shutdown_perf_add_elapsed(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_END_EMBEDDED_SERVER_TOTAL_NS,
+      mylite_shutdown_start);
 }
 
 

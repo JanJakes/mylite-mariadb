@@ -819,7 +819,10 @@ The design must be fast in the common case:
   ordinary embedded release shutdown into `mysql_thread_end()` and
   `mysql_server_end()` timing while retaining the existing aggregate shutdown
   counter, so process-isolated PHPUnit lifecycle cost can be attributed before
-  any MariaDB cleanup trimming work.
+  any MariaDB cleanup trimming work. Follow-up cleanup attribution splits
+  `mysql_server_end()` through `end_embedded_server()` and `clean_up()` and
+  currently points the dominant ordinary shutdown cost at MariaDB
+  `plugin_shutdown()`, not ownerless SHM/WAL/checkpoint setup.
 - Page-version lookup should be O(1) average by `(space_id, page_no)` with a
   short version chain filtered by reader end mark.
 - Ordinary exclusive opens must stay on the native MariaDB embedded hot path:

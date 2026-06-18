@@ -87,6 +87,10 @@
 
 #include "sql_callback.h"
 #include "threadpool.h"
+#include <mylite_embedded_shutdown_perf.h>
+
+#include <atomic>
+#include <chrono>
 
 #ifndef MYLITE_WITH_STATUS_VARIABLES
 #define MYLITE_WITH_STATUS_VARIABLES 1
@@ -99,6 +103,73 @@
 #ifndef MYLITE_WITH_DISABLED_STARTUP_OPTIONS
 #define MYLITE_WITH_DISABLED_STARTUP_OPTIONS 1
 #endif
+
+static std::atomic<bool> mylite_embedded_shutdown_perf_stats_enabled_flag{
+    false};
+static std::atomic<uint64_t> mylite_embedded_shutdown_perf_stats
+    [MYLITE_EMBEDDED_SHUTDOWN_PERF_STAT_COUNT];
+
+extern "C" void mylite_embedded_shutdown_perf_set_enabled(int enabled)
+{
+  mylite_embedded_shutdown_perf_stats_enabled_flag.store(
+      enabled != 0, std::memory_order_relaxed);
+}
+
+extern "C" void mylite_embedded_shutdown_perf_reset(void)
+{
+  for (size_t i= 0; i < MYLITE_EMBEDDED_SHUTDOWN_PERF_STAT_COUNT; ++i)
+    mylite_embedded_shutdown_perf_stats[i].store(
+        0, std::memory_order_relaxed);
+}
+
+extern "C" void mylite_embedded_shutdown_perf_read(uint64_t *out_values,
+                                                   size_t value_count)
+{
+  if (!out_values || value_count == 0)
+    return;
+
+  const size_t copy_count=
+      value_count < MYLITE_EMBEDDED_SHUTDOWN_PERF_STAT_COUNT
+          ? value_count
+          : MYLITE_EMBEDDED_SHUTDOWN_PERF_STAT_COUNT;
+  for (size_t i= 0; i < copy_count; ++i)
+    out_values[i]=
+        mylite_embedded_shutdown_perf_stats[i].load(
+            std::memory_order_relaxed);
+}
+
+extern "C" int mylite_embedded_shutdown_perf_stats_enabled(void)
+{
+  return mylite_embedded_shutdown_perf_stats_enabled_flag.load(
+      std::memory_order_relaxed)
+             ? 1
+             : 0;
+}
+
+extern "C" uint64_t mylite_embedded_shutdown_perf_now_ns(void)
+{
+  const auto now= std::chrono::steady_clock::now().time_since_epoch();
+  return static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
+}
+
+extern "C" void mylite_embedded_shutdown_perf_add(size_t index,
+                                                  uint64_t value)
+{
+  if (index < MYLITE_EMBEDDED_SHUTDOWN_PERF_STAT_COUNT &&
+      mylite_embedded_shutdown_perf_stats_enabled_flag.load(
+          std::memory_order_relaxed))
+    mylite_embedded_shutdown_perf_stats[index].fetch_add(
+        value, std::memory_order_relaxed);
+}
+
+extern "C" void mylite_embedded_shutdown_perf_add_elapsed(size_t index,
+                                                          uint64_t start_ns)
+{
+  if (start_ns != 0)
+    mylite_embedded_shutdown_perf_add(
+        index, mylite_embedded_shutdown_perf_now_ns() - start_ns);
+}
 
 #ifdef HAVE_OPENSSL
 #include <ssl_compat.h>
@@ -1986,10 +2057,21 @@ static void mysqld_exit(int exit_code)
 
 static void clean_up(bool print_message)
 {
+  uint64_t mylite_shutdown_start, mylite_stage_start;
+
+  mylite_embedded_shutdown_perf_count(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_CALLS);
+  mylite_shutdown_start= mylite_embedded_shutdown_perf_start_ns();
   DBUG_PRINT("exit",("clean_up"));
   if (cleanup_done++)
+  {
+    mylite_embedded_shutdown_perf_add_elapsed(
+        MYLITE_EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_TOTAL_NS,
+        mylite_shutdown_start);
     return; /* purecov: inspected */
+  }
 
+  mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
 #ifdef HAVE_REPLICATION
   // We must call end_slave() as clean_up may have been called during startup
   end_slave();
@@ -2029,14 +2111,34 @@ static void clean_up(bool print_message)
 #ifdef HAVE_REPLICATION
   semi_sync_master_deinit();
 #endif
+  mylite_embedded_shutdown_perf_add_elapsed(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_EARLY_NS,
+      mylite_stage_start);
+
+  mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
   plugin_shutdown();
+  mylite_embedded_shutdown_perf_add_elapsed(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_PLUGIN_SHUTDOWN_NS,
+      mylite_stage_start);
+
+  mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
   udf_free();
   ha_end();
   if (tc_log)
     tc_log->close();
   xid_cache_free();
+  mylite_embedded_shutdown_perf_add_elapsed(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_HANDLER_END_NS,
+      mylite_stage_start);
+
+  mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
   tdc_deinit();
   mdl_destroy();
+  mylite_embedded_shutdown_perf_add_elapsed(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_TDC_MDL_NS,
+      mylite_stage_start);
+
+  mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
   dflt_key_cache= 0;
   key_caches.delete_elements(free_key_cache);
   free_all_optimizer_costs();
@@ -2074,7 +2176,11 @@ static void clean_up(bool print_message)
   /* End the debug sync facility. See debug_sync.cc. */
   debug_sync_end();
 #endif /* defined(ENABLED_DEBUG_SYNC) */
+  mylite_embedded_shutdown_perf_add_elapsed(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_CACHE_STATUS_NS,
+      mylite_stage_start);
 
+  mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
   delete_pid_file(MYF(0));
 
   if (print_message && my_default_lc_messages && server_start_time)
@@ -2086,7 +2192,17 @@ static void clean_up(bool print_message)
 #else
   thread_scheduler= 0;
 #endif
+  mylite_embedded_shutdown_perf_add_elapsed(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_SCHEDULER_NS,
+      mylite_stage_start);
+
+  mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
   mysql_library_end();
+  mylite_embedded_shutdown_perf_add_elapsed(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_MYSQL_LIBRARY_END_NS,
+      mylite_stage_start);
+
+  mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
   finish_client_errs();
   free_root(&startup_root, MYF(0));
   protect_root(&read_only_root, PROT_READ | PROT_WRITE);
@@ -2097,7 +2213,11 @@ static void clean_up(bool print_message)
   logger.cleanup_end();
   sys_var_end();
   free_charsets();
+  mylite_embedded_shutdown_perf_add_elapsed(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_ERROR_CHARSET_NS,
+      mylite_stage_start);
 
+  mylite_stage_start= mylite_embedded_shutdown_perf_start_ns();
   my_free(const_cast<char*>(log_bin_basename));
   my_free(const_cast<char*>(log_bin_index));
 #ifndef EMBEDDED_LIBRARY
@@ -2106,12 +2226,18 @@ static void clean_up(bool print_message)
 #endif
   free_list(opt_plugin_load_list_ptr);
   destroy_proxy_protocol_networks();
+  mylite_embedded_shutdown_perf_add_elapsed(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_FINAL_FREE_NS,
+      mylite_stage_start);
 
   /*
     The following lines may never be executed as the main thread may have
     killed us
   */
   DBUG_PRINT("quit", ("done with cleanup"));
+  mylite_embedded_shutdown_perf_add_elapsed(
+      MYLITE_EMBEDDED_SHUTDOWN_PERF_CLEAN_UP_TOTAL_NS,
+      mylite_shutdown_start);
 } /* clean_up */
 
 
