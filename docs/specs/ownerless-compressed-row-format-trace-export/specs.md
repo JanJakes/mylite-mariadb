@@ -110,6 +110,10 @@ slice adds one shell tool, one check-mode CTest entry, and trace-suite metadata.
 - Run
   `tools/ownerless-sql-trace-suite --output DIR --trace compressed-row-format-ddl --check`.
 - Run a focused CTest selector for the new tool and trace suite.
+- Run `tools/ownerless-external-mariadb-trace-smoke --output DIR --trace
+  compressed-row-format-ddl --scale 2` for opt-in external replay evidence.
+- Run `tools/ownerless-external-mariadb-trace-smoke --output DIR --scale 2`
+  when validating the current full deterministic suite.
 - Run `git diff --check`.
 
 ## Acceptance Criteria
@@ -124,8 +128,36 @@ slice adds one shell tool, one check-mode CTest entry, and trace-suite metadata.
   aggregates.
 - The trace runner accepts the generated package in `--check` mode.
 - The full trace suite includes and can select `compressed-row-format-ddl`.
+- Opt-in Docker-backed MariaDB replay succeeds for the focused trace and for
+  the current deterministic full suite at scale 2.
 - Compatibility docs record the external trace input without claiming full
   external MariaDB/RQG completion.
+
+## Evidence
+
+Focused Docker-backed MariaDB 11.8 replay at scale 2 passed for
+`compressed-row-format-ddl`:
+
+```text
+scale=2
+trace_count=1
+trace=compressed-row-format-ddl
+suite_run=ok
+external_mariadb_trace_smoke=ok
+```
+
+The current full deterministic suite replay also passed at scale 2 with
+`trace_count=12`, including `compressed-row-format-ddl`. Its final compressed
+row-format oracle reported:
+
+```text
+observed_rows=4
+observed_value_sum=148
+observed_version_sum=32
+observed_payload_bytes=48000
+ownerless_compressed_row_format_trace_check ok
+ownerless_compressed_row_format_trace_reader_retries 0
+```
 
 ## Risks And Follow-Up
 
@@ -133,4 +165,5 @@ slice adds one shell tool, one check-mode CTest entry, and trace-suite metadata.
   InnoDB tables. The default CTest path validates trace structure only.
 - The trace validates metadata and SQL-level oracles, not native compressed page
   classes; embedded ownerless selectors remain the page-evidence authority.
-- Full external MariaDB/RQG long-running compressed DDL stress remains planned.
+- Long-running randomized external MariaDB/RQG compressed DDL stress remains
+  planned.

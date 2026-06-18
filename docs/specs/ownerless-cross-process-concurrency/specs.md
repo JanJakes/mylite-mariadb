@@ -4427,8 +4427,9 @@ Tasks:
    KEY_BLOCK_SIZE` rebuild cycles, retry-aware repeatable-read reader polling,
    per-round compressed metadata checks, final aggregate/metadata oracles, and
    a manifest. It joins the dependency-free check-mode trace suite as the
-   twelfth trace family, while focused Docker-backed replay for this trace
-   remains planned. The
+   twelfth trace family. Focused Docker-backed MariaDB 11.8 replay of
+   `--trace compressed-row-format-ddl --scale 2` passed with `trace_count=1`,
+   `suite_run=ok`, and `external_mariadb_trace_smoke=ok`. The
    `ownerless-pressure-external-replay-evidence` slice adds a dependency-free
    scaled CTest check for the active-reader and BLOB pressure traces and records
    a Docker-backed MariaDB 11.8 replay of `--trace active-reader-pressure
@@ -4454,9 +4455,13 @@ Tasks:
    A current-suite rerun after adding the active-reader AUTO_INCREMENT
    high-watermark oracle also passed all 11 scale-2 traces and verified the
    active-reader final AUTO_INCREMENT state `rows=4`, `sum(id)=106`,
-   `max(id)=100`, and `sum(value)=1060`. The compressed row-format DDL trace
-   raises dependency-free check-mode coverage to 12 traces after that replay
-   window; full Docker-backed replay of the 12-trace suite remains planned.
+   `max(id)=100`, and `sum(value)=1060`. The
+   `ownerless-external-full12-scale2-replay` slice then hardens CTAS DML reader
+   retries after raw-client MariaDB returned `ERROR 1020` under concurrent
+   CTAS/DML replay, and records full scale-2 Docker-backed MariaDB replay of
+   all 12 deterministic traces with `trace_count=12`, `suite_run=ok`, and
+   `external_mariadb_trace_smoke=ok`, including the compressed row-format DDL
+   trace.
    Normal ownerless SQL coverage also verifies
    no-live close-time reclaim after a raw-latest versus page-visible checkpoint
    gap, the opt-in active-reader pressure limit for direct/prepared writes

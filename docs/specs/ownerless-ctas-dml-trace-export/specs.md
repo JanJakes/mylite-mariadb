@@ -38,17 +38,21 @@ Add `tools/ownerless-ctas-dml-trace`, which generates:
   `ownerless_ctas_dml` with `CREATE TABLE ... ENGINE=InnoDB AS SELECT`, update
   two rows, delete one row, insert one replacement row, mutate the stable
   aggregate table, and emit a per-round oracle.
-- `reader.sql` that polls repeatable-read consistent snapshots and checks the
-  aggregate table stays monotonic and below the final total.
+- `schema.sql` also owns a retry-aware reader procedure, and `reader.sql` calls
+  it. The procedure polls repeatable-read consistent snapshots, checks the
+  aggregate table stays monotonic and below the final total, and retries each
+  poll on ordinary external MariaDB `1020`, `1205`, `1213`, or SQLSTATE
+  `40001` contention before the final oracle runs.
 - `expected.sql` with final row-count, id-sum, value-sum, payload-byte, table,
   and column oracles.
-- `manifest.txt` with the derived counts used by external harnesses.
+- `manifest.txt` with the derived counts and reader retry limit used by
+  external harnesses.
 
 Register the trace in `tools/ownerless-sql-trace-suite` as `ctas-dml` and add a
 dependency-free CTest smoke check for the exporter. Follow-up evidence first
 runs the new trace through the optional MariaDB Docker smoke tool at scale 2;
-later full-suite evidence records all 11 trace families together. Neither path
-claims randomized RQG coverage.
+later full-suite evidence records the current 12 trace families together.
+Neither path claims randomized RQG coverage.
 
 ## Scope
 
@@ -75,11 +79,12 @@ No MyLite SQL behavior changes. The slice adds reusable external-harness input
 for MariaDB-compatible CTAS post-create DML behavior that is already covered in
 focused embedded ownerless tests.
 
-The deterministic trace suite now has 11 trace families in check mode. Existing
-full scale-2 Docker-backed MariaDB evidence remains historical evidence for the
-10 trace families present in that replay. Focused `ctas-dml` Docker-backed
-MariaDB 11.8 replay now has separate scale-2 evidence, and later full 11-family
-scale-2 replay covered the current deterministic suite.
+The deterministic trace suite now has 12 trace families in check mode after
+compressed row-format DDL export. Existing full scale-2 Docker-backed MariaDB
+evidence remains historical evidence for the 10- and 11-family suites present
+in those replays. Focused `ctas-dml` Docker-backed MariaDB 11.8 replay has
+separate scale-2 evidence, and the current 12-family scale-2 replay covered
+the whole deterministic suite after CTAS reader retry hardening.
 
 ## Directory And Lifecycle Impact
 
@@ -99,11 +104,14 @@ The slice adds one shell tool and one CTest registration.
 
 ## Test Plan
 
+- Run `bash -n tools/ownerless-ctas-dml-trace`.
 - Run `tools/ownerless-ctas-dml-trace --output DIR --rounds 3 --check`.
 - Run `tools/ownerless-sql-trace-runner --trace-dir DIR --check`.
 - Run `tools/ownerless-sql-trace-suite --output DIR --trace ctas-dml --check`.
 - Run `tools/ownerless-external-mariadb-trace-smoke --output DIR --trace
   ctas-dml --scale 2`.
+- Run `tools/ownerless-external-mariadb-trace-smoke --output DIR --scale 2`
+  after the current suite grows beyond the previous full replay.
 - Run the focused CTest for `tools.ownerless-ctas-dml-trace`.
 - Run the full dependency-free deterministic trace-suite CTest after CMake
   reconfiguration.
@@ -114,8 +122,10 @@ The slice adds one shell tool and one CTest registration.
 
 - The CTAS DML exporter emits the trace-runner contract files.
 - Check mode proves the generated worker includes CTAS create, update, delete,
-  and insert statements, the reader uses consistent snapshots, and the final
-  oracle exists.
+  and insert statements, the reader calls the retry-aware consistent-snapshot
+  procedure, and the final oracle exists.
+- External replay survives ordinary raw-client reader contention through a
+  bounded retry contract.
 - The trace suite includes `ctas-dml` and can generate it by focused
   `--trace`.
 - Documentation states that CTAS DML is deterministic trace-export evidence,
@@ -163,10 +173,42 @@ ownerless_ctas_dml_trace_check
 ok
 ```
 
+The first full 12-family Docker-backed MariaDB 11.8 replay attempt later
+exposed the missing reader retry contract:
+
+```text
+ERROR 1020 (HY000) at line 274: Record has changed since last read in table
+'ownerless_sql'; try restarting transaction
+```
+
+After moving the CTAS reader into a bounded-retry procedure, focused scale-2
+replay passed again with `retry_limit=40` and
+`ownerless_ctas_dml_trace_reader_retries=0` in that run. The current full
+12-family scale-2 replay also passed:
+
+```text
+scale=2
+trace_count=12
+trace=independent-table-stress
+trace=random-tx
+trace=fk-graph
+trace=ddl-stress
+trace=ddl-lifecycle
+trace=ctas-dml
+trace=checksum-stress
+trace=transaction-stress
+trace=temporary-table-stress
+trace=active-reader-pressure
+trace=compressed-row-format-ddl
+trace=blob-pressure
+suite_run=ok
+external_mariadb_trace_smoke=ok
+```
+
 ## Risks And Unresolved Questions
 
 - The trace is deterministic and bounded; it does not replace randomized
   external MariaDB/RQG stress.
-- Full 11-family Docker-backed replay was recorded later, but it remains
+- Full 12-family Docker-backed replay was recorded later, but it remains
   deterministic rather than randomized.
 - Exhaustive CTAS post-create DML crash and isolation matrices remain planned.
