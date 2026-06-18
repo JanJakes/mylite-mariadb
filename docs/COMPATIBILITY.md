@@ -1018,12 +1018,14 @@ being timed twice.
 The same production WordPress PHPUnit job keeps harness-owned JUnit timing
 disabled by default after completed production branch runs without JUnit
 reported the long non-isolated shard at `1156.633s` shell real in an earlier
-run and `691.743s` shell real in the latest post-compressed-BLOB-size-matrix
-run, while the latest split test-only PHPUnit steps summed to about
-`14.1` minutes and the whole WordPress job completed in `21m52s`, below main's
-`28:21.227` all-in PHPUnit body from the comparable one-shot harness run. The
-harness-owned JUnit slowest-class and slowest-method report remains available
-through
+run, `691.743s` shell real in the post-compressed-BLOB-size-matrix run, and
+`661.843s` shell real in a later green run where the whole WordPress job
+completed in about `19m45s`. CI now derives three visible non-isolated timing
+steps from the same restored `MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER`:
+REST classes, query/theme/block/token classes, and the remaining core classes.
+This keeps the same test coverage while showing which broad class family owns
+the remaining non-isolated wall time. The harness-owned JUnit slowest-class
+and slowest-method report remains available through
 `MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1` for targeted diagnostics, but it is not
 enabled on the critical CI timing path. The CI timing path also sets
 `MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING=1`, causing the harness to pass

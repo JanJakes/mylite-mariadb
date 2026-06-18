@@ -181,6 +181,15 @@ caller supplied an explicit logging argument. Diagnostic slow-report runs must
 disable that guard with `MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING=0` before setting
 `MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1`.
 
+A later timing-only split keeps that no-logging policy and derives three
+visible non-isolated filters from the restored
+`MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER`: REST classes,
+query/theme/block/token classes, and the remaining core classes.
+The latest green pre-split run reported the single non-isolated step at
+`661.843s` shell real and `658.629s` PHPUnit time; the derived filters will
+show which broad class family owns that time before any parallel-matrix or
+query-path optimization is attempted.
+
 ## Optimization Assessment
 
 The fresh ordinary WordPress and C API numbers remain in the documented trunk
