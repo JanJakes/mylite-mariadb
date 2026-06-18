@@ -5141,7 +5141,11 @@ subsystems that this mode needs:
   for pure autocommit `INSERT ... VALUES` statements, disables native-support
   page WAL elision only for the expected rollback-segment and undo-header
   pages, and skips the native exact history flush only when both expected page
-  images are published successfully through the ownerless page WAL. The reduced
+  images are published successfully through the ownerless page WAL. When another
+  ownerless peer is live, `INSERT ... VALUES` with an explicit target-column
+  list into AUTO_INCREMENT targets stays on the conservative refresh/flush
+  bridge until page-version publication has a peer-safe merge proof for locally
+  dirty user pages and auto-increment high-water state. The reduced
   production
   attribution sample after this change reported `0.000` ownerless history flush
   pages and `0.000` exact history flush pages per insert while keeping `3.570`
@@ -5502,8 +5506,11 @@ subsystems that this mode needs:
   and page-log append-batch policy classification into one private result. For
   `INSERT ... VALUES`, the row-list shape is parsed once and target
   foreign-key state is resolved once before applying the existing visible-fast
-  and one-through-four-row append-batch predicates; explicit `COMMIT` keeps
-  the transaction-scoped visible-fast proof and never enables append batching.
+  and one-through-four-row append-batch predicates; when another ownerless peer
+  is live, explicit-column-list AUTO_INCREMENT targets use the conservative
+  current-read refresh bridge instead of carrying stale dirty pages across
+  statement boundaries; explicit `COMMIT` keeps the transaction-scoped
+  visible-fast proof and never enables append batching.
   The page-write publish summary slice then promoted existing detailed native
   page-write counters into CI-facing per-insert summary rows for publish
   calls, dirty-page scan work, deferred pages, lookup/allocation/copy/checksum/

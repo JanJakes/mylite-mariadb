@@ -1282,6 +1282,13 @@ struct OwnerlessInsertForeignKeyCacheEntry {
     bool has_foreign_keys = true;
 };
 
+struct OwnerlessInsertAutoIncrementCacheEntry {
+    std::string schema_name;
+    std::string table_name;
+    std::uint64_t dictionary_generation = 0;
+    bool has_auto_increment = true;
+};
+
 enum class OwnerlessTransactionIsolation {
     ReadUncommitted,
     ReadCommitted,
@@ -1330,6 +1337,7 @@ struct mylite_db {
     std::vector<std::uint64_t> ownerless_page_write_trx_ids;
     std::vector<std::string> ownerless_temporary_table_names;
     std::vector<OwnerlessInsertForeignKeyCacheEntry> ownerless_insert_foreign_key_cache;
+    std::vector<OwnerlessInsertAutoIncrementCacheEntry> ownerless_insert_auto_increment_cache;
     unsigned ownerless_statement_lock_wait_timeout_ms = k_statement_lock_wait_timeout_ms;
     unsigned ownerless_active_page_visibility_statement_count = 0;
     OwnerlessTransactionIsolation ownerless_session_transaction_isolation =
@@ -2586,6 +2594,7 @@ bool ownerless_insert_target_table(
     std::string *out_schema,
     std::string *out_table
 );
+bool ownerless_insert_statement_has_target_column_list(const SqlPolicyTokens &tokens);
 std::string ownerless_escape_metadata_literal(mylite_db &db, std::string_view value);
 bool ownerless_cached_insert_target_foreign_key_state(
     const mylite_db &db,
@@ -2600,6 +2609,19 @@ void ownerless_cache_insert_target_foreign_key_state(
     bool has_foreign_keys
 );
 bool ownerless_insert_target_has_foreign_keys(mylite_db &db, const SqlPolicyTokens &tokens);
+bool ownerless_cached_insert_target_auto_increment_state(
+    const mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    bool *out_has_auto_increment
+);
+void ownerless_cache_insert_target_auto_increment_state(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    bool has_auto_increment
+);
+bool ownerless_insert_target_has_auto_increment(mylite_db &db, const SqlPolicyTokens &tokens);
 bool sql_statement_requests_write_transaction(const SqlPolicyTokens &tokens);
 bool sql_statement_uses_locking_read(const SqlPolicyTokens &tokens);
 bool sql_statement_needs_ownerless_current_read_refresh(const SqlPolicyTokens &tokens);
@@ -5250,6 +5272,16 @@ OwnerlessStatementFastPathPolicy ownerless_statement_fast_path_policy(
 
     std::size_t row_count = 0U;
     if (ownerless_insert_values_statement_row_count(tokens, &row_count) && row_count != 0U) {
+        if (ownerless_insert_statement_has_target_column_list(tokens)) {
+            bool single_owner_epoch = false;
+            {
+                const std::lock_guard<std::mutex> guard(g_runtime.mutex);
+                single_owner_epoch = ownerless_runtime_in_single_owner_epoch_locked(g_runtime);
+            }
+            if (!single_owner_epoch && ownerless_insert_target_has_auto_increment(db, tokens)) {
+                return policy;
+            }
+        }
         if (!ownerless_insert_target_has_foreign_keys(db, tokens)) {
             policy.visible_fast_path = true;
             policy.append_batch_fast_path =
@@ -5312,6 +5344,29 @@ bool ownerless_insert_target_table(
 
     return !out_schema->empty() && !out_table->empty() &&
            !ownerless_tracked_temporary_table_name(db, *out_table);
+}
+
+bool ownerless_insert_statement_has_target_column_list(const SqlPolicyTokens &tokens) {
+    if (!token_equals(identifier_token_at(tokens, 0), "INSERT")) {
+        return false;
+    }
+
+    std::size_t index = 1U;
+    while (index < tokens.count &&
+           ownerless_table_reference_skip_token(ownerless_raw_identifier_token_at(tokens, index))) {
+        ++index;
+    }
+    if (index >= tokens.count || !ownerless_table_identifier_token(tokens.values[index])) {
+        return false;
+    }
+
+    if (index + 2U < tokens.count && tokens.values[index + 1U] == "." &&
+        ownerless_table_identifier_token(tokens.values[index + 2U])) {
+        index += 3U;
+    } else {
+        ++index;
+    }
+    return index < tokens.count && token_equals(tokens.values[index], "(");
 }
 
 std::string ownerless_escape_metadata_literal(mylite_db &db, std::string_view value) {
@@ -5414,6 +5469,98 @@ bool ownerless_insert_target_has_foreign_keys(mylite_db &db, const SqlPolicyToke
         );
     }
     return has_foreign_keys;
+}
+
+bool ownerless_cached_insert_target_auto_increment_state(
+    const mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    bool *out_has_auto_increment
+) {
+    if (out_has_auto_increment == nullptr || db.ownerless_observed_dictionary_generation == 0U) {
+        return false;
+    }
+    for (const OwnerlessInsertAutoIncrementCacheEntry &entry :
+         db.ownerless_insert_auto_increment_cache) {
+        if (entry.dictionary_generation == db.ownerless_observed_dictionary_generation &&
+            entry.schema_name == schema_name && entry.table_name == table_name) {
+            *out_has_auto_increment = entry.has_auto_increment;
+            return true;
+        }
+    }
+    return false;
+}
+
+void ownerless_cache_insert_target_auto_increment_state(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    bool has_auto_increment
+) {
+    if (db.ownerless_observed_dictionary_generation == 0U) {
+        return;
+    }
+    for (OwnerlessInsertAutoIncrementCacheEntry &entry : db.ownerless_insert_auto_increment_cache) {
+        if (entry.dictionary_generation == db.ownerless_observed_dictionary_generation &&
+            entry.schema_name == schema_name && entry.table_name == table_name) {
+            entry.has_auto_increment = has_auto_increment;
+            return;
+        }
+    }
+    db.ownerless_insert_auto_increment_cache.push_back(
+        {std::string(schema_name),
+         std::string(table_name),
+         db.ownerless_observed_dictionary_generation,
+         has_auto_increment}
+    );
+}
+
+bool ownerless_insert_target_has_auto_increment(mylite_db &db, const SqlPolicyTokens &tokens) {
+    std::string schema_name;
+    std::string table_name;
+    if (!ownerless_insert_target_table(db, tokens, &schema_name, &table_name)) {
+        return true;
+    }
+
+    bool has_auto_increment = true;
+    if (ownerless_cached_insert_target_auto_increment_state(
+            db,
+            schema_name,
+            table_name,
+            &has_auto_increment
+        )) {
+        return has_auto_increment;
+    }
+
+    const ErrorSnapshot snapshot = capture_error(db);
+    const std::string escaped_schema = ownerless_escape_metadata_literal(db, schema_name);
+    const std::string escaped_table = ownerless_escape_metadata_literal(db, table_name);
+    const std::string sql = "SELECT COUNT(*) FROM information_schema.columns "
+                            "WHERE table_schema = '" +
+                            escaped_schema + "' AND table_name = '" + escaped_table +
+                            "' AND extra LIKE '%auto_increment%'";
+
+    bool query_succeeded = false;
+    if (mysql_query(&db.mysql, sql.c_str()) == 0) {
+        MYSQL_RES *result = mysql_store_result(&db.mysql);
+        if (result != nullptr) {
+            MYSQL_ROW row = mysql_fetch_row(result);
+            has_auto_increment =
+                row != nullptr && row[0] != nullptr && std::strtoull(row[0], nullptr, 10) != 0U;
+            query_succeeded = row != nullptr && row[0] != nullptr;
+            mysql_free_result(result);
+        }
+    }
+    restore_error(db, snapshot);
+    if (query_succeeded) {
+        ownerless_cache_insert_target_auto_increment_state(
+            db,
+            schema_name,
+            table_name,
+            has_auto_increment
+        );
+    }
+    return has_auto_increment;
 }
 
 bool sql_statement_requests_write_transaction(const SqlPolicyTokens &tokens) {
@@ -12653,6 +12800,7 @@ int refresh_ownerless_dictionary_cache_after_stale_engine_error(mylite_db &db) {
 
 void clear_ownerless_insert_foreign_key_cache(mylite_db &db) {
     db.ownerless_insert_foreign_key_cache.clear();
+    db.ownerless_insert_auto_increment_cache.clear();
 }
 
 void initialize_ownerless_dictionary_generation(mylite_db &db) {

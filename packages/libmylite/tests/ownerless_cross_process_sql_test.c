@@ -6486,7 +6486,24 @@ static void test_ownerless_auto_increment_assigns_distinct_ids(void) {
     }
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
-    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_auto_inc") == expected_count);
+    const unsigned long long actual_count =
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_auto_inc");
+    if (actual_count != expected_count) {
+        fprintf(
+            stderr,
+            "ownerless auto-inc count mismatch: actual=%llu expected=%llu "
+            "distinct=%llu min=%llu max=%llu sum_id=%llu sum_value=%llu\n",
+            actual_count,
+            expected_count,
+            query_unsigned(db, "SELECT COUNT(DISTINCT id) FROM app.ownerless_auto_inc"),
+            query_unsigned(db, "SELECT MIN(id) FROM app.ownerless_auto_inc"),
+            query_unsigned(db, "SELECT MAX(id) FROM app.ownerless_auto_inc"),
+            query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_auto_inc"),
+            query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_auto_inc")
+        );
+        fflush(stderr);
+    }
+    assert(actual_count == expected_count);
     assert(
         query_unsigned(db, "SELECT COUNT(DISTINCT id) FROM app.ownerless_auto_inc") ==
         expected_count
