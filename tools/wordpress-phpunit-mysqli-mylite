@@ -2650,6 +2650,12 @@ PHP_KEEPALIVE
     mylite_mysqli_profile_query_verb_use_ms_total
     mylite_mysqli_profile_query_verb_transaction_calls
     mylite_mysqli_profile_query_verb_transaction_ms_total
+    mylite_mysqli_profile_query_transaction_start_calls
+    mylite_mysqli_profile_query_transaction_start_ms_total
+    mylite_mysqli_profile_query_transaction_end_calls
+    mylite_mysqli_profile_query_transaction_end_ms_total
+    mylite_mysqli_profile_query_transaction_savepoint_calls
+    mylite_mysqli_profile_query_transaction_savepoint_ms_total
     mylite_mysqli_profile_query_verb_lock_calls
     mylite_mysqli_profile_query_verb_lock_ms_total
     mylite_mysqli_profile_query_verb_call_calls
@@ -2707,7 +2713,14 @@ PHP_KEEPALIVE
         profile_keys = profile_keys " query_verb_ddl_ms_total query_verb_set_calls";
         profile_keys = profile_keys " query_verb_set_ms_total query_verb_use_calls";
         profile_keys = profile_keys " query_verb_use_ms_total query_verb_transaction_calls";
-        profile_keys = profile_keys " query_verb_transaction_ms_total query_verb_lock_calls";
+        profile_keys = profile_keys " query_verb_transaction_ms_total";
+        profile_keys = profile_keys " query_transaction_start_calls";
+        profile_keys = profile_keys " query_transaction_start_ms_total";
+        profile_keys = profile_keys " query_transaction_end_calls";
+        profile_keys = profile_keys " query_transaction_end_ms_total";
+        profile_keys = profile_keys " query_transaction_savepoint_calls";
+        profile_keys = profile_keys " query_transaction_savepoint_ms_total";
+        profile_keys = profile_keys " query_verb_lock_calls";
         profile_keys = profile_keys " query_verb_lock_ms_total query_verb_call_calls";
         profile_keys = profile_keys " query_verb_call_ms_total";
         profile_keys = profile_keys " query_cache_hits query_cache_misses";

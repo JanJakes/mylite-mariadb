@@ -18,6 +18,10 @@ application result fetching.
 - `mariadb/include/mysql.h` exposes native C API control functions:
   `mysql_commit(MYSQL *)`, `mysql_rollback(MYSQL *)`, and
   `mysql_autocommit(MYSQL *, my_bool)`.
+- `mariadb/libmysqld/libmysql.c` implements those embedded C API functions as
+  `mysql_real_query()` wrappers, so this slice bypasses MyLite's outer
+  direct-result handling for exact control statements but does not bypass the
+  MariaDB SQL parser for those wrappers.
 - `packages/libmylite/src/database.cc::exec_result_impl()` currently sends all
   direct text execution through `mysql_query()` before collecting affected
   rows, insert id, result shape, current schema, and MyLite status fields.
@@ -44,11 +48,11 @@ and expression-valued forms so unsupported shapes keep the existing
 `mysql_query()` semantics.
 
 On a match, `exec_result_impl()` calls the corresponding MariaDB C API
-function, records a native-control profile bucket, marks the statement as a
+wrapper, records a native-control profile bucket, marks the statement as a
 no-result execution, and updates MyLite status fields as `changes=0` and the
 current `mysql_insert_id()`. `START TRANSACTION` remains on the SQL text path
-because there is no equivalent simple MariaDB C API call with identical SQL
-semantics.
+in this slice because there is no equivalent simple public MariaDB C API call
+with identical SQL semantics.
 
 ## Compatibility Impact
 
@@ -195,8 +199,10 @@ git diff --check
 ## Risks And Follow-Up
 
 - The fast path intentionally does not cover `START TRANSACTION`, `BEGIN`,
-  `COMMIT AND CHAIN`, `ROLLBACK TO SAVEPOINT`, or general `SET` expressions.
-- If the remaining transaction cost still dominates after this slice, the next
-  investigation should compare MariaDB text `START TRANSACTION` cost against a
-  broader, explicitly tested transaction API strategy rather than inferring
-  equivalence.
+  `COMMIT AND CHAIN`, `ROLLBACK TO SAVEPOINT`, extended transaction-start
+  forms, or general `SET` expressions.
+- Follow-up transaction-start optimization needs a separately designed,
+  testable MariaDB integration point. The public embedded C API does not expose
+  a simple `BEGIN` equivalent, and reaching into server-internal `THD`
+  transaction helpers from the standalone MyLite target is not a safe assumption
+  for this slice.

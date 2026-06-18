@@ -490,22 +490,39 @@ Profiled mysqli runs also split total query elapsed time into
 `query_verb_*` buckets for result queries, DML, DDL, connection state,
 transaction, lock, call, and other first-keyword classes so WordPress timing
 summaries can identify which SQL class dominates native execution time before
-choosing an optimization target.
+choosing an optimization target. The transaction bucket is further split into
+`query_transaction_start_*`, `query_transaction_end_*`, and
+`query_transaction_savepoint_*` profile rows so production WordPress PHPUnit
+timing summaries can separate `BEGIN`/`START`, `COMMIT`/`ROLLBACK`, and
+`SAVEPOINT`/`RELEASE` cost while preserving the existing aggregate
+`query_verb_transaction_*` totals.
 Non-ownerless direct execution now fast-paths exact simple `COMMIT`, full
-`ROLLBACK`, and `SET autocommit = 0|1` text statements through MariaDB's native
-C API after the query-verb profile showed repeated WordPress PHPUnit
-transaction scaffolding dominating native `mysql_query()` time. Broader SQL
-forms such as `START TRANSACTION`, `COMMIT AND CHAIN`, `ROLLBACK TO SAVEPOINT`,
-and general `SET` expressions still use MariaDB SQL parsing, and ownerless
-execution keeps the existing statement-lock, page-version, and publication
-path. A focused production profiled `^Tests_DB` sample after the fast path
-reported `libmylite_exec_result_native_control_calls=1310`,
+`ROLLBACK`, and `SET autocommit = 0|1` text statements through the
+native-control result path after the query-verb profile showed repeated
+WordPress PHPUnit transaction scaffolding dominating native `mysql_query()`
+time. In embedded MariaDB, `mysql_commit()`, `mysql_rollback()`, and
+`mysql_autocommit()` are still public C API wrappers around
+`mysql_real_query()`, so this path avoids MyLite's outer result/status work for
+those exact statements but does not bypass MariaDB SQL parsing for those
+wrappers. Broader SQL forms such as `START TRANSACTION`, `COMMIT AND CHAIN`,
+`ROLLBACK TO SAVEPOINT`, and general `SET` expressions still use MariaDB SQL
+parsing, and ownerless execution keeps the existing statement-lock,
+page-version, and publication path. A focused production profiled `^Tests_DB`
+sample after the fast path reported `libmylite_exec_result_native_control_calls=1310`,
 `libmylite_exec_result_native_control_ms_total=1404.955`,
 `libmylite_exec_result_mysql_query_ms_total=3946.376`,
 `query_ms_total=5432.945`, and
 `wordpress_phpunit_reported_seconds=7.914`; the preceding query-verb sample
 reported `libmylite_exec_result_mysql_query_ms_total=6891.775`,
 `query_ms_total=6979.728`, and `wordpress_phpunit_reported_seconds=9.596`.
+A follow-up production profiled `^Tests_DB` sample with transaction sub-buckets
+reported `query_transaction_start_calls=651`,
+`query_transaction_start_ms_total=708.722`,
+`query_transaction_end_calls=659`, `query_transaction_end_ms_total=705.569`,
+`query_transaction_savepoint_calls=0`, and
+`wordpress_phpunit_reported_seconds=8.195`, showing the remaining transaction
+cost is split nearly evenly between transaction start and transaction end in
+that workload.
 The stats-enabled embedded performance probe now also reports ownerless
 prepared-DML native `mysql_stmt_prepare()` and `mysql_stmt_close()` call counts
 and elapsed time, plus per-insert summaries, so the remaining prepared-write
