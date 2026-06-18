@@ -60,9 +60,9 @@ profile blocks in the phase output, then derives aggregate averages:
 - `mylite_mysqli_profile_aggregate_processes`;
 - open and close calls, close-kind calls, total milliseconds, and average
   milliseconds;
-- query call mix, query milliseconds, query average milliseconds, cache,
-  prepare, status-sync, result/no-result, direct libmylite text-execution
-  subphase, row, and fetch-object totals.
+- query call mix, query milliseconds, query average milliseconds, query-verb
+  totals, cache, prepare, status-sync, result/no-result, direct libmylite
+  text-execution subphase, row, and fetch-object totals.
 
 Do not aggregate per-process average rows directly. Compute aggregate averages
 from summed totals divided by summed call counts.
@@ -205,6 +205,6 @@ git diff --check
 
 - The aggregate rows are diagnostics only. They do not reduce child process
   runtime.
-- Aggregation covers the selected high-value profile keys, not every key
-  printed by the PHP extension. Additional keys can be added when a future
-  investigation needs them.
+- Aggregation covers the selected high-value profile keys, including the
+  query-verb buckets, not every key printed by the PHP extension. Additional
+  keys can be added when a future investigation needs them.

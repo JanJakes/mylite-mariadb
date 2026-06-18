@@ -2634,6 +2634,26 @@ PHP_KEEPALIVE
     mylite_mysqli_profile_query_no_result_calls
     mylite_mysqli_profile_query_ms_total
     mylite_mysqli_profile_query_ms_avg
+    mylite_mysqli_profile_query_verb_other_calls
+    mylite_mysqli_profile_query_verb_other_ms_total
+    mylite_mysqli_profile_query_verb_select_calls
+    mylite_mysqli_profile_query_verb_select_ms_total
+    mylite_mysqli_profile_query_verb_show_calls
+    mylite_mysqli_profile_query_verb_show_ms_total
+    mylite_mysqli_profile_query_verb_dml_calls
+    mylite_mysqli_profile_query_verb_dml_ms_total
+    mylite_mysqli_profile_query_verb_ddl_calls
+    mylite_mysqli_profile_query_verb_ddl_ms_total
+    mylite_mysqli_profile_query_verb_set_calls
+    mylite_mysqli_profile_query_verb_set_ms_total
+    mylite_mysqli_profile_query_verb_use_calls
+    mylite_mysqli_profile_query_verb_use_ms_total
+    mylite_mysqli_profile_query_verb_transaction_calls
+    mylite_mysqli_profile_query_verb_transaction_ms_total
+    mylite_mysqli_profile_query_verb_lock_calls
+    mylite_mysqli_profile_query_verb_lock_ms_total
+    mylite_mysqli_profile_query_verb_call_calls
+    mylite_mysqli_profile_query_verb_call_ms_total
     mylite_mysqli_profile_query_cache_hits
     mylite_mysqli_profile_query_cache_misses
     mylite_mysqli_profile_query_prepare_calls
@@ -2676,7 +2696,18 @@ PHP_KEEPALIVE
         profile_keys = profile_keys " close_explicit_calls close_object_free_calls";
         profile_keys = profile_keys " close_reopen_calls close_ms_total query_calls";
         profile_keys = profile_keys " query_result_calls query_no_result_calls";
-        profile_keys = profile_keys " query_ms_total query_cache_hits query_cache_misses";
+        profile_keys = profile_keys " query_ms_total query_verb_other_calls";
+        profile_keys = profile_keys " query_verb_other_ms_total query_verb_select_calls";
+        profile_keys = profile_keys " query_verb_select_ms_total query_verb_show_calls";
+        profile_keys = profile_keys " query_verb_show_ms_total query_verb_dml_calls";
+        profile_keys = profile_keys " query_verb_dml_ms_total query_verb_ddl_calls";
+        profile_keys = profile_keys " query_verb_ddl_ms_total query_verb_set_calls";
+        profile_keys = profile_keys " query_verb_set_ms_total query_verb_use_calls";
+        profile_keys = profile_keys " query_verb_use_ms_total query_verb_transaction_calls";
+        profile_keys = profile_keys " query_verb_transaction_ms_total query_verb_lock_calls";
+        profile_keys = profile_keys " query_verb_lock_ms_total query_verb_call_calls";
+        profile_keys = profile_keys " query_verb_call_ms_total";
+        profile_keys = profile_keys " query_cache_hits query_cache_misses";
         profile_keys = profile_keys " query_prepare_calls query_prepare_ms_total";
         profile_keys = profile_keys " query_cache_clear_ms_total query_status_sync_ms_total";
         profile_keys = profile_keys " exec_result_calls exec_result_ms_total";

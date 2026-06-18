@@ -52,9 +52,9 @@ Extend the existing PHPUnit output post-processing in
 
 The selected keys summarize the major buckets needed for the next optimization
 decision: open/close, query call mix, query total/average, cache hits/misses,
-prepare/cache clear/status sync, result/no-result execution, result row count,
-fetch-object conversion, and direct libmylite text-execution subphases when
-the bundled libmylite profile counters are available.
+query-verb totals, prepare/cache clear/status sync, result/no-result execution,
+result row count, fetch-object conversion, and direct libmylite text-execution
+subphases when the bundled libmylite profile counters are available.
 
 ## Compatibility Impact
 

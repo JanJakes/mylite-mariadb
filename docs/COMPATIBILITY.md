@@ -486,6 +486,11 @@ current-schema update, and handle status-update buckets. These rows are
 diagnostics for profiled WordPress and mysqli runs only; they do not change SQL
 semantics, public C API compatibility, native storage behavior, or default CI
 timing overhead.
+Profiled mysqli runs also split total query elapsed time into
+`query_verb_*` buckets for result queries, DML, DDL, connection state,
+transaction, lock, call, and other first-keyword classes so WordPress timing
+summaries can identify which SQL class dominates native execution time before
+choosing an optimization target.
 The stats-enabled embedded performance probe now also reports ownerless
 prepared-DML native `mysql_stmt_prepare()` and `mysql_stmt_close()` call counts
 and elapsed time, plus per-insert summaries, so the remaining prepared-write
