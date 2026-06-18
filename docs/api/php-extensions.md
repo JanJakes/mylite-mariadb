@@ -82,7 +82,11 @@ environment. The summary is printed at module shutdown with
 `mysqli_query()` paths, query classification, result-statement cache handling,
 prepared-statement execution, result stepping, row and field materialization,
 status synchronization, result-object creation, and result-fetch counts plus
-fetch elapsed time. Normal runs leave this disabled.
+fetch elapsed time. Diagnostic harnesses may set
+`MYLITE_MYSQLI_PROFILE_CONTEXT` to add a sanitized
+`mylite_mysqli_profile_context=<value>` line before the counters, allowing
+multi-process profile blocks to be grouped without changing adapter behavior.
+Normal runs leave this disabled.
 
 The adapter routes first-seen and non-repeated result-producing
 `mysqli_query()` calls through libmylite's direct text-result API, which

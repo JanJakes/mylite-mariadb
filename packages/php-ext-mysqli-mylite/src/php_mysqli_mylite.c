@@ -183,6 +183,7 @@ static uint64_t php_mylite_mysqli_profile_elapsed_ns(uint64_t start);
 static void php_mylite_mysqli_profile_add_elapsed(uint64_t *target, uint64_t start);
 static void php_mylite_mysqli_profile_print(void);
 static void php_mylite_mysqli_profile_print_counter(const char *name, uint64_t value);
+static void php_mylite_mysqli_profile_print_context(void);
 static void php_mylite_mysqli_profile_print_millis(const char *name, uint64_t ns);
 static void php_mylite_mysqli_profile_print_average_millis(
     const char *name,
@@ -2197,6 +2198,34 @@ static void php_mylite_mysqli_profile_print_counter(const char *name, uint64_t v
     fprintf(output, "mylite_mysqli_profile_%s=%" PRIu64 "\n", name, value);
 }
 
+static void php_mylite_mysqli_profile_print_context(void) {
+    const char *context = getenv("MYLITE_MYSQLI_PROFILE_CONTEXT");
+    if (context == NULL || context[0] == '\0') {
+        return;
+    }
+
+    char sanitized[65];
+    size_t out = 0;
+    for (size_t in = 0; context[in] != '\0' && out + 1 < sizeof(sanitized); ++in) {
+        const unsigned char ch = (unsigned char)context[in];
+        if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') ||
+            ch == '_' || ch == '-' || ch == '.' || ch == ':') {
+            sanitized[out++] = (char)ch;
+        } else {
+            sanitized[out++] = '_';
+        }
+    }
+    sanitized[out] = '\0';
+    if (out == 0) {
+        return;
+    }
+
+    FILE *output = php_mylite_mysqli_profile_output_file != NULL
+                       ? php_mylite_mysqli_profile_output_file
+                       : stderr;
+    fprintf(output, "mylite_mysqli_profile_context=%s\n", sanitized);
+}
+
 static void php_mylite_mysqli_profile_print_millis(const char *name, uint64_t ns) {
     FILE *output = php_mylite_mysqli_profile_output_file != NULL
                        ? php_mylite_mysqli_profile_output_file
@@ -2242,6 +2271,7 @@ static void php_mylite_mysqli_profile_print(void) {
 
     php_mylite_mysqli_profile_print_counter("enabled", 1);
     php_mylite_mysqli_profile_print_counter("pid", (uint64_t)getpid());
+    php_mylite_mysqli_profile_print_context();
     php_mylite_mysqli_profile_print_counter("open_calls", php_mylite_mysqli_profile.open_calls);
     php_mylite_mysqli_profile_print_counter(
         "open_successes",

@@ -754,6 +754,7 @@ $childScriptJobMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_JOB_WRAPPER';
 $childScriptEnvMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_ENV_SETUP';
 $childScriptSummaryMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_PARENT_SUMMARY';
 $childScriptSummaryReadMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_SUMMARY_READ';
+$childMysqliProfileContextMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_MYSQLI_PROFILE_CONTEXT';
 
 $hasTimingMarker = str_contains($source, $timingMarker);
 $hasChildProcessAverageMarker = str_contains($source, $childProcessAverageMarker);
@@ -767,6 +768,7 @@ $hasChildScriptJobMarker = str_contains($source, $childScriptJobMarker);
 $hasChildScriptEnvMarker = str_contains($source, $childScriptEnvMarker);
 $hasChildScriptSummaryMarker = str_contains($source, $childScriptSummaryMarker);
 $hasChildScriptSummaryReadMarker = str_contains($source, $childScriptSummaryReadMarker);
+$hasChildMysqliProfileContextMarker = str_contains($source, $childMysqliProfileContextMarker);
 $hasChildRuntimeTiming =
     str_contains($source, "\$myliteWordPressChildStats['child_process_seconds'] +=");
 $hasChildReconnectTiming =
@@ -784,6 +786,7 @@ if ($hasTimingMarker &&
     $hasChildScriptEnvMarker &&
     $hasChildScriptSummaryMarker &&
     $hasChildScriptSummaryReadMarker &&
+    $hasChildMysqliProfileContextMarker &&
     $hasChildRuntimeTiming &&
     $hasChildReconnectTiming) {
     exit(0);
@@ -845,6 +848,23 @@ $childScriptEnvSetup = <<<'PATCH'
             } else {
                 $myliteWordPressChildScriptTimingFile = null;
             }
+        }
+
+PATCH;
+
+$childMysqliProfileContextSetup = <<<'PATCH'
+        // MYLITE_WORDPRESS_PHPUNIT_CHILD_MYSQLI_PROFILE_CONTEXT
+        if (\getenv('MYLITE_MYSQLI_PROFILE') === '1') {
+            if ($env === null) {
+                $env = $_SERVER ?? [];
+                unset($env['argv'], $env['argc']);
+                foreach ($env as $envKey => $envVar) {
+                    if (\is_array($envVar)) {
+                        unset($env[$envKey]);
+                    }
+                }
+            }
+            $env['MYLITE_MYSQLI_PROFILE_CONTEXT'] = 'wordpress_phpunit_child';
         }
 
 PATCH;
@@ -1467,6 +1487,19 @@ if (!str_contains($patched, $childScriptEnvMarker)) {
         exit(1);
     }
     $patched = $patchedWithChildScriptEnv;
+}
+
+if (!str_contains($patched, $childMysqliProfileContextMarker)) {
+    $patchedWithChildMysqliProfileContext = str_replace(
+        "        \$process = proc_open(\n",
+        $childMysqliProfileContextSetup . "        \$process = proc_open(\n",
+        $patched
+    );
+    if ($patchedWithChildMysqliProfileContext === $patched) {
+        fwrite(STDERR, "Could not add PHPUnit child mysqli profile context setup.\n");
+        exit(1);
+    }
+    $patched = $patchedWithChildMysqliProfileContext;
 }
 
 if (!str_contains($patched, $keepaliveMarker)) {
@@ -2194,8 +2227,28 @@ PHP_KEEPALIVE
         printf "mylite_mysqli_profile_aggregate_%s=%.0f\n", key, totals[key];
       }
 
+      function print_child_total(key) {
+        if (!(key in child_seen)) {
+          return;
+        }
+        if (key ~ /_ms_total$/) {
+          printf "mylite_mysqli_profile_child_aggregate_%s=%.3f\n", key, child_totals[key];
+          return;
+        }
+        printf "mylite_mysqli_profile_child_aggregate_%s=%.0f\n", key, child_totals[key];
+      }
+
       /^mylite_mysqli_profile_enabled=1$/ {
         ++profile_processes;
+        profile_context = "";
+        next;
+      }
+
+      /^mylite_mysqli_profile_context=/ {
+        profile_context = $2;
+        if (profile_context == "wordpress_phpunit_child") {
+          ++child_profile_processes;
+        }
         next;
       }
 
@@ -2204,6 +2257,10 @@ PHP_KEEPALIVE
           key = selected[$1];
           totals[key] += $2 + 0;
           seen[key] = 1;
+          if (profile_context == "wordpress_phpunit_child") {
+            child_totals[key] += $2 + 0;
+            child_seen[key] = 1;
+          }
         }
       }
 
@@ -2230,6 +2287,29 @@ PHP_KEEPALIVE
         if (totals["fetch_object_calls"] > 0) {
           printf "mylite_mysqli_profile_aggregate_fetch_object_ms_avg=%.3f\n", \
             totals["fetch_object_ms_total"] / totals["fetch_object_calls"];
+        }
+        if (child_profile_processes > 0) {
+          printf "mylite_mysqli_profile_child_aggregate_processes=%d\n", \
+            child_profile_processes;
+          for (key_index = 1; key_index <= key_count; ++key_index) {
+            print_child_total(keys[key_index]);
+          }
+          if (child_totals["open_calls"] > 0) {
+            printf "mylite_mysqli_profile_child_aggregate_open_ms_avg=%.3f\n", \
+              child_totals["open_ms_total"] / child_totals["open_calls"];
+          }
+          if (child_totals["close_calls"] > 0) {
+            printf "mylite_mysqli_profile_child_aggregate_close_ms_avg=%.3f\n", \
+              child_totals["close_ms_total"] / child_totals["close_calls"];
+          }
+          if (child_totals["query_calls"] > 0) {
+            printf "mylite_mysqli_profile_child_aggregate_query_ms_avg=%.3f\n", \
+              child_totals["query_ms_total"] / child_totals["query_calls"];
+          }
+          if (child_totals["fetch_object_calls"] > 0) {
+            printf "mylite_mysqli_profile_child_aggregate_fetch_object_ms_avg=%.3f\n", \
+              child_totals["fetch_object_ms_total"] / child_totals["fetch_object_calls"];
+          }
         }
       }
     ' "${phpunit_output}"

@@ -28,4 +28,13 @@ if(BUILD_TESTING)
     ENVIRONMENT "MYLITE_MYSQLI_PROFILE=1"
     PASS_REGULAR_EXPRESSION "mylite_mysqli_profile_exec_result_calls=[1-9][0-9]*"
   )
+  mylite_add_php_test(
+    php-ext-mysqli-mylite.profile-context
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/mysqli_profile_test.php"
+    -d "extension=$<TARGET_FILE:mylite_mysqli_php_extension>"
+  )
+  set_tests_properties(php-ext-mysqli-mylite.profile-context PROPERTIES
+    ENVIRONMENT "MYLITE_MYSQLI_PROFILE=1;MYLITE_MYSQLI_PROFILE_CONTEXT=profile-context"
+    PASS_REGULAR_EXPRESSION "mylite_mysqli_profile_context=profile-context"
+  )
 endif()

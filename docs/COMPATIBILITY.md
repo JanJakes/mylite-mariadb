@@ -912,7 +912,15 @@ the critical timing steps. Diagnostic child profiling now also records
 child-script runtime through a per-child temp file instead of child stderr; a
 focused production process-isolated emoji method reported `3.951s` of child
 script time inside `4.335s` of child-process runtime, leaving about `0.384s`
-of outer process/pipe overhead for that child.
+of outer process/pipe overhead for that child. Mysqli profile blocks can now
+carry a sanitized `mylite_mysqli_profile_context` value; the WordPress PHPUnit
+patch tags process-isolated children as `wordpress_phpunit_child` and the
+harness emits `mylite_mysqli_profile_child_aggregate_*` rows, separating
+child-only MyLite open/close/query cost from parent and setup PHP processes. A
+focused production profiled emoji method reported child-only mysqli totals of
+`1.685s` open, `1.338s` close, and `1.484s` query work inside `6.050s` of
+child script runtime, keeping the next optimization target on child
+open/close/query execution rather than parent `proc_open()` overhead.
 The long non-isolated shard now also excludes the whole `Tests_DB*` class
 family with a leading `^(?!Tests_DB)` negative lookahead, matching the
 dedicated `^Tests_DB` database shard and preventing database-prefix tests such
