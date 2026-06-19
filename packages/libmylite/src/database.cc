@@ -157,6 +157,11 @@ enum OwnerlessDatabasePerfStatIndex : std::size_t {
     OWNERLESS_DATABASE_PERF_PREPARED_RESET_CALLS,
     OWNERLESS_DATABASE_PERF_PREPARED_RESET_TOTAL_NS,
     OWNERLESS_DATABASE_PERF_PREPARED_RESET_MYSQL_NS,
+    OWNERLESS_DATABASE_PERF_PAGE_WRITE_TRACKED_RELEASE_CALLS,
+    OWNERLESS_DATABASE_PERF_PAGE_WRITE_TRACKED_RELEASE_NS,
+    OWNERLESS_DATABASE_PERF_PAGE_WRITE_TRACKED_RELEASE_EMPTY,
+    OWNERLESS_DATABASE_PERF_PAGE_WRITE_TRACKED_RELEASE_TRX_IDS,
+    OWNERLESS_DATABASE_PERF_PAGE_WRITE_TRACKED_RELEASE_NATIVE_CLEARED,
     OWNERLESS_DATABASE_PERF_SINGLE_OWNER_SKIP_CALLS,
     OWNERLESS_DATABASE_PERF_SINGLE_OWNER_SKIP_ALLOWED,
     OWNERLESS_DATABASE_PERF_SINGLE_OWNER_SKIP_BLOCKED_UNMAPPED,
@@ -2266,6 +2271,7 @@ int ownerless_innodb_lock_release_page_write_hook(
 );
 int ownerless_innodb_lock_release_page_writes_hook(std::uint64_t trx_id, void *ctx);
 void record_ownerless_page_write_trx_id(mylite_db &db, std::uint64_t trx_id);
+void forget_ownerless_page_write_trx_id(mylite_db &db, std::uint64_t trx_id);
 int release_ownerless_page_write_trx_ids(mylite_db &db);
 int ownerless_innodb_lock_wait_record_hook(
     std::uint64_t trx_id,
@@ -15774,20 +15780,24 @@ int ownerless_innodb_lock_release_page_writes_hook(std::uint64_t trx_id, void *c
     }
 
     std::uint32_t released_locks = 0;
-    return ownerless_innodb_lock_result_from_registry_result(
-        mylite_ownerless_innodb_lock_registry_release_transaction_records(
-            hook->page_write_lock_registry,
-            hook->page_write_lock_registry_size,
-            hook->owner_id,
-            hook->owner_generation,
-            trx_id,
-            MYLITE_OWNERLESS_INNODB_PAGE_WRITE_INDEX_ID,
-            MYLITE_OWNERLESS_INNODB_PAGE_WRITE_HEAP_NO,
-            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
-            0U,
-            &released_locks
-        )
+    const int registry_result = mylite_ownerless_innodb_lock_registry_release_transaction_records(
+        hook->page_write_lock_registry,
+        hook->page_write_lock_registry_size,
+        hook->owner_id,
+        hook->owner_generation,
+        trx_id,
+        MYLITE_OWNERLESS_INNODB_PAGE_WRITE_INDEX_ID,
+        MYLITE_OWNERLESS_INNODB_PAGE_WRITE_HEAP_NO,
+        MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+        0U,
+        &released_locks
     );
+    if ((registry_result == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK ||
+         registry_result == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_NOT_FOUND) &&
+        ownerless_current_statement_db != nullptr) {
+        forget_ownerless_page_write_trx_id(*ownerless_current_statement_db, trx_id);
+    }
+    return ownerless_innodb_lock_result_from_registry_result(registry_result);
 }
 
 void record_ownerless_page_write_trx_id(mylite_db &db, std::uint64_t trx_id) {
@@ -15800,10 +15810,34 @@ void record_ownerless_page_write_trx_id(mylite_db &db, std::uint64_t trx_id) {
     }
 }
 
+void forget_ownerless_page_write_trx_id(mylite_db &db, std::uint64_t trx_id) {
+    if (trx_id == 0U) {
+        return;
+    }
+    auto &trx_ids = db.ownerless_page_write_trx_ids;
+    const std::size_t original_size = trx_ids.size();
+    trx_ids.erase(std::remove(trx_ids.begin(), trx_ids.end(), trx_id), trx_ids.end());
+    if (trx_ids.size() != original_size) {
+        ownerless_database_perf_add(
+            OWNERLESS_DATABASE_PERF_PAGE_WRITE_TRACKED_RELEASE_NATIVE_CLEARED,
+            original_size - trx_ids.size()
+        );
+    }
+}
+
 int release_ownerless_page_write_trx_ids(mylite_db &db) {
+    OwnerlessDatabasePerfCountedScope perf_scope(
+        OWNERLESS_DATABASE_PERF_PAGE_WRITE_TRACKED_RELEASE_CALLS,
+        OWNERLESS_DATABASE_PERF_PAGE_WRITE_TRACKED_RELEASE_NS
+    );
     if (db.ownerless_page_write_trx_ids.empty()) {
+        ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_PAGE_WRITE_TRACKED_RELEASE_EMPTY, 1U);
         return MYLITE_OK;
     }
+    ownerless_database_perf_add(
+        OWNERLESS_DATABASE_PERF_PAGE_WRITE_TRACKED_RELEASE_TRX_IDS,
+        db.ownerless_page_write_trx_ids.size()
+    );
 
     void *page_write_lock_registry = nullptr;
     std::size_t page_write_lock_registry_size = 0U;

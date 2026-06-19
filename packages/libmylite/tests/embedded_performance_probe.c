@@ -256,6 +256,11 @@ enum database_perf_stat_index {
     DATABASE_PERF_STAT_PREPARED_RESET_CALLS,
     DATABASE_PERF_STAT_PREPARED_RESET_TOTAL_NS,
     DATABASE_PERF_STAT_PREPARED_RESET_MYSQL_NS,
+    DATABASE_PERF_STAT_PAGE_WRITE_TRACKED_RELEASE_CALLS,
+    DATABASE_PERF_STAT_PAGE_WRITE_TRACKED_RELEASE_NS,
+    DATABASE_PERF_STAT_PAGE_WRITE_TRACKED_RELEASE_EMPTY,
+    DATABASE_PERF_STAT_PAGE_WRITE_TRACKED_RELEASE_TRX_IDS,
+    DATABASE_PERF_STAT_PAGE_WRITE_TRACKED_RELEASE_NATIVE_CLEARED,
     DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_CALLS,
     DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_ALLOWED,
     DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_UNMAPPED,
@@ -4900,6 +4905,32 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         insert_iterations
     );
     emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_tracked_release_calls_per_insert",
+        database_perf[DATABASE_PERF_STAT_PAGE_WRITE_TRACKED_RELEASE_CALLS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_tracked_release_ms_per_insert",
+        database_perf[DATABASE_PERF_STAT_PAGE_WRITE_TRACKED_RELEASE_NS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_tracked_release_empty_per_insert",
+        database_perf[DATABASE_PERF_STAT_PAGE_WRITE_TRACKED_RELEASE_EMPTY],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_tracked_release_trx_ids_per_insert",
+        database_perf[DATABASE_PERF_STAT_PAGE_WRITE_TRACKED_RELEASE_TRX_IDS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_tracked_release_native_cleared_"
+        "per_insert",
+        database_perf[DATABASE_PERF_STAT_PAGE_WRITE_TRACKED_RELEASE_NATIVE_CLEARED],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_native_support_pages_per_insert",
         page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT],
         insert_iterations
@@ -7697,6 +7728,31 @@ static void emit_database_perf_stats(const char *prefix) {
         "%s_prepared_reset_mysql_ms=%.3f\n",
         prefix,
         (double)values[DATABASE_PERF_STAT_PREPARED_RESET_MYSQL_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_write_tracked_release_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_PAGE_WRITE_TRACKED_RELEASE_CALLS]
+    );
+    printf(
+        "%s_page_write_tracked_release_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_PAGE_WRITE_TRACKED_RELEASE_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_write_tracked_release_empty=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_PAGE_WRITE_TRACKED_RELEASE_EMPTY]
+    );
+    printf(
+        "%s_page_write_tracked_release_trx_ids=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_PAGE_WRITE_TRACKED_RELEASE_TRX_IDS]
+    );
+    printf(
+        "%s_page_write_tracked_release_native_cleared=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_PAGE_WRITE_TRACKED_RELEASE_NATIVE_CLEARED]
     );
     printf(
         "%s_single_owner_skip_calls=%" PRIu64 "\n",
