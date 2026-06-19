@@ -20,6 +20,7 @@ constexpr std::size_t k_written_lsn_offset = 72;
 constexpr std::size_t k_visible_generation_offset =
     MYLITE_OWNERLESS_REDO_STATE_VISIBLE_GENERATION_OFFSET;
 constexpr std::size_t k_active_reservation_count_offset = 88;
+constexpr std::size_t k_completed_range_count_offset = 92;
 constexpr std::size_t k_progress_latch_offset = 96;
 constexpr std::size_t k_active_reservation_slots_offset = 128;
 constexpr std::size_t k_active_reservation_slot_size = 32;
@@ -59,6 +60,10 @@ static_assert(
 static_assert(
     k_active_reservation_count_offset + sizeof(std::uint32_t) <= k_progress_latch_offset,
     "redo state active reservation count overlaps progress latch"
+);
+static_assert(
+    k_completed_range_count_offset + sizeof(std::uint32_t) <= k_progress_latch_offset,
+    "redo state completed range count overlaps progress latch"
 );
 static_assert(
     k_progress_latch_offset + MYLITE_OWNERLESS_LATCH_SIZE <= k_active_reservation_slots_offset,
@@ -158,9 +163,12 @@ int clear_owner_entry_slots_guarded(
 );
 void clear_owner_entry_slots(void *state, std::uint32_t owner_id, std::uint64_t owner_generation);
 std::uint32_t active_reservation_count(const void *state);
+std::uint32_t completed_range_count(const void *state);
 std::uint32_t owner_active_state_count(const void *state, std::uint32_t owner_id);
 void increment_active_reservation_count(void *state);
 void decrement_active_reservation_count(void *state);
+void increment_completed_range_count(void *state);
+void decrement_completed_range_count(void *state);
 bool record_completed_range(void *state, std::uint64_t start_lsn, std::uint64_t end_lsn);
 bool ranges_touch_or_overlap(
     std::uint64_t left_start,
@@ -550,6 +558,7 @@ int mylite_ownerless_redo_state_read_snapshot(
     out_snapshot->visible_generation = load64(state, k_visible_generation_offset);
     out_snapshot->refcount = load32(state, k_refcount_offset);
     out_snapshot->active_reservation_count = active_reservation_count(state);
+    out_snapshot->completed_range_count = completed_range_count(state);
     if (mylite_ownerless_latch_snapshot(
             progress_latch(state),
             &out_snapshot->progress_latch_state,
@@ -967,6 +976,10 @@ std::uint32_t active_reservation_count(const void *state) {
     return load32(state, k_active_reservation_count_offset);
 }
 
+std::uint32_t completed_range_count(const void *state) {
+    return load32(state, k_completed_range_count_offset);
+}
+
 std::uint32_t owner_active_state_count(const void *state, std::uint32_t owner_id) {
     const auto *bytes = static_cast<const unsigned char *>(state);
     std::uint32_t count = 0;
@@ -999,6 +1012,20 @@ void decrement_active_reservation_count(void *state) {
     }
 }
 
+void increment_completed_range_count(void *state) {
+    const std::uint32_t count = load32(state, k_completed_range_count_offset);
+    if (count < k_completed_range_slot_count) {
+        store32(state, k_completed_range_count_offset, count + 1U);
+    }
+}
+
+void decrement_completed_range_count(void *state) {
+    const std::uint32_t count = load32(state, k_completed_range_count_offset);
+    if (count != 0U) {
+        store32(state, k_completed_range_count_offset, count - 1U);
+    }
+}
+
 bool record_completed_range(void *state, std::uint64_t start_lsn, std::uint64_t end_lsn) {
     std::uint64_t merged_start_lsn = start_lsn;
     std::uint64_t merged_end_lsn = end_lsn;
@@ -1027,6 +1054,7 @@ bool record_completed_range(void *state, std::uint64_t start_lsn, std::uint64_t 
             merged_end_lsn = std::max(merged_end_lsn, slot_end_lsn);
             store64(state, slot_offset + k_completed_range_slot_end_offset, 0U);
             store64(state, slot_offset + k_completed_range_slot_start_offset, 0U);
+            decrement_completed_range_count(state);
             merged = true;
         }
         if (!merged) {
@@ -1041,6 +1069,7 @@ bool record_completed_range(void *state, std::uint64_t start_lsn, std::uint64_t 
         }
         store64(state, slot_offset + k_completed_range_slot_end_offset, merged_end_lsn);
         store64(state, slot_offset + k_completed_range_slot_start_offset, merged_start_lsn);
+        increment_completed_range_count(state);
         return true;
     }
     return false;
@@ -1056,10 +1085,18 @@ bool ranges_touch_or_overlap(
 }
 
 std::uint64_t drain_completed_ranges(void *state, std::uint64_t written_lsn) {
+    std::uint32_t ranges_remaining = completed_range_count(state);
+    if (ranges_remaining == 0U) {
+        return written_lsn;
+    }
+
     for (;;) {
         bool advanced = false;
         for (std::uint32_t slot_index = 0; slot_index < k_completed_range_slot_count;
              ++slot_index) {
+            if (ranges_remaining == 0U) {
+                return written_lsn;
+            }
             const std::size_t slot_offset = completed_range_slot_offset(slot_index);
             const std::uint64_t start_lsn =
                 load64(state, slot_offset + k_completed_range_slot_start_offset);
@@ -1071,6 +1108,8 @@ std::uint64_t drain_completed_ranges(void *state, std::uint64_t written_lsn) {
                 load64(state, slot_offset + k_completed_range_slot_end_offset);
             store64(state, slot_offset + k_completed_range_slot_end_offset, 0U);
             store64(state, slot_offset + k_completed_range_slot_start_offset, 0U);
+            decrement_completed_range_count(state);
+            --ranges_remaining;
             if (end_lsn > written_lsn) {
                 written_lsn = end_lsn;
                 store64(state, k_written_lsn_offset, written_lsn);

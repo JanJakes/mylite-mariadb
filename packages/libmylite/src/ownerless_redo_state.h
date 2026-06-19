@@ -25,6 +25,7 @@ typedef struct mylite_ownerless_redo_state_snapshot {
     uint64_t visible_generation;
     uint32_t refcount;
     uint32_t active_reservation_count;
+    uint32_t completed_range_count;
     uint32_t latch_state;
     uint32_t latch_owner_id;
     uint64_t latch_owner_generation;

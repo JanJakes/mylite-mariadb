@@ -6092,6 +6092,12 @@ subsystems that this mode needs:
   `21802.61 rows/s`, ordinary bulk at `95543.15 rows/s`, and an
   ownerless/ordinary ratio of `0.2282`; this remains a bounded bookkeeping
   reduction, not a full ownerless write-throughput fix.
+  The completed-range count follow-up uses offset `92` in redo-state segment
+  version `10` to skip the completed-range table scan when no out-of-order
+  ranges exist. Recording, merging, and draining completed ranges maintain the
+  count under the same redo progress latch; redo ordering, completed-range
+  coalescing, checkpoint files, page-version WAL, and SQL semantics are
+  unchanged.
   Larger row lists, broad DML/DDL, and unbounded append-lock hold times remain
   out of scope.
   Focused gating coverage proves active live writers, including idle explicit

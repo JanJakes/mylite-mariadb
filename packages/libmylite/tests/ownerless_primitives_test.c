@@ -14248,6 +14248,7 @@ static void test_redo_state_tracks_contiguous_written_ranges(void) {
         MYLITE_OWNERLESS_REDO_STATE_OK
     );
     assert(snapshot.written_lsn == 100U);
+    assert(snapshot.completed_range_count == 1U);
 
     assert(
         mylite_ownerless_redo_state_complete_write(
@@ -14278,6 +14279,7 @@ static void test_redo_state_tracks_contiguous_written_ranges(void) {
         MYLITE_OWNERLESS_REDO_STATE_OK
     );
     assert(snapshot.written_lsn == 130U);
+    assert(snapshot.completed_range_count == 0U);
 
     assert(
         mylite_ownerless_redo_state_complete_write(
@@ -14291,6 +14293,12 @@ static void test_redo_state_tracks_contiguous_written_ranges(void) {
         ) == MYLITE_OWNERLESS_REDO_STATE_OK
     );
     assert(written_lsn == 0U);
+    assert(
+        mylite_ownerless_redo_state_read_snapshot(state, sizeof(state), &snapshot) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(snapshot.written_lsn == 130U);
+    assert(snapshot.completed_range_count == 1U);
     assert(
         mylite_ownerless_redo_state_complete_write(
             state,
@@ -14308,6 +14316,7 @@ static void test_redo_state_tracks_contiguous_written_ranges(void) {
         MYLITE_OWNERLESS_REDO_STATE_OK
     );
     assert(snapshot.written_lsn == 150U);
+    assert(snapshot.completed_range_count == 0U);
 
     assert(
         mylite_ownerless_redo_state_complete_write(
@@ -14321,6 +14330,11 @@ static void test_redo_state_tracks_contiguous_written_ranges(void) {
         ) == MYLITE_OWNERLESS_REDO_STATE_OK
     );
     assert(written_lsn == 0U);
+    assert(
+        mylite_ownerless_redo_state_read_snapshot(state, sizeof(state), &snapshot) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(snapshot.completed_range_count == 0U);
 
     assert(
         mylite_ownerless_redo_state_initialize(state, sizeof(state), 200U, 200U) ==
@@ -14351,6 +14365,7 @@ static void test_redo_state_tracks_contiguous_written_ranges(void) {
     assert(snapshot.latest_lsn == 240U);
     assert(snapshot.reserved_lsn == 240U);
     assert(snapshot.written_lsn == 240U);
+    assert(snapshot.completed_range_count == 0U);
 
     assert(
         mylite_ownerless_redo_state_initialize(state, sizeof(state), 0U, 0U) ==
@@ -14375,6 +14390,7 @@ static void test_redo_state_tracks_contiguous_written_ranges(void) {
         MYLITE_OWNERLESS_REDO_STATE_OK
     );
     assert(snapshot.written_lsn == 12288U);
+    assert(snapshot.completed_range_count == 0U);
     assert(
         mylite_ownerless_redo_state_complete_write(
             state,
@@ -14419,6 +14435,11 @@ static void test_redo_state_tracks_contiguous_written_ranges(void) {
         assert(written_lsn == 0U);
     }
     assert(
+        mylite_ownerless_redo_state_read_snapshot(state, sizeof(state), &snapshot) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(snapshot.completed_range_count == 1U);
+    assert(
         mylite_ownerless_redo_state_complete_write(
             state,
             sizeof(state),
@@ -14430,6 +14451,11 @@ static void test_redo_state_tracks_contiguous_written_ranges(void) {
         ) == MYLITE_OWNERLESS_REDO_STATE_OK
     );
     assert(written_lsn == 190U);
+    assert(
+        mylite_ownerless_redo_state_read_snapshot(state, sizeof(state), &snapshot) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(snapshot.completed_range_count == 0U);
 }
 
 static void test_redo_state_combines_write_and_leave_like_separate_steps(void) {
@@ -14577,10 +14603,12 @@ static void test_redo_state_combines_write_and_leave_like_separate_steps(void) {
     assert(
         separate_snapshot.active_reservation_count == combined_snapshot.active_reservation_count
     );
+    assert(separate_snapshot.completed_range_count == combined_snapshot.completed_range_count);
     assert(combined_snapshot.latest_lsn == 140U);
     assert(combined_snapshot.written_lsn == 140U);
     assert(combined_snapshot.refcount == 0U);
     assert(combined_snapshot.active_reservation_count == 0U);
+    assert(combined_snapshot.completed_range_count == 0U);
 }
 
 static void *reserve_redo_ranges_in_thread(void *context) {
