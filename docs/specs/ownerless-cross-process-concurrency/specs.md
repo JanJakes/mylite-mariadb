@@ -5568,8 +5568,16 @@ subsystems that this mode needs:
   behavior, but standalone base refreshes now reuse an existing unshared cached
   page buffer instead of allocating a new page vector. Primitive coverage
   asserts the `delta_base_page_buffer_reuse_records` diagnostic and production
-  probes expose it for attribution. A later MTR wrapper fast-path audit rejected
-  caching
+  probes expose it for attribution. A four KiB delta fast-path follow-up raises
+  the bounded fast acceptance cap from `2048` to `4096` bytes while retaining
+  the half-standalone-size rule, exact fallback above the cap, non-chained
+  delta records, checkpoint rewrite, and replay behavior. Primitive coverage
+  proves the medium fast-accepted index-delta and larger exact-fallback
+  boundary both read back byte-identically. The reduced 500-row four-row-bulk
+  production probe moved fast-limit rejections from `41` to `6`,
+  standalone-size probe calls from `174` to `144`, standalone-size probe time
+  from `3.074 ms` to `1.838 ms`, and page-log append total from `8.411 ms`
+  to `7.183 ms`. A later MTR wrapper fast-path audit rejected caching
   `ownerless_page_write_uses_transaction_release()` per publish pass or
   reusing the tracked-page lookup for release after ownerless stress found
   reader monotonicity failures and a DDL stress InnoDB assertion in prototype
@@ -5749,6 +5757,20 @@ subsystems that this mode needs:
   four-row bulk shapes, leaving the larger ownerless write target on native
   page publication, history/native durability proof, and redo/checkpoint
   reconciliation.
+  The four KiB delta fast-path follow-up raises the bounded fast acceptance
+  threshold from `2048` to `4096` bytes while keeping the cached-standalone
+  half-size rule and exact fallback for larger deltas unchanged. Primitive
+  coverage proves a medium index-page delta above `2048` bytes uses the fast
+  path without a standalone-size probe and replays byte-identically, while a
+  larger delta above `4096` bytes still records a fast-limit miss, reaches
+  exact fallback, and replays byte-identically. WAL flags, payload
+  reconstruction, checkpoint rewrite, replay, and SQL semantics are unchanged.
+  On the same reduced 500-row four-row-bulk production shape, fast-limit
+  rejections dropped from `41` to `6`, standalone-size probe calls from `174`
+  to `144`, standalone-size probe time from `3.074 ms` to `1.838 ms`,
+  page-log encode time from `6.142 ms` to `4.977 ms`, page-log append total
+  from `8.411 ms` to `7.183 ms`, and ownerless bulk throughput stayed in the
+  same range at `4880.07` to `4904.94` rows/s.
   The page-log metadata flag coalescing slice then added a single helper that
   reads one page-log record header and returns the metadata bits needed by
   native checkpoint proof collection. The proof collector now tests
