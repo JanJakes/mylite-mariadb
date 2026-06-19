@@ -884,6 +884,11 @@ summaries and emitted no `mylite_perf_summary_*_client_*` rows.
   transaction-held-page or `transaction_publish` decisions when marking pages
   for transaction-deferred dirty publishing. This avoids another redundant
   ownerless classification hop without changing publication volume.
+- Transaction-deferred page-image publication now prepares the private captured
+  image buffer in place before calling the page-version hook, avoiding a
+  throwaway page-sized vector allocation and copy while keeping transaction
+  image counts, fallback publication, WAL format, and recovery behavior
+  unchanged.
 - Ownerless checkpoint update summaries include
   `checkpoint_update_legacy_write_elided_per_insert`, distinguishing legacy
   payload write removal from same-pair no-op elision and file-read elision.

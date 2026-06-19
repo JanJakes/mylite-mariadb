@@ -5855,6 +5855,14 @@ subsystems that this mode needs:
   throughput samples were noisy, so this slice records unchanged publication
   counters and removed duplicate predicate work rather than claiming a stable
   throughput win.
+  The transaction-image in-place preparation slice then removed the temporary
+  page-sized vector allocation and copy inside
+  `mylite_ownerless_innodb_publish_transaction_pages_to_lsn()`. Captured page
+  images are private to the committing transaction and cleared during
+  transaction cleanup, so the publisher can run the same InnoDB checksum
+  preparation directly on that buffer before calling the page-version hook.
+  Transaction-image publication counts, page-id fallback, WAL format,
+  checkpoint ordering, and recovery semantics stay unchanged.
   The page-write stats-off fast-path slice then made disabled page-write
   elapsed scopes return on the existing zero start-time sentinel before
   rechecking the stats-enabled flag. Focused SQL coverage proves disabled

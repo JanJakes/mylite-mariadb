@@ -1689,8 +1689,8 @@ extern "C" uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
   collect_transaction_page_write_pages(trx, pages, true);
   std::vector<uint64_t> dirty_pages;
   collect_transaction_dirty_page_write_pages(trx, dirty_pages);
-  const trx_t::mylite_ownerless_page_image_vector *images=
-      trx->mylite_ownerless_page_images_for_read();
+  trx_t::mylite_ownerless_page_image_vector *images=
+      trx->mylite_ownerless_page_images;
   if (pages.empty() && (images == nullptr || images->empty()))
     return visible_lsn;
 
@@ -1700,7 +1700,7 @@ extern "C" uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
   if (images != nullptr)
   {
     successful_image_pages.reserve(images->size());
-    for (const trx_t::mylite_ownerless_page_image &image : *images)
+    for (trx_t::mylite_ownerless_page_image &image : *images)
     {
       if (image.page_lsn == 0 || image.page_size == 0 ||
           image.page.size() != image.page_size)
@@ -1713,18 +1713,23 @@ extern "C" uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
       if (space != nullptr)
         space->release();
 
-      std::vector<byte> page(image.page.begin(), image.page.end());
+      /*
+      The captured image is private to this transaction and will be cleared
+      during transaction cleanup. Prepare it in place instead of allocating a
+      second page-sized buffer for the publish call.
+      */
+      byte *page= image.page.data();
       if (image.compressed)
-        buf_flush_update_zip_checksum(page.data(), image.page_size);
+        buf_flush_update_zip_checksum(page, image.page_size);
       else
-        buf_flush_init_for_writing(nullptr, page.data(), nullptr, full_crc32);
+        buf_flush_init_for_writing(nullptr, page, nullptr, full_crc32);
 
       const uint64_t publish_lsn=
           std::max<uint64_t>(visible_lsn, image.page_lsn);
       mylite_ownerless_innodb_deep_perf_count(
           MYLITE_OWNERLESS_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_IMAGE_ATTEMPTS);
       const int result= mylite_ownerless_innodb_publish_page_version(
-          space_id, page_no, image.page_lsn, publish_lsn, page.data(),
+          space_id, page_no, image.page_lsn, publish_lsn, page,
           image.page_size);
       if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
       {

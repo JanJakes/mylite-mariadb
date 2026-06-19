@@ -1404,6 +1404,13 @@ stats-disabled ownerless write leaves representative commit-visibility counters
 at zero while enabled visible-fast attribution remains covered. Commit
 publication, log flush, page-visible LSN publication, page flushing, and lock
 release ordering are unchanged.
+The transaction-image in-place preparation slice removes a temporary
+page-sized allocation and copy from transaction-deferred page publication. The
+captured page image is private to the committing transaction and is cleared
+during transaction cleanup, so the publisher now prepares that buffer with the
+same InnoDB checksum helper before handing it to the page-version hook.
+Transaction-image counts, fallback publication, page-log format, checkpoint
+ordering, and recovery semantics are unchanged.
 A follow-up production attribution slice now splits native-support page
 publication into published versus elided page classes. The reduced
 stats-enabled sample reported `2.000` published native-support pages per
