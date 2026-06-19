@@ -1712,9 +1712,14 @@ Tasks:
    mini-transactions also prepare later persistent user pages in an
    already-modified tablespace before X/SX page-linked access, so
    secondary-index navigation refreshes before using peer-modified page state
-   without turning cross-table row deadlocks into page-write deadlocks. Undo
-   segment creation explicitly enters
-   the
+   without turning cross-table row deadlocks into page-write deadlocks.
+   The `ownerless-page-write-timeout-retry` slice treats ownerless page-write
+   lock timeouts in the MTR and buffer pre-read hooks as internal physical-page
+   contention that refreshes and retries instead of poisoning InnoDB transaction
+   error state or returning null for mandatory dictionary pages. SQL-visible
+   ownerless pressure and statement-lock busy errors remain raised by the
+   MyLite statement policy layer where they can be reported safely.
+   Undo segment creation explicitly enters the
    ownerless tablespace-allocation write resource before reading
    rollback-segment slots or native free-space metadata, and holds it through
    the mini-transaction that creates the segment. The current correctness bridge
@@ -4098,6 +4103,11 @@ Tasks:
    stress with `MYLITE_OWNERLESS_DDL_STRESS_ROUNDS=8` and same-name temporary
    table stress with `MYLITE_OWNERLESS_TEMP_STRESS_ROUNDS=40`, all with
    forced `.shm` rebuild and native exclusive reopen checks. The
+   `ownerless-page-write-timeout-retry` slice specifically covers the amplified
+   DDL stale-`DB_LOCK_WAIT_TIMEOUT` transaction-start assertion and the
+   temporary-table `dict_hdr_get_new_id()` null-page segfault caused by
+   low-level ownerless page-write timeouts that could not safely propagate as
+   SQL errors. The
    `ownerless-independent-table-stress-trace-export` slice adds
    `tools/ownerless-independent-table-stress-trace`, which emits schema,
    per-table worker SQL, live-reader SQL, an expected aggregate/per-table

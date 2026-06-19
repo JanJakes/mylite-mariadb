@@ -178,7 +178,13 @@ static bool mylite_ownerless_trx_sql_is_dictionary_ddl(const trx_t* trx) noexcep
 static bool mylite_ownerless_trx_timeout_aborts_statement(
 	const trx_t* trx) noexcept
 {
-	return mylite_ownerless_trx_sql_is_dictionary_ddl(trx);
+	/* This pre-read hook feeds callers that often assume system pages are
+	always available and cannot safely surface a SQL error from a transient
+	ownerless page-write timeout. Retry after refresh here; SQL-visible
+	ownerless pressure failures are raised before execution by MyLite's
+	statement policy layer. */
+	(void) trx;
+	return false;
 }
 
 static bool mylite_ownerless_trx_sql_is_plain_select(const trx_t* trx) noexcept

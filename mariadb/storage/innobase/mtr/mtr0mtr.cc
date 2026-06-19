@@ -1448,25 +1448,12 @@ static void ownerless_page_write_note_deadlock(trx_t *ownerless_trx)
 
 static bool ownerless_page_write_timeout_aborts_statement(const trx_t *trx)
 {
-  THD *thd= trx != nullptr ? trx->mysql_thd : nullptr;
-  if (thd == nullptr)
-    thd= current_thd;
-  if (thd == nullptr || thd->lex == nullptr)
-    return false;
-
-  switch (thd->lex->sql_command)
-  {
-  case SQLCOM_CREATE_TABLE:
-  case SQLCOM_CREATE_INDEX:
-  case SQLCOM_ALTER_TABLE:
-  case SQLCOM_TRUNCATE:
-  case SQLCOM_DROP_TABLE:
-  case SQLCOM_DROP_INDEX:
-  case SQLCOM_RENAME_TABLE:
-    return true;
-  default:
-    return false;
-  }
+  /* The MTR page-write hooks cannot propagate a SQL error directly. Treat
+  ownerless page-write timeouts here as internal contention and retry after
+  refresh; SQL-visible ownerless pressure failures are raised before execution
+  by the statement policy layer. */
+  (void) trx;
+  return false;
 }
 
 static bool ownerless_page_write_sql_is_select(const trx_t *trx)

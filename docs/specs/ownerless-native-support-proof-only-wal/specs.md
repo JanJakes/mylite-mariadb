@@ -156,13 +156,11 @@ show the proof-payload work no longer dominates the WAL payload summary.
   and `MYLITE_PERF_INSERT_ITERATIONS=100` plus
   `MYLITE_PERF_OWNERLESS_PAGE_PUBLISH_STATS=1`, and with
   `MYLITE_PERF_INSERT_ITERATIONS=500` stats-off for throughput comparison.
-- `ctest --preset ownerless-stress --output-on-failure` is not green on this
-  branch: the amplified DDL and temporary-table stress cases intermittently hit
-  MariaDB/InnoDB `trx0trx.cc:1337` (`trx->error_state == DB_SUCCESS`) or child
-  aborts. The default direct `ddl-stress` and `temp-stress` commands passed,
-  and direct eight-round `ddl-stress` passed under both production and
-  ownerless-stress binaries, so the failing evidence remains a broader
-  ownerless stress gap rather than proof-only WAL replay coverage.
+- A later `ownerless-page-write-timeout-retry` slice fixed the broader
+  amplified DDL/temporary-table ownerless stress gap by treating low-level
+  ownerless page-write lock timeouts as retryable physical-page contention.
+  `ctest --preset ownerless-stress --output-on-failure` then passed all 12
+  stress cases.
 
 ## Risks
 
