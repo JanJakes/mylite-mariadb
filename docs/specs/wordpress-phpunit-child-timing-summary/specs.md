@@ -52,9 +52,12 @@ profiling. The emitted keys are the existing summary rows:
 - `wordpress_phpunit_child_process_runtime_ms_avg`
 - `wordpress_phpunit_child_process_reconnect_ms_avg`
 
-The child-script temp-file path stays guarded by
-`MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES != 0`, so the new summary
-mode does not inject child-script timing work into normal CI children.
+The initial child-script temp-file path stayed guarded by
+`MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES != 0`, so this summary mode
+did not inject child-script timing work into normal CI children. A later
+`wordpress-phpunit-child-script-ci-timing` slice adds a narrower
+`MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_TIMING_SUMMARY` flag for CI script
+versus outer-process attribution while still keeping full child profiling off.
 
 CI keeps `MYLITE_WORDPRESS_PHPUNIT_CHILD_TIMING_SUMMARY=0` as the job default
 and enables it only in the three process-isolated PHPUnit steps. The production
@@ -156,8 +159,9 @@ the default external tmpfs WordPress MyLite database path.
   `MYLITE_WORDPRESS_PHPUNIT_CHILD_TIMING_SUMMARY=1`.
 - Child timing summary rows appear in the WordPress timing summary when the
   flag is enabled.
-- Child-script timing remains tied to the heavier diagnostic child profiler,
-  not the lightweight summary flag.
+- Full child-process profiling remains tied to the heavier diagnostic child
+  profiler. CI can separately opt into child-script timing through
+  `MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_TIMING_SUMMARY`.
 
 ## Risks And Unresolved Questions
 

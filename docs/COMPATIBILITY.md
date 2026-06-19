@@ -653,12 +653,15 @@ child mode used by CI: parent child-process profiling and defensive static
 `MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN=1`.
 CI process-isolated shards still enable
 `MYLITE_WORDPRESS_PHPUNIT_CHILD_TIMING_SUMMARY=1`, which records parent-side
-child count, lock-release, child runtime, and reconnect timings without
-turning on child-body script profiling or mysqli aggregation.
+child count, lock-release, child runtime, and reconnect timings, plus
+`MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_TIMING_SUMMARY=1`, which records
+child-script and outer-minus-script timings without turning on full
+child-process profiling, static `wpdb` scanning, or mysqli aggregation.
 A focused production smoke with child profiling off reported `7`
-process-isolated children at `1506.584 ms` runtime, `257.155 ms` parent
-lock-release, and `114.787 ms` reconnect per child, keeping CI's per-process
-startup cost visible without changing the child body.
+process-isolated children at `988.095 ms` runtime, `861.665 ms` child-script
+time, `126.430 ms` outer-minus-script time, `6.925 ms` parent lock-release,
+and `0.006 ms` reconnect per child, keeping CI's per-process startup and child
+script cost visible without enabling the heavier diagnostic profile.
 The CI audit also forbids process-isolated timing steps from overriding
 child-process profiling back on, and it requires the UI/filesystem shard to
 keep parent reconnect disabled after each child, so their published wall
@@ -1436,13 +1439,14 @@ process-isolated timing from being inflated by unrelated non-isolated methods
 in large mixed classes. The current CI path keeps those exact filters and runs
 without child-process profiling by default, but the process-isolated steps keep
 a lightweight parent-side child timing summary enabled so CI reports child
-count, child runtime, lock-release, and reconnect averages without injecting
-child-body profiling. Full diagnostic child averages and child-body timings
-remain available through `MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES=1`
-outside the critical timing steps. Diagnostic child profiling now also records
-child-script runtime through a per-child temp file instead of child stderr; a
-focused production process-isolated emoji method reported `3.951s` of child
-script time inside `4.335s` of child-process runtime, leaving about `0.384s`
+count, child runtime, lock-release, reconnect, child-script, and
+outer-minus-script averages without enabling full child profiling or mysqli
+child aggregation. Full diagnostic child profiling remains available through
+`MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES=1` outside the critical
+timing steps. Diagnostic and CI child-script timing both use a per-child temp
+file instead of child stderr; a focused production process-isolated emoji
+method reported `3.951s` of child script time inside `4.335s` of child-process
+runtime, leaving about `0.384s`
 of outer process/pipe overhead for that child. Mysqli profile blocks can now
 carry a sanitized `mylite_mysqli_profile_context` value; the WordPress PHPUnit
 patch tags process-isolated children as `wordpress_phpunit_child` and the

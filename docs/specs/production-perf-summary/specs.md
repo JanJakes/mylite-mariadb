@@ -236,11 +236,19 @@ scanning disabled. Diagnostic runs can still enable those costs explicitly with
 The process-isolated CI shards keep
 `MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES=0` and
 `MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN=0`, while enabling the lightweight
-child timing summary. CI timing summaries include child count, parent
-lock-release time, optional per-child baseline-restore time, child runtime,
+child timing and child-script timing summaries. CI timing summaries include
+child count, parent lock-release time, optional per-child baseline-restore
+time, child runtime, child-script runtime, outer-minus-script runtime,
 reconnect time, and per-child averages without enabling the slower reflection
-scan or child-body profiling. The database suite and non-isolated suite keep
-the global disabled default.
+scan, full child-process profiling, or mysqli child aggregation. The database
+suite and non-isolated suite keep the global disabled default.
+The focused production process-isolated smoke for the CI child-script timing
+slice ran `Tests_Functions_WpUniquePrefixedId::test_should_create_unique_prefixed_ids`
+with full child profiling off and reported `7` child processes,
+`6.916666s` child-process runtime, `6.031654s` child-script runtime,
+`0.885012s` outer-minus-script runtime, and per-child averages of
+`988.095 ms`, `861.665 ms`, and `126.430 ms` respectively. That points the
+sample at child script work more than parent-side launch overhead.
 The factory-heavy deferred-reconnect shard now enables
 `MYLITE_WORDPRESS_PHPUNIT_CHILD_RESTORE_BASELINE=1` together with child
 skip-install. The parent closes WordPress/MyLite handles, restores the prepared
@@ -930,6 +938,9 @@ summaries and emitted no `mylite_perf_summary_*_client_*` rows.
   database artifacts before they start measuring.
 - CI process-isolated WordPress PHPUnit logs include per-child average timing
   keys in addition to total child-process counters.
+- CI process-isolated WordPress PHPUnit logs include low-overhead child-script
+  timing keys and outer-minus-script timing keys without enabling full
+  child-process profiling or mysqli child aggregation.
 - CI process-isolated WordPress PHPUnit logs include per-child prepared
   database baseline restore count, total time, and average time when the
   baseline-restored child mode is enabled.
