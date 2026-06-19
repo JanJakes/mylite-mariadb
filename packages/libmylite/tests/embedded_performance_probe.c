@@ -1169,6 +1169,7 @@ static void emit_ownerless_bulk_autocommit_phase_summary(
     unsigned insert_rows,
     unsigned insert_statements
 );
+static void emit_bulk_exec_result_summary(const char *prefix, unsigned insert_statements);
 static void emit_insert_client_timing_summary(
     const char *prefix,
     const insert_client_timing *timing,
@@ -1553,12 +1554,15 @@ int main(void) {
     rate = ordinary_insert_autocommit_rate;
     check_min_rate("MYLITE_PERF_MIN_ORDINARY_AUTOCOMMIT_INSERT_OPS", rate);
 
+    if (page_publish_stats) {
+        mylite_exec_result_perf_set_enabled(1);
+    }
     seconds = measure_bulk_autocommit_insert(
         db,
         "mylite_perf_ordinary_autocommit_bulk",
         insert_iterations,
         bulk_insert_rows_per_statement,
-        0
+        page_publish_stats
     );
     emit_rate("mylite_perf_ordinary_insert_autocommit_bulk_rows", insert_iterations, seconds);
     emit_rate(
@@ -1566,6 +1570,14 @@ int main(void) {
         bulk_insert_statements,
         seconds
     );
+    if (page_publish_stats) {
+        mylite_exec_result_perf_set_enabled(0);
+        emit_exec_result_perf_stats("mylite_perf_ordinary_insert_autocommit_bulk");
+        emit_bulk_exec_result_summary(
+            "mylite_perf_summary_ordinary_autocommit_bulk",
+            bulk_insert_statements
+        );
+    }
     ordinary_insert_autocommit_bulk_row_rate = operations_per_second(insert_iterations, seconds);
     ordinary_insert_autocommit_bulk_statement_rate =
         operations_per_second(bulk_insert_statements, seconds);
@@ -1755,6 +1767,9 @@ int main(void) {
     rate = ownerless_insert_autocommit_rate;
     check_min_rate("MYLITE_PERF_MIN_OWNERLESS_AUTOCOMMIT_INSERT_OPS", rate);
 
+    if (page_publish_stats) {
+        mylite_exec_result_perf_set_enabled(1);
+    }
     seconds = measure_bulk_autocommit_insert(
         db,
         "mylite_perf_ownerless_autocommit_bulk",
@@ -1769,6 +1784,8 @@ int main(void) {
         seconds
     );
     if (page_publish_stats) {
+        mylite_exec_result_perf_set_enabled(0);
+        emit_exec_result_perf_stats("mylite_perf_ownerless_insert_autocommit_bulk");
         emit_page_publish_stats("mylite_perf_ownerless_insert_autocommit_bulk");
         emit_commit_visibility_stats("mylite_perf_ownerless_insert_autocommit_bulk");
         emit_database_perf_stats("mylite_perf_ownerless_insert_autocommit_bulk");
@@ -1781,6 +1798,10 @@ int main(void) {
         emit_page_log_scan_perf_stats("mylite_perf_ownerless_insert_autocommit_bulk");
         emit_page_log_sync_perf_stats("mylite_perf_ownerless_insert_autocommit_bulk");
         emit_ownerless_bulk_autocommit_phase_summary(insert_iterations, bulk_insert_statements);
+        emit_bulk_exec_result_summary(
+            "mylite_perf_summary_ownerless_autocommit_bulk",
+            bulk_insert_statements
+        );
         mylite_ownerless_innodb_set_page_publish_stats_enabled(0);
         mylite_ownerless_innodb_set_page_write_perf_stats_enabled(0);
         mylite_ownerless_innodb_set_page_write_refresh_stats_enabled(0);
@@ -3366,6 +3387,33 @@ static void emit_ownerless_bulk_autocommit_phase_summary(
         "mylite_perf_summary_ownerless_autocommit_bulk_default_checked_bulk_starts_per_statement",
         innodb_deep[INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_OWNERLESS_DEFAULT_CHECKED_BULK],
         insert_statements
+    );
+}
+
+static void emit_bulk_exec_result_summary(const char *prefix, unsigned insert_statements) {
+    uint64_t values[EXEC_RESULT_PERF_STAT_COUNT] = {0};
+    const double divisor = insert_statements > 0U ? (double)insert_statements : 1.0;
+
+    mylite_exec_result_perf_read(values, EXEC_RESULT_PERF_STAT_COUNT);
+    printf(
+        "%s_exec_result_calls_per_statement=%.3f\n",
+        prefix,
+        (double)values[EXEC_RESULT_PERF_CALLS] / divisor
+    );
+    printf(
+        "%s_mysql_query_ms_per_statement=%.3f\n",
+        prefix,
+        ((double)values[EXEC_RESULT_PERF_MYSQL_QUERY_NS] / 1000000.0) / divisor
+    );
+    printf(
+        "%s_store_result_ms_per_statement=%.3f\n",
+        prefix,
+        ((double)values[EXEC_RESULT_PERF_STORE_RESULT_NS] / 1000000.0) / divisor
+    );
+    printf(
+        "%s_status_update_ms_per_statement=%.3f\n",
+        prefix,
+        ((double)values[EXEC_RESULT_PERF_STATUS_UPDATE_NS] / 1000000.0) / divisor
     );
 }
 
@@ -12109,6 +12157,7 @@ static void reset_ownerless_insert_stats(void) {
     mylite_ownerless_innodb_reset_page_write_refresh_stats();
     mylite_ownerless_innodb_reset_commit_visibility_stats();
     mylite_ownerless_database_reset_perf_stats();
+    mylite_exec_result_perf_reset();
     mylite_ownerless_page_log_reset_append_perf_stats();
     mylite_ownerless_page_log_reset_scan_perf_stats();
     mylite_ownerless_page_log_reset_sync_perf_stats();

@@ -6062,6 +6062,13 @@ subsystems that this mode needs:
   exclusion, and preserved visible-fast publication; secondary indexes,
   foreign-key tables, explicit transactions, duplicate-handling DML, and broader
   SQL bulk coverage remain out of scope.
+  The follow-up bulk exec-result attribution slice does not change the
+  ownerless write path; it enables the existing `mylite_exec()` counters around
+  ordinary and ownerless bulk autocommit loops in stats-enabled performance
+  probes and emits compact per-statement `mysql_query()`, store-result,
+  status-update, and exec-call summaries. That keeps CI evidence from hiding a
+  multi-millisecond statement interval outside the already-reported page-log,
+  page-write, commit-visibility, SQL-handler, and InnoDB-handler buckets.
   Larger row lists, broad DML/DDL, and unbounded append-lock hold times remain
   out of scope.
   Focused gating coverage proves active live writers, including idle explicit

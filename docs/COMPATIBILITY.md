@@ -675,6 +675,13 @@ current-schema update, handle status-update buckets, and native-control
 fast-path calls. These rows are diagnostics for profiled WordPress and mysqli
 runs only; they do not change SQL semantics, public C API compatibility, native
 storage behavior, or default CI timing overhead.
+The embedded ownerless attribution probe now reuses those existing
+exec-result counters for ordinary and ownerless bulk autocommit insert phases,
+emitting both raw `*_exec_result_*` rows and compact per-statement
+`mysql_query()`, result-drain, status-update, and call-count summaries. This is
+diagnostic-only and is intended to expose whether the remaining bulk insert
+gap sits inside SQL text execution or the already-reported page-log,
+page-write, commit-visibility, SQL-handler, and InnoDB-handler buckets.
 Profiled mysqli runs also split total query elapsed time into
 `query_verb_*` buckets for result queries, DML, DDL, connection state,
 transaction, lock, call, and other first-keyword classes so WordPress timing
