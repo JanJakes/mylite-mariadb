@@ -9671,6 +9671,7 @@ static void test_ownerless_single_owner_history_wal_proof(void) {
     char *database_path = path_join(root, "ownerless-single-owner-history-wal-proof.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     uint64_t deep_stats[OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT] = {0};
+    uint64_t database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT] = {0};
     uint64_t page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT] = {0};
     mylite_db *db;
     char sql[256];
@@ -9691,8 +9692,10 @@ static void test_ownerless_single_owner_history_wal_proof(void) {
 
     mylite_ownerless_innodb_set_page_publish_stats_enabled(1);
     mylite_ownerless_innodb_deep_set_perf_stats_enabled(1);
+    mylite_ownerless_database_set_perf_stats_enabled(1);
     mylite_ownerless_innodb_reset_page_publish_stats();
     mylite_ownerless_innodb_deep_reset_perf_stats();
+    mylite_ownerless_database_reset_perf_stats();
 
     for (unsigned id = 1U; id <= 16U; ++id) {
         assert(
@@ -9716,6 +9719,11 @@ static void test_ownerless_single_owner_history_wal_proof(void) {
         page_stats,
         OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT
     );
+    mylite_ownerless_database_read_perf_stats(
+        database_stats,
+        OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT
+    );
+    mylite_ownerless_database_set_perf_stats_enabled(0);
     mylite_ownerless_innodb_deep_set_perf_stats_enabled(0);
     mylite_ownerless_innodb_set_page_publish_stats_enabled(0);
     assert(
@@ -9764,6 +9772,19 @@ static void test_ownerless_single_owner_history_wal_proof(void) {
     assert(
         page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_HISTORY_PROOF_UNDO_SAMPLES] ==
         page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO]
+    );
+    assert(
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_RSEG] ==
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_SYS]
+    );
+    assert(
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO] ==
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_UNDO]
+    );
+    assert(
+        database_stats
+            [OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_SKIPPED_NATIVE_SUPPORT] >=
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED]
     );
     assert(
         page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_HISTORY_PROOF_RSEG_FIRST_SAMPLES] +
@@ -9894,6 +9915,8 @@ static void test_ownerless_history_proof_publish_failure_flushes(void) {
         page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO] ==
         0U
     );
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_HISTORY_PROOF_RSEG_SAMPLES] == 0U);
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_HISTORY_PROOF_UNDO_SAMPLES] == 0U);
     assert(
         deep_stats
             [OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES] > 0U

@@ -5960,6 +5960,19 @@ subsystems that this mode needs:
   snapshot-boundary publications, `2.000` page versions and native-support
   proof pages per statement, `1.000` visible-fast commits per statement, and
   `2049.000` deferred latest-checkpoint coalesces per statement.
+  The history-proof publication harness then tightens the controlled fast-path
+  and unsafe fallback selectors without changing production code: rollback-
+  segment proof publication must match published native-support
+  `FIL_PAGE_TYPE_SYS`, undo proof publication must match published
+  `FIL_PAGE_UNDO_LOG`, published native-support records must be counted as
+  skipped from live page-index publication, and forced native-support publish
+  failure must take positive native history flush pages with zero accepted
+  proof samples. A reduced stats-enabled production probe over 100 ownerless
+  autocommit inserts reported `100` rollback-segment proof pages, `100` undo
+  proof pages, matching `100` published native-support `FIL_PAGE_TYPE_SYS` and
+  `100` published `FIL_PAGE_UNDO_LOG` pages, zero native history flush pages on
+  the fast path, and a page-index native-support skip summary of `2.030` per
+  insert.
   Larger row lists, broad DML/DDL, and unbounded append-lock hold times remain
   out of scope.
   Focused gating coverage proves active live writers, including idle explicit
