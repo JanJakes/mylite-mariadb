@@ -916,7 +916,9 @@ public:
   TRX_DDL_BULK
   @see trx_bulk_insert in trx0types.h */
   unsigned bulk_insert:2;
-	/*------------------------------*/
+  /** whether SQL has opened a direct row-list bulk insert statement */
+  bool mylite_ownerless_default_checked_bulk_insert_sql_started;
+		/*------------------------------*/
 	/* MySQL has a transaction coordinator to coordinate two phase
 	commit between multiple storage engines and the binary log. When
 	an engine participates in a transaction, it's responsible for
@@ -1228,6 +1230,7 @@ public:
     ut_ad(check_foreigns);
     ut_ad(check_unique_secondary);
     ut_ad(bulk_insert == TRX_NO_BULK);
+    ut_ad(!mylite_ownerless_default_checked_bulk_insert_sql_started);
   }
 
   /** This has to be invoked on SAVEPOINT or at the end of a statement.

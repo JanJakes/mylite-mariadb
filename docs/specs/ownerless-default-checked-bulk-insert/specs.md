@@ -46,7 +46,14 @@ MariaDB's general bulk policy:
 
 - ownerless InnoDB hooks must be active;
 - the transaction must be autocommit;
-- the table must have exactly one InnoDB index, the clustered index;
+- the ownerless statement policy must prove the narrower single-owner
+  deferred-page-publish path, excluding peer-present cross-process statements;
+- the SQL command must be a direct `INSERT ... VALUES` statement, not CTAS or
+  `INSERT ... SELECT`;
+- the SQL handler must have started a multi-row bulk insert for a table share
+  with exactly one MySQL key;
+- the table must also have exactly one InnoDB index, the clustered index, at
+  the row insert gate;
 - the table must have no outgoing or incoming foreign-key relationships when
   `foreign_key_checks` is enabled;
 - all existing row0ins gates for empty root page, no duplicate-handling DML,
@@ -71,9 +78,10 @@ leaves no partial rows. Ordinary non-ownerless embedded opens keep upstream
 MariaDB's stricter `unique_checks=0`/`foreign_key_checks=0` bulk requirement.
 
 This does not broaden ownerless support for secondary indexes, unique secondary
-checks, foreign keys, explicit transactions, triggers/functions that read the
-target table, `INSERT ... ON DUPLICATE KEY UPDATE`, `REPLACE`, `INSERT ...
-SELECT`, DDL, or non-InnoDB engines.
+checks, foreign keys, explicit transactions, peer-present cross-process
+statements, triggers/functions that read the target table, `INSERT ... ON
+DUPLICATE KEY UPDATE`, `REPLACE`, `INSERT ... SELECT`, DDL, or non-InnoDB
+engines.
 
 ## Directory And Lifecycle Impact
 
@@ -95,7 +103,12 @@ commit visibility, or ownerless page-write release.
   `mylite_embedded_performance_probe`.
 - Extend `ownerless-single-owner-multi-row-insert-visible-fast-path` to assert
   the default-checked bulk-start counter is positive, duplicate-key row-list
-  failure leaves no partial rows, and a later valid row-list insert succeeds.
+  failure leaves no partial rows, a later valid row-list insert succeeds, and
+  CTAS plus `INSERT ... SELECT` copy rows without using the default-checked
+  bulk counter.
+- Add focused peer-present coverage proving a live ownerless peer keeps the
+  default-checked bulk-start counter at zero for the same primary-key-only
+  multi-row insert shape.
 - Run the focused production selector plus the existing ownerless visible-fast,
   native-support, history-proof, FK-cache, and uncommitted-peer subset.
 - Run the hook-build ownerless subset and ownerless stress preset.
@@ -110,6 +123,10 @@ commit visibility, or ownerless page-write release.
   multi-row fast-path test.
 - Duplicate-key failure in the new bounded row-list shape rolls the full
   statement back.
+- CTAS and `INSERT ... SELECT` remain outside the ownerless default-checked
+  bulk path and preserve their copied rows.
+- Peer-present ownerless SQL remains outside the ownerless default-checked bulk
+  path and preserves ordinary cross-process visibility/recovery behavior.
 - Existing visible-fast publication, page-version, history-proof,
   native-support, page-write, and commit-visibility assertions still pass.
 - Ordinary/non-ownerless behavior is unchanged.
@@ -125,15 +142,26 @@ Local production and hook verification passed:
   mylite_ownerless_cross_process_sql_test mylite_embedded_performance_probe`
 - `ctest --preset php-embedded-prod -R
   '^libmylite\.ownerless-single-owner-multi-row-insert-visible-fast-path$'
-  --output-on-failure` passed in `4.53 sec`.
+  --output-on-failure` passed in `4.13 sec`.
+- `build/php-embedded-prod/packages/libmylite/mylite_ownerless_cross_process_sql_test
+  sql-case test_ownerless_default_checked_bulk_insert_skips_live_peer` passed
+  in `2 sec`.
+- `build/php-embedded-prod/packages/libmylite/mylite_ownerless_cross_process_sql_test`
+  direct reruns of the CI/local repro cases
+  `test_ownerless_active_reader_pressure_limit_blocks_write_classes`,
+  `test_ownerless_multi_rename_cycle_refreshes_peer_dictionary`, and
+  `test_ownerless_unique_index_ddl_refreshes_peer_dictionary` passed.
+- `ctest --preset php-embedded-prod -R
+  '^libmylite\.ownerless-cross-process-sql\.[0-9]+$' --parallel 2
+  --output-on-failure` passed `16/16` in `176.61 sec`.
 - `ctest --preset php-embedded-prod -R
   '^libmylite\.ownerless-(primitives|single-owner-(multi-row-insert-visible-fast-path|history-wal-proof|native-support-page-wal-elision)|insert-fk-fast-path-cache|uncommitted-peer-hidden)$'
-  --parallel 2 --output-on-failure` passed `6/6` in `14.87 sec`.
+  --parallel 2 --output-on-failure` passed `6/6` in `6.14 sec`.
 - `cmake --build --preset ownerless-test-hooks --target
   mylite_ownerless_cross_process_sql_test mylite_ownerless_primitives_test`
 - `ctest --preset ownerless-test-hooks -R
   '^libmylite\.ownerless-(primitives|single-owner-(multi-row-insert-visible-fast-path|history-wal-proof|native-support-page-wal-elision)|negative-proof|history-proof-publish-failure-fallback)$'
-  --parallel 2 --output-on-failure` passed `6/6` in `10.23 sec`.
+  --parallel 2 --output-on-failure` passed `6/6` in `9.02 sec`.
 - `cmake --build --preset ownerless-stress`
 - `ctest --preset ownerless-stress --output-on-failure` passed `12/12`
   in `577.83 sec`.

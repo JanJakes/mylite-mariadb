@@ -511,6 +511,7 @@ typedef struct child_pipes {
 
 typedef struct query_result {
     unsigned long long value;
+    const char *sql;
 } query_result;
 
 typedef struct ownerless_stress_values {
@@ -696,6 +697,7 @@ static void test_ownerless_history_proof_publish_failure_flushes(void);
 static void test_ownerless_single_owner_native_support_page_wal_elision(void);
 static void test_ownerless_explicit_transaction_undo_wal_elision(void);
 static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void);
+static void test_ownerless_default_checked_bulk_insert_skips_live_peer(void);
 static void test_ownerless_insert_fk_fast_path_cache_invalidation(void);
 static void test_ownerless_single_owner_foreground_reclaim_budget_defers_to_timer(void);
 static void test_ownerless_peer_history_disables_foreground_reclaim_budget(void);
@@ -5069,6 +5071,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_native_support_page_wal_elision),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_explicit_transaction_undo_wal_elision),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_multi_row_insert_visible_fast_path),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_default_checked_bulk_insert_skips_live_peer),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_foreground_reclaim_budget_defers_to_timer),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_peer_history_disables_foreground_reclaim_budget),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_peer_history_blocks_single_owner_skip_proof),
@@ -11071,6 +11074,73 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
 
     exec_ok(
         db,
+        "CREATE TABLE app.ownerless_default_checked_bulk_source ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_default_checked_bulk_source VALUES "
+        "(1, 10), (2, 20)"
+    );
+    mylite_ownerless_innodb_deep_reset_perf_stats();
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_default_checked_bulk_ctas AS "
+        "SELECT id, value FROM app.ownerless_default_checked_bulk_source"
+    );
+    mylite_ownerless_innodb_deep_read_perf_stats(
+        deep_stats,
+        OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT
+    );
+    assert(
+        deep_stats[OWNERLESS_TEST_INNODB_DEEP_ROW_INS_CLUST_LOW_OWNERLESS_DEFAULT_CHECKED_BULK] ==
+        0U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_default_checked_bulk_ctas") == 2U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_default_checked_bulk_ctas") == 30U
+    );
+
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_default_checked_bulk_insert_select ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    mylite_ownerless_innodb_deep_reset_perf_stats();
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_default_checked_bulk_insert_select "
+        "SELECT id, value FROM app.ownerless_default_checked_bulk_source"
+    );
+    mylite_ownerless_innodb_deep_read_perf_stats(
+        deep_stats,
+        OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT
+    );
+    assert(
+        deep_stats[OWNERLESS_TEST_INNODB_DEEP_ROW_INS_CLUST_LOW_OWNERLESS_DEFAULT_CHECKED_BULK] ==
+        0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_default_checked_bulk_insert_select"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_default_checked_bulk_insert_select"
+        ) == 30U
+    );
+
+    exec_ok(
+        db,
         "CREATE TABLE app.ownerless_eight_row_insert_fast_path ("
         "id INT NOT NULL PRIMARY KEY, "
         "value INT NOT NULL, "
@@ -11803,6 +11873,100 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
     );
     assert(
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_row_insert_fast_path") == 81U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_default_checked_bulk_insert_skips_live_peer(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-default-checked-bulk-peer.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    uint64_t deep_stats[OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT] = {0};
+    int peer_ready_pipe[2];
+    int peer_release_pipe[2];
+    pid_t peer_child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_default_checked_bulk_peer_present ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert(pipe(peer_ready_pipe) == 0);
+    assert(pipe(peer_release_pipe) == 0);
+    peer_child = fork();
+    assert(peer_child >= 0);
+    if (peer_child == 0) {
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        hold_ownerless_open_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = peer_ready_pipe[1],
+                .release_read_fd = peer_release_pipe[0],
+            }
+        );
+    }
+    close(peer_ready_pipe[1]);
+    close(peer_release_pipe[0]);
+    wait_for_pipe(peer_ready_pipe[0]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    mylite_ownerless_innodb_deep_set_perf_stats_enabled(1);
+    mylite_ownerless_innodb_deep_reset_perf_stats();
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_default_checked_bulk_peer_present VALUES "
+        "(1, 10), (2, 20)"
+    );
+    mylite_ownerless_innodb_deep_read_perf_stats(
+        deep_stats,
+        OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT
+    );
+    mylite_ownerless_innodb_deep_set_perf_stats_enabled(0);
+    assert(
+        deep_stats[OWNERLESS_TEST_INNODB_DEEP_ROW_INS_CLUST_LOW_OWNERLESS_DEFAULT_CHECKED_BULK] ==
+        0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_default_checked_bulk_peer_present"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_default_checked_bulk_peer_present"
+        ) == 30U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    signal_pipe(peer_release_pipe[1]);
+    wait_for_child(peer_child);
+    close(peer_ready_pipe[0]);
+    close(peer_release_pipe[1]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_default_checked_bulk_peer_present"
+        ) == 2U
     );
     assert(mylite_close(db) == MYLITE_OK);
 
@@ -59878,7 +60042,7 @@ static void expect_readonly_exec_error(mylite_db *db, const char *sql) {
 }
 
 static unsigned long long query_unsigned(mylite_db *db, const char *sql) {
-    query_result result = {0U};
+    query_result result = {.value = 0U, .sql = sql};
     char *errmsg = NULL;
 
     if (mylite_exec(db, sql, capture_first_column, &result, &errmsg) != MYLITE_OK) {
@@ -76326,9 +76490,10 @@ static int capture_first_column(void *ctx, int column_count, char **values, char
     if (values[0] == NULL) {
         fprintf(
             stderr,
-            "mylite query returned NULL first column: pid=%ld column=%s\n",
+            "mylite query returned NULL first column: pid=%ld column=%s sql=%s\n",
             (long)getpid(),
-            columns[0] != NULL ? columns[0] : "(unknown)"
+            columns[0] != NULL ? columns[0] : "(unknown)",
+            result->sql != NULL ? result->sql : "(unknown)"
         );
         fflush(stderr);
     }

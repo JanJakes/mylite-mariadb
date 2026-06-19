@@ -7992,6 +7992,23 @@ struct mariadb_set_stats
 }
 
 /********************************************************************//**
+Start a bulk insert statement. */
+void
+ha_innobase::start_bulk_insert(
+/*============================*/
+	ha_rows	rows,	/*!< in: rows expected to be inserted */
+	uint	flags)	/*!< in: flags */
+{
+	DBUG_ENTER("ha_innobase::start_bulk_insert");
+	(void)flags;
+	trx_t* trx = check_trx_exists(ha_thd());
+	trx->mylite_ownerless_default_checked_bulk_insert_sql_started =
+		rows > 1 && thd_sql_command(m_user_thd) == SQLCOM_INSERT
+		&& table != NULL && table->s != NULL && table->s->keys == 1;
+	DBUG_VOID_RETURN;
+}
+
+/********************************************************************//**
 End a bulk insert statement. */
 int
 ha_innobase::end_bulk_insert()
@@ -8000,12 +8017,16 @@ ha_innobase::end_bulk_insert()
 	trx_t* trx = check_trx_exists(ha_thd());
 
 	if (!trx->mylite_ownerless_has_default_checked_bulk_insert()) {
+		trx->mylite_ownerless_default_checked_bulk_insert_sql_started =
+			false;
 		DBUG_RETURN(0);
 	}
 
 	if (dberr_t err = trx->bulk_insert_apply()) {
 		trx->error_state = err;
 		trx->bulk_insert &= TRX_DDL_BULK;
+		trx->mylite_ownerless_default_checked_bulk_insert_sql_started =
+			false;
 		trx->last_stmt_start = 0;
 		const int mysql_error = convert_error_code_to_mysql(
 			err, m_prebuilt->table->flags, trx->mysql_thd);
@@ -8016,6 +8037,7 @@ ha_innobase::end_bulk_insert()
 
 	trx->end_bulk_insert(*m_prebuilt->table);
 	trx->bulk_insert &= TRX_DDL_BULK;
+	trx->mylite_ownerless_default_checked_bulk_insert_sql_started = false;
 	DBUG_RETURN(0);
 }
 

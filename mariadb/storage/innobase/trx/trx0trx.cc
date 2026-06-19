@@ -180,6 +180,20 @@ static bool ownerless_sql_command_requires_dirty_page_bridge(const trx_t *trx)
   }
 }
 
+static bool ownerless_sql_command_is_direct_insert(const trx_t *trx)
+{
+  return trx != nullptr && trx->mysql_thd != nullptr &&
+         trx->mysql_thd->lex != nullptr &&
+         trx->mysql_thd->lex->sql_command == SQLCOM_INSERT;
+}
+
+static bool ownerless_sql_command_allows_default_checked_bulk_insert(
+    const trx_t *trx)
+{
+  return ownerless_sql_command_is_direct_insert(trx) &&
+         mylite_ownerless_innodb_statement_deferred_page_publish() != 0;
+}
+
 static bool ownerless_sql_command_allows_visible_fast_path(const trx_t *trx)
 {
   return trx != nullptr &&
@@ -384,6 +398,8 @@ trx_init(
 	trx->check_foreigns = true;
 
 	trx->check_unique_secondary = true;
+
+	trx->mylite_ownerless_default_checked_bulk_insert_sql_started = false;
 
 	trx->lock.n_rec_locks = 0;
 
@@ -873,6 +889,7 @@ TRANSACTIONAL_TARGET void trx_free_at_shutdown(trx_t *trx)
 
 	ut_d(trx->apply_online_log = false);
 	trx->bulk_insert = 0;
+	trx->mylite_ownerless_default_checked_bulk_insert_sql_started = false;
 	trx->commit_state();
 	trx->release_locks();
 	trx->mod_tables.clear();
@@ -2280,6 +2297,7 @@ bool trx_t::commit_cleanup() noexcept
   mod_tables.clear();
 
   bulk_insert= TRX_NO_BULK;
+  mylite_ownerless_default_checked_bulk_insert_sql_started= false;
   check_foreigns= true;
   check_unique_secondary= true;
   assert_freed();
@@ -2295,7 +2313,9 @@ bool trx_t::mylite_ownerless_default_checked_bulk_insert_allowed(
 {
   if (!mysql_thd || thd_test_options(mysql_thd, OPTION_NOT_AUTOCOMMIT |
                                      OPTION_BEGIN) ||
-      !mylite_ownerless_innodb_lock_has_hooks())
+      !mylite_ownerless_innodb_lock_has_hooks() ||
+      !mylite_ownerless_default_checked_bulk_insert_sql_started ||
+      !ownerless_sql_command_allows_default_checked_bulk_insert(this))
     return false;
   if (!check_unique_secondary && !check_foreigns)
     return false;

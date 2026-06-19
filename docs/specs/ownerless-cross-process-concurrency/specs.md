@@ -6025,14 +6025,16 @@ subsystems that this mode needs:
   claim broader native redo, checkpoint, DDL/file-lifecycle, or SQL-level
   table-wait completion.
   A later default-checked bulk-insert slice reuses MariaDB's existing
-  `TRX_UNDO_EMPTY` buffered empty-table path for ownerless autocommit row-list
-  inserts only when the table has exactly one clustered InnoDB index and no
-  foreign-key relationships, even if SQL `unique_checks` and
-  `foreign_key_checks` remain at default values. The focused selector proves
-  the ownerless-only bulk-start counter, duplicate-key statement rollback, and
-  preserved visible-fast publication; secondary indexes, foreign-key tables,
-  explicit transactions, duplicate-handling DML, and broader SQL bulk coverage
-  remain out of scope.
+  `TRX_UNDO_EMPTY` buffered empty-table path for ownerless autocommit direct
+  `INSERT ... VALUES` row lists only when the ownerless statement policy proves
+  the narrower single-owner deferred-page-publish path and the table has exactly
+  one clustered InnoDB index and no foreign-key relationships, even if SQL
+  `unique_checks` and `foreign_key_checks` remain at default values. The focused
+  selector proves the ownerless-only bulk-start counter, duplicate-key statement
+  rollback, CTAS and `INSERT ... SELECT` exclusion, peer-present cross-process
+  exclusion, and preserved visible-fast publication; secondary indexes,
+  foreign-key tables, explicit transactions, duplicate-handling DML, and broader
+  SQL bulk coverage remain out of scope.
   Larger row lists, broad DML/DDL, and unbounded append-lock hold times remain
   out of scope.
   Focused gating coverage proves active live writers, including idle explicit
