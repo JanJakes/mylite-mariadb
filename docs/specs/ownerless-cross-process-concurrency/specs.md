@@ -1885,7 +1885,11 @@ Tasks:
    standalone payload that would otherwise be discarded. Successful exact-probed
    delta appends now refresh the volatile standalone-size estimate for that
    durable base, so later same-base appends can fast-accept without repeating
-   the size probe. Page-log
+   the size probe. Exact fallback's size-only standalone probe now computes
+   compact sparse, varint compact sparse, fill-sparse, and trailing-size
+   evidence for `FIL_PAGE_INDEX` and `FIL_PAGE_TYPE_SYS` pages in one pass,
+   preserving fill-sparse rejection of retained deltas without a second
+   full-page scan. Page-log
    scan/replay/checkpoint validation now streams the full-page checksum for
    non-delta full, trailing-zero, sparse-zero, compact sparse, varint compact
    sparse, and fill-sparse records instead of reconstructing a full page just
@@ -5716,6 +5720,16 @@ subsystems that this mode needs:
   reuses it for those decisions. System-space index pages, unhinted SYS/TRX_SYS
   records, record flags, payload bytes, checkpoint rewrite, replay, and native
   history-proof requirements are unchanged.
+  The standalone size-probe single-pass slice then removed the second
+  size-only page scan for index/SYS fill-sparse candidates in exact fallback.
+  The helper still applies the same compact, varint compact, fill-sparse, and
+  trailing-zero selection rules before accepting or rejecting a retained
+  fast-miss delta; new primitive coverage forces a fill-sparse standalone
+  rejection to guard against overestimating the standalone size. The reduced
+  500-row production sample preserved append counts, payload bytes, and delta
+  counts while reducing the one-row standalone-size probe time in the first
+  post-slice sample; bulk timing remained noisy and is not treated as a
+  material throughput improvement.
   The page-log metadata flag coalescing slice then added a single helper that
   reads one page-log record header and returns the metadata bits needed by
   native checkpoint proof collection. The proof collector now tests
