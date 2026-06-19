@@ -1262,6 +1262,20 @@ static void ownerless_page_write_note_history_proof_page(
     trx->mylite_ownerless_history_proof_undo_published= true;
 }
 
+static bool ownerless_page_write_history_proof_pair_handled(
+    const trx_t *trx, uint32_t space_id, uint32_t page_no) noexcept
+{
+  if (trx == nullptr || !trx->mylite_ownerless_history_proof_active ||
+      trx->mylite_ownerless_history_proof_space_id != space_id)
+    return false;
+  if (trx->mylite_ownerless_history_proof_rseg_page_no != page_no &&
+      trx->mylite_ownerless_history_proof_undo_page_no != page_no)
+    return false;
+  return trx->mylite_ownerless_page_write_publish_failed ||
+         (trx->mylite_ownerless_history_proof_rseg_published &&
+          trx->mylite_ownerless_history_proof_undo_published);
+}
+
 static bool ownerless_page_write_requires_lock(const buf_page_t &page)
 {
   if (!page.in_file() || page.id().space() >= SRV_TMP_SPACE_ID)
@@ -2794,6 +2808,126 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_writes_publish() noexcept
     mylite_ownerless_innodb_end_page_publish_batch();
 }
 
+struct ownerless_history_proof_pair_page
+{
+  const buf_page_t *bpage= nullptr;
+  const byte *source= nullptr;
+  uint32_t page_no= 0;
+  uint64_t page_lsn= 0;
+  uint32_t page_size= 0;
+};
+
+static bool ownerless_history_proof_pair_prepare_page(
+    trx_t *trx, buf_page_t *bpage, unsigned expected_role, lsn_t commit_lsn,
+    ownerless_history_proof_pair_page *out_page) noexcept
+{
+  ut_ad(trx != nullptr);
+  ut_ad(out_page != nullptr);
+
+  const page_id_t id{bpage->id()};
+  const unsigned roles=
+      ownerless_page_write_history_proof_roles(trx, id.space(), id.page_no());
+  if (roles == 0)
+    return true;
+  if (roles != expected_role || out_page->bpage != nullptr)
+    return false;
+  if (id.space() >= SRV_TMP_SPACE_ID || !bpage->in_file())
+    return false;
+  if (ownerless_page_write_lock_only_transaction_page(trx, *bpage))
+    return false;
+  if (bpage->frame == nullptr)
+    return false;
+
+  mach_write_to_8(bpage->frame + FIL_PAGE_LSN, commit_lsn);
+  if (UNIV_LIKELY_NULL(bpage->zip.data))
+    memcpy_aligned<8>(FIL_PAGE_LSN + bpage->zip.data,
+                      FIL_PAGE_LSN + bpage->frame, 8);
+
+  const byte *source= bpage->zip.data ? bpage->zip.data : bpage->frame;
+  const lsn_t source_page_lsn= mach_read_from_8(source + FIL_PAGE_LSN);
+  if (source_page_lsn != commit_lsn)
+    return false;
+  if (!ownerless_page_publish_type_has_native_support(
+          fil_page_get_type(source)))
+    return false;
+
+  out_page->bpage= bpage;
+  out_page->source= source;
+  out_page->page_no= id.page_no();
+  out_page->page_lsn= source_page_lsn;
+  out_page->page_size= static_cast<uint32_t>(bpage->physical_size());
+  return true;
+}
+
+bool mtr_t::ownerless_history_proof_publish_pair() noexcept
+{
+  if (UNIV_LIKELY(!ownerless_hooks_enabled()) || m_commit_lsn == 0)
+    return false;
+  if (recv_recovery_is_on() || !srv_was_started)
+    return false;
+  if (ownerless_page_publish_stats_enabled.load(std::memory_order_relaxed))
+    return false;
+  if (mylite_ownerless_innodb_test_faults_enabled_fast())
+    return false;
+
+  trx_t *ownerless_trx= ownerless_page_write_trx();
+  if (ownerless_trx == nullptr ||
+      !ownerless_trx->mylite_ownerless_history_proof_active ||
+      ownerless_trx->mylite_ownerless_history_proof_rseg_published ||
+      ownerless_trx->mylite_ownerless_history_proof_undo_published ||
+      ownerless_trx->mylite_ownerless_history_proof_space_id >=
+          SRV_TMP_SPACE_ID ||
+      ownerless_trx->mylite_ownerless_history_proof_rseg_page_no ==
+          ownerless_trx->mylite_ownerless_history_proof_undo_page_no)
+    return false;
+
+  ownerless_history_proof_pair_page rseg_page;
+  ownerless_history_proof_pair_page undo_page;
+  for (const mtr_memo_slot_t &slot : m_memo)
+  {
+    if (!(slot.type & MTR_MEMO_MODIFY))
+      continue;
+    buf_page_t *bpage= static_cast<buf_page_t*>(slot.object);
+    const page_id_t id{bpage->id()};
+    const unsigned roles= ownerless_page_write_history_proof_roles(
+        ownerless_trx, id.space(), id.page_no());
+    if (roles == 0)
+      continue;
+    if ((roles & ~(ownerless_page_write_history_proof_role_rseg |
+                   ownerless_page_write_history_proof_role_undo)) != 0 ||
+        ((roles & ownerless_page_write_history_proof_role_rseg) != 0 &&
+         (roles & ownerless_page_write_history_proof_role_undo) != 0))
+      return false;
+    ownerless_history_proof_pair_page *target=
+        (roles & ownerless_page_write_history_proof_role_rseg) != 0
+            ? &rseg_page
+            : &undo_page;
+    if (!ownerless_history_proof_pair_prepare_page(
+            ownerless_trx, bpage, roles, m_commit_lsn, target))
+      return false;
+  }
+
+  if (rseg_page.bpage == nullptr || undo_page.bpage == nullptr)
+    return false;
+
+  const int result= mylite_ownerless_innodb_publish_history_proof_pair(
+      ownerless_trx->mylite_ownerless_history_proof_space_id,
+      rseg_page.page_no, rseg_page.page_lsn, rseg_page.source,
+      rseg_page.page_size, undo_page.page_no, undo_page.page_lsn,
+      undo_page.source, undo_page.page_size, m_commit_lsn);
+  if (result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+    return false;
+  if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
+  {
+    ownerless_page_write_note_publish_success(ownerless_trx);
+    ownerless_trx->mylite_ownerless_history_proof_rseg_published= true;
+    ownerless_trx->mylite_ownerless_history_proof_undo_published= true;
+  }
+  else
+    ownerless_page_write_note_publish_failure(ownerless_trx);
+  return true;
+}
+
 ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
     const buf_page_t &bpage) noexcept
 {
@@ -2810,10 +2944,13 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
 
   const bool publish_stats_enabled= ownerless_page_publish_stats_enabled.load(
       std::memory_order_relaxed);
-  if (publish_stats_enabled)
-    ownerless_page_publish_count(ownerless_page_publish_candidates);
   trx_t *ownerless_trx= ownerless_page_write_trx();
   const page_id_t id{bpage.id()};
+  if (ownerless_page_write_history_proof_pair_handled(
+          ownerless_trx, id.space(), id.page_no()))
+    return;
+  if (publish_stats_enabled)
+    ownerless_page_publish_count(ownerless_page_publish_candidates);
   if (id.space() >= SRV_TMP_SPACE_ID || !bpage.in_file())
   {
     if (publish_stats_enabled)
@@ -3442,6 +3579,7 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
     if (UNIV_UNLIKELY(ownerless_collect_modified_pages))
     {
       phase_start_ns= ownerless_perf ? ownerless_page_write_perf_now_ns() : 0;
+      mtr->ownerless_history_proof_publish_pair();
       if (UNIV_LIKELY(!ownerless_modified_page_overflow))
         mtr->ownerless_page_writes_publish_list(
             ownerless_modified_pages, ownerless_modified_page_count);
@@ -3484,6 +3622,8 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
     const bool ownerless_uses_transaction_release=
         ownerless_page_publish &&
         mtr->ownerless_page_write_uses_transaction_release();
+    if (UNIV_UNLIKELY(ownerless_page_publish))
+      mtr->ownerless_history_proof_publish_pair();
     bool ownerless_page_leave=
       ownerless_hooks && mtr->m_ownerless_page_write_mtr_pages != nullptr &&
       !mtr->m_ownerless_page_write_mtr_pages->empty();

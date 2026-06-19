@@ -176,6 +176,12 @@ enum OwnerlessDatabasePerfStatIndex : std::size_t {
     OWNERLESS_DATABASE_PERF_CHECKPOINT_UPDATE_DEFERRED_LATEST_COALESCED,
     OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_PAGE_LOG_CHECKSUM_NS,
     OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_INDEX_SKIPPED_NATIVE_SUPPORT,
+    OWNERLESS_DATABASE_PERF_HISTORY_PROOF_PAIR_CALLS,
+    OWNERLESS_DATABASE_PERF_HISTORY_PROOF_PAIR_NS,
+    OWNERLESS_DATABASE_PERF_HISTORY_PROOF_PAIR_APPEND_NS,
+    OWNERLESS_DATABASE_PERF_HISTORY_PROOF_PAIR_SUCCEEDED,
+    OWNERLESS_DATABASE_PERF_HISTORY_PROOF_PAIR_UNAVAILABLE,
+    OWNERLESS_DATABASE_PERF_HISTORY_PROOF_PAIR_FAILED,
     OWNERLESS_DATABASE_PERF_REFRESH_CALLS,
     OWNERLESS_DATABASE_PERF_REFRESH_TOTAL_NS,
     OWNERLESS_DATABASE_PERF_REFRESH_DICTIONARY_NS,
@@ -2349,6 +2355,20 @@ void ownerless_persist_redo_checkpoint(
 void ownerless_innodb_page_publish_batch_begin_hook(void *ctx);
 void ownerless_innodb_page_publish_batch_end_hook(void *ctx);
 void ownerless_page_log_append_batch_release_for_snapshot(OwnerlessInnoDBLockHookContext *hook);
+int ownerless_innodb_history_proof_publish_pair_hook(
+    std::uint32_t space_id,
+    std::uint32_t rseg_page_no,
+    std::uint64_t rseg_page_lsn,
+    const void *rseg_page,
+    std::uint32_t rseg_page_size,
+    std::uint32_t undo_page_no,
+    std::uint64_t undo_page_lsn,
+    const void *undo_page,
+    std::uint32_t undo_page_size,
+    std::uint64_t visible_lsn,
+    void *ctx
+);
+bool ownerless_test_fails_native_support_page_publish(bool native_support_page);
 int append_ownerless_page_version(
     OwnerlessInnoDBLockHookContext *hook,
     std::uint32_t space_id,
@@ -12553,6 +12573,9 @@ int install_ownerless_innodb_lock_hooks(RuntimeState &runtime) {
         ownerless_innodb_page_publish_batch_begin_hook,
         ownerless_innodb_page_publish_batch_end_hook
     );
+    mylite_ownerless_innodb_lock_set_history_proof_publish_pair_hook(
+        ownerless_innodb_history_proof_publish_pair_hook
+    );
     mylite_ownerless_innodb_autoinc_set_hooks(
         ownerless_innodb_autoinc_read_hook,
         ownerless_innodb_autoinc_publish_hook,
@@ -16595,6 +16618,121 @@ int append_ownerless_page_version(
         append_options,
         out_record_offset
     );
+}
+
+int ownerless_innodb_history_proof_publish_pair_hook(
+    std::uint32_t space_id,
+    std::uint32_t rseg_page_no,
+    std::uint64_t rseg_page_lsn,
+    const void *rseg_page,
+    std::uint32_t rseg_page_size,
+    std::uint32_t undo_page_no,
+    std::uint64_t undo_page_lsn,
+    const void *undo_page,
+    std::uint32_t undo_page_size,
+    std::uint64_t visible_lsn,
+    void *ctx
+) {
+    OwnerlessDatabasePerfCountedScope perf_scope(
+        OWNERLESS_DATABASE_PERF_HISTORY_PROOF_PAIR_CALLS,
+        OWNERLESS_DATABASE_PERF_HISTORY_PROOF_PAIR_NS
+    );
+    if (ctx == nullptr || visible_lsn == 0U || rseg_page_no == undo_page_no ||
+        rseg_page_lsn == 0U || undo_page_lsn == 0U || rseg_page_size == 0U ||
+        undo_page_size == 0U) {
+        ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_HISTORY_PROOF_PAIR_FAILED, 1U);
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
+
+    auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
+    if (!hook->page_versioning_enabled || hook->page_log_fd < 0 || hook->page_log_offset == 0U ||
+        hook->owner_id == 0U || hook->owner_generation == 0U) {
+        ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_HISTORY_PROOF_PAIR_UNAVAILABLE, 1U);
+        return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+    }
+    if (ownerless_test_fault_is_configured()) {
+        ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_HISTORY_PROOF_PAIR_UNAVAILABLE, 1U);
+        return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+    }
+    if (ownerless_test_fails_native_support_page_publish(true)) {
+        ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_HISTORY_PROOF_PAIR_FAILED, 1U);
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
+    if (ownerless_page_log_append_batch.hook != nullptr &&
+        ownerless_page_log_append_batch.hook != hook) {
+        ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_HISTORY_PROOF_PAIR_UNAVAILABLE, 1U);
+        return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+    }
+
+    const bool had_batch = ownerless_page_log_append_batch.hook == hook ||
+                           ownerless_page_log_append_batch.session.active != 0;
+    if (!had_batch) {
+        ownerless_page_log_append_batch.hook = hook;
+    }
+
+    const auto finish_pair_batch = [hook, had_batch]() {
+        if (had_batch) {
+            return;
+        }
+        if (ownerless_page_log_append_batch.session.active == 0) {
+            ownerless_page_log_append_batch.hook = nullptr;
+            return;
+        }
+        if (!ownerless_statement_defers_page_log_append_batch) {
+            ownerless_page_log_append_batch_release_current();
+        }
+    };
+
+    std::uint64_t record_offset = 0U;
+    std::uint64_t stage_start_ns =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
+    int append_result = append_ownerless_page_version(
+        hook,
+        space_id,
+        rseg_page_no,
+        rseg_page_lsn,
+        visible_lsn,
+        rseg_page,
+        rseg_page_size,
+        0U,
+        true,
+        false,
+        MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_PROOF_ONLY |
+            MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_HISTORY_RSEG,
+        &record_offset
+    );
+    if (append_result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        append_result = append_ownerless_page_version(
+            hook,
+            space_id,
+            undo_page_no,
+            undo_page_lsn,
+            visible_lsn,
+            undo_page,
+            undo_page_size,
+            0U,
+            true,
+            false,
+            MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_PROOF_ONLY,
+            &record_offset
+        );
+    }
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_HISTORY_PROOF_PAIR_APPEND_NS,
+        stage_start_ns
+    );
+    finish_pair_batch();
+
+    if (append_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_HISTORY_PROOF_PAIR_FAILED, 1U);
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
+    ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_HISTORY_PROOF_PAIR_SUCCEEDED, 1U);
+    ownerless_database_perf_add(
+        OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_INDEX_SKIPPED_NATIVE_SUPPORT,
+        2U
+    );
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
 }
 
 bool publish_ownerless_snapshot_boundary_if_needed(

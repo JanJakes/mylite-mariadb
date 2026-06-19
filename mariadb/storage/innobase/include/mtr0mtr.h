@@ -781,6 +781,9 @@ private:
   /** Publish one ownerless page image after its commit LSN is installed. */
   void ownerless_page_write_publish(const buf_page_t &bpage) noexcept;
 
+  /** Publish rollback-segment and undo history proof records as one pair. */
+  bool ownerless_history_proof_publish_pair() noexcept;
+
   /** Publish the current committed image before transaction-deferred writes. */
   void ownerless_page_write_publish_boundary(const buf_page_t &bpage) noexcept;
 

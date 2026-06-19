@@ -363,6 +363,20 @@ stats-off 500-row sample reported ownerless autocommit at `1950.43 ops/s`
 versus `3560.43` ordinary ops/s, ownerless explicit transactions at
 `2692.65 ops/s` versus `4171.71` ordinary ops/s, and ownerless four-row bulk
 rows at `5328.72 rows/s`.
+Ownerless production/stats-off history-proof publication can now append those
+two existing proof-only records through one narrow paired native hook while the
+history MTR still owns both page latches. The durable WAL format is unchanged:
+the path still writes one rollback-segment proof-only record and one
+undo-header proof-only record, marks both proof flags only after both appends
+succeed, and falls back to the native exact history flush if the pair hook is
+unavailable or fails. Detailed page-publish attribution and unsafe ownerless
+fault builds deliberately stay on the previous per-page hook path so existing
+page-publish counters and crash-window tests remain exact. Focused SQL
+coverage proves pair calls succeed with zero exact history flush pages while
+the detailed-counter proof path remains covered separately; short production
+stats-off throughput samples remained noisy, so this is tracked as a bounded
+hook/append overhead reduction rather than a broad throughput-completion
+claim.
 Broader native commit, redo/checkpoint reconciliation, and DDL/file-lifecycle
 recovery work remain separate correctness and performance targets.
 Ownerless latest-only checkpoint publication now also coalesces repeated

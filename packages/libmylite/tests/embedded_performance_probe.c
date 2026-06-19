@@ -275,6 +275,12 @@ enum database_perf_stat_index {
     DATABASE_PERF_STAT_CHECKPOINT_UPDATE_DEFERRED_LATEST_COALESCED,
     DATABASE_PERF_STAT_PAGE_PUBLISH_PAGE_LOG_CHECKSUM_NS,
     DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_SKIPPED_NATIVE_SUPPORT,
+    DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_CALLS,
+    DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_NS,
+    DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_APPEND_NS,
+    DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_SUCCEEDED,
+    DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_UNAVAILABLE,
+    DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_FAILED,
     DATABASE_PERF_STAT_REFRESH_CALLS,
     DATABASE_PERF_STAT_REFRESH_TOTAL_NS,
     DATABASE_PERF_STAT_REFRESH_DICTIONARY_NS,
@@ -5360,6 +5366,36 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         database_perf[DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_SKIPPED_NATIVE_SUPPORT],
         insert_iterations
     );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_history_proof_pair_calls_per_insert",
+        database_perf[DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_CALLS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_history_proof_pair_succeeded_per_insert",
+        database_perf[DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_SUCCEEDED],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_history_proof_pair_unavailable_per_insert",
+        database_perf[DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_UNAVAILABLE],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_history_proof_pair_failed_per_insert",
+        database_perf[DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_FAILED],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_history_proof_pair_ms_per_insert",
+        database_perf[DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_NS],
+        insert_iterations
+    );
+    emit_summary_ms_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_history_proof_pair_append_ms_per_insert",
+        database_perf[DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_APPEND_NS],
+        insert_iterations
+    );
     emit_summary_ms_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_page_log_append_ms_per_insert",
         page_log_append[PAGE_LOG_APPEND_PERF_STAT_TOTAL_NS],
@@ -7267,6 +7303,36 @@ static void emit_database_perf_stats(const char *prefix) {
         "%s_page_publish_hook_index_skipped_native_support=%" PRIu64 "\n",
         prefix,
         values[DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_SKIPPED_NATIVE_SUPPORT]
+    );
+    printf(
+        "%s_history_proof_pair_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_CALLS]
+    );
+    printf(
+        "%s_history_proof_pair_total_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_NS] / 1000000.0
+    );
+    printf(
+        "%s_history_proof_pair_append_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_APPEND_NS] / 1000000.0
+    );
+    printf(
+        "%s_history_proof_pair_succeeded=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_SUCCEEDED]
+    );
+    printf(
+        "%s_history_proof_pair_unavailable=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_UNAVAILABLE]
+    );
+    printf(
+        "%s_history_proof_pair_failed=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_FAILED]
     );
     printf(
         "%s_pages_visible_hook_calls=%" PRIu64 "\n",

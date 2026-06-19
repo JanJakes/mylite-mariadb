@@ -253,6 +253,12 @@ enum ownerless_test_database_perf_stat_index {
     OWNERLESS_TEST_DATABASE_PERF_STAT_CHECKPOINT_UPDATE_DEFERRED_LATEST_COALESCED,
     OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_PUBLISH_PAGE_LOG_CHECKSUM_NS,
     OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_SKIPPED_NATIVE_SUPPORT,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_CALLS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_NS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_APPEND_NS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_SUCCEEDED,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_UNAVAILABLE,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_FAILED,
     OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT
 };
 
@@ -9676,7 +9682,9 @@ static void test_ownerless_single_owner_history_wal_proof(void) {
     char *database_path = path_join(root, "ownerless-single-owner-history-wal-proof.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     uint64_t deep_stats[OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT] = {0};
+    uint64_t pair_deep_stats[OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT] = {0};
     uint64_t database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT] = {0};
+    uint64_t pair_database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT] = {0};
     uint64_t page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT] = {0};
     mylite_db *db;
     char sql[256];
@@ -9838,15 +9846,82 @@ static void test_ownerless_single_owner_history_wal_proof(void) {
         page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_HISTORY_PROOF_UNDO_SAMPLES]
     );
 
+    mylite_ownerless_innodb_deep_set_perf_stats_enabled(1);
+    mylite_ownerless_database_set_perf_stats_enabled(1);
+    mylite_ownerless_innodb_deep_reset_perf_stats();
+    mylite_ownerless_database_reset_perf_stats();
+    for (unsigned id = 17U; id <= 24U; ++id) {
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "INSERT INTO app.ownerless_history_flush_proof "
+                "VALUES (%u, REPEAT('p', 4000))",
+                id
+            ) > 0
+        );
+        exec_ok(db, sql);
+    }
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_history_flush_proof") == 24U);
+    mylite_ownerless_innodb_deep_read_perf_stats(
+        pair_deep_stats,
+        OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT
+    );
+    mylite_ownerless_database_read_perf_stats(
+        pair_database_stats,
+        OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT
+    );
+    mylite_ownerless_database_set_perf_stats_enabled(0);
+    mylite_ownerless_innodb_deep_set_perf_stats_enabled(0);
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    assert(pair_database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_CALLS] == 0U);
+    assert(pair_database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_NS] == 0U);
+    assert(
+        pair_database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_APPEND_NS] == 0U
+    );
+    assert(
+        pair_database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_SUCCEEDED] == 0U
+    );
+    assert(pair_database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_FAILED] == 0U);
+    assert(
+        pair_database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_UNAVAILABLE] == 0U
+    );
+#else
+    assert(pair_database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_CALLS] > 0U);
+    assert(
+        pair_database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_CALLS] ==
+        pair_database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_SUCCEEDED]
+    );
+    assert(pair_database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_FAILED] == 0U);
+    assert(
+        pair_database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_UNAVAILABLE] == 0U
+    );
+    assert(
+        pair_database_stats
+            [OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_SKIPPED_NATIVE_SUPPORT] >=
+        pair_database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_SUCCEEDED] * 2U
+    );
+#endif
+    assert(
+        pair_deep_stats
+            [OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES] ==
+        0U
+    );
+    assert(
+        pair_deep_stats
+            [OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_PAGES] ==
+        0U
+    );
+
     assert(mylite_close(db) == MYLITE_OK);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
-    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_history_flush_proof") == 16U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_history_flush_proof") == 24U);
     assert(mylite_close(db) == MYLITE_OK);
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
-    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_history_flush_proof") == 16U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_history_flush_proof") == 24U);
     assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);
@@ -10091,6 +10166,25 @@ static void test_ownerless_single_owner_native_support_page_wal_elision(void) {
     assert(
         disabled_database_stats
             [OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_SKIPPED_NATIVE_SUPPORT] == 0U
+    );
+    assert(
+        disabled_database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_CALLS] == 0U
+    );
+    assert(disabled_database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_NS] == 0U);
+    assert(
+        disabled_database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_APPEND_NS] ==
+        0U
+    );
+    assert(
+        disabled_database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_SUCCEEDED] ==
+        0U
+    );
+    assert(
+        disabled_database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_UNAVAILABLE] ==
+        0U
+    );
+    assert(
+        disabled_database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_FAILED] == 0U
     );
     assert(disabled_page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_CANDIDATES] == 0U);
     assert(disabled_page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_PUBLISHED] == 0U);

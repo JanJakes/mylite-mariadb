@@ -187,6 +187,18 @@ typedef int (*mylite_ownerless_innodb_page_publish_callback)(
     uint32_t page_size,
     uint32_t publish_flags,
     void *context);
+typedef int (*mylite_ownerless_innodb_history_proof_publish_pair_callback)(
+    uint32_t space_id,
+    uint32_t rseg_page_no,
+    uint64_t rseg_page_lsn,
+    const void *rseg_page,
+    uint32_t rseg_page_size,
+    uint32_t undo_page_no,
+    uint64_t undo_page_lsn,
+    const void *undo_page,
+    uint32_t undo_page_size,
+    uint64_t visible_lsn,
+    void *context);
 typedef void (*mylite_ownerless_innodb_page_publish_batch_callback)(void *context);
 typedef int (*mylite_ownerless_innodb_page_read_callback)(
     uint32_t space_id,
@@ -255,6 +267,8 @@ void mylite_ownerless_innodb_lock_set_hooks(
 void mylite_ownerless_innodb_lock_set_page_publish_batch_hooks(
     mylite_ownerless_innodb_page_publish_batch_callback begin_hook,
     mylite_ownerless_innodb_page_publish_batch_callback end_hook);
+void mylite_ownerless_innodb_lock_set_history_proof_publish_pair_hook(
+    mylite_ownerless_innodb_history_proof_publish_pair_callback pair_hook);
 void mylite_ownerless_innodb_lock_reset_hooks(void);
 int mylite_ownerless_innodb_lock_has_hooks(void);
 void mylite_ownerless_innodb_set_checkpoint_suppression(int suppressed);
@@ -489,6 +503,17 @@ int mylite_ownerless_innodb_publish_page_version_with_flags(
     const void *page,
     uint32_t page_size,
     uint32_t publish_flags);
+int mylite_ownerless_innodb_publish_history_proof_pair(
+    uint32_t space_id,
+    uint32_t rseg_page_no,
+    uint64_t rseg_page_lsn,
+    const void *rseg_page,
+    uint32_t rseg_page_size,
+    uint32_t undo_page_no,
+    uint64_t undo_page_lsn,
+    const void *undo_page,
+    uint32_t undo_page_size,
+    uint64_t visible_lsn);
 void mylite_ownerless_innodb_begin_page_publish_batch(void);
 void mylite_ownerless_innodb_end_page_publish_batch(void);
 int mylite_ownerless_innodb_read_page_version(
