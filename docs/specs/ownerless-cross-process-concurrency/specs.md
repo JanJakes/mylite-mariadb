@@ -5904,11 +5904,22 @@ subsystems that this mode needs:
   from `60.789 ms` to `2.938 ms`, commit-log publish attribution from
   `61.565 ms` to `6.767 ms`, and ownerless 256-row bulk throughput from
   `12178.41` to `20008.38` rows/s while keeping visible-fast commit at
-  `1.000` per statement and conservative flush at `0.000`; the 257-row guard
-  shape still reported `2581` append-session begin/end calls, `2619` page-log
-  appends, and `2582` snapshot-boundary page publications for `10`
-  statements. Larger row lists, broad DML/DDL, and unbounded append-lock hold
-  times remain out of scope.
+  `1.000` per statement and conservative flush at `0.000`; before the 512-row
+  follow-up, the 257-row guard shape still reported `2581` append-session
+  begin/end calls, `2619` page-log appends, and `2582` snapshot-boundary page
+  publications for `10` statements. A bounded 512-row follow-up raises only the
+  explicit pure
+  row-list cap after the same full SQL-text proof: a reduced 512-row baseline
+  reported `5131` append-session begin/end calls, `5193` page-log appends,
+  `5144` snapshot-boundary page publications, zero deferred latest-checkpoint
+  coalesces, and `11181.55` ownerless rows/s for `10` statements; the
+  post-slice probe reported `10` append-session begin/end calls, `90` page-log
+  appends, zero snapshot-boundary page publications, `1024.000` deferred
+  latest-checkpoint coalesces per statement, and `25810.38` ownerless rows/s
+  while keeping visible-fast commit at `1.000` per statement and conservative
+  flush at `0.000`. The focused selector now proves the 512-row positive
+  boundary and the 513-row conservative boundary. Larger row lists, broad
+  DML/DDL, and unbounded append-lock hold times remain out of scope.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.

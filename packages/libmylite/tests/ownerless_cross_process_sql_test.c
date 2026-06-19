@@ -11301,7 +11301,7 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
 
     exec_ok(
         db,
-        "CREATE TABLE app.ownerless_two_hundred_fifty_six_row_insert_fast_path ("
+        "CREATE TABLE app.ownerless_five_hundred_twelve_row_insert_fast_path ("
         "id INT NOT NULL PRIMARY KEY, "
         "value VARCHAR(32) NOT NULL"
         ") ENGINE=InnoDB"
@@ -11315,8 +11315,8 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
 
     exec_ownerless_simple_multi_row_insert(
         db,
-        "ownerless_two_hundred_fifty_six_row_insert_fast_path",
-        256U
+        "ownerless_five_hundred_twelve_row_insert_fast_path",
+        512U
     );
 
     mylite_ownerless_innodb_read_commit_visibility_stats(
@@ -11385,19 +11385,19 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
     assert(
         query_unsigned(
             db,
-            "SELECT COUNT(*) FROM app.ownerless_two_hundred_fifty_six_row_insert_fast_path"
-        ) == 256U
+            "SELECT COUNT(*) FROM app.ownerless_five_hundred_twelve_row_insert_fast_path"
+        ) == 512U
     );
     assert(
         query_unsigned(
             db,
-            "SELECT SUM(id) FROM app.ownerless_two_hundred_fifty_six_row_insert_fast_path"
-        ) == 32896U
+            "SELECT SUM(id) FROM app.ownerless_five_hundred_twelve_row_insert_fast_path"
+        ) == 131328U
     );
 
     exec_ok(
         db,
-        "CREATE TABLE app.ownerless_two_hundred_fifty_seven_row_insert_fast_path ("
+        "CREATE TABLE app.ownerless_five_hundred_thirteen_row_insert_fast_path ("
         "id INT NOT NULL PRIMARY KEY, "
         "value VARCHAR(32) NOT NULL"
         ") ENGINE=InnoDB"
@@ -11411,8 +11411,8 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
 
     exec_ownerless_simple_multi_row_insert(
         db,
-        "ownerless_two_hundred_fifty_seven_row_insert_fast_path",
-        257U
+        "ownerless_five_hundred_thirteen_row_insert_fast_path",
+        513U
     );
 
     mylite_ownerless_innodb_read_commit_visibility_stats(
@@ -11461,14 +11461,14 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
     assert(
         query_unsigned(
             db,
-            "SELECT COUNT(*) FROM app.ownerless_two_hundred_fifty_seven_row_insert_fast_path"
-        ) == 257U
+            "SELECT COUNT(*) FROM app.ownerless_five_hundred_thirteen_row_insert_fast_path"
+        ) == 513U
     );
     assert(
         query_unsigned(
             db,
-            "SELECT SUM(id) FROM app.ownerless_two_hundred_fifty_seven_row_insert_fast_path"
-        ) == 33153U
+            "SELECT SUM(id) FROM app.ownerless_five_hundred_thirteen_row_insert_fast_path"
+        ) == 131841U
     );
 
     exec_ok(
