@@ -5022,13 +5022,17 @@ subsystems that this mode needs:
   production PHPUnit result. The same
   WordPress CI job disables the defensive static `wpdb` property scan and
   child-process profiling for process-isolated PHPUnit timing while still
-  closing the global `wpdb` and eagerly reconnecting after each child;
-  production `Tests_Formatting_Emoji` evidence on the measured host changed
-  from `41.816s` shell real with full static scanning to `31.599s` with static
-  scan disabled, and a same-session static-scan-disabled A/B measured
+  closing the global `wpdb` before each child. The remaining process-isolated
+  shards now use reconnect-disabled parent policy only after focused filter
+  evidence: production `Tests_Formatting_Emoji` evidence on the measured host
+  changed from `41.816s` shell real with full static scanning to `31.599s` with
+  static scan disabled, a same-session static-scan-disabled A/B measured
   `28.711s` shell real with child profiling disabled versus `30.354s` with
-  child profiling enabled, while a deferred reconnect prototype failed mixed
-  parent-side tests and remains rejected. The
+  child profiling enabled, and the former eager UI/filesystem filter later
+  passed `22` tests with `MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD=0`,
+  reporting `28.749s` PHPUnit time and `0.009 ms` parent reconnect per child
+  through the renamed workflow variable.
+  The
   production performance probe now classifies page-version publish volume by
   page type,
   splits ownerless mini-transaction publish and commit-log phase time, and
@@ -5115,7 +5119,7 @@ subsystems that this mode needs:
   lifecycle work rather than active reconnect or ordinary SQL throughput.
   The current CI production-build audit also requires the WordPress timing job
   to keep its Docker image, source fetch, PHP-extension build, dependency,
-  database-prep, perf-probe, and four test-only PHPUnit phases separate, and
+  database-prep, perf-probe, and split test-only PHPUnit phases separate, and
   rejects the old all-in-one harness phase for CI timing. The audit now checks
   the step bodies for embedded tests/probes, WordPress dependency/database/
   perf/PHPUnit phases, and clang tools, so those timing paths must retain their
@@ -5143,8 +5147,8 @@ subsystems that this mode needs:
   connect/close at `552.251 ms`, in-process connect/close at `382.206 ms`,
   active-runtime reconnect at `3.707 ms`, and `SELECT 1` at `410.02 ops/s`.
   This keeps the next optimization target on full embedded lifecycle cost and
-  process-isolated parent reconnect policy, not the steady active-runtime SQL
-  loop.
+  process-isolated child startup and any remaining parent reconnect policy, not
+  the steady active-runtime SQL loop.
   Stats-enabled
   ownerless autocommit probes now also emit per-insert summary keys for
   page-version volume, native-support page ratio, page-publish and page-log

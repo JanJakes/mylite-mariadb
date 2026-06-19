@@ -296,7 +296,7 @@ require_literal 'MYLITE_WORDPRESS_PHPUNIT_CHILD_RESTORE_BASELINE: "0"'
 require_literal 'MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL: "0"'
 require_literal "MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_FILTER:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_SKIP_INSTALL_FILTER:"
-require_literal "MYLITE_WORDPRESS_PHPUNIT_EAGER_RECONNECT_FILTER:"
+require_literal "MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_UI_FILTER:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER: '^(?!Tests_DB)"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE:"
@@ -317,7 +317,7 @@ require_literal "Run WordPress mysqli performance probe"
 require_literal "Run WordPress PHPUnit database suite (test only)"
 require_literal "Run WordPress PHPUnit process-isolated deferred-reconnect baseline-restored suite (test only)"
 require_literal "Run WordPress PHPUnit process-isolated deferred-reconnect skip-install suite (test only)"
-require_literal "Run WordPress PHPUnit process-isolated eager-reconnect suite (test only)"
+require_literal "Run WordPress PHPUnit process-isolated deferred-reconnect UI suite (test only)"
 require_literal "Run WordPress PHPUnit non-isolated REST suite (test only)"
 require_literal "Run WordPress PHPUnit non-isolated query/theme/block/token suite (test only)"
 require_literal "Run WordPress PHPUnit non-isolated remaining suite (test only)"
@@ -337,7 +337,7 @@ require_literal "MYLITE_WORDPRESS_TIMING_LABEL: perf-probe"
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-db"
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-deferred-reconnect-baseline-restored"
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-deferred-reconnect-skip-install"
-require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-eager-reconnect"
+require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-deferred-reconnect-ui"
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-non-isolated-rest"
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-non-isolated-query-theme-block-token"
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-non-isolated-remaining"
@@ -377,7 +377,7 @@ require_wordpress_timing_step_guards \
 require_wordpress_timing_step_guards \
   "Run WordPress PHPUnit process-isolated deferred-reconnect skip-install suite (test only)"
 require_wordpress_timing_step_guards \
-  "Run WordPress PHPUnit process-isolated eager-reconnect suite (test only)"
+  "Run WordPress PHPUnit process-isolated deferred-reconnect UI suite (test only)"
 require_wordpress_timing_step_guards "Run WordPress PHPUnit non-isolated REST suite (test only)"
 require_wordpress_timing_step_guards \
   "Run WordPress PHPUnit non-isolated query/theme/block/token suite (test only)"
@@ -387,7 +387,7 @@ for phpunit_step in \
   "Run WordPress PHPUnit database suite (test only)" \
   "Run WordPress PHPUnit process-isolated deferred-reconnect baseline-restored suite (test only)" \
   "Run WordPress PHPUnit process-isolated deferred-reconnect skip-install suite (test only)" \
-  "Run WordPress PHPUnit process-isolated eager-reconnect suite (test only)" \
+  "Run WordPress PHPUnit process-isolated deferred-reconnect UI suite (test only)" \
   "Run WordPress PHPUnit non-isolated REST suite (test only)" \
   "Run WordPress PHPUnit non-isolated query/theme/block/token suite (test only)" \
   "Run WordPress PHPUnit non-isolated remaining suite (test only)"
@@ -401,7 +401,7 @@ forbid_step_literal \
   "Run WordPress PHPUnit process-isolated deferred-reconnect skip-install suite (test only)" \
   'MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES: "1"'
 forbid_step_literal \
-  "Run WordPress PHPUnit process-isolated eager-reconnect suite (test only)" \
+  "Run WordPress PHPUnit process-isolated deferred-reconnect UI suite (test only)" \
   'MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES: "1"'
 require_step_literal \
   "Run WordPress PHPUnit process-isolated deferred-reconnect baseline-restored suite (test only)" \
@@ -410,7 +410,7 @@ require_step_literal \
   "Run WordPress PHPUnit process-isolated deferred-reconnect skip-install suite (test only)" \
   'MYLITE_WORDPRESS_PHPUNIT_CHILD_TIMING_SUMMARY: "1"'
 require_step_literal \
-  "Run WordPress PHPUnit process-isolated eager-reconnect suite (test only)" \
+  "Run WordPress PHPUnit process-isolated deferred-reconnect UI suite (test only)" \
   'MYLITE_WORDPRESS_PHPUNIT_CHILD_TIMING_SUMMARY: "1"'
 require_step_literal \
   "Run WordPress PHPUnit process-isolated deferred-reconnect baseline-restored suite (test only)" \
@@ -428,7 +428,10 @@ require_step_literal \
   "Run WordPress PHPUnit process-isolated deferred-reconnect skip-install suite (test only)" \
   'MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL: "1"'
 require_step_literal \
-  "Run WordPress PHPUnit process-isolated eager-reconnect suite (test only)" \
+  "Run WordPress PHPUnit process-isolated deferred-reconnect UI suite (test only)" \
+  'MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD: "0"'
+require_step_literal \
+  "Run WordPress PHPUnit process-isolated deferred-reconnect UI suite (test only)" \
   'MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL: "1"'
 forbid_step_literal \
   "Run WordPress PHPUnit database suite (test only)" \

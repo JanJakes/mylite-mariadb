@@ -226,6 +226,12 @@ MyLite baseline database directory, and then starts the PHPUnit child with
 `WP_TESTS_SKIP_INSTALL=1`. This keeps factory sequence state fresh for
 `Tests_Admin_ExportWp` and the process-isolated Sitemaps methods without
 running WordPress `install.php` in every child.
+The UI/filesystem process-isolated shard also runs with child install skip and
+now keeps `MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD=0`. A fresh
+production run of the former eager filter passed `22` tests with child timing
+summary enabled; the final rerun through the renamed workflow variable
+reported `28.749s` PHPUnit time, `38.197s` shell real time, `0.009 ms` parent
+reconnect per child, and `13.020 ms` parent lock-release per child.
 The default CI WordPress PHPUnit path also leaves harness-owned JUnit logging
 disabled so the split test-only step timings stay comparable to trunk; local
 diagnostic runs can still opt into slowest-class and slowest-method reporting
@@ -834,6 +840,9 @@ values are timing smoke evidence, not a replacement for CI-sized samples.
 - CI process-isolated WordPress PHPUnit logs include per-child prepared
   database baseline restore count, total time, and average time when the
   baseline-restored child mode is enabled.
+- CI's UI/filesystem process-isolated WordPress PHPUnit shard keeps parent
+  reconnect disabled after each child once the exact filter has passed with
+  child install skip.
 - CI's long non-isolated WordPress PHPUnit shard excludes the full
   `Tests_DB*` class family so database-prefix tests are not duplicated between
   the database and remaining test-only steps.

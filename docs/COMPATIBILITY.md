@@ -588,10 +588,11 @@ A focused production smoke with child profiling off reported `7`
 process-isolated children at `1506.584 ms` runtime, `257.155 ms` parent
 lock-release, and `114.787 ms` reconnect per child, keeping CI's per-process
 startup cost visible without changing the child body.
-The CI audit also forbids the deferred- and eager-reconnect process-isolated
-timing steps from overriding child-process profiling back on, so their
-published wall timings stay on the lean production path while per-child
-process timing remains visible in the shared timing summary.
+The CI audit also forbids process-isolated timing steps from overriding
+child-process profiling back on, and it requires the UI/filesystem shard to
+keep parent reconnect disabled after each child, so their published wall
+timings stay on the lean production path while per-child process timing remains
+visible in the shared timing summary.
 Ownerless statement startup now skips the heavier dictionary ready-wait path
 when the handle has already observed the same stable idle dictionary
 generation. Active dictionary DDL and changed generations still use the
@@ -1153,27 +1154,19 @@ retained/skipped static-property counts plus per-child lock-release, runtime,
 and reconnect averages on clean patched PHPUnit vendor trees. The WordPress CI
 job now runs process-isolated PHPUnit with the static `wpdb` scan and
 child-process profiling disabled while still closing the global WordPress
-`wpdb` and eagerly reconnecting after each child; on the measured production
-host, the `Tests_Formatting_Emoji` class changed from `41.816s` shell real with
-full static scanning to `31.599s` with static scan disabled, and a same-session
-A/B with static scan disabled measured `28.711s` shell real with child
-profiling disabled versus `30.354s` with child profiling enabled. A
-deferred-reconnect prototype failed later parent-side tests in that mixed class
-and remains rejected. The harness now exposes
+`wpdb` before each child; on the measured production host, the
+`Tests_Formatting_Emoji` class changed from `41.816s` shell real with full
+static scanning to `31.599s` with static scan disabled, and a same-session A/B
+with static scan disabled measured `28.711s` shell real with child profiling
+disabled versus `30.354s` with child profiling enabled. The harness exposes
 `MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD`, defaulting to eager
-reconnect, so CI can skip parent reconnect only for process-isolated class
-filters proven under production builds. A broad deferred trial over every
-isolated class except `Tests_Formatting_Emoji` failed with 170 parent-side
-`wpdb` connection errors in about `288.912s`, and focused trials kept
-`Tests_Admin_WpAutomaticUpdater`, `Tests_Admin_WpUpgrader`,
-`Tests_Filesystem_WpFilesystemDirect_Mkdir`, `Tests_Formatting_Emoji`, and
-`Tests_Theme` on eager reconnect. The CI deferred shard is limited to
-`Tests_Admin_ExportWp`, `Tests_Filesystem_WpFilesystemDirect_Chmod`,
-`Tests_Functions_WpUniquePrefixedId`, `Tests_oEmbed_HTTP_Headers`, and
-`Tests_Sitemaps_Sitemaps`; the final focused production trials for that set
-passed as `20` tests in `88.635s` and `30` tests in `114.782s`, the combined
-CI-shaped deferred shard passed `50` tests in `199.583s`, and the complementary
-eager reconnect shard passed `271` tests in `199.256s`. An earlier mysqli
+reconnect, so CI skips parent reconnect only for exact process-isolated filters
+proven under production builds. Earlier broad deferred trials failed
+parent-side `wpdb` reconnection checks, so CI first limited deferred reconnect
+to verified subsets; the current split keeps the factory-heavy deferred shard
+baseline-restored, the skip-safe deferred shard child-install-only, and the
+UI/filesystem shard reconnect-disabled after a fresh production run passed the
+same `22` tests with parent reconnect at `0.009 ms` per child. An earlier mysqli
 adapter slice kept a one-entry link-local prepared-statement cache for repeated
 exact result-producing direct `mysqli_query()` SQL after rows and metadata had
 been materialized into PHP result objects. The final CI-sized production WordPress
@@ -1264,7 +1257,7 @@ shards instead of broad mixed-class filters, while the two class-level
 `@runTestsInSeparateProcesses` files stay excluded from the non-isolated
 bucket. CI-shaped production verification on 2026-06-10 passed the exact
 deferred-reconnect shard as 31 tests in `198.815s` shell real, the exact
-eager-reconnect shard as 22 tests in `121.294s` shell real, and the
+then-eager-reconnect shard as 22 tests in `121.294s` shell real, and the
 non-isolated remaining shard as 28,687 tests in `2757.813s` shell real. This
 does not reduce the ordinary WordPress suite volume, but it keeps
 process-isolated timing from being inflated by unrelated non-isolated methods
@@ -1287,13 +1280,19 @@ focused production profiled emoji method reported child-only mysqli totals of
 `1.685s` open, `1.338s` close, and `1.484s` query work inside `6.050s` of
 child script runtime, keeping the next optimization target on child
 open/close/query execution rather than parent `proc_open()` overhead. The
-eager process-isolated CI shard now sets
+UI/filesystem process-isolated CI shard now sets
 `MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL=1`, which maps to WordPress'
-`WP_TESTS_SKIP_INSTALL=1` only inside PHPUnit children; focused emoji coverage
-dropped child script time to `1.776s`, and the full eager filter passed `22`
-tests in `56.294s` reported time. Direct child skip-install remains unsafe for
-factory-heavy deferred tests: on 2026-06-18, `Tests_Admin_ExportWp` and the two
-process-isolated `Tests_Sitemaps_Sitemaps` methods both reproduced the
+`WP_TESTS_SKIP_INSTALL=1` only inside PHPUnit children, and the verified
+production CI path now also sets
+`MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD=0` for that shard. Focused
+emoji coverage dropped child script time to `1.776s`; the full filter first
+passed `22` tests in `56.294s` reported time with eager parent reconnect, then
+passed the same `22` tests through the renamed reconnect-disabled shard in
+`28.749s` reported time and `38.197s` shell real, with parent reconnect at
+`0.009 ms` per child and lock release at `13.020 ms` per child. Direct child
+skip-install remains unsafe
+for factory-heavy deferred tests: on 2026-06-18, `Tests_Admin_ExportWp` and the
+two process-isolated `Tests_Sitemaps_Sitemaps` methods both reproduced the
 WordPress factory data-shape failure where a `WP_Error` object reaches
 `wpdb::prepare()`. The harness therefore adds
 `MYLITE_WORDPRESS_PHPUNIT_CHILD_RESTORE_BASELINE=1` for that shard. With the
@@ -1303,8 +1302,8 @@ directory before each child and then runs the child with
 tests in `46.688s` shell real, with `13` baseline restores totaling `2.936861s`
 (`225.912 ms` per child), compared with the previous install-required local
 sample at `110.170s` shell real. CI uses that baseline-restored deferred shard
-while keeping the already-safe deferred skip-install and eager skip-install
-shards unchanged.
+while keeping the already-safe deferred skip-install and UI/filesystem
+skip-install shards on reconnect-disabled paths.
 The long non-isolated shard now also excludes the whole `Tests_DB*` class
 family with a leading `^(?!Tests_DB)` negative lookahead, matching the
 dedicated `^Tests_DB` database shard and preventing database-prefix tests such
