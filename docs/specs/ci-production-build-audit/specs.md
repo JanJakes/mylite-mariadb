@@ -52,6 +52,10 @@ Add `tools/check-ci-production-builds`, a small static workflow audit that:
 - requires the WordPress PHPUnit Docker-image, fetch, PHP-extension build,
   dependency, database-prep, perf-probe, and test-only suite steps to remain
   separate visible CI phases;
+- requires the separate `phpunit-db-profile` diagnostic shard to keep the same
+  production build guards and `^Tests_DB` filter as the normal database shard,
+  while also requiring the normal database timing shard to keep mysqli
+  profiling disabled;
 - rejects the WordPress harness `all` phase and the old single
   `Run WordPress PHPUnit suite` step name in CI timing paths;
 - rejects `ctest --parallel N` workflow invocations so CI does not run

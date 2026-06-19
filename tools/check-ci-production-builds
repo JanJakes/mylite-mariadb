@@ -318,6 +318,7 @@ require_literal "Install WordPress PHPUnit dependencies"
 require_literal "Prepare WordPress PHPUnit database"
 require_literal "Run WordPress mysqli performance probe"
 require_literal "Run WordPress PHPUnit database suite (test only)"
+require_literal "Run WordPress PHPUnit database profile probe (diagnostic)"
 require_literal "Run WordPress PHPUnit process-isolated deferred-reconnect baseline-restored suite (test only)"
 require_literal "Run WordPress PHPUnit process-isolated deferred-reconnect skip-install suite (test only)"
 require_literal "Run WordPress PHPUnit process-isolated deferred-reconnect UI suite (test only)"
@@ -341,6 +342,7 @@ require_literal "MYLITE_WORDPRESS_TIMING_LABEL: prepare-db"
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: perf-probe"
 require_literal 'MYLITE_WORDPRESS_PERF_PROFILE_CONNECT_PROCESSES: "1"'
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-db"
+require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-db-profile"
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-deferred-reconnect-baseline-restored"
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-deferred-reconnect-skip-install"
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-deferred-reconnect-ui"
@@ -348,8 +350,8 @@ require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-non-isolated-rest"
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-non-isolated-query-theme-block-token"
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-non-isolated-remaining"
 require_literal 'cat "${summary}" >> "${GITHUB_STEP_SUMMARY}"'
-require_literal_count_at_least "MYLITE_WORDPRESS_PHASE: phpunit" 7
-require_literal_count_at_least 'MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"' 10
+require_literal_count_at_least "MYLITE_WORDPRESS_PHASE: phpunit" 8
+require_literal_count_at_least 'MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"' 11
 
 require_literal "Embedded ownerless SQL weighted shards"
 require_literal "ctest --preset php-embedded-prod"
@@ -417,6 +419,7 @@ require_wordpress_timing_step_guards "Install WordPress PHPUnit dependencies"
 require_wordpress_timing_step_guards "Prepare WordPress PHPUnit database"
 require_wordpress_timing_step_guards "Run WordPress mysqli performance probe"
 require_wordpress_timing_step_guards "Run WordPress PHPUnit database suite (test only)"
+require_wordpress_timing_step_guards "Run WordPress PHPUnit database profile probe (diagnostic)"
 require_wordpress_timing_step_guards \
   "Run WordPress PHPUnit process-isolated deferred-reconnect baseline-restored suite (test only)"
 require_wordpress_timing_step_guards \
@@ -430,6 +433,7 @@ require_wordpress_timing_step_guards "Run WordPress PHPUnit non-isolated remaini
 require_step_literal "Prepare WordPress PHPUnit database" 'MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL: "1"'
 for phpunit_step in \
   "Run WordPress PHPUnit database suite (test only)" \
+  "Run WordPress PHPUnit database profile probe (diagnostic)" \
   "Run WordPress PHPUnit process-isolated deferred-reconnect baseline-restored suite (test only)" \
   "Run WordPress PHPUnit process-isolated deferred-reconnect skip-install suite (test only)" \
   "Run WordPress PHPUnit process-isolated deferred-reconnect UI suite (test only)" \
@@ -481,6 +485,18 @@ require_step_literal \
 forbid_step_literal \
   "Run WordPress PHPUnit database suite (test only)" \
   'MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL: "1"'
+forbid_step_literal \
+  "Run WordPress PHPUnit database profile probe (diagnostic)" \
+  'MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL: "1"'
+require_step_literal \
+  "Run WordPress PHPUnit database profile probe (diagnostic)" \
+  'MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI: "1"'
+require_step_literal \
+  "Run WordPress PHPUnit database profile probe (diagnostic)" \
+  "tools/wordpress-phpunit-mysqli-mylite --filter '^Tests_DB'"
+forbid_step_literal \
+  "Run WordPress PHPUnit database suite (test only)" \
+  'MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI: "1"'
 forbid_step_literal \
   "Run WordPress PHPUnit non-isolated REST suite (test only)" \
   'MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL: "1"'

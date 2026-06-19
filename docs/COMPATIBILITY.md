@@ -680,6 +680,18 @@ remained much larger. The current WordPress performance target is therefore
 MariaDB/libmylite query execution and prepared-statement lifecycle cost, not
 PHP fetch-object conversion. Other WordPress CI timing steps keep that profile
 disabled unless a diagnostic run explicitly opts in.
+CI now includes that opt-in path as a separate `phpunit-db-profile` diagnostic
+step after the normal unprofiled `phpunit-db` timing shard. The diagnostic step
+reruns the bounded `^Tests_DB` filter with the same production build guards and
+`MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI=1`, so the uploaded WordPress timing
+summary has default profile attribution rows without adding profiler overhead
+to the normal database, process-isolated, or non-isolated timing shards. The
+current local production diagnostic sample passed 651 tests with 3 skips and
+reported `query_ms_total=5290.576`, `query_verb_select_ms_total=2589.649`,
+`query_verb_transaction_ms_total=1584.162`, and
+`libmylite_exec_result_native_control_ms_total=1572.866`, while the previously
+documented transaction-end helper remains rejected because it regressed the
+same focused profile.
 The same opt-in profile now also emits `libmylite_exec_result_*` rows that
 separate direct text execution into native `mysql_query()`, affected-row and
 insert-id capture, result draining, result/no-result classification,

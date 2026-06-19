@@ -257,6 +257,20 @@ when no explicit logging argument is present. That keeps WordPress'
 `phpunit.xml.dist` JUnit logger out of the default timing path; diagnostic
 JUnit runs must set `MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING=0`.
 
+The WordPress job now adds a separate production-guarded
+`phpunit-db-profile` diagnostic phase after the normal unprofiled `phpunit-db`
+timing shard. It repeats only the bounded `^Tests_DB` filter with
+`MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI=1`, leaving the normal database,
+process-isolated, and non-isolated timings unprofiled. A current focused local
+production sample without keepalive passed 651 tests with 3 skips and reported
+`query_ms_total=5290.576`, `query_verb_select_ms_total=2589.649`,
+`query_verb_transaction_ms_total=1584.162`,
+`query_verb_ddl_ms_total=573.732`, and
+`libmylite_exec_result_native_control_ms_total=1572.866`. That preserves the
+prior conclusion from `libmylite-transaction-end-profile`: exact transaction
+end parser bypass is still rejected until a future implementation beats the
+documented focused profile and micro-benchmark controls.
+
 The prepared DML reset fast path removes the measured server-side
 `mysql_stmt_reset()` cost after successful no-result statements. MariaDB's
 result-bearing, failed, and metadata-retaining statement reset behavior remains

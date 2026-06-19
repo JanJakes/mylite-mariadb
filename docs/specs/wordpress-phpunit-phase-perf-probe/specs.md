@@ -108,10 +108,14 @@ database preparation, performance probe, and PHPUnit suite wall time as
 separate GitHub Actions steps. The added CI `perf-probe` uses three process and
 connect iterations, 1000 SQL iterations, and 200 insert iterations to keep the
 step bounded. The autocommit insert loop reuses that same insert iteration
-control for prepared and direct-string insert timings. CI now enables
-harness-owned JUnit logging for test-only phases so the slowest classes and
-methods are printed in production timing logs. The harness default remains `0`
-for local callers that do not request the report.
+control for prepared and direct-string insert timings. CI now keeps
+harness-owned JUnit logging disabled on the normal test-only timing phases so
+their wall-clock summaries stay comparable to trunk; diagnostic callers can
+still enable the slowest-class and slowest-method report explicitly with
+`MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1` and
+`MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING=0`. The separate
+`phpunit-db-profile` diagnostic phase uses mysqli profiling, not JUnit logging,
+to publish default query-attribution rows for the bounded database shard.
 
 Local default behavior is preserved: running `tools/wordpress-phpunit-mysqli-mylite`
 without `MYLITE_WORDPRESS_PHASE` still executes the full end-to-end harness.
@@ -211,9 +215,10 @@ metric:
   build, WordPress/PHPUnit dependency installation, database preparation,
   WordPress mysqli performance probing, and the PHPUnit suite.
 - The `phpunit` phase remains separated from builds and dependency setup.
-- CI's WordPress PHPUnit test-only phases enable optional JUnit logging for
-  production timing visibility; local callers can still opt in with
-  `MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1` when they need the XML report.
+- CI's normal WordPress PHPUnit test-only timing phases keep optional JUnit
+  logging disabled; local and diagnostic callers can still opt in with
+  `MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1` and
+  `MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING=0` when they need the XML report.
 - Existing `all` and `setup` phase behavior remains available for local
   callers.
 - The WordPress `perf-probe` prints parseable process startup, extension-load
