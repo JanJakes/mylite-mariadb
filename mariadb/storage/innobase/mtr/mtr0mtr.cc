@@ -2215,6 +2215,9 @@ void mtr_t::release_unlogged()
   const bool ownerless_hooks= ownerless_hooks_enabled();
   const bool ownerless_uses_transaction_release=
       ownerless_hooks && ownerless_page_write_uses_transaction_release();
+  bool ownerless_page_leave=
+      ownerless_hooks && m_ownerless_page_write_mtr_pages != nullptr &&
+      !m_ownerless_page_write_mtr_pages->empty();
   for (auto it= m_memo.rbegin(); it != m_memo.rend(); it++)
   {
     mtr_memo_slot_t &slot= *it;
@@ -2250,8 +2253,15 @@ void mtr_t::release_unlogged()
         insert_imported(block);
       }
 
-      if (UNIV_UNLIKELY(ownerless_hooks))
+      if (UNIV_UNLIKELY(ownerless_page_leave &&
+                        (slot.type & (MTR_MEMO_PAGE_X_FIX |
+                                      MTR_MEMO_PAGE_SX_FIX)) &&
+                        ownerless_page_write_has_mtr_page(block->page)))
+      {
         ownerless_page_write_leave(slot);
+        ownerless_page_leave= m_ownerless_page_write_mtr_pages != nullptr &&
+                              !m_ownerless_page_write_mtr_pages->empty();
+      }
       switch (slot.type) {
       case MTR_MEMO_PAGE_S_FIX:
         block->page.lock.s_unlock();
@@ -2274,10 +2284,23 @@ void mtr_t::release_unlogged()
 void mtr_t::release()
 {
   const bool ownerless_hooks= ownerless_hooks_enabled();
+  bool ownerless_page_leave=
+      ownerless_hooks && m_ownerless_page_write_mtr_pages != nullptr &&
+      !m_ownerless_page_write_mtr_pages->empty();
   for (auto it= m_memo.rbegin(); it != m_memo.rend(); it++)
   {
-    if (UNIV_UNLIKELY(ownerless_hooks))
-      ownerless_page_write_leave(*it);
+    if (UNIV_UNLIKELY(ownerless_page_leave &&
+                      (it->type & (MTR_MEMO_PAGE_X_FIX |
+                                   MTR_MEMO_PAGE_SX_FIX))))
+    {
+      const buf_page_t *bpage= static_cast<const buf_page_t*>(it->object);
+      if (ownerless_page_write_has_mtr_page(*bpage))
+      {
+        ownerless_page_write_leave(*it);
+        ownerless_page_leave= m_ownerless_page_write_mtr_pages != nullptr &&
+                              !m_ownerless_page_write_mtr_pages->empty();
+      }
+    }
     it->release();
     if (UNIV_UNLIKELY(ownerless_hooks))
       ownerless_space_write_leave(*it);

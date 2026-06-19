@@ -5790,6 +5790,17 @@ subsystems that this mode needs:
   page memo slots no longer enter `ownerless_page_write_leave()` only to
   return before release; member pages still use the existing helper and release
   order.
+  The release-memo membership precheck then applies the same non-empty-vector
+  and page-membership guard to generic `mtr_t::release()` and
+  `release_unlogged()` ownerless page-write leave calls. The reduced 500-row
+  four-row-bulk production probe preserved page-version, native-support,
+  page-log append, and commit-visibility counts while moving bulk leave calls
+  from `1485` to `1458`, leave total from `2.101 ms` to `1.989 ms`,
+  and release time from `1.854 ms` to `1.685 ms`; release-memo,
+  no-dirty-loop, page-log append, and throughput timings remained noisy across
+  short final probes. This is a small release-path cleanup and still leaves
+  history/native proof volume and redo/checkpoint reconciliation as the larger
+  write-throughput targets.
   Ownerless page-write publication now snapshots the page-write perf-enabled
   flag once per publish call and uses that snapshot for publish-call,
   publish-total, subphase, and scratch-buffer reuse counters. This removes
