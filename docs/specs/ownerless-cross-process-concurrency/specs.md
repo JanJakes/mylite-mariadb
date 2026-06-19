@@ -5730,6 +5730,18 @@ subsystems that this mode needs:
   counts while reducing the one-row standalone-size probe time in the first
   post-slice sample; bulk timing remained noisy and is not treated as a
   material throughput improvement.
+  The delta exact negative-cache slice then records exact fallback standalone
+  rejections in the volatile delta-base slot. A later append with the same base
+  slot skips the exact standalone-size probe only when the new fast decision is
+  also a standalone-size rejection; fast-limit misses still reach exact
+  fallback because existing primitive coverage proves they can be accepted by
+  the exact comparison. Primitive coverage proves the second repeated
+  rejection stores standalone bytes, skips the probe, and replays the current
+  page byte-identically. A reduced 120-row production sample reported one
+  skipped exact standalone probe in both the single-row autocommit and
+  four-row bulk shapes, leaving the larger ownerless write target on native
+  page publication, history/native durability proof, and redo/checkpoint
+  reconciliation.
   The page-log metadata flag coalescing slice then added a single helper that
   reads one page-log record header and returns the metadata bits needed by
   native checkpoint proof collection. The proof collector now tests

@@ -127,6 +127,7 @@ constexpr std::size_t k_index_delta_base_slot_count = 1024;
 constexpr std::size_t k_index_delta_base_probe_limit = 8;
 constexpr std::size_t k_index_delta_base_record_offset_size = sizeof(std::uint64_t);
 constexpr std::uint32_t k_index_delta_base_min_standalone_observations = 1;
+constexpr std::uint32_t k_index_delta_base_exact_standalone_rejection_skip_threshold = 1;
 constexpr std::uint32_t k_index_delta_base_max_delta_records = 32;
 constexpr std::uint64_t k_index_delta_fast_payload_size_limit = 2048;
 constexpr off_t k_append_lock_start = 0;
@@ -187,6 +188,7 @@ struct IndexPageDeltaBaseSlot {
     std::uint64_t record_offset = 0;
     std::uint64_t standalone_payload_size = 0;
     std::uint32_t standalone_observations = 0;
+    std::uint32_t exact_standalone_rejections = 0;
     std::uint32_t delta_records_since_base = 0;
     std::shared_ptr<const std::vector<unsigned char>> page;
 };
@@ -196,6 +198,7 @@ struct IndexPageDeltaBaseSnapshot {
     std::uint32_t delta_flag = 0;
     std::uint64_t record_offset = 0;
     std::uint64_t standalone_payload_size = 0;
+    std::uint32_t exact_standalone_rejections = 0;
     bool has_slot_index = false;
     std::size_t slot_index = 0;
     std::shared_ptr<const std::vector<unsigned char>> page;
@@ -315,6 +318,8 @@ enum PageLogAppendPerfStatIndex : std::size_t {
     PAGE_LOG_APPEND_PERF_DELTA_FAST_REJECTED_BUILD_FAILURES,
     PAGE_LOG_APPEND_PERF_DELTA_EXACT_REJECTED_STANDALONE_RECORDS,
     PAGE_LOG_APPEND_PERF_DELTA_EXACT_REJECTED_STANDALONE_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_DELTA_EXACT_SKIPPED_STANDALONE_RECORDS,
+    PAGE_LOG_APPEND_PERF_DELTA_EXACT_SKIPPED_STANDALONE_PAYLOAD_BYTES,
     PAGE_LOG_APPEND_PERF_DELTA_EXACT_REJECTED_BUILD_FAILURES,
     PAGE_LOG_APPEND_PERF_DELTA_EXACT_REUSED_FAST_PAYLOAD_RECORDS,
     PAGE_LOG_APPEND_PERF_DELTA_EXACT_REUSED_FAST_PAYLOAD_BYTES,
@@ -846,6 +851,7 @@ void note_index_delta_base_after_successful_append(
     std::uint32_t delta_flag,
     bool has_preferred_slot_index,
     std::size_t preferred_slot_index,
+    bool exact_delta_rejected_standalone,
     bool append_stats_enabled
 );
 std::uint64_t index_delta_base_fingerprint(
@@ -3018,6 +3024,7 @@ int append_record_at_locked(
         &page_delta_flag
     );
     IndexPageDeltaBaseSnapshot page_delta_snapshot;
+    bool exact_delta_rejected_standalone = false;
     try {
         const std::uint64_t stage_start_ns =
             append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
@@ -3085,7 +3092,27 @@ int append_record_at_locked(
             const bool exact_delta_build_failed =
                 has_page_delta_snapshot &&
                 fast_delta_decision == PageDeltaEncodeDecision::BuildFailed;
-            if (has_page_delta_snapshot && !rejected_delta_payload.empty()) {
+            const bool skip_exact_standalone_probe =
+                has_page_delta_snapshot &&
+                fast_delta_decision == PageDeltaEncodeDecision::Standalone &&
+                page_delta_snapshot.exact_standalone_rejections >=
+                    k_index_delta_base_exact_standalone_rejection_skip_threshold;
+            if (skip_exact_standalone_probe && !rejected_delta_payload.empty()) {
+                exact_delta_payload_size = rejected_delta_payload.size();
+                exact_delta_decision = PageDeltaEncodeDecision::Standalone;
+                exact_delta_rejected_standalone = true;
+                page_log_append_perf_add_if_enabled(
+                    append_stats_enabled,
+                    PAGE_LOG_APPEND_PERF_DELTA_EXACT_SKIPPED_STANDALONE_RECORDS,
+                    1U
+                );
+                page_log_append_perf_add_if_enabled(
+                    append_stats_enabled,
+                    PAGE_LOG_APPEND_PERF_DELTA_EXACT_SKIPPED_STANDALONE_PAYLOAD_BYTES,
+                    exact_delta_payload_size
+                );
+                rejected_delta_payload.clear();
+            } else if (has_page_delta_snapshot && !rejected_delta_payload.empty()) {
                 const std::uint64_t size_probe_start_ns =
                     append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
                 page_log_append_perf_add_if_enabled(
@@ -3133,6 +3160,7 @@ int append_record_at_locked(
                     );
                 } else {
                     exact_delta_decision = PageDeltaEncodeDecision::Standalone;
+                    exact_delta_rejected_standalone = true;
                     rejected_delta_payload.clear();
                 }
             } else if (exact_delta_build_failed) {
@@ -3166,6 +3194,10 @@ int append_record_at_locked(
                         &exact_delta_payload_size,
                         nullptr
                     );
+                    if (!exact_page_delta_encoded &&
+                        exact_delta_decision == PageDeltaEncodeDecision::Standalone) {
+                        exact_delta_rejected_standalone = true;
+                    }
                 }
                 page_log_append_perf_add_elapsed_if_enabled(
                     append_stats_enabled,
@@ -3313,6 +3345,7 @@ int append_record_at_locked(
             page_delta_flag,
             page_delta_snapshot.has_slot_index,
             page_delta_snapshot.slot_index,
+            exact_delta_rejected_standalone,
             append_stats_enabled
         );
     }
@@ -6081,6 +6114,7 @@ bool index_delta_base_snapshot(
     out_snapshot->delta_flag = 0U;
     out_snapshot->record_offset = 0U;
     out_snapshot->standalone_payload_size = 0U;
+    out_snapshot->exact_standalone_rejections = 0U;
     out_snapshot->has_slot_index = false;
     out_snapshot->slot_index = 0U;
     out_snapshot->page.reset();
@@ -6123,6 +6157,7 @@ bool index_delta_base_snapshot(
             out_snapshot->delta_flag = delta_flag;
             out_snapshot->record_offset = slot.record_offset;
             out_snapshot->standalone_payload_size = slot.standalone_payload_size;
+            out_snapshot->exact_standalone_rejections = slot.exact_standalone_rejections;
             out_snapshot->has_slot_index = true;
             out_snapshot->slot_index = slot_index;
             out_snapshot->found = true;
@@ -6148,6 +6183,7 @@ void note_index_delta_base_after_successful_append(
     std::uint32_t delta_flag,
     bool has_preferred_slot_index,
     std::size_t preferred_slot_index,
+    bool exact_delta_rejected_standalone,
     bool append_stats_enabled
 ) {
     if (delta_flag != k_record_flag_index_delta_payload &&
@@ -6177,6 +6213,7 @@ void note_index_delta_base_after_successful_append(
                         ++slot.standalone_observations;
                     }
                 }
+                slot.exact_standalone_rejections = 0U;
                 ++slot.delta_records_since_base;
                 return;
             }
@@ -6207,6 +6244,7 @@ void note_index_delta_base_after_successful_append(
                         ++slot.standalone_observations;
                     }
                 }
+                slot.exact_standalone_rejections = 0U;
                 ++slot.delta_records_since_base;
                 return;
             }
@@ -6224,6 +6262,8 @@ void note_index_delta_base_after_successful_append(
     const auto note_standalone_base = [&](IndexPageDeltaBaseSlot &slot, bool matching_slot) {
         const bool matching_page_size = matching_slot && slot.page_size == page_size &&
                                         slot.page != nullptr && slot.page->size() == page_size;
+        const std::uint32_t previous_exact_standalone_rejections =
+            matching_page_size ? slot.exact_standalone_rejections : 0U;
         slot.log_device = log_device;
         slot.log_inode = log_inode;
         slot.log_offset = log_offset;
@@ -6238,6 +6278,14 @@ void note_index_delta_base_after_successful_append(
             slot.standalone_observations = 1U;
         } else if (slot.standalone_observations < std::numeric_limits<std::uint32_t>::max()) {
             ++slot.standalone_observations;
+        }
+        if (exact_delta_rejected_standalone) {
+            slot.exact_standalone_rejections =
+                previous_exact_standalone_rejections < std::numeric_limits<std::uint32_t>::max()
+                    ? previous_exact_standalone_rejections + 1U
+                    : previous_exact_standalone_rejections;
+        } else {
+            slot.exact_standalone_rejections = 0U;
         }
         slot.delta_records_since_base = 0U;
         try {
@@ -6267,6 +6315,7 @@ void note_index_delta_base_after_successful_append(
             slot.record_offset = 0U;
             slot.standalone_payload_size = 0U;
             slot.standalone_observations = 0U;
+            slot.exact_standalone_rejections = 0U;
             slot.delta_records_since_base = 0U;
             slot.page.reset();
             return false;
@@ -6345,6 +6394,7 @@ void invalidate_index_delta_bases_for_log(
             slot.record_offset = 0U;
             slot.standalone_payload_size = 0U;
             slot.standalone_observations = 0U;
+            slot.exact_standalone_rejections = 0U;
             slot.delta_records_since_base = 0U;
             slot.page.reset();
         }

@@ -703,6 +703,8 @@ enum page_log_append_perf_stat_index {
     PAGE_LOG_APPEND_PERF_STAT_DELTA_FAST_REJECTED_BUILD_FAILURES,
     PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_REJECTED_STANDALONE_RECORDS,
     PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_REJECTED_STANDALONE_PAYLOAD_BYTES,
+    PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_SKIPPED_STANDALONE_RECORDS,
+    PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_SKIPPED_STANDALONE_PAYLOAD_BYTES,
     PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_REJECTED_BUILD_FAILURES,
     PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_REUSED_FAST_PAYLOAD_RECORDS,
     PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_REUSED_FAST_PAYLOAD_BYTES,
@@ -5571,6 +5573,18 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         "mylite_perf_summary_ownerless_autocommit_page_log_delta_exact_rejected_standalone_payload_"
         "bytes_per_insert",
         page_log_append[PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_REJECTED_STANDALONE_PAYLOAD_BYTES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_delta_exact_skipped_standalone_records_"
+        "per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_SKIPPED_STANDALONE_RECORDS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_delta_exact_skipped_standalone_payload_"
+        "bytes_per_insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_SKIPPED_STANDALONE_PAYLOAD_BYTES],
         insert_iterations
     );
     emit_summary_count_per_iteration(
@@ -11255,6 +11269,16 @@ static void emit_page_log_append_perf_stats(const char *prefix) {
         prefix,
         "delta_exact_rejected_standalone_payload",
         values[PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_REJECTED_STANDALONE_PAYLOAD_BYTES]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "delta_exact_skipped_standalone_records",
+        values[PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_SKIPPED_STANDALONE_RECORDS]
+    );
+    emit_page_log_append_perf_bytes(
+        prefix,
+        "delta_exact_skipped_standalone_payload",
+        values[PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_SKIPPED_STANDALONE_PAYLOAD_BYTES]
     );
     emit_page_log_append_perf_count(
         prefix,
