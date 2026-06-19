@@ -661,7 +661,11 @@ A focused production smoke with child profiling off reported `7`
 process-isolated children at `988.095 ms` runtime, `861.665 ms` child-script
 time, `126.430 ms` outer-minus-script time, `6.925 ms` parent lock-release,
 and `0.006 ms` reconnect per child, keeping CI's per-process startup and child
-script cost visible without enabling the heavier diagnostic profile.
+script cost visible without enabling the heavier diagnostic profile. The
+WordPress timing rollup now also aggregates those process-isolated child
+counts, runtime, script, outer-minus-script, lock-release, reconnect, and
+baseline-restore rows, recomputing per-child averages from summed seconds and
+counts so CI summaries do not require manual per-shard arithmetic.
 The CI audit also forbids process-isolated timing steps from overriding
 child-process profiling back on, and it requires the UI/filesystem shard to
 keep parent reconnect disabled after each child, so their published wall

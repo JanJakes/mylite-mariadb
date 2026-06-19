@@ -40,6 +40,18 @@ cat > "${summary}" <<'SUMMARY'
 | phpunit-deferred-reconnect-baseline-restored | wordpress_phpunit_shell_real_seconds | 26.917 |
 | phpunit-deferred-reconnect-baseline-restored | wordpress_phpunit_reported_seconds | 23.823 |
 | phpunit-deferred-reconnect-baseline-restored | wordpress_phpunit_seconds | 27 |
+| phpunit-deferred-reconnect-baseline-restored | wordpress_phpunit_child_process_count | 7 |
+| phpunit-deferred-reconnect-baseline-restored | wordpress_phpunit_child_process_closed_wpdbs | 1 |
+| phpunit-deferred-reconnect-baseline-restored | wordpress_phpunit_child_process_static_properties | 0 |
+| phpunit-deferred-reconnect-baseline-restored | wordpress_phpunit_child_process_skipped_static_properties | 0 |
+| phpunit-deferred-reconnect-baseline-restored | wordpress_phpunit_child_process_baseline_restore_count | 7 |
+| phpunit-deferred-reconnect-baseline-restored | wordpress_phpunit_child_process_baseline_restore_seconds | 1.400000 |
+| phpunit-deferred-reconnect-baseline-restored | wordpress_phpunit_child_process_lock_release_seconds | 0.070000 |
+| phpunit-deferred-reconnect-baseline-restored | wordpress_phpunit_child_process_runtime_seconds | 7.000000 |
+| phpunit-deferred-reconnect-baseline-restored | wordpress_phpunit_child_process_reconnect_seconds | 0.014000 |
+| phpunit-deferred-reconnect-baseline-restored | wordpress_phpunit_child_script_count | 7 |
+| phpunit-deferred-reconnect-baseline-restored | wordpress_phpunit_child_script_seconds | 6.300000 |
+| phpunit-deferred-reconnect-baseline-restored | wordpress_phpunit_child_process_outer_minus_script_seconds | 0.700000 |
 | phpunit-non-isolated-rest | wordpress_phpunit_shell_real_seconds | 168.469 |
 | phpunit-non-isolated-rest | wordpress_phpunit_reported_seconds | 165.226 |
 | phpunit-non-isolated-rest | wordpress_phpunit_seconds | 169 |
@@ -65,6 +77,24 @@ require_row "| timing-rollup | wordpress_phpunit_diagnostic_shell_real_seconds_s
 require_row "| timing-rollup | wordpress_phpunit_all_phase_count | 4 |"
 require_row "| timing-rollup | wordpress_phpunit_db_shell_real_seconds_sum | 7.522 |"
 require_row "| timing-rollup | wordpress_phpunit_isolated_shell_real_seconds_sum | 26.917 |"
+require_row "| timing-rollup | wordpress_phpunit_isolated_child_process_count_sum | 7 |"
+require_row "| timing-rollup | wordpress_phpunit_isolated_child_process_closed_wpdbs_sum | 1 |"
+require_row "| timing-rollup | wordpress_phpunit_isolated_child_process_static_properties_sum | 0 |"
+require_row "| timing-rollup | wordpress_phpunit_isolated_child_process_skipped_static_properties_sum | 0 |"
+require_row "| timing-rollup | wordpress_phpunit_isolated_child_process_baseline_restore_count_sum | 7 |"
+require_row "| timing-rollup | wordpress_phpunit_isolated_child_process_baseline_restore_seconds_sum | 1.400 |"
+require_row "| timing-rollup | wordpress_phpunit_isolated_child_process_lock_release_seconds_sum | 0.070 |"
+require_row "| timing-rollup | wordpress_phpunit_isolated_child_process_runtime_seconds_sum | 7.000 |"
+require_row "| timing-rollup | wordpress_phpunit_isolated_child_process_reconnect_seconds_sum | 0.014 |"
+require_row "| timing-rollup | wordpress_phpunit_isolated_child_script_count_sum | 7 |"
+require_row "| timing-rollup | wordpress_phpunit_isolated_child_script_seconds_sum | 6.300 |"
+require_row "| timing-rollup | wordpress_phpunit_isolated_child_process_outer_minus_script_seconds_sum | 0.700 |"
+require_row "| timing-rollup | wordpress_phpunit_isolated_child_process_baseline_restore_ms_avg | 200.000 |"
+require_row "| timing-rollup | wordpress_phpunit_isolated_child_process_lock_release_ms_avg | 10.000 |"
+require_row "| timing-rollup | wordpress_phpunit_isolated_child_process_runtime_ms_avg | 1000.000 |"
+require_row "| timing-rollup | wordpress_phpunit_isolated_child_process_reconnect_ms_avg | 2.000 |"
+require_row "| timing-rollup | wordpress_phpunit_isolated_child_script_ms_avg | 900.000 |"
+require_row "| timing-rollup | wordpress_phpunit_isolated_child_process_outer_minus_script_ms_avg | 100.000 |"
 require_row "| timing-rollup | wordpress_phpunit_non_isolated_shell_real_seconds_sum | 168.469 |"
 require_row "| timing-rollup | wordpress_build_mariadb_embedded_seconds | 406.000 |"
 require_row "| timing-rollup | wordpress_build_total_seconds | 424.000 |"

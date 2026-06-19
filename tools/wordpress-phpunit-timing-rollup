@@ -118,6 +118,44 @@ function emit_sum(bucket, metric, output_metric) {
   }
 }
 
+function emit_int_sum(bucket, metric, output_metric) {
+  if (metric_seen(bucket, metric)) {
+    row_int(output_metric, metric_sum(bucket, metric))
+  }
+}
+
+function emit_ms_avg(bucket, numerator_metric, denominator_metric, output_metric, denominator) {
+  if (!metric_seen(bucket, numerator_metric) || !metric_seen(bucket, denominator_metric)) {
+    return
+  }
+  denominator = metric_sum(bucket, denominator_metric)
+  if (denominator <= 0) {
+    return
+  }
+  row_num(output_metric, (metric_sum(bucket, numerator_metric) * 1000.0) / denominator)
+}
+
+function emit_child_bucket(bucket, prefix) {
+  emit_int_sum(bucket, "wordpress_phpunit_child_process_count", prefix "_child_process_count_sum")
+  emit_int_sum(bucket, "wordpress_phpunit_child_process_closed_wpdbs", prefix "_child_process_closed_wpdbs_sum")
+  emit_int_sum(bucket, "wordpress_phpunit_child_process_static_properties", prefix "_child_process_static_properties_sum")
+  emit_int_sum(bucket, "wordpress_phpunit_child_process_skipped_static_properties", prefix "_child_process_skipped_static_properties_sum")
+  emit_int_sum(bucket, "wordpress_phpunit_child_process_baseline_restore_count", prefix "_child_process_baseline_restore_count_sum")
+  emit_sum(bucket, "wordpress_phpunit_child_process_baseline_restore_seconds", prefix "_child_process_baseline_restore_seconds_sum")
+  emit_sum(bucket, "wordpress_phpunit_child_process_lock_release_seconds", prefix "_child_process_lock_release_seconds_sum")
+  emit_sum(bucket, "wordpress_phpunit_child_process_runtime_seconds", prefix "_child_process_runtime_seconds_sum")
+  emit_sum(bucket, "wordpress_phpunit_child_process_reconnect_seconds", prefix "_child_process_reconnect_seconds_sum")
+  emit_int_sum(bucket, "wordpress_phpunit_child_script_count", prefix "_child_script_count_sum")
+  emit_sum(bucket, "wordpress_phpunit_child_script_seconds", prefix "_child_script_seconds_sum")
+  emit_sum(bucket, "wordpress_phpunit_child_process_outer_minus_script_seconds", prefix "_child_process_outer_minus_script_seconds_sum")
+  emit_ms_avg(bucket, "wordpress_phpunit_child_process_baseline_restore_seconds", "wordpress_phpunit_child_process_baseline_restore_count", prefix "_child_process_baseline_restore_ms_avg")
+  emit_ms_avg(bucket, "wordpress_phpunit_child_process_lock_release_seconds", "wordpress_phpunit_child_process_count", prefix "_child_process_lock_release_ms_avg")
+  emit_ms_avg(bucket, "wordpress_phpunit_child_process_runtime_seconds", "wordpress_phpunit_child_process_count", prefix "_child_process_runtime_ms_avg")
+  emit_ms_avg(bucket, "wordpress_phpunit_child_process_reconnect_seconds", "wordpress_phpunit_child_process_count", prefix "_child_process_reconnect_ms_avg")
+  emit_ms_avg(bucket, "wordpress_phpunit_child_script_seconds", "wordpress_phpunit_child_script_count", prefix "_child_script_ms_avg")
+  emit_ms_avg(bucket, "wordpress_phpunit_child_process_outer_minus_script_seconds", "wordpress_phpunit_child_process_count", prefix "_child_process_outer_minus_script_ms_avg")
+}
+
 function emit_bucket(bucket, prefix) {
   if (counts[bucket] <= 0) {
     return
@@ -129,6 +167,7 @@ function emit_bucket(bucket, prefix) {
   emit_sum(bucket, "wordpress_phpunit_seconds", prefix "_seconds_sum")
   emit_sum(bucket, "wordpress_container_seconds", prefix "_container_seconds_sum")
   emit_sum(bucket, "wordpress_total_seconds", prefix "_total_seconds_sum")
+  emit_child_bucket(bucket, prefix)
 }
 
 BEGIN {
@@ -138,6 +177,18 @@ BEGIN {
   phpunit_metric["wordpress_phpunit_seconds"] = 1
   phpunit_metric["wordpress_container_seconds"] = 1
   phpunit_metric["wordpress_total_seconds"] = 1
+  phpunit_metric["wordpress_phpunit_child_process_count"] = 1
+  phpunit_metric["wordpress_phpunit_child_process_closed_wpdbs"] = 1
+  phpunit_metric["wordpress_phpunit_child_process_static_properties"] = 1
+  phpunit_metric["wordpress_phpunit_child_process_skipped_static_properties"] = 1
+  phpunit_metric["wordpress_phpunit_child_process_baseline_restore_count"] = 1
+  phpunit_metric["wordpress_phpunit_child_process_baseline_restore_seconds"] = 1
+  phpunit_metric["wordpress_phpunit_child_process_lock_release_seconds"] = 1
+  phpunit_metric["wordpress_phpunit_child_process_runtime_seconds"] = 1
+  phpunit_metric["wordpress_phpunit_child_process_reconnect_seconds"] = 1
+  phpunit_metric["wordpress_phpunit_child_script_count"] = 1
+  phpunit_metric["wordpress_phpunit_child_script_seconds"] = 1
+  phpunit_metric["wordpress_phpunit_child_process_outer_minus_script_seconds"] = 1
 
   build_metric["mylite_mariadb_embedded_seconds"] = 1
   build_metric["mylite_php_configure_seconds"] = 1
