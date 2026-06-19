@@ -2281,7 +2281,7 @@ void mtr_t::release_unlogged()
                                       MTR_MEMO_PAGE_SX_FIX)) &&
                         ownerless_page_write_has_mtr_page(block->page)))
       {
-        ownerless_page_write_leave(slot);
+        ownerless_page_write_leave_known_mtr_page(slot);
         ownerless_page_leave= ownerless_page_write_has_mtr_pages();
       }
       switch (slot.type) {
@@ -2317,7 +2317,7 @@ void mtr_t::release()
       const buf_page_t *bpage= static_cast<const buf_page_t*>(it->object);
       if (ownerless_page_write_has_mtr_page(*bpage))
       {
-        ownerless_page_write_leave(*it);
+        ownerless_page_write_leave_known_mtr_page(*it);
         ownerless_page_leave= ownerless_page_write_has_mtr_pages();
       }
     }
@@ -2685,8 +2685,19 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_refresh(
   }
 }
 
-ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_leave(
+void mtr_t::ownerless_page_write_leave(const mtr_memo_slot_t &slot) noexcept
+{
+  ownerless_page_write_leave_low(slot, false);
+}
+
+void mtr_t::ownerless_page_write_leave_known_mtr_page(
     const mtr_memo_slot_t &slot) noexcept
+{
+  ownerless_page_write_leave_low(slot, true);
+}
+
+ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_leave_low(
+    const mtr_memo_slot_t &slot, bool mtr_page_known) noexcept
 {
   if (UNIV_LIKELY(!ownerless_hooks_enabled()))
     return;
@@ -2699,11 +2710,19 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_leave(
 
   if (!(slot.type & (MTR_MEMO_PAGE_X_FIX | MTR_MEMO_PAGE_SX_FIX)))
     return;
-  if (!ownerless_page_write_has_mtr_pages())
-    return;
   const buf_page_t *bpage= static_cast<const buf_page_t*>(slot.object);
-  if (!ownerless_page_write_has_mtr_page(*bpage))
-    return;
+  if (mtr_page_known)
+  {
+    ut_ad(ownerless_page_write_has_mtr_pages());
+    ut_ad(ownerless_page_write_has_mtr_page(*bpage));
+  }
+  else
+  {
+    if (!ownerless_page_write_has_mtr_pages())
+      return;
+    if (!ownerless_page_write_has_mtr_page(*bpage))
+      return;
+  }
 
   if (ownerless_page_write_lock_only_transaction_page(
           ownerless_page_write_trx(), *bpage))
@@ -3828,7 +3847,7 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
           if (UNIV_UNLIKELY(ownerless_page_leave &&
                             mtr->ownerless_page_write_has_mtr_page(*bpage)))
           {
-            mtr->ownerless_page_write_leave(slot);
+            mtr->ownerless_page_write_leave_known_mtr_page(slot);
             ownerless_page_leave= mtr->ownerless_page_write_has_mtr_pages();
           }
           ownerless_page_write_perf_add_elapsed(

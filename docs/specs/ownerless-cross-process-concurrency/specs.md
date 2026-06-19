@@ -6120,6 +6120,14 @@ subsystems that this mode needs:
   `1.000` overflow vector allocation per statement; timing remained noisy, so
   the slice is an allocation-path reduction rather than a broad throughput
   claim.
+  The known-MTR-page leave follow-up then routes release loops that already
+  proved a memo slot is MTR-tracked through a helper that skips the repeated
+  membership checks while preserving the same forget/release, deferred-release,
+  and native latch order. Reduced 100-row bulk samples preserved `2.000` page
+  versions, `4.500` page-log appends, `2.000` native-support published pages,
+  and fast commit visibility; post-change no-dirty page-leave timing was noisy
+  at `0.204` to `0.220 ms/statement`, so this remains a bookkeeping cleanup
+  rather than a throughput-completion claim.
   Larger row lists, broad DML/DDL, and unbounded append-lock hold times remain
   out of scope.
   Focused gating coverage proves active live writers, including idle explicit

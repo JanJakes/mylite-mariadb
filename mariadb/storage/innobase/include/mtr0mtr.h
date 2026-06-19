@@ -755,6 +755,14 @@ private:
   /** Release ownerless physical-page write serialization for a modified page. */
   void ownerless_page_write_leave(const mtr_memo_slot_t &slot) noexcept;
 
+  /** Release ownerless physical-page serialization for a known tracked page. */
+  void ownerless_page_write_leave_known_mtr_page(
+      const mtr_memo_slot_t &slot) noexcept;
+
+  /** Release ownerless physical-page serialization. */
+  void ownerless_page_write_leave_low(
+      const mtr_memo_slot_t &slot, bool mtr_page_known) noexcept;
+
   /** Track a page-write lock acquired by this mini-transaction. */
   void ownerless_page_write_note_mtr_page(const buf_page_t &bpage) noexcept;
 

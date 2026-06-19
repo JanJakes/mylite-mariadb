@@ -741,6 +741,15 @@ while reporting `0.671 ms/statement` aggregate redo leave, split into
 `0.362 ms/statement` native log write and `0.281 ms/statement` MyLite hook time;
 all `181.500` redo leaves per statement used the written-range hook, with zero
 fallback or zero-LSN leaves.
+Ownerless MTR page-write release now has a known-page helper for release loops
+that have already proven a memo slot is tracked by the current MTR. Generic
+release paths keep the defensive membership checks; the proven release loops
+skip only the repeated lookup before using the same forget/release logic. A
+reduced 100-row bulk probe preserved `2.000` page versions, `4.500` page-log
+appends, `2.000` native-support published pages, and fast commit visibility
+while reporting noisy post-change no-dirty page-leave samples between
+`0.204` and `0.220 ms/statement`. This is a bookkeeping cleanup, not a new
+compatibility claim or a broad throughput claim.
 Profiled mysqli runs also split total query elapsed time into
 `query_verb_*` buckets for result queries, DML, DDL, connection state,
 transaction, lock, call, and other first-keyword classes so WordPress timing
