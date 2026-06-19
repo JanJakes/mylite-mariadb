@@ -366,6 +366,11 @@ enum page_write_perf_stat_index {
     PAGE_WRITE_PERF_STAT_PUBLISH_BUFFER_REUSE_HITS,
     PAGE_WRITE_PERF_STAT_PUBLISH_BUFFER_REUSE_MISSES,
     PAGE_WRITE_PERF_STAT_TRANSACTION_DEFERRED_MTR_ELIDED,
+    PAGE_WRITE_PERF_STAT_MTR_INLINE_FIRST_PAGES,
+    PAGE_WRITE_PERF_STAT_MTR_INLINE_DUPLICATE_PAGES,
+    PAGE_WRITE_PERF_STAT_MTR_OVERFLOW_VECTOR_ALLOCATIONS,
+    PAGE_WRITE_PERF_STAT_MTR_OVERFLOW_PAGE_INSERTS,
+    PAGE_WRITE_PERF_STAT_MTR_INLINE_PROMOTIONS,
     PAGE_WRITE_PERF_STAT_COUNT
 };
 
@@ -3388,6 +3393,36 @@ static void emit_ownerless_bulk_autocommit_phase_summary(
         innodb_deep[INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_OWNERLESS_DEFAULT_CHECKED_BULK],
         insert_statements
     );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_bulk_page_write_mtr_inline_first_pages_per_"
+        "statement",
+        page_write[PAGE_WRITE_PERF_STAT_MTR_INLINE_FIRST_PAGES],
+        insert_statements
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_bulk_page_write_mtr_inline_duplicate_pages_"
+        "per_statement",
+        page_write[PAGE_WRITE_PERF_STAT_MTR_INLINE_DUPLICATE_PAGES],
+        insert_statements
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_bulk_page_write_mtr_overflow_vector_"
+        "allocations_per_statement",
+        page_write[PAGE_WRITE_PERF_STAT_MTR_OVERFLOW_VECTOR_ALLOCATIONS],
+        insert_statements
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_bulk_page_write_mtr_overflow_page_inserts_"
+        "per_statement",
+        page_write[PAGE_WRITE_PERF_STAT_MTR_OVERFLOW_PAGE_INSERTS],
+        insert_statements
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_bulk_page_write_mtr_inline_promotions_per_"
+        "statement",
+        page_write[PAGE_WRITE_PERF_STAT_MTR_INLINE_PROMOTIONS],
+        insert_statements
+    );
 }
 
 static void emit_bulk_exec_result_summary(const char *prefix, unsigned insert_statements) {
@@ -6227,6 +6262,34 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         "mylite_perf_summary_ownerless_autocommit_page_write_publish_buffer_reuse_misses_per_"
         "insert",
         page_write[PAGE_WRITE_PERF_STAT_PUBLISH_BUFFER_REUSE_MISSES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_mtr_inline_first_pages_per_insert",
+        page_write[PAGE_WRITE_PERF_STAT_MTR_INLINE_FIRST_PAGES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_mtr_inline_duplicate_pages_per_"
+        "insert",
+        page_write[PAGE_WRITE_PERF_STAT_MTR_INLINE_DUPLICATE_PAGES],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_mtr_overflow_vector_allocations_"
+        "per_insert",
+        page_write[PAGE_WRITE_PERF_STAT_MTR_OVERFLOW_VECTOR_ALLOCATIONS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_mtr_overflow_page_inserts_per_"
+        "insert",
+        page_write[PAGE_WRITE_PERF_STAT_MTR_OVERFLOW_PAGE_INSERTS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_write_mtr_inline_promotions_per_insert",
+        page_write[PAGE_WRITE_PERF_STAT_MTR_INLINE_PROMOTIONS],
         insert_iterations
     );
     emit_summary_count_per_iteration(
@@ -10040,6 +10103,31 @@ static void emit_page_write_perf_stats(const char *prefix) {
         "%s_page_write_transaction_deferred_mtr_elided=%" PRIu64 "\n",
         prefix,
         values[PAGE_WRITE_PERF_STAT_TRANSACTION_DEFERRED_MTR_ELIDED]
+    );
+    printf(
+        "%s_page_write_mtr_inline_first_pages=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_WRITE_PERF_STAT_MTR_INLINE_FIRST_PAGES]
+    );
+    printf(
+        "%s_page_write_mtr_inline_duplicate_pages=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_WRITE_PERF_STAT_MTR_INLINE_DUPLICATE_PAGES]
+    );
+    printf(
+        "%s_page_write_mtr_overflow_vector_allocations=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_WRITE_PERF_STAT_MTR_OVERFLOW_VECTOR_ALLOCATIONS]
+    );
+    printf(
+        "%s_page_write_mtr_overflow_page_inserts=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_WRITE_PERF_STAT_MTR_OVERFLOW_PAGE_INSERTS]
+    );
+    printf(
+        "%s_page_write_mtr_inline_promotions=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_WRITE_PERF_STAT_MTR_INLINE_PROMOTIONS]
     );
     printf(
         "%s_page_write_commit_log_calls=%" PRIu64 "\n",

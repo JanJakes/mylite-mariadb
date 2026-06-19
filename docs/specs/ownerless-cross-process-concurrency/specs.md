@@ -6098,6 +6098,18 @@ subsystems that this mode needs:
   count under the same redo progress latch; redo ordering, completed-range
   coalescing, checkpoint files, page-version WAL, and SQL semantics are
   unchanged.
+  The inline MTR page-tracking follow-up keeps the first MTR-scoped ownerless
+  page-write identity in `mtr_t` and uses the existing vector only for overflow
+  pages. This preserves page-write release order, transaction-deferred
+  ownership, native-support/history-proof publication, and native latch release
+  while removing the overflow-vector allocation from common single-page MTR
+  tracking. A reduced 100-row bulk attribution sample preserved `2.000` page
+  versions, `4.500` page-log appends, `2.000` native-support published pages,
+  fast commit visibility, and `180.500` deferred latest-checkpoint coalesces
+  per statement while reporting `91.200` inline first-page records and only
+  `1.000` overflow vector allocation per statement; timing remained noisy, so
+  the slice is an allocation-path reduction rather than a broad throughput
+  claim.
   Larger row lists, broad DML/DDL, and unbounded append-lock hold times remain
   out of scope.
   Focused gating coverage proves active live writers, including idle explicit

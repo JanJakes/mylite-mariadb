@@ -292,6 +292,11 @@ enum ownerless_page_write_perf_stat_index {
   OWNERLESS_PAGE_WRITE_PERF_PUBLISH_BUFFER_REUSE_HITS,
   OWNERLESS_PAGE_WRITE_PERF_PUBLISH_BUFFER_REUSE_MISSES,
   OWNERLESS_PAGE_WRITE_PERF_TRANSACTION_DEFERRED_MTR_ELIDED,
+  OWNERLESS_PAGE_WRITE_PERF_MTR_INLINE_FIRST_PAGES,
+  OWNERLESS_PAGE_WRITE_PERF_MTR_INLINE_DUPLICATE_PAGES,
+  OWNERLESS_PAGE_WRITE_PERF_MTR_OVERFLOW_VECTOR_ALLOCATIONS,
+  OWNERLESS_PAGE_WRITE_PERF_MTR_OVERFLOW_PAGE_INSERTS,
+  OWNERLESS_PAGE_WRITE_PERF_MTR_INLINE_PROMOTIONS,
   OWNERLESS_PAGE_WRITE_PERF_STAT_COUNT
 };
 
@@ -2091,7 +2096,10 @@ inline void buf_pool_t::insert_into_flush_list(buf_page_t *prev,
   block->page.set_oldest_modification(lsn);
 }
 
-mtr_t::mtr_t(trx_t *trx) : trx(trx) {}
+mtr_t::mtr_t(trx_t *trx) : trx(trx)
+{
+  m_ownerless_page_write_inline_mtr_page_set= false;
+}
 mtr_t::~mtr_t()
 {
   if (m_ownerless_page_write_mtr_pages != nullptr)
@@ -2102,14 +2110,15 @@ mtr_t::~mtr_t()
 void mtr_t::start()
 {
   ut_ad(m_memo.empty());
-  ut_ad(m_ownerless_page_write_mtr_pages == nullptr ||
-        m_ownerless_page_write_mtr_pages->empty());
+  ut_ad(!ownerless_page_write_has_mtr_pages());
   ut_ad(!m_freed_pages);
   ut_ad(!m_freed_space);
   MEM_CHECK_DEFINED(&trx, sizeof trx);
   MEM_UNDEFINED(this, sizeof *this);
   MEM_MAKE_DEFINED(&trx, sizeof trx);
   MEM_MAKE_DEFINED(&m_memo, sizeof m_memo);
+  MEM_MAKE_DEFINED(&m_ownerless_page_write_inline_mtr_page,
+                   sizeof m_ownerless_page_write_inline_mtr_page);
   MEM_MAKE_DEFINED(&m_ownerless_page_write_mtr_pages,
                    sizeof m_ownerless_page_write_mtr_pages);
   MEM_MAKE_DEFINED(&m_freed_space, sizeof m_freed_space);
@@ -2137,6 +2146,8 @@ void mtr_t::start()
   m_ownerless_redo_start_lsn= 0;
   m_ownerless_redo_end_lsn= 0;
   m_ownerless_page_write_trx= nullptr;
+  m_ownerless_page_write_inline_mtr_page_set= false;
+  m_ownerless_page_write_inline_mtr_page= 0;
   if (m_ownerless_page_write_mtr_pages != nullptr)
     m_ownerless_page_write_mtr_pages->clear();
   m_trim_pages= false;
@@ -2147,9 +2158,10 @@ inline void mtr_t::release_resources()
 {
   ut_ad(is_active());
   ut_ad(m_memo.empty());
-  ut_ad(m_ownerless_page_write_mtr_pages == nullptr ||
-        m_ownerless_page_write_mtr_pages->empty());
+  ut_ad(!ownerless_page_write_has_mtr_pages());
   m_log.erase();
+  m_ownerless_page_write_inline_mtr_page_set= false;
+  m_ownerless_page_write_inline_mtr_page= 0;
   if (m_ownerless_page_write_mtr_pages != nullptr)
   {
     UT_DELETE(m_ownerless_page_write_mtr_pages);
@@ -2222,8 +2234,7 @@ void mtr_t::release_unlogged()
   const bool ownerless_uses_transaction_release=
       ownerless_hooks && ownerless_page_write_uses_transaction_release();
   bool ownerless_page_leave=
-      ownerless_hooks && m_ownerless_page_write_mtr_pages != nullptr &&
-      !m_ownerless_page_write_mtr_pages->empty();
+      ownerless_hooks && ownerless_page_write_has_mtr_pages();
   for (auto it= m_memo.rbegin(); it != m_memo.rend(); it++)
   {
     mtr_memo_slot_t &slot= *it;
@@ -2265,8 +2276,7 @@ void mtr_t::release_unlogged()
                         ownerless_page_write_has_mtr_page(block->page)))
       {
         ownerless_page_write_leave(slot);
-        ownerless_page_leave= m_ownerless_page_write_mtr_pages != nullptr &&
-                              !m_ownerless_page_write_mtr_pages->empty();
+        ownerless_page_leave= ownerless_page_write_has_mtr_pages();
       }
       switch (slot.type) {
       case MTR_MEMO_PAGE_S_FIX:
@@ -2291,8 +2301,7 @@ void mtr_t::release()
 {
   const bool ownerless_hooks= ownerless_hooks_enabled();
   bool ownerless_page_leave=
-      ownerless_hooks && m_ownerless_page_write_mtr_pages != nullptr &&
-      !m_ownerless_page_write_mtr_pages->empty();
+      ownerless_hooks && ownerless_page_write_has_mtr_pages();
   for (auto it= m_memo.rbegin(); it != m_memo.rend(); it++)
   {
     if (UNIV_UNLIKELY(ownerless_page_leave &&
@@ -2303,8 +2312,7 @@ void mtr_t::release()
       if (ownerless_page_write_has_mtr_page(*bpage))
       {
         ownerless_page_write_leave(*it);
-        ownerless_page_leave= m_ownerless_page_write_mtr_pages != nullptr &&
-                              !m_ownerless_page_write_mtr_pages->empty();
+        ownerless_page_leave= ownerless_page_write_has_mtr_pages();
       }
     }
     it->release();
@@ -2425,6 +2433,9 @@ ATTRIBUTE_NOINLINE bool mtr_t::ownerless_page_write_enter(
       ownerless_page_write_holds_for_transaction(block.page);
   uint64_t packed_page=
       ownerless_page_write_pack(id.space(), id.page_no());
+  if (m_ownerless_page_write_inline_mtr_page_set &&
+      m_ownerless_page_write_inline_mtr_page == packed_page)
+    return holds_for_transaction;
   if (m_ownerless_page_write_mtr_pages != nullptr &&
       std::find(m_ownerless_page_write_mtr_pages->begin(),
                 m_ownerless_page_write_mtr_pages->end(),
@@ -2652,8 +2663,7 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_leave(
 
   if (!(slot.type & (MTR_MEMO_PAGE_X_FIX | MTR_MEMO_PAGE_SX_FIX)))
     return;
-  if (m_ownerless_page_write_mtr_pages == nullptr ||
-      m_ownerless_page_write_mtr_pages->empty())
+  if (!ownerless_page_write_has_mtr_pages())
     return;
   const buf_page_t *bpage= static_cast<const buf_page_t*>(slot.object);
   if (!ownerless_page_write_has_mtr_page(*bpage))
@@ -3379,27 +3389,57 @@ void mtr_t::ownerless_page_write_note_mtr_page(
   const page_id_t id{bpage.id()};
   uint64_t packed_page=
       ownerless_page_write_pack(id.space(), id.page_no());
+  if (!m_ownerless_page_write_inline_mtr_page_set)
+  {
+    m_ownerless_page_write_inline_mtr_page= packed_page;
+    m_ownerless_page_write_inline_mtr_page_set= true;
+    ownerless_page_write_perf_add(
+        OWNERLESS_PAGE_WRITE_PERF_MTR_INLINE_FIRST_PAGES, 1);
+    return;
+  }
+  if (m_ownerless_page_write_inline_mtr_page == packed_page)
+  {
+    ownerless_page_write_perf_add(
+        OWNERLESS_PAGE_WRITE_PERF_MTR_INLINE_DUPLICATE_PAGES, 1);
+    return;
+  }
   if (m_ownerless_page_write_mtr_pages == nullptr)
   {
     m_ownerless_page_write_mtr_pages=
       UT_NEW_NOKEY(ownerless_page_write_mtr_page_vector());
     ut_a(m_ownerless_page_write_mtr_pages != nullptr);
+    ownerless_page_write_perf_add(
+        OWNERLESS_PAGE_WRITE_PERF_MTR_OVERFLOW_VECTOR_ALLOCATIONS, 1);
   }
   if (std::find(m_ownerless_page_write_mtr_pages->begin(),
                 m_ownerless_page_write_mtr_pages->end(),
                 packed_page) == m_ownerless_page_write_mtr_pages->end())
+  {
     m_ownerless_page_write_mtr_pages->emplace_back(packed_page);
+    ownerless_page_write_perf_add(
+        OWNERLESS_PAGE_WRITE_PERF_MTR_OVERFLOW_PAGE_INSERTS, 1);
+  }
+}
+
+bool mtr_t::ownerless_page_write_has_mtr_pages() const noexcept
+{
+  return m_ownerless_page_write_inline_mtr_page_set ||
+         (m_ownerless_page_write_mtr_pages != nullptr &&
+          !m_ownerless_page_write_mtr_pages->empty());
 }
 
 bool mtr_t::ownerless_page_write_has_mtr_page(
     const buf_page_t &bpage) const noexcept
 {
   const page_id_t id{bpage.id()};
+  const uint64_t packed_page=
+      ownerless_page_write_pack(id.space(), id.page_no());
+  if (m_ownerless_page_write_inline_mtr_page_set &&
+      m_ownerless_page_write_inline_mtr_page == packed_page)
+    return true;
   if (m_ownerless_page_write_mtr_pages == nullptr ||
       m_ownerless_page_write_mtr_pages->empty())
     return false;
-  const uint64_t packed_page=
-      ownerless_page_write_pack(id.space(), id.page_no());
   return std::find(m_ownerless_page_write_mtr_pages->begin(),
                    m_ownerless_page_write_mtr_pages->end(),
                    packed_page) != m_ownerless_page_write_mtr_pages->end();
@@ -3409,10 +3449,29 @@ bool mtr_t::ownerless_page_write_forget_mtr_page(
     const buf_page_t &bpage) noexcept
 {
   const page_id_t id{bpage.id()};
-  if (m_ownerless_page_write_mtr_pages == nullptr)
-    return false;
   const uint64_t packed_page=
       ownerless_page_write_pack(id.space(), id.page_no());
+  if (m_ownerless_page_write_inline_mtr_page_set &&
+      m_ownerless_page_write_inline_mtr_page == packed_page)
+  {
+    if (m_ownerless_page_write_mtr_pages != nullptr &&
+        !m_ownerless_page_write_mtr_pages->empty())
+    {
+      auto first= m_ownerless_page_write_mtr_pages->begin();
+      m_ownerless_page_write_inline_mtr_page= *first;
+      m_ownerless_page_write_mtr_pages->erase(first, first + 1);
+      ownerless_page_write_perf_add(
+          OWNERLESS_PAGE_WRITE_PERF_MTR_INLINE_PROMOTIONS, 1);
+    }
+    else
+    {
+      m_ownerless_page_write_inline_mtr_page_set= false;
+      m_ownerless_page_write_inline_mtr_page= 0;
+    }
+    return true;
+  }
+  if (m_ownerless_page_write_mtr_pages == nullptr)
+    return false;
   auto it= std::find(m_ownerless_page_write_mtr_pages->begin(),
                      m_ownerless_page_write_mtr_pages->end(),
                      packed_page);
@@ -3636,8 +3695,7 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
     if (UNIV_UNLIKELY(ownerless_page_publish))
       mtr->ownerless_history_proof_publish_pair();
     bool ownerless_page_leave=
-      ownerless_hooks && mtr->m_ownerless_page_write_mtr_pages != nullptr &&
-      !mtr->m_ownerless_page_write_mtr_pages->empty();
+      ownerless_hooks && mtr->ownerless_page_write_has_mtr_pages();
     bool ownerless_page_publish_batch_started= false;
     for (auto it= mtr->m_memo.rbegin(); it != mtr->m_memo.rend(); )
     {
@@ -3735,9 +3793,7 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
                             mtr->ownerless_page_write_has_mtr_page(*bpage)))
           {
             mtr->ownerless_page_write_leave(slot);
-            ownerless_page_leave=
-                mtr->m_ownerless_page_write_mtr_pages != nullptr &&
-                !mtr->m_ownerless_page_write_mtr_pages->empty();
+            ownerless_page_leave= mtr->ownerless_page_write_has_mtr_pages();
           }
           ownerless_page_write_perf_add_elapsed(
               OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_NO_DIRTY_PAGE_LEAVE_NS,
