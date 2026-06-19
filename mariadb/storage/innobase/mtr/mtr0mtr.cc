@@ -285,6 +285,10 @@ enum ownerless_page_write_perf_stat_index {
   OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_PUBLISH_NS,
   OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_RELEASE_MEMO_NS,
   OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_NO_DIRTY_LOOP_NS,
+  OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_NO_DIRTY_SPACE_LEAVE_NS,
+  OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_NO_DIRTY_PAGE_PUBLISH_NS,
+  OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_NO_DIRTY_PAGE_LEAVE_NS,
+  OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_NO_DIRTY_PAGE_UNLOCK_NS,
   OWNERLESS_PAGE_WRITE_PERF_PUBLISH_BUFFER_REUSE_HITS,
   OWNERLESS_PAGE_WRITE_PERF_PUBLISH_BUFFER_REUSE_MISSES,
   OWNERLESS_PAGE_WRITE_PERF_STAT_COUNT
@@ -3496,7 +3500,15 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
         static_cast<fil_space_t*>(slot.object)->set_committed_size();
         static_cast<fil_space_t*>(slot.object)->x_unlock();
         if (UNIV_UNLIKELY(ownerless_hooks))
+        {
+          const uint64_t space_leave_start_ns= ownerless_perf ?
+              ownerless_page_write_perf_now_ns() :
+              0;
           mtr->ownerless_space_write_leave(slot);
+          ownerless_page_write_perf_add_elapsed(
+              OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_NO_DIRTY_SPACE_LEAVE_NS,
+              space_leave_start_ns);
+        }
         break;
       case MTR_MEMO_X_LOCK:
       case MTR_MEMO_SX_LOCK:
@@ -3544,15 +3556,30 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
             ownerless_page_write_perf_add_elapsed(
                 OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_PUBLISH_NS,
                 publish_start_ns);
+            ownerless_page_write_perf_add_elapsed(
+                OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_NO_DIRTY_PAGE_PUBLISH_NS,
+                publish_start_ns);
           }
           modified++;
         }
         switch (auto latch= slot.type & ~MTR_MEMO_MODIFY) {
         case MTR_MEMO_PAGE_S_FIX:
+        {
+          const uint64_t page_unlock_start_ns= ownerless_perf ?
+              ownerless_page_write_perf_now_ns() :
+              0;
           bpage->lock.s_unlock();
+          ownerless_page_write_perf_add_elapsed(
+              OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_NO_DIRTY_PAGE_UNLOCK_NS,
+              page_unlock_start_ns);
           continue;
+        }
         case MTR_MEMO_PAGE_SX_FIX:
         case MTR_MEMO_PAGE_X_FIX:
+        {
+          const uint64_t page_leave_start_ns= ownerless_perf ?
+              ownerless_page_write_perf_now_ns() :
+              0;
           if (UNIV_UNLIKELY(ownerless_page_leave &&
                             mtr->ownerless_page_write_has_mtr_page(*bpage)))
           {
@@ -3561,8 +3588,18 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
                 mtr->m_ownerless_page_write_mtr_pages != nullptr &&
                 !mtr->m_ownerless_page_write_mtr_pages->empty();
           }
+          ownerless_page_write_perf_add_elapsed(
+              OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_NO_DIRTY_PAGE_LEAVE_NS,
+              page_leave_start_ns);
+          const uint64_t page_unlock_start_ns= ownerless_perf ?
+              ownerless_page_write_perf_now_ns() :
+              0;
           bpage->lock.u_or_x_unlock(latch == MTR_MEMO_PAGE_SX_FIX);
+          ownerless_page_write_perf_add_elapsed(
+              OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_NO_DIRTY_PAGE_UNLOCK_NS,
+              page_unlock_start_ns);
           continue;
+        }
         default:
           ut_ad(latch == MTR_MEMO_BUF_FIX);
         }
