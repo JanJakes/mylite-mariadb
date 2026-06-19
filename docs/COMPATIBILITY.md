@@ -193,7 +193,9 @@ probe, a stats-off large-row bulk probe, and a reduced stats-enabled ownerless
 attribution probe. The large-row bulk probe uses
 `MYLITE_PERF_BULK_INSERT_ROWS_PER_STATEMENT=100` so CI reports the ownerless
 default-checked bulk-insert row-list shape separately from the default four-row
-small-bulk shape. CI also separates the WordPress PHPUnit source, build,
+small-bulk shape; it now uses `MYLITE_PERF_INSERT_ITERATIONS=5000`, producing
+50 such statements instead of a timer-noisy five-statement sample. CI also
+separates the WordPress PHPUnit source, build,
 dependency, database-prep, performance-probe, and test-only phases so PHPUnit
 wall timings are not hidden inside build work.
 Those phases append compact timing rows into

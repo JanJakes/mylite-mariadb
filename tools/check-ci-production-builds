@@ -384,7 +384,7 @@ require_step_literal \
   'MYLITE_PERF_BULK_INSERT_ROWS_PER_STATEMENT: "100"'
 require_step_literal \
   "Run embedded large-row bulk performance probe" \
-  'MYLITE_PERF_INSERT_ITERATIONS: "500"'
+  'MYLITE_PERF_INSERT_ITERATIONS: "5000"'
 require_step_literal \
   "Run embedded large-row bulk performance probe" \
   "tee build/embedded-performance-reports/large-row-bulk.log"

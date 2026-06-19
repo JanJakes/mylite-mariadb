@@ -209,6 +209,10 @@ WordPress timing summary remains printed to the GitHub step summary and is also
 uploaded as the `wordpress-phpunit-timing-summary` artifact. The artifact
 uploads run with `if: always()` so earlier performance evidence is still
 downloadable when a later correctness or PHPUnit shard fails.
+The large-row bulk probe keeps `MYLITE_PERF_BULK_INSERT_ROWS_PER_STATEMENT=100`
+but now uses `MYLITE_PERF_INSERT_ITERATIONS=5000`, giving CI 50 bulk
+statements instead of five while preserving the ownerless default-checked
+row-list shape being measured.
 The WordPress timing job also enables
 `MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR=1`, which rejects an in-repository
 test database path for CI timing phases. The harness prints

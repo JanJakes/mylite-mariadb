@@ -121,7 +121,7 @@ jobs:
         env:
           MYLITE_PERF_OPEN_CLOSE_ITERATIONS: "1"
           MYLITE_PERF_SELECT_ITERATIONS: "20"
-          MYLITE_PERF_INSERT_ITERATIONS: "500"
+          MYLITE_PERF_INSERT_ITERATIONS: "5000"
           MYLITE_PERF_BULK_INSERT_ROWS_PER_STATEMENT: "100"
         run: |
           set -euo pipefail
