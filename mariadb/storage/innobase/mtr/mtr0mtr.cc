@@ -2860,6 +2860,9 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
   }
 
   const uint16_t source_page_type= fil_page_get_type(source);
+  const unsigned history_proof_roles=
+      ownerless_page_write_history_proof_roles(
+          ownerless_trx, id.space(), id.page_no());
   if (ownerless_page_write_can_elide_native_support_page(
           ownerless_trx, id.space(), id.page_no(), source_page_type,
           publish_stats_enabled))
@@ -2879,6 +2882,65 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
         ownerless_page_publish_count_elided_sys_identity(
             id.space(), id.page_no());
     }
+    return;
+  }
+  if (history_proof_roles != 0 &&
+      ownerless_page_publish_type_has_native_support(source_page_type))
+  {
+    if (publish_stats_enabled)
+    {
+      ownerless_page_publish_count_page_type(source_page_type);
+      ownerless_page_publish_count_identity(
+          id.space(), id.page_no(), m_commit_lsn, source_page_type);
+      if (id.space() == TRX_SYS_SPACE && id.page_no() == TRX_SYS_PAGE_NO &&
+          source_page_type == FIL_PAGE_TYPE_TRX_SYS)
+        ownerless_page_publish_count_trx_system_diff(source, bpage.physical_size());
+    }
+    const uint32_t publish_flags=
+        MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_PROOF_ONLY |
+        ((history_proof_roles & ownerless_page_write_history_proof_role_rseg)
+             ? MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_HISTORY_RSEG
+             : 0U);
+    uint64_t proof_start_ns= page_write_perf_enabled ?
+        ownerless_page_write_perf_now_ns() :
+        0;
+    const int result= mylite_ownerless_innodb_publish_page_version_with_flags(
+        id.space(), id.page_no(), source_page_lsn, m_commit_lsn, source,
+        static_cast<uint32_t>(bpage.physical_size()), publish_flags);
+    ownerless_page_write_perf_add_elapsed(
+        OWNERLESS_PAGE_WRITE_PERF_PUBLISH_HOOK_NS, proof_start_ns);
+    if (publish_stats_enabled)
+      ownerless_page_publish_count(
+          result == MYLITE_OWNERLESS_INNODB_LOCK_OK ?
+              ownerless_page_publish_published :
+              ownerless_page_publish_failed);
+    if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
+    {
+      if (publish_stats_enabled)
+      {
+        ownerless_page_publish_count(
+            ownerless_page_publish_native_support_published);
+        ownerless_page_publish_count_native_support_published_page_type(
+            source_page_type);
+        ownerless_page_publish_count_native_support_published_system_page_type(
+            source_page_type);
+        if (source_page_type == FIL_PAGE_TYPE_SYS)
+          ownerless_page_publish_count_published_sys_identity(
+              id.space(), id.page_no());
+        ownerless_page_publish_count_history_proof_roles(
+            history_proof_roles,
+            ownerless_page_publish_native_support_published_history_proof_rseg,
+            ownerless_page_publish_native_support_published_history_proof_undo);
+        ownerless_page_publish_count_history_proof_diff(
+            history_proof_roles, source, bpage.physical_size(), id.space(),
+            id.page_no());
+      }
+      ownerless_page_write_note_publish_success(ownerless_trx);
+      ownerless_page_write_note_history_proof_page(
+          ownerless_trx, id.space(), id.page_no());
+    }
+    else
+      ownerless_page_write_note_publish_failure(ownerless_trx);
     return;
   }
 
@@ -2940,9 +3002,6 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
   ownerless_page_write_perf_add_elapsed(
       OWNERLESS_PAGE_WRITE_PERF_PUBLISH_CHECKSUM_NS, start_ns);
 
-  const unsigned history_proof_roles=
-      ownerless_page_write_history_proof_roles(
-          ownerless_trx, id.space(), id.page_no());
   uint16_t page_type= source_page_type;
   if (publish_stats_enabled)
   {

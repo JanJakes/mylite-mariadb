@@ -325,6 +325,11 @@ Roles:
   rollback-segment proof page may use a hinted history-rseg page-log delta
   payload after a standalone base record exists, but that optimization does not
   elide the proof page and does not enable broad SYS-page delta encoding.
+  The native-support proof-only WAL shape keeps the rollback-segment and
+  undo-header proof records durable but stores them as page-log metadata with
+  zero payload bytes. Page-image reads, latest scans, replay, and checkpoint
+  retained-record callbacks skip those records so a `.shm` page-version index
+  rebuild never points at unreadable proof metadata.
   Same-runtime reads covered by the handle's local-native autocommit write
   boundary do not publish a page-version pin or enable the file-read overlay
   while the runtime remains in a continuous single-owner epoch and has not
@@ -5906,6 +5911,12 @@ subsystems that this mode needs:
   marker survives retained-record checkpoint rewrites and does not change
   payload bytes, checksums, page-version ordering, or the remaining
   rollback-segment/undo history-proof requirement.
+  A follow-up proof-only native-support WAL slice uses that metadata class for
+  active history-proof rollback-segment and undo records. It keeps page
+  identity, page LSN, commit LSN, native-support metadata, and retention
+  ordering, but writes no page payload and forbids page-image reads from those
+  records. Replay and checkpoint retained-record callbacks skip them for the
+  same reason the live page-index path already skips native-support pages.
   The append-batch fault-guard slice then narrowed unsafe-hook checks to
   actual configured ownerless fault names. Hook builds still enable fault
   infrastructure globally, but visible-fast correctness selectors and
@@ -5993,6 +6004,16 @@ subsystems that this mode needs:
   `100` published `FIL_PAGE_UNDO_LOG` pages, zero native history flush pages on
   the fast path, and a page-index native-support skip summary of `2.030` per
   insert.
+  The native-support proof-only WAL slice then preserves those two proof
+  records per eligible commit while removing their page-image payloads from the
+  WAL. The reduced 100-row stats-enabled production sample reported `2.000`
+  proof-only native-support records per ownerless autocommit insert, zero
+  MTR scratch allocation/copy/checksum time for the proof path, and `503.380`
+  page-log payload bytes per insert. The matching 500-row stats-off sample
+  reported ownerless autocommit at `1950.43 ops/s` versus ordinary autocommit
+  at `3560.43 ops/s`. This narrows proof representation cost only; it does not
+  claim broader native redo, checkpoint, DDL/file-lifecycle, or SQL-level
+  table-wait completion.
   Larger row lists, broad DML/DDL, and unbounded append-lock hold times remain
   out of scope.
   Focused gating coverage proves active live writers, including idle explicit

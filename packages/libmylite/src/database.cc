@@ -16485,6 +16485,9 @@ int append_ownerless_page_version(
     if (native_support_page) {
         append_options |= MYLITE_OWNERLESS_PAGE_LOG_APPEND_NATIVE_SUPPORT_STATE;
     }
+    if ((publish_flags & MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_PROOF_ONLY) != 0U) {
+        append_options |= MYLITE_OWNERLESS_PAGE_LOG_APPEND_PROOF_ONLY;
+    }
     if (ownerless_page_log_append_batch.hook == hook) {
         if (ownerless_page_log_append_batch.session.active == 0) {
             const int begin_result = mylite_ownerless_page_log_append_session_begin_initialized_at(
@@ -16796,7 +16799,15 @@ int ownerless_innodb_page_publish_hook(
     if (ctx == nullptr || page == nullptr || page_size == 0U || visible_lsn == 0U) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
-    if ((publish_flags & ~MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_HISTORY_RSEG) != 0U) {
+    constexpr std::uint32_t known_publish_flags =
+        MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_HISTORY_RSEG |
+        MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_PROOF_ONLY;
+    if ((publish_flags & ~known_publish_flags) != 0U) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
+    const bool proof_only_publish =
+        (publish_flags & MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_PROOF_ONLY) != 0U;
+    if (proof_only_publish && page_lsn == 0U) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
 
@@ -16822,7 +16833,8 @@ int ownerless_innodb_page_publish_hook(
     std::uint64_t record_offset = 0;
     std::uint64_t stage_start_ns =
         ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
-    const bool native_support_page = ownerless_page_image_is_native_support_state(page, page_size);
+    const bool native_support_page =
+        proof_only_publish || ownerless_page_image_is_native_support_state(page, page_size);
     bool external_snapshot_pin_active = false;
     if (ownerless_test_fails_native_support_page_publish(native_support_page)) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
@@ -16844,7 +16856,8 @@ int ownerless_innodb_page_publish_hook(
 
     stage_start_ns =
         ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
-    const std::uint64_t page_checksum = mylite_ownerless_page_log_checksum_page(page, page_size);
+    const std::uint64_t page_checksum =
+        proof_only_publish ? 0U : mylite_ownerless_page_log_checksum_page(page, page_size);
     ownerless_database_perf_add_elapsed(
         OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_PAGE_LOG_CHECKSUM_NS,
         stage_start_ns
@@ -19600,9 +19613,29 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
 
         int bootstrap_lock_fd = -1;
         if (!memory_database && skip_database_lock) {
-            const std::filesystem::path lock_path = std::filesystem::path(db.database_path) /
-                                                    k_concurrency_dir_name /
-                                                    k_concurrency_lock_filename;
+            const std::filesystem::path concurrency_directory =
+                std::filesystem::path(db.database_path) / k_concurrency_dir_name;
+            if (!ownerless_runtime_open && unsafe_disable_database_lock_for_tests()) {
+                std::error_code error;
+                std::filesystem::create_directories(concurrency_directory, error);
+                if (error) {
+                    if (concurrency_mapped) {
+                        unmap_concurrency_shared_memory_for_runtime(g_runtime);
+                        concurrency_mapped = false;
+                    }
+                    clear_runtime_state(g_runtime);
+                    cleanup_runtime_layout(layout);
+                    release_database_lock(lock_fd);
+                    set_error(
+                        db,
+                        MYLITE_IOERR,
+                        "database concurrency directory could not be created"
+                    );
+                    return MYLITE_IOERR;
+                }
+            }
+            const std::filesystem::path lock_path =
+                concurrency_directory / k_concurrency_lock_filename;
             stage_start_ns = embedded_open_perf_start_ns();
             bootstrap_lock_fd = acquire_concurrency_lock(
                 lock_path,

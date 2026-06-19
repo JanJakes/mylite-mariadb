@@ -889,6 +889,14 @@ summaries and emitted no `mylite_perf_summary_*_client_*` rows.
   throwaway page-sized vector allocation and copy while keeping transaction
   image counts, fallback publication, WAL format, and recovery behavior
   unchanged.
+- Native-support history-proof publication now appends proof-only page-log
+  metadata for the rollback-segment and undo proof records instead of page
+  payloads. A reduced stats-enabled production sample preserved `2.000`
+  published native-support proof records per ownerless autocommit insert while
+  reporting zero MTR scratch allocation/copy/checksum time for that proof path,
+  and `503.380` page-log payload bytes per insert. The matching stats-off
+  sample reported ownerless autocommit at `1950.43 ops/s` versus ordinary
+  autocommit at `3560.43 ops/s`.
 - Ownerless checkpoint update summaries include
   `checkpoint_update_legacy_write_elided_per_insert`, distinguishing legacy
   payload write removal from same-pair no-op elision and file-read elision.
@@ -911,4 +919,7 @@ summaries and emitted no `mylite_perf_summary_*_client_*` rows.
   repeated production samples with comparable storage placement and runner load;
   the WordPress harness now makes DB placement visible and CI-guarded.
 - Broader native redo/checkpoint reconciliation remains the prerequisite before
-  ownerless native-support page publication can be safely reduced.
+  ownerless native-support proof records can be removed or replaced with a
+  native checkpoint proof. The current proof-only WAL slice removes payload
+  work for the two history-proof records but deliberately keeps the records
+  durable.
