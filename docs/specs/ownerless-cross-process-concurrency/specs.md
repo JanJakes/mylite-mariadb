@@ -4280,6 +4280,14 @@ Tasks:
    seeds `549` and `557` can recover on attempt `3`, and seeds `546`, `560`,
    `562`, `564`, and `575` can recover on attempt `2` after transient raw
    MariaDB `1213` deadlock exits.
+   The `ownerless-external-seed-576-607-replay` follow-up widens the
+   dependency-free seed-sweep CTest window to seeds `256` through `319` and
+   records the next replay window for seeds `576` through `607` at rounds `2`,
+   using the same explicit FK graph whole-seed retry budget of `10` so seeds
+   `581`, `586`, and `605` can recover on attempt `4`, seeds `576`, `584`,
+   `595`, `599`, and `604` can recover on attempt `3`, and seeds `578`, `579`,
+   `582`, `587`, `589`, `590`, and `606` can recover on attempt `2` after
+   transient raw MariaDB `1213` deadlock exits.
    Separate foreign-key graph stress
    coverage runs with
    `MYLITE_OWNERLESS_FK_GRAPH_STRESS_ROUNDS=48`, concurrent ownerless workers
