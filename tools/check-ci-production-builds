@@ -311,6 +311,7 @@ require_literal "Tests_Theme::test_default_themes_are_included_in_new_files"
 require_literal "Build WordPress PHPUnit Docker image"
 require_literal "Fetch WordPress PHPUnit sources"
 require_literal "Build MyLite PHP extensions for WordPress PHPUnit"
+require_literal "Run embedded large-row bulk performance probe"
 require_literal "Install WordPress PHPUnit dependencies"
 require_literal "Prepare WordPress PHPUnit database"
 require_literal "Run WordPress mysqli performance probe"
@@ -351,8 +352,10 @@ require_literal "-R '^libmylite\\.ownerless-cross-process-sql\\.'"
 require_literal "--parallel 2"
 require_literal "build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe"
 require_step_order "Run embedded performance probe" "Run embedded non-ownerless tests"
+require_step_order "Run embedded large-row bulk performance probe" "Run embedded non-ownerless tests"
 require_step_order "Run embedded ownerless attribution probe" "Run embedded non-ownerless tests"
 require_step_order "Run embedded performance probe" "Run embedded ownerless SQL tests"
+require_step_order "Run embedded large-row bulk performance probe" "Run embedded ownerless SQL tests"
 require_step_order "Run embedded ownerless attribution probe" "Run embedded ownerless SQL tests"
 
 require_step_timeout "Build MariaDB embedded archive" 30
@@ -367,6 +370,13 @@ require_embedded_timing_step_guards "Run embedded non-ownerless tests"
 forbid_step_literal "Run embedded non-ownerless tests" "--parallel"
 require_embedded_timing_step_guards "Run embedded ownerless SQL tests"
 require_embedded_timing_step_guards "Run embedded performance probe"
+require_embedded_timing_step_guards "Run embedded large-row bulk performance probe"
+require_step_literal \
+  "Run embedded large-row bulk performance probe" \
+  'MYLITE_PERF_BULK_INSERT_ROWS_PER_STATEMENT: "100"'
+require_step_literal \
+  "Run embedded large-row bulk performance probe" \
+  'MYLITE_PERF_INSERT_ITERATIONS: "500"'
 require_embedded_timing_step_guards "Run embedded ownerless attribution probe"
 require_wordpress_timing_step_guards "Install WordPress PHPUnit dependencies"
 require_wordpress_timing_step_guards "Prepare WordPress PHPUnit database"

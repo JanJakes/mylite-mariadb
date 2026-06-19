@@ -188,10 +188,14 @@ committed foreign-key cascades and deletes to replace locally cached pages on
 the same handle.
 
 Ownerless performance diagnostics now run through production build presets for
-CI-visible timings, and CI separates the stats-off embedded throughput probe
-from a reduced stats-enabled ownerless attribution probe. CI also separates the
-WordPress PHPUnit source, build, dependency, database-prep, performance-probe,
-and test-only phases so PHPUnit wall timings are not hidden inside build work.
+CI-visible timings, and CI separates the default stats-off embedded throughput
+probe, a stats-off large-row bulk probe, and a reduced stats-enabled ownerless
+attribution probe. The large-row bulk probe uses
+`MYLITE_PERF_BULK_INSERT_ROWS_PER_STATEMENT=100` so CI reports the ownerless
+default-checked bulk-insert row-list shape separately from the default four-row
+small-bulk shape. CI also separates the WordPress PHPUnit source, build,
+dependency, database-prep, performance-probe, and test-only phases so PHPUnit
+wall timings are not hidden inside build work.
 Those phases append compact timing rows into
 `build/wordpress-phpunit-reports/timing-summary.md`, and CI publishes that
 Markdown table to the GitHub step summary so setup, build, probe, and each
@@ -202,8 +206,8 @@ and records the shard selector and parallelism in the GitHub step summary.
 CTest still prints per-shard elapsed time and the existing child watchdog emits
 active case identity plus process diagnostics when a case hangs.
 The embedded performance and attribution probes run before embedded correctness
-tests, so production throughput and attribution numbers remain visible even
-when a later ownerless SQL case fails.
+tests, so production throughput, large-row bulk, and attribution numbers remain
+visible even when a later ownerless SQL case fails.
 Stats-enabled prepared insert attribution now adds ordinary, ownerless, and
 ownerless-minus-ordinary client timing summaries for `prepare`, transaction
 begin, bind, `step`, reset, commit, finalize, measured loop time, and measured

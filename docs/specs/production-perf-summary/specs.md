@@ -869,9 +869,13 @@ summaries and emitted no `mylite_perf_summary_*_client_*` rows.
   the database and remaining test-only steps.
 - CI separates the embedded stats-off throughput probe from the reduced
   stats-enabled ownerless attribution probe.
-- CI runs both embedded performance probes before embedded correctness tests so
-  production timing evidence remains visible even if a later correctness case
-  fails.
+- CI also runs a stats-off large-row bulk probe with
+  `MYLITE_PERF_BULK_INSERT_ROWS_PER_STATEMENT=100`, so the ownerless
+  default-checked bulk-insert path has its own production timing bucket
+  instead of being inferred from the default four-row bulk sample.
+- CI runs the embedded performance and attribution probes before embedded
+  correctness tests so production timing evidence remains visible even if a
+  later correctness case fails.
 - Stats-enabled ownerless attribution summaries include native page-write
   publish and commit-log subphase rows so CI logs show whether remaining write
   cost sits in scan, page image preparation, hook/page-log append, redo-leave,
