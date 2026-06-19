@@ -1437,6 +1437,8 @@ std::mutex g_ownerless_checkpoint_lsn_sync_anchor_mutex;
 OwnerlessCheckpointLsnSyncAnchor g_ownerless_checkpoint_lsn_sync_anchor;
 std::mutex g_ownerless_checkpoint_lsn_generation_cache_mutex;
 OwnerlessCheckpointLsnGenerationCache g_ownerless_checkpoint_lsn_generation_cache;
+std::mutex g_ownerless_platform_probe_device_cache_mutex;
+std::vector<std::uint64_t> g_ownerless_platform_probe_device_cache;
 std::atomic<std::uint64_t> g_ownerless_next_page_observation_token{1};
 #endif
 
@@ -1763,6 +1765,9 @@ bool ownerless_platform_probe_proof_matches(
     const std::filesystem::path &metadata_path,
     std::uint64_t database_device
 );
+bool ownerless_platform_probe_device_cache_matches(std::uint64_t database_device);
+void remember_ownerless_platform_probe_device(std::uint64_t database_device);
+bool ownerless_platform_probe_test_failure_configured();
 int write_ownerless_platform_probe_proof(
     const std::filesystem::path &metadata_path,
     std::uint64_t database_device
@@ -4594,6 +4599,22 @@ int validate_ownerless_platform_for_database(mylite_db &db) {
     const std::filesystem::path probe_metadata_path =
         concurrency_directory / k_ownerless_platform_probe_meta_filename;
     if (ownerless_platform_probe_proof_matches(probe_metadata_path, database_device)) {
+        remember_ownerless_platform_probe_device(database_device);
+        return MYLITE_OK;
+    }
+
+    if (!ownerless_platform_probe_test_failure_configured() &&
+        ownerless_platform_probe_device_cache_matches(database_device)) {
+        const int write_result =
+            write_ownerless_platform_probe_proof(probe_metadata_path, database_device);
+        if (write_result != MYLITE_OK) {
+            set_error(
+                db,
+                write_result,
+                "database ownerless platform probe metadata could not be saved"
+            );
+            return write_result;
+        }
         return MYLITE_OK;
     }
 
@@ -4607,6 +4628,7 @@ int validate_ownerless_platform_for_database(mylite_db &db) {
         );
         return MYLITE_ERROR;
     }
+    remember_ownerless_platform_probe_device(database_device);
 
     const int write_result =
         write_ownerless_platform_probe_proof(probe_metadata_path, database_device);
@@ -4656,6 +4678,36 @@ bool ownerless_platform_probe_proof_matches(
     }
 
     return has_format && has_matching_device && has_required_primitives;
+}
+
+bool ownerless_platform_probe_device_cache_matches(std::uint64_t database_device) {
+    std::lock_guard<std::mutex> guard(g_ownerless_platform_probe_device_cache_mutex);
+    return std::find(
+               g_ownerless_platform_probe_device_cache.begin(),
+               g_ownerless_platform_probe_device_cache.end(),
+               database_device
+           ) != g_ownerless_platform_probe_device_cache.end();
+}
+
+void remember_ownerless_platform_probe_device(std::uint64_t database_device) {
+    std::lock_guard<std::mutex> guard(g_ownerless_platform_probe_device_cache_mutex);
+    if (std::find(
+            g_ownerless_platform_probe_device_cache.begin(),
+            g_ownerless_platform_probe_device_cache.end(),
+            database_device
+        ) != g_ownerless_platform_probe_device_cache.end()) {
+        return;
+    }
+    g_ownerless_platform_probe_device_cache.push_back(database_device);
+}
+
+bool ownerless_platform_probe_test_failure_configured() {
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    const char *failure = std::getenv("MYLITE_OWNERLESS_TEST_PROBE_FAIL");
+    return failure != nullptr && failure[0] != '\0';
+#  else
+    return false;
+#  endif
 }
 
 int write_ownerless_platform_probe_proof(

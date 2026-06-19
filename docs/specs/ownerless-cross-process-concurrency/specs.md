@@ -961,9 +961,14 @@ before the ownerless startup lock and embedded MariaDB runtime startup. A
 successful probe writes `concurrency/mylite-ownerless-platform.meta` with the
 database-directory device id and `required_primitives=1`; later ownerless opens
 reuse that proof and re-probe when the proof is absent or the database directory
-is on a different filesystem. The open gate requires the correctness primitives;
-the fast wait backend remains high-performance evidence rather than a
-correctness requirement.
+is on a different filesystem. The opener also remembers successful proofs per
+filesystem device inside the current process; a later fresh MyLite directory on
+the same device may skip the child-process probe, but it still writes its own
+directory-local proof metadata before ownerless mode is accepted. Unsafe
+probe-failure hooks bypass the process cache so negative coverage still
+exercises the real probe path. The open gate requires the correctness
+primitives; the fast wait backend remains high-performance evidence rather
+than a correctness requirement.
 
 ## Architecture Options
 
@@ -5117,9 +5122,11 @@ subsystems that this mode needs:
   `mysql_server_end()` shutdown, making per-process startup and shutdown cost
   visible separately from active in-process reconnect cost. The ownerless
   startup probe now emits a first-probe open/close sample before
-  `concurrency/mylite-ownerless-platform.meta` exists, then measures cached
-  warm ownerless open/close after the proof file is available, keeping the
-  one-time filesystem proof cost separate from recurring ownerless startup.
+  `concurrency/mylite-ownerless-platform.meta` exists, a second fresh
+  same-device ownerless database sample after the process-local device proof is
+  cached, then cached warm ownerless open/close after the original directory's
+  proof file is available, keeping the one-time filesystem proof cost separate
+  from recurring ownerless startup and cold runtime/InnoDB startup.
   A public API parity benchmark is now also available as
   `tools/mylite_public_open_close_bench`, using only `mylite_open()`,
   `mylite_exec()`, and `mylite_close()` over an InnoDB table so the same source

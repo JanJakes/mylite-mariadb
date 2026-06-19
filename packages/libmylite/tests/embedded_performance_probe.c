@@ -1329,6 +1329,7 @@ int main(void) {
     double ordinary_warm_open_close_ms;
     double ordinary_active_runtime_reconnect_ms;
     double ownerless_first_probe_open_close_ms;
+    double ownerless_device_cached_probe_open_close_ms;
     double ownerless_warm_open_close_ms;
     double ownerless_active_runtime_reconnect_ms;
     double ordinary_direct_select1_rate;
@@ -1430,6 +1431,39 @@ int main(void) {
     emit_embedded_shutdown_perf_stats("mylite_perf_ownerless_first_probe_open_close");
     emit_embedded_shutdown_perf_summary("mylite_perf_summary_ownerless_first_probe_open_close");
     check_max_ms("MYLITE_PERF_MAX_OWNERLESS_FIRST_PROBE_OPEN_CLOSE_MS", seconds, 1U);
+
+    char *ownerless_cached_database_path =
+        path_join(paths.root, "startup-performance-device-cache.mylite");
+    char *ownerless_cached_runtime_root = path_join(paths.root, "runtime-device-cache");
+    if (mkdir(ownerless_cached_runtime_root, 0700) != 0) {
+        fprintf(stderr, "mkdir %s failed: %s\n", ownerless_cached_runtime_root, strerror(errno));
+        exit(1);
+    }
+    performance_paths ownerless_cached_paths = paths;
+    ownerless_cached_paths.database_path = ownerless_cached_database_path;
+    ownerless_cached_paths.runtime_root = ownerless_cached_runtime_root;
+    mylite_open_config ownerless_cached_config =
+        open_config(ownerless_cached_runtime_root, durability);
+    reset_embedded_lifecycle_perf_stats();
+    set_embedded_lifecycle_perf_stats_enabled(1);
+    seconds =
+        measure_open_close(&ownerless_cached_paths, ownerless_flags, &ownerless_cached_config, 1U);
+    set_embedded_lifecycle_perf_stats_enabled(0);
+    ownerless_device_cached_probe_open_close_ms = average_ms(seconds, 1U);
+    emit_ms("mylite_perf_ownerless_device_cached_probe_open_close", seconds, 1U);
+    emit_embedded_open_perf_stats("mylite_perf_ownerless_device_cached_probe_open_close");
+    emit_embedded_open_perf_summary("mylite_perf_summary_ownerless_device_cached_probe_open_close");
+    emit_embedded_startup_perf_stats("mylite_perf_ownerless_device_cached_probe_open_close");
+    emit_embedded_startup_perf_summary(
+        "mylite_perf_summary_ownerless_device_cached_probe_open_close"
+    );
+    emit_embedded_shutdown_perf_stats("mylite_perf_ownerless_device_cached_probe_open_close");
+    emit_embedded_shutdown_perf_summary(
+        "mylite_perf_summary_ownerless_device_cached_probe_open_close"
+    );
+    check_max_ms("MYLITE_PERF_MAX_OWNERLESS_DEVICE_CACHED_PROBE_OPEN_CLOSE_MS", seconds, 1U);
+    free(ownerless_cached_database_path);
+    free(ownerless_cached_runtime_root);
 
     reset_embedded_lifecycle_perf_stats();
     set_embedded_lifecycle_perf_stats_enabled(1);
@@ -1900,6 +1934,14 @@ int main(void) {
     emit_summary_ms(
         "mylite_perf_summary_ownerless_first_probe_open_close_overhead_ms_avg",
         ownerless_first_probe_open_close_ms - ordinary_warm_open_close_ms
+    );
+    emit_summary_ms(
+        "mylite_perf_summary_ownerless_device_cached_probe_open_close_ms_avg",
+        ownerless_device_cached_probe_open_close_ms
+    );
+    emit_summary_ms(
+        "mylite_perf_summary_ownerless_device_cached_probe_open_close_overhead_ms_avg",
+        ownerless_device_cached_probe_open_close_ms - ordinary_warm_open_close_ms
     );
     emit_summary_ms(
         "mylite_perf_summary_ownerless_warm_open_close_ms_avg",

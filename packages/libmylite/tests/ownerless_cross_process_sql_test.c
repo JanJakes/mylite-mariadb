@@ -49982,13 +49982,26 @@ static void assert_shared_readonly_open_returns_busy(open_database_paths paths) 
 static void test_ownerless_rejects_directory_probe_failure(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
+    char *primer_database_path = path_join(root, "ownerless-platform-probe-cache-primer.mylite");
+    char *primer_concurrency_path = path_join(primer_database_path, "concurrency");
+    char *primer_probe_metadata_path =
+        path_join(primer_concurrency_path, "mylite-ownerless-platform.meta");
     char *database_path = path_join(root, "ownerless-platform-probe-failure.mylite");
     char *concurrency_path = path_join(database_path, "concurrency");
     char *probe_metadata_path = path_join(concurrency_path, "mylite-ownerless-platform.meta");
+    open_database_paths primer_paths = {
+        .database_path = primer_database_path,
+        .runtime_root = runtime_root
+    };
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     mylite_db *db = NULL;
 
     assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(primer_paths);
+    db = open_database(primer_paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(path_exists(primer_probe_metadata_path));
+
     initialize_database(paths);
 
     assert(setenv("MYLITE_OWNERLESS_TEST_PROBE_FAIL", "required-primitives", 1) == 0);
@@ -50011,6 +50024,9 @@ static void test_ownerless_rejects_directory_probe_failure(void) {
     assert(mylite_close(db) == MYLITE_OK);
     assert(path_exists(probe_metadata_path));
 
+    free(primer_probe_metadata_path);
+    free(primer_concurrency_path);
+    free(primer_database_path);
     free(probe_metadata_path);
     free(concurrency_path);
     free(database_path);
