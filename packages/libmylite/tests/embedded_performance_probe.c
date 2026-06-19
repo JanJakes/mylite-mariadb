@@ -371,6 +371,12 @@ enum page_write_perf_stat_index {
     PAGE_WRITE_PERF_STAT_MTR_OVERFLOW_VECTOR_ALLOCATIONS,
     PAGE_WRITE_PERF_STAT_MTR_OVERFLOW_PAGE_INSERTS,
     PAGE_WRITE_PERF_STAT_MTR_INLINE_PROMOTIONS,
+    PAGE_WRITE_PERF_STAT_REDO_LEAVE_LOG_WRITE_CALLS,
+    PAGE_WRITE_PERF_STAT_REDO_LEAVE_LOG_WRITE_NS,
+    PAGE_WRITE_PERF_STAT_REDO_LEAVE_ZERO_LSN_CALLS,
+    PAGE_WRITE_PERF_STAT_REDO_LEAVE_HOOK_NS,
+    PAGE_WRITE_PERF_STAT_REDO_LEAVE_WRITTEN_HOOK_CALLS,
+    PAGE_WRITE_PERF_STAT_REDO_LEAVE_FALLBACK_HOOK_CALLS,
     PAGE_WRITE_PERF_STAT_COUNT
 };
 
@@ -2558,6 +2564,56 @@ static void emit_redo_hook_summary(
     );
 }
 
+static void emit_page_write_redo_leave_subphase_summary(
+    const char *prefix,
+    const uint64_t *page_write,
+    unsigned iterations,
+    const char *unit
+) {
+    emit_summary_count_per_named_unit(
+        prefix,
+        "page_write_redo_leave_log_write_calls",
+        page_write[PAGE_WRITE_PERF_STAT_REDO_LEAVE_LOG_WRITE_CALLS],
+        iterations,
+        unit
+    );
+    emit_summary_ms_per_named_unit(
+        prefix,
+        "page_write_redo_leave_log_write_ms",
+        page_write[PAGE_WRITE_PERF_STAT_REDO_LEAVE_LOG_WRITE_NS],
+        iterations,
+        unit
+    );
+    emit_summary_count_per_named_unit(
+        prefix,
+        "page_write_redo_leave_zero_lsn_calls",
+        page_write[PAGE_WRITE_PERF_STAT_REDO_LEAVE_ZERO_LSN_CALLS],
+        iterations,
+        unit
+    );
+    emit_summary_ms_per_named_unit(
+        prefix,
+        "page_write_redo_leave_hook_ms",
+        page_write[PAGE_WRITE_PERF_STAT_REDO_LEAVE_HOOK_NS],
+        iterations,
+        unit
+    );
+    emit_summary_count_per_named_unit(
+        prefix,
+        "page_write_redo_leave_written_hook_calls",
+        page_write[PAGE_WRITE_PERF_STAT_REDO_LEAVE_WRITTEN_HOOK_CALLS],
+        iterations,
+        unit
+    );
+    emit_summary_count_per_named_unit(
+        prefix,
+        "page_write_redo_leave_fallback_hook_calls",
+        page_write[PAGE_WRITE_PERF_STAT_REDO_LEAVE_FALLBACK_HOOK_CALLS],
+        iterations,
+        unit
+    );
+}
+
 static void emit_ownerless_native_hook_metric_summary(
     const char *prefix,
     const uint64_t *database_perf,
@@ -3340,6 +3396,12 @@ static void emit_ownerless_bulk_autocommit_phase_summary(
         page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_REDO_LEAVE_NS],
         insert_statements
     );
+    emit_page_write_redo_leave_subphase_summary(
+        "mylite_perf_summary_ownerless_autocommit_bulk",
+        page_write,
+        insert_statements,
+        "statement"
+    );
     emit_summary_ms_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_bulk_page_write_commit_log_publish_ms_per_"
         "statement",
@@ -3728,6 +3790,18 @@ static void emit_ownerless_transaction_phase_summary(
         "mylite_perf_summary_ownerless_insert_txn_page_write_commit_log_redo_leave_ms_per_insert",
         page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_REDO_LEAVE_NS],
         insert_iterations
+    );
+    emit_page_write_redo_leave_subphase_summary(
+        "mylite_perf_summary_ownerless_insert_txn",
+        page_write,
+        insert_iterations,
+        "insert"
+    );
+    emit_page_write_redo_leave_subphase_summary(
+        "mylite_perf_summary_ownerless_insert_txn",
+        page_write,
+        1U,
+        "transaction"
     );
     emit_summary_ms_per_iteration(
         "mylite_perf_summary_ownerless_insert_txn_page_write_commit_log_publish_ms_per_insert",
@@ -6331,6 +6405,12 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
         "insert",
         page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_REDO_LEAVE_NS],
         insert_iterations
+    );
+    emit_page_write_redo_leave_subphase_summary(
+        "mylite_perf_summary_ownerless_autocommit",
+        page_write,
+        insert_iterations,
+        "insert"
     );
     emit_summary_ms_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_commit_mtr_publish_ms_per_insert",
@@ -10163,6 +10243,36 @@ static void emit_page_write_perf_stats(const char *prefix) {
         "%s_page_write_commit_log_redo_leave_ms=%.3f\n",
         prefix,
         (double)values[PAGE_WRITE_PERF_STAT_COMMIT_LOG_REDO_LEAVE_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_write_redo_leave_log_write_calls=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_WRITE_PERF_STAT_REDO_LEAVE_LOG_WRITE_CALLS]
+    );
+    printf(
+        "%s_page_write_redo_leave_log_write_ms=%.3f\n",
+        prefix,
+        (double)values[PAGE_WRITE_PERF_STAT_REDO_LEAVE_LOG_WRITE_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_write_redo_leave_zero_lsn_calls=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_WRITE_PERF_STAT_REDO_LEAVE_ZERO_LSN_CALLS]
+    );
+    printf(
+        "%s_page_write_redo_leave_hook_ms=%.3f\n",
+        prefix,
+        (double)values[PAGE_WRITE_PERF_STAT_REDO_LEAVE_HOOK_NS] / 1000000.0
+    );
+    printf(
+        "%s_page_write_redo_leave_written_hook_calls=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_WRITE_PERF_STAT_REDO_LEAVE_WRITTEN_HOOK_CALLS]
+    );
+    printf(
+        "%s_page_write_redo_leave_fallback_hook_calls=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_WRITE_PERF_STAT_REDO_LEAVE_FALLBACK_HOOK_CALLS]
     );
     printf(
         "%s_page_write_commit_log_publish_ms=%.3f\n",

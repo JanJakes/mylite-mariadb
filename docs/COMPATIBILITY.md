@@ -730,6 +730,17 @@ time moved from `0.743 ms` to `0.687 ms` per statement; the final stats-off
 `24510.00 rows/s`, ordinary bulk at `88307.92 rows/s`, and an
 ownerless/ordinary ratio of `0.2776`. This remains a bounded redo-state
 bookkeeping reduction, not a full ownerless write-throughput fix.
+The redo-leave subphase attribution follow-up then splits the existing
+`page_write_commit_log_redo_leave` bucket into native `log_write_up_to()` time,
+MyLite redo-state hook time, written-range hook calls, fallback hook calls, and
+zero-LSN leaves without changing call order or redo/checkpoint behavior. A
+reduced 100-row bulk attribution sample preserved `2.000` page versions,
+`4.500` page-log appends, `2.000` native-support published pages, fast commit
+visibility, and `180.500` deferred latest-checkpoint coalesces per statement
+while reporting `0.671 ms/statement` aggregate redo leave, split into
+`0.362 ms/statement` native log write and `0.281 ms/statement` MyLite hook time;
+all `181.500` redo leaves per statement used the written-range hook, with zero
+fallback or zero-LSN leaves.
 Profiled mysqli runs also split total query elapsed time into
 `query_verb_*` buckets for result queries, DML, DDL, connection state,
 transaction, lock, call, and other first-keyword classes so WordPress timing

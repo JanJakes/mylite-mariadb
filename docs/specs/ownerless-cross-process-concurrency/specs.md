@@ -6098,6 +6098,16 @@ subsystems that this mode needs:
   count under the same redo progress latch; redo ordering, completed-range
   coalescing, checkpoint files, page-version WAL, and SQL semantics are
   unchanged.
+  The redo-leave subphase attribution follow-up then splits the existing
+  `page_write_commit_log_redo_leave` bucket into native `log_write_up_to()`
+  time, MyLite redo-state hook time, written-range hook calls, fallback hook
+  calls, and zero-LSN leaves without changing redo write or redo-state hook
+  order. A reduced 100-row bulk attribution sample preserved `2.000` page
+  versions, `4.500` page-log appends, `2.000` native-support published pages,
+  fast commit visibility, and `180.500` deferred latest-checkpoint coalesces
+  per statement while reporting `0.671 ms/statement` aggregate redo leave,
+  split into `0.362 ms/statement` native log-write time and
+  `0.281 ms/statement` MyLite redo-state hook time.
   The inline MTR page-tracking follow-up keeps the first MTR-scoped ownerless
   page-write identity in `mtr_t` and uses the existing vector only for overflow
   pages. This preserves page-write release order, transaction-deferred
