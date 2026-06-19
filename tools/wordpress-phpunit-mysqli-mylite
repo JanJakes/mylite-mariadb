@@ -2860,6 +2860,34 @@ PHP_KEEPALIVE
     mylite_mysqli_profile_query_transaction_end_ms_total
     mylite_mysqli_profile_query_transaction_savepoint_calls
     mylite_mysqli_profile_query_transaction_savepoint_ms_total
+    mylite_mysqli_profile_query_shape_top_count
+    mylite_mysqli_profile_query_shape_overflow_calls
+    mylite_mysqli_profile_query_shape_overflow_ms_total
+    mylite_mysqli_profile_query_shape_1_hash
+    mylite_mysqli_profile_query_shape_1_calls
+    mylite_mysqli_profile_query_shape_1_ms_total
+    mylite_mysqli_profile_query_shape_1_verb
+    mylite_mysqli_profile_query_shape_1_sample
+    mylite_mysqli_profile_query_shape_2_hash
+    mylite_mysqli_profile_query_shape_2_calls
+    mylite_mysqli_profile_query_shape_2_ms_total
+    mylite_mysqli_profile_query_shape_2_verb
+    mylite_mysqli_profile_query_shape_2_sample
+    mylite_mysqli_profile_query_shape_3_hash
+    mylite_mysqli_profile_query_shape_3_calls
+    mylite_mysqli_profile_query_shape_3_ms_total
+    mylite_mysqli_profile_query_shape_3_verb
+    mylite_mysqli_profile_query_shape_3_sample
+    mylite_mysqli_profile_query_shape_4_hash
+    mylite_mysqli_profile_query_shape_4_calls
+    mylite_mysqli_profile_query_shape_4_ms_total
+    mylite_mysqli_profile_query_shape_4_verb
+    mylite_mysqli_profile_query_shape_4_sample
+    mylite_mysqli_profile_query_shape_5_hash
+    mylite_mysqli_profile_query_shape_5_calls
+    mylite_mysqli_profile_query_shape_5_ms_total
+    mylite_mysqli_profile_query_shape_5_verb
+    mylite_mysqli_profile_query_shape_5_sample
     mylite_mysqli_profile_query_verb_lock_calls
     mylite_mysqli_profile_query_verb_lock_ms_total
     mylite_mysqli_profile_query_verb_call_calls

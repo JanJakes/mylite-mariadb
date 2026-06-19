@@ -271,6 +271,14 @@ prior conclusion from `libmylite-transaction-end-profile`: exact transaction
 end parser bypass is still rejected until a future implementation beats the
 documented focused profile and micro-benchmark controls.
 
+The mysqli profile now also emits bounded top SQL-shape attribution rows for
+profiled text queries. Literal values are normalized, whitespace is collapsed,
+and the top five shapes by elapsed query time are copied into the WordPress
+timing summary for explicitly profiled phases. This keeps the normal
+production timing shards free of profiler overhead while making the
+`phpunit-db-profile` diagnostic useful for deciding which SELECT or DDL query
+families deserve the next optimization slice.
+
 The prepared DML reset fast path removes the measured server-side
 `mysql_stmt_reset()` cost after successful no-result statements. MariaDB's
 result-bearing, failed, and metadata-retaining statement reset behavior remains

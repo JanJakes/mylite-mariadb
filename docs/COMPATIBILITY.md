@@ -692,6 +692,12 @@ reported `query_ms_total=5290.576`, `query_verb_select_ms_total=2589.649`,
 `libmylite_exec_result_native_control_ms_total=1572.866`, while the previously
 documented transaction-end helper remains rejected because it regressed the
 same focused profile.
+The same opt-in profile now also prints bounded top SQL-shape rows for text
+queries. Samples normalize literal strings and numbers to `?`, collapse
+whitespace, and report hash, call count, elapsed time, verb, and sample text for
+the top profiled shapes. The WordPress timing summary copies those rows only
+for profiled phases, so normal test-only timings remain comparable while the
+diagnostic database shard can identify the next high-impact query family.
 The same opt-in profile now also emits `libmylite_exec_result_*` rows that
 separate direct text execution into native `mysql_query()`, affected-row and
 insert-id capture, result draining, result/no-result classification,
