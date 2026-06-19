@@ -74,6 +74,11 @@ the end of the probes:
   - ownerless/ordinary read throughput ratios,
   - ordinary and ownerless transactional and autocommit insert throughput,
   - ownerless/ordinary write throughput ratios,
+  - when detailed ownerless stats are enabled, prepared insert client-side
+    `prepare`, transaction begin, bind, step, reset, commit, finalize, measured
+    loop, and measured residual timing for ordinary and ownerless
+    transactional and autocommit insert paths, plus ownerless-minus-ordinary
+    client timing deltas,
   - when detailed ownerless stats are enabled, ordinary insert transaction and
     autocommit raw deep InnoDB counters, plus ordinary autocommit baselines and
     ownerless-minus-ordinary deltas for commit, write-history, history-list,
@@ -817,6 +822,18 @@ ownerless direct `SELECT 1` at `614.31 ops/s`, ownerless prepared `SELECT 1` at
 ownerless autocommit inserts at `1344.07 ops/s`; those small-sample throughput
 values are timing smoke evidence, not a replacement for CI-sized samples.
 
+The follow-up insert client-step attribution slice keeps the stats-off
+throughput path unchanged and adds stats-enabled prepared insert timing rows
+for ordinary, ownerless, and ownerless-minus-ordinary client work. A reduced
+20-insert production attribution sample printed the new client summaries:
+ownerless transactional prepared inserts reported `0.494 ms/insert` measured
+client loop time versus `0.283 ms/insert` ordinary, with the delta mostly in
+`step` (`0.181 ms/insert`) and `COMMIT` (`0.030 ms/insert`), while ownerless
+autocommit prepared inserts reported `1.299 ms/insert` versus `0.341
+ms/insert` ordinary, with the delta mostly in `step` (`0.957 ms/insert`). The
+matching stats-off reduced probe retained the existing write-throughput
+summaries and emitted no `mylite_perf_summary_*_client_*` rows.
+
 ## Acceptance Criteria
 
 - CI and local production probes emit compact summary keys for startup,
@@ -826,6 +843,10 @@ values are timing smoke evidence, not a replacement for CI-sized samples.
   derived from existing detailed counters, including separate MTR-published
   page-version, total page-publish hook-call, page-log append-call, and
   non-MTR page-publish source rates, plus clustered-low row-insert subphases.
+- Stats-enabled prepared insert probes emit client-side ordinary, ownerless,
+  and ownerless-minus-ordinary timing summaries so write-path attribution can
+  distinguish probe/API bind/step/reset/commit time from native page-publish,
+  page-log, and InnoDB deep counters.
 - CI timing-sensitive jobs remain production-build based, and test-only
   WordPress PHPUnit steps remain separated from build/setup phases.
 - CI embedded non-ownerless CTest coverage runs serially so production timing

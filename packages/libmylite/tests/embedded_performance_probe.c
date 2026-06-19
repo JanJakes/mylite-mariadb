@@ -24,6 +24,24 @@ typedef struct performance_paths {
     char *database_path;
 } performance_paths;
 
+typedef struct insert_client_timing {
+    uint64_t measured_ns;
+    uint64_t prepare_ns;
+    uint64_t begin_ns;
+    uint64_t bind_ns;
+    uint64_t step_ns;
+    uint64_t reset_ns;
+    uint64_t commit_ns;
+    uint64_t finalize_ns;
+    uint64_t prepare_calls;
+    uint64_t begin_calls;
+    uint64_t bind_calls;
+    uint64_t step_calls;
+    uint64_t reset_calls;
+    uint64_t commit_calls;
+    uint64_t finalize_calls;
+} insert_client_timing;
+
 enum page_publish_stat_index {
     PAGE_PUBLISH_STAT_CANDIDATES = 0,
     PAGE_PUBLISH_STAT_PUBLISHED,
@@ -1134,6 +1152,17 @@ static void emit_ownerless_bulk_autocommit_phase_summary(
     unsigned insert_rows,
     unsigned insert_statements
 );
+static void emit_insert_client_timing_summary(
+    const char *prefix,
+    const insert_client_timing *timing,
+    unsigned insert_iterations
+);
+static void emit_insert_client_timing_delta_summary(
+    const char *prefix,
+    const insert_client_timing *ownerless,
+    const insert_client_timing *ordinary,
+    unsigned insert_iterations
+);
 static void emit_ownerless_direct_select_summary(unsigned select_iterations);
 static void emit_ownerless_prepared_select_summary(unsigned select_iterations);
 static void emit_ownerless_direct_point_select_summary(unsigned select_iterations);
@@ -1204,13 +1233,15 @@ static double measure_transactional_insert(
     mylite_db *db,
     const char *table_name,
     unsigned rows,
-    int reset_page_publish_stats
+    int reset_page_publish_stats,
+    insert_client_timing *timing
 );
 static double measure_autocommit_insert(
     mylite_db *db,
     const char *table_name,
     unsigned rows,
-    int reset_page_publish_stats
+    int reset_page_publish_stats,
+    insert_client_timing *timing
 );
 static double measure_bulk_autocommit_insert(
     mylite_db *db,
@@ -1284,6 +1315,10 @@ int main(void) {
     uint64_t ownerless_txn_innodb_deep[INNODB_DEEP_PERF_STAT_COUNT] = {0};
     uint64_t ordinary_autocommit_innodb_deep[INNODB_DEEP_PERF_STAT_COUNT] = {0};
     uint64_t ownerless_autocommit_innodb_deep[INNODB_DEEP_PERF_STAT_COUNT] = {0};
+    insert_client_timing ordinary_txn_client_timing = {0};
+    insert_client_timing ownerless_txn_client_timing = {0};
+    insert_client_timing ordinary_autocommit_client_timing = {0};
+    insert_client_timing ownerless_autocommit_client_timing = {0};
 
     if (bulk_insert_rows_per_statement == 0U) {
         bulk_insert_rows_per_statement = 1U;
@@ -1456,7 +1491,8 @@ int main(void) {
         db,
         "mylite_perf_ordinary_insert",
         insert_iterations,
-        page_publish_stats
+        page_publish_stats,
+        page_publish_stats ? &ordinary_txn_client_timing : NULL
     );
     emit_rate("mylite_perf_ordinary_insert_txn", insert_iterations, seconds);
     if (page_publish_stats) {
@@ -1464,6 +1500,11 @@ int main(void) {
         mylite_ownerless_innodb_deep_read_perf_stats(
             ordinary_txn_innodb_deep,
             INNODB_DEEP_PERF_STAT_COUNT
+        );
+        emit_insert_client_timing_summary(
+            "mylite_perf_summary_ordinary_insert_txn_client",
+            &ordinary_txn_client_timing,
+            insert_iterations
         );
     }
     ordinary_insert_txn_rate = operations_per_second(insert_iterations, seconds);
@@ -1474,7 +1515,8 @@ int main(void) {
         db,
         "mylite_perf_ordinary_autocommit",
         insert_iterations,
-        page_publish_stats
+        page_publish_stats,
+        page_publish_stats ? &ordinary_autocommit_client_timing : NULL
     );
     emit_rate("mylite_perf_ordinary_insert_autocommit", insert_iterations, seconds);
     if (page_publish_stats) {
@@ -1482,6 +1524,11 @@ int main(void) {
         mylite_ownerless_innodb_deep_read_perf_stats(
             ordinary_autocommit_innodb_deep,
             INNODB_DEEP_PERF_STAT_COUNT
+        );
+        emit_insert_client_timing_summary(
+            "mylite_perf_summary_ordinary_autocommit_client",
+            &ordinary_autocommit_client_timing,
+            insert_iterations
         );
         mylite_ownerless_innodb_deep_set_perf_stats_enabled(0);
     }
@@ -1604,7 +1651,8 @@ int main(void) {
         db,
         "mylite_perf_ownerless_insert",
         insert_iterations,
-        page_publish_stats
+        page_publish_stats,
+        page_publish_stats ? &ownerless_txn_client_timing : NULL
     );
     emit_rate("mylite_perf_ownerless_insert_txn", insert_iterations, seconds);
     if (page_publish_stats) {
@@ -1628,6 +1676,17 @@ int main(void) {
             ownerless_txn_innodb_deep,
             insert_iterations
         );
+        emit_insert_client_timing_summary(
+            "mylite_perf_summary_ownerless_insert_txn_client",
+            &ownerless_txn_client_timing,
+            insert_iterations
+        );
+        emit_insert_client_timing_delta_summary(
+            "mylite_perf_summary_ownerless_minus_ordinary_insert_txn_client",
+            &ownerless_txn_client_timing,
+            &ordinary_txn_client_timing,
+            insert_iterations
+        );
     }
     ownerless_insert_txn_rate = operations_per_second(insert_iterations, seconds);
     rate = ownerless_insert_txn_rate;
@@ -1637,7 +1696,8 @@ int main(void) {
         db,
         "mylite_perf_ownerless_autocommit",
         insert_iterations,
-        page_publish_stats
+        page_publish_stats,
+        page_publish_stats ? &ownerless_autocommit_client_timing : NULL
     );
     emit_rate("mylite_perf_ownerless_insert_autocommit", insert_iterations, seconds);
     if (page_publish_stats) {
@@ -1660,6 +1720,17 @@ int main(void) {
         emit_autocommit_deep_comparison_summary(
             ordinary_autocommit_innodb_deep,
             ownerless_autocommit_innodb_deep,
+            insert_iterations
+        );
+        emit_insert_client_timing_summary(
+            "mylite_perf_summary_ownerless_autocommit_client",
+            &ownerless_autocommit_client_timing,
+            insert_iterations
+        );
+        emit_insert_client_timing_delta_summary(
+            "mylite_perf_summary_ownerless_minus_ordinary_autocommit_client",
+            &ownerless_autocommit_client_timing,
+            &ordinary_autocommit_client_timing,
             insert_iterations
         );
     }
@@ -2146,6 +2217,202 @@ static void emit_prefixed_ms_per_iteration(
     const double total_ms = (double)value_ns / 1000000.0;
     const double average_ms = iterations > 0U ? total_ms / (double)iterations : 0.0;
     printf("%s_%s=%.3f\n", prefix, suffix, average_ms);
+}
+
+static void emit_prefixed_ms_per_iteration_delta(
+    const char *prefix,
+    const char *suffix,
+    uint64_t left_ns,
+    uint64_t right_ns,
+    unsigned iterations
+) {
+    const double total_ms = ((double)left_ns - (double)right_ns) / 1000000.0;
+    const double average_ms = iterations > 0U ? total_ms / (double)iterations : 0.0;
+    printf("%s_%s=%.3f\n", prefix, suffix, average_ms);
+}
+
+static uint64_t insert_client_measured_accounted_ns(const insert_client_timing *timing) {
+    return timing->bind_ns + timing->step_ns + timing->reset_ns + timing->commit_ns;
+}
+
+static uint64_t insert_client_measured_residual_ns(const insert_client_timing *timing) {
+    const uint64_t accounted_ns = insert_client_measured_accounted_ns(timing);
+
+    return timing->measured_ns > accounted_ns ? timing->measured_ns - accounted_ns : 0U;
+}
+
+static void emit_insert_client_timing_summary(
+    const char *prefix,
+    const insert_client_timing *timing,
+    unsigned insert_iterations
+) {
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "measured_ms_per_insert",
+        timing->measured_ns,
+        insert_iterations
+    );
+    emit_prefixed_count_per_iteration(
+        prefix,
+        "prepare_calls_per_insert",
+        timing->prepare_calls,
+        insert_iterations
+    );
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "prepare_ms_per_insert",
+        timing->prepare_ns,
+        insert_iterations
+    );
+    emit_prefixed_count_per_iteration(
+        prefix,
+        "begin_calls_per_insert",
+        timing->begin_calls,
+        insert_iterations
+    );
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "begin_ms_per_insert",
+        timing->begin_ns,
+        insert_iterations
+    );
+    emit_prefixed_count_per_iteration(
+        prefix,
+        "bind_calls_per_insert",
+        timing->bind_calls,
+        insert_iterations
+    );
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "bind_ms_per_insert",
+        timing->bind_ns,
+        insert_iterations
+    );
+    emit_prefixed_count_per_iteration(
+        prefix,
+        "step_calls_per_insert",
+        timing->step_calls,
+        insert_iterations
+    );
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "step_ms_per_insert",
+        timing->step_ns,
+        insert_iterations
+    );
+    emit_prefixed_count_per_iteration(
+        prefix,
+        "reset_calls_per_insert",
+        timing->reset_calls,
+        insert_iterations
+    );
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "reset_ms_per_insert",
+        timing->reset_ns,
+        insert_iterations
+    );
+    emit_prefixed_count_per_iteration(
+        prefix,
+        "commit_calls_per_insert",
+        timing->commit_calls,
+        insert_iterations
+    );
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "commit_ms_per_insert",
+        timing->commit_ns,
+        insert_iterations
+    );
+    emit_prefixed_count_per_iteration(
+        prefix,
+        "finalize_calls_per_insert",
+        timing->finalize_calls,
+        insert_iterations
+    );
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "finalize_ms_per_insert",
+        timing->finalize_ns,
+        insert_iterations
+    );
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "measured_residual_ms_per_insert",
+        insert_client_measured_residual_ns(timing),
+        insert_iterations
+    );
+}
+
+static void emit_insert_client_timing_delta_summary(
+    const char *prefix,
+    const insert_client_timing *ownerless,
+    const insert_client_timing *ordinary,
+    unsigned insert_iterations
+) {
+    emit_prefixed_ms_per_iteration_delta(
+        prefix,
+        "measured_ms_per_insert",
+        ownerless->measured_ns,
+        ordinary->measured_ns,
+        insert_iterations
+    );
+    emit_prefixed_ms_per_iteration_delta(
+        prefix,
+        "prepare_ms_per_insert",
+        ownerless->prepare_ns,
+        ordinary->prepare_ns,
+        insert_iterations
+    );
+    emit_prefixed_ms_per_iteration_delta(
+        prefix,
+        "begin_ms_per_insert",
+        ownerless->begin_ns,
+        ordinary->begin_ns,
+        insert_iterations
+    );
+    emit_prefixed_ms_per_iteration_delta(
+        prefix,
+        "bind_ms_per_insert",
+        ownerless->bind_ns,
+        ordinary->bind_ns,
+        insert_iterations
+    );
+    emit_prefixed_ms_per_iteration_delta(
+        prefix,
+        "step_ms_per_insert",
+        ownerless->step_ns,
+        ordinary->step_ns,
+        insert_iterations
+    );
+    emit_prefixed_ms_per_iteration_delta(
+        prefix,
+        "reset_ms_per_insert",
+        ownerless->reset_ns,
+        ordinary->reset_ns,
+        insert_iterations
+    );
+    emit_prefixed_ms_per_iteration_delta(
+        prefix,
+        "commit_ms_per_insert",
+        ownerless->commit_ns,
+        ordinary->commit_ns,
+        insert_iterations
+    );
+    emit_prefixed_ms_per_iteration_delta(
+        prefix,
+        "finalize_ms_per_insert",
+        ownerless->finalize_ns,
+        ordinary->finalize_ns,
+        insert_iterations
+    );
+    emit_prefixed_ms_per_iteration_delta(
+        prefix,
+        "measured_residual_ms_per_insert",
+        insert_client_measured_residual_ns(ownerless),
+        insert_client_measured_residual_ns(ordinary),
+        insert_iterations
+    );
 }
 
 static void emit_summary_count_per_named_unit(
@@ -11915,14 +12182,20 @@ static double measure_transactional_insert(
     mylite_db *db,
     const char *table_name,
     unsigned rows,
-    int reset_page_publish_stats
+    int reset_page_publish_stats,
+    insert_client_timing *timing
 ) {
     char sql[256];
     const char *tail = NULL;
     mylite_stmt *stmt = NULL;
     uint64_t start_ns;
     uint64_t end_ns;
+    uint64_t phase_start_ns;
     unsigned index;
+
+    if (timing != NULL) {
+        memset(timing, 0, sizeof(*timing));
+    }
 
     (void)snprintf(sql, sizeof(sql), "DROP TABLE IF EXISTS app.%s", table_name);
     exec_ok(db, sql);
@@ -11934,9 +12207,16 @@ static double measure_transactional_insert(
     );
     exec_ok(db, sql);
     (void)snprintf(sql, sizeof(sql), "INSERT INTO app.%s (id, value) VALUES (?, ?)", table_name);
+    if (timing != NULL) {
+        phase_start_ns = monotonic_ns();
+    }
     if (mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, &tail) != MYLITE_OK) {
         fprintf(stderr, "prepare insert failed: %s\n", mylite_errmsg(db));
         exit(1);
+    }
+    if (timing != NULL) {
+        timing->prepare_ns += monotonic_ns() - phase_start_ns;
+        ++timing->prepare_calls;
     }
     if (tail == NULL || tail[0] != '\0') {
         fprintf(stderr, "prepare insert left unexpected tail\n");
@@ -11945,29 +12225,72 @@ static double measure_transactional_insert(
     if (reset_page_publish_stats) {
         reset_ownerless_insert_stats();
     }
+    if (timing != NULL) {
+        phase_start_ns = monotonic_ns();
+    }
     exec_ok(db, "START TRANSACTION");
+    if (timing != NULL) {
+        timing->begin_ns += monotonic_ns() - phase_start_ns;
+        ++timing->begin_calls;
+    }
     start_ns = monotonic_ns();
     for (index = 1U; index <= rows; ++index) {
+        if (timing != NULL) {
+            phase_start_ns = monotonic_ns();
+        }
         if (mylite_bind_int64(stmt, 1U, (long long)index) != MYLITE_OK ||
             mylite_bind_text(stmt, 2U, "mylite-perf", MYLITE_NUL_TERMINATED, MYLITE_STATIC) !=
                 MYLITE_OK) {
             fprintf(stderr, "insert bind failed\n");
             exit(1);
         }
+        if (timing != NULL) {
+            timing->bind_ns += monotonic_ns() - phase_start_ns;
+            timing->bind_calls += 2U;
+        }
+        if (timing != NULL) {
+            phase_start_ns = monotonic_ns();
+        }
         if (mylite_step(stmt) != MYLITE_DONE) {
             fprintf(stderr, "insert step failed\n");
             exit(1);
+        }
+        if (timing != NULL) {
+            timing->step_ns += monotonic_ns() - phase_start_ns;
+            ++timing->step_calls;
+        }
+        if (timing != NULL) {
+            phase_start_ns = monotonic_ns();
         }
         if (mylite_reset(stmt) != MYLITE_OK || mylite_clear_bindings(stmt) != MYLITE_OK) {
             fprintf(stderr, "insert reset failed\n");
             exit(1);
         }
+        if (timing != NULL) {
+            timing->reset_ns += monotonic_ns() - phase_start_ns;
+            timing->reset_calls += 2U;
+        }
+    }
+    if (timing != NULL) {
+        phase_start_ns = monotonic_ns();
     }
     exec_ok(db, "COMMIT");
+    if (timing != NULL) {
+        timing->commit_ns += monotonic_ns() - phase_start_ns;
+        ++timing->commit_calls;
+    }
     end_ns = monotonic_ns();
+    if (timing != NULL) {
+        timing->measured_ns = end_ns - start_ns;
+        phase_start_ns = monotonic_ns();
+    }
     if (mylite_finalize(stmt) != MYLITE_OK) {
         fprintf(stderr, "finalize insert failed\n");
         exit(1);
+    }
+    if (timing != NULL) {
+        timing->finalize_ns += monotonic_ns() - phase_start_ns;
+        ++timing->finalize_calls;
     }
     return elapsed_seconds(start_ns, end_ns);
 }
@@ -11976,14 +12299,20 @@ static double measure_autocommit_insert(
     mylite_db *db,
     const char *table_name,
     unsigned rows,
-    int reset_page_publish_stats
+    int reset_page_publish_stats,
+    insert_client_timing *timing
 ) {
     char sql[256];
     const char *tail = NULL;
     mylite_stmt *stmt = NULL;
     uint64_t start_ns;
     uint64_t end_ns;
+    uint64_t phase_start_ns;
     unsigned index;
+
+    if (timing != NULL) {
+        memset(timing, 0, sizeof(*timing));
+    }
 
     (void)snprintf(sql, sizeof(sql), "DROP TABLE IF EXISTS app.%s", table_name);
     exec_ok(db, sql);
@@ -11995,9 +12324,16 @@ static double measure_autocommit_insert(
     );
     exec_ok(db, sql);
     (void)snprintf(sql, sizeof(sql), "INSERT INTO app.%s (id, value) VALUES (?, ?)", table_name);
+    if (timing != NULL) {
+        phase_start_ns = monotonic_ns();
+    }
     if (mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, &tail) != MYLITE_OK) {
         fprintf(stderr, "prepare autocommit insert failed: %s\n", mylite_errmsg(db));
         exit(1);
+    }
+    if (timing != NULL) {
+        timing->prepare_ns += monotonic_ns() - phase_start_ns;
+        ++timing->prepare_calls;
     }
     if (tail == NULL || tail[0] != '\0') {
         fprintf(stderr, "prepare autocommit insert left unexpected tail\n");
@@ -12008,25 +12344,54 @@ static double measure_autocommit_insert(
     }
     start_ns = monotonic_ns();
     for (index = 1U; index <= rows; ++index) {
+        if (timing != NULL) {
+            phase_start_ns = monotonic_ns();
+        }
         if (mylite_bind_int64(stmt, 1U, (long long)index) != MYLITE_OK ||
             mylite_bind_text(stmt, 2U, "mylite-perf", MYLITE_NUL_TERMINATED, MYLITE_STATIC) !=
                 MYLITE_OK) {
             fprintf(stderr, "autocommit insert bind failed\n");
             exit(1);
         }
+        if (timing != NULL) {
+            timing->bind_ns += monotonic_ns() - phase_start_ns;
+            timing->bind_calls += 2U;
+        }
+        if (timing != NULL) {
+            phase_start_ns = monotonic_ns();
+        }
         if (mylite_step(stmt) != MYLITE_DONE) {
             fprintf(stderr, "autocommit insert step failed\n");
             exit(1);
+        }
+        if (timing != NULL) {
+            timing->step_ns += monotonic_ns() - phase_start_ns;
+            ++timing->step_calls;
+        }
+        if (timing != NULL) {
+            phase_start_ns = monotonic_ns();
         }
         if (mylite_reset(stmt) != MYLITE_OK || mylite_clear_bindings(stmt) != MYLITE_OK) {
             fprintf(stderr, "autocommit insert reset failed\n");
             exit(1);
         }
+        if (timing != NULL) {
+            timing->reset_ns += monotonic_ns() - phase_start_ns;
+            timing->reset_calls += 2U;
+        }
     }
     end_ns = monotonic_ns();
+    if (timing != NULL) {
+        timing->measured_ns = end_ns - start_ns;
+        phase_start_ns = monotonic_ns();
+    }
     if (mylite_finalize(stmt) != MYLITE_OK) {
         fprintf(stderr, "finalize autocommit insert failed\n");
         exit(1);
+    }
+    if (timing != NULL) {
+        timing->finalize_ns += monotonic_ns() - phase_start_ns;
+        ++timing->finalize_calls;
     }
     return elapsed_seconds(start_ns, end_ns);
 }

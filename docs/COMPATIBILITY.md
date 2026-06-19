@@ -204,6 +204,11 @@ active case identity plus process diagnostics when a case hangs.
 The embedded performance and attribution probes run before embedded correctness
 tests, so production throughput and attribution numbers remain visible even
 when a later ownerless SQL case fails.
+Stats-enabled prepared insert attribution now adds ordinary, ownerless, and
+ownerless-minus-ordinary client timing summaries for `prepare`, transaction
+begin, bind, `step`, reset, commit, finalize, measured loop time, and measured
+residual time. This is diagnostic output only; stats-off throughput probes
+remain the comparison signal for branch/main performance.
 Ordinary embedded shutdown attribution now splits release teardown through
 `mysql_thread_end()`, `mysql_server_end()`, `end_embedded_server()`,
 `clean_up()`, and `plugin_shutdown()`. A reduced production sample narrowed the
