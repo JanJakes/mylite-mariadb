@@ -9,26 +9,26 @@ still be opaque. The latest production non-isolated remaining shard passed
 classes or methods consumed that time.
 
 The harness already had opt-in JUnit logging through
-`MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1`. CI kept it disabled to avoid adding
-per-test report work before production build parity was established. Now that
-CI timing is production-guarded and the process-isolated shards are narrowed to
-exact methods, JUnit timing is the next low-risk way to make PHPUnit
-performance work actionable.
+`MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1`. The critical CI timing path keeps it
+disabled because full-suite XML logging changes the measured test cost. The
+diagnostic path still needs enough output to decide whether a slow shard is
+dominated by a few classes or broadly distributed across WordPress tests.
 
 ## Non-Goals
 
 - Do not change SQL, mysqli, PHP extension, or storage-engine behavior.
 - Do not claim the WordPress suite is faster.
-- Do not upload or persist JUnit artifacts in this slice; print the slowest
-  timing rows directly into the job log first.
+- Do not upload or persist JUnit artifacts in this slice; print diagnostic rows
+  into the job log and append compact aggregate rows to the timing summary.
 - Do not make JUnit parsing run when a caller supplies its own JUnit path.
+- Do not enable JUnit on the default production CI timing path.
 
 ## Source Findings
 
 - Base: MariaDB `mariadb-11.8.6`
   (`9bfea48ce1214cc4470f6f6f8a4e30352cef84e7`). This slice does not change
   MariaDB source.
-- `tools/wordpress-phpunit-mysqli-mylite` already forwards
+- `tools/wordpress-phpunit-mysqli-mylite` forwards
   `MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT` into the Docker container and appends
   `--log-junit <report-dir>/phpunit-junit.xml` when the caller has not supplied
   a JUnit argument.
@@ -49,18 +49,28 @@ When `MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1` and the harness created the JUnit
 path itself, parse the generated XML after PHPUnit exits and print:
 
 - `wordpress_phpunit_slow_report_path`;
-- top 20 classes by cumulative testcase time, with rank, seconds, test count,
-  and class name;
-- top 20 methods by testcase time, with rank, seconds, class name, and method
-  name.
+- aggregate distribution rows for testcase count, class count, total testcase
+  time, top-class time, selected top-class time, and selected top-class ratio;
+- top classes by cumulative testcase time, with rank, seconds, test count, and
+  class name;
+- top methods by testcase time, with rank, seconds, class name, and method name.
+
+`MYLITE_WORDPRESS_PHPUNIT_SLOW_REPORT_LIMIT` selects the number of class and
+method rows and defaults to `20`. The harness validates it as a positive
+integer on the host before entering the Docker container, forwards it, and uses
+the same limit inside the XML parser. Compact aggregate rows are appended to
+the timing summary so diagnostic runs can tell whether a shard is concentrated
+or broad without scraping the full class list.
 
 Use the PHP wrapper already built for the WordPress job to parse the XML inside
 the same container environment. This avoids new host dependencies and keeps the
 logic available anywhere the harness already runs.
 
-Enable `MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1` in the production WordPress CI
-job and require that marker from `tools/check-ci-production-builds`, so future
-workflow edits cannot remove the slow-test report silently.
+Keep `MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=0` and
+`MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING=1` on the default production WordPress CI
+timing path. Diagnostic runs that need per-test attribution opt into
+`MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1` and set
+`MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING=0`.
 
 ## File Lifecycle
 
@@ -88,17 +98,21 @@ Docker/PHP environment.
   `ctest --preset prod -R '^tools\.ci-production-builds$'
   --output-on-failure`.
 - Run a focused production WordPress PHPUnit shard with
-  `MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1` and confirm the slow class/method
-  lines print.
+  `MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1`,
+  `MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING=0`, and a non-default
+  `MYLITE_WORDPRESS_PHPUNIT_SLOW_REPORT_LIMIT`; confirm the aggregate
+  distribution rows and bounded slow class/method lines print.
 - Run `cmake --build --preset format-check-prod`.
 - Run `git diff --check`.
 
 ## Acceptance Criteria
 
-- Production WordPress CI enables harness-owned JUnit logging.
-- The CI production-build audit requires the JUnit setting.
-- Focused production PHPUnit output includes slowest class and method timing
-  rows.
+- Production WordPress CI keeps harness-owned JUnit logging disabled on the
+  critical timing path.
+- Focused production PHPUnit diagnostic output includes slow-report aggregate
+  rows and bounded slowest class/method timing rows.
+- Diagnostic slow-report aggregate rows are appended to the WordPress timing
+  summary.
 - PHPUnit pass/fail behavior remains controlled by PHPUnit's own exit status.
 
 ## Verification Results
@@ -137,11 +151,46 @@ Docker image.
 - `cmake --build --preset format-check-prod`: passed.
 - `git diff --check`: passed.
 
+Follow-up diagnostic verification on 2026-06-19 refreshed the production
+WordPress PHP build after the MariaDB embedded archive freshness check reported
+`libmariadbd.a` older than `mariadb/sql/handler.cc`. The refreshed archive used
+the `build/wordpress-mariadb-embedded` `MinSizeRel` profile and the PHP build
+used `build/wordpress-php-embedded-prod` `Release`.
+
+- The CI-shaped `prepare-db` phase passed with the external tmpfs-backed
+  WordPress MyLite test database.
+- A first diagnostic run proved malformed ad hoc filters can select zero tests,
+  but still printed the JUnit slow-report headers without changing PHPUnit exit
+  handling.
+- The corrected CI-filtered non-isolated remaining diagnostic run passed
+  16,811 tests with 3,384,801 assertions, 77 upstream PHPUnit warnings, and
+  79 skipped tests. It reported `wordpress_phpunit_shell_real_seconds=508.734`,
+  `wordpress_phpunit_reported_seconds=500.281`, and
+  `wordpress_phpunit_shell_overhead_seconds=8.453`.
+- The generated JUnit XML contained 16,809 testcase entries across 845 classes,
+  `417.660s` of summed testcase time, `113.720s` in the top 20 classes, and a
+  top-20 ratio of `0.2723`. The top classes were
+  `Tests_Term_getTerms` at `12.606s`, `Tests_Media` at `11.685s`, and
+  `Tests_User_Capabilities` at `8.597s`, proving the shard is broad rather
+  than dominated by one pathological class.
+- After adding aggregate output and a configurable report limit, a focused
+  production-shaped diagnostic run with
+  `MYLITE_WORDPRESS_PHPUNIT_SLOW_REPORT_LIMIT=3` and
+  `--filter 'Tests_DB::test_db_reconnect'` passed 1 test with 2 assertions,
+  reported `wordpress_phpunit_slow_report_testcase_count=1`,
+  `wordpress_phpunit_slow_report_class_count=1`,
+  `wordpress_phpunit_slow_report_total_case_time_seconds=0.198`,
+  `wordpress_phpunit_slow_report_top_classes_time_ratio=1.0000`, and bounded
+  the slowest class/method limits to `3`. The same aggregate rows were appended
+  under the `manual-focused-slow-report-limit` timing-summary label.
+- `MYLITE_WORDPRESS_PHPUNIT_SLOW_REPORT_LIMIT=0` failed before Docker startup
+  with `MYLITE_WORDPRESS_PHPUNIT_SLOW_REPORT_LIMIT must be a positive integer`.
+
 ## Risks And Open Questions
 
-- The report adds XML generation and parsing overhead to CI. The expected
-  overhead is small relative to the current 45-minute non-isolated shard, but
-  CI logs should be watched for a measurable increase.
+- The report adds XML generation and parsing overhead. The 2026-06-19
+  diagnostic run was materially slower than the no-logging CI timing path, so
+  JUnit remains opt-in rather than enabled on critical CI timings.
 - If the report shows most time in a few WordPress classes, a later slice can
   split or optimize those classes. If time is broadly distributed, wall-clock
   reduction likely requires parallel CI sharding rather than engine changes.

@@ -16,6 +16,7 @@ phpunit_report_dir="${MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR:-${root_dir}/build/wor
 timing_summary_path="${MYLITE_WORDPRESS_TIMING_SUMMARY_PATH:-${phpunit_report_dir}/timing-summary.md}"
 phpunit_log_junit="${MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT:-0}"
 phpunit_no_logging="${MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING:-0}"
+phpunit_slow_report_limit="${MYLITE_WORDPRESS_PHPUNIT_SLOW_REPORT_LIMIT:-20}"
 phpunit_profile_child_processes="${MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES:-0}"
 phpunit_child_timing_summary="${MYLITE_WORDPRESS_PHPUNIT_CHILD_TIMING_SUMMARY:-0}"
 phpunit_profile_mysqli="${MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI:-0}"
@@ -86,6 +87,18 @@ if [[ "${phpunit_log_junit}" == "1" && "${phpunit_no_logging}" == "1" ]]; then
   echo "MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1 requires MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING=0" >&2
   exit 1
 fi
+case "${phpunit_slow_report_limit}" in
+  '' | *[!0-9]*)
+    echo "MYLITE_WORDPRESS_PHPUNIT_SLOW_REPORT_LIMIT must be a positive integer" >&2
+    exit 1
+    ;;
+  *)
+    if [ "${phpunit_slow_report_limit}" -le 0 ]; then
+      echo "MYLITE_WORDPRESS_PHPUNIT_SLOW_REPORT_LIMIT must be a positive integer" >&2
+      exit 1
+    fi
+    ;;
+esac
 case "${phpunit_static_wpdb_scan}" in
   0 | 1)
     ;;
@@ -484,6 +497,7 @@ run_suite() {
     -e MYLITE_WORDPRESS_TIMING_LABEL="${timing_label}" \
     -e MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT="${phpunit_log_junit}" \
     -e MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING="${phpunit_no_logging}" \
+    -e MYLITE_WORDPRESS_PHPUNIT_SLOW_REPORT_LIMIT="${phpunit_slow_report_limit}" \
     -e MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES="${phpunit_profile_child_processes}" \
     -e MYLITE_WORDPRESS_PHPUNIT_CHILD_TIMING_SUMMARY="${phpunit_child_timing_summary}" \
     -e MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI="${phpunit_profile_mysqli}" \
@@ -769,6 +783,7 @@ echo "wordpress_timing_summary_path=${MYLITE_WORDPRESS_TIMING_SUMMARY_PATH}"
 echo "wordpress_timing_label=${MYLITE_WORDPRESS_TIMING_LABEL}"
 echo "wordpress_phpunit_log_junit=${MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT}"
 echo "wordpress_phpunit_no_logging=${MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING}"
+echo "wordpress_phpunit_slow_report_limit=${MYLITE_WORDPRESS_PHPUNIT_SLOW_REPORT_LIMIT}"
 echo "wordpress_phpunit_profile_child_processes=${MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES}"
 echo "wordpress_phpunit_child_timing_summary=${MYLITE_WORDPRESS_PHPUNIT_CHILD_TIMING_SUMMARY}"
 echo "wordpress_phpunit_profile_mysqli=${MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI}"
@@ -3057,10 +3072,14 @@ PHP_KEEPALIVE
   if [ -n "${phpunit_junit_path}" ] &&
      [ "${phpunit_junit_path}" != "caller-supplied" ] &&
      [ -f "${phpunit_junit_path}" ]; then
-    if ! "${php_wrapper}" /dev/stdin "${phpunit_junit_path}" <<'PHP_JUNIT_SUMMARY'
+    slow_report_output="$(
+      "${php_wrapper}" /dev/stdin "${phpunit_junit_path}" <<'PHP_JUNIT_SUMMARY'
 <?php
 $path = $argv[1];
-$limit = 20;
+$limitValue = getenv('MYLITE_WORDPRESS_PHPUNIT_SLOW_REPORT_LIMIT');
+$limit = is_string($limitValue) && preg_match('/^[1-9][0-9]*$/', $limitValue)
+    ? (int) $limitValue
+    : 20;
 $xml = @simplexml_load_file($path);
 if ($xml === false) {
     fwrite(STDERR, "Could not parse WordPress PHPUnit JUnit report: {$path}\n");
@@ -3069,6 +3088,8 @@ if ($xml === false) {
 
 $classes = [];
 $methods = [];
+$testcaseCount = 0;
+$totalCaseTime = 0.0;
 foreach ($xml->xpath('//testcase') ?: [] as $case) {
     $attrs = $case->attributes();
     $time = isset($attrs['time']) ? (float) $attrs['time'] : 0.0;
@@ -3082,6 +3103,8 @@ foreach ($xml->xpath('//testcase') ?: [] as $case) {
     }
     $classes[$class]['time'] += $time;
     ++$classes[$class]['tests'];
+    ++$testcaseCount;
+    $totalCaseTime += $time;
     $methods[] = ['time' => $time, 'class' => $class, 'name' => $name];
 }
 
@@ -3092,7 +3115,30 @@ usort($methods, static function (array $left, array $right): int {
     return $right['time'] <=> $left['time'];
 });
 
+$topClassTime = 0.0;
+$topClassesTime = 0.0;
+$selectedClassCount = 0;
+foreach ($classes as $data) {
+    if ($selectedClassCount === 0) {
+        $topClassTime = $data['time'];
+    }
+    if ($selectedClassCount >= $limit) {
+        break;
+    }
+    $topClassesTime += $data['time'];
+    ++$selectedClassCount;
+}
+
 printf("wordpress_phpunit_slow_report_path=%s\n", $path);
+printf("wordpress_phpunit_slow_report_testcase_count=%d\n", $testcaseCount);
+printf("wordpress_phpunit_slow_report_class_count=%d\n", count($classes));
+printf("wordpress_phpunit_slow_report_total_case_time_seconds=%.3f\n", $totalCaseTime);
+printf("wordpress_phpunit_slow_report_top_class_time_seconds=%.3f\n", $topClassTime);
+printf("wordpress_phpunit_slow_report_top_classes_time_seconds=%.3f\n", $topClassesTime);
+printf(
+    "wordpress_phpunit_slow_report_top_classes_time_ratio=%.4f\n",
+    $totalCaseTime > 0.0 ? $topClassesTime / $totalCaseTime : 0.0
+);
 printf("wordpress_phpunit_slowest_classes_limit=%d\n", $limit);
 $rank = 1;
 foreach ($classes as $class => $data) {
@@ -3123,7 +3169,29 @@ foreach ($methods as $method) {
     }
 }
 PHP_JUNIT_SUMMARY
-    then
+    )"
+    slow_report_status="$?"
+    if [ "${slow_report_status}" -eq 0 ]; then
+      printf '%s\n' "${slow_report_output}"
+      slow_report_summary_metrics=()
+      while IFS= read -r slow_report_line; do
+        case "${slow_report_line}" in
+          wordpress_phpunit_slow_report_testcase_count=* | \
+            wordpress_phpunit_slow_report_class_count=* | \
+            wordpress_phpunit_slow_report_total_case_time_seconds=* | \
+            wordpress_phpunit_slow_report_top_class_time_seconds=* | \
+            wordpress_phpunit_slow_report_top_classes_time_seconds=* | \
+            wordpress_phpunit_slow_report_top_classes_time_ratio=* | \
+            wordpress_phpunit_slowest_classes_limit=* | \
+            wordpress_phpunit_slowest_methods_limit=*)
+            slow_report_summary_metrics+=("${slow_report_line}")
+            ;;
+        esac
+      done <<<"${slow_report_output}"
+      if [ "${#slow_report_summary_metrics[@]}" -gt 0 ]; then
+        append_timing_summary "${slow_report_summary_metrics[@]}"
+      fi
+    else
       phpunit_status=1
     fi
   fi

@@ -1275,9 +1275,22 @@ enabled on the critical CI timing path. The CI timing path also sets
 WordPress' default `phpunit.xml.dist` JUnit logger does not add XML generation
 work to the split test-only timings. Diagnostic runs that need JUnit must set
 `MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING=0` together with
-`MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1`. The follow-up CI timing-summary slice
-keeps those same production/test-only phases but records their key
-`wordpress_*`, `wordpress_perf_summary_*`, and any explicitly profiled
+`MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1`. Those diagnostic JUnit runs now accept
+`MYLITE_WORDPRESS_PHPUNIT_SLOW_REPORT_LIMIT` and emit slow-report aggregate
+distribution rows for testcase count, class count, total testcase time,
+top-class time, selected top-class time, and selected top-class ratio, with the
+compact aggregate rows appended to the WordPress timing summary. A 2026-06-19
+production-shaped diagnostic run over the corrected non-isolated remaining
+filter passed 16,811 tests with `508.734s` shell real and `500.281s` PHPUnit
+reported time; the generated JUnit XML summed `417.660s` across 16,809
+testcases and 845 classes, with the top 20 classes accounting for only
+`113.720s` (`0.2723`) and the top classes spread across terms, media, user,
+post, comment, auth, template, XML-RPC, and customize coverage. That keeps the
+critical CI path on no-logging timings and points future wall-clock reduction
+toward broader sharding or query-profile slices rather than one slow WordPress
+class. The follow-up CI timing-summary slice keeps those same
+production/test-only phases but records their key `wordpress_*`,
+`wordpress_perf_summary_*`, and any explicitly profiled
 `mylite_mysqli_profile_*` metrics in one Markdown file that the final WordPress
 CI step publishes to the GitHub step summary.
 Current stats-enabled ownerless autocommit attribution also shows zero
