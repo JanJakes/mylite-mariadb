@@ -5727,7 +5727,12 @@ subsystems that this mode needs:
   probe as the stats-off throughput signal and runs a separate reduced
   stats-enabled ownerless attribution probe under the same `php-embedded-prod`
   production build, including the ordinary-versus-ownerless deep-counter
-  deltas. A later embedded text-query drain fast path removes a redundant
+  deltas. It now also runs a reduced append-only attribution probe with
+  `MYLITE_PERF_OWNERLESS_APPEND_STATS=1` and page-publish stats disabled, so
+  CI-visible production logs include history-proof pair calls and page-log
+  append timing from the fast path where
+  `mtr_t::ownerless_history_proof_publish_pair()` remains active. A later
+  embedded text-query drain fast path removes a redundant
   `mysql_next_result()` no-more-results probe from ordinary single-result
   `mylite_exec()` and `mylite_exec_result()` calls while keeping the
   `mysql_more_results()`-guarded stored-procedure/multi-result drain path;

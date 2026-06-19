@@ -1171,6 +1171,11 @@ static void emit_redo_hook_summary(
 static uint64_t page_publish_sys_identity_space_id(uint64_t identity);
 static uint64_t page_publish_sys_identity_page_no(uint64_t identity);
 static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations);
+static void emit_ownerless_append_phase_summary(
+    const char *summary_prefix,
+    unsigned iterations,
+    const char *unit_name
+);
 static void emit_ownerless_transaction_phase_summary(
     const uint64_t *ordinary_deep,
     const uint64_t *ownerless_deep,
@@ -1310,6 +1315,8 @@ int main(void) {
     );
     unsigned bulk_insert_statements;
     const int page_publish_stats = env_flag("MYLITE_PERF_OWNERLESS_PAGE_PUBLISH_STATS");
+    const int append_stats = env_flag("MYLITE_PERF_OWNERLESS_APPEND_STATS") && !page_publish_stats;
+    const int ownerless_insert_stats = page_publish_stats || append_stats;
     const int page_log_detail_stats = env_flag("MYLITE_PERF_OWNERLESS_PAGE_LOG_DETAIL_STATS");
     const unsigned ordinary_flags = MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE;
     const unsigned ownerless_flags =
@@ -1362,6 +1369,7 @@ int main(void) {
     printf("mylite_perf_bulk_insert_statements=%u\n", bulk_insert_statements);
     printf("mylite_perf_durability=%s\n", durability_name(durability));
     printf("mylite_perf_ownerless_page_publish_stats=%d\n", page_publish_stats);
+    printf("mylite_perf_ownerless_append_stats=%d\n", append_stats);
     printf("mylite_perf_ownerless_page_log_detail_stats=%d\n", page_log_detail_stats);
     printf("mylite_perf_database_path=%s\n", paths.database_path);
 
@@ -1672,16 +1680,18 @@ int main(void) {
     }
     ownerless_prepared_point_select_rate = operations_per_second(select_iterations, seconds);
 
-    if (page_publish_stats) {
-        mylite_ownerless_innodb_set_page_publish_stats_enabled(1);
-        mylite_ownerless_innodb_set_page_write_perf_stats_enabled(1);
-        mylite_ownerless_innodb_set_page_write_refresh_stats_enabled(1);
-        mylite_ownerless_innodb_set_commit_visibility_stats_enabled(1);
+    if (ownerless_insert_stats) {
         mylite_ownerless_database_set_perf_stats_enabled(1);
         mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
         mylite_ownerless_page_log_set_append_detail_perf_stats_enabled(page_log_detail_stats);
         mylite_ownerless_page_log_set_scan_perf_stats_enabled(1);
         mylite_ownerless_page_log_set_sync_perf_stats_enabled(1);
+    }
+    if (page_publish_stats) {
+        mylite_ownerless_innodb_set_page_publish_stats_enabled(1);
+        mylite_ownerless_innodb_set_page_write_perf_stats_enabled(1);
+        mylite_ownerless_innodb_set_page_write_refresh_stats_enabled(1);
+        mylite_ownerless_innodb_set_commit_visibility_stats_enabled(1);
         mylite_ownerless_sql_handler_set_perf_stats_enabled(1);
         mylite_ownerless_innodb_handler_set_perf_stats_enabled(1);
         mylite_ownerless_innodb_deep_set_perf_stats_enabled(1);
@@ -1691,7 +1701,7 @@ int main(void) {
         db,
         "mylite_perf_ownerless_insert",
         insert_iterations,
-        page_publish_stats,
+        ownerless_insert_stats,
         page_publish_stats ? &ownerless_txn_client_timing : NULL
     );
     emit_rate("mylite_perf_ownerless_insert_txn", insert_iterations, seconds);
@@ -1727,6 +1737,21 @@ int main(void) {
             &ordinary_txn_client_timing,
             insert_iterations
         );
+    } else if (append_stats) {
+        emit_database_perf_stats("mylite_perf_ownerless_insert_txn");
+        emit_page_log_append_perf_stats("mylite_perf_ownerless_insert_txn");
+        emit_page_log_scan_perf_stats("mylite_perf_ownerless_insert_txn");
+        emit_page_log_sync_perf_stats("mylite_perf_ownerless_insert_txn");
+        emit_ownerless_append_phase_summary(
+            "mylite_perf_summary_ownerless_insert_txn",
+            insert_iterations,
+            "insert"
+        );
+        emit_ownerless_append_phase_summary(
+            "mylite_perf_summary_ownerless_insert_txn",
+            1U,
+            "transaction"
+        );
     }
     ownerless_insert_txn_rate = operations_per_second(insert_iterations, seconds);
     rate = ownerless_insert_txn_rate;
@@ -1736,7 +1761,7 @@ int main(void) {
         db,
         "mylite_perf_ownerless_autocommit",
         insert_iterations,
-        page_publish_stats,
+        ownerless_insert_stats,
         page_publish_stats ? &ownerless_autocommit_client_timing : NULL
     );
     emit_rate("mylite_perf_ownerless_insert_autocommit", insert_iterations, seconds);
@@ -1773,12 +1798,22 @@ int main(void) {
             &ordinary_autocommit_client_timing,
             insert_iterations
         );
+    } else if (append_stats) {
+        emit_database_perf_stats("mylite_perf_ownerless_insert_autocommit");
+        emit_page_log_append_perf_stats("mylite_perf_ownerless_insert_autocommit");
+        emit_page_log_scan_perf_stats("mylite_perf_ownerless_insert_autocommit");
+        emit_page_log_sync_perf_stats("mylite_perf_ownerless_insert_autocommit");
+        emit_ownerless_append_phase_summary(
+            "mylite_perf_summary_ownerless_autocommit",
+            insert_iterations,
+            "insert"
+        );
     }
     ownerless_insert_autocommit_rate = operations_per_second(insert_iterations, seconds);
     rate = ownerless_insert_autocommit_rate;
     check_min_rate("MYLITE_PERF_MIN_OWNERLESS_AUTOCOMMIT_INSERT_OPS", rate);
 
-    if (page_publish_stats) {
+    if (ownerless_insert_stats) {
         mylite_exec_result_perf_set_enabled(1);
     }
     seconds = measure_bulk_autocommit_insert(
@@ -1786,7 +1821,7 @@ int main(void) {
         "mylite_perf_ownerless_autocommit_bulk",
         insert_iterations,
         bulk_insert_rows_per_statement,
-        page_publish_stats
+        ownerless_insert_stats
     );
     emit_rate("mylite_perf_ownerless_insert_autocommit_bulk_rows", insert_iterations, seconds);
     emit_rate(
@@ -1813,6 +1848,29 @@ int main(void) {
             "mylite_perf_summary_ownerless_autocommit_bulk",
             bulk_insert_statements
         );
+    } else if (append_stats) {
+        mylite_exec_result_perf_set_enabled(0);
+        emit_exec_result_perf_stats("mylite_perf_ownerless_insert_autocommit_bulk");
+        emit_database_perf_stats("mylite_perf_ownerless_insert_autocommit_bulk");
+        emit_page_log_append_perf_stats("mylite_perf_ownerless_insert_autocommit_bulk");
+        emit_page_log_scan_perf_stats("mylite_perf_ownerless_insert_autocommit_bulk");
+        emit_page_log_sync_perf_stats("mylite_perf_ownerless_insert_autocommit_bulk");
+        emit_ownerless_append_phase_summary(
+            "mylite_perf_summary_ownerless_autocommit_bulk",
+            insert_iterations,
+            "row"
+        );
+        emit_ownerless_append_phase_summary(
+            "mylite_perf_summary_ownerless_autocommit_bulk",
+            bulk_insert_statements,
+            "statement"
+        );
+        emit_bulk_exec_result_summary(
+            "mylite_perf_summary_ownerless_autocommit_bulk",
+            bulk_insert_statements
+        );
+    }
+    if (ownerless_insert_stats) {
         mylite_ownerless_innodb_set_page_publish_stats_enabled(0);
         mylite_ownerless_innodb_set_page_write_perf_stats_enabled(0);
         mylite_ownerless_innodb_set_page_write_refresh_stats_enabled(0);
@@ -2278,6 +2336,112 @@ static void emit_prefixed_ms_per_iteration_delta(
     const double total_ms = ((double)left_ns - (double)right_ns) / 1000000.0;
     const double average_ms = iterations > 0U ? total_ms / (double)iterations : 0.0;
     printf("%s_%s=%.3f\n", prefix, suffix, average_ms);
+}
+
+static void emit_ownerless_append_phase_summary(
+    const char *summary_prefix,
+    unsigned iterations,
+    const char *unit_name
+) {
+    uint64_t database_perf[DATABASE_PERF_STAT_COUNT] = {0};
+    uint64_t page_log_append[PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
+    char suffix[128];
+
+    mylite_ownerless_database_read_perf_stats(database_perf, DATABASE_PERF_STAT_COUNT);
+    mylite_ownerless_page_log_read_append_perf_stats(
+        page_log_append,
+        PAGE_LOG_APPEND_PERF_STAT_COUNT
+    );
+
+#define EMIT_APPEND_COUNT(metric_name, value)                                                      \
+    do {                                                                                           \
+        (void)snprintf(suffix, sizeof(suffix), "%s_per_%s", (metric_name), unit_name);             \
+        emit_prefixed_count_per_iteration(summary_prefix, suffix, (value), iterations);            \
+    } while (0)
+
+#define EMIT_APPEND_MS(metric_name, value)                                                         \
+    do {                                                                                           \
+        (void)snprintf(suffix, sizeof(suffix), "%s_ms_per_%s", (metric_name), unit_name);          \
+        emit_prefixed_ms_per_iteration(summary_prefix, suffix, (value), iterations);               \
+    } while (0)
+
+    EMIT_APPEND_COUNT(
+        "history_proof_pair_calls",
+        database_perf[DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_CALLS]
+    );
+    EMIT_APPEND_COUNT(
+        "history_proof_pair_succeeded",
+        database_perf[DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_SUCCEEDED]
+    );
+    EMIT_APPEND_COUNT(
+        "history_proof_pair_unavailable",
+        database_perf[DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_UNAVAILABLE]
+    );
+    EMIT_APPEND_COUNT(
+        "history_proof_pair_failed",
+        database_perf[DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_FAILED]
+    );
+    EMIT_APPEND_COUNT(
+        "page_publish_index_skipped_native_support",
+        database_perf[DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_SKIPPED_NATIVE_SUPPORT]
+    );
+    EMIT_APPEND_MS("history_proof_pair", database_perf[DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_NS]);
+    EMIT_APPEND_MS(
+        "history_proof_pair_append",
+        database_perf[DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_APPEND_NS]
+    );
+    EMIT_APPEND_COUNT("page_log_append_calls", page_log_append[PAGE_LOG_APPEND_PERF_STAT_CALLS]);
+    EMIT_APPEND_COUNT(
+        "page_log_session_begin_calls",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS]
+    );
+    EMIT_APPEND_COUNT(
+        "page_log_session_append_calls",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_SESSION_APPEND_CALLS]
+    );
+    EMIT_APPEND_COUNT(
+        "page_log_session_end_calls",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS]
+    );
+    EMIT_APPEND_COUNT(
+        "page_log_direct_append_calls",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_DIRECT_APPEND_CALLS]
+    );
+    EMIT_APPEND_MS("page_log_append", page_log_append[PAGE_LOG_APPEND_PERF_STAT_TOTAL_NS]);
+    EMIT_APPEND_MS("page_log_lock", page_log_append[PAGE_LOG_APPEND_PERF_STAT_LOCK_NS]);
+    EMIT_APPEND_MS("page_log_header", page_log_append[PAGE_LOG_APPEND_PERF_STAT_HEADER_NS]);
+    EMIT_APPEND_MS("page_log_body", page_log_append[PAGE_LOG_APPEND_PERF_STAT_BODY_NS]);
+    EMIT_APPEND_MS("page_log_fstat", page_log_append[PAGE_LOG_APPEND_PERF_STAT_FSTAT_NS]);
+    EMIT_APPEND_MS("page_log_encode", page_log_append[PAGE_LOG_APPEND_PERF_STAT_ENCODE_NS]);
+    EMIT_APPEND_MS("page_log_checksum", page_log_append[PAGE_LOG_APPEND_PERF_STAT_CHECKSUM_NS]);
+    EMIT_APPEND_MS(
+        "page_log_payload_write",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_WRITE_NS]
+    );
+    EMIT_APPEND_MS(
+        "page_log_record_header_write",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_WRITE_NS]
+    );
+    EMIT_APPEND_COUNT(
+        "page_log_precomputed_checksum_records",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_PRECOMPUTED_CHECKSUM_RECORDS]
+    );
+    EMIT_APPEND_COUNT(
+        "page_log_record_header_bytes",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_BYTES]
+    );
+    EMIT_APPEND_COUNT(
+        "page_log_payload_bytes",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_BYTES]
+    );
+    EMIT_APPEND_COUNT(
+        "page_log_total_record_bytes",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_BYTES] +
+            page_log_append[PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_BYTES]
+    );
+
+#undef EMIT_APPEND_MS
+#undef EMIT_APPEND_COUNT
 }
 
 static uint64_t insert_client_measured_accounted_ns(const insert_client_timing *timing) {

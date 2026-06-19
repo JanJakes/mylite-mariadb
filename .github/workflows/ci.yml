@@ -145,6 +145,20 @@ jobs:
           build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe \
             | tee build/embedded-performance-reports/ownerless-attribution.log
 
+      - name: Run embedded ownerless append attribution probe
+        env:
+          MYLITE_PERF_OPEN_CLOSE_ITERATIONS: "1"
+          MYLITE_PERF_SELECT_ITERATIONS: "20"
+          MYLITE_PERF_INSERT_ITERATIONS: "100"
+          MYLITE_PERF_OWNERLESS_APPEND_STATS: "1"
+        run: |
+          set -euo pipefail
+          mkdir -p build/embedded-performance-reports
+          tools/require-cmake-build-type MinSizeRel build/mariadb-embedded
+          tools/require-cmake-release-build build/php-embedded-prod
+          build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe \
+            | tee build/embedded-performance-reports/ownerless-append-attribution.log
+
       - name: Upload embedded performance reports
         if: always()
         uses: actions/upload-artifact@v4
