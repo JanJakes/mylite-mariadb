@@ -203,7 +203,7 @@ ahead of the embedded test steps. This keeps the branch's production engine
 timings visible during performance work even when the ownerless SQL suite finds
 a late correctness regression.
 Those embedded probe steps now tee their production output to
-`build/embedded-performance-reports/{default,large-row-bulk,ownerless-attribution}.log`
+`build/embedded-performance-reports/{default,large-row-bulk,large-row-ownerless-attribution,ownerless-attribution,ownerless-append-attribution}.log`
 and upload the directory as the `embedded-performance-reports` artifact. The
 WordPress timing summary remains printed to the GitHub step summary and is also
 uploaded as the `wordpress-phpunit-timing-summary` artifact. The artifact
@@ -213,6 +213,12 @@ The large-row bulk probe keeps `MYLITE_PERF_BULK_INSERT_ROWS_PER_STATEMENT=100`
 but now uses `MYLITE_PERF_INSERT_ITERATIONS=5000`, giving CI 50 bulk
 statements instead of five while preserving the ownerless default-checked
 row-list shape being measured.
+CI also runs a reduced stats-enabled large-row ownerless attribution probe with
+the same 100-row statement shape and `MYLITE_PERF_INSERT_ITERATIONS=1000`.
+That keeps 10 measured bulk statements in the production artifact, enough to
+show page-publish, redo-leave, no-dirty commit-loop, append, and bulk
+`mysql_query()` attribution for the path whose stats-off throughput regressed,
+without putting full diagnostic overhead on the 5000-row throughput bucket.
 The WordPress timing job also enables
 `MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR=1`, which rejects an in-repository
 test database path for CI timing phases. The harness prints
@@ -939,6 +945,11 @@ summaries and emitted no `mylite_perf_summary_*_client_*` rows.
   `MYLITE_PERF_BULK_INSERT_ROWS_PER_STATEMENT=100`, so the ownerless
   default-checked bulk-insert path has its own production timing bucket
   instead of being inferred from the default four-row bulk sample.
+- CI also runs a stats-enabled large-row ownerless attribution probe with
+  `MYLITE_PERF_BULK_INSERT_ROWS_PER_STATEMENT=100` and
+  `MYLITE_PERF_OWNERLESS_PAGE_PUBLISH_STATS=1`, so the same bulk-write shape
+  has production artifact rows for page publication, redo-leave,
+  no-dirty-loop, append, and bulk `mysql_query()` attribution.
 - CI runs the embedded performance and attribution probes before embedded
   correctness tests so production timing evidence remains visible even if a
   later correctness case fails.
