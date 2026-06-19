@@ -1898,18 +1898,20 @@ Tasks:
    redo/checkpoint reconciliation, and DDL/file lifecycle recovery remain
    planned work.
    Parser-proven pure `INSERT ... VALUES` visible-fast-path statements with one
-   through four row constructors reuse one page-log append session across the
+   through 1024 row constructors reuse one page-log append session across the
    statement's ownerless mini-transactions and release it before page-log
    sync/page-visible LSN publication. Focused SQL coverage keeps the existing
    native history WAL proof, capped multi-row visible-fast proof, single-row
    append-session proof, and conservative upsert fallback checks while asserting
    that append-session begin/end counts collapse for successful capped
-   visible-fast inserts. Later latest-only checkpoint updates inside the same
-   implicit/autocommit deferred append-batch statement are coalesced only after
-   the first successful latest-only checkpoint has been preserved; final
-   durable page-visible checkpoint publication is unchanged. Broader DML, DDL,
-   explicit-transaction coalescing, foreign-key, larger row-list append-session
-   deferral, and cross-statement group-commit batching remain future work.
+   visible-fast inserts. The 1025-row boundary stays outside append batching
+   and deferred latest-checkpoint coalescing. Later latest-only checkpoint
+   updates inside the same implicit/autocommit deferred append-batch statement
+   are coalesced only after the first successful latest-only checkpoint has
+   been preserved; final durable page-visible checkpoint publication is
+   unchanged. Broader DML, DDL, foreign-key shapes, still larger row-list
+   append-session deferral, and cross-statement group-commit batching remain
+   future work.
    Undo, allocation,
    tablespace-header, extent, transaction-system, change-buffer, and system page
    records remain primitive evidence for future active-pin compaction.
@@ -5950,9 +5952,16 @@ subsystems that this mode needs:
   appends, zero snapshot-boundary page publications, `1024.000` deferred
   latest-checkpoint coalesces per statement, and `25810.38` ownerless rows/s
   while keeping visible-fast commit at `1.000` per statement and conservative
-  flush at `0.000`. The focused selector now proves the 512-row positive
-  boundary and the 513-row conservative boundary. Larger row lists, broad
-  DML/DDL, and unbounded append-lock hold times remain out of scope.
+  flush at `0.000`. A 1024-row follow-up keeps the same parser-proven
+  policy for the next bounded row-list edge: the focused selector now proves
+  the 1024-row positive boundary and the 1025-row conservative boundary.
+  The reduced 10240-row production probe with 1024 rows per statement reported
+  `10` append-session begin/end calls for `10` statements, `0`
+  snapshot-boundary publications, `2.000` page versions and native-support
+  proof pages per statement, `1.000` visible-fast commits per statement, and
+  `2049.000` deferred latest-checkpoint coalesces per statement.
+  Larger row lists, broad DML/DDL, and unbounded append-lock hold times remain
+  out of scope.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.
