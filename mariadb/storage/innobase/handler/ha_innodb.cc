@@ -7992,6 +7992,34 @@ struct mariadb_set_stats
 }
 
 /********************************************************************//**
+End a bulk insert statement. */
+int
+ha_innobase::end_bulk_insert()
+{
+	DBUG_ENTER("ha_innobase::end_bulk_insert");
+	trx_t* trx = check_trx_exists(ha_thd());
+
+	if (!trx->mylite_ownerless_has_default_checked_bulk_insert()) {
+		DBUG_RETURN(0);
+	}
+
+	if (dberr_t err = trx->bulk_insert_apply()) {
+		trx->error_state = err;
+		trx->bulk_insert &= TRX_DDL_BULK;
+		trx->last_stmt_start = 0;
+		const int mysql_error = convert_error_code_to_mysql(
+			err, m_prebuilt->table->flags, trx->mysql_thd);
+		set_my_errno(mysql_error);
+		my_errno = mysql_error;
+		DBUG_RETURN(mysql_error);
+	}
+
+	trx->end_bulk_insert(*m_prebuilt->table);
+	trx->bulk_insert &= TRX_DDL_BULK;
+	DBUG_RETURN(0);
+}
+
+/********************************************************************//**
 Stores a row in an InnoDB database, to the table specified in this
 handle.
 @return error code */

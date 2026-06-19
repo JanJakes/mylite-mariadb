@@ -2931,7 +2931,7 @@ err_exit:
 	if (!(flags & BTR_NO_UNDO_LOG_FLAG)
 	    && page_is_empty(block->page.frame)
 	    && !entry->is_metadata() && !trx->duplicates
-	    && !trx->check_unique_secondary && !trx->check_foreigns
+	    && trx->bulk_insert_checks_allow_buffer(*index->table)
 	    && !trx->dict_operation
 	    && block->page.id().page_no() == index->page
 	    && !index->table->is_native_online_ddl()
@@ -2944,6 +2944,11 @@ err_exit:
 		    && !index->table->has_spatial_index()) {
 
 			ut_ad(!index->table->skip_alter_undo);
+			if (trx->mylite_ownerless_default_checked_bulk_insert_allowed(
+				    *index->table)) {
+				mylite_ownerless_innodb_deep_perf_count(
+					MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_CLUST_LOW_OWNERLESS_DEFAULT_CHECKED_BULK);
+			}
 			trx->bulk_insert = TRX_DML_BULK;
 			err = lock_table(index->table, NULL, LOCK_X, thr);
 			if (err != DB_SUCCESS) {

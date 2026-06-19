@@ -495,6 +495,7 @@ enum ownerless_test_innodb_deep_perf_stat_index {
     OWNERLESS_TEST_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_BUFFER_PUBLISHED,
     OWNERLESS_TEST_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_BUFFER_RETRY_ATTEMPTS,
     OWNERLESS_TEST_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_BUFFER_RETRY_PUBLISHED,
+    OWNERLESS_TEST_INNODB_DEEP_ROW_INS_CLUST_LOW_OWNERLESS_DEFAULT_CHECKED_BULK = 187,
     OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT = 188
 };
 
@@ -11012,6 +11013,9 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
     assert(
         page_write_stats[OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_TRANSACTION_DEFERRED_MTR_ELIDED] > 0U
     );
+    assert(
+        deep_stats[OWNERLESS_TEST_INNODB_DEEP_ROW_INS_CLUST_LOW_OWNERLESS_DEFAULT_CHECKED_BULK] > 0U
+    );
 
     assert(
         query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_multi_row_insert_fast_path") == 3U
@@ -11024,6 +11028,45 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
             db,
             "SELECT SUM(LENGTH(payload)) FROM app.ownerless_multi_row_insert_fast_path"
         ) == 12000U
+    );
+
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_default_checked_bulk_duplicate ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    mylite_ownerless_innodb_deep_reset_perf_stats();
+    expect_exec_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_default_checked_bulk_duplicate VALUES "
+        "(1, 10), (1, 20), (2, 30)",
+        MYLITE_TEST_DUPLICATE_KEY_ERRNO
+    );
+    mylite_ownerless_innodb_deep_read_perf_stats(
+        deep_stats,
+        OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT
+    );
+    assert(
+        deep_stats[OWNERLESS_TEST_INNODB_DEEP_ROW_INS_CLUST_LOW_OWNERLESS_DEFAULT_CHECKED_BULK] > 0U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_default_checked_bulk_duplicate") ==
+        0U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_default_checked_bulk_duplicate VALUES "
+        "(1, 10), (2, 20)"
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_default_checked_bulk_duplicate") ==
+        2U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_default_checked_bulk_duplicate") ==
+        30U
     );
 
     exec_ok(

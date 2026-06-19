@@ -107,6 +107,7 @@ public:
         double rnd_pos_time(ha_rows rows) override;
 #endif
 	int write_row(const uchar * buf) override;
+	int end_bulk_insert() override;
 
 	int update_row(const uchar * old_data, const uchar * new_data) override;
 

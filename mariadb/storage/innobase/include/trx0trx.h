@@ -1259,6 +1259,28 @@ public:
       t.second.end_bulk_insert();
   }
 
+  /** @return whether MyLite ownerless can use buffered empty-table insert
+  while SQL unique_checks or foreign_key_checks remain enabled */
+  bool mylite_ownerless_default_checked_bulk_insert_allowed(
+      const dict_table_t &table) const noexcept;
+
+  /** @return whether current check settings allow buffered bulk insert */
+  bool bulk_insert_checks_allow_buffer(const dict_table_t &table) const noexcept
+  {
+    return (!check_unique_secondary && !check_foreigns) ||
+           mylite_ownerless_default_checked_bulk_insert_allowed(table);
+  }
+
+  /** @return whether an ownerless default-checked bulk buffer is active */
+  bool mylite_ownerless_has_default_checked_bulk_insert() const noexcept
+  {
+    for (const auto& t : mod_tables)
+      if (t.second.is_bulk_insert() &&
+          mylite_ownerless_default_checked_bulk_insert_allowed(*t.first))
+        return true;
+    return false;
+  }
+
   /** @return whether a bulk insert into empty table is in progress */
   bool is_bulk_insert() const
   {
@@ -1270,10 +1292,9 @@ public:
     default:
       ut_ad(bulk_insert == TRX_DML_BULK);
     }
-    if (check_unique_secondary || check_foreigns)
-      return false;
     for (const auto& t : mod_tables)
-      if (t.second.is_bulk_insert())
+      if (t.second.is_bulk_insert()
+          && bulk_insert_checks_allow_buffer(*t.first))
         return true;
     return false;
   }
@@ -1286,8 +1307,8 @@ public:
   {
     if (UNIV_LIKELY(!bulk_insert))
       return nullptr;
-    ut_ad(index->table->skip_alter_undo || !check_unique_secondary);
-    ut_ad(index->table->skip_alter_undo || !check_foreigns);
+    ut_ad(index->table->skip_alter_undo ||
+          bulk_insert_checks_allow_buffer(*index->table));
     auto it= mod_tables.find(index->table);
     if (it == mod_tables.end() || !it->second.bulk_buffer_exist())
       return nullptr;

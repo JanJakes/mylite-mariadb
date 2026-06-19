@@ -6024,6 +6024,15 @@ subsystems that this mode needs:
   at `3560.43 ops/s`. This narrows proof representation cost only; it does not
   claim broader native redo, checkpoint, DDL/file-lifecycle, or SQL-level
   table-wait completion.
+  A later default-checked bulk-insert slice reuses MariaDB's existing
+  `TRX_UNDO_EMPTY` buffered empty-table path for ownerless autocommit row-list
+  inserts only when the table has exactly one clustered InnoDB index and no
+  foreign-key relationships, even if SQL `unique_checks` and
+  `foreign_key_checks` remain at default values. The focused selector proves
+  the ownerless-only bulk-start counter, duplicate-key statement rollback, and
+  preserved visible-fast publication; secondary indexes, foreign-key tables,
+  explicit transactions, duplicate-handling DML, and broader SQL bulk coverage
+  remain out of scope.
   Larger row lists, broad DML/DDL, and unbounded append-lock hold times remain
   out of scope.
   Focused gating coverage proves active live writers, including idle explicit

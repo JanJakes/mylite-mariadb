@@ -634,6 +634,7 @@ enum innodb_deep_perf_stat_index {
     INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_DIRTY_SCAN_PUBLISHED,
     INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_BUFFER_POOL_SCAN_ATTEMPTS,
     INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_BUFFER_POOL_SCAN_PUBLISHED,
+    INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_OWNERLESS_DEFAULT_CHECKED_BULK,
     INNODB_DEEP_PERF_STAT_COUNT
 };
 
@@ -3359,6 +3360,11 @@ static void emit_ownerless_bulk_autocommit_phase_summary(
         "mylite_perf_summary_ownerless_autocommit_bulk_page_publish_transaction_buffer_published_"
         "per_statement",
         innodb_deep[INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_TRANSACTION_BUFFER_PUBLISHED],
+        insert_statements
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_bulk_default_checked_bulk_starts_per_statement",
+        innodb_deep[INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_OWNERLESS_DEFAULT_CHECKED_BULK],
         insert_statements
     );
 }
@@ -11324,6 +11330,11 @@ static void emit_innodb_deep_perf_stats(const char *prefix) {
         prefix,
         "trx_undo_page_report_insert_no_space",
         values[INNODB_DEEP_PERF_STAT_TRX_UNDO_PAGE_REPORT_INSERT_NO_SPACE]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "row_ins_clust_low_ownerless_default_checked_bulk",
+        values[INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_OWNERLESS_DEFAULT_CHECKED_BULK]
     );
     emit_innodb_deep_perf_ms(
         prefix,

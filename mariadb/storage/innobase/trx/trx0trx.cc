@@ -35,6 +35,7 @@ Created 3/26/1996 Heikki Tuuri
 #include <mysql/service_thd_error_context.h>
 
 #include "btr0sea.h"
+#include "dict0dict.h"
 #include "lock0lock.h"
 #include "log0log.h"
 #include "mylite_ownerless_innodb_deep_perf.h"
@@ -2287,6 +2288,23 @@ bool trx_t::commit_cleanup() noexcept
 
   ut_a(error_state == DB_SUCCESS);
   return false;
+}
+
+bool trx_t::mylite_ownerless_default_checked_bulk_insert_allowed(
+    const dict_table_t &table) const noexcept
+{
+  if (!mysql_thd || thd_test_options(mysql_thd, OPTION_NOT_AUTOCOMMIT |
+                                     OPTION_BEGIN) ||
+      !mylite_ownerless_innodb_lock_has_hooks())
+    return false;
+  if (!check_unique_secondary && !check_foreigns)
+    return false;
+  if (check_unique_secondary && UT_LIST_GET_LEN(table.indexes) != 1)
+    return false;
+  if (check_foreigns && (!table.foreign_set.empty() ||
+                         !table.referenced_set.empty()))
+    return false;
+  return true;
 }
 
 /** Commit the transaction in the file system. */
