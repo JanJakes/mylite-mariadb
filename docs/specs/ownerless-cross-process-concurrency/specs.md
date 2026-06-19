@@ -6069,6 +6069,20 @@ subsystems that this mode needs:
   status-update, and exec-call summaries. That keeps CI evidence from hiding a
   multi-millisecond statement interval outside the already-reported page-log,
   page-write, commit-visibility, SQL-handler, and InnoDB-handler buckets.
+  The redo written/leave fusion slice then narrows a measured ownerless
+  mini-transaction hot path by letting top-level production redo ranges complete
+  the reserved range and publish the latest LSN through one shared redo-state
+  progress-latch pass. The old written and leave callbacks remain the fallback,
+  and unsafe named-fault hook builds keep the separate callbacks so redo crash
+  windows remain individually observable. The pre-slice 5000-row,
+  100-row-per-statement attribution baseline reported ownerless bulk at
+  `18594.73 rows/s`, ordinary bulk at `108178.15 rows/s`, ownerless
+  `mysql_query()` at `4.895 ms` per statement, and commit-log redo-leave at
+  `0.988 ms` per statement. The post-slice sample reported ownerless bulk at
+  `19629.59 rows/s`, an ownerless/ordinary ratio of `0.2052`, ownerless
+  `mysql_query()` at `4.614 ms` per statement, page-write commit-log at
+  `1.382 ms` per statement, and commit-log redo-leave at `0.737 ms` per
+  statement.
   Larger row lists, broad DML/DDL, and unbounded append-lock hold times remain
   out of scope.
   Focused gating coverage proves active live writers, including idle explicit

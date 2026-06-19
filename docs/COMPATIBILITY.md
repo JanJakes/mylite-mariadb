@@ -682,6 +682,20 @@ emitting both raw `*_exec_result_*` rows and compact per-statement
 diagnostic-only and is intended to expose whether the remaining bulk insert
 gap sits inside SQL text execution or the already-reported page-log,
 page-write, commit-visibility, SQL-handler, and InnoDB-handler buckets.
+Ownerless production mini-transaction redo completion now has an optional fused
+written-plus-leave hook for top-level redo ranges. The path keeps the existing
+separate `redo-written` and `redo-leave` callbacks as the fallback and leaves
+unsafe named-fault hook builds on the separate callbacks, but production can
+complete the reserved redo range and publish the latest LSN through one shared
+redo-state progress-latch pass. The pre-slice 5000-row, 100-row-per-statement
+attribution baseline reported ownerless bulk at `18594.73 rows/s`, ordinary
+bulk at `108178.15 rows/s`, ownerless `mysql_query()` at `4.895 ms` per
+statement, and commit-log redo-leave at `0.988 ms` per statement. The
+post-slice sample reported ownerless bulk at `19629.59 rows/s`, an
+ownerless/ordinary ratio of `0.2052`, ownerless `mysql_query()` at
+`4.614 ms` per statement, page-write commit-log at `1.382 ms` per statement,
+and commit-log redo-leave at `0.737 ms` per statement. This is tracked as a
+bounded hot-path reduction rather than a full ownerless completion claim.
 Profiled mysqli runs also split total query elapsed time into
 `query_verb_*` buckets for result queries, DML, DDL, connection state,
 transaction, lock, call, and other first-keyword classes so WordPress timing

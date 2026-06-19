@@ -81,6 +81,18 @@ int mylite_ownerless_redo_state_complete_write(
     uint64_t end_lsn,
     uint64_t *out_written_lsn
 );
+int mylite_ownerless_redo_state_complete_write_and_leave(
+    void *state,
+    size_t state_size,
+    uint32_t owner_id,
+    uint64_t owner_generation,
+    uint64_t start_lsn,
+    uint64_t end_lsn,
+    uint64_t latest_lsn,
+    uint64_t *out_written_lsn,
+    uint64_t *out_advanced_latest_lsn,
+    uint32_t *out_remaining
+);
 int mylite_ownerless_redo_state_publish_visible(
     void *state,
     size_t state_size,

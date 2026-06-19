@@ -12,6 +12,8 @@ typedef struct page_visibility_state {
     uint64_t written_lsn;
     uint64_t last_written_start_lsn;
     uint64_t last_written_end_lsn;
+    uint64_t last_leave_lsn;
+    uint64_t last_written_leave_latest_lsn;
     uint64_t observed_lsn;
     uint64_t last_table_wait_trx_id;
     uint64_t last_table_wait_table_id;
@@ -20,6 +22,8 @@ typedef struct page_visibility_state {
     unsigned read_count;
     unsigned reserve_count;
     unsigned written_count;
+    unsigned written_leave_count;
+    unsigned leave_count;
     unsigned observe_count;
     unsigned table_wait_count;
     int table_wait_result;
@@ -29,6 +33,8 @@ static void test_page_visibility_is_thread_local(void);
 static void test_checkpoint_suppression_and_file_op_flags_reset(void);
 static void test_file_op_redo_relative_path_normalizes_datadir_prefix(void);
 static void test_external_table_wait_dispatch_uses_table_hook(void);
+static void test_redo_written_leave_uses_fused_top_level_hook(void);
+static void test_redo_written_leave_falls_back_to_separate_hooks(void);
 static void install_page_hooks(page_visibility_state *state);
 static void *exercise_visibility_in_thread(void *context);
 static int acquire_table_hook(
@@ -135,6 +141,13 @@ static int redo_written_hook(
     uint64_t *out_written_lsn,
     void *context
 );
+static int redo_written_leave_hook(
+    uint64_t start_lsn,
+    uint64_t end_lsn,
+    uint64_t latest_lsn,
+    uint64_t *out_written_lsn,
+    void *context
+);
 static void redo_leave_hook(uint64_t latest_lsn, void *context);
 static void pages_visible_hook(uint64_t visible_lsn, void *context);
 static int page_publish_hook(
@@ -165,6 +178,8 @@ int main(void) {
     test_checkpoint_suppression_and_file_op_flags_reset();
     test_file_op_redo_relative_path_normalizes_datadir_prefix();
     test_external_table_wait_dispatch_uses_table_hook();
+    test_redo_written_leave_uses_fused_top_level_hook();
+    test_redo_written_leave_falls_back_to_separate_hooks();
     test_page_visibility_is_thread_local();
     return 0;
 }
@@ -313,6 +328,59 @@ static void test_external_table_wait_dispatch_uses_table_hook(void) {
         mylite_ownerless_innodb_lock_wait_for_external(&wait, 1U) ==
         MYLITE_OWNERLESS_INNODB_LOCK_ERROR
     );
+
+    mylite_ownerless_innodb_lock_reset_hooks();
+    assert(!mylite_ownerless_innodb_lock_has_hooks());
+}
+
+static void test_redo_written_leave_uses_fused_top_level_hook(void) {
+    page_visibility_state state = {0};
+    uint64_t latest_lsn = 0U;
+    uint64_t written_lsn = 0U;
+
+    install_page_hooks(&state);
+    mylite_ownerless_innodb_lock_set_redo_written_leave_hook(redo_written_leave_hook);
+    assert(mylite_ownerless_innodb_lock_has_hooks());
+    assert(!mylite_ownerless_innodb_redo_is_active());
+    assert(mylite_ownerless_innodb_redo_enter(&latest_lsn) == MYLITE_OWNERLESS_INNODB_LOCK_OK);
+    assert(mylite_ownerless_innodb_redo_is_active());
+    assert(
+        mylite_ownerless_innodb_redo_written_and_leave(200U, 212U, 250U, &written_lsn) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_OK
+    );
+    assert(written_lsn == 212U);
+    assert(!mylite_ownerless_innodb_redo_is_active());
+    assert(state.written_leave_count == 1U);
+    assert(state.written_count == 0U);
+    assert(state.leave_count == 0U);
+    assert(state.last_written_start_lsn == 200U);
+    assert(state.last_written_end_lsn == 212U);
+    assert(state.last_written_leave_latest_lsn == 250U);
+
+    mylite_ownerless_innodb_lock_reset_hooks();
+    assert(!mylite_ownerless_innodb_lock_has_hooks());
+}
+
+static void test_redo_written_leave_falls_back_to_separate_hooks(void) {
+    page_visibility_state state = {0};
+    uint64_t latest_lsn = 0U;
+    uint64_t written_lsn = 0U;
+
+    install_page_hooks(&state);
+    assert(mylite_ownerless_innodb_lock_has_hooks());
+    assert(mylite_ownerless_innodb_redo_enter(&latest_lsn) == MYLITE_OWNERLESS_INNODB_LOCK_OK);
+    assert(
+        mylite_ownerless_innodb_redo_written_and_leave(300U, 312U, 350U, &written_lsn) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_OK
+    );
+    assert(written_lsn == 312U);
+    assert(!mylite_ownerless_innodb_redo_is_active());
+    assert(state.written_leave_count == 0U);
+    assert(state.written_count == 1U);
+    assert(state.leave_count == 1U);
+    assert(state.last_written_start_lsn == 300U);
+    assert(state.last_written_end_lsn == 312U);
+    assert(state.last_leave_lsn == 350U);
 
     mylite_ownerless_innodb_lock_reset_hooks();
     assert(!mylite_ownerless_innodb_lock_has_hooks());
@@ -701,9 +769,35 @@ static int redo_written_hook(
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
 }
 
+static int redo_written_leave_hook(
+    uint64_t start_lsn,
+    uint64_t end_lsn,
+    uint64_t latest_lsn,
+    uint64_t *out_written_lsn,
+    void *context
+) {
+    page_visibility_state *state = (page_visibility_state *)context;
+
+    assert(start_lsn != 0U);
+    assert(end_lsn > start_lsn);
+
+    state->written_lsn = end_lsn;
+    state->last_written_start_lsn = start_lsn;
+    state->last_written_end_lsn = end_lsn;
+    state->last_written_leave_latest_lsn = latest_lsn;
+    ++state->written_leave_count;
+    if (out_written_lsn != NULL) {
+        *out_written_lsn = state->written_lsn;
+    }
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
 static void redo_leave_hook(uint64_t latest_lsn, void *context) {
-    (void)latest_lsn;
-    (void)context;
+    page_visibility_state *state = (page_visibility_state *)context;
+
+    assert(state != NULL);
+    state->last_leave_lsn = latest_lsn;
+    ++state->leave_count;
 }
 
 static void pages_visible_hook(uint64_t visible_lsn, void *context) {

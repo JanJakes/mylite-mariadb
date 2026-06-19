@@ -2344,6 +2344,13 @@ int ownerless_innodb_redo_written_hook(
     std::uint64_t *out_written_lsn,
     void *ctx
 );
+int ownerless_innodb_redo_written_leave_hook(
+    std::uint64_t start_lsn,
+    std::uint64_t end_lsn,
+    std::uint64_t latest_lsn,
+    std::uint64_t *out_written_lsn,
+    void *ctx
+);
 void ownerless_innodb_redo_leave_hook(std::uint64_t latest_lsn, void *ctx);
 void ownerless_innodb_pages_visible_hook(std::uint64_t visible_lsn, void *ctx);
 void ownerless_persist_redo_checkpoint(
@@ -12576,6 +12583,9 @@ int install_ownerless_innodb_lock_hooks(RuntimeState &runtime) {
     mylite_ownerless_innodb_lock_set_history_proof_publish_pair_hook(
         ownerless_innodb_history_proof_publish_pair_hook
     );
+    mylite_ownerless_innodb_lock_set_redo_written_leave_hook(
+        ownerless_innodb_redo_written_leave_hook
+    );
     mylite_ownerless_innodb_autoinc_set_hooks(
         ownerless_innodb_autoinc_read_hook,
         ownerless_innodb_autoinc_publish_hook,
@@ -16289,6 +16299,61 @@ int ownerless_innodb_redo_written_hook(
 #  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         pause_for_ownerless_test_fault("redo-after-written");
 #  endif
+        return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+    }
+    if (result == MYLITE_OWNERLESS_REDO_STATE_TIMEOUT) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT;
+    }
+    return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+}
+
+int ownerless_innodb_redo_written_leave_hook(
+    std::uint64_t start_lsn,
+    std::uint64_t end_lsn,
+    std::uint64_t latest_lsn,
+    std::uint64_t *out_written_lsn,
+    void *ctx
+) {
+    OwnerlessDatabasePerfScope perf_scope(OWNERLESS_DATABASE_PERF_REDO_LEAVE_NS);
+    ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_REDO_WRITTEN_CALLS, 1U);
+    ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_REDO_LEAVE_CALLS, 1U);
+    if (ctx == nullptr || start_lsn == 0U || end_lsn <= start_lsn) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
+
+    auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
+    if (!hook->page_versioning_enabled) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+    }
+    if (hook->redo_state == nullptr ||
+        hook->redo_state_size < k_concurrency_redo_state_segment_size || hook->owner_id == 0U ||
+        hook->owner_generation == 0U) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
+
+    std::uint64_t advanced_latest_lsn = 0U;
+    const int result = mylite_ownerless_redo_state_complete_write_and_leave(
+        hook->redo_state,
+        hook->redo_state_size,
+        hook->owner_id,
+        hook->owner_generation,
+        start_lsn,
+        end_lsn,
+        latest_lsn,
+        out_written_lsn,
+        &advanced_latest_lsn,
+        nullptr
+    );
+    if (result == MYLITE_OWNERLESS_REDO_STATE_OK) {
+        if (advanced_latest_lsn != 0U) {
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+            pause_for_ownerless_test_fault("redo-before-checkpoint");
+#  endif
+            ownerless_persist_redo_checkpoint(hook, advanced_latest_lsn, 0U, false);
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+            pause_for_ownerless_test_fault("redo-after-checkpoint");
+#  endif
+        }
         return MYLITE_OWNERLESS_INNODB_LOCK_OK;
     }
     if (result == MYLITE_OWNERLESS_REDO_STATE_TIMEOUT) {

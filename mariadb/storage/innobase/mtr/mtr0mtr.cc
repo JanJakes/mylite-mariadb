@@ -2365,15 +2365,17 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_redo_leave() noexcept
       m_ownerless_redo_end_lsn > m_ownerless_redo_start_lsn)
   {
     uint64_t written_lsn= 0;
-    const int result= mylite_ownerless_innodb_redo_written(
+    const int result= mylite_ownerless_innodb_redo_written_and_leave(
       m_ownerless_redo_start_lsn,
       m_ownerless_redo_end_lsn,
+      lsn,
       &written_lsn);
     if (result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
         result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
       ut_error;
   }
-  mylite_ownerless_innodb_redo_leave(lsn);
+  else
+    mylite_ownerless_innodb_redo_leave(lsn);
   m_ownerless_redo= false;
   m_ownerless_redo_borrowed_latch= false;
   m_ownerless_redo_start_lsn= 0;

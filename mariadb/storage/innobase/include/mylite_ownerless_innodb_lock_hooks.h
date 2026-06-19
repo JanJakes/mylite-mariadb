@@ -175,6 +175,12 @@ typedef int (*mylite_ownerless_innodb_redo_written_callback)(
 typedef void (*mylite_ownerless_innodb_redo_leave_callback)(
     uint64_t latest_lsn,
     void *context);
+typedef int (*mylite_ownerless_innodb_redo_written_leave_callback)(
+    uint64_t start_lsn,
+    uint64_t end_lsn,
+    uint64_t latest_lsn,
+    uint64_t *out_written_lsn,
+    void *context);
 typedef void (*mylite_ownerless_innodb_pages_visible_callback)(
     uint64_t visible_lsn,
     void *context);
@@ -269,6 +275,8 @@ void mylite_ownerless_innodb_lock_set_page_publish_batch_hooks(
     mylite_ownerless_innodb_page_publish_batch_callback end_hook);
 void mylite_ownerless_innodb_lock_set_history_proof_publish_pair_hook(
     mylite_ownerless_innodb_history_proof_publish_pair_callback pair_hook);
+void mylite_ownerless_innodb_lock_set_redo_written_leave_hook(
+    mylite_ownerless_innodb_redo_written_leave_callback written_leave_hook);
 void mylite_ownerless_innodb_lock_reset_hooks(void);
 int mylite_ownerless_innodb_lock_has_hooks(void);
 void mylite_ownerless_innodb_set_checkpoint_suppression(int suppressed);
@@ -488,6 +496,11 @@ int mylite_ownerless_innodb_redo_written(
     uint64_t end_lsn,
     uint64_t *out_written_lsn);
 void mylite_ownerless_innodb_redo_leave(uint64_t latest_lsn);
+int mylite_ownerless_innodb_redo_written_and_leave(
+    uint64_t start_lsn,
+    uint64_t end_lsn,
+    uint64_t latest_lsn,
+    uint64_t *out_written_lsn);
 int mylite_ownerless_innodb_publish_page_version(
     uint32_t space_id,
     uint32_t page_no,
