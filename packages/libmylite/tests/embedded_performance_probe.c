@@ -365,6 +365,7 @@ enum page_write_perf_stat_index {
     PAGE_WRITE_PERF_STAT_COMMIT_LOG_NO_DIRTY_PAGE_UNLOCK_NS,
     PAGE_WRITE_PERF_STAT_PUBLISH_BUFFER_REUSE_HITS,
     PAGE_WRITE_PERF_STAT_PUBLISH_BUFFER_REUSE_MISSES,
+    PAGE_WRITE_PERF_STAT_TRANSACTION_DEFERRED_MTR_ELIDED,
     PAGE_WRITE_PERF_STAT_COUNT
 };
 
@@ -9980,6 +9981,11 @@ static void emit_page_write_perf_stats(const char *prefix) {
         "%s_page_write_publish_buffer_reuse_misses=%" PRIu64 "\n",
         prefix,
         values[PAGE_WRITE_PERF_STAT_PUBLISH_BUFFER_REUSE_MISSES]
+    );
+    printf(
+        "%s_page_write_transaction_deferred_mtr_elided=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_WRITE_PERF_STAT_TRANSACTION_DEFERRED_MTR_ELIDED]
     );
     printf(
         "%s_page_write_commit_log_calls=%" PRIu64 "\n",

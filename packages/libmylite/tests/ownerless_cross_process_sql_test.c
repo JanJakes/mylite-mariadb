@@ -264,7 +264,10 @@ enum ownerless_test_database_perf_stat_index {
 
 enum ownerless_test_page_write_perf_stat_index {
     OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_ENTER_CALLS = 0,
-    OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_DISABLED_PROBE_COUNT
+    OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_DISABLED_PROBE_COUNT = 1,
+    OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_PUBLISH_DEFERRED_PAGES = 12,
+    OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_TRANSACTION_DEFERRED_MTR_ELIDED = 35,
+    OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_COUNT = 36
 };
 
 enum ownerless_test_page_log_append_perf_stat_index {
@@ -10875,6 +10878,7 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
     uint64_t deep_stats[OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT] = {0};
     uint64_t database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT] = {0};
     uint64_t page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
+    uint64_t page_write_stats[OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_COUNT] = {0};
     uint64_t page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT] = {0};
     uint64_t commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT] = {0};
     mylite_db *db;
@@ -10896,11 +10900,13 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
     mylite_ownerless_database_set_perf_stats_enabled(1);
     mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
     mylite_ownerless_innodb_set_page_publish_stats_enabled(1);
+    mylite_ownerless_innodb_set_page_write_perf_stats_enabled(1);
     mylite_ownerless_innodb_deep_set_perf_stats_enabled(1);
     mylite_ownerless_innodb_reset_commit_visibility_stats();
     mylite_ownerless_database_reset_perf_stats();
     mylite_ownerless_page_log_reset_append_perf_stats();
     mylite_ownerless_innodb_reset_page_publish_stats();
+    mylite_ownerless_innodb_reset_page_write_perf_stats();
     mylite_ownerless_innodb_deep_reset_perf_stats();
 
     exec_ok(
@@ -10927,11 +10933,16 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
         page_log_append_stats,
         OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_COUNT
     );
+    mylite_ownerless_innodb_read_page_write_perf_stats(
+        page_write_stats,
+        OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_COUNT
+    );
     mylite_ownerless_database_read_perf_stats(
         database_stats,
         OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT
     );
     mylite_ownerless_database_set_perf_stats_enabled(0);
+    mylite_ownerless_innodb_set_page_write_perf_stats_enabled(0);
 
     assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FAST] > 0U);
     assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH] == 0U);
@@ -10997,6 +11008,9 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
     assert(
         database_stats
             [OWNERLESS_TEST_DATABASE_PERF_STAT_CHECKPOINT_UPDATE_DEFERRED_LATEST_COALESCED] > 0U
+    );
+    assert(
+        page_write_stats[OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_TRANSACTION_DEFERRED_MTR_ELIDED] > 0U
     );
 
     assert(

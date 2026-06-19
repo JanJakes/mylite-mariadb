@@ -291,6 +291,7 @@ enum ownerless_page_write_perf_stat_index {
   OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_NO_DIRTY_PAGE_UNLOCK_NS,
   OWNERLESS_PAGE_WRITE_PERF_PUBLISH_BUFFER_REUSE_HITS,
   OWNERLESS_PAGE_WRITE_PERF_PUBLISH_BUFFER_REUSE_MISSES,
+  OWNERLESS_PAGE_WRITE_PERF_TRANSACTION_DEFERRED_MTR_ELIDED,
   OWNERLESS_PAGE_WRITE_PERF_STAT_COUNT
 };
 
@@ -2427,6 +2428,9 @@ ATTRIBUTE_NOINLINE bool mtr_t::ownerless_page_write_enter(
                 m_ownerless_page_write_mtr_pages->end(),
                 packed_page) != m_ownerless_page_write_mtr_pages->end())
     return holds_for_transaction;
+  if (holds_for_transaction &&
+      ownerless_page_write_transaction_owns_page(ownerless_trx, packed_page))
+    return holds_for_transaction;
 
   bool page_write_waited= false;
   if (ownerless_trx != nullptr &&
@@ -2546,9 +2550,14 @@ ATTRIBUTE_NOINLINE bool mtr_t::ownerless_page_write_enter(
 
   if (page_write_acquired)
   {
-    ownerless_page_write_note_mtr_page(block.page);
     if (holds_for_transaction)
+    {
       ownerless_page_write_note_transaction_page(block.page);
+      ownerless_page_write_perf_add(
+          OWNERLESS_PAGE_WRITE_PERF_TRANSACTION_DEFERRED_MTR_ELIDED, 1);
+    }
+    else
+      ownerless_page_write_note_mtr_page(block.page);
   }
 
   if (page_write_waited)
