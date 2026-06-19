@@ -5165,9 +5165,13 @@ subsystems that this mode needs:
   heavyweight child profiling off, so the shared timing summary reports
   parent-side child count, runtime, lock-release, and reconnect averages
   without injecting child-body instrumentation into the production timing
-  shards. The embedded ownerless SQL CI step now also prints the direct
-  `sql-case` count, emits per-case start and status/seconds log markers, and
-  appends a case-index timing table to the GitHub step summary while preserving
+  shards. The embedded production probes now tee their logs into the
+  `embedded-performance-reports` artifact, and the WordPress timing summary is
+  uploaded as `wordpress-phpunit-timing-summary`, giving follow-up performance
+  audits downloadable evidence without enabling heavyweight profilers in the
+  default timing run. The embedded ownerless SQL CI step now also prints the
+  direct `sql-case` count, emits per-case start and status/seconds log markers,
+  and appends a case-index timing table to the GitHub step summary while preserving
   the failing case's exit status. This keeps long ownerless correctness
   coverage tied to case-level performance evidence rather than a single opaque
   step duration. A fresh guarded

@@ -312,6 +312,7 @@ require_literal "Build WordPress PHPUnit Docker image"
 require_literal "Fetch WordPress PHPUnit sources"
 require_literal "Build MyLite PHP extensions for WordPress PHPUnit"
 require_literal "Run embedded large-row bulk performance probe"
+require_literal "Upload embedded performance reports"
 require_literal "Install WordPress PHPUnit dependencies"
 require_literal "Prepare WordPress PHPUnit database"
 require_literal "Run WordPress mysqli performance probe"
@@ -323,6 +324,8 @@ require_literal "Run WordPress PHPUnit non-isolated REST suite (test only)"
 require_literal "Run WordPress PHPUnit non-isolated query/theme/block/token suite (test only)"
 require_literal "Run WordPress PHPUnit non-isolated remaining suite (test only)"
 require_literal "Show WordPress timing summary"
+require_literal "Upload WordPress timing summary"
+require_literal_count_at_least "actions/upload-artifact@v4" 2
 require_literal "MYLITE_WORDPRESS_PHASE: docker-image"
 require_literal "MYLITE_WORDPRESS_PHASE: fetch"
 require_literal "MYLITE_WORDPRESS_PHASE: build-php"
@@ -357,6 +360,8 @@ require_step_order "Run embedded ownerless attribution probe" "Run embedded non-
 require_step_order "Run embedded performance probe" "Run embedded ownerless SQL tests"
 require_step_order "Run embedded large-row bulk performance probe" "Run embedded ownerless SQL tests"
 require_step_order "Run embedded ownerless attribution probe" "Run embedded ownerless SQL tests"
+require_step_order "Run embedded ownerless attribution probe" "Upload embedded performance reports"
+require_step_order "Show WordPress timing summary" "Upload WordPress timing summary"
 
 require_step_timeout "Build MariaDB embedded archive" 30
 require_step_timeout "Build embedded PHP targets" 15
@@ -370,6 +375,9 @@ require_embedded_timing_step_guards "Run embedded non-ownerless tests"
 forbid_step_literal "Run embedded non-ownerless tests" "--parallel"
 require_embedded_timing_step_guards "Run embedded ownerless SQL tests"
 require_embedded_timing_step_guards "Run embedded performance probe"
+require_step_literal \
+  "Run embedded performance probe" \
+  "tee build/embedded-performance-reports/default.log"
 require_embedded_timing_step_guards "Run embedded large-row bulk performance probe"
 require_step_literal \
   "Run embedded large-row bulk performance probe" \
@@ -377,7 +385,19 @@ require_step_literal \
 require_step_literal \
   "Run embedded large-row bulk performance probe" \
   'MYLITE_PERF_INSERT_ITERATIONS: "500"'
+require_step_literal \
+  "Run embedded large-row bulk performance probe" \
+  "tee build/embedded-performance-reports/large-row-bulk.log"
 require_embedded_timing_step_guards "Run embedded ownerless attribution probe"
+require_step_literal \
+  "Run embedded ownerless attribution probe" \
+  "tee build/embedded-performance-reports/ownerless-attribution.log"
+require_step_literal \
+  "Upload embedded performance reports" \
+  "name: embedded-performance-reports"
+require_step_literal \
+  "Upload embedded performance reports" \
+  "path: build/embedded-performance-reports"
 require_wordpress_timing_step_guards "Install WordPress PHPUnit dependencies"
 require_wordpress_timing_step_guards "Prepare WordPress PHPUnit database"
 require_wordpress_timing_step_guards "Run WordPress mysqli performance probe"
@@ -473,6 +493,12 @@ require_step_literal \
 require_step_literal \
   "Run WordPress PHPUnit non-isolated remaining suite (test only)" \
   'MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE: "1"'
+require_step_literal \
+  "Upload WordPress timing summary" \
+  "name: wordpress-phpunit-timing-summary"
+require_step_literal \
+  "Upload WordPress timing summary" \
+  "path: build/wordpress-phpunit-reports/timing-summary.md"
 require_step_literal "Check formatting" "tools/require-cmake-release-build build/prod"
 require_step_literal "Run clang-tidy" "tools/require-cmake-release-build build/prod"
 

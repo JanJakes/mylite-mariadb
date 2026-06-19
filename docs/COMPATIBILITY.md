@@ -199,7 +199,11 @@ wall timings are not hidden inside build work.
 Those phases append compact timing rows into
 `build/wordpress-phpunit-reports/timing-summary.md`, and CI publishes that
 Markdown table to the GitHub step summary so setup, build, probe, and each
-PHPUnit shard can be compared without scraping separate step logs.
+PHPUnit shard can be compared without scraping separate step logs. CI now also
+uploads that timing summary as the `wordpress-phpunit-timing-summary` artifact,
+and the embedded performance probes persist their production output as the
+`embedded-performance-reports` artifact, so branch/main timing comparisons can
+download the same evidence after a run instead of relying only on log scraping.
 The embedded ownerless SQL CI step uses the registered sixteen weighted CTest
 shards through the production `php-embedded-prod` preset with `--parallel 2`,
 and records the shard selector and parallelism in the GitHub step summary.
@@ -831,7 +835,9 @@ directories, or unguarded WordPress timing settings. The audit also checks
 that timing-bearing embedded, WordPress, and clang-tool step bodies retain
 their production cache guards instead of merely carrying those guard strings
 elsewhere in the workflow, and that embedded performance probes stay ahead of
-embedded test steps.
+embedded test steps. It also guards the CI performance artifact names and
+paths so timing evidence remains downloadable when future workflow edits touch
+the performance jobs.
 Guarded ownerless SQL page-version reads are now enabled only when statement
 refresh actually needs page-version WAL. In a continuous single-owner epoch,
 local autocommit writes advance a separate local-native read boundary; eligible

@@ -202,6 +202,13 @@ The audit also requires the embedded performance and attribution probes to stay
 ahead of the embedded test steps. This keeps the branch's production engine
 timings visible during performance work even when the ownerless SQL suite finds
 a late correctness regression.
+Those embedded probe steps now tee their production output to
+`build/embedded-performance-reports/{default,large-row-bulk,ownerless-attribution}.log`
+and upload the directory as the `embedded-performance-reports` artifact. The
+WordPress timing summary remains printed to the GitHub step summary and is also
+uploaded as the `wordpress-phpunit-timing-summary` artifact. The artifact
+uploads run with `if: always()` so earlier performance evidence is still
+downloadable when a later correctness or PHPUnit shard fails.
 The WordPress timing job also enables
 `MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR=1`, which rejects an in-repository
 test database path for CI timing phases. The harness prints
@@ -385,6 +392,8 @@ behavior remains covered by the dedicated idle-runtime scheduling cases.
   native-support `SYS`/`TRX_SYS` split when stats are enabled.
 - Run a reduced production WordPress mysqli `perf-probe` after database
   preparation and confirm `wordpress_perf_summary_*` lines are printed.
+- Confirm workflow edits keep the embedded performance report and WordPress
+  timing-summary artifact steps guarded by `tools/check-ci-production-builds`.
 - Run focused ownerless primitive CTest coverage under `php-embedded-prod`.
 - Run `tools/check-ci-production-builds` and the production CTest wrapper for
   that audit after workflow edits.

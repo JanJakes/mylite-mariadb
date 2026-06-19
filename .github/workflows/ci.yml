@@ -111,9 +111,11 @@ jobs:
       - name: Run embedded performance probe
         run: |
           set -euo pipefail
+          mkdir -p build/embedded-performance-reports
           tools/require-cmake-build-type MinSizeRel build/mariadb-embedded
           tools/require-cmake-release-build build/php-embedded-prod
-          build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe
+          build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe \
+            | tee build/embedded-performance-reports/default.log
 
       - name: Run embedded large-row bulk performance probe
         env:
@@ -123,9 +125,11 @@ jobs:
           MYLITE_PERF_BULK_INSERT_ROWS_PER_STATEMENT: "100"
         run: |
           set -euo pipefail
+          mkdir -p build/embedded-performance-reports
           tools/require-cmake-build-type MinSizeRel build/mariadb-embedded
           tools/require-cmake-release-build build/php-embedded-prod
-          build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe
+          build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe \
+            | tee build/embedded-performance-reports/large-row-bulk.log
 
       - name: Run embedded ownerless attribution probe
         env:
@@ -135,9 +139,19 @@ jobs:
           MYLITE_PERF_OWNERLESS_PAGE_PUBLISH_STATS: "1"
         run: |
           set -euo pipefail
+          mkdir -p build/embedded-performance-reports
           tools/require-cmake-build-type MinSizeRel build/mariadb-embedded
           tools/require-cmake-release-build build/php-embedded-prod
-          build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe
+          build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe \
+            | tee build/embedded-performance-reports/ownerless-attribution.log
+
+      - name: Upload embedded performance reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: embedded-performance-reports
+          path: build/embedded-performance-reports
+          if-no-files-found: warn
 
       - name: Run embedded non-ownerless tests
         timeout-minutes: 10
@@ -400,6 +414,14 @@ jobs:
           else
             echo "Missing WordPress timing summary: ${summary}"
           fi
+
+      - name: Upload WordPress timing summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wordpress-phpunit-timing-summary
+          path: build/wordpress-phpunit-reports/timing-summary.md
+          if-no-files-found: warn
 
       - name: Show generated artifact sizes
         if: always()
