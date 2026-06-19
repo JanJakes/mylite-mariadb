@@ -193,6 +193,20 @@ int mylite_ownerless_page_log_append_session_append_with_checksum_and_options(
     uint32_t append_options,
     uint64_t *out_record_offset
 );
+int mylite_ownerless_page_log_append_session_append_native_support_proof_pair(
+    int fd,
+    mylite_ownerless_page_log_append_session *session,
+    uint32_t space_id,
+    uint32_t first_page_no,
+    uint64_t first_page_lsn,
+    uint32_t first_page_size,
+    uint32_t second_page_no,
+    uint64_t second_page_lsn,
+    uint32_t second_page_size,
+    uint64_t commit_lsn,
+    uint64_t *out_first_record_offset,
+    uint64_t *out_second_record_offset
+);
 int mylite_ownerless_page_log_append_external_snapshot_lineage_session_append_with_checksum_and_options(
     int fd,
     mylite_ownerless_page_log_append_session *session,

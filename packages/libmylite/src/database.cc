@@ -16751,22 +16751,55 @@ int ownerless_innodb_history_proof_publish_pair_hook(
     std::uint64_t record_offset = 0U;
     std::uint64_t stage_start_ns =
         ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
-    int append_result = append_ownerless_page_version(
-        hook,
-        space_id,
-        rseg_page_no,
-        rseg_page_lsn,
-        visible_lsn,
-        rseg_page,
-        rseg_page_size,
-        0U,
-        true,
-        false,
-        MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_PROOF_ONLY |
-            MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_HISTORY_RSEG,
-        &record_offset
-    );
-    if (append_result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
+    int append_result = MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    if (ownerless_page_log_append_batch.hook == hook &&
+        ownerless_page_log_append_batch.session.active == 0) {
+        const int begin_result = mylite_ownerless_page_log_append_session_begin_initialized_at(
+            hook->page_log_fd,
+            hook->page_log_offset,
+            &ownerless_page_log_append_batch.session
+        );
+        if (begin_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
+            ownerless_page_log_append_batch.hook = nullptr;
+        }
+    }
+    if (ownerless_page_log_append_batch.hook == hook &&
+        ownerless_page_log_append_batch.session.active != 0) {
+        std::uint64_t undo_record_offset = 0U;
+        append_result = mylite_ownerless_page_log_append_session_append_native_support_proof_pair(
+            hook->page_log_fd,
+            &ownerless_page_log_append_batch.session,
+            space_id,
+            rseg_page_no,
+            rseg_page_lsn,
+            rseg_page_size,
+            undo_page_no,
+            undo_page_lsn,
+            undo_page_size,
+            visible_lsn,
+            &record_offset,
+            &undo_record_offset
+        );
+    } else {
+        append_result = append_ownerless_page_version(
+            hook,
+            space_id,
+            rseg_page_no,
+            rseg_page_lsn,
+            visible_lsn,
+            rseg_page,
+            rseg_page_size,
+            0U,
+            true,
+            false,
+            MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_PROOF_ONLY |
+                MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_HISTORY_RSEG,
+            &record_offset
+        );
+    }
+    if (append_result == MYLITE_OWNERLESS_PAGE_LOG_OK &&
+        (ownerless_page_log_append_batch.hook != hook ||
+         ownerless_page_log_append_batch.session.active == 0)) {
         append_result = append_ownerless_page_version(
             hook,
             space_id,

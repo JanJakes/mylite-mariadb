@@ -313,6 +313,7 @@ static void test_page_log_preserves_external_snapshot_lineage_metadata(void);
 static void test_page_log_external_snapshot_lineage_session_append(void);
 static void test_page_log_preserves_native_support_metadata(void);
 static void test_page_log_skips_proof_only_native_support_records(void);
+static void test_page_log_appends_native_support_proof_pairs(void);
 static void test_page_log_requires_boundaries_only_for_snapshot_pages(void);
 static void test_page_log_checkpoint_waits_for_readers(void);
 static void test_page_log_scan_recovers_from_stale_index_offset(void);
@@ -527,6 +528,7 @@ int main(void) {
     test_page_log_external_snapshot_lineage_session_append();
     test_page_log_preserves_native_support_metadata();
     test_page_log_skips_proof_only_native_support_records();
+    test_page_log_appends_native_support_proof_pairs();
     test_page_log_requires_boundaries_only_for_snapshot_pages();
     test_page_log_checkpoint_waits_for_readers();
     test_page_log_scan_recovers_from_stale_index_offset();
@@ -6443,6 +6445,214 @@ static void test_page_log_skips_proof_only_native_support_records(void) {
             &commit_lsn
         ) == MYLITE_OWNERLESS_PAGE_LOG_NOT_FOUND
     );
+
+    assert(close(fd) == 0);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_appends_native_support_proof_pairs(void) {
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "native-support-proof-pair-page-log.bin");
+    int fd = open_file(log_path);
+    uint8_t page_base[MYLITE_TEST_PAGE_SIZE];
+    uint8_t out_page[MYLITE_TEST_PAGE_SIZE];
+    mylite_ownerless_page_log_append_session session = {0};
+    uint64_t base_record_offset = 0;
+    uint64_t first_record_offset = 0;
+    uint64_t second_record_offset = 0;
+    uint64_t page_lsn = 0;
+    uint64_t commit_lsn = 0;
+    uint32_t out_page_size = 0;
+    uint32_t metadata_flags = 0;
+    uint32_t record_flags = 0;
+    uint64_t stats[PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
+    page_log_retained_records replay_records = {0};
+    page_log_checkpoint_index_context checkpoint_context = {0};
+    int is_native_support = 0;
+
+    fill_innodb_test_page(page_base, 91U, 4U, 200U, 0x23U);
+    memset(out_page, 0xEE, sizeof(out_page));
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            91U,
+            4U,
+            200U,
+            200U,
+            page_base,
+            sizeof(page_base),
+            &base_record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+
+    mylite_ownerless_page_log_reset_append_perf_stats();
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
+    assert(
+        mylite_ownerless_page_log_append_session_begin_initialized_at(fd, 0U, &session) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append_session_append_native_support_proof_pair(
+            fd,
+            &session,
+            91U,
+            4U,
+            220U,
+            sizeof(page_base),
+            5U,
+            225U,
+            sizeof(page_base),
+            230U,
+            &first_record_offset,
+            &second_record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    mylite_ownerless_page_log_append_session_end(fd, &session);
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(0);
+    mylite_ownerless_page_log_read_append_perf_stats(stats, PAGE_LOG_APPEND_PERF_STAT_COUNT);
+
+    assert(first_record_offset > base_record_offset);
+    assert(
+        second_record_offset == first_record_offset + MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE
+    );
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_CALLS] == 2U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_DIRECT_APPEND_CALLS] == 0U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_SESSION_APPEND_CALLS] == 2U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_PAYLOAD_BYTES] == 0U);
+    assert(
+        stats[PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_BYTES] ==
+        2U * MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE
+    );
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_PRECOMPUTED_CHECKSUM_RECORDS] == 0U);
+
+    assert(
+        mylite_ownerless_page_log_record_metadata_flags_at(
+            fd,
+            first_record_offset,
+            &metadata_flags
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert((metadata_flags & MYLITE_OWNERLESS_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE) != 0U);
+    assert((metadata_flags & MYLITE_OWNERLESS_PAGE_LOG_RECORD_PROOF_ONLY) != 0U);
+    record_flags = read_page_log_record_flags(fd, first_record_offset);
+    assert((record_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_NATIVE_SUPPORT_STATE) != 0U);
+    assert((record_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_PROOF_ONLY) != 0U);
+    assert(
+        mylite_ownerless_page_log_record_is_native_support_state_at(
+            fd,
+            first_record_offset,
+            &is_native_support
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(is_native_support == 1);
+
+    assert(
+        mylite_ownerless_page_log_record_metadata_flags_at(
+            fd,
+            second_record_offset,
+            &metadata_flags
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert((metadata_flags & MYLITE_OWNERLESS_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE) != 0U);
+    assert((metadata_flags & MYLITE_OWNERLESS_PAGE_LOG_RECORD_PROOF_ONLY) != 0U);
+
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            91U,
+            4U,
+            300U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page_base));
+    assert(page_lsn == 200U);
+    assert(commit_lsn == 200U);
+    assert(memcmp(out_page, page_base, sizeof(page_base)) == 0);
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            91U,
+            5U,
+            300U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_NOT_FOUND
+    );
+    assert(
+        mylite_ownerless_page_log_read_record_at(
+            fd,
+            0U,
+            first_record_offset,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_NOT_FOUND
+    );
+    assert(
+        mylite_ownerless_page_log_read_record_at(
+            fd,
+            0U,
+            second_record_offset,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_NOT_FOUND
+    );
+
+    assert(
+        mylite_ownerless_page_log_replay_at(
+            fd,
+            0U,
+            capture_page_log_record_for_index_replace,
+            &replay_records
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(replay_records.count == 1U);
+    assert(replay_records.records[0].record_offset == base_record_offset);
+
+    assert(
+        mylite_ownerless_page_log_checkpoint(
+            fd,
+            210U,
+            capture_page_log_record_for_checkpoint_index,
+            &checkpoint_context
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(checkpoint_context.retained.count == 0U);
+    assert(
+        mylite_ownerless_page_log_record_metadata_flags_at(
+            fd,
+            MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE,
+            &metadata_flags
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert((metadata_flags & MYLITE_OWNERLESS_PAGE_LOG_RECORD_PROOF_ONLY) != 0U);
+    assert(
+        mylite_ownerless_page_log_record_metadata_flags_at(
+            fd,
+            MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE + MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE,
+            &metadata_flags
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert((metadata_flags & MYLITE_OWNERLESS_PAGE_LOG_RECORD_PROOF_ONLY) != 0U);
 
     assert(close(fd) == 0);
     free(log_path);

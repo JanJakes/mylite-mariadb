@@ -628,6 +628,18 @@ int append_record_at_locked(
     std::uint64_t precomputed_checksum,
     std::uint32_t append_options
 );
+int append_native_support_proof_only_record_at_locked(
+    int fd,
+    off_t record_offset,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t page_lsn,
+    std::uint64_t commit_lsn,
+    std::uint32_t page_size,
+    std::uint64_t *out_record_offset,
+    std::uint64_t *out_next_record_offset,
+    bool append_stats_enabled
+);
 int snapshot_locked(int fd, off_t log_offset, std::uint64_t *out_snapshot_end_offset);
 int snapshot_locked_with_generation(
     int fd,
@@ -1618,6 +1630,65 @@ int mylite_ownerless_page_log_append_session_begin_initialized_at(
     return MYLITE_OWNERLESS_PAGE_LOG_OK;
 }
 
+namespace {
+
+int append_native_support_proof_only_record_at_locked(
+    int fd,
+    off_t record_offset,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t page_lsn,
+    std::uint64_t commit_lsn,
+    std::uint32_t page_size,
+    std::uint64_t *out_record_offset,
+    std::uint64_t *out_next_record_offset,
+    bool append_stats_enabled
+) {
+    off_t next_record_offset = 0;
+    if (!offset_adds(
+            record_offset,
+            MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE,
+            &next_record_offset
+        )) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    PageRecordHeader record = {};
+    record.space_id = space_id;
+    record.page_no = page_no;
+    record.page_size = page_size;
+    record.flags = k_record_flag_native_support_state | k_record_flag_proof_only;
+    record.page_lsn = page_lsn;
+    record.commit_lsn = commit_lsn;
+    record.payload_size = 0U;
+    record.checksum = 0U;
+
+    const std::uint64_t stage_start_ns = append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
+    const bool record_header_written = write_record_header(fd, record_offset, record);
+    page_log_append_perf_add_elapsed_if_enabled(
+        append_stats_enabled,
+        PAGE_LOG_APPEND_PERF_RECORD_HEADER_WRITE_NS,
+        stage_start_ns
+    );
+    if (!record_header_written) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    page_log_append_perf_add_if_enabled(
+        append_stats_enabled,
+        PAGE_LOG_APPEND_PERF_RECORD_HEADER_BYTES,
+        MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE
+    );
+    if (out_record_offset != nullptr) {
+        *out_record_offset = static_cast<std::uint64_t>(record_offset);
+    }
+    if (out_next_record_offset != nullptr) {
+        *out_next_record_offset = static_cast<std::uint64_t>(next_record_offset);
+    }
+    return MYLITE_OWNERLESS_PAGE_LOG_OK;
+}
+
+} // namespace
+
 int page_log_append_session_append_common(
     int fd,
     mylite_ownerless_page_log_append_session *session,
@@ -1775,6 +1846,76 @@ int mylite_ownerless_page_log_append_session_append_with_checksum_and_options(
         append_options,
         out_record_offset
     );
+}
+
+int mylite_ownerless_page_log_append_session_append_native_support_proof_pair(
+    int fd,
+    mylite_ownerless_page_log_append_session *session,
+    std::uint32_t space_id,
+    std::uint32_t first_page_no,
+    std::uint64_t first_page_lsn,
+    std::uint32_t first_page_size,
+    std::uint32_t second_page_no,
+    std::uint64_t second_page_lsn,
+    std::uint32_t second_page_size,
+    std::uint64_t commit_lsn,
+    std::uint64_t *out_first_record_offset,
+    std::uint64_t *out_second_record_offset
+) {
+    const bool append_stats_enabled = page_log_append_perf_stats_are_enabled();
+    PageLogAppendPerfScope total_scope(PAGE_LOG_APPEND_PERF_TOTAL_NS, append_stats_enabled);
+    page_log_append_perf_add_if_enabled(append_stats_enabled, PAGE_LOG_APPEND_PERF_CALLS, 2U);
+    page_log_append_perf_add_if_enabled(
+        append_stats_enabled,
+        PAGE_LOG_APPEND_PERF_SESSION_APPEND_CALLS,
+        2U
+    );
+    if (fd < 0 || session == nullptr || session->active == 0 || commit_lsn == 0U ||
+        first_page_lsn == 0U || second_page_lsn == 0U || first_page_size == 0U ||
+        second_page_size == 0U ||
+        session->next_record_offset >
+            static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    std::uint64_t next_record_offset = 0U;
+    int result = append_native_support_proof_only_record_at_locked(
+        fd,
+        static_cast<off_t>(session->next_record_offset),
+        space_id,
+        first_page_no,
+        first_page_lsn,
+        commit_lsn,
+        first_page_size,
+        out_first_record_offset,
+        &next_record_offset,
+        append_stats_enabled
+    );
+    if (result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        return result;
+    }
+    session->next_record_offset = next_record_offset;
+    if (session->next_record_offset >
+        static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    result = append_native_support_proof_only_record_at_locked(
+        fd,
+        static_cast<off_t>(session->next_record_offset),
+        space_id,
+        second_page_no,
+        second_page_lsn,
+        commit_lsn,
+        second_page_size,
+        out_second_record_offset,
+        &next_record_offset,
+        append_stats_enabled
+    );
+    if (result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        session->next_record_offset = next_record_offset;
+    }
+    return result;
 }
 
 int mylite_ownerless_page_log_append_external_snapshot_lineage_session_append_with_checksum_and_options(
