@@ -338,6 +338,7 @@ require_literal "MYLITE_WORDPRESS_TIMING_LABEL: build-php"
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: dependencies"
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: prepare-db"
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: perf-probe"
+require_literal 'MYLITE_WORDPRESS_PERF_PROFILE_CONNECT_PROCESSES: "1"'
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-db"
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-deferred-reconnect-baseline-restored"
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-deferred-reconnect-skip-install"

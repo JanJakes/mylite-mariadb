@@ -509,6 +509,13 @@ WordPress timing summary, alongside the in-process connect and SQL probe keys,
 so CI step summaries show PHP startup, extension-load, explicit/implicit
 process connect/close, and active in-process engine timings without log
 scraping.
+CI now also enables a separate, non-averaged process profile sample for one
+explicit-close and one implicit-object-free WordPress mysqli process. Those
+samples leave the existing process timing loop unprofiled, but append
+`wordpress_perf_summary_mysqli_process_explicit_profile_*` and
+`wordpress_perf_summary_mysqli_process_implicit_profile_*` rows for native
+open/close attribution so the next process-isolated PHPUnit optimization can
+target startup, close, or teardown with evidence.
 Ownerless mini-transaction page-write release now skips transaction lookup and
 external release policy checks when the current MTR has no ownerless
 page-write pages left to release. In the CI-shaped stats-enabled bulk probe,

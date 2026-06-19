@@ -515,6 +515,7 @@ run_suite() {
     -e MYLITE_WORDPRESS_PHASE="${phase}" \
     -e MYLITE_WORDPRESS_PERF_PROCESS_ITERATIONS="${MYLITE_WORDPRESS_PERF_PROCESS_ITERATIONS:-5}" \
     -e MYLITE_WORDPRESS_PERF_CONNECT_ITERATIONS="${MYLITE_WORDPRESS_PERF_CONNECT_ITERATIONS:-${MYLITE_WORDPRESS_PERF_PROCESS_ITERATIONS:-5}}" \
+    -e MYLITE_WORDPRESS_PERF_PROFILE_CONNECT_PROCESSES="${MYLITE_WORDPRESS_PERF_PROFILE_CONNECT_PROCESSES:-0}" \
     -e MYLITE_WORDPRESS_PERF_SQL_ITERATIONS="${MYLITE_WORDPRESS_PERF_SQL_ITERATIONS:-5000}" \
     -e MYLITE_WORDPRESS_PERF_WRITE_ITERATIONS="${MYLITE_WORDPRESS_PERF_WRITE_ITERATIONS:-1000}" \
     -e COMPOSER_CACHE_DIR="${container_composer_cache_dir}" \
@@ -3213,6 +3214,7 @@ require_build_php_artifacts
 require_prepared_database
 perf_process_iterations="${MYLITE_WORDPRESS_PERF_PROCESS_ITERATIONS:-5}"
 perf_connect_iterations="${MYLITE_WORDPRESS_PERF_CONNECT_ITERATIONS:-${perf_process_iterations}}"
+perf_profile_connect_processes="${MYLITE_WORDPRESS_PERF_PROFILE_CONNECT_PROCESSES:-0}"
 perf_sql_iterations="${MYLITE_WORDPRESS_PERF_SQL_ITERATIONS:-5000}"
 perf_write_iterations="${MYLITE_WORDPRESS_PERF_WRITE_ITERATIONS:-1000}"
 for perf_value in \
@@ -3231,6 +3233,14 @@ for perf_value in \
     exit 1
   fi
 done
+case "${perf_profile_connect_processes}" in
+  0 | 1)
+    ;;
+  *)
+    echo "MYLITE_WORDPRESS_PERF_PROFILE_CONNECT_PROCESSES must be 0 or 1" >&2
+    exit 1
+    ;;
+esac
 
 elapsed_ns_average_ms() {
   local elapsed_ns="$1"
@@ -3254,20 +3264,104 @@ nonnegative_delta_ms() {
 
 echo "wordpress_perf_process_iterations=${perf_process_iterations}"
 echo "wordpress_perf_connect_iterations=${perf_connect_iterations}"
+echo "wordpress_perf_profile_connect_processes=${perf_profile_connect_processes}"
 echo "wordpress_perf_sql_iterations=${perf_sql_iterations}"
 echo "wordpress_perf_write_iterations=${perf_write_iterations}"
 echo "wordpress_perf_summary_cmake_build_type=${MYLITE_WORDPRESS_CMAKE_BUILD_TYPE}"
 echo "wordpress_perf_summary_process_iterations=${perf_process_iterations}"
 echo "wordpress_perf_summary_connect_iterations=${perf_connect_iterations}"
+echo "wordpress_perf_summary_profile_connect_processes=${perf_profile_connect_processes}"
 echo "wordpress_perf_summary_sql_iterations=${perf_sql_iterations}"
 echo "wordpress_perf_summary_write_iterations=${perf_write_iterations}"
 perf_summary_metrics=(
   "wordpress_perf_summary_cmake_build_type=${MYLITE_WORDPRESS_CMAKE_BUILD_TYPE}"
   "wordpress_perf_summary_process_iterations=${perf_process_iterations}"
   "wordpress_perf_summary_connect_iterations=${perf_connect_iterations}"
+  "wordpress_perf_summary_profile_connect_processes=${perf_profile_connect_processes}"
   "wordpress_perf_summary_sql_iterations=${perf_sql_iterations}"
   "wordpress_perf_summary_write_iterations=${perf_write_iterations}"
 )
+
+append_mysqli_process_profile_metric() {
+  local shape="$1"
+  local output="$2"
+  local profile_key="$3"
+  local value
+  value="$(
+    sed -n "s/^mylite_mysqli_profile_${profile_key}=//p" "${output}" |
+      tail -n 1
+  )"
+  if [ -z "${value}" ]; then
+    return
+  fi
+  echo "wordpress_perf_mysqli_process_${shape}_profile_${profile_key}=${value}"
+  echo "wordpress_perf_summary_mysqli_process_${shape}_profile_${profile_key}=${value}"
+  perf_summary_metrics+=(
+    "wordpress_perf_summary_mysqli_process_${shape}_profile_${profile_key}=${value}"
+  )
+}
+
+append_mysqli_process_profile_metrics() {
+  local shape="$1"
+  local output="$2"
+  local profile_key
+
+  for profile_key in \
+    open_calls \
+    open_ms_total \
+    open_ms_avg \
+    close_calls \
+    close_explicit_calls \
+    close_object_free_calls \
+    close_reopen_calls \
+    close_ms_total \
+    close_ms_avg; do
+    append_mysqli_process_profile_metric "${shape}" "${output}" "${profile_key}"
+  done
+}
+
+profile_explicit_connect_process() {
+  local output
+  if ! output="$(mktemp "${TMPDIR:-/tmp}/mylite-wordpress-explicit-connect-profile.XXXXXX")"; then
+    echo "Could not create explicit connect profile capture" >&2
+    exit 1
+  fi
+  env \
+    MYLITE_MYSQLI_PROFILE=1 \
+    MYLITE_MYSQLI_PROFILE_CONTEXT=wordpress_perf_process_explicit \
+    "MYLITE_MYSQLI_PROFILE_OUTPUT=${output}" \
+    "${php_wrapper}" -r '
+$db = mysqli_connect($argv[1]);
+if (!$db) {
+    fwrite(STDERR, "connect failed: " . (mysqli_connect_error() ?? "") . PHP_EOL);
+    exit(1);
+}
+mysqli_close($db);
+' "${MYLITE_WORDPRESS_DB_DIR}"
+  append_mysqli_process_profile_metrics explicit "${output}"
+  rm -f "${output}"
+}
+
+profile_implicit_connect_process() {
+  local output
+  if ! output="$(mktemp "${TMPDIR:-/tmp}/mylite-wordpress-implicit-connect-profile.XXXXXX")"; then
+    echo "Could not create implicit connect profile capture" >&2
+    exit 1
+  fi
+  env \
+    MYLITE_MYSQLI_PROFILE=1 \
+    MYLITE_MYSQLI_PROFILE_CONTEXT=wordpress_perf_process_implicit \
+    "MYLITE_MYSQLI_PROFILE_OUTPUT=${output}" \
+    "${php_wrapper}" -r '
+$db = mysqli_connect($argv[1]);
+if (!$db) {
+    fwrite(STDERR, "connect failed: " . (mysqli_connect_error() ?? "") . PHP_EOL);
+    exit(1);
+}
+' "${MYLITE_WORDPRESS_DB_DIR}"
+  append_mysqli_process_profile_metrics implicit "${output}"
+  rm -f "${output}"
+}
 
 stock_php_process_total_ns=0
 php_process_total_ns=0
@@ -3407,6 +3501,11 @@ perf_summary_metrics+=(
   "wordpress_perf_summary_php_process_connect_close_ms_avg=${php_connect_process_ms}"
   "wordpress_perf_summary_php_process_connect_close_delta_ms_avg=${php_connect_process_delta_ms}"
 )
+
+if [ "${perf_profile_connect_processes}" = "1" ]; then
+  profile_explicit_connect_process
+  profile_implicit_connect_process
+fi
 
 if ! perf_output="$(mktemp "${TMPDIR:-/tmp}/mylite-wordpress-perf.XXXXXX")"; then
   echo "Could not create temporary WordPress perf output capture" >&2
