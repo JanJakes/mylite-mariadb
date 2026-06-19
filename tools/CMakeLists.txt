@@ -120,6 +120,20 @@ if(BUILD_TESTING)
     LABELS "tools;compat.concurrency"
   )
   add_test(
+    NAME tools.ownerless-external-mariadb-seed-sweep-next-check
+    COMMAND
+      "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-external-mariadb-seed-sweep"
+      --output "${CMAKE_CURRENT_BINARY_DIR}/ownerless-external-mariadb-seed-sweep-next-check"
+      --random-tx-rounds 2
+      --ddl-rounds 2
+      --fk-graph-rounds 2
+      --seed-range 64:127
+      --check
+  )
+  set_tests_properties(tools.ownerless-external-mariadb-seed-sweep-next-check PROPERTIES
+    LABELS "tools;compat.concurrency"
+  )
+  add_test(
     NAME tools.ownerless-sql-trace-suite-scaled
     COMMAND
       "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-sql-trace-suite"
