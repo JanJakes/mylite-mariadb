@@ -435,6 +435,9 @@ jobs:
           set -euo pipefail
           summary="${MYLITE_WORDPRESS_TIMING_SUMMARY_PATH}"
           if [ -f "${summary}" ]; then
+            if ! tools/wordpress-phpunit-timing-rollup --input "${summary}" --append; then
+              echo "WordPress timing rollup unavailable for ${summary}" >&2
+            fi
             cat "${summary}"
             if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
               cat "${summary}" >> "${GITHUB_STEP_SUMMARY}"

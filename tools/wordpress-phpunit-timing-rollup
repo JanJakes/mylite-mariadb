@@ -1,0 +1,302 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+input="${MYLITE_WORDPRESS_TIMING_SUMMARY_PATH:-}"
+append=0
+label=timing-rollup
+
+usage() {
+  cat <<'USAGE'
+Usage: wordpress-phpunit-timing-rollup [--input PATH] [--append] [--label LABEL]
+
+Summarize the WordPress PHPUnit timing markdown table into deterministic
+rollup rows. By default rows are written to stdout. With --append, previous
+rows for the selected label are replaced and the new rows are appended to the
+input table.
+USAGE
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --input)
+      if [ "$#" -lt 2 ]; then
+        echo "--input requires a path" >&2
+        exit 2
+      fi
+      input="$2"
+      shift 2
+      ;;
+    --append)
+      append=1
+      shift
+      ;;
+    --label)
+      if [ "$#" -lt 2 ]; then
+        echo "--label requires a value" >&2
+        exit 2
+      fi
+      label="$2"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "${input}" ]; then
+  echo "No timing summary path supplied; use --input or MYLITE_WORDPRESS_TIMING_SUMMARY_PATH" >&2
+  exit 2
+fi
+if [ ! -f "${input}" ]; then
+  echo "Missing WordPress timing summary: ${input}" >&2
+  exit 1
+fi
+
+rollup_tmp="$(mktemp "${TMPDIR:-/tmp}/mylite-wordpress-timing-rollup.XXXXXX")"
+cleanup() {
+  rm -f "${rollup_tmp}" "${filtered_tmp:-}"
+}
+trap cleanup EXIT
+
+awk -v rollup_label="${label}" '
+function trim(value) {
+  sub(/^[[:space:]]+/, "", value)
+  sub(/[[:space:]]+$/, "", value)
+  return value
+}
+
+function is_number(value) {
+  return value ~ /^-?[0-9]+([.][0-9]+)?$/
+}
+
+function add_sum(bucket, metric, value) {
+  if (!is_number(value)) {
+    return
+  }
+  sums[bucket SUBSEP metric] += value
+  seen[bucket SUBSEP metric] = 1
+}
+
+function count_once(bucket, row_label, key) {
+  key = bucket SUBSEP row_label
+  if (!(key in counted)) {
+    counted[key] = 1
+    counts[bucket]++
+  }
+}
+
+function metric_sum(bucket, metric) {
+  return sums[bucket SUBSEP metric] + 0
+}
+
+function metric_seen(bucket, metric) {
+  return (bucket SUBSEP metric) in seen
+}
+
+function row(metric, value) {
+  printf "| %s | %s | %s |\n", rollup_label, metric, value
+}
+
+function row_int(metric, value) {
+  row(metric, sprintf("%d", value))
+}
+
+function row_num(metric, value) {
+  row(metric, sprintf("%.3f", value))
+}
+
+function emit_sum(bucket, metric, output_metric) {
+  if (metric_seen(bucket, metric)) {
+    row_num(output_metric, metric_sum(bucket, metric))
+  }
+}
+
+function emit_bucket(bucket, prefix) {
+  if (counts[bucket] <= 0) {
+    return
+  }
+  row_int(prefix "_phase_count", counts[bucket])
+  emit_sum(bucket, "wordpress_phpunit_shell_real_seconds", prefix "_shell_real_seconds_sum")
+  emit_sum(bucket, "wordpress_phpunit_reported_seconds", prefix "_reported_seconds_sum")
+  emit_sum(bucket, "wordpress_phpunit_shell_overhead_seconds", prefix "_shell_overhead_seconds_sum")
+  emit_sum(bucket, "wordpress_phpunit_seconds", prefix "_seconds_sum")
+  emit_sum(bucket, "wordpress_container_seconds", prefix "_container_seconds_sum")
+  emit_sum(bucket, "wordpress_total_seconds", prefix "_total_seconds_sum")
+}
+
+BEGIN {
+  phpunit_metric["wordpress_phpunit_shell_real_seconds"] = 1
+  phpunit_metric["wordpress_phpunit_reported_seconds"] = 1
+  phpunit_metric["wordpress_phpunit_shell_overhead_seconds"] = 1
+  phpunit_metric["wordpress_phpunit_seconds"] = 1
+  phpunit_metric["wordpress_container_seconds"] = 1
+  phpunit_metric["wordpress_total_seconds"] = 1
+
+  build_metric["mylite_mariadb_embedded_seconds"] = 1
+  build_metric["mylite_php_configure_seconds"] = 1
+  build_metric["mylite_php_build_seconds"] = 1
+  build_metric["mylite_php_wrapper_seconds"] = 1
+  build_metric["mylite_build_seconds"] = 1
+  build_metric["wordpress_container_seconds"] = 1
+  build_metric["wordpress_total_seconds"] = 1
+
+  phase_metric["wordpress_docker_build_seconds"] = 1
+  phase_metric["wordpress_fetch_seconds"] = 1
+  phase_metric["wordpress_dependency_seconds"] = 1
+  phase_metric["wordpress_prepare_db_seconds"] = 1
+  phase_metric["wordpress_perf_summary_stock_php_process_start_ms_avg"] = 1
+  phase_metric["wordpress_perf_summary_php_process_start_ms_avg"] = 1
+  phase_metric["wordpress_perf_summary_php_extension_process_overhead_ms_avg"] = 1
+  phase_metric["wordpress_perf_summary_php_process_connect_close_ms_avg"] = 1
+  phase_metric["wordpress_perf_summary_php_process_connect_close_delta_ms_avg"] = 1
+  phase_metric["wordpress_perf_summary_mysqli_inprocess_connect_close_ms_avg"] = 1
+  phase_metric["wordpress_perf_summary_mysqli_active_runtime_reconnect_ms_avg"] = 1
+  phase_metric["wordpress_perf_summary_select1_ops_per_second"] = 1
+  phase_metric["wordpress_perf_summary_insert_txn_ops_per_second"] = 1
+  phase_metric["wordpress_perf_summary_point_select_ops_per_second"] = 1
+  phase_metric["wordpress_perf_summary_insert_autocommit_ops_per_second"] = 1
+  phase_metric["wordpress_perf_summary_insert_direct_autocommit_ops_per_second"] = 1
+}
+
+/^\|/ {
+  fields = split($0, cells, "|")
+  if (fields < 4) {
+    next
+  }
+
+  row_label = trim(cells[2])
+  metric = trim(cells[3])
+  value = trim(cells[4])
+
+  if (row_label == "label" || row_label == "---" || metric == "---" || row_label == rollup_label) {
+    next
+  }
+
+  if (metric == "wordpress_total_seconds" && is_number(value)) {
+    count_once("phase_all", row_label)
+    add_sum("phase_all", metric, value)
+  }
+
+  if (row_label == "build-php" && metric in build_metric) {
+    count_once("build", row_label)
+    add_sum("build", metric, value)
+  }
+
+  if (metric in phase_metric) {
+    add_sum("phase_metric", metric, value)
+  }
+
+  if (row_label !~ /^phpunit-/ || !(metric in phpunit_metric)) {
+    next
+  }
+
+  count_once("phpunit_all", row_label)
+  add_sum("phpunit_all", metric, value)
+
+  if (row_label == "phpunit-db-profile") {
+    count_once("phpunit_diagnostic", row_label)
+    add_sum("phpunit_diagnostic", metric, value)
+    next
+  }
+
+  count_once("phpunit_test", row_label)
+  add_sum("phpunit_test", metric, value)
+
+  if (row_label == "phpunit-db") {
+    count_once("phpunit_db", row_label)
+    add_sum("phpunit_db", metric, value)
+  } else if (row_label ~ /^phpunit-deferred-reconnect-/) {
+    count_once("phpunit_isolated", row_label)
+    add_sum("phpunit_isolated", metric, value)
+  } else if (row_label ~ /^phpunit-non-isolated-/) {
+    count_once("phpunit_non_isolated", row_label)
+    add_sum("phpunit_non_isolated", metric, value)
+  } else {
+    count_once("phpunit_other_test", row_label)
+    add_sum("phpunit_other_test", metric, value)
+  }
+}
+
+END {
+  emit_bucket("phpunit_test", "wordpress_phpunit_test")
+  emit_bucket("phpunit_diagnostic", "wordpress_phpunit_diagnostic")
+  emit_bucket("phpunit_all", "wordpress_phpunit_all")
+  emit_bucket("phpunit_db", "wordpress_phpunit_db")
+  emit_bucket("phpunit_isolated", "wordpress_phpunit_isolated")
+  emit_bucket("phpunit_non_isolated", "wordpress_phpunit_non_isolated")
+  emit_bucket("phpunit_other_test", "wordpress_phpunit_other_test")
+
+  if (counts["build"] > 0) {
+    row_int("wordpress_build_phase_count", counts["build"])
+    emit_sum("build", "mylite_mariadb_embedded_seconds", "wordpress_build_mariadb_embedded_seconds")
+    emit_sum("build", "mylite_php_configure_seconds", "wordpress_build_php_configure_seconds")
+    emit_sum("build", "mylite_php_build_seconds", "wordpress_build_php_seconds")
+    emit_sum("build", "mylite_php_wrapper_seconds", "wordpress_build_php_wrapper_seconds")
+    emit_sum("build", "mylite_build_seconds", "wordpress_build_inner_seconds")
+    emit_sum("build", "wordpress_container_seconds", "wordpress_build_container_seconds")
+    emit_sum("build", "wordpress_total_seconds", "wordpress_build_total_seconds")
+  }
+
+  if (counts["phase_all"] > 0) {
+    row_int("wordpress_timed_phase_count", counts["phase_all"])
+    emit_sum("phase_all", "wordpress_total_seconds", "wordpress_timed_phase_total_seconds_sum")
+  }
+
+  emit_sum("phase_metric", "wordpress_docker_build_seconds", "wordpress_docker_build_seconds")
+  emit_sum("phase_metric", "wordpress_fetch_seconds", "wordpress_fetch_seconds")
+  emit_sum("phase_metric", "wordpress_dependency_seconds", "wordpress_dependency_seconds")
+  emit_sum("phase_metric", "wordpress_prepare_db_seconds", "wordpress_prepare_db_seconds")
+  emit_sum("phase_metric", "wordpress_perf_summary_stock_php_process_start_ms_avg", "wordpress_perf_stock_php_process_start_ms_avg")
+  emit_sum("phase_metric", "wordpress_perf_summary_php_process_start_ms_avg", "wordpress_perf_php_process_start_ms_avg")
+  emit_sum("phase_metric", "wordpress_perf_summary_php_extension_process_overhead_ms_avg", "wordpress_perf_php_extension_process_overhead_ms_avg")
+  emit_sum("phase_metric", "wordpress_perf_summary_php_process_connect_close_ms_avg", "wordpress_perf_php_process_connect_close_ms_avg")
+  emit_sum("phase_metric", "wordpress_perf_summary_php_process_connect_close_delta_ms_avg", "wordpress_perf_php_process_connect_close_delta_ms_avg")
+  emit_sum("phase_metric", "wordpress_perf_summary_mysqli_inprocess_connect_close_ms_avg", "wordpress_perf_mysqli_inprocess_connect_close_ms_avg")
+  emit_sum("phase_metric", "wordpress_perf_summary_mysqli_active_runtime_reconnect_ms_avg", "wordpress_perf_mysqli_active_runtime_reconnect_ms_avg")
+  emit_sum("phase_metric", "wordpress_perf_summary_select1_ops_per_second", "wordpress_perf_select1_ops_per_second")
+  emit_sum("phase_metric", "wordpress_perf_summary_insert_txn_ops_per_second", "wordpress_perf_insert_txn_ops_per_second")
+  emit_sum("phase_metric", "wordpress_perf_summary_point_select_ops_per_second", "wordpress_perf_point_select_ops_per_second")
+  emit_sum("phase_metric", "wordpress_perf_summary_insert_autocommit_ops_per_second", "wordpress_perf_insert_autocommit_ops_per_second")
+  emit_sum("phase_metric", "wordpress_perf_summary_insert_direct_autocommit_ops_per_second", "wordpress_perf_insert_direct_autocommit_ops_per_second")
+}
+' "${input}" > "${rollup_tmp}"
+
+if [ ! -s "${rollup_tmp}" ]; then
+  echo "No rollup rows produced from ${input}" >&2
+  exit 1
+fi
+
+if [ "${append}" -eq 0 ]; then
+  cat "${rollup_tmp}"
+  exit 0
+fi
+
+filtered_tmp="$(mktemp "${TMPDIR:-/tmp}/mylite-wordpress-timing-summary.XXXXXX")"
+awk -v rollup_label="${label}" '
+function trim(value) {
+  sub(/^[[:space:]]+/, "", value)
+  sub(/[[:space:]]+$/, "", value)
+  return value
+}
+
+/^\|/ {
+  fields = split($0, cells, "|")
+  if (fields >= 4 && trim(cells[2]) == rollup_label) {
+    next
+  }
+}
+
+{ print }
+' "${input}" > "${filtered_tmp}"
+
+{
+  cat "${filtered_tmp}"
+  cat "${rollup_tmp}"
+} > "${input}"

@@ -16,6 +16,14 @@ if(BUILD_TESTING)
     LABELS "tools;compat.build"
   )
   add_test(
+    NAME tools.wordpress-phpunit-timing-rollup
+    COMMAND
+      "${CMAKE_CURRENT_SOURCE_DIR}/wordpress-phpunit-timing-rollup-test"
+  )
+  set_tests_properties(tools.wordpress-phpunit-timing-rollup PROPERTIES
+    LABELS "tools;compat.build"
+  )
+  add_test(
     NAME tools.ownerless-sql-trace-runner
     COMMAND
       "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-sql-trace-runner"
