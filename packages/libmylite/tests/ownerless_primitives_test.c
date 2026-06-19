@@ -3594,6 +3594,116 @@ static void test_page_log_reuses_fast_miss_delta_payload_for_exact_fallback(void
     assert(commit_lsn == 940U);
     assert(memcmp(out_page, page_delta, sizeof(page_delta)) == 0);
 
+    memcpy(page_delta, page_base, sizeof(page_delta));
+    store_test_be64(page_delta, MYLITE_TEST_INNODB_PAGE_LSN_OFFSET, 950U);
+    for (uint32_t offset = 4096U; offset < 9728U; ++offset) {
+        page_delta[offset] ^= (uint8_t)(0x21U + (offset & 0x3FU));
+    }
+
+    mylite_ownerless_page_log_reset_append_perf_stats();
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            73U,
+            45U,
+            950U,
+            950U,
+            page_delta,
+            sizeof(page_delta),
+            &delta_record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(0);
+    memset(stats, 0, sizeof(stats));
+    mylite_ownerless_page_log_read_append_perf_stats(stats, PAGE_LOG_APPEND_PERF_STAT_COUNT);
+
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_CALLS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_FAST_RECORDS] == 0U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_EXACT_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_DELTA_FAST_REJECTED_LIMIT_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_REUSED_FAST_PAYLOAD_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_STANDALONE_SIZE_PROBE_CALLS] == 0U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_STANDALONE_MATERIALIZE_SKIPPED_RECORDS] == 0U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_REJECTED_STANDALONE_RECORDS] == 0U);
+    delta_flags = read_page_log_record_flags(fd, delta_record_offset);
+    assert((delta_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_INDEX_DELTA) != 0U);
+
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            73U,
+            45U,
+            950U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page_delta));
+    assert(page_lsn == 950U);
+    assert(commit_lsn == 950U);
+    assert(memcmp(out_page, page_delta, sizeof(page_delta)) == 0);
+
+    memcpy(page_delta, page_base, sizeof(page_delta));
+    store_test_be64(page_delta, MYLITE_TEST_INNODB_PAGE_LSN_OFFSET, 960U);
+    for (uint32_t offset = 4096U; offset < 9728U; ++offset) {
+        page_delta[offset] ^= (uint8_t)(0x31U + (offset & 0x3FU));
+    }
+
+    mylite_ownerless_page_log_reset_append_perf_stats();
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            73U,
+            45U,
+            960U,
+            960U,
+            page_delta,
+            sizeof(page_delta),
+            &delta_record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(0);
+    memset(stats, 0, sizeof(stats));
+    mylite_ownerless_page_log_read_append_perf_stats(stats, PAGE_LOG_APPEND_PERF_STAT_COUNT);
+
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_CALLS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_FAST_RECORDS] == 0U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_INDEX_DELTA_EXACT_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_DELTA_FAST_REJECTED_LIMIT_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_REUSED_FAST_PAYLOAD_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_STANDALONE_SIZE_PROBE_CALLS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_STANDALONE_MATERIALIZE_SKIPPED_RECORDS] == 1U);
+    assert(stats[PAGE_LOG_APPEND_PERF_STAT_DELTA_EXACT_REJECTED_STANDALONE_RECORDS] == 0U);
+    delta_flags = read_page_log_record_flags(fd, delta_record_offset);
+    assert((delta_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_INDEX_DELTA) != 0U);
+
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            73U,
+            45U,
+            960U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page_delta));
+    assert(page_lsn == 960U);
+    assert(commit_lsn == 960U);
+    assert(memcmp(out_page, page_delta, sizeof(page_delta)) == 0);
+
     assert(close(fd) == 0);
     free(log_path);
     remove_tree(root);

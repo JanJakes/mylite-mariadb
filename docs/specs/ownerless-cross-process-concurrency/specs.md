@@ -5812,6 +5812,21 @@ subsystems that this mode needs:
   page-log encode time from `6.142 ms` to `4.977 ms`, page-log append total
   from `8.411 ms` to `7.183 ms`, and ownerless bulk throughput stayed in the
   same range at `4880.07` to `4904.94` rows/s.
+  The delta exact reuse-probe cache then records positive exact fallback reuse
+  observations in the same volatile delta-base slot. A later same-base
+  fast-limit miss with an outstanding positive observation can accept the
+  already-built delta payload without repeating the standalone-size probe;
+  standalone rejection, build failure, base refresh, invalidation, and
+  max-delta bounds stay conservative. Primitive coverage proves the first
+  exact reuse still probes, the next same-base append skips the probe and
+  replays byte-identically from the delta record, and the following append
+  probes again after consuming the single positive observation. Final reduced
+  simple and 100-row-bulk stats-enabled production probes still used
+  standalone-size probes for their representative exact-reuse records, so the
+  current measured CI-shaped workloads should not claim a throughput win from
+  this cache. WAL format, checkpoint rewrite, replay, and concurrency ordering
+  remain unchanged; the tradeoff is bounded WAL-size risk if a skipped probe
+  would have selected a smaller standalone record.
   The page-log metadata flag coalescing slice then added a single helper that
   reads one page-log record header and returns the metadata bits needed by
   native checkpoint proof collection. The proof collector now tests

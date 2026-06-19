@@ -1712,6 +1712,21 @@ the probe and still replays byte-identically from the standalone page image,
 and a reduced 120-row production probe reported one skipped exact standalone
 probe in both the single-row autocommit and four-row bulk shapes. This is a
 small page-log CPU heuristic rather than a concurrency-semantics change.
+The follow-up delta exact reuse-probe cache records positive exact fallback
+reuse observations in the same process-local delta-base slot. When a later
+same-base fast-limit miss has an outstanding positive observation, MyLite can
+accept the already-built delta payload without repeating the standalone-size
+probe; standalone rejection, build failure, base refresh, invalidation, and
+max-delta bounds stay conservative. Primitive coverage proves the first exact
+reuse still probes, the next same-base append skips the probe and replays
+byte-identically from the delta record, and the following append probes again
+after consuming the single positive observation. Final reduced simple and
+100-row-bulk stats-enabled production probes still used standalone-size probes
+for their representative exact-reuse records, so the current measured CI-shaped
+workloads should not claim a throughput win from this cache. This keeps WAL
+format, checkpoint rewrite, replay, and concurrency ordering unchanged; the
+tradeoff is bounded WAL-size risk if a skipped probe would have selected a
+smaller standalone record.
 The follow-up delta payload direct-copy slice keeps the same non-chained
 index/undo delta WAL bytes but resizes the encoded payload once for all raw
 changed-byte runs and copies those runs directly instead of repeatedly
