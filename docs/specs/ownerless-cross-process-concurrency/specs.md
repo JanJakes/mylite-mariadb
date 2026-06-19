@@ -6083,6 +6083,15 @@ subsystems that this mode needs:
   `mysql_query()` at `4.614 ms` per statement, page-write commit-log at
   `1.382 ms` per statement, and commit-log redo-leave at `0.737 ms` per
   statement.
+  The active-reservation count follow-up then removes the O(64) reservation
+  table scan from redo-state snapshot and leave policy by maintaining a
+  progress-latch-protected counter at offset `88` in redo-state segment version
+  `9`. It keeps reservation ordering, completed-range draining, checkpoint
+  files, page-version WAL, and SQL semantics unchanged. A reduced production
+  stats-off 30000-row, 100-row-per-statement probe reported ownerless bulk at
+  `21802.61 rows/s`, ordinary bulk at `95543.15 rows/s`, and an
+  ownerless/ordinary ratio of `0.2282`; this remains a bounded bookkeeping
+  reduction, not a full ownerless write-throughput fix.
   Larger row lists, broad DML/DDL, and unbounded append-lock hold times remain
   out of scope.
   Focused gating coverage proves active live writers, including idle explicit

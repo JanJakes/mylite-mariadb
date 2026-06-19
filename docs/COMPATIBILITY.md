@@ -696,6 +696,18 @@ ownerless/ordinary ratio of `0.2052`, ownerless `mysql_query()` at
 `4.614 ms` per statement, page-write commit-log at `1.382 ms` per statement,
 and commit-log redo-leave at `0.737 ms` per statement. This is tracked as a
 bounded hot-path reduction rather than a full ownerless completion claim.
+Ownerless redo state now keeps an active-reservation counter in the shared
+redo-state segment, bumping that segment descriptor from version `8` to `9`.
+Reserve and complete-write paths update the counter while holding the existing
+redo progress latch, and leave/snapshot policy reads the counter directly
+instead of scanning the 64 reservation slots each time it checks whether a
+latest-LSN advance can also advance the written LSN. SQL behavior, WAL format,
+checkpoint files, and page-version publication are unchanged. A reduced
+production stats-off 30000-row, 100-row-per-statement probe reported ownerless
+bulk at `21802.61 rows/s`, ordinary bulk at `95543.15 rows/s`, and an
+ownerless/ordinary ratio of `0.2282`; this is recorded as a bounded redo-state
+bookkeeping reduction, not as closure of the broader ownerless performance
+gap.
 Profiled mysqli runs also split total query elapsed time into
 `query_verb_*` buckets for result queries, DML, DDL, connection state,
 transaction, lock, call, and other first-keyword classes so WordPress timing

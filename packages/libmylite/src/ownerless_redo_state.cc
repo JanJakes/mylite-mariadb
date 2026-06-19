@@ -19,6 +19,7 @@ constexpr std::size_t k_durable_lsn_offset = 64;
 constexpr std::size_t k_written_lsn_offset = 72;
 constexpr std::size_t k_visible_generation_offset =
     MYLITE_OWNERLESS_REDO_STATE_VISIBLE_GENERATION_OFFSET;
+constexpr std::size_t k_active_reservation_count_offset = 88;
 constexpr std::size_t k_progress_latch_offset = 96;
 constexpr std::size_t k_active_reservation_slots_offset = 128;
 constexpr std::size_t k_active_reservation_slot_size = 32;
@@ -54,6 +55,10 @@ static_assert(
 static_assert(
     k_visible_generation_offset + sizeof(std::uint64_t) <= k_progress_latch_offset,
     "redo state visible generation overlaps progress latch"
+);
+static_assert(
+    k_active_reservation_count_offset + sizeof(std::uint32_t) <= k_progress_latch_offset,
+    "redo state active reservation count overlaps progress latch"
 );
 static_assert(
     k_progress_latch_offset + MYLITE_OWNERLESS_LATCH_SIZE <= k_active_reservation_slots_offset,
@@ -137,13 +142,15 @@ int complete_write_locked(
     std::uint64_t *out_written_lsn
 );
 void reserve_active_range(
+    void *state,
     unsigned char *slot,
     std::uint32_t owner_id,
     std::uint64_t owner_generation,
     std::uint64_t start_lsn,
     std::uint64_t end_lsn
 );
-void clear_active_reservation_slot(unsigned char *slot);
+void clear_active_reservation_slot(void *state, unsigned char *slot);
+void clear_redo_state_slot(unsigned char *slot);
 int clear_owner_entry_slots_guarded(
     void *state,
     std::uint32_t owner_id,
@@ -152,6 +159,8 @@ int clear_owner_entry_slots_guarded(
 void clear_owner_entry_slots(void *state, std::uint32_t owner_id, std::uint64_t owner_generation);
 std::uint32_t active_reservation_count(const void *state);
 std::uint32_t owner_active_state_count(const void *state, std::uint32_t owner_id);
+void increment_active_reservation_count(void *state);
+void decrement_active_reservation_count(void *state);
 bool record_completed_range(void *state, std::uint64_t start_lsn, std::uint64_t end_lsn);
 bool ranges_touch_or_overlap(
     std::uint64_t left_start,
@@ -313,7 +322,7 @@ int mylite_ownerless_redo_state_reserve(
         *out_end_lsn = 0U;
         return MYLITE_OWNERLESS_REDO_STATE_ERROR;
     }
-    reserve_active_range(slot, owner_id, owner_generation, *out_start_lsn, *out_end_lsn);
+    reserve_active_range(state, slot, owner_id, owner_generation, *out_start_lsn, *out_end_lsn);
     if (*out_start_lsn != 0U && load64(state, k_written_lsn_offset) == 0U) {
         store64(state, k_written_lsn_offset, *out_start_lsn);
     }
@@ -839,7 +848,7 @@ int leave_active_owner_locked(
     }
 
     if (owner_refcount == 1U) {
-        clear_active_reservation_slot(slot);
+        clear_active_reservation_slot(state, slot);
     } else {
         store64(slot, k_active_entry_slot_refcount_offset, owner_refcount - 1U);
     }
@@ -881,7 +890,7 @@ int complete_write_locked(
         written_lsn = drain_completed_ranges(state, written_lsn);
     }
     if (result == MYLITE_OWNERLESS_REDO_STATE_OK && slot != nullptr) {
-        clear_active_reservation_slot(slot);
+        clear_active_reservation_slot(state, slot);
     }
     if (result == MYLITE_OWNERLESS_REDO_STATE_OK && out_written_lsn != nullptr &&
         written_lsn > previous_written_lsn) {
@@ -891,6 +900,7 @@ int complete_write_locked(
 }
 
 void reserve_active_range(
+    void *state,
     unsigned char *slot,
     std::uint32_t owner_id,
     std::uint64_t owner_generation,
@@ -902,9 +912,18 @@ void reserve_active_range(
     store64(slot, k_active_reservation_slot_owner_generation_offset, owner_generation);
     store32(slot, k_active_reservation_slot_owner_id_offset, owner_id);
     store32(slot, k_active_reservation_slot_state_offset, k_active_reservation_slot_state_active);
+    increment_active_reservation_count(state);
 }
 
-void clear_active_reservation_slot(unsigned char *slot) {
+void clear_active_reservation_slot(void *state, unsigned char *slot) {
+    if (load32(slot, k_active_reservation_slot_state_offset) ==
+        k_active_reservation_slot_state_active) {
+        decrement_active_reservation_count(state);
+    }
+    clear_redo_state_slot(slot);
+}
+
+void clear_redo_state_slot(unsigned char *slot) {
     store32(slot, k_active_reservation_slot_state_offset, k_active_reservation_slot_state_free);
     store64(slot, k_active_reservation_slot_end_offset, 0U);
     store64(slot, k_active_reservation_slot_start_offset, 0U);
@@ -940,23 +959,12 @@ void clear_owner_entry_slots(void *state, std::uint32_t owner_id, std::uint64_t 
                 ? 0U
                 : static_cast<std::uint32_t>(global_refcount - owner_refcount)
         );
-        clear_active_reservation_slot(slot);
+        clear_redo_state_slot(slot);
     }
 }
 
 std::uint32_t active_reservation_count(const void *state) {
-    const auto *bytes = static_cast<const unsigned char *>(state);
-    std::uint32_t count = 0;
-    for (std::uint32_t slot_index = 0; slot_index < k_active_reservation_slot_count; ++slot_index) {
-        const unsigned char *slot =
-            bytes + k_active_reservation_slots_offset +
-            (static_cast<std::size_t>(slot_index) * k_active_reservation_slot_size);
-        if (load32(slot, k_active_reservation_slot_state_offset) ==
-            k_active_reservation_slot_state_active) {
-            ++count;
-        }
-    }
-    return count;
+    return load32(state, k_active_reservation_count_offset);
 }
 
 std::uint32_t owner_active_state_count(const void *state, std::uint32_t owner_id) {
@@ -975,6 +983,20 @@ std::uint32_t owner_active_state_count(const void *state, std::uint32_t owner_id
         }
     }
     return count;
+}
+
+void increment_active_reservation_count(void *state) {
+    const std::uint32_t count = load32(state, k_active_reservation_count_offset);
+    if (count < k_active_reservation_slot_count) {
+        store32(state, k_active_reservation_count_offset, count + 1U);
+    }
+}
+
+void decrement_active_reservation_count(void *state) {
+    const std::uint32_t count = load32(state, k_active_reservation_count_offset);
+    if (count != 0U) {
+        store32(state, k_active_reservation_count_offset, count - 1U);
+    }
 }
 
 bool record_completed_range(void *state, std::uint64_t start_lsn, std::uint64_t end_lsn) {
