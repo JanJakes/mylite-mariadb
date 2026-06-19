@@ -20143,10 +20143,10 @@ static void test_ownerless_ddl_refreshes_peer_dictionary(void) {
     );
     exec_ok(db, "INSERT INTO app.ownerless_renamed VALUES (3, 300)");
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_renamed") == 300U);
-    assert(mylite_close(db) == MYLITE_OK);
     close(ddl_ready_pipe[0]);
     close(ddl_release_pipe[1]);
     wait_for_child(ddl_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);
     free(runtime_root);
@@ -20286,10 +20286,10 @@ static void test_ownerless_table_idempotent_ddl_refreshes_peer_dictionary(void) 
     assert(!path_exists(frm_path));
     assert(!path_exists(ibd_path));
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(ddl_ready_pipe[0]);
     close(ddl_release_pipe[1]);
     wait_for_child(ddl_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_table_idempotent_ddl_state(
         paths,
@@ -20709,10 +20709,10 @@ static void test_ownerless_broader_ddl_refreshes_peer_dictionary(void) {
         ) == 1U
     );
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(ddl_ready_pipe[0]);
     close(ddl_release_pipe[1]);
     wait_for_child(ddl_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_broader_ddl_state(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert_ownerless_broader_ddl_state(paths, MYLITE_OPEN_READWRITE);
@@ -21280,10 +21280,10 @@ static void test_ownerless_online_ddl_options_refresh_peer_dictionary(void) {
         exec_status(db, "SELECT SUM(option_note) FROM app.ownerless_ddl_options", NULL) != MYLITE_OK
     );
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(ddl_ready_pipe[0]);
     close(ddl_release_pipe[1]);
     wait_for_child(ddl_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_online_ddl_options_state(
         paths,
@@ -21439,10 +21439,10 @@ static void test_ownerless_generated_column_alter_refreshes_peer_dictionary(void
         ) == 1U
     );
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(generated_ready_pipe[0]);
     close(generated_release_pipe[1]);
     wait_for_child(generated_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_generated_column_alter_state(
         paths,
@@ -21842,10 +21842,10 @@ static void test_ownerless_generated_column_index_ddl_refreshes_peer_dictionary(
         ) == 4U
     );
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(index_ready_pipe[0]);
     close(index_release_pipe[1]);
     wait_for_child(index_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_generated_column_index_ddl_state(
         paths,
@@ -22087,10 +22087,10 @@ static void test_ownerless_generated_column_indexed_expression_replacement(void)
         ) == 90U
     );
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(expression_ready_pipe[0]);
     close(expression_release_pipe[1]);
     wait_for_child(expression_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_generated_column_indexed_expression_state(
         paths,
@@ -22864,10 +22864,10 @@ static void test_ownerless_charset_convert_ddl_refreshes_peer_dictionary(void) {
         ) == 14U
     );
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(charset_ready_pipe[0]);
     close(charset_release_pipe[1]);
     wait_for_child(charset_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_charset_convert_ddl_state(
         paths,
@@ -22960,10 +22960,10 @@ static void test_ownerless_row_format_ddl_refreshes_peer_dictionary(void) {
         768U
     );
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(row_format_ready_pipe[0]);
     close(row_format_release_pipe[1]);
     wait_for_child(row_format_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_row_format_ddl_state(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert_ownerless_row_format_ddl_state(paths, MYLITE_OPEN_READWRITE);
@@ -23074,10 +23074,10 @@ static void test_ownerless_compressed_row_format_ddl_refreshes_peer_dictionary(v
         ) == 3U * MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES
     );
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(row_format_ready_pipe[0]);
     close(row_format_release_pipe[1]);
     wait_for_child(row_format_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_compressed_row_format_ddl_state(
         paths,
@@ -23261,10 +23261,10 @@ static void test_ownerless_compressed_row_format_key_block_ddl_refreshes_peer_di
         ) == 3U * MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES
     );
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(row_format_ready_pipe[0]);
     close(row_format_release_pipe[1]);
     wait_for_child(row_format_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_compressed_row_format_key_block_ddl_state(
         paths,
@@ -23347,10 +23347,10 @@ static void test_ownerless_table_comment_ddl_refreshes_peer_dictionary(void) {
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_table_comment_base") == 3U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_table_comment_base") == 60U);
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(comment_ready_pipe[0]);
     close(comment_release_pipe[1]);
     wait_for_child(comment_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_table_comment_ddl_state(
         paths,
@@ -23459,10 +23459,10 @@ static void test_ownerless_force_rebuild_ddl_refreshes_peer_dictionary(void) {
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_force_rebuild_base") == 4U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_force_rebuild_base") == 100U);
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(rebuild_ready_pipe[0]);
     close(rebuild_release_pipe[1]);
     wait_for_child(rebuild_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_force_rebuild_ddl_state(
         paths,
@@ -23590,10 +23590,10 @@ static void test_ownerless_column_default_ddl_refreshes_peer_dictionary(void) {
         ) == 2U
     );
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(default_ready_pipe[0]);
     close(default_release_pipe[1]);
     wait_for_child(default_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_column_default_ddl_state(
         paths,
@@ -23724,10 +23724,10 @@ static void test_ownerless_column_idempotent_ddl_refreshes_peer_dictionary(void)
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_column_idempotent") == 4U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_column_idempotent") == 100U);
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(column_ready_pipe[0]);
     close(column_release_pipe[1]);
     wait_for_child(column_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_column_idempotent_ddl_state(
         paths,
@@ -24006,10 +24006,10 @@ static void test_ownerless_instant_column_variants_refresh_peer_dictionary(void)
     assert(query_unsigned(db, "SELECT SUM(base_value) FROM app.ownerless_instant_variants") == 65U);
     assert(query_unsigned(db, "SELECT SUM(side_value) FROM app.ownerless_instant_variants") == 21U);
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(instant_ready_pipe[0]);
     close(instant_release_pipe[1]);
     wait_for_child(instant_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_instant_column_variant_state(
         paths,
@@ -24111,10 +24111,10 @@ static void test_ownerless_schema_lifecycle_refreshes_peer_dictionary(void) {
         MYLITE_OK
     );
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(schema_ready_pipe[0]);
     close(schema_release_pipe[1]);
     wait_for_child(schema_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     datadir_path = path_join(database_path, "datadir");
     schema_path = path_join(datadir_path, "ownerless_schema");
@@ -24296,10 +24296,10 @@ static void test_ownerless_schema_default_ddl_refreshes_peer_dictionary(void) {
         ) != MYLITE_OK
     );
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(schema_ready_pipe[0]);
     close(schema_release_pipe[1]);
     wait_for_child(schema_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert(!path_exists(schema_path));
     assert_ownerless_schema_default_ddl_absent(
@@ -24476,10 +24476,10 @@ static void test_ownerless_schema_idempotent_ddl_refreshes_peer_dictionary(void)
         ) != MYLITE_OK
     );
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(schema_ready_pipe[0]);
     close(schema_release_pipe[1]);
     wait_for_child(schema_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert(!path_exists(schema_path));
     assert_ownerless_schema_idempotent_ddl_absent(
@@ -24645,10 +24645,10 @@ static void test_ownerless_cross_schema_rename_refreshes_peer_dictionary(void) {
     );
 
     signal_pipe_message(rename_release_pipe[1]);
-    assert(mylite_close(db) == MYLITE_OK);
     close(rename_ready_pipe[0]);
     close(rename_release_pipe[1]);
     wait_for_child(rename_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_cross_schema_rename_state(
         paths,
@@ -24810,10 +24810,10 @@ static void test_ownerless_multi_rename_cycle_refreshes_peer_dictionary(void) {
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_rename_cycle_right") == 61U);
 
     signal_pipe_message(rename_release_pipe[1]);
-    assert(mylite_close(db) == MYLITE_OK);
     close(rename_ready_pipe[0]);
     close(rename_release_pipe[1]);
     wait_for_child(rename_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_multi_rename_cycle_state(
         paths,
@@ -24930,10 +24930,10 @@ static void test_ownerless_view_ddl_refreshes_peer_dictionary(void) {
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_base") == 30U);
     assert(!path_exists(view_path));
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(view_ready_pipe[0]);
     close(view_release_pipe[1]);
     wait_for_child(view_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_view_ddl_state(
         paths,
@@ -25044,10 +25044,10 @@ static void test_ownerless_view_ddl_variants_refresh_peer_dictionary(void) {
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_variant_base") == 60U);
     assert(!path_exists(view_path));
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(view_ready_pipe[0]);
     close(view_release_pipe[1]);
     wait_for_child(view_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_view_ddl_variant_state(
         paths,
@@ -25194,10 +25194,10 @@ static void test_ownerless_view_idempotent_ddl_refreshes_peer_dictionary(void) {
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_idempotent_base") == 4U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_idempotent_base") == 100U);
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(view_ready_pipe[0]);
     close(view_release_pipe[1]);
     wait_for_child(view_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_view_idempotent_ddl_state(
         paths,
@@ -25349,10 +25349,10 @@ static void test_ownerless_view_check_option_refreshes_peer_dictionary(void) {
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_check_base") == 127U);
     assert(!path_exists(view_path));
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(view_ready_pipe[0]);
     close(view_release_pipe[1]);
     wait_for_child(view_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_view_check_option_state(
         paths,
@@ -25530,10 +25530,10 @@ static void test_ownerless_nested_view_check_option_refreshes_peer_dictionary(vo
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_nested_base") == 6U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_nested_base") == 83U);
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(view_ready_pipe[0]);
     close(view_release_pipe[1]);
     wait_for_child(view_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_nested_view_check_option_state(
         paths,
@@ -25828,10 +25828,10 @@ static void test_ownerless_view_prepared_dml_enforces_check_option(void) {
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_prepared_base") == 4U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_prepared_base") == 93U);
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(view_ready_pipe[0]);
     close(view_release_pipe[1]);
     wait_for_child(view_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_view_prepared_dml_state(
         paths,
@@ -26078,10 +26078,10 @@ static void test_ownerless_view_non_updatable_diagnostics_refresh_peer_dictionar
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_nonupd_base") == 3U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_nonupd_base") == 50U);
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(view_ready_pipe[0]);
     close(view_release_pipe[1]);
     wait_for_child(view_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_view_non_updatable_diagnostics_state(
         paths,
@@ -26215,10 +26215,10 @@ static void test_ownerless_view_invalid_dependency_refreshes_peer_dictionary(voi
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_invalid_base") == 2U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_invalid_base") == 70U);
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(view_ready_pipe[0]);
     close(view_release_pipe[1]);
     wait_for_child(view_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_view_invalid_dependency_state(
         paths,
@@ -26399,10 +26399,10 @@ static void test_ownerless_view_column_list_refreshes_peer_dictionary(void) {
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_column_base") == 4U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_column_base") == 105U);
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(view_ready_pipe[0]);
     close(view_release_pipe[1]);
     wait_for_child(view_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_view_column_list_state(
         paths,
@@ -26540,10 +26540,10 @@ static void test_ownerless_view_security_refreshes_peer_dictionary(void) {
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_security_base") == 4U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_security_base") == 105U);
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(view_ready_pipe[0]);
     close(view_release_pipe[1]);
     wait_for_child(view_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_view_security_state(
         paths,
@@ -26656,10 +26656,10 @@ static void test_ownerless_trigger_ddl_refreshes_peer_dictionary(void) {
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_trigger_base") == 60U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_trigger_audit") == 30U);
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(trigger_ready_pipe[0]);
     close(trigger_release_pipe[1]);
     wait_for_child(trigger_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_trigger_ddl_state(
         paths,
@@ -26817,10 +26817,10 @@ static void test_ownerless_trigger_ddl_variants_refresh_peer_dictionary(void) {
         query_unsigned(db, "SELECT SUM(old_value) FROM app.ownerless_trigger_variant_audit") == 32U
     );
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(trigger_ready_pipe[0]);
     close(trigger_release_pipe[1]);
     wait_for_child(trigger_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_trigger_ddl_variant_state(
         paths,
@@ -26988,10 +26988,10 @@ static void test_ownerless_trigger_ordering_refreshes_peer_dictionary(void) {
         ) == 0U
     );
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(trigger_ready_pipe[0]);
     close(trigger_release_pipe[1]);
     wait_for_child(trigger_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_trigger_ordering_state(
         paths,
@@ -27166,10 +27166,10 @@ static void test_ownerless_trigger_idempotent_ddl_refreshes_peer_dictionary(void
         query_unsigned(db, "SELECT SUM(marker) FROM app.ownerless_trigger_idempotent_audit") == 4U
     );
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(trigger_ready_pipe[0]);
     close(trigger_release_pipe[1]);
     wait_for_child(trigger_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_trigger_idempotent_ddl_state(
         paths,
@@ -27557,10 +27557,10 @@ static void test_ownerless_index_ddl_refreshes_peer_dictionary(void) {
     );
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_index_base") == 100U);
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(index_ready_pipe[0]);
     close(index_release_pipe[1]);
     wait_for_child(index_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_index_ddl_state(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert_ownerless_index_ddl_state(paths, MYLITE_OPEN_READWRITE);
@@ -27898,10 +27898,10 @@ static void test_ownerless_index_idempotent_ddl_refreshes_peer_dictionary(void) 
         ) == 0U
     );
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(index_ready_pipe[0]);
     close(index_release_pipe[1]);
     wait_for_child(index_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_index_idempotent_ddl_state(
         paths,
@@ -28031,10 +28031,10 @@ static void test_ownerless_rename_index_ddl_refreshes_peer_dictionary(void) {
         ) == 9U
     );
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(index_ready_pipe[0]);
     close(index_release_pipe[1]);
     wait_for_child(index_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_rename_index_ddl_state(
         paths,
@@ -28146,10 +28146,10 @@ static void test_ownerless_ignored_index_ddl_refreshes_peer_dictionary(void) {
         ) == 14U
     );
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(index_ready_pipe[0]);
     close(index_release_pipe[1]);
     wait_for_child(index_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_ignored_index_ddl_state(
         paths,
@@ -28532,10 +28532,10 @@ static void test_ownerless_unique_index_ddl_refreshes_peer_dictionary(void) {
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_unique_index_base") == 6U);
     assert(query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_unique_index_base") == 200U);
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(index_ready_pipe[0]);
     close(index_release_pipe[1]);
     wait_for_child(index_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_unique_index_ddl_state(
         paths,
@@ -28645,11 +28645,10 @@ static void test_ownerless_descending_index_ddl_refreshes_peer_dictionary(void) 
     assert(
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_descending_index_base") == 100U
     );
-    assert(mylite_close(db) == MYLITE_OK);
-
     close(index_ready_pipe[0]);
     close(index_release_pipe[1]);
     wait_for_child(index_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_descending_index_ddl_state(
         paths,
@@ -28774,11 +28773,10 @@ static void test_ownerless_mixed_direction_index_ddl_refreshes_peer_dictionary(v
         query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_mixed_direction_index_base") ==
         100U
     );
-    assert(mylite_close(db) == MYLITE_OK);
-
     close(index_ready_pipe[0]);
     close(index_release_pipe[1]);
     wait_for_child(index_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_mixed_direction_index_ddl_state(
         paths,
@@ -28920,11 +28918,10 @@ static void test_ownerless_prefix_direction_index_ddl_refreshes_peer_dictionary(
         query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_prefix_direction_index_base") ==
         150U
     );
-    assert(mylite_close(db) == MYLITE_OK);
-
     close(index_ready_pipe[0]);
     close(index_release_pipe[1]);
     wait_for_child(index_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_prefix_direction_index_ddl_state(
         paths,
@@ -29088,11 +29085,10 @@ static void test_ownerless_unique_prefix_direction_index_ddl_refreshes_peer_dict
         query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_unique_prefix_direction_base") ==
         150U
     );
-    assert(mylite_close(db) == MYLITE_OK);
-
     close(index_ready_pipe[0]);
     close(index_release_pipe[1]);
     wait_for_child(index_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_unique_prefix_direction_index_ddl_state(
         paths,
@@ -29239,11 +29235,10 @@ static void test_ownerless_unique_descending_index_ddl_refreshes_peer_dictionary
         query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_unique_descending_index_base") ==
         150U
     );
-    assert(mylite_close(db) == MYLITE_OK);
-
     close(index_ready_pipe[0]);
     close(index_release_pipe[1]);
     wait_for_child(index_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_unique_descending_index_ddl_state(
         paths,
@@ -29362,11 +29357,10 @@ static void test_ownerless_unique_prefix_index_ddl_refreshes_peer_dictionary(voi
     assert(
         query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_unique_prefix_index_base") == 150U
     );
-    assert(mylite_close(db) == MYLITE_OK);
-
     close(index_ready_pipe[0]);
     close(index_release_pipe[1]);
     wait_for_child(index_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_unique_prefix_index_ddl_state(
         paths,
@@ -29537,11 +29531,10 @@ static void test_ownerless_text_blob_prefix_index_ddl_refreshes_peer_dictionary(
         query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_text_blob_prefix_index_base") ==
         150U
     );
-    assert(mylite_close(db) == MYLITE_OK);
-
     close(index_ready_pipe[0]);
     close(index_release_pipe[1]);
     wait_for_child(index_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_text_blob_prefix_index_ddl_state(
         paths,
@@ -29724,11 +29717,10 @@ static void test_ownerless_text_blob_prefix_direction_index_ddl_refreshes_peer_d
             "SELECT SUM(weight) FROM app.ownerless_text_blob_prefix_direction_index_base"
         ) == 150U
     );
-    assert(mylite_close(db) == MYLITE_OK);
-
     close(index_ready_pipe[0]);
     close(index_release_pipe[1]);
     wait_for_child(index_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_text_blob_prefix_direction_index_ddl_state(
         paths,
@@ -29928,11 +29920,10 @@ static void test_ownerless_unique_text_blob_prefix_index_ddl_refreshes_peer_dict
             "SELECT SUM(weight) FROM app.ownerless_unique_text_blob_prefix_index_base"
         ) == 150U
     );
-    assert(mylite_close(db) == MYLITE_OK);
-
     close(index_ready_pipe[0]);
     close(index_release_pipe[1]);
     wait_for_child(index_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_unique_text_blob_prefix_index_ddl_state(
         paths,
@@ -30137,11 +30128,10 @@ static void test_ownerless_unique_text_blob_prefix_direction_index_ddl_refreshes
             "SELECT SUM(weight) FROM app.ownerless_unique_text_blob_prefix_direction_index_base"
         ) == 150U
     );
-    assert(mylite_close(db) == MYLITE_OK);
-
     close(index_ready_pipe[0]);
     close(index_release_pipe[1]);
     wait_for_child(index_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_unique_text_blob_prefix_direction_index_ddl_state(
         paths,
@@ -30307,11 +30297,10 @@ static void test_ownerless_utf8mb4_prefix_index_ddl_refreshes_peer_dictionary(vo
             ")"
         ) == 60U
     );
-    assert(mylite_close(db) == MYLITE_OK);
-
     close(index_ready_pipe[0]);
     close(index_release_pipe[1]);
     wait_for_child(index_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_utf8mb4_prefix_index_ddl_state(
         paths,
@@ -30419,11 +30408,10 @@ static void test_ownerless_prefix_index_ddl_refreshes_peer_dictionary(void) {
     );
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_prefix_index_base") == 4U);
     assert(query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_prefix_index_base") == 100U);
-    assert(mylite_close(db) == MYLITE_OK);
-
     close(index_ready_pipe[0]);
     close(index_release_pipe[1]);
     wait_for_child(index_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_prefix_index_ddl_state(
         paths,
@@ -30593,10 +30581,10 @@ static void test_ownerless_primary_key_ddl_refreshes_peer_dictionary(void) {
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_primary_key_base") == 4U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_primary_key_base") == 1000U);
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(primary_ready_pipe[0]);
     close(primary_release_pipe[1]);
     wait_for_child(primary_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_primary_key_ddl_state(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert_ownerless_primary_key_ddl_state(paths, MYLITE_OPEN_READWRITE);
@@ -30697,10 +30685,10 @@ static void test_ownerless_descending_primary_key_ddl_refreshes_peer_dictionary(
         1000U
     );
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(primary_ready_pipe[0]);
     close(primary_release_pipe[1]);
     wait_for_child(primary_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_descending_primary_key_ddl_state(
         paths,
@@ -30838,11 +30826,10 @@ static void test_ownerless_composite_direction_primary_key_ddl_refreshes_peer_di
             "SELECT SUM(value) FROM app.ownerless_composite_direction_primary_key_base"
         ) == 1000U
     );
-    assert(mylite_close(db) == MYLITE_OK);
-
     close(primary_ready_pipe[0]);
     close(primary_release_pipe[1]);
     wait_for_child(primary_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_composite_direction_primary_key_ddl_state(
         paths,
@@ -30947,11 +30934,10 @@ static void test_ownerless_auto_increment_primary_key_ddl_refreshes_peer(void) {
     );
     assert(mylite_errcode(db) == MYLITE_ERROR);
     assert(mariadb_errno == MYLITE_TEST_DUPLICATE_KEY_ERRNO);
-    assert(mylite_close(db) == MYLITE_OK);
-
     close(primary_ready_pipe[0]);
     close(primary_release_pipe[1]);
     wait_for_child(primary_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_auto_increment_primary_key_ddl_state(
         paths,
@@ -31110,11 +31096,10 @@ static void test_ownerless_auto_increment_descending_primary_key_ddl_refreshes_p
     );
     assert(mylite_errcode(db) == MYLITE_ERROR);
     assert(mariadb_errno == MYLITE_TEST_DUPLICATE_KEY_ERRNO);
-    assert(mylite_close(db) == MYLITE_OK);
-
     close(primary_ready_pipe[0]);
     close(primary_release_pipe[1]);
     wait_for_child(primary_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_auto_increment_descending_primary_key_ddl_state(
         paths,
@@ -31313,10 +31298,10 @@ static void test_ownerless_foreign_key_ddl_refreshes_peer_dictionary(void) {
     );
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_alter_child") == 1290U);
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(fk_ready_pipe[0]);
     close(fk_release_pipe[1]);
     wait_for_child(fk_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_foreign_key_ddl_state(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert_ownerless_foreign_key_ddl_state(paths, MYLITE_OPEN_READWRITE);
@@ -31463,10 +31448,10 @@ static void test_ownerless_foreign_key_actions_cross_process(void) {
     );
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_action_restrict_child") == 1U);
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(fk_ready_pipe[0]);
     close(fk_release_pipe[1]);
     wait_for_child(fk_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_foreign_key_action_state(
         paths,
@@ -31916,10 +31901,10 @@ static void test_ownerless_composite_foreign_keys_cross_process(void) {
     );
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_composite_child") == 3U);
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(fk_ready_pipe[0]);
     close(fk_release_pipe[1]);
     wait_for_child(fk_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_composite_foreign_key_state(
         paths,
@@ -32106,10 +32091,10 @@ static void test_ownerless_foreign_key_deep_cascade_cross_process(void) {
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_deep_root") == 1030U);
 
     signal_pipe_message(fk_release_pipe[1]);
-    assert(mylite_close(db) == MYLITE_OK);
     close(fk_ready_pipe[0]);
     close(fk_release_pipe[1]);
     wait_for_child(fk_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_foreign_key_deep_cascade_state(
         paths,
@@ -32293,10 +32278,10 @@ static void test_ownerless_generated_column_foreign_key_cross_process(void) {
     exec_ok(db, "COMMIT");
 
     signal_pipe_message(fk_release_pipe[1]);
-    assert(mylite_close(db) == MYLITE_OK);
     close(fk_ready_pipe[0]);
     close(fk_release_pipe[1]);
     wait_for_child(fk_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_generated_column_foreign_key_state(
         paths,
@@ -32460,10 +32445,10 @@ static void test_ownerless_generated_column_foreign_key_policy(void) {
     exec_ok(db, "COMMIT");
 
     signal_pipe_message(fk_release_pipe[1]);
-    assert(mylite_close(db) == MYLITE_OK);
     close(fk_ready_pipe[0]);
     close(fk_release_pipe[1]);
     wait_for_child(fk_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_generated_column_foreign_key_policy_state(
         paths,
@@ -32917,10 +32902,10 @@ static void test_ownerless_cyclic_foreign_key_cross_process(void) {
     exec_ok(db, "COMMIT");
 
     signal_pipe_message(fk_release_pipe[1]);
-    assert(mylite_close(db) == MYLITE_OK);
     close(fk_ready_pipe[0]);
     close(fk_release_pipe[1]);
     wait_for_child(fk_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_cyclic_foreign_key_state(
         paths,
@@ -33052,10 +33037,10 @@ static void test_ownerless_cyclic_foreign_key_variants_cross_process(void) {
     exec_ok(db, "COMMIT");
 
     signal_pipe_message(fk_release_pipe[1]);
-    assert(mylite_close(db) == MYLITE_OK);
     close(fk_ready_pipe[0]);
     close(fk_release_pipe[1]);
     wait_for_child(fk_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_cyclic_foreign_key_variants_state(
         paths,
@@ -33205,10 +33190,10 @@ static void test_ownerless_foreign_key_rename_refreshes_peer_dictionary(void) {
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_rename_child") == 300U);
 
     signal_pipe_message(fk_release_pipe[1]);
-    assert(mylite_close(db) == MYLITE_OK);
     close(fk_ready_pipe[0]);
     close(fk_release_pipe[1]);
     wait_for_child(fk_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_foreign_key_rename_state(
         paths,
@@ -33384,10 +33369,10 @@ static void test_ownerless_foreign_key_child_rename_refreshes_peer_dictionary(vo
     );
 
     signal_pipe_message(fk_release_pipe[1]);
-    assert(mylite_close(db) == MYLITE_OK);
     close(fk_ready_pipe[0]);
     close(fk_release_pipe[1]);
     wait_for_child(fk_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_foreign_key_child_rename_state(
         paths,
@@ -33560,10 +33545,10 @@ static void test_ownerless_foreign_key_cross_schema_rename_refreshes_peer_dictio
     );
 
     signal_pipe_message(fk_release_pipe[1]);
-    assert(mylite_close(db) == MYLITE_OK);
     close(fk_ready_pipe[0]);
     close(fk_release_pipe[1]);
     wait_for_child(fk_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_foreign_key_cross_schema_rename_state(
         paths,
@@ -33775,10 +33760,10 @@ static void test_ownerless_foreign_key_cross_schema_child_rename_refreshes_peer_
     );
 
     signal_pipe_message(fk_release_pipe[1]);
-    assert(mylite_close(db) == MYLITE_OK);
     close(fk_ready_pipe[0]);
     close(fk_release_pipe[1]);
     wait_for_child(fk_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_foreign_key_cross_schema_child_rename_state(
         paths,
@@ -34009,10 +33994,10 @@ static void test_ownerless_foreign_key_multi_rename_refreshes_peer_dictionary(vo
     );
 
     signal_pipe_message(fk_release_pipe[1]);
-    assert(mylite_close(db) == MYLITE_OK);
     close(fk_ready_pipe[0]);
     close(fk_release_pipe[1]);
     wait_for_child(fk_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_foreign_key_multi_rename_state(
         paths,
@@ -34259,10 +34244,10 @@ static void test_ownerless_foreign_key_cross_schema_multi_rename_refreshes_peer_
     );
 
     signal_pipe_message(fk_release_pipe[1]);
-    assert(mylite_close(db) == MYLITE_OK);
     close(fk_ready_pipe[0]);
     close(fk_release_pipe[1]);
     wait_for_child(fk_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_foreign_key_cross_schema_multi_rename_state(
         paths,
@@ -34396,10 +34381,10 @@ static void test_ownerless_check_constraint_ddl_refreshes_peer_dictionary(void) 
     );
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_check_alter") == 35U);
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(check_ready_pipe[0]);
     close(check_release_pipe[1]);
     wait_for_child(check_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_check_constraint_ddl_state(
         paths,
@@ -34551,10 +34536,10 @@ static void test_ownerless_field_generated_check_ddl_refreshes_peer_dictionary(v
         33U
     );
 
-    assert(mylite_close(db) == MYLITE_OK);
     close(check_ready_pipe[0]);
     close(check_release_pipe[1]);
     wait_for_child(check_child);
+    assert(mylite_close(db) == MYLITE_OK);
 
     assert_ownerless_field_generated_check_ddl_state(
         paths,
