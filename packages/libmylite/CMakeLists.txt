@@ -501,6 +501,12 @@ if(BUILD_TESTING)
           TIMEOUT 900
       )
     endforeach()
+    # This weighted shard includes the FK cross-schema child-rename case, which
+    # is quick alone but can hit the per-case timeout under sustained parallel
+    # ownerless SQL pressure.
+    set_tests_properties(libmylite.ownerless-cross-process-sql.11 PROPERTIES
+      RUN_SERIAL TRUE
+    )
     set_tests_properties(libmylite.ownerless-single-owner-foreground-reclaim-budget PROPERTIES
       LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
       TIMEOUT 90
