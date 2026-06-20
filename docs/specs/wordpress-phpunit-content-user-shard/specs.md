@@ -73,3 +73,12 @@ slice only changes how CI partitions already-selected WordPress PHPUnit tests.
 - The production-build audit fails if the new shard or its remaining-shard
   exclusion is removed.
 - Existing timing rollups still aggregate every `phpunit-non-isolated-*` label.
+
+## Follow-Up Timing
+
+The green production CI run for `84a744f1` reported the new critical path as
+`phpunit-non-isolated-rest` at `178.539s` shell real, followed by
+`phpunit-non-isolated-content-user` at `145.720s`,
+`phpunit-non-isolated-remaining` at `116.857s`, and
+`phpunit-non-isolated-query-theme-block-token` at `99.539s`. That made the
+REST partition the next bounded CI wall-clock target.

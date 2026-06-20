@@ -70,6 +70,12 @@ The shard matrix covers the same PHPUnit partition as the sequential workflow:
 - `phpunit-non-isolated-query-theme-block-token`;
 - `phpunit-non-isolated-remaining`.
 
+A later timing slice split `phpunit-non-isolated-rest` into
+`phpunit-non-isolated-rest-controller` and
+`phpunit-non-isolated-rest-other` after production CI showed REST had become
+the longest individual shard. The aggregate job still treats both labels as
+non-isolated PHPUnit shards.
+
 Each shard runs with its own `/tmp/mylite-wordpress-tests.mylite` path in a
 separate GitHub runner, so native MyLite database files are not shared across
 parallel jobs. The setup job also uses `/tmp` for the prepared baseline so the

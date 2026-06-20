@@ -46,7 +46,9 @@ derive three visible timing filters from it:
 
 This keeps the split as a partition of the previous non-isolated step while
 preserving the dedicated `Tests_DB*` shard and the process-isolated class and
-method exclusions.
+method exclusions. A later production timing slice further split the REST
+partition into `Controller` and non-`Controller` filters after the REST shard
+became the longest single PHPUnit gate.
 
 The REST shard includes
 `WP_Test_REST_Schema_Initialization::test_build_wp_api_client_fixtures`, which

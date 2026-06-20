@@ -424,7 +424,8 @@ require_literal "label: phpunit-db-profile"
 require_literal "label: phpunit-deferred-reconnect-baseline-restored"
 require_literal "label: phpunit-deferred-reconnect-skip-install"
 require_literal "label: phpunit-deferred-reconnect-ui"
-require_literal "label: phpunit-non-isolated-rest"
+require_literal "label: phpunit-non-isolated-rest-controller"
+require_literal "label: phpunit-non-isolated-rest-other"
 require_literal "label: phpunit-non-isolated-query-theme-block-token"
 require_literal "label: phpunit-non-isolated-content-user"
 require_literal "label: phpunit-non-isolated-remaining"
@@ -433,14 +434,17 @@ require_literal "shard: db-profile"
 require_literal "shard: deferred-reconnect-baseline-restored"
 require_literal "shard: deferred-reconnect-skip-install"
 require_literal "shard: deferred-reconnect-ui"
-require_literal "shard: non-isolated-rest"
+require_literal "shard: non-isolated-rest-controller"
+require_literal "shard: non-isolated-rest-other"
 require_literal "shard: non-isolated-query-theme-block-token"
 require_literal "shard: non-isolated-content-user"
 require_literal "shard: non-isolated-remaining"
+require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
+require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?!.*Controller)${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'cat "${summary}" >> "${GITHUB_STEP_SUMMARY}"'
 require_literal_count_at_least "MYLITE_WORDPRESS_PHASE: phpunit" 1
 require_literal_count_at_least 'MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"' 4
-require_literal_count_at_least 'keepalive: "1"' 4
+require_literal_count_at_least 'keepalive: "1"' 5
 require_literal_count_at_least 'child_timing_summary: "1"' 3
 require_literal_count_at_least 'child_script_timing_summary: "1"' 3
 require_literal_count_at_least 'child_skip_install: "1"' 3
