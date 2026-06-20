@@ -849,6 +849,27 @@ events per statement, and zero fallback hook calls. The matching stats-off
 ownerless/ordinary ratio. This is a bounded visible-fast hot-path reduction,
 not completion of the broader ownerless redo/checkpoint or DDL/file-lifecycle
 recovery work.
+Ownerless visible-fast redo completion now also batches the shared redo-state
+written/leave work behind that same flush boundary. The InnoDB hook layer
+passes deferred ranges to an optional batch callback, and the first-party redo
+state completes the written ranges and matching owner leaves while holding the
+progress latch once. The single-range fused callback remains the fallback for
+missing batch callbacks, unsafe hook builds, and non-deferred paths. SQL
+behavior, public APIs, native redo/page-version formats, checkpoints, and
+directory layout are unchanged. A reduced stats-enabled 100-row bulk
+attribution sample reported database redo written/leave callbacks falling from
+`810` to `29` across five statements, while logical page-write written/leave
+events stayed at `162.000` per statement and fallback hook calls stayed at
+zero. Commit-log redo-leave moved from `0.260 ms/statement` to
+`0.094 ms/statement`, page-write redo hook time moved from
+`0.243 ms/statement` to `0.079 ms/statement`, and ownerless `mysql_query()`
+remained `3.405 ms/statement`. The matching stats-off 5000-row,
+100-row-per-statement production sample reported ownerless bulk at
+`33432.91 rows/s`, ordinary bulk at `107188.95 rows/s`, and a `0.3119`
+ownerless/ordinary ratio. The normal-build positive assertion for deferred
+latest-checkpoint coalescing in the explicit-transaction undo WAL-elision case
+was removed because redo latest/checkpoint advancement is now allowed to happen
+at the batch boundary rather than through that older coalescing counter.
 Profiled mysqli runs also split total query elapsed time into
 `query_verb_*` buckets for result queries, DML, DDL, connection state,
 transaction, lock, call, and other first-keyword classes so WordPress timing

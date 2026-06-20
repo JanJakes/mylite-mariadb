@@ -6289,6 +6289,21 @@ subsystems that this mode needs:
   ownerless/ordinary ratio. This is a visible-fast hot-path reduction only; it
   does not close broader redo/checkpoint reconciliation or DDL/file-lifecycle
   recovery.
+  The redo-state batch-completion follow-up then moves those deferred ranges
+  through a first-party batch written/leave API, acquiring the shared redo
+  progress latch once per bounded batch instead of once per range. It preserves
+  the existing single-range fused hook as the fallback and keeps page-write
+  counters as logical mini-transaction event evidence. A reduced stats-enabled
+  100-row bulk sample reported database redo written/leave callbacks falling
+  from `810` to `29` across five statements, while logical page-write
+  written/leave events stayed at `162.000` per statement, commit-log redo-leave
+  moved from `0.260 ms/statement` to `0.094 ms/statement`, and page-write redo
+  hook time moved from `0.243 ms/statement` to `0.079 ms/statement`. The
+  matching stats-off sample reported ownerless bulk at `33432.91 rows/s`,
+  ordinary bulk at `107188.95 rows/s`, and a `0.3119` ownerless/ordinary ratio.
+  This remains a bounded visible-fast redo-state hot-path reduction; it does
+  not close broader redo/checkpoint reconciliation, SQL execution residuals, or
+  DDL/file-lifecycle recovery.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.

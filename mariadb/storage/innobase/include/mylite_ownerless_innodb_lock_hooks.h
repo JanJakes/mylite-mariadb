@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define MYLITE_OWNERLESS_INNODB_REDO_BATCH_MAX_RANGES 32U
+
 #ifdef __cplusplus
 #include <atomic>
 
@@ -175,11 +177,22 @@ typedef int (*mylite_ownerless_innodb_redo_written_callback)(
 typedef void (*mylite_ownerless_innodb_redo_leave_callback)(
     uint64_t latest_lsn,
     void *context);
+typedef struct mylite_ownerless_innodb_redo_range {
+    uint64_t start_lsn;
+    uint64_t end_lsn;
+} mylite_ownerless_innodb_redo_range;
 typedef int (*mylite_ownerless_innodb_redo_written_leave_callback)(
     uint64_t start_lsn,
     uint64_t end_lsn,
     uint64_t latest_lsn,
     uint64_t *out_written_lsn,
+    void *context);
+typedef int (*mylite_ownerless_innodb_redo_written_leave_batch_callback)(
+    const mylite_ownerless_innodb_redo_range *ranges,
+    size_t range_count,
+    uint64_t latest_lsn,
+    uint64_t *out_written_lsn,
+    size_t *out_completed_count,
     void *context);
 typedef void (*mylite_ownerless_innodb_pages_visible_callback)(
     uint64_t visible_lsn,
@@ -277,6 +290,8 @@ void mylite_ownerless_innodb_lock_set_history_proof_publish_pair_hook(
     mylite_ownerless_innodb_history_proof_publish_pair_callback pair_hook);
 void mylite_ownerless_innodb_lock_set_redo_written_leave_hook(
     mylite_ownerless_innodb_redo_written_leave_callback written_leave_hook);
+void mylite_ownerless_innodb_lock_set_redo_written_leave_batch_hook(
+    mylite_ownerless_innodb_redo_written_leave_batch_callback written_leave_batch_hook);
 void mylite_ownerless_innodb_lock_reset_hooks(void);
 int mylite_ownerless_innodb_lock_has_hooks(void);
 void mylite_ownerless_innodb_set_checkpoint_suppression(int suppressed);

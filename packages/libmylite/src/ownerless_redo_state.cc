@@ -436,6 +436,103 @@ int mylite_ownerless_redo_state_complete_write_and_leave(
     return result;
 }
 
+int mylite_ownerless_redo_state_complete_write_and_leave_batch(
+    void *state,
+    std::size_t state_size,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
+    const mylite_ownerless_redo_state_range *ranges,
+    std::size_t range_count,
+    std::uint64_t latest_lsn,
+    std::uint64_t *out_written_lsn,
+    std::uint64_t *out_advanced_latest_lsn,
+    std::uint32_t *out_remaining,
+    std::size_t *out_completed_count
+) {
+    if (out_written_lsn != nullptr) {
+        *out_written_lsn = 0U;
+    }
+    if (out_advanced_latest_lsn != nullptr) {
+        *out_advanced_latest_lsn = 0U;
+    }
+    if (out_remaining != nullptr) {
+        *out_remaining = 0U;
+    }
+    if (out_completed_count != nullptr) {
+        *out_completed_count = 0U;
+    }
+    if (!state_valid(state, state_size) || owner_id == 0U || owner_generation == 0U ||
+        ranges == nullptr || range_count == 0U) {
+        return MYLITE_OWNERLESS_REDO_STATE_ERROR;
+    }
+    for (std::size_t index = 0; index < range_count; ++index) {
+        if (ranges[index].start_lsn == 0U || ranges[index].end_lsn <= ranges[index].start_lsn) {
+            return MYLITE_OWNERLESS_REDO_STATE_ERROR;
+        }
+    }
+
+    const int latch_result = acquire_progress_latch(state, owner_id, owner_generation);
+    if (latch_result != MYLITE_OWNERLESS_LATCH_OK) {
+        return latch_result_to_redo_state_result(latch_result);
+    }
+
+    int result = MYLITE_OWNERLESS_REDO_STATE_OK;
+    std::uint64_t written_lsn = 0U;
+    std::uint64_t advanced_latest_lsn = 0U;
+    std::uint32_t remaining = 0U;
+    std::size_t completed_count = 0U;
+    for (std::size_t index = 0; index < range_count; ++index) {
+        std::uint64_t range_written_lsn = 0U;
+        result = complete_write_locked(
+            state,
+            owner_id,
+            owner_generation,
+            ranges[index].start_lsn,
+            ranges[index].end_lsn,
+            &range_written_lsn
+        );
+        if (result != MYLITE_OWNERLESS_REDO_STATE_OK) {
+            break;
+        }
+
+        const std::uint64_t range_latest_lsn = index + 1U == range_count ? latest_lsn : 0U;
+        result = leave_active_owner_locked(
+            state,
+            owner_id,
+            owner_generation,
+            range_latest_lsn,
+            &advanced_latest_lsn,
+            &remaining
+        );
+        if (result != MYLITE_OWNERLESS_REDO_STATE_OK) {
+            break;
+        }
+
+        ++completed_count;
+        written_lsn = std::max(written_lsn, range_written_lsn);
+    }
+
+    if (out_written_lsn != nullptr) {
+        *out_written_lsn = written_lsn;
+    }
+    if (out_advanced_latest_lsn != nullptr) {
+        *out_advanced_latest_lsn = advanced_latest_lsn;
+    }
+    if (out_remaining != nullptr) {
+        *out_remaining = remaining;
+    }
+    if (out_completed_count != nullptr) {
+        *out_completed_count = completed_count;
+    }
+
+    const int release_result =
+        mylite_ownerless_latch_release(progress_latch(state), owner_id, owner_generation);
+    if (release_result != MYLITE_OWNERLESS_LATCH_OK) {
+        return latch_result_to_redo_state_result(release_result);
+    }
+    return result;
+}
+
 int mylite_ownerless_redo_state_publish_visible(
     void *state,
     std::size_t state_size,

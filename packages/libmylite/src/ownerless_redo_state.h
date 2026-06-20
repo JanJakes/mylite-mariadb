@@ -34,6 +34,11 @@ typedef struct mylite_ownerless_redo_state_snapshot {
     uint64_t progress_latch_owner_generation;
 } mylite_ownerless_redo_state_snapshot;
 
+typedef struct mylite_ownerless_redo_state_range {
+    uint64_t start_lsn;
+    uint64_t end_lsn;
+} mylite_ownerless_redo_state_range;
+
 int mylite_ownerless_redo_state_initialize(
     void *state,
     size_t state_size,
@@ -93,6 +98,19 @@ int mylite_ownerless_redo_state_complete_write_and_leave(
     uint64_t *out_written_lsn,
     uint64_t *out_advanced_latest_lsn,
     uint32_t *out_remaining
+);
+int mylite_ownerless_redo_state_complete_write_and_leave_batch(
+    void *state,
+    size_t state_size,
+    uint32_t owner_id,
+    uint64_t owner_generation,
+    const mylite_ownerless_redo_state_range *ranges,
+    size_t range_count,
+    uint64_t latest_lsn,
+    uint64_t *out_written_lsn,
+    uint64_t *out_advanced_latest_lsn,
+    uint32_t *out_remaining,
+    size_t *out_completed_count
 );
 int mylite_ownerless_redo_state_publish_visible(
     void *state,

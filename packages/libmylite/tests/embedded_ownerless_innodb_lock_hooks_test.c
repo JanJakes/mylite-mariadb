@@ -14,6 +14,7 @@ typedef struct page_visibility_state {
     uint64_t last_written_end_lsn;
     uint64_t last_leave_lsn;
     uint64_t last_written_leave_latest_lsn;
+    uint64_t last_batch_latest_lsn;
     uint64_t observed_lsn;
     uint64_t last_table_wait_trx_id;
     uint64_t last_table_wait_table_id;
@@ -23,6 +24,9 @@ typedef struct page_visibility_state {
     unsigned reserve_count;
     unsigned written_count;
     unsigned written_leave_count;
+    unsigned written_leave_batch_count;
+    unsigned last_batch_range_count;
+    unsigned last_batch_completed_count;
     unsigned leave_count;
     unsigned observe_count;
     unsigned table_wait_count;
@@ -35,6 +39,7 @@ static void test_file_op_redo_relative_path_normalizes_datadir_prefix(void);
 static void test_external_table_wait_dispatch_uses_table_hook(void);
 static void test_redo_written_leave_uses_fused_top_level_hook(void);
 static void test_redo_written_leave_falls_back_to_separate_hooks(void);
+static void test_redo_deferred_flush_uses_batch_hook(void);
 static void install_page_hooks(page_visibility_state *state);
 static void *exercise_visibility_in_thread(void *context);
 static int acquire_table_hook(
@@ -148,6 +153,14 @@ static int redo_written_leave_hook(
     uint64_t *out_written_lsn,
     void *context
 );
+static int redo_written_leave_batch_hook(
+    const mylite_ownerless_innodb_redo_range *ranges,
+    size_t range_count,
+    uint64_t latest_lsn,
+    uint64_t *out_written_lsn,
+    size_t *out_completed_count,
+    void *context
+);
 static void redo_leave_hook(uint64_t latest_lsn, void *context);
 static void pages_visible_hook(uint64_t visible_lsn, void *context);
 static int page_publish_hook(
@@ -180,6 +193,7 @@ int main(void) {
     test_external_table_wait_dispatch_uses_table_hook();
     test_redo_written_leave_uses_fused_top_level_hook();
     test_redo_written_leave_falls_back_to_separate_hooks();
+    test_redo_deferred_flush_uses_batch_hook();
     test_page_visibility_is_thread_local();
     return 0;
 }
@@ -381,6 +395,62 @@ static void test_redo_written_leave_falls_back_to_separate_hooks(void) {
     assert(state.last_written_start_lsn == 300U);
     assert(state.last_written_end_lsn == 312U);
     assert(state.last_leave_lsn == 350U);
+
+    mylite_ownerless_innodb_lock_reset_hooks();
+    assert(!mylite_ownerless_innodb_lock_has_hooks());
+}
+
+static void test_redo_deferred_flush_uses_batch_hook(void) {
+    page_visibility_state state = {0};
+    uint64_t latest_lsn = 0U;
+    uint64_t written_lsn = 0U;
+
+    install_page_hooks(&state);
+    mylite_ownerless_innodb_lock_set_redo_written_leave_hook(redo_written_leave_hook);
+    mylite_ownerless_innodb_lock_set_redo_written_leave_batch_hook(redo_written_leave_batch_hook);
+    assert(mylite_ownerless_innodb_set_statement_deferred_page_publish(1) == 0);
+    assert(mylite_ownerless_innodb_redo_enter(&latest_lsn) == MYLITE_OWNERLESS_INNODB_LOCK_OK);
+    assert(
+        mylite_ownerless_innodb_redo_defer_written_and_leave(400U, 412U, 450U, &written_lsn) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_OK
+    );
+    assert(mylite_ownerless_innodb_redo_enter(&latest_lsn) == MYLITE_OWNERLESS_INNODB_LOCK_OK);
+    assert(
+        mylite_ownerless_innodb_redo_defer_written_and_leave(412U, 424U, 460U, &written_lsn) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_OK
+    );
+    assert(state.written_leave_count == 0U);
+    assert(state.written_leave_batch_count == 0U);
+    assert(mylite_ownerless_innodb_redo_flush_deferred() == MYLITE_OWNERLESS_INNODB_LOCK_OK);
+    assert(state.written_leave_batch_count == 1U);
+    assert(state.last_batch_range_count == 2U);
+    assert(state.last_batch_completed_count == 2U);
+    assert(state.written_leave_count == 0U);
+    assert(state.written_lsn == 424U);
+    assert(state.last_batch_latest_lsn == 460U);
+    assert(mylite_ownerless_innodb_set_statement_deferred_page_publish(0) == 1);
+
+    memset(&state, 0, sizeof(state));
+    install_page_hooks(&state);
+    mylite_ownerless_innodb_lock_set_redo_written_leave_hook(redo_written_leave_hook);
+    mylite_ownerless_innodb_lock_set_redo_written_leave_batch_hook(NULL);
+    assert(mylite_ownerless_innodb_set_statement_deferred_page_publish(1) == 0);
+    assert(mylite_ownerless_innodb_redo_enter(&latest_lsn) == MYLITE_OWNERLESS_INNODB_LOCK_OK);
+    assert(
+        mylite_ownerless_innodb_redo_defer_written_and_leave(500U, 512U, 550U, &written_lsn) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_OK
+    );
+    assert(mylite_ownerless_innodb_redo_enter(&latest_lsn) == MYLITE_OWNERLESS_INNODB_LOCK_OK);
+    assert(
+        mylite_ownerless_innodb_redo_defer_written_and_leave(512U, 524U, 560U, &written_lsn) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_OK
+    );
+    assert(mylite_ownerless_innodb_redo_flush_deferred() == MYLITE_OWNERLESS_INNODB_LOCK_OK);
+    assert(state.written_leave_batch_count == 0U);
+    assert(state.written_leave_count == 2U);
+    assert(state.written_lsn == 524U);
+    assert(state.last_written_leave_latest_lsn == 560U);
+    assert(mylite_ownerless_innodb_set_statement_deferred_page_publish(0) == 1);
 
     mylite_ownerless_innodb_lock_reset_hooks();
     assert(!mylite_ownerless_innodb_lock_has_hooks());
@@ -788,6 +858,40 @@ static int redo_written_leave_hook(
     ++state->written_leave_count;
     if (out_written_lsn != NULL) {
         *out_written_lsn = state->written_lsn;
+    }
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
+static int redo_written_leave_batch_hook(
+    const mylite_ownerless_innodb_redo_range *ranges,
+    size_t range_count,
+    uint64_t latest_lsn,
+    uint64_t *out_written_lsn,
+    size_t *out_completed_count,
+    void *context
+) {
+    page_visibility_state *state = (page_visibility_state *)context;
+
+    assert(state != NULL);
+    assert(ranges != NULL);
+    assert(range_count != 0U);
+
+    ++state->written_leave_batch_count;
+    state->last_batch_range_count = (unsigned)range_count;
+    state->last_batch_latest_lsn = latest_lsn;
+    for (size_t index = 0; index < range_count; ++index) {
+        assert(ranges[index].start_lsn != 0U);
+        assert(ranges[index].end_lsn > ranges[index].start_lsn);
+        state->last_written_start_lsn = ranges[index].start_lsn;
+        state->last_written_end_lsn = ranges[index].end_lsn;
+        state->written_lsn = ranges[index].end_lsn;
+    }
+    state->last_batch_completed_count = (unsigned)range_count;
+    if (out_written_lsn != NULL) {
+        *out_written_lsn = state->written_lsn;
+    }
+    if (out_completed_count != NULL) {
+        *out_completed_count = range_count;
     }
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
 }

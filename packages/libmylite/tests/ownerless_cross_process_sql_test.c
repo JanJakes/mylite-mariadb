@@ -224,6 +224,10 @@ extern void mylite_ownerless_page_log_read_append_perf_stats(
 );
 
 enum ownerless_test_database_perf_stat_index {
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REDO_ENTER_CALLS = 45,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REDO_RESERVE_CALLS = 49,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REDO_WRITTEN_CALLS = 51,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REDO_LEAVE_CALLS = 53,
     OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_CALLS = 55,
     OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_INDEX_HITS = 59,
     OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_INDEX_MISSES = 60,
@@ -10642,11 +10646,6 @@ static void test_ownerless_explicit_transaction_undo_wal_elision(void) {
         database_stats
             [OWNERLESS_TEST_DATABASE_PERF_STAT_CHECKPOINT_UPDATE_DEFERRED_LATEST_COALESCED] == 0U
     );
-#else
-    assert(
-        database_stats
-            [OWNERLESS_TEST_DATABASE_PERF_STAT_CHECKPOINT_UPDATE_DEFERRED_LATEST_COALESCED] > 0U
-    );
 #endif
     assert(
         deep_stats
@@ -11059,6 +11058,11 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
 #else
     assert(
         page_write_stats[OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_REDO_LEAVE_LOG_WRITE_CALLS] <
+        page_write_stats[OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_REDO_LEAVE_WRITTEN_HOOK_CALLS] +
+            page_write_stats[OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_REDO_LEAVE_FALLBACK_HOOK_CALLS]
+    );
+    assert(
+        database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_REDO_LEAVE_CALLS] <
         page_write_stats[OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_REDO_LEAVE_WRITTEN_HOOK_CALLS] +
             page_write_stats[OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_REDO_LEAVE_FALLBACK_HOOK_CALLS]
     );

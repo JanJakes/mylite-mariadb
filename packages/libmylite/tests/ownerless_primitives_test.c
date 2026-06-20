@@ -412,6 +412,7 @@ static void test_redo_state_reserves_ranges_for_same_owner_threads(void);
 static void test_redo_state_allows_bounded_fanout_reservations(void);
 static void test_redo_state_tracks_contiguous_written_ranges(void);
 static void test_redo_state_combines_write_and_leave_like_separate_steps(void);
+static void test_redo_state_batches_write_and_leave_ranges(void);
 static void *reserve_redo_ranges_in_thread(void *context);
 static int compare_uint64_values(const void *left, const void *right);
 static void test_process_registry_allocates_cross_process_slots(void);
@@ -601,6 +602,7 @@ int main(void) {
     test_redo_state_allows_bounded_fanout_reservations();
     test_redo_state_tracks_contiguous_written_ranges();
     test_redo_state_combines_write_and_leave_like_separate_steps();
+    test_redo_state_batches_write_and_leave_ranges();
     test_process_registry_allocates_cross_process_slots();
     test_process_registry_rejects_stale_release();
     test_process_registry_updates_heartbeat();
@@ -14821,6 +14823,185 @@ static void test_redo_state_combines_write_and_leave_like_separate_steps(void) {
     assert(combined_snapshot.refcount == 0U);
     assert(combined_snapshot.active_reservation_count == 0U);
     assert(combined_snapshot.completed_range_count == 0U);
+}
+
+static void test_redo_state_batches_write_and_leave_ranges(void) {
+    uint8_t state[MYLITE_OWNERLESS_REDO_STATE_SIZE];
+    uint64_t latest_lsn = 0U;
+    uint64_t start_lsn = 0U;
+    uint64_t end_lsn = 0U;
+    uint64_t written_lsn = 0U;
+    uint64_t advanced_lsn = 0U;
+    uint32_t remaining = 0U;
+    size_t completed_count = 99U;
+    mylite_ownerless_redo_state_range ranges[2];
+    mylite_ownerless_redo_state_snapshot snapshot;
+
+    assert(
+        mylite_ownerless_redo_state_initialize(state, sizeof(state), 100U, 100U) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(
+        mylite_ownerless_redo_state_enter(state, sizeof(state), 1U, 10U, 100U, &latest_lsn) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(
+        mylite_ownerless_redo_state_enter(state, sizeof(state), 1U, 10U, 100U, &latest_lsn) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(
+        mylite_ownerless_redo_state_reserve(
+            state,
+            sizeof(state),
+            1U,
+            10U,
+            0U,
+            10U,
+            &ranges[0].start_lsn,
+            &ranges[0].end_lsn
+        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(
+        mylite_ownerless_redo_state_reserve(
+            state,
+            sizeof(state),
+            1U,
+            10U,
+            0U,
+            10U,
+            &ranges[1].start_lsn,
+            &ranges[1].end_lsn
+        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(
+        mylite_ownerless_redo_state_complete_write_and_leave_batch(
+            state,
+            sizeof(state),
+            1U,
+            10U,
+            ranges,
+            2U,
+            150U,
+            &written_lsn,
+            &advanced_lsn,
+            &remaining,
+            &completed_count
+        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(completed_count == 2U);
+    assert(written_lsn == 120U);
+    assert(advanced_lsn == 150U);
+    assert(remaining == 0U);
+    assert(
+        mylite_ownerless_redo_state_read_snapshot(state, sizeof(state), &snapshot) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(snapshot.latest_lsn == 150U);
+    assert(snapshot.reserved_lsn == 150U);
+    assert(snapshot.written_lsn == 150U);
+    assert(snapshot.refcount == 0U);
+    assert(snapshot.active_reservation_count == 0U);
+    assert(snapshot.completed_range_count == 0U);
+
+    assert(
+        mylite_ownerless_redo_state_initialize(state, sizeof(state), 200U, 200U) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(
+        mylite_ownerless_redo_state_enter(state, sizeof(state), 2U, 20U, 100U, &latest_lsn) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(
+        mylite_ownerless_redo_state_enter(state, sizeof(state), 2U, 20U, 100U, &latest_lsn) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(
+        mylite_ownerless_redo_state_reserve(
+            state,
+            sizeof(state),
+            2U,
+            20U,
+            0U,
+            8U,
+            &start_lsn,
+            &end_lsn
+        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(start_lsn == 200U);
+    assert(end_lsn == 208U);
+    ranges[1].start_lsn = start_lsn;
+    ranges[1].end_lsn = end_lsn;
+    assert(
+        mylite_ownerless_redo_state_reserve(
+            state,
+            sizeof(state),
+            2U,
+            20U,
+            0U,
+            8U,
+            &start_lsn,
+            &end_lsn
+        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(start_lsn == 208U);
+    assert(end_lsn == 216U);
+    ranges[0].start_lsn = start_lsn;
+    ranges[0].end_lsn = end_lsn;
+    completed_count = 0U;
+    written_lsn = 0U;
+    advanced_lsn = 0U;
+    remaining = 0U;
+    assert(
+        mylite_ownerless_redo_state_complete_write_and_leave_batch(
+            state,
+            sizeof(state),
+            2U,
+            20U,
+            ranges,
+            2U,
+            240U,
+            &written_lsn,
+            &advanced_lsn,
+            &remaining,
+            &completed_count
+        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(completed_count == 2U);
+    assert(written_lsn == 216U);
+    assert(advanced_lsn == 240U);
+    assert(remaining == 0U);
+    assert(
+        mylite_ownerless_redo_state_read_snapshot(state, sizeof(state), &snapshot) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(snapshot.latest_lsn == 240U);
+    assert(snapshot.written_lsn == 240U);
+    assert(snapshot.active_reservation_count == 0U);
+    assert(snapshot.completed_range_count == 0U);
+
+    completed_count = 99U;
+    written_lsn = 99U;
+    advanced_lsn = 99U;
+    remaining = 99U;
+    assert(
+        mylite_ownerless_redo_state_complete_write_and_leave_batch(
+            state,
+            sizeof(state),
+            2U,
+            20U,
+            ranges,
+            0U,
+            240U,
+            &written_lsn,
+            &advanced_lsn,
+            &remaining,
+            &completed_count
+        ) == MYLITE_OWNERLESS_REDO_STATE_ERROR
+    );
+    assert(completed_count == 0U);
+    assert(written_lsn == 0U);
+    assert(advanced_lsn == 0U);
+    assert(remaining == 0U);
 }
 
 static void *reserve_redo_ranges_in_thread(void *context) {
