@@ -611,6 +611,18 @@ trx_t::mylite_ownerless_page_images_for_write() noexcept
   return *mylite_ownerless_page_images;
 }
 
+trx_t::mylite_ownerless_page_vector &
+trx_t::mylite_ownerless_native_support_page_write_pages_for_write() noexcept
+{
+  if (mylite_ownerless_native_support_page_write_pages == nullptr)
+  {
+    mylite_ownerless_native_support_page_write_pages=
+      UT_NEW_NOKEY(mylite_ownerless_page_vector());
+    ut_a(mylite_ownerless_native_support_page_write_pages != nullptr);
+  }
+  return *mylite_ownerless_native_support_page_write_pages;
+}
+
 bool trx_t::mylite_ownerless_modified_page_contains(
     uint64_t packed_page) const noexcept
 {
@@ -629,6 +641,15 @@ bool trx_t::mylite_ownerless_dirty_page_contains(
       packed_page);
 }
 
+bool trx_t::mylite_ownerless_native_support_page_write_contains(
+    uint64_t packed_page) const noexcept
+{
+  return mylite_ownerless_page_vector_contains(
+      mylite_ownerless_native_support_page_write_pages,
+      mylite_ownerless_native_support_page_write_page_set,
+      packed_page);
+}
+
 void trx_t::mylite_ownerless_note_modified_page(
     uint64_t packed_page) noexcept
 {
@@ -643,6 +664,15 @@ void trx_t::mylite_ownerless_note_dirty_page(uint64_t packed_page) noexcept
   mylite_ownerless_note_page(
       mylite_ownerless_dirty_pages_for_write(),
       mylite_ownerless_dirty_page_set,
+      packed_page);
+}
+
+void trx_t::mylite_ownerless_note_native_support_page_write(
+    uint64_t packed_page) noexcept
+{
+  mylite_ownerless_note_page(
+      mylite_ownerless_native_support_page_write_pages_for_write(),
+      mylite_ownerless_native_support_page_write_page_set,
       packed_page);
 }
 
@@ -755,6 +785,14 @@ struct TrxFactory {
 			if (trx->mylite_ownerless_page_images != nullptr) {
 				UT_DELETE(trx->mylite_ownerless_page_images);
 				trx->mylite_ownerless_page_images = nullptr;
+			}
+			if (trx->mylite_ownerless_native_support_page_write_pages != nullptr) {
+				UT_DELETE(trx->mylite_ownerless_native_support_page_write_pages);
+				trx->mylite_ownerless_native_support_page_write_pages = nullptr;
+			}
+			if (trx->mylite_ownerless_native_support_page_write_page_set != nullptr) {
+				UT_DELETE(trx->mylite_ownerless_native_support_page_write_page_set);
+				trx->mylite_ownerless_native_support_page_write_page_set = nullptr;
 			}
 
 		trx->mod_tables.~trx_mod_tables_t();
@@ -984,6 +1022,10 @@ void trx_t::free() noexcept
 	               sizeof mylite_ownerless_dirty_page_set);
 	  MEM_NOACCESS(&mylite_ownerless_page_images,
 	               sizeof mylite_ownerless_page_images);
+	  MEM_NOACCESS(&mylite_ownerless_native_support_page_write_pages,
+	               sizeof mylite_ownerless_native_support_page_write_pages);
+	  MEM_NOACCESS(&mylite_ownerless_native_support_page_write_page_set,
+	               sizeof mylite_ownerless_native_support_page_write_page_set);
   MEM_NOACCESS(&mylite_ownerless_page_write_publish_failed,
                sizeof mylite_ownerless_page_write_publish_failed);
   MEM_NOACCESS(&mylite_ownerless_page_write_published_page,

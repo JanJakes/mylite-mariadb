@@ -667,6 +667,10 @@ public:
   mylite_ownerless_page_set *mylite_ownerless_dirty_page_set;
   /** Latest transaction-deferred page images captured while mtr pages are latched. */
   mylite_ownerless_page_image_vector *mylite_ownerless_page_images;
+  /** Native-support page-write locks held until transaction cleanup. */
+  mylite_ownerless_page_vector *mylite_ownerless_native_support_page_write_pages;
+  /** Exact membership cache for native-support page-write locks. */
+  mylite_ownerless_page_set *mylite_ownerless_native_support_page_write_page_set;
   /** Whether an ownerless MTR page-write image was not published. */
   bool mylite_ownerless_page_write_publish_failed;
   /** Whether an ownerless MTR page-write image was published. */
@@ -712,16 +716,31 @@ public:
   /** @return ownerless page images, allocating storage on first use. */
   mylite_ownerless_page_image_vector &mylite_ownerless_page_images_for_write()
       noexcept;
+  /** @return native-support held page-write pages if they have been allocated. */
+  const mylite_ownerless_page_vector *
+  mylite_ownerless_native_support_page_write_pages_for_read() const noexcept
+  {
+    return mylite_ownerless_native_support_page_write_pages;
+  }
+  /** @return native-support held page-write pages, allocating storage on first use. */
+  mylite_ownerless_page_vector &
+  mylite_ownerless_native_support_page_write_pages_for_write() noexcept;
   /** @return whether the packed page is tracked as modified. */
   bool mylite_ownerless_modified_page_contains(uint64_t packed_page) const
       noexcept;
   /** @return whether the packed page is tracked as dirty. */
   bool mylite_ownerless_dirty_page_contains(uint64_t packed_page) const
       noexcept;
+  /** @return whether the packed page is held as a native-support page. */
+  bool mylite_ownerless_native_support_page_write_contains(
+      uint64_t packed_page) const noexcept;
   /** Track a modified page after the caller has checked uniqueness. */
   void mylite_ownerless_note_modified_page(uint64_t packed_page) noexcept;
   /** Track a dirty page after the caller has checked uniqueness. */
   void mylite_ownerless_note_dirty_page(uint64_t packed_page) noexcept;
+  /** Track a native-support page-write lock held to transaction cleanup. */
+  void mylite_ownerless_note_native_support_page_write(
+      uint64_t packed_page) noexcept;
   /** Rebuild the modified-page membership cache after vector erasure. */
   void mylite_ownerless_rebuild_modified_page_set() noexcept;
   /** @return whether this transaction has no tracked ownerless modified pages. */
@@ -736,6 +755,20 @@ public:
     return mylite_ownerless_dirty_pages == nullptr ||
            mylite_ownerless_dirty_pages->empty();
   }
+  /** @return whether this transaction has no held native-support page writes. */
+  bool mylite_ownerless_native_support_page_write_pages_empty() const noexcept
+  {
+    return mylite_ownerless_native_support_page_write_pages == nullptr ||
+           mylite_ownerless_native_support_page_write_pages->empty();
+  }
+  /** Clear tracked native-support page-write locks if allocated. */
+  void mylite_ownerless_native_support_page_write_pages_clear() noexcept
+  {
+    if (mylite_ownerless_native_support_page_write_pages != nullptr)
+      mylite_ownerless_native_support_page_write_pages->clear();
+    if (mylite_ownerless_native_support_page_write_page_set != nullptr)
+      mylite_ownerless_native_support_page_write_page_set->clear();
+  }
   /** Clear tracked ownerless modified pages if the vector was allocated. */
   void mylite_ownerless_modified_pages_clear() noexcept
   {
@@ -749,6 +782,7 @@ public:
       mylite_ownerless_dirty_page_set->clear();
     if (mylite_ownerless_page_images != nullptr)
       mylite_ownerless_page_images->clear();
+    mylite_ownerless_native_support_page_write_pages_clear();
   }
   /** Whether ownerless page-write acquisition waited before a preread imported
   a page image. */

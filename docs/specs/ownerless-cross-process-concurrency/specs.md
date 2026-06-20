@@ -6394,6 +6394,16 @@ subsystems that this mode needs:
   existing meaning. Page-write locking/release, native undo records, redo
   completion, transaction-deferred user page publication, and active
   rollback-segment/undo history-proof pages are unchanged.
+  The native-support lock-hold follow-up then reduces repeated page-write
+  acquire/release churn without relying on the single-owner observation as a
+  correctness proof. Autocommit visible-fast statements may keep an actually
+  acquired shared page-write lock to transaction cleanup for native-support
+  pages that the existing native-support elision predicate accepts. The held
+  page list is separate from the transaction modified/dirty/page-image lists, so
+  it does not participate in commit-time page-version publication or deferred
+  page-write visibility proof. Transaction page-write release clears that
+  membership when it releases the shared locks, including deadlock retry and
+  rollback/forget paths.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.

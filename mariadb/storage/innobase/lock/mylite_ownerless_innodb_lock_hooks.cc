@@ -1441,6 +1441,7 @@ extern "C" void mylite_ownerless_innodb_lock_release_transaction_page_writes(
 {
   if (trx == nullptr)
     return;
+  trx->mylite_ownerless_native_support_page_write_pages_clear();
   if (!ownerless_lock_hooks_enabled())
     return;
 

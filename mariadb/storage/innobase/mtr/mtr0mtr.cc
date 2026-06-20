@@ -303,6 +303,8 @@ enum ownerless_page_write_perf_stat_index {
   OWNERLESS_PAGE_WRITE_PERF_REDO_LEAVE_HOOK_NS,
   OWNERLESS_PAGE_WRITE_PERF_REDO_LEAVE_WRITTEN_HOOK_CALLS,
   OWNERLESS_PAGE_WRITE_PERF_REDO_LEAVE_FALLBACK_HOOK_CALLS,
+  OWNERLESS_PAGE_WRITE_PERF_NATIVE_SUPPORT_TRANSACTION_HELD,
+  OWNERLESS_PAGE_WRITE_PERF_NATIVE_SUPPORT_TRANSACTION_HIT,
   OWNERLESS_PAGE_WRITE_PERF_STAT_COUNT
 };
 
@@ -1292,7 +1294,8 @@ static bool ownerless_page_write_history_proof_pair_handled(
 
 static bool ownerless_page_write_requires_lock(const buf_page_t &page)
 {
-  if (!page.in_file() || page.id().space() >= SRV_TMP_SPACE_ID)
+  const page_id_t id{page.id()};
+  if (!page.in_file() || id.space() >= SRV_TMP_SPACE_ID)
     return false;
 
   return page.frame != nullptr || page.zip.data != nullptr;
@@ -1939,6 +1942,53 @@ static bool ownerless_page_write_transaction_owns_page(
   return trx->mylite_ownerless_modified_page_contains(packed_page);
 }
 
+static bool ownerless_page_write_transaction_holds_native_support_page(
+    const trx_t *trx, uint64_t packed_page)
+{
+  if (trx == nullptr)
+    return false;
+
+  return trx->mylite_ownerless_native_support_page_write_contains(
+      packed_page);
+}
+
+static bool ownerless_page_write_can_hold_native_support_page(
+    const trx_t *trx, const buf_page_t &page) noexcept
+{
+  if (trx == nullptr || !ownerless_page_write_sql_autocommit(trx) ||
+      !ownerless_page_write_sql_allows_visible_fast_path(trx))
+    return false;
+
+  const page_id_t id{page.id()};
+  if (!page.in_file() || id.space() >= SRV_TMP_SPACE_ID)
+    return false;
+
+  const byte *source= page.zip.data ? page.zip.data : page.frame;
+  if (source == nullptr)
+    return false;
+
+  if (!ownerless_page_write_can_elide_native_support_page(
+          trx, id.space(), id.page_no(), fil_page_get_type(source), false))
+    return false;
+
+  return mylite_ownerless_innodb_can_skip_external_page_refresh() ==
+         MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
+static void ownerless_page_write_note_native_support_transaction_page(
+    trx_t *trx, uint64_t packed_page) noexcept
+{
+  if (trx == nullptr)
+    return;
+
+  if (!trx->mylite_ownerless_native_support_page_write_contains(packed_page))
+  {
+    trx->mylite_ownerless_note_native_support_page_write(packed_page);
+    ownerless_page_write_perf_add(
+        OWNERLESS_PAGE_WRITE_PERF_NATIVE_SUPPORT_TRANSACTION_HELD, 1);
+  }
+}
+
 static void ownerless_page_write_release_lock(
     trx_t *trx, uint32_t space_id, uint32_t page_no)
 {
@@ -2561,6 +2611,17 @@ ATTRIBUTE_NOINLINE bool mtr_t::ownerless_page_write_enter(
   if (holds_for_transaction &&
       ownerless_page_write_transaction_owns_page(ownerless_trx, packed_page))
     return holds_for_transaction;
+  if (ownerless_page_write_transaction_holds_native_support_page(
+          ownerless_trx, packed_page))
+  {
+    ownerless_page_write_perf_add(
+        OWNERLESS_PAGE_WRITE_PERF_NATIVE_SUPPORT_TRANSACTION_HIT, 1);
+    return false;
+  }
+  const bool holds_native_support_for_transaction=
+      uses_transaction_release && !holds_for_transaction &&
+      ownerless_page_write_can_hold_native_support_page(
+          ownerless_trx, block.page);
 
   bool page_write_waited= false;
   if (ownerless_trx != nullptr &&
@@ -2683,6 +2744,9 @@ ATTRIBUTE_NOINLINE bool mtr_t::ownerless_page_write_enter(
       ownerless_page_write_perf_add(
           OWNERLESS_PAGE_WRITE_PERF_TRANSACTION_DEFERRED_MTR_ELIDED, 1);
     }
+    else if (holds_native_support_for_transaction && !page_write_waited)
+      ownerless_page_write_note_native_support_transaction_page(
+          ownerless_trx, packed_page);
     else
       ownerless_page_write_note_mtr_page(block.page);
   }

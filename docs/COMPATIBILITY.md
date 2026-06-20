@@ -946,6 +946,19 @@ and reuses the existing history-proof/native-support elision predicate. It does
 not skip native undo records, page-write locking or release, redo completion,
 transaction-deferred user page publication, or active rollback-segment/undo
 history-proof pages.
+The native-support lock-hold follow-up keeps those safety boundaries and
+reduces repeated page-write lock churn only by holding actual shared
+page-write locks until autocommit transaction cleanup for native-support pages
+that the same elision predicate already accepts. It records those held pages in
+a separate transaction-local vector rather than the modified/dirty vectors, so
+commit-time page-version publication and visible-fast proof logic are
+unchanged. Focused SQL coverage proves native-support WAL elision still occurs
+and that visible-fast multi-row inserts reuse a held native-support page-write
+lock inside one statement. A reduced stats-enabled 2048-row production probe
+reported `47` held native-support page-write locks and `36947` already-held
+hits in the ownerless bulk phase; the companion stats-off sample reported
+ownerless 2048-row bulk rows at `63087.14 ops/s` versus ordinary at
+`125321.71 ops/s`, ratio `0.5034`.
 Profiled mysqli runs also split total query elapsed time into
 `query_verb_*` buckets for result queries, DML, DDL, connection state,
 transaction, lock, call, and other first-keyword classes so WordPress timing

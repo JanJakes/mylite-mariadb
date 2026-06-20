@@ -386,6 +386,8 @@ enum page_write_perf_stat_index {
     PAGE_WRITE_PERF_STAT_REDO_LEAVE_HOOK_NS,
     PAGE_WRITE_PERF_STAT_REDO_LEAVE_WRITTEN_HOOK_CALLS,
     PAGE_WRITE_PERF_STAT_REDO_LEAVE_FALLBACK_HOOK_CALLS,
+    PAGE_WRITE_PERF_STAT_NATIVE_SUPPORT_TRANSACTION_HELD,
+    PAGE_WRITE_PERF_STAT_NATIVE_SUPPORT_TRANSACTION_HIT,
     PAGE_WRITE_PERF_STAT_COUNT
 };
 
@@ -12252,6 +12254,16 @@ static void emit_page_write_perf_stats(const char *prefix) {
         "%s_page_write_redo_leave_fallback_hook_calls=%" PRIu64 "\n",
         prefix,
         values[PAGE_WRITE_PERF_STAT_REDO_LEAVE_FALLBACK_HOOK_CALLS]
+    );
+    printf(
+        "%s_page_write_native_support_transaction_held=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_WRITE_PERF_STAT_NATIVE_SUPPORT_TRANSACTION_HELD]
+    );
+    printf(
+        "%s_page_write_native_support_transaction_hit=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_WRITE_PERF_STAT_NATIVE_SUPPORT_TRANSACTION_HIT]
     );
     printf(
         "%s_page_write_commit_log_publish_ms=%.3f\n",
