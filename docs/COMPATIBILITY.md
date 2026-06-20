@@ -929,6 +929,15 @@ default-checked bulk-start buckets in both per-row and per-statement form. This
 is diagnostic-only: it does not change SQL behavior, page-version publication,
 redo/checkpoint ordering, WAL format, or recovery, and it does not claim a
 throughput win.
+The later undo attribution follow-up extends those first/remaining bulk rows
+to the existing B-tree lock/undo and undo-report subcounters. A reduced
+2048-row production probe reported later ownerless statements at `20.857 ms`
+per statement in the B-tree lock/undo undo-report subphase, `20.606 ms` in
+undo-report total, `13.523 ms` in undo-report MTR commit, and `4.671 ms` in
+persistent undo assignment while preserving `2048.000` undo-report successes
+and `0.000` default-checked bulk starts per statement. A one-statement guard
+reported zero remaining-statement averages, so the phase split does not reuse
+aggregate counters when no later statement exists.
 Profiled mysqli runs also split total query elapsed time into
 `query_verb_*` buckets for result queries, DML, DDL, connection state,
 transaction, lock, call, and other first-keyword classes so WordPress timing

@@ -6375,6 +6375,16 @@ subsystems that this mode needs:
   ownerless bulk `mysql_query()` time and ordinary baseline engine work without
   changing SQL behavior, page-version publication, redo/checkpoint ordering, WAL
   format, or recovery.
+  The follow-up bulk undo phase attribution slice keeps the same diagnostic
+  boundary but expands the compact first/remaining rows to existing B-tree
+  lock/undo and undo-report subcounters. A reduced 2048-row production probe
+  reported later ownerless statements at `20.857 ms` per statement in the
+  B-tree lock/undo undo-report subphase, `20.606 ms` in undo-report total,
+  `13.523 ms` in undo-report MTR commit, and `4.671 ms` in persistent undo
+  assignment, with `2048.000` undo-report successes and `0.000`
+  default-checked bulk starts per statement. A one-statement guard reported
+  zero remaining-statement averages, so the remaining phase is not inferred
+  from aggregate counters when no non-empty-table statement exists.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.

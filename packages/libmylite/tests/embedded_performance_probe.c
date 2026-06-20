@@ -4348,6 +4348,69 @@ static void emit_bulk_deep_comparison_summary_for_phase(
     emit_bulk_deep_ms_phase_pair(
         ordinary_deep,
         ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_LOCK_UNDO_SETUP_NS,
+        phase,
+        "row_ins_btr_lock_undo_setup",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_LOCK_UNDO_LOCK_CHECK_NS,
+        phase,
+        "row_ins_btr_lock_undo_lock_check",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_LOCK_UNDO_PREDICATE_LOCK_NS,
+        phase,
+        "row_ins_btr_lock_undo_predicate_lock",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_LOCK_UNDO_REC_LOCK_NS,
+        phase,
+        "row_ins_btr_lock_undo_rec_lock",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_LOCK_UNDO_UNDO_REPORT_NS,
+        phase,
+        "row_ins_btr_lock_undo_undo_report",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_LOCK_UNDO_TRX_ID_WRITE_NS,
+        phase,
+        "row_ins_btr_lock_undo_trx_id_write",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_LOCK_UNDO_ROLL_PTR_WRITE_NS,
+        phase,
+        "row_ins_btr_lock_undo_roll_ptr_write",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
         INNODB_DEEP_PERF_STAT_TRX_UNDO_REPORT_TOTAL_NS,
         phase,
         "trx_undo_report",
@@ -4357,9 +4420,72 @@ static void emit_bulk_deep_comparison_summary_for_phase(
     emit_bulk_deep_ms_phase_pair(
         ordinary_deep,
         ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_UNDO_REPORT_PRELUDE_NS,
+        phase,
+        "trx_undo_report_prelude",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_UNDO_REPORT_ASSIGN_PERSISTENT_NS,
+        phase,
+        "trx_undo_report_assign_persistent",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_UNDO_REPORT_ASSIGN_TEMP_NS,
+        phase,
+        "trx_undo_report_assign_temp",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_UNDO_REPORT_INSERT_RECORD_NS,
+        phase,
+        "trx_undo_report_insert_record",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_UNDO_REPORT_MODIFY_RECORD_NS,
+        phase,
+        "trx_undo_report_modify_record",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
         INNODB_DEEP_PERF_STAT_TRX_UNDO_REPORT_MTR_COMMIT_NS,
         phase,
         "trx_undo_report_mtr_commit",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_UNDO_REPORT_SUCCESS_BOOKKEEPING_NS,
+        phase,
+        "trx_undo_report_success_bookkeeping",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_UNDO_REPORT_ADD_PAGE_NS,
+        phase,
+        "trx_undo_report_add_page",
         insert_rows,
         insert_statements
     );
@@ -4384,9 +4510,108 @@ static void emit_bulk_deep_comparison_summary_for_phase(
     emit_bulk_deep_count_phase_pair(
         ordinary_deep,
         ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_LOCK_UNDO_FAST_SKIP,
+        phase,
+        "row_ins_btr_lock_undo_fast_skip",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_LOCK_UNDO_NON_PRIMARY_OR_NON_LEAF_SKIP,
+        phase,
+        "row_ins_btr_lock_undo_non_primary_or_non_leaf_skip",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_LOCK_UNDO_SUCCESS_PRIMARY_LEAF,
+        phase,
+        "row_ins_btr_lock_undo_success_primary_leaf",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_LOCK_UNDO_SUCCESS_NON_PRIMARY_OR_NON_LEAF,
+        phase,
+        "row_ins_btr_lock_undo_success_non_primary_or_non_leaf",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
         INNODB_DEEP_PERF_STAT_TRX_UNDO_REPORT_BULK_ALREADY_COVERED,
         phase,
         "trx_undo_report_bulk_already_covered",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_UNDO_REPORT_SUCCESS,
+        phase,
+        "trx_undo_report_success",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_UNDO_REPORT_ASSIGN_FAIL,
+        phase,
+        "trx_undo_report_assign_fail",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_UNDO_REPORT_ADD_PAGE_ATTEMPTS,
+        phase,
+        "trx_undo_report_add_page_attempts",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_UNDO_REPORT_ADD_PAGE_SUCCESS,
+        phase,
+        "trx_undo_report_add_page_success",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_UNDO_REPORT_RECORD_TOO_BIG,
+        phase,
+        "trx_undo_report_record_too_big",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_UNDO_REPORT_OUT_OF_SPACE,
+        phase,
+        "trx_undo_report_out_of_space",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_UNDO_REPORT_OTHER_ERROR,
+        phase,
+        "trx_undo_report_other_error",
         insert_rows,
         insert_statements
     );
