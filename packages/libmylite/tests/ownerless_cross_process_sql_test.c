@@ -938,6 +938,7 @@ static void test_crashed_field_generated_check_drop_ddl_absent_constraints(void)
 static void test_crashed_create_like_dictionary_ddl_recovers_table(void);
 static void test_crashed_create_table_select_dictionary_ddl_recovers_table(void);
 static void test_crashed_create_or_replace_table_dictionary_ddl_recovers_replacement(void);
+static void test_crashed_create_or_replace_after_drop_dictionary_ddl_recovers_absence(void);
 static void test_crashed_create_or_replace_like_dictionary_ddl_recovers_replacement(void);
 static void test_crashed_create_or_replace_ctas_dictionary_ddl_recovers_replacement(void);
 static void test_crashed_table_idempotent_create_dictionary_ddl_preserves_table(void);
@@ -1654,6 +1655,7 @@ static void create_or_replace_table_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
+static void create_or_replace_table_until_after_drop_fault(open_database_paths paths, int ready_fd);
 static void create_or_replace_like_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -2691,6 +2693,16 @@ static void assert_ownerless_create_table_select_crash_ddl_state(
     const char *database_path
 );
 static void assert_ownerless_create_or_replace_table_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_create_or_replace_after_drop_absent_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_create_or_replace_after_drop_recreated_state(
     open_database_paths paths,
     unsigned flags,
     const char *database_path
@@ -4318,6 +4330,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-create-or-replace-after-drop-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_create_or_replace_after_drop_dictionary_ddl_recovers_absence();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-create-or-replace-like-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_create_or_replace_like_dictionary_ddl_recovers_replacement();
@@ -4784,6 +4802,7 @@ int main(int argc, char **argv) {
             test_crashed_create_like_dictionary_ddl_recovers_table,
             test_crashed_create_table_select_dictionary_ddl_recovers_table,
             test_crashed_create_or_replace_table_dictionary_ddl_recovers_replacement,
+            test_crashed_create_or_replace_after_drop_dictionary_ddl_recovers_absence,
             test_crashed_table_idempotent_create_dictionary_ddl_preserves_table,
             test_crashed_table_idempotent_drop_dictionary_ddl_preserves_table,
             test_crashed_view_create_dictionary_ddl_recovers_view,
@@ -5010,6 +5029,11 @@ int main(int argc, char **argv) {
             "dictionary-check-constraint-drop-crash|"
             "dictionary-field-generated-check-crash|"
             "dictionary-field-generated-check-drop-crash|"
+            "dictionary-create-like-crash|dictionary-ctas-crash|"
+            "dictionary-create-or-replace-table-crash|"
+            "dictionary-create-or-replace-after-drop-crash|"
+            "dictionary-create-or-replace-like-crash|"
+            "dictionary-create-or-replace-ctas-crash|"
             "dictionary-table-idempotent-create-crash|"
             "dictionary-table-idempotent-drop-crash|"
             "dictionary-view-create-crash|"
@@ -5383,6 +5407,9 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_crashed_create_like_dictionary_ddl_recovers_table),
     OWNERLESS_SQL_TEST_CASE(test_crashed_create_table_select_dictionary_ddl_recovers_table),
     OWNERLESS_SQL_TEST_CASE(test_crashed_create_or_replace_table_dictionary_ddl_recovers_replacement
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_create_or_replace_after_drop_dictionary_ddl_recovers_absence
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_create_or_replace_like_dictionary_ddl_recovers_replacement
     ),
@@ -41355,6 +41382,132 @@ static void test_crashed_create_or_replace_table_dictionary_ddl_recovers_replace
     free(root);
 }
 
+static void test_crashed_create_or_replace_after_drop_dictionary_ddl_recovers_absence(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-create-replace-after-drop-crash.mylite");
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *table_frm_path = path_join(app_path, "ownerless_create_replace_after_drop_crash.frm");
+    char *table_ibd_path = path_join(app_path, "ownerless_create_replace_after_drop_crash.ibd");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_create_replace_after_drop_crash ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "old_value INT NOT NULL, "
+        "stale_note VARCHAR(16) NOT NULL, "
+        "INDEX ownerless_create_replace_after_drop_crash_old_idx (old_value)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_create_replace_after_drop_crash VALUES "
+        "(1, 10, 'old'), (2, 20, 'old')"
+    );
+    exec_ok(db, "COMMIT");
+    assert(path_exists(table_frm_path));
+    assert(path_exists(table_ibd_path));
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_create_replace_after_drop_crash") ==
+        2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(old_value) FROM app.ownerless_create_replace_after_drop_crash"
+        ) == 30U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_replace_after_drop_crash' "
+            "AND index_name = 'ownerless_create_replace_after_drop_crash_old_idx'"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(paths, create_or_replace_table_until_after_drop_fault);
+
+    assert_ownerless_create_or_replace_after_drop_absent_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_create_or_replace_after_drop_absent_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_create_or_replace_after_drop_absent_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_create_or_replace_after_drop_absent_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_create_replace_after_drop_crash ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note VARCHAR(16) NOT NULL DEFAULT 'recreated', "
+        "INDEX ownerless_create_replace_after_drop_crash_value_idx (value)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_create_replace_after_drop_crash (id, value, note) VALUES "
+        "(1, 100, 'alpha'), (2, 200, 'beta')"
+    );
+    exec_ok(db, "COMMIT");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_create_or_replace_after_drop_recreated_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_create_or_replace_after_drop_recreated_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_create_or_replace_after_drop_recreated_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_create_or_replace_after_drop_recreated_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+
+    free(table_ibd_path);
+    free(table_frm_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_create_or_replace_like_dictionary_ddl_recovers_replacement(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -58682,6 +58835,23 @@ static void create_or_replace_table_until_dictionary_finish_fault(
     );
 }
 
+static void create_or_replace_table_until_after_drop_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_ownerless_fault(
+        paths,
+        ready_fd,
+        "create-or-replace-after-drop",
+        "CREATE OR REPLACE TABLE app.ownerless_create_replace_after_drop_crash ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note VARCHAR(16) NOT NULL DEFAULT 'replace', "
+        "INDEX ownerless_create_replace_after_drop_crash_value_idx (value)"
+        ") ENGINE=InnoDB"
+    );
+}
+
 static void create_or_replace_like_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -70409,6 +70579,154 @@ static void assert_ownerless_create_or_replace_table_crash_ddl_state(
     exec_ok(db, "COMMIT");
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_create_replace_crash") == 2U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_create_replace_crash") == 300U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(table_ibd_path);
+    free(table_frm_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_create_or_replace_after_drop_absent_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *table_frm_path = path_join(app_path, "ownerless_create_replace_after_drop_crash.frm");
+    char *table_ibd_path = path_join(app_path, "ownerless_create_replace_after_drop_crash.ibd");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(!path_exists(table_frm_path));
+    assert(!path_exists(table_ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_replace_after_drop_crash'"
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_create_replace_after_drop_crash",
+            NULL
+        ) != MYLITE_OK
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(table_ibd_path);
+    free(table_frm_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_create_or_replace_after_drop_recreated_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *table_frm_path = path_join(app_path, "ownerless_create_replace_after_drop_crash.frm");
+    char *table_ibd_path = path_join(app_path, "ownerless_create_replace_after_drop_crash.ibd");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(path_exists(table_frm_path));
+    assert(path_exists(table_ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_replace_after_drop_crash' "
+            "AND table_type = 'BASE TABLE'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_replace_after_drop_crash' "
+            "AND column_name IN ('value', 'note')"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_replace_after_drop_crash' "
+            "AND column_name IN ('old_value', 'stale_note')"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_replace_after_drop_crash' "
+            "AND index_name = 'ownerless_create_replace_after_drop_crash_value_idx' "
+            "AND column_name = 'value'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_create_replace_after_drop_crash' "
+            "AND index_name = 'ownerless_create_replace_after_drop_crash_old_idx'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_create_replace_after_drop_crash") ==
+        2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_create_replace_after_drop_crash"
+        ) == 300U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_create_replace_after_drop_crash "
+            "FORCE INDEX (ownerless_create_replace_after_drop_crash_value_idx) "
+            "WHERE value >= 200"
+        ) == 2U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_create_replace_after_drop_crash (id, value) VALUES (3, 300)"
+    );
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_create_replace_after_drop_crash") ==
+        3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_create_replace_after_drop_crash"
+        ) == 600U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_create_replace_after_drop_crash WHERE id = 3");
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_create_replace_after_drop_crash") ==
+        2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_create_replace_after_drop_crash"
+        ) == 300U
+    );
     assert(mylite_close(db) == MYLITE_OK);
 
     free(table_ibd_path);

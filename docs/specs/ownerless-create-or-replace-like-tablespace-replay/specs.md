@@ -213,8 +213,9 @@ git diff --check
 
 ## Risks And Open Questions
 
-- This proves a successful same-name LIKE replacement final state. It does not
-  prove failed replacement cleanup between old-target drop and replacement
-  creation.
+- This proves a successful same-name LIKE replacement final state. The
+  representative plain after-drop boundary is covered separately by
+  `docs/specs/ownerless-create-or-replace-after-drop-crash/specs.md`; broader
+  LIKE copy cleanup remains open.
 - The broader durable file-lifecycle protocol and external oracle stress remain
   open work.

@@ -81,8 +81,9 @@ Out of scope:
 
 - replacement of tables with foreign keys, triggers, generated columns,
   partitioning, special indexes, or unsupported storage options,
-- failed replacement cleanup fault injection between old-table removal and
-  replacement creation,
+- broader failed replacement cleanup variants beyond the representative
+  old-table-removal boundary covered by
+  `docs/specs/ownerless-create-or-replace-after-drop-crash/specs.md`,
 - SQL locked-table mode, which ownerless SQL rejects,
 - external MariaDB/RQG long-running DDL stress.
 
@@ -136,7 +137,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 - This covers a representative successful replacement, not every replacement
   interaction with constraints, triggers, generated columns, or partitioning.
-- Crashes between native old-table removal and replacement creation remain a
-  separate, lower-level DDL recovery problem.
+- A follow-up after-drop crash slice covers the representative lower-level
+  old-table-removal boundary; copy variants and constraint-heavy replacements
+  remain broader DDL lifecycle coverage.
 - Broader DDL/file lifecycle recovery and external MariaDB/RQG stress remain
   planned.

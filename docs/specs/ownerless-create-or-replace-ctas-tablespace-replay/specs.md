@@ -210,8 +210,9 @@ git diff --check
 
 ## Risks And Open Questions
 
-- This proves a successful same-name CTAS replacement final state. It does not
-  prove failed replacement cleanup between old-target drop, destination create,
-  and CTAS row population.
+- This proves a successful same-name CTAS replacement final state. The
+  representative plain after-drop boundary is covered separately by
+  `docs/specs/ownerless-create-or-replace-after-drop-crash/specs.md`; CTAS
+  cleanup after destination create and during row population remains open.
 - The broader durable file-lifecycle protocol and external oracle stress remain
   open work.

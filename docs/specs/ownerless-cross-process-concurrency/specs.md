@@ -2669,6 +2669,12 @@ Tasks:
    before ownerless dictionary finish, then verifies recovered replacement
    native files, old metadata absence, new metadata, empty replacement rowset,
    post-recovery writes, ownerless/native reopen, and forced `.shm` rebuild.
+   Hook-build after-drop crash coverage now also kills a representative
+   `CREATE OR REPLACE TABLE` writer after MariaDB removes the old native target
+   and before the replacement `.frm`/engine table is created, then verifies
+   ownerless/native reopen see the absent table, forced `.shm` rebuild
+   preserves absence, and the same SQL name can be recreated with fresh
+   metadata and rows.
    Hook-build crash coverage now also kills representative
    `CREATE OR REPLACE TABLE ... LIKE` and
    `CREATE OR REPLACE TABLE ... AS SELECT` replacement-copy writers after
@@ -3387,6 +3393,11 @@ Tasks:
    and verifies recovered replacement `.frm`/`.ibd` files, old-column/index
    absence, new-column/index metadata, empty replacement rowset,
    post-recovery writes, ownerless/native reopen, and forced `.shm` rebuild.
+   Hook-build after-drop crash coverage also kills a representative
+   `CREATE OR REPLACE TABLE` writer between MariaDB's old-table removal and
+   replacement creation, verifies the table remains absent through
+   ownerless/native reopen and forced `.shm` rebuild, and verifies same-name
+   recreation after recovery.
    Hook-build crash coverage also kills representative
    `CREATE OR REPLACE TABLE ... LIKE` and
    `CREATE OR REPLACE TABLE ... AS SELECT` replacement-copy writers before

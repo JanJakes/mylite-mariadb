@@ -69,6 +69,8 @@
 #define MYLITE_WITH_VECTOR_SQL_RUNTIME 1
 #endif
 
+extern "C" void mylite_ownerless_innodb_test_fault(const char *fault_name);
+
 #ifdef WITH_WSREP
 #include "wsrep_mysqld.h"
 
@@ -4808,6 +4810,7 @@ int create_table_impl(THD *thd,
           goto err;
 
         debug_crash_here("ddl_log_create_after_drop");
+        mylite_ownerless_innodb_test_fault("create-or-replace-after-drop");
 
         /*
           We have to log this query, even if it failed later to ensure the

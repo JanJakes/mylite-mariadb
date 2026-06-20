@@ -191,6 +191,8 @@ removed file-per-table tablespaces, rename-away plus new original-name
 `CREATE TABLE` coverage that preserves both final file-per-table spaces, and
 same-name `CREATE OR REPLACE TABLE` replacement coverage, including `... LIKE`
 copied-shape replacement and the `... AS SELECT` populated replacement variant,
+plus hook-build coverage for a representative `CREATE OR REPLACE TABLE` crash
+after the old target is removed and before replacement creation begins,
 in addition to the single-table drop, stale-reader retained-WAL killed-drop,
 and multi-table schema-drop evidence tracked below. This is still bounded
 replay evidence, not a claim that the

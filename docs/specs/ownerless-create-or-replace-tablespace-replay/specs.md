@@ -77,7 +77,9 @@ Out of scope:
 
 - Foreign-key, trigger, generated-column, partition, special-index, or
   unsupported-storage-option replacement variants.
-- Failed replacement cleanup between old-table removal and new-table creation.
+- Broader failed replacement cleanup variants beyond the representative
+  old-table-removal boundary covered by
+  `docs/specs/ownerless-create-or-replace-after-drop-crash/specs.md`.
 - SQL locked-table mode, which ownerless SQL rejects.
 - External MariaDB/RQG DDL stress.
 
@@ -200,7 +202,8 @@ git diff --check
 
 ## Risks And Open Questions
 
-- This proves a successful same-name replacement final state. It does not prove
-  failed replacement cleanup between old-table drop and replacement creation.
+- This proves a successful same-name replacement final state. A later focused
+  after-drop crash slice covers the representative old-table drop before
+  replacement creation; broader variants remain open.
 - The broader durable file-lifecycle protocol and external oracle stress remain
   open work.
