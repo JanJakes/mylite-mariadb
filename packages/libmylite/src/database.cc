@@ -59,6 +59,7 @@
 #  include <mysql.h>
 extern "C" std::uint32_t my_crc32c(std::uint32_t crc, const void *buf, std::size_t len);
 extern "C" my_bool mylite_embedded_start_transaction(MYSQL *mysql);
+extern unsigned int srv_fast_shutdown;
 #endif
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
@@ -20407,12 +20408,27 @@ void release_runtime(void) {
         reset_ownerless_runtime_hooks(g_runtime);
     }
     embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_RELEASE_RESET_HOOKS_NS, stage_start_ns);
+    const bool retained_ownerless_page_log_payload =
+        g_runtime.ownerless_rw_mode && ownerless_page_log_has_payload_records(g_runtime);
+    const bool clean_final_ownerless_shutdown = g_runtime.ownerless_rw_mode &&
+                                                no_live_ownerless_shutdown &&
+                                                !retained_ownerless_page_log_payload;
+    unsigned int saved_srv_fast_shutdown = 0U;
+    bool changed_srv_fast_shutdown = false;
+    if (clean_final_ownerless_shutdown && srv_fast_shutdown == 2U) {
+        saved_srv_fast_shutdown = srv_fast_shutdown;
+        srv_fast_shutdown = 1U;
+        changed_srv_fast_shutdown = true;
+    }
     const std::uint64_t mysql_shutdown_start_ns = embedded_open_perf_start_ns();
     stage_start_ns = mysql_shutdown_start_ns;
     mysql_thread_end();
     embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_RELEASE_MYSQL_THREAD_END_NS, stage_start_ns);
     stage_start_ns = embedded_open_perf_start_ns();
     mysql_server_end();
+    if (changed_srv_fast_shutdown) {
+        srv_fast_shutdown = saved_srv_fast_shutdown;
+    }
     embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_RELEASE_MYSQL_SERVER_END_NS, stage_start_ns);
     embedded_open_perf_add_elapsed(
         EMBEDDED_OPEN_PERF_RELEASE_MYSQL_SHUTDOWN_NS,
@@ -20421,10 +20437,8 @@ void release_runtime(void) {
     if (ownerless_concurrency_runtime_mapped) {
         clear_ownerless_native_hook_contexts(g_runtime);
     }
-    const bool retained_ownerless_page_log =
-        g_runtime.ownerless_rw_mode && ownerless_page_log_has_uncheckpointed_records(g_runtime);
     const bool restore_shutdown_redo_prefix =
-        redo_shutdown_repair_candidate && !retained_ownerless_page_log &&
+        redo_shutdown_repair_candidate && !retained_ownerless_page_log_payload &&
         (!g_runtime.ownerless_rw_mode || (startup_lock_fd >= 0 && no_live_ownerless_shutdown));
     if (restore_shutdown_redo_prefix) {
         stage_start_ns = embedded_open_perf_start_ns();

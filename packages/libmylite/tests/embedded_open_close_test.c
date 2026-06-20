@@ -165,6 +165,7 @@
 #define MYLITE_TEST_EMBEDDED_OPEN_PERF_STAT_COUNT 64U
 #define MYLITE_TEST_EMBEDDED_OPEN_PERF_SYSTEM_TABLES_CALLS 32U
 #define MYLITE_TEST_EMBEDDED_OPEN_PERF_SYSTEM_TABLES_EXECUTIONS 33U
+#define MYLITE_TEST_INNODB_REDO_FILE_SIZE 100663296
 
 typedef struct text_file {
     const char *path;
@@ -210,6 +211,8 @@ static void test_nonempty_directory_without_metadata_fails(void);
 static void test_invalid_metadata_fails(void);
 static void test_incomplete_layout_fails(void);
 static void test_ownerless_open_initializes_concurrency_metadata(void);
+static void test_ownerless_final_close_truncates_clean_redo_tail(void);
+static void test_ownerless_metadata_only_final_close_truncates_redo_tail(void);
 static void test_invalid_concurrency_metadata_fails(void);
 static void test_concurrency_shared_memory_is_grow_only(void);
 static void test_dead_ownerless_transaction_rebuilds_shared_state_on_open(void);
@@ -387,6 +390,8 @@ static void run_baseline_tests(void) {
 static void run_ownerless_directory_tests(void) {
     test_shared_readonly_open_reads_existing_database();
     test_ownerless_open_initializes_concurrency_metadata();
+    test_ownerless_final_close_truncates_clean_redo_tail();
+    test_ownerless_metadata_only_final_close_truncates_redo_tail();
     test_invalid_concurrency_metadata_fails();
     test_concurrency_shared_memory_is_grow_only();
     test_dead_ownerless_transaction_rebuilds_shared_state_on_open();
@@ -994,6 +999,113 @@ static void test_ownerless_open_initializes_concurrency_metadata(void) {
     free(tmp_path);
     free(data_path);
     free(metadata_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_final_close_truncates_clean_redo_tail(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-redo-tail.mylite");
+    char *datadir_path = path_join(database_path, "datadir");
+    char *redo_path = path_join(datadir_path, "ib_logfile0");
+    mylite_open_config config = open_config(runtime_root);
+    mylite_db *db = NULL;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+
+    assert(
+        mylite_open(
+            database_path,
+            &db,
+            MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE | MYLITE_OPEN_OWNERLESS_RW,
+            &config
+        ) == MYLITE_OK
+    );
+    exec_ok(db, "CREATE DATABASE app");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_redo_tail ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_redo_tail VALUES (1, 10)");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(file_size(redo_path) == MYLITE_TEST_INNODB_REDO_FILE_SIZE);
+
+    for (unsigned iteration = 0U; iteration < 5U; ++iteration) {
+        db = NULL;
+        assert(
+            mylite_open(
+                database_path,
+                &db,
+                MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+                &config
+            ) == MYLITE_OK
+        );
+        exec_ok(db, "UPDATE app.ownerless_redo_tail SET value = value + 1 WHERE id = 1");
+        assert(mylite_close(db) == MYLITE_OK);
+        assert(file_size(redo_path) == MYLITE_TEST_INNODB_REDO_FILE_SIZE);
+        assert_ownerless_closed_database_layout(database_path);
+        assert(is_directory_empty(runtime_root));
+    }
+
+    free(redo_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_metadata_only_final_close_truncates_redo_tail(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ordinary-ownerless-redo-tail.mylite");
+    char *datadir_path = path_join(database_path, "datadir");
+    char *redo_path = path_join(datadir_path, "ib_logfile0");
+    mylite_open_config config = open_config(runtime_root);
+    mylite_db *db = NULL;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+
+    assert(
+        mylite_open(database_path, &db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
+        MYLITE_OK
+    );
+    exec_ok(db, "CREATE DATABASE app");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_metadata_redo_tail ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_metadata_redo_tail VALUES (1, 10)");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(file_size(redo_path) == MYLITE_TEST_INNODB_REDO_FILE_SIZE);
+
+    for (unsigned iteration = 0U; iteration < 5U; ++iteration) {
+        db = NULL;
+        assert(
+            mylite_open(
+                database_path,
+                &db,
+                MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE | MYLITE_OPEN_OWNERLESS_RW,
+                &config
+            ) == MYLITE_OK
+        );
+        assert(mylite_close(db) == MYLITE_OK);
+        assert(file_size(redo_path) == MYLITE_TEST_INNODB_REDO_FILE_SIZE);
+        assert_ownerless_closed_database_layout(database_path);
+        assert(is_directory_empty(runtime_root));
+    }
+
+    free(redo_path);
+    free(datadir_path);
     free(database_path);
     free(runtime_root);
     remove_tree(root);

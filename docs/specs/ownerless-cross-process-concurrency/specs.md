@@ -5269,6 +5269,20 @@ subsystems that this mode needs:
   sample showed the same temp tablespace shape, while still occasionally
   paying actual redo rebuild time; redo rebuild trigger frequency remains a
   separate performance target from the temp file create/open cost.
+  A follow-up final-ownerless shutdown slice then made that redo-rebuild target
+  payload-aware: when the closing ownerless runtime holds the startup lock,
+  has no live ownerless peers, and the retained WAL has no page-version payload
+  records, MyLite temporarily lets MariaDB run clean InnoDB shutdown so the
+  clean redo-tail truncation path can normalize `ib_logfile0`; the saved
+  redo-header repair path follows the same payload-aware gate. Retained
+  page-image WAL payload records and live-peer closes continue using the
+  existing crash-style ownerless shutdown policy. Focused lifecycle tests cover
+  both ownerless-created repeated write closes and ordinary-created,
+  metadata-only ownerless attach closes; the reduced five-open production probe
+  reported `mylite_perf_ownerless_warm_open_close_startup_phase_innodb_log_rebuild_calls=0`,
+  `mylite_perf_ownerless_warm_open_close_startup_phase_innodb_log_rebuild_total_ms_avg=0.000`,
+  ownerless warm `startup_innodb_srv_start_total_ms_avg=41.034`, and
+  ownerless warm open/close at `111.688 ms` versus ordinary at `113.698 ms`.
   Stats-enabled
   ownerless autocommit probes now also emit per-insert summary keys for
   page-version volume, native-support page ratio, page-publish and page-log
