@@ -938,6 +938,14 @@ persistent undo assignment while preserving `2048.000` undo-report successes
 and `0.000` default-checked bulk starts per statement. A one-statement guard
 reported zero remaining-statement averages, so the phase split does not reuse
 aggregate counters when no later statement exists.
+Ownerless native-support page publication now has a stats-off production fast
+skip for pages that the existing native-support rules would only elide. The
+fast path is disabled whenever page-publish or page-write diagnostics are
+enabled, requires the page image LSN to match the mini-transaction commit LSN,
+and reuses the existing history-proof/native-support elision predicate. It does
+not skip native undo records, page-write locking or release, redo completion,
+transaction-deferred user page publication, or active rollback-segment/undo
+history-proof pages.
 Profiled mysqli runs also split total query elapsed time into
 `query_verb_*` buckets for result queries, DML, DDL, connection state,
 transaction, lock, call, and other first-keyword classes so WordPress timing

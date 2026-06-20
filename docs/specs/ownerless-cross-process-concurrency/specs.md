@@ -6385,6 +6385,15 @@ subsystems that this mode needs:
   default-checked bulk starts per statement. A one-statement guard reported
   zero remaining-statement averages, so the remaining phase is not inferred
   from aggregate counters when no non-empty-table statement exists.
+  The native-support publish fast-skip follow-up is a stats-off production
+  dispatch cleanup: when diagnostics are disabled and the existing
+  native-support predicate proves the publish helper would only elide a page,
+  MTR publish dispatch skips the helper after checking the page image LSN
+  against the mini-transaction commit LSN. Diagnostic runs still use the full
+  helper so native-support elision and history-proof counters keep their
+  existing meaning. Page-write locking/release, native undo records, redo
+  completion, transaction-deferred user page publication, and active
+  rollback-segment/undo history-proof pages are unchanged.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.

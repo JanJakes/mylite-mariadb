@@ -1471,6 +1471,32 @@ static bool ownerless_page_write_lock_only_transaction_page(
          ownerless_page_write_defers_for_transaction(page);
 }
 
+static bool ownerless_page_write_can_fast_skip_elided_native_support_publish(
+    const trx_t *trx, const buf_page_t &bpage, lsn_t commit_lsn) noexcept
+{
+  if (UNIV_UNLIKELY(ownerless_page_publish_stats_enabled.load(
+          std::memory_order_relaxed)) ||
+      UNIV_UNLIKELY(ownerless_page_write_perf_enabled()))
+    return false;
+  if (commit_lsn == 0)
+    return false;
+
+  const page_id_t id{bpage.id()};
+  if (id.space() >= SRV_TMP_SPACE_ID || !bpage.in_file())
+    return false;
+  if (ownerless_page_write_lock_only_transaction_page(trx, bpage))
+    return false;
+
+  const byte *source= bpage.zip.data ? bpage.zip.data : bpage.frame;
+  if (source == nullptr)
+    return false;
+  if (mach_read_from_8(source + FIL_PAGE_LSN) != commit_lsn)
+    return false;
+
+  return ownerless_page_write_can_elide_native_support_page(
+      trx, id.space(), id.page_no(), fil_page_get_type(source), false);
+}
+
 static bool ownerless_page_write_in_startup_or_recovery()
 {
   return recv_recovery_is_on() || !srv_was_started;
@@ -2875,6 +2901,7 @@ void mtr_t::ownerless_page_writes_publish_list(
 
   bool batch_started= false;
   const bool uses_transaction= ownerless_page_write_uses_transaction_release();
+  trx_t *ownerless_trx= ownerless_page_write_trx();
   for (size_t i= 0; i < page_count; ++i)
   {
     const buf_page_t *bpage= pages[i];
@@ -2890,6 +2917,10 @@ void mtr_t::ownerless_page_writes_publish_list(
       ownerless_page_write_capture_dirty_transaction_page(*bpage, true);
       continue;
     }
+
+    if (ownerless_page_write_can_fast_skip_elided_native_support_publish(
+            ownerless_trx, *bpage, m_commit_lsn))
+      continue;
 
     ownerless_page_write_begin_publish_batch_if_needed(batch_started);
     ownerless_page_write_publish(*bpage);
@@ -2913,6 +2944,7 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_writes_publish() noexcept
   bool batch_started= false;
   const bool uses_transaction=
       ownerless_page_write_uses_transaction_release();
+  trx_t *ownerless_trx= ownerless_page_write_trx();
   for (const mtr_memo_slot_t &slot : m_memo)
   {
     if (!(slot.type & MTR_MEMO_MODIFY))
@@ -2928,6 +2960,10 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_writes_publish() noexcept
       ownerless_page_write_capture_dirty_transaction_page(*bpage, true);
       continue;
     }
+
+    if (ownerless_page_write_can_fast_skip_elided_native_support_publish(
+            ownerless_trx, *bpage, m_commit_lsn))
+      continue;
 
     ownerless_page_write_begin_publish_batch_if_needed(batch_started);
     ownerless_page_write_publish(*bpage);
@@ -3792,6 +3828,8 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
     const bool ownerless_uses_transaction_release=
         ownerless_page_publish &&
         mtr->ownerless_page_write_uses_transaction_release();
+    trx_t *ownerless_publish_trx=
+        ownerless_page_publish ? mtr->ownerless_page_write_trx() : nullptr;
     if (UNIV_UNLIKELY(ownerless_page_publish))
       mtr->ownerless_history_proof_publish_pair();
     bool ownerless_page_leave=
@@ -3858,9 +3896,13 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
             }
             else
             {
-              ownerless_page_write_begin_publish_batch_if_needed(
-                  ownerless_page_publish_batch_started);
-              mtr->ownerless_page_write_publish(*bpage);
+              if (!ownerless_page_write_can_fast_skip_elided_native_support_publish(
+                      ownerless_publish_trx, *bpage, mtr->m_commit_lsn))
+              {
+                ownerless_page_write_begin_publish_batch_if_needed(
+                    ownerless_page_publish_batch_started);
+                mtr->ownerless_page_write_publish(*bpage);
+              }
             }
             ownerless_page_write_perf_add_elapsed(
                 OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_PUBLISH_NS,
