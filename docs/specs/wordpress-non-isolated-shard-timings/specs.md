@@ -48,7 +48,9 @@ This keeps the split as a partition of the previous non-isolated step while
 preserving the dedicated `Tests_DB*` shard and the process-isolated class and
 method exclusions. A later production timing slice further split the REST
 partition into `Controller` and non-`Controller` filters after the REST shard
-became the longest single PHPUnit gate.
+became the longest single PHPUnit gate. A follow-up split then separated the
+query/theme/canonical classes from block/token classes after
+`phpunit-non-isolated-query-theme-block-token` became the longest shard.
 
 The REST shard includes
 `WP_Test_REST_Schema_Initialization::test_build_wp_api_client_fixtures`, which

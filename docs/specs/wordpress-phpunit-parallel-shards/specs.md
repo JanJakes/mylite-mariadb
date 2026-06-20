@@ -76,6 +76,10 @@ A later timing slice split `phpunit-non-isolated-rest` into
 the longest individual shard. The aggregate job still treats both labels as
 non-isolated PHPUnit shards.
 
+A follow-up split divided `phpunit-non-isolated-query-theme-block-token` into
+`phpunit-non-isolated-query-theme` and `phpunit-non-isolated-block-token` after
+REST was no longer the critical path.
+
 Each shard runs with its own `/tmp/mylite-wordpress-tests.mylite` path in a
 separate GitHub runner, so native MyLite database files are not shared across
 parallel jobs. The setup job also uses `/tmp` for the prepared baseline so the
