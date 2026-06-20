@@ -42,6 +42,15 @@ typedef struct insert_client_timing {
     uint64_t finalize_calls;
 } insert_client_timing;
 
+typedef struct bulk_insert_timing {
+    uint64_t first_statement_ns;
+    uint64_t remaining_statements_ns;
+    unsigned first_statement_rows;
+    unsigned remaining_statement_rows;
+    unsigned first_statement_count;
+    unsigned remaining_statement_count;
+} bulk_insert_timing;
+
 enum page_publish_stat_index {
     PAGE_PUBLISH_STAT_CANDIDATES = 0,
     PAGE_PUBLISH_STAT_PUBLISHED,
@@ -1380,7 +1389,8 @@ static double measure_bulk_autocommit_insert(
     const char *table_name,
     unsigned rows,
     unsigned rows_per_statement,
-    int reset_page_publish_stats
+    int reset_page_publish_stats,
+    bulk_insert_timing *timing
 );
 
 static void reset_embedded_lifecycle_perf_stats(void) {
@@ -1438,6 +1448,10 @@ int main(void) {
     double ordinary_insert_autocommit_rate;
     double ordinary_insert_autocommit_bulk_row_rate;
     double ordinary_insert_autocommit_bulk_statement_rate;
+    double ordinary_insert_autocommit_bulk_first_statement_row_rate;
+    double ordinary_insert_autocommit_bulk_first_statement_rate;
+    double ordinary_insert_autocommit_bulk_remaining_row_rate;
+    double ordinary_insert_autocommit_bulk_remaining_statement_rate;
     double ownerless_direct_select1_rate;
     double ownerless_prepared_select1_rate;
     double ownerless_direct_point_select_rate;
@@ -1446,6 +1460,10 @@ int main(void) {
     double ownerless_insert_autocommit_rate;
     double ownerless_insert_autocommit_bulk_row_rate;
     double ownerless_insert_autocommit_bulk_statement_rate;
+    double ownerless_insert_autocommit_bulk_first_statement_row_rate;
+    double ownerless_insert_autocommit_bulk_first_statement_rate;
+    double ownerless_insert_autocommit_bulk_remaining_row_rate;
+    double ownerless_insert_autocommit_bulk_remaining_statement_rate;
     uint64_t ordinary_txn_innodb_deep[INNODB_DEEP_PERF_STAT_COUNT] = {0};
     uint64_t ownerless_txn_innodb_deep[INNODB_DEEP_PERF_STAT_COUNT] = {0};
     uint64_t ordinary_autocommit_innodb_deep[INNODB_DEEP_PERF_STAT_COUNT] = {0};
@@ -1456,6 +1474,8 @@ int main(void) {
     insert_client_timing ownerless_txn_client_timing = {0};
     insert_client_timing ordinary_autocommit_client_timing = {0};
     insert_client_timing ownerless_autocommit_client_timing = {0};
+    bulk_insert_timing ordinary_bulk_timing = {0};
+    bulk_insert_timing ownerless_bulk_timing = {0};
 
     if (bulk_insert_rows_per_statement == 0U) {
         bulk_insert_rows_per_statement = 1U;
@@ -1718,13 +1738,34 @@ int main(void) {
         "mylite_perf_ordinary_autocommit_bulk",
         insert_iterations,
         bulk_insert_rows_per_statement,
-        page_publish_stats
+        page_publish_stats,
+        &ordinary_bulk_timing
     );
     emit_rate("mylite_perf_ordinary_insert_autocommit_bulk_rows", insert_iterations, seconds);
     emit_rate(
         "mylite_perf_ordinary_insert_autocommit_bulk_statements",
         bulk_insert_statements,
         seconds
+    );
+    emit_rate(
+        "mylite_perf_ordinary_insert_autocommit_bulk_first_statement_rows",
+        ordinary_bulk_timing.first_statement_rows,
+        (double)ordinary_bulk_timing.first_statement_ns / 1000000000.0
+    );
+    emit_rate(
+        "mylite_perf_ordinary_insert_autocommit_bulk_first_statement",
+        ordinary_bulk_timing.first_statement_count,
+        (double)ordinary_bulk_timing.first_statement_ns / 1000000000.0
+    );
+    emit_rate(
+        "mylite_perf_ordinary_insert_autocommit_bulk_remaining_rows",
+        ordinary_bulk_timing.remaining_statement_rows,
+        (double)ordinary_bulk_timing.remaining_statements_ns / 1000000000.0
+    );
+    emit_rate(
+        "mylite_perf_ordinary_insert_autocommit_bulk_remaining_statements",
+        ordinary_bulk_timing.remaining_statement_count,
+        (double)ordinary_bulk_timing.remaining_statements_ns / 1000000000.0
     );
     if (page_publish_stats) {
         mylite_exec_result_perf_set_enabled(0);
@@ -1747,6 +1788,22 @@ int main(void) {
     ordinary_insert_autocommit_bulk_row_rate = operations_per_second(insert_iterations, seconds);
     ordinary_insert_autocommit_bulk_statement_rate =
         operations_per_second(bulk_insert_statements, seconds);
+    ordinary_insert_autocommit_bulk_first_statement_row_rate = operations_per_second(
+        ordinary_bulk_timing.first_statement_rows,
+        (double)ordinary_bulk_timing.first_statement_ns / 1000000000.0
+    );
+    ordinary_insert_autocommit_bulk_first_statement_rate = operations_per_second(
+        ordinary_bulk_timing.first_statement_count,
+        (double)ordinary_bulk_timing.first_statement_ns / 1000000000.0
+    );
+    ordinary_insert_autocommit_bulk_remaining_row_rate = operations_per_second(
+        ordinary_bulk_timing.remaining_statement_rows,
+        (double)ordinary_bulk_timing.remaining_statements_ns / 1000000000.0
+    );
+    ordinary_insert_autocommit_bulk_remaining_statement_rate = operations_per_second(
+        ordinary_bulk_timing.remaining_statement_count,
+        (double)ordinary_bulk_timing.remaining_statements_ns / 1000000000.0
+    );
     close_database(db);
 
     db = open_database(&paths, ownerless_flags, &config);
@@ -1968,13 +2025,34 @@ int main(void) {
         "mylite_perf_ownerless_autocommit_bulk",
         insert_iterations,
         bulk_insert_rows_per_statement,
-        ownerless_insert_stats
+        ownerless_insert_stats,
+        &ownerless_bulk_timing
     );
     emit_rate("mylite_perf_ownerless_insert_autocommit_bulk_rows", insert_iterations, seconds);
     emit_rate(
         "mylite_perf_ownerless_insert_autocommit_bulk_statements",
         bulk_insert_statements,
         seconds
+    );
+    emit_rate(
+        "mylite_perf_ownerless_insert_autocommit_bulk_first_statement_rows",
+        ownerless_bulk_timing.first_statement_rows,
+        (double)ownerless_bulk_timing.first_statement_ns / 1000000000.0
+    );
+    emit_rate(
+        "mylite_perf_ownerless_insert_autocommit_bulk_first_statement",
+        ownerless_bulk_timing.first_statement_count,
+        (double)ownerless_bulk_timing.first_statement_ns / 1000000000.0
+    );
+    emit_rate(
+        "mylite_perf_ownerless_insert_autocommit_bulk_remaining_rows",
+        ownerless_bulk_timing.remaining_statement_rows,
+        (double)ownerless_bulk_timing.remaining_statements_ns / 1000000000.0
+    );
+    emit_rate(
+        "mylite_perf_ownerless_insert_autocommit_bulk_remaining_statements",
+        ownerless_bulk_timing.remaining_statement_count,
+        (double)ownerless_bulk_timing.remaining_statements_ns / 1000000000.0
     );
     if (page_publish_stats) {
         mylite_exec_result_perf_set_enabled(0);
@@ -2044,6 +2122,22 @@ int main(void) {
     ownerless_insert_autocommit_bulk_row_rate = operations_per_second(insert_iterations, seconds);
     ownerless_insert_autocommit_bulk_statement_rate =
         operations_per_second(bulk_insert_statements, seconds);
+    ownerless_insert_autocommit_bulk_first_statement_row_rate = operations_per_second(
+        ownerless_bulk_timing.first_statement_rows,
+        (double)ownerless_bulk_timing.first_statement_ns / 1000000000.0
+    );
+    ownerless_insert_autocommit_bulk_first_statement_rate = operations_per_second(
+        ownerless_bulk_timing.first_statement_count,
+        (double)ownerless_bulk_timing.first_statement_ns / 1000000000.0
+    );
+    ownerless_insert_autocommit_bulk_remaining_row_rate = operations_per_second(
+        ownerless_bulk_timing.remaining_statement_rows,
+        (double)ownerless_bulk_timing.remaining_statements_ns / 1000000000.0
+    );
+    ownerless_insert_autocommit_bulk_remaining_statement_rate = operations_per_second(
+        ownerless_bulk_timing.remaining_statement_count,
+        (double)ownerless_bulk_timing.remaining_statements_ns / 1000000000.0
+    );
     close_database(db);
 
     emit_summary_ms(
@@ -2189,6 +2283,58 @@ int main(void) {
         "mylite_perf_summary_ownerless_insert_autocommit_bulk_statements_ratio",
         ownerless_insert_autocommit_bulk_statement_rate,
         ordinary_insert_autocommit_bulk_statement_rate
+    );
+    emit_summary_rate(
+        "mylite_perf_summary_ordinary_insert_autocommit_bulk_first_statement_rows_ops_per_second",
+        ordinary_insert_autocommit_bulk_first_statement_row_rate
+    );
+    emit_summary_rate(
+        "mylite_perf_summary_ownerless_insert_autocommit_bulk_first_statement_rows_ops_per_second",
+        ownerless_insert_autocommit_bulk_first_statement_row_rate
+    );
+    emit_summary_ratio(
+        "mylite_perf_summary_ownerless_insert_autocommit_bulk_first_statement_rows_ratio",
+        ownerless_insert_autocommit_bulk_first_statement_row_rate,
+        ordinary_insert_autocommit_bulk_first_statement_row_rate
+    );
+    emit_summary_rate(
+        "mylite_perf_summary_ordinary_insert_autocommit_bulk_first_statement_ops_per_second",
+        ordinary_insert_autocommit_bulk_first_statement_rate
+    );
+    emit_summary_rate(
+        "mylite_perf_summary_ownerless_insert_autocommit_bulk_first_statement_ops_per_second",
+        ownerless_insert_autocommit_bulk_first_statement_rate
+    );
+    emit_summary_ratio(
+        "mylite_perf_summary_ownerless_insert_autocommit_bulk_first_statement_ratio",
+        ownerless_insert_autocommit_bulk_first_statement_rate,
+        ordinary_insert_autocommit_bulk_first_statement_rate
+    );
+    emit_summary_rate(
+        "mylite_perf_summary_ordinary_insert_autocommit_bulk_remaining_rows_ops_per_second",
+        ordinary_insert_autocommit_bulk_remaining_row_rate
+    );
+    emit_summary_rate(
+        "mylite_perf_summary_ownerless_insert_autocommit_bulk_remaining_rows_ops_per_second",
+        ownerless_insert_autocommit_bulk_remaining_row_rate
+    );
+    emit_summary_ratio(
+        "mylite_perf_summary_ownerless_insert_autocommit_bulk_remaining_rows_ratio",
+        ownerless_insert_autocommit_bulk_remaining_row_rate,
+        ordinary_insert_autocommit_bulk_remaining_row_rate
+    );
+    emit_summary_rate(
+        "mylite_perf_summary_ordinary_insert_autocommit_bulk_remaining_statements_ops_per_second",
+        ordinary_insert_autocommit_bulk_remaining_statement_rate
+    );
+    emit_summary_rate(
+        "mylite_perf_summary_ownerless_insert_autocommit_bulk_remaining_statements_ops_per_second",
+        ownerless_insert_autocommit_bulk_remaining_statement_rate
+    );
+    emit_summary_ratio(
+        "mylite_perf_summary_ownerless_insert_autocommit_bulk_remaining_statements_ratio",
+        ownerless_insert_autocommit_bulk_remaining_statement_rate,
+        ordinary_insert_autocommit_bulk_remaining_statement_rate
     );
 
     remove_tree(paths.root);
@@ -14056,7 +14202,8 @@ static double measure_bulk_autocommit_insert(
     const char *table_name,
     unsigned rows,
     unsigned rows_per_statement,
-    int reset_page_publish_stats
+    int reset_page_publish_stats,
+    bulk_insert_timing *timing
 ) {
     char ddl[256];
     char *sql;
@@ -14069,6 +14216,9 @@ static double measure_bulk_autocommit_insert(
 
     if (rows_per_statement == 0U) {
         rows_per_statement = 1U;
+    }
+    if (timing != NULL) {
+        memset(timing, 0, sizeof(*timing));
     }
     rows_in_buffer = rows_per_statement;
     if (rows > 0U && rows_in_buffer > (size_t)rows) {
@@ -14106,6 +14256,8 @@ static double measure_bulk_autocommit_insert(
     while (next_id <= rows) {
         size_t offset = 0U;
         unsigned statement_rows = 0U;
+        uint64_t statement_start_ns;
+        uint64_t statement_end_ns;
 
         append_sql_or_exit(
             sql,
@@ -14126,7 +14278,21 @@ static double measure_bulk_autocommit_insert(
             ++statement_rows;
             ++next_id;
         }
+        statement_start_ns = monotonic_ns();
         exec_ok(db, sql);
+        statement_end_ns = monotonic_ns();
+        if (timing != NULL) {
+            const uint64_t statement_ns = statement_end_ns - statement_start_ns;
+            if (timing->first_statement_count == 0U) {
+                timing->first_statement_ns += statement_ns;
+                timing->first_statement_rows += statement_rows;
+                timing->first_statement_count = 1U;
+            } else {
+                timing->remaining_statements_ns += statement_ns;
+                timing->remaining_statement_rows += statement_rows;
+                ++timing->remaining_statement_count;
+            }
+        }
     }
     end_ns = monotonic_ns();
 

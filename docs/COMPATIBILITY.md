@@ -231,8 +231,11 @@ from cold runtime/InnoDB startup. The large-row bulk probe uses
 `MYLITE_PERF_BULK_INSERT_ROWS_PER_STATEMENT=100` so CI reports the ownerless
 default-checked bulk-insert row-list shape separately from the default four-row
 small-bulk shape; it now uses `MYLITE_PERF_INSERT_ITERATIONS=5000`, producing
-50 such statements instead of a timer-noisy five-statement sample. CI also
-separates the WordPress PHPUnit source, build,
+50 such statements instead of a timer-noisy five-statement sample. The
+embedded probe now also splits ordinary and ownerless bulk timing into the
+first row-list statement and the remaining row-list statements, exposing the
+current empty-table default-checked bulk path separately from later
+non-empty-table insert execution. CI also separates the WordPress PHPUnit source, build,
 dependency, database-prep, performance-probe, and test-only phases so PHPUnit
 wall timings are not hidden inside build work.
 Those phases append compact timing rows into
