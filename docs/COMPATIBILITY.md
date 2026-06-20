@@ -1449,6 +1449,16 @@ reported ordinary warm open/close at `162.474 ms`,
 active-runtime reconnect stayed cheap at `0.695 ms`. The next performance work
 should therefore inspect native redo/log rebuild and recovery bootstrap before
 claiming a broader branch regression.
+The follow-up log-rebuild attribution split showed that steady no-rebuild
+garbage cleanup was not the main cost: a reduced production sample reported
+five `srv_log_rebuild_if_needed()` calls, four no-rebuild calls with
+`startup_innodb_log_rebuild_no_rebuild_delete_log_files_ms_avg=0.384`, and one
+actual rebuild at `startup_innodb_log_rebuild_total_ms_avg=130.486`, dominated
+by `startup_innodb_log_rebuild_create_log_file_ms_avg=99.935` and
+`startup_innodb_log_rebuild_resize_rename_ms_avg=27.111`. In that sample,
+steady warm-open attention shifted to recovery bootstrap and InnoDB system-table
+startup, while creation-heavy paths may separately consider first-post-create
+redo rebuild avoidance.
 A follow-up public API branch/main parity benchmark now builds
 `tools/mylite_public_open_close_bench` and measures only portable
 `mylite_open()` plus `mylite_close()` behavior over an InnoDB table. Against

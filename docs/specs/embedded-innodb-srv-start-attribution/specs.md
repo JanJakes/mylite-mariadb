@@ -132,6 +132,16 @@ core object setup. The next optimization slice should inspect
 `srv_log_rebuild_if_needed()` and recovery bootstrap with source-level recovery
 evidence before changing startup behavior.
 
+The follow-up `docs/specs/embedded-innodb-log-rebuild-attribution/specs.md`
+slice split the log-rebuild bucket. In a reduced production sample, four of
+five `srv_log_rebuild_if_needed()` calls took the no-rebuild path and spent
+`0.384 ms` on `delete_log_files()` per no-rebuild call; one actual rebuild took
+`130.486 ms`, including `99.935 ms` in `create_log_file(false, lsn)` and
+`27.111 ms` in `log_sys.resize_rename()`. That makes repeated stale-log cleanup
+a poor steady-state optimization target and shifts warm-open work toward
+recovery bootstrap/system-table attribution or first-post-create redo rebuild
+avoidance.
+
 Verification commands run for this slice:
 
 - `tools/mariadb-embedded-build build`;

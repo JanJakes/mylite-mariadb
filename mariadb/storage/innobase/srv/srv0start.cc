@@ -1200,8 +1200,18 @@ same_size:
 or encryption, before starting to write any log records. */
 ATTRIBUTE_COLD static dberr_t srv_log_rebuild()
 {
+  uint64_t mylite_log_start, mylite_stage_start;
+
+  mylite_embedded_startup_perf_count(
+    MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_CALLS);
+  mylite_log_start= mylite_embedded_startup_perf_start_ns();
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
+
   /* Prepare to delete the old redo log file */
   const lsn_t lsn{srv_prepare_to_delete_redo_log_file()};
+  mylite_embedded_startup_perf_add_elapsed(
+    MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_PREPARE_NS,
+    mylite_stage_start);
 
   DBUG_EXECUTE_IF("innodb_log_abort_1", return DB_ERROR;);
   /* Prohibit redo log writes from any other threads until creating a
@@ -1223,10 +1233,21 @@ ATTRIBUTE_COLD static dberr_t srv_log_rebuild()
 
   DBUG_EXECUTE_IF("innodb_log_abort_5", return DB_ERROR;);
 
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
   dberr_t err= create_log_file(false, lsn);
+  mylite_embedded_startup_perf_add_elapsed(
+    MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_CREATE_LOG_FILE_NS,
+    mylite_stage_start);
 
+  mylite_stage_start= mylite_embedded_startup_perf_start_ns();
   if (err == DB_SUCCESS && log_sys.resize_rename())
     err = DB_ERROR;
+  mylite_embedded_startup_perf_add_elapsed(
+    MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_RESIZE_RENAME_NS,
+    mylite_stage_start);
+  mylite_embedded_startup_perf_add_elapsed(
+    MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_TOTAL_NS,
+    mylite_log_start);
 
   return err;
 }
@@ -1234,23 +1255,56 @@ ATTRIBUTE_COLD static dberr_t srv_log_rebuild()
 /** Rebuild the redo log if needed. */
 static dberr_t srv_log_rebuild_if_needed()
 {
+  uint64_t mylite_log_start, mylite_stage_start;
+
+  mylite_embedded_startup_perf_count(
+    MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_IF_NEEDED_CALLS);
+  mylite_log_start= mylite_embedded_startup_perf_start_ns();
+
   if (srv_force_recovery == SRV_FORCE_NO_LOG_REDO)
+  {
     /* Completely ignore the redo log. */
+    mylite_embedded_startup_perf_count(
+      MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_SKIP_FORCE_RECOVERY);
+    mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_IF_NEEDED_TOTAL_NS,
+      mylite_log_start);
     return DB_SUCCESS;
+  }
   if (srv_read_only_mode)
+  {
     /* Leave the redo log alone. */
+    mylite_embedded_startup_perf_count(
+      MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_SKIP_READ_ONLY);
+    mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_IF_NEEDED_TOTAL_NS,
+      mylite_log_start);
     return DB_SUCCESS;
+  }
 
   if (log_sys.file_size == srv_log_file_size &&
       log_sys.format ==
       (srv_encrypt_log ? log_t::FORMAT_ENC_11 : log_t::FORMAT_10_8))
   {
     /* No need to add or remove encryption, upgrade, or resize. */
+    mylite_embedded_startup_perf_count(
+      MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_NO_REBUILD_CALLS);
+    mylite_stage_start= mylite_embedded_startup_perf_start_ns();
     delete_log_files();
+    mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_NO_REBUILD_DELETE_LOG_FILES_NS,
+      mylite_stage_start);
+    mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_IF_NEEDED_TOTAL_NS,
+      mylite_log_start);
     return DB_SUCCESS;
   }
 
-  return srv_log_rebuild();
+  dberr_t err= srv_log_rebuild();
+  mylite_embedded_startup_perf_add_elapsed(
+    MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_IF_NEEDED_TOTAL_NS,
+    mylite_log_start);
+  return err;
 }
 
 ut_d(bool ibuf_upgrade_was_needed;)

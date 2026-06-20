@@ -147,6 +147,12 @@ used by the workflow.
   `MYLITE_WORDPRESS_PRESERVE_TIMING_SUMMARY=1` to CI shard jobs and guards the
   harness cleanup so workflow-level download/extract rows survive into each
   uploaded shard timing summary.
+- CI run `27858806067` for `22893f8f` confirmed the fix: the final timing
+  summary included per-shard `artifact-download-*` and `artifact-extract-*`
+  rows, and the rollup emitted `wordpress_artifact_download_seconds=32.000`,
+  `wordpress_artifact_extract_seconds=24.000`,
+  `wordpress_artifact_pack_seconds=11.000`, and
+  `wordpress_artifact_upload_seconds=2.000`.
 
 ## Acceptance Criteria
 
