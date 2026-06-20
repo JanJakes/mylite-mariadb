@@ -49,9 +49,12 @@ directories:
 - `build/wordpress-mariadb-embedded`.
 
 The keys hash the MariaDB source tree, the embedded baseline profile, and the
-embedded build wrapper. The WordPress cache key also hashes the WordPress
-PHPUnit harness because that script owns the Docker build environment and
-container path mapping used for the archive.
+embedded build wrapper. The WordPress cache key deliberately does not hash the
+WordPress PHPUnit harness: the archive contents and `CMakeCache.txt` contract
+are owned by MariaDB source, the embedded profile, and
+`tools/mariadb-embedded-build`. Harness-only timing, sharding, Docker, or
+artifact changes must not evict a valid `build/wordpress-mariadb-embedded`
+archive cache.
 
 Do not use prefix `restore-keys` for the archive caches. A cache miss should
 fall back to a normal production build instead of restoring a build tree from a
@@ -109,6 +112,13 @@ the build directory and should spend only cache restore time plus any no-op
 Ninja/measure work. The optimization targets CI setup wall time and does not
 claim an engine-runtime improvement.
 
+The WordPress archive cache can now also survive changes to
+`tools/wordpress-phpunit-mysqli-mylite`, so PHP harness timing instrumentation
+or shard/filter edits do not force another several-minute MariaDB archive build
+when the MariaDB source/profile inputs are unchanged. The downstream
+`MinSizeRel` build-type guard and runtime artifact manifest still validate the
+restored archive before any production timing is published.
+
 The cache keys intentionally prefer correctness over broad reuse. Runner image
 or Docker base-image changes may still reuse a cache with the same source hash;
 the production build-type guards catch configuration drift, and exact source
@@ -139,6 +149,8 @@ keys avoid restoring stale MariaDB outputs across code changes.
 - Neither MariaDB archive cache uses prefix restore keys.
 - The CI production-build audit requires both cache steps, both cache paths,
   both exact keys, and the `ensure` command.
+- The WordPress archive cache key is independent of the WordPress PHPUnit
+  harness so harness-only timing edits do not invalidate the MariaDB archive.
 - A restored cache is invalidated by profile content drift, not by checkout
   mtime drift.
 - CI normalizes MariaDB archive source mtimes before reusing restored build

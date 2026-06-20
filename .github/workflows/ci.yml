@@ -272,7 +272,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/wordpress-mariadb-embedded
-          key: ${{ runner.os }}-wordpress-mariadb-embedded-${{ hashFiles('mariadb/**', 'cmake/mariadb-embedded-baseline.cmake', 'tools/mariadb-embedded-build', 'tools/wordpress-phpunit-mysqli-mylite') }}
+          key: ${{ runner.os }}-wordpress-mariadb-embedded-${{ hashFiles('mariadb/**', 'cmake/mariadb-embedded-baseline.cmake', 'tools/mariadb-embedded-build') }}
 
       - name: Show runner resources
         run: |

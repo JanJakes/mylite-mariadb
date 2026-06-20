@@ -1308,7 +1308,10 @@ inside the CI test/probe steps that report production timings, and the
 WordPress timing harness prints the verified MyLite and MariaDB embedded CMake
 cache build types before `perf-probe` or PHPUnit timing output, while
 `tools/mariadb-embedded-build` rejects non-`MinSizeRel` caches before local
-embedded `build`, `measure`, or warmed `ensure` output. The same probe now
+embedded `build`, `measure`, or warmed `ensure` output. The WordPress MariaDB
+embedded archive cache key is scoped to MariaDB source, the embedded profile,
+and `tools/mariadb-embedded-build`, so harness-only timing/sharding edits do
+not evict a valid production archive cache. The same probe now
 also splits ownerless mini-transaction publish and commit-log phases so the
 remaining autocommit gap can be attributed before a correctness-sensitive
 publication optimization is attempted; the first reduced production sample
