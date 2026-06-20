@@ -205,9 +205,11 @@ checksummed generation records after the LSN records; runtime marker reads
 prefer the highest valid record, fall back to the legacy marker only before any
 marker record has been written, and treat corrupt marker-record-only evidence
 as checkpoint-needed so a torn clear cannot suppress required native drain.
-Ownerless `RENAME TABLE` now persists that marker after native `FILE_RENAME`
-redo evidence and before the dictionary-finish hook window, so a killed writer
-cannot lose the durable checkpoint-needed boundary before no-live recovery.
+Ownerless dictionary DDL now persists that marker after native `FILE_*` redo
+evidence and before the dictionary-finish hook window, with focused hook
+coverage for `RENAME TABLE` `FILE_RENAME` and `TRUNCATE TABLE` native
+truncate/recreate boundaries, so a killed writer cannot lose the durable
+checkpoint-needed boundary before no-live recovery for those classes.
 Ownerless AUTO_INCREMENT publishes now also mark a shared registry
 native-checkpoint pending bit when they raise a table high watermark. The
 final no-live ownerless close path drains that bit through the existing native

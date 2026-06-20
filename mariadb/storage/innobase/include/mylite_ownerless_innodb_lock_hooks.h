@@ -305,6 +305,8 @@ int mylite_ownerless_innodb_file_op_redo_relative_path(
     size_t relative_path_size);
 void mylite_ownerless_innodb_set_uncheckpointed_file_rename_recovery(int enabled);
 int mylite_ownerless_innodb_uncheckpointed_file_rename_recovery(void);
+void mylite_ownerless_innodb_note_file_op_redo(void);
+int mylite_ownerless_innodb_take_file_op_redo(void);
 void mylite_ownerless_innodb_note_file_rename_redo(void);
 int mylite_ownerless_innodb_take_file_rename_redo(void);
 void mylite_ownerless_innodb_set_test_faults_enabled(int enabled);

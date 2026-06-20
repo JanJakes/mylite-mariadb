@@ -201,10 +201,14 @@ int main(void) {
 static void test_checkpoint_suppression_and_file_op_flags_reset(void) {
     assert(!mylite_ownerless_innodb_checkpoint_suppressed());
     assert(!mylite_ownerless_innodb_relative_file_op_redo_paths());
+    assert(!mylite_ownerless_innodb_take_file_op_redo());
     assert(!mylite_ownerless_innodb_take_file_rename_redo());
 
     mylite_ownerless_innodb_set_checkpoint_suppression(1);
     mylite_ownerless_innodb_set_relative_file_op_redo_paths(1);
+    mylite_ownerless_innodb_note_file_op_redo();
+    assert(mylite_ownerless_innodb_take_file_op_redo());
+    assert(!mylite_ownerless_innodb_take_file_op_redo());
     mylite_ownerless_innodb_note_file_rename_redo();
     assert(mylite_ownerless_innodb_checkpoint_suppressed());
     assert(mylite_ownerless_innodb_relative_file_op_redo_paths());
@@ -222,6 +226,7 @@ static void test_checkpoint_suppression_and_file_op_flags_reset(void) {
     mylite_ownerless_innodb_lock_reset_hooks();
     assert(!mylite_ownerless_innodb_checkpoint_suppressed());
     assert(!mylite_ownerless_innodb_relative_file_op_redo_paths());
+    assert(!mylite_ownerless_innodb_take_file_op_redo());
     assert(!mylite_ownerless_innodb_take_file_rename_redo());
 }
 

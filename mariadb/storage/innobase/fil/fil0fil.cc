@@ -1628,8 +1628,7 @@ inline size_t mtr_t::log_file_op(mfile_type_t type, uint32_t space_id,
   m_modifications= true;
   if (!is_logged())
     return 0;
-  if (type == FILE_RENAME)
-    mylite_ownerless_innodb_note_file_rename_redo();
+  mylite_ownerless_innodb_note_file_op_redo();
   m_last= nullptr;
 
   const size_t len= strlen(path);

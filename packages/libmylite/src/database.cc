@@ -1914,7 +1914,7 @@ void mark_ownerless_native_file_op_checkpoint_after_dictionary_ddl(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 );
-void mark_ownerless_native_file_rename_checkpoint_before_dictionary_finish(mylite_db &db);
+void mark_ownerless_native_file_op_checkpoint_before_dictionary_finish(mylite_db &db);
 bool advance_ownerless_no_live_page_visible_lsn_for_reclaim(
     RuntimeState &runtime,
     std::uint64_t latest_lsn,
@@ -11104,11 +11104,11 @@ void mark_ownerless_native_file_op_checkpoint_after_dictionary_ddl(
     if (!db.ownerless_rw_open || db.readonly_open) {
         return;
     }
-    const bool file_rename_redo = mylite_ownerless_innodb_take_file_rename_redo() != 0;
-    if (!file_rename_redo && !ownerless_dictionary_ddl_needs_native_file_op_checkpoint(tokens)) {
+    const bool file_op_redo = mylite_ownerless_innodb_take_file_op_redo() != 0;
+    if (!file_op_redo && !ownerless_dictionary_ddl_needs_native_file_op_checkpoint(tokens)) {
         return;
     }
-    if (file_rename_redo &&
+    if (file_op_redo &&
         mylite_ownerless_innodb_make_checkpoint() == MYLITE_OWNERLESS_INNODB_LOCK_OK) {
         return;
     }
@@ -11123,11 +11123,11 @@ void mark_ownerless_native_file_op_checkpoint_after_dictionary_ddl(
     );
 }
 
-void mark_ownerless_native_file_rename_checkpoint_before_dictionary_finish(mylite_db &db) {
+void mark_ownerless_native_file_op_checkpoint_before_dictionary_finish(mylite_db &db) {
     if (!db.ownerless_rw_open || db.readonly_open) {
         return;
     }
-    if (mylite_ownerless_innodb_take_file_rename_redo() == 0) {
+    if (mylite_ownerless_innodb_take_file_op_redo() == 0) {
         return;
     }
 
@@ -11142,7 +11142,7 @@ void mark_ownerless_native_file_rename_checkpoint_before_dictionary_finish(mylit
         }
     }
     if (!marker_written) {
-        mylite_ownerless_innodb_note_file_rename_redo();
+        mylite_ownerless_innodb_note_file_op_redo();
     }
 }
 
@@ -14163,7 +14163,7 @@ int ownerless_begin_dictionary_ddl(
     db.ownerless_observed_dictionary_generation_initialized = true;
     clear_ownerless_insert_foreign_key_cache(db);
     *out_ddl_started = true;
-    static_cast<void>(mylite_ownerless_innodb_take_file_rename_redo());
+    static_cast<void>(mylite_ownerless_innodb_take_file_op_redo());
     pause_for_ownerless_test_fault("dictionary-after-begin");
     return MYLITE_OK;
 }
@@ -14173,7 +14173,7 @@ int ownerless_finish_dictionary_ddl(mylite_db &db, bool ddl_started) {
         return MYLITE_OK;
     }
 
-    mark_ownerless_native_file_rename_checkpoint_before_dictionary_finish(db);
+    mark_ownerless_native_file_op_checkpoint_before_dictionary_finish(db);
     pause_for_ownerless_test_fault("dictionary-before-finish");
 
     void *dictionary_state = nullptr;

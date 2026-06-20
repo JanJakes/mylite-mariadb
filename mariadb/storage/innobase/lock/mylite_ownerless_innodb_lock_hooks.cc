@@ -151,7 +151,7 @@ std::atomic<trx_id_t> next_transient_lock_trx_id{1};
 std::atomic<bool> checkpoint_suppressed{false};
 std::atomic<bool> relative_file_op_redo_paths{false};
 std::atomic<bool> uncheckpointed_file_rename_recovery{false};
-std::atomic<bool> file_rename_redo_logged{false};
+std::atomic<bool> file_op_redo_logged{false};
 std::atomic<uint64_t> test_fault_match_count{0};
 thread_local uint64_t page_visible_lsn= 0;
 thread_local bool page_visible_lsn_is_current= false;
@@ -561,7 +561,7 @@ extern "C" void mylite_ownerless_innodb_lock_reset_hooks(void)
   checkpoint_suppressed.store(false, std::memory_order_release);
   relative_file_op_redo_paths.store(false, std::memory_order_release);
   uncheckpointed_file_rename_recovery.store(false, std::memory_order_release);
-  file_rename_redo_logged.store(false, std::memory_order_release);
+  file_op_redo_logged.store(false, std::memory_order_release);
   mylite_ownerless_innodb_set_test_faults_enabled(0);
 }
 
@@ -676,16 +676,26 @@ extern "C" int mylite_ownerless_innodb_uncheckpointed_file_rename_recovery(void)
              : 0;
 }
 
+extern "C" void mylite_ownerless_innodb_note_file_op_redo(void)
+{
+  file_op_redo_logged.store(true, std::memory_order_release);
+}
+
+extern "C" int mylite_ownerless_innodb_take_file_op_redo(void)
+{
+  const bool logged= file_op_redo_logged.exchange(false,
+                                                  std::memory_order_acq_rel);
+  return logged ? 1 : 0;
+}
+
 extern "C" void mylite_ownerless_innodb_note_file_rename_redo(void)
 {
-  file_rename_redo_logged.store(true, std::memory_order_release);
+  mylite_ownerless_innodb_note_file_op_redo();
 }
 
 extern "C" int mylite_ownerless_innodb_take_file_rename_redo(void)
 {
-  const bool logged= file_rename_redo_logged.exchange(
-      false, std::memory_order_acq_rel);
-  return logged ? 1 : 0;
+  return mylite_ownerless_innodb_take_file_op_redo();
 }
 
 extern "C" void mylite_ownerless_innodb_set_test_faults_enabled(int enabled)
