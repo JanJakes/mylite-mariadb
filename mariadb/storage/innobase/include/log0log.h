@@ -471,6 +471,11 @@ public:
   /** Make previous write_buf() durable and update flushed_to_disk_lsn. */
   bool flush(lsn_t lsn) noexcept;
 
+  /** Truncate the open redo log file.
+  @param size  desired physical file size
+  @return whether the truncate succeeded or there was no open file */
+  bool truncate(lsn_t size) noexcept;
+
   /** Shut down the redo log subsystem. */
   void close();
 

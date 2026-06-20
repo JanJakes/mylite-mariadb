@@ -124,10 +124,10 @@ observed native redo file is exactly 8 bytes larger than the configured 96 MiB
 follow-up physical-size attribution slice showed that this is not merely an
 internal `log_sys.file_size` accounting artifact: the physical `ib_logfile0`
 size also averaged `100663304` bytes at rebuild time, physical mismatch calls
-matched rebuild calls, and internal/physical divergence was zero. A follow-up
-optimization should focus on why clean embedded shutdown leaves a physical
-8-byte redo tail, or whether MariaDB's shutdown checkpoint policy requires that
-tail and must remain untouched.
+matched rebuild calls, and internal/physical divergence was zero. The later
+clean-shutdown tail truncation slice keeps the startup rebuild predicate intact
+and normalizes the physical tail only after MariaDB's clean shutdown
+LSN/checkpoint checks pass.
 
 ## Risks And Follow-Up
 

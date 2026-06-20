@@ -1231,6 +1231,15 @@ void log_t::writer_update(bool resizing) noexcept
   mtr_t::finisher_update();
 }
 
+bool log_t::truncate(lsn_t size) noexcept
+{
+  if (!log.is_opened())
+    return true;
+
+  std::string path{get_log_file_path()};
+  return os_file_truncate(path.c_str(), log.m_file, size, true);
+}
+
 /** Write to the log file up to the last log entry.
 @param durable  whether to wait for a durable write to complete */
 void log_buffer_flush_to_disk(bool durable) noexcept
@@ -1367,6 +1376,31 @@ void log_free_check() noexcept
 extern void buf_mem_pressure_shutdown() noexcept;
 #else
 inline void buf_mem_pressure_shutdown() noexcept {}
+#endif
+
+#ifdef EMBEDDED_LIBRARY
+static void mylite_truncate_clean_shutdown_redo_tail() noexcept
+{
+	if (log_sys.file_size != srv_log_file_size) {
+		return;
+	}
+
+	std::string path{get_log_file_path()};
+	const os_file_size_t physical_size{os_file_get_size(path.c_str())};
+
+	if (physical_size.m_total_size == os_offset_t(~0)
+	    || physical_size.m_total_size == os_offset_t(~0U)
+	    || static_cast<lsn_t>(physical_size.m_total_size)
+		<= log_sys.file_size) {
+		return;
+	}
+
+	if (!log_sys.truncate(log_sys.file_size)) {
+		ib::warn() << "Could not truncate clean-shutdown redo log tail"
+			   << " from " << ib::bytes_iec{physical_size.m_total_size}
+			   << " to " << ib::bytes_iec{log_sys.file_size};
+	}
+}
 #endif
 
 /** Make a checkpoint at the latest lsn on shutdown. */
@@ -1683,6 +1717,12 @@ wait_suspend_loop:
 
 	ut_a(lsn == log_get_lsn()
 	     || srv_force_recovery == SRV_FORCE_NO_LOG_REDO);
+#ifdef EMBEDDED_LIBRARY
+	if (!srv_read_only_mode
+	    && srv_force_recovery < SRV_FORCE_NO_LOG_REDO) {
+		mylite_truncate_clean_shutdown_redo_tail();
+	}
+#endif
 	mylite_embedded_shutdown_perf_add_elapsed(
 		MYLITE_EMBEDDED_SHUTDOWN_PERF_INNODB_LOGS_EMPTY_FINAL_CHECKS_NS,
 		mylite_stage_start);

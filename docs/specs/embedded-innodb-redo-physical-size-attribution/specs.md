@@ -120,11 +120,11 @@ reported:
 
 The measured rebuild trigger is a real physical `ib_logfile0` size mismatch:
 the physical file and `log_sys.file_size` both report `100663304` bytes, while
-the configured `srv_log_file_size` is `100663296` bytes. The next performance
-slice should therefore focus on why clean embedded shutdown leaves a physical
-8-byte redo tail or whether MariaDB's shutdown checkpoint policy requires that
-tail. A startup-only comparison skip would be unsafe without proving redo wrap
-geometry and checkpoint validation remain correct.
+the configured `srv_log_file_size` is `100663296` bytes. The follow-up
+clean-shutdown tail truncation slice therefore targets the shutdown side after
+MariaDB's clean LSN/checkpoint checks instead of skipping the startup rebuild
+predicate. A startup-only comparison skip would be unsafe without proving redo
+wrap geometry and checkpoint validation remain correct.
 
 ## Risks And Follow-Up
 

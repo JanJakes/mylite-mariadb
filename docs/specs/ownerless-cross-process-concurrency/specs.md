@@ -910,6 +910,13 @@ The design must be fast in the common case:
   native prepared reprepare/close calls, and ownerless prepared-step native
   execute at `0.303 ms/select`; a stats-off 3000-select sample reported
   point-select direct/prepared ratios of `0.8475`/`0.8276`.
+  Native redo attribution then showed repeated actual rebuilds came from a
+  physical clean-shutdown `ib_logfile0` tail (`100663304` observed versus
+  `100663296` configured). Embedded clean-shutdown tail truncation now
+  normalizes that tail only after MariaDB's clean shutdown LSN/checkpoint
+  checks pass; the focused reduced production probe reported zero warm-open
+  redo rebuilds and `124.153 ms` ordinary warm open/close, while the public
+  open/close bench left `ib_logfile0` at exactly `100663296` bytes after close.
 - Page-version lookup should be O(1) average by `(space_id, page_no)` with a
   short version chain filtered by reader end mark.
 - Ordinary exclusive opens must stay on the native MariaDB embedded hot path:
