@@ -501,6 +501,12 @@ int mylite_ownerless_innodb_redo_written_and_leave(
     uint64_t end_lsn,
     uint64_t latest_lsn,
     uint64_t *out_written_lsn);
+int mylite_ownerless_innodb_redo_defer_written_and_leave(
+    uint64_t start_lsn,
+    uint64_t end_lsn,
+    uint64_t latest_lsn,
+    uint64_t *out_written_lsn);
+int mylite_ownerless_innodb_redo_flush_deferred(void);
 int mylite_ownerless_innodb_publish_page_version(
     uint32_t space_id,
     uint32_t page_no,

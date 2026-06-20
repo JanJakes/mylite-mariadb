@@ -52,6 +52,19 @@ constexpr trx_id_t k_transient_lock_trx_id_flag =
     trx_id_t{1} << ((sizeof(trx_id_t) * 8) - 1);
 constexpr size_t k_page_write_refresh_negative_cache_entries= 64;
 constexpr size_t k_external_page_observation_entries= 128;
+constexpr size_t k_deferred_redo_batch_capacity= 32;
+
+struct deferred_redo_range
+{
+  uint64_t start_lsn= 0;
+  uint64_t end_lsn= 0;
+  uint64_t latest_lsn= 0;
+};
+
+thread_local deferred_redo_range deferred_redo_batch
+    [k_deferred_redo_batch_capacity];
+thread_local size_t deferred_redo_batch_count= 0;
+thread_local uint64_t deferred_redo_batch_latest_lsn= 0;
 
 bool ownerless_path_separator(char c) noexcept
 {
@@ -383,6 +396,7 @@ bool transaction_should_track_page_write(trx_t *trx,
                                          uint32_t space_id,
                                          uint32_t page_no);
 void collect_buffer_pool_file_pages(std::vector<uint64_t> &pages);
+int flush_deferred_redo_batch();
 void publish_pages_visible_lsn(uint64_t visible_lsn);
 void clear_transaction_wait(trx_id_t trx_id);
 void release_transaction_page_writes(trx_id_t trx_id);
@@ -490,6 +504,10 @@ extern "C" void mylite_ownerless_innodb_lock_set_redo_written_leave_hook(
 
 extern "C" void mylite_ownerless_innodb_lock_reset_hooks(void)
 {
+  const int flush_result= mylite_ownerless_innodb_redo_flush_deferred();
+  if (flush_result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
+      flush_result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+    ut_error;
   ownerless_page_write_refresh_cache_epoch.fetch_add(
       1, std::memory_order_acq_rel);
   mylite_ownerless_innodb_lock_hooks_enabled.store(false, std::memory_order_release);
@@ -1529,6 +1547,13 @@ extern "C" int mylite_ownerless_innodb_statement_visible_fast_path(void)
 extern "C" int
 mylite_ownerless_innodb_set_statement_deferred_page_publish(int enabled)
 {
+  if (enabled == 0 && mylite_ownerless_statement_deferred_page_publish)
+  {
+    const int flush_result= mylite_ownerless_innodb_redo_flush_deferred();
+    if (flush_result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
+        flush_result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+      ut_error;
+  }
   const bool previous= mylite_ownerless_statement_deferred_page_publish;
   mylite_ownerless_statement_deferred_page_publish= enabled != 0;
   return previous ? 1 : 0;
@@ -2757,6 +2782,58 @@ extern "C" int mylite_ownerless_innodb_redo_written_and_leave(
   return result;
 }
 
+extern "C" int mylite_ownerless_innodb_redo_defer_written_and_leave(
+    uint64_t start_lsn,
+    uint64_t end_lsn,
+    uint64_t latest_lsn,
+    uint64_t *out_written_lsn)
+{
+  if (start_lsn == 0 || end_lsn <= start_lsn)
+    return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+
+  if (out_written_lsn != nullptr)
+    *out_written_lsn= 0;
+
+  if (!ownerless_lock_hooks_enabled() || redo_depth != 1 ||
+      !mylite_ownerless_statement_deferred_page_publish ||
+      mylite_ownerless_innodb_test_faults_enabled_fast())
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+
+  mylite_ownerless_innodb_redo_written_leave_callback hook=
+      redo_written_leave_callback.load(std::memory_order_acquire);
+  void *context= callback_context.load(std::memory_order_acquire);
+  if (hook == nullptr || context == nullptr)
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+
+  if (deferred_redo_batch_count == k_deferred_redo_batch_capacity)
+  {
+    const int flush_result= flush_deferred_redo_batch();
+    if (flush_result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
+        flush_result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+      return flush_result;
+  }
+
+  if (deferred_redo_batch_count >= k_deferred_redo_batch_capacity)
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+
+  deferred_redo_batch[deferred_redo_batch_count++]=
+      {start_lsn, end_lsn, latest_lsn};
+  if (latest_lsn > deferred_redo_batch_latest_lsn)
+    deferred_redo_batch_latest_lsn= latest_lsn;
+  if (latest_lsn > redo_latest_lsn)
+    redo_latest_lsn= latest_lsn;
+
+  redo_depth--;
+  if (redo_depth == 0)
+    redo_latest_lsn= 0;
+  return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
+extern "C" int mylite_ownerless_innodb_redo_flush_deferred(void)
+{
+  return flush_deferred_redo_batch();
+}
+
 extern "C" int mylite_ownerless_innodb_publish_page_version(
     uint32_t space_id,
     uint32_t page_no,
@@ -3085,11 +3162,63 @@ void publish_pages_visible_lsn(uint64_t visible_lsn)
 {
   if (visible_lsn == 0 || !ownerless_lock_hooks_enabled())
     return;
+  const int flush_result= flush_deferred_redo_batch();
+  if (flush_result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
+      flush_result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+    return;
   mylite_ownerless_innodb_pages_visible_callback hook=
       pages_visible_callback.load(std::memory_order_acquire);
   void *context= callback_context.load(std::memory_order_acquire);
   if (hook != nullptr && context != nullptr)
     hook(visible_lsn, context);
+}
+
+int flush_deferred_redo_batch()
+{
+  if (deferred_redo_batch_count == 0)
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+
+  mylite_ownerless_innodb_redo_written_leave_callback hook=
+      redo_written_leave_callback.load(std::memory_order_acquire);
+  void *context= callback_context.load(std::memory_order_acquire);
+  if (hook == nullptr || context == nullptr)
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+
+  const size_t count= deferred_redo_batch_count;
+  const uint64_t latest_lsn= deferred_redo_batch_latest_lsn;
+  deferred_redo_batch_count= 0;
+  deferred_redo_batch_latest_lsn= 0;
+
+  if (latest_lsn != 0)
+    log_write_up_to(static_cast<lsn_t>(latest_lsn), false);
+
+  for (size_t i= 0; i < count; ++i)
+  {
+    uint64_t written_lsn= 0;
+    const uint64_t range_latest_lsn= (i + 1 == count) ? latest_lsn : 0;
+    const int result= hook(deferred_redo_batch[i].start_lsn,
+                           deferred_redo_batch[i].end_lsn,
+                           range_latest_lsn, &written_lsn, context);
+    if (result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
+        result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+    {
+      size_t retained_count= 0;
+      deferred_redo_batch_latest_lsn= 0;
+      for (size_t tail= i; tail < count; ++tail)
+      {
+        const deferred_redo_range retained= deferred_redo_batch[tail];
+        deferred_redo_batch[retained_count++]= retained;
+        if (retained.latest_lsn > deferred_redo_batch_latest_lsn)
+          deferred_redo_batch_latest_lsn= retained.latest_lsn;
+      }
+      for (size_t clear= retained_count; clear < count; ++clear)
+        deferred_redo_batch[clear]= {};
+      deferred_redo_batch_count= retained_count;
+      return result;
+    }
+    deferred_redo_batch[i]= {};
+  }
+  return MYLITE_OWNERLESS_INNODB_LOCK_OK;
 }
 
 void handle_hook_result(const char *operation, int result)

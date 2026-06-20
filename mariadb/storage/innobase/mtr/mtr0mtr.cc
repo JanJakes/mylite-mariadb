@@ -2409,6 +2409,35 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_redo_leave() noexcept
   const bool ownerless_perf= ownerless_page_write_perf_enabled();
   if (lsn != 0)
   {
+    if (m_ownerless_redo_start_lsn != 0 &&
+        m_ownerless_redo_end_lsn > m_ownerless_redo_start_lsn)
+    {
+      const uint64_t hook_start_ns= ownerless_perf ?
+          ownerless_page_write_perf_now_ns() :
+          0;
+      uint64_t written_lsn= 0;
+      const int result= mylite_ownerless_innodb_redo_defer_written_and_leave(
+        m_ownerless_redo_start_lsn,
+        m_ownerless_redo_end_lsn,
+        lsn,
+        &written_lsn);
+      ownerless_page_write_perf_add_elapsed(
+          OWNERLESS_PAGE_WRITE_PERF_REDO_LEAVE_HOOK_NS, hook_start_ns);
+      if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
+      {
+        ownerless_page_write_perf_add_if_enabled(
+            ownerless_perf,
+            OWNERLESS_PAGE_WRITE_PERF_REDO_LEAVE_WRITTEN_HOOK_CALLS, 1);
+        m_ownerless_redo= false;
+        m_ownerless_redo_borrowed_latch= false;
+        m_ownerless_redo_start_lsn= 0;
+        m_ownerless_redo_end_lsn= 0;
+        return;
+      }
+      if (result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+        ut_error;
+    }
+
     ownerless_page_write_perf_add_if_enabled(
         ownerless_perf,
         OWNERLESS_PAGE_WRITE_PERF_REDO_LEAVE_LOG_WRITE_CALLS, 1);

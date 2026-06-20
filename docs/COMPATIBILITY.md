@@ -830,6 +830,25 @@ publication in normal builds. A reduced stats-off 5000-row,
 reported ownerless bulk at `24520.62 rows/s`, ordinary bulk at
 `81550.84 rows/s`, and a `0.3007` ownerless/ordinary ratio; this is a bounded
 append-path cleanup, not a broad throughput or recovery-completion claim.
+Ownerless visible-fast statements now also batch mini-transaction redo
+completion inside the existing deferred page-publication boundary. The
+production path defers top-level `(start_lsn, end_lsn, latest_lsn)` completion
+to a bounded thread-local batch, writes native redo once at the flush boundary,
+then completes each range through the existing fused written/leave hook before
+page-visible publication, statement teardown, or hook reset. Unsafe hook builds,
+non-visible-fast statements, nested redo, missing callbacks, and DDL/file
+lifecycle paths stay on the conservative immediate path. SQL behavior, public
+APIs, native redo format, page-version WAL, checkpoints, and directory layout
+are unchanged. A reduced stats-enabled 100-row bulk attribution sample reported
+ownerless `mysql_query()` at `3.406 ms` per statement, page-write commit-log at
+`0.725 ms` per statement, commit-log redo-leave at `0.260 ms` per statement,
+zero immediate page-write `log_write_up_to()` calls, `162.000` written/leave
+events per statement, and zero fallback hook calls. The matching stats-off
+5000-row, 100-row-per-statement production sample reported ownerless bulk at
+`27297.54 rows/s`, ordinary bulk at `96781.94 rows/s`, and a `0.2821`
+ownerless/ordinary ratio. This is a bounded visible-fast hot-path reduction,
+not completion of the broader ownerless redo/checkpoint or DDL/file-lifecycle
+recovery work.
 Profiled mysqli runs also split total query elapsed time into
 `query_verb_*` buckets for result queries, DML, DDL, connection state,
 transaction, lock, call, and other first-keyword classes so WordPress timing

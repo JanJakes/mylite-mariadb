@@ -1601,6 +1601,7 @@ struct OwnerlessStatementVisibleFastPathScope {
         if (ownerless_statement_defers_page_log_append_batch) {
             ownerless_page_log_append_batch_release_current();
         }
+        mylite_ownerless_innodb_redo_flush_deferred();
         ownerless_statement_latest_checkpoint_preserved = previous_latest_checkpoint_preserved;
         ownerless_statement_allows_deferred_latest_checkpoint_coalescing =
             previous_coalesce_deferred_latest_checkpoint;

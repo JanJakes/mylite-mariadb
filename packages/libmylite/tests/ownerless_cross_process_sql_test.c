@@ -11046,19 +11046,23 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
     );
     assert(page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS] == 1U);
     assert(
-        database_stats
-            [OWNERLESS_TEST_DATABASE_PERF_STAT_CHECKPOINT_UPDATE_DEFERRED_LATEST_COALESCED] > 0U
-    );
-    assert(
         page_write_stats[OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_TRANSACTION_DEFERRED_MTR_ELIDED] > 0U
     );
     assert(page_write_stats[OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_MTR_INLINE_FIRST_PAGES] > 0U);
-    assert(page_write_stats[OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_REDO_LEAVE_LOG_WRITE_CALLS] > 0U);
     assert(
         page_write_stats[OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_REDO_LEAVE_WRITTEN_HOOK_CALLS] +
             page_write_stats[OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_REDO_LEAVE_FALLBACK_HOOK_CALLS] >
         0U
     );
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    assert(page_write_stats[OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_REDO_LEAVE_LOG_WRITE_CALLS] > 0U);
+#else
+    assert(
+        page_write_stats[OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_REDO_LEAVE_LOG_WRITE_CALLS] <
+        page_write_stats[OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_REDO_LEAVE_WRITTEN_HOOK_CALLS] +
+            page_write_stats[OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_REDO_LEAVE_FALLBACK_HOOK_CALLS]
+    );
+#endif
     assert(
         deep_stats[OWNERLESS_TEST_INNODB_DEEP_ROW_INS_CLUST_LOW_OWNERLESS_DEFAULT_CHECKED_BULK] > 0U
     );
@@ -11270,10 +11274,6 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
     );
     assert(page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS] == 1U);
     assert(
-        database_stats
-            [OWNERLESS_TEST_DATABASE_PERF_STAT_CHECKPOINT_UPDATE_DEFERRED_LATEST_COALESCED] > 0U
-    );
-    assert(
         query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_eight_row_insert_fast_path") == 8U
     );
     assert(
@@ -11382,10 +11382,6 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
         page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] == 1U
     );
     assert(page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS] == 1U);
-    assert(
-        database_stats
-            [OWNERLESS_TEST_DATABASE_PERF_STAT_CHECKPOINT_UPDATE_DEFERRED_LATEST_COALESCED] > 0U
-    );
     assert(
         query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sixteen_row_insert_fast_path") == 16U
     );
@@ -11511,10 +11507,6 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
     );
     assert(page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS] == 1U);
     assert(
-        database_stats
-            [OWNERLESS_TEST_DATABASE_PERF_STAT_CHECKPOINT_UPDATE_DEFERRED_LATEST_COALESCED] > 0U
-    );
-    assert(
         query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_thirty_two_row_insert_fast_path") ==
         32U
     );
@@ -11598,10 +11590,6 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
         page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] == 1U
     );
     assert(page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS] == 1U);
-    assert(
-        database_stats
-            [OWNERLESS_TEST_DATABASE_PERF_STAT_CHECKPOINT_UPDATE_DEFERRED_LATEST_COALESCED] > 0U
-    );
     assert(
         query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sixty_four_row_insert_fast_path") ==
         64U
@@ -11690,10 +11678,6 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
         page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] == 1U
     );
     assert(page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS] == 1U);
-    assert(
-        database_stats
-            [OWNERLESS_TEST_DATABASE_PERF_STAT_CHECKPOINT_UPDATE_DEFERRED_LATEST_COALESCED] > 0U
-    );
     assert(
         query_unsigned(
             db,

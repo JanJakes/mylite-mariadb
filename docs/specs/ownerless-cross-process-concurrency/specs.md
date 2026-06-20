@@ -6272,6 +6272,23 @@ subsystems that this mode needs:
   visible LSN rules, redo/checkpoint ordering, or DDL/file-lifecycle recovery.
   Larger row lists, broad DML/DDL, and unbounded append-lock hold times remain
   out of scope.
+  The visible-fast redo batch-completion follow-up then defers top-level
+  mini-transaction redo completion inside the existing statement deferred
+  page-publication boundary. It writes native redo once per bounded batch,
+  completes each reserved range through the existing fused written/leave hook
+  before page-visible publication, statement teardown, or hook reset, and keeps
+  unsafe hook builds, non-visible-fast statements, nested redo, and DDL/file
+  lifecycle paths on the immediate path. The reduced stats-enabled 100-row bulk
+  attribution sample reported ownerless `mysql_query()` at `3.406 ms` per
+  statement, page-write commit-log at `0.725 ms` per statement, commit-log
+  redo-leave at `0.260 ms` per statement, zero immediate page-write
+  `log_write_up_to()` calls, `162.000` written/leave events per statement, and
+  zero fallback hook calls. The matching stats-off 5000-row,
+  100-row-per-statement production sample reported ownerless bulk at
+  `27297.54 rows/s`, ordinary bulk at `96781.94 rows/s`, and a `0.2821`
+  ownerless/ordinary ratio. This is a visible-fast hot-path reduction only; it
+  does not close broader redo/checkpoint reconciliation or DDL/file-lifecycle
+  recovery.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.
