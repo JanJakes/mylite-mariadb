@@ -4142,6 +4142,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-rename-file-op-marker-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_rename_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-cross-schema-rename-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_cross_schema_rename_dictionary_ddl_recovers_moved_table();
@@ -4955,7 +4961,8 @@ int main(int argc, char **argv) {
             "active-pin-reclaim-boundary|"
             "table-lock-wait-negative-proof|native-table-wait-crash|platform-probe-failure|"
             "trx-register-crash|record-lock-before-grant-crash|record-lock-grant-crash|"
-            "dictionary-rename-crash|dictionary-cross-schema-rename-crash|"
+            "dictionary-rename-crash|dictionary-rename-file-op-marker-crash|"
+            "dictionary-cross-schema-rename-crash|"
             "dictionary-multi-rename-crash|"
             "dictionary-secondary-index-crash|"
             "dictionary-secondary-index-drop-crash|"
@@ -37674,6 +37681,7 @@ static void test_crashed_rename_dictionary_ddl_blocks_peer_cleanup_until_reopen_
     wait_for_pipe(writer_ready_pipe[0]);
     assert(kill(writer_child, SIGKILL) == 0);
     wait_for_signaled_child(writer_child, SIGKILL);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     probe_child = fork();
     assert(probe_child >= 0);

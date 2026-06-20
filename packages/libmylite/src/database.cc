@@ -1914,6 +1914,7 @@ void mark_ownerless_native_file_op_checkpoint_after_dictionary_ddl(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 );
+void mark_ownerless_native_file_rename_checkpoint_before_dictionary_finish(mylite_db &db);
 bool advance_ownerless_no_live_page_visible_lsn_for_reclaim(
     RuntimeState &runtime,
     std::uint64_t latest_lsn,
@@ -11122,6 +11123,29 @@ void mark_ownerless_native_file_op_checkpoint_after_dictionary_ddl(
     );
 }
 
+void mark_ownerless_native_file_rename_checkpoint_before_dictionary_finish(mylite_db &db) {
+    if (!db.ownerless_rw_open || db.readonly_open) {
+        return;
+    }
+    if (mylite_ownerless_innodb_take_file_rename_redo() == 0) {
+        return;
+    }
+
+    bool marker_written = false;
+    {
+        const std::lock_guard<std::mutex> guard(g_runtime.mutex);
+        if (g_runtime.ref_count != 0U && g_runtime.ownerless_rw_mode &&
+            g_runtime.concurrency_checkpoint_fd >= 0) {
+            marker_written = mark_concurrency_native_file_op_checkpoint_needed(
+                g_runtime.concurrency_checkpoint_fd
+            );
+        }
+    }
+    if (!marker_written) {
+        mylite_ownerless_innodb_note_file_rename_redo();
+    }
+}
+
 bool advance_ownerless_no_live_page_visible_lsn_for_reclaim(
     RuntimeState &runtime,
     std::uint64_t latest_lsn,
@@ -14149,6 +14173,7 @@ int ownerless_finish_dictionary_ddl(mylite_db &db, bool ddl_started) {
         return MYLITE_OK;
     }
 
+    mark_ownerless_native_file_rename_checkpoint_before_dictionary_finish(db);
     pause_for_ownerless_test_fault("dictionary-before-finish");
 
     void *dictionary_state = nullptr;
