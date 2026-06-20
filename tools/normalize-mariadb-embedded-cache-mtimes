@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+epoch="${MYLITE_MARIADB_EMBEDDED_SOURCE_MTIME_EPOCH:-946684800}"
+touch_args=()
+
+usage() {
+  cat <<EOF
+Usage: tools/normalize-mariadb-embedded-cache-mtimes
+
+Normalize MariaDB embedded archive input mtimes before restoring or reusing a
+cached CMake build tree. CI checkouts give source files fresh mtimes, while
+actions/cache restores object files with older mtimes. Without normalization,
+Ninja rebuilds valid exact-key archive caches even when content has not changed.
+
+Environment:
+  MYLITE_MARIADB_EMBEDDED_SOURCE_MTIME_EPOCH
+                 Unix timestamp applied to archive inputs. Defaults to
+                 946684800, 2000-01-01T00:00:00Z.
+EOF
+}
+
+touch_one() {
+  local path="$1"
+
+  touch "${touch_args[@]}" "${path}"
+}
+
+normalize_tree() {
+  local path="$1"
+
+  if [ ! -d "${path}" ]; then
+    echo "Missing MariaDB embedded source tree: ${path}" >&2
+    exit 1
+  fi
+
+  find "${path}" -type f -exec touch "${touch_args[@]}" {} +
+}
+
+set_touch_args() {
+  local probe
+
+  probe="${TMPDIR:-/tmp}/mylite-mariadb-mtime-probe.$$"
+  : > "${probe}"
+  if touch -d "@${epoch}" "${probe}" 2>/dev/null; then
+    touch_args=(-d "@${epoch}")
+  else
+    touch_args=(-t "${touch_stamp}")
+    touch "${touch_args[@]}" "${probe}"
+  fi
+  rm -f "${probe}"
+}
+
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  "")
+    ;;
+  *)
+    usage >&2
+    exit 1
+    ;;
+esac
+
+case "${epoch}" in
+  ""|*[!0-9]*)
+    echo "Invalid MYLITE_MARIADB_EMBEDDED_SOURCE_MTIME_EPOCH: ${epoch}" >&2
+    exit 1
+    ;;
+esac
+
+touch_stamp="$(date -u -d "@${epoch}" '+%Y%m%d%H%M.%S' 2>/dev/null ||
+  date -u -r "${epoch}" '+%Y%m%d%H%M.%S')"
+set_touch_args
+
+normalize_tree "${root_dir}/mariadb"
+touch_one "${root_dir}/cmake/mariadb-embedded-baseline.cmake"
+touch_one "${root_dir}/tools/mariadb-embedded-build"
+
+echo "mariadb_embedded_source_mtime_epoch=${epoch}"
+echo "mariadb_embedded_source_mtime_stamp=${touch_stamp}"

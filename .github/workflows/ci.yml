@@ -91,6 +91,9 @@ jobs:
             php-dev \
             zlib1g-dev
 
+      - name: Normalize embedded MariaDB archive source mtimes
+        run: tools/normalize-mariadb-embedded-cache-mtimes
+
       - name: Cache embedded MariaDB archive build
         uses: actions/cache@v4
         with:
@@ -261,6 +264,9 @@ jobs:
           key: ${{ runner.os }}-wordpress-composer-${{ hashFiles('tools/wordpress-phpunit-mysqli-mylite') }}
           restore-keys: |
             ${{ runner.os }}-wordpress-composer-
+
+      - name: Normalize WordPress MariaDB archive source mtimes
+        run: tools/normalize-mariadb-embedded-cache-mtimes
 
       - name: Cache WordPress MariaDB archive build
         uses: actions/cache@v4

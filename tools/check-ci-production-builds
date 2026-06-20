@@ -308,6 +308,9 @@ require_literal "tools/require-cmake-build-type MinSizeRel build/wordpress-maria
 require_literal "tools/mariadb-embedded-build ensure"
 require_literal "Cache embedded MariaDB archive build"
 require_literal "Cache WordPress MariaDB archive build"
+require_literal "Normalize embedded MariaDB archive source mtimes"
+require_literal "Normalize WordPress MariaDB archive source mtimes"
+require_literal_count_at_least "tools/normalize-mariadb-embedded-cache-mtimes" 2
 require_literal "path: build/mariadb-embedded"
 require_literal "path: build/wordpress-mariadb-embedded"
 require_literal "\${{ runner.os }}-mariadb-embedded-\${{ hashFiles('mariadb/**', 'cmake/mariadb-embedded-baseline.cmake', 'tools/mariadb-embedded-build') }}"

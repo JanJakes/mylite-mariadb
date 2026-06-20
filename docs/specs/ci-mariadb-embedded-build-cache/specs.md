@@ -35,6 +35,10 @@ repeat-run wall time after the cache is populated.
   `cmake/mariadb-embedded-baseline.cmake` a newer mtime than the restored
   `CMakeCache.txt`, so the old `profile -nt CMakeCache.txt` freshness check
   defeated a valid exact-key cache hit.
+- After the profile-signature fix, a warm-cache rerun still spent minutes in
+  the archive build steps. That proved configure invalidation was fixed, but
+  Ninja still saw freshly checked-out MariaDB sources as newer than restored
+  object files and rebuilt valid exact-key caches.
 
 ## Design
 
@@ -65,6 +69,13 @@ configure. `ensure` compares the current profile content hash with that marker
 instead of comparing checkout/cache mtimes. Missing markers, profile content
 changes, explicit CMake arguments, missing CMake caches, or absolute build
 directory mismatches still force configure.
+
+Add `tools/normalize-mariadb-embedded-cache-mtimes` and run it in the embedded
+and WordPress setup jobs before archive cache restore/build. The tool sets
+MariaDB archive input file mtimes to a stable old timestamp. Exact cache keys
+still decide whether cached build outputs are allowed for the current content;
+the normalized mtimes only stop Ninja from treating unchanged checked-out
+sources as newer than restored object files.
 
 Update `tools/check-ci-production-builds` so workflow edits that remove these
 caches, cache paths, exact keys, or the `ensure` entry point fail the local and
@@ -113,6 +124,9 @@ keys avoid restoring stale MariaDB outputs across code changes.
   `build/mariadb-embedded` tree and confirm configure is skipped.
 - Run `tools/mariadb-embedded-build ensure` twice after adding the profile
   signature marker and confirm the second run skips configure.
+- Run `tools/normalize-mariadb-embedded-cache-mtimes` and confirm
+  `tools/mariadb-embedded-build ensure` still skips configure and has no Ninja
+  work on a warmed tree.
 - Verify the local WordPress MariaDB embedded cache remains `MinSizeRel`.
 - Run `git diff --check`.
 
@@ -127,6 +141,8 @@ keys avoid restoring stale MariaDB outputs across code changes.
   both exact keys, and the `ensure` command.
 - A restored cache is invalidated by profile content drift, not by checkout
   mtime drift.
+- CI normalizes MariaDB archive source mtimes before reusing restored build
+  directories, so Ninja can observe valid exact-key caches as no-op builds.
 - Production build-type guards remain in place after the restore/build phase.
 
 ## Verification Results
@@ -154,9 +170,23 @@ keys avoid restoring stale MariaDB outputs across code changes.
   `tools/mariadb-embedded-build ensure`: passed with
   `mariadb_embedded_configure=skipped`, proving profile mtime drift alone no
   longer invalidates the cache.
+- Warm-cache CI rerun after the profile-signature fix still spent minutes in
+  the archive build steps, proving restored object-file mtimes also need source
+  mtime normalization before Ninja can no-op a valid cache.
+- `bash -n tools/normalize-mariadb-embedded-cache-mtimes`: passed.
+- `tools/normalize-mariadb-embedded-cache-mtimes`: passed locally and reported
+  `mariadb_embedded_source_mtime_epoch=946684800`.
+- `tools/mariadb-embedded-build ensure` after source mtime normalization:
+  passed with `mariadb_embedded_configure=skipped` and
+  `ninja: no work to do.`
 - `tools/require-cmake-build-type MinSizeRel
   build/wordpress-mariadb-embedded`: passed.
 - `ctest --preset prod -R '^tools\.ci-production-builds$'
   --output-on-failure`: passed after the profile-signature fix, 1/1 test.
+- `tools/check-ci-production-builds`: passed after adding the workflow mtime
+  normalization steps.
+- `ctest --preset prod -R '^tools\.ci-production-builds$'
+  --output-on-failure`: passed after adding the workflow mtime normalization
+  audit, 1/1 test.
 - `cmake --build --preset format-check-prod`: passed.
 - `git diff --check`: passed.
