@@ -96,6 +96,15 @@ conservative native-read mode for subsequent post-peer-DDL statements instead
 of immediately re-enabling page-version reads over table pages whose rebuild
 generation is not encoded in the page-version WAL key.
 
+The follow-up
+`ownerless-compressed-row-format-native-read-proof` slice closes the same
+boundary for the first statement that detects the peer DDL generation change:
+if dictionary refresh sets the conservative native-read flag after the caller
+entered with page-version reads allowed, the refresh path revokes
+same-statement page-version eligibility before native execution. Focused
+coverage now asserts the post-peer compressed rebuild parent window records
+ownerless refresh calls but zero `refresh_page_version_reads_enabled`.
+
 ## Compatibility Impact
 
 SQL behavior is unchanged. The slice strengthens partial ownerless DDL
@@ -135,6 +144,8 @@ add dependencies or new public entry points.
   test_ownerless_compressed_row_format_ddl_refreshes_peer_dictionary`.
 - Run focused `compressed-row-format-ddl` and
   `compressed-row-format-key-block-ddl`.
+- Assert the post-peer compressed rebuild parent windows record refresh calls
+  and zero `refresh_page_version_reads_enabled`.
 - Run adjacent DDL selectors: `row-format-ddl`, `charset-convert-ddl`,
   `table-comment-ddl`, `force-rebuild-ddl`, and `compressed-blob-page-pressure`.
 - Build and run focused compressed row-format crash selectors in
@@ -148,6 +159,8 @@ add dependencies or new public entry points.
   rebuilt `Compressed` row format.
 - Existing rows remain readable after the compressed rebuild.
 - The already-open peer can insert a prepared BLOB row after the rebuild.
+- The already-open peer does not enable page-version reads in the post-peer
+  compressed rebuild parent window.
 - Final rows, compressed metadata, and ZBLOB page evidence survive
   ownerless/native reopen before and after forced `.shm` rebuild.
 - A dictionary-generation refresh updates space-header page-size metadata and
@@ -160,10 +173,11 @@ add dependencies or new public entry points.
   DDL matrix. Focused `KEY_BLOCK_SIZE=4` and `KEY_BLOCK_SIZE=16` compressed
   rebuilds are covered separately by
   `ownerless-compressed-row-format-key-block-ddl`.
-- Crash injection during compressed rebuild, durable DDL file-lifecycle
-  metadata for every native DDL class, SQL-level table-lock fault injection,
-  broader deterministic compressed-row-format trace variants, and external
-  MariaDB/RQG DDL stress remain separate gaps.
+- Broader compressed DDL crash matrices beyond the focused row-format/key-block
+  dictionary-boundary crash selectors, durable DDL file-lifecycle metadata for
+  every native DDL class, SQL-level table-lock fault injection, broader
+  deterministic compressed-row-format trace variants, and external MariaDB/RQG
+  DDL stress remain separate gaps.
 - Conservative native reads after peer DDL are intentionally broader than the
   compressed-row-format case. A future per-space or per-table rebuild-generation
   stamp in the page-version index could recover more page-version read

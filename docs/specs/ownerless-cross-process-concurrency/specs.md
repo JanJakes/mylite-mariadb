@@ -2002,7 +2002,12 @@ Tasks:
    conservative flag is set. This avoids overlaying retained `(space_id,
    page_no)` records from the pre-rebuild table image onto the rebuilt table,
    including compressed external BLOB page chains whose continuation pages can
-   be invalid for the new table image. No-live-process
+   be invalid for the new table image. If the dictionary refresh itself is the
+   first point where the handle notices the peer generation change, the same
+   statement now revokes page-version-read eligibility before native execution;
+   compressed row-format coverage asserts the post-peer parent window records
+   refresh calls and zero `refresh_page_version_reads_enabled`.
+   No-live-process
    recovery treats the page-version WAL as the visibility authority and applies
    the latest visible page-version record by the same commit-first ordering as
    page-version reads to existing native InnoDB tablespace files before
@@ -3974,7 +3979,10 @@ Tasks:
    native compressed row-format transition, inserts a prepared BLOB row through
    the rebuilt table, and verifies final compressed metadata plus native
    `FIL_PAGE_TYPE_ZBLOB`/`ZBLOB2` page evidence before and after forced `.shm`
-   rebuild.
+   rebuild. The compressed selectors also assert that the post-peer rebuild
+   parent window records ownerless refresh calls but does not enable
+   page-version reads, proving the conservative native-read boundary while
+   rebuild generation is not encoded in the page-version key.
    Table-comment coverage adds ownerless
    `ALTER TABLE ... COMMENT='ownerless updated comment'`, verifies an
    already-open peer observes `information_schema.TABLES.TABLE_COMMENT`

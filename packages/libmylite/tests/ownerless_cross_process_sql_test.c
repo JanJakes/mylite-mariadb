@@ -259,6 +259,31 @@ enum ownerless_test_database_perf_stat_index {
     OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_SUCCEEDED,
     OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_UNAVAILABLE,
     OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_FAILED,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_CALLS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_TOTAL_NS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_DICTIONARY_NS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_SHARED_SNAPSHOT_NS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_PIN_SNAPSHOT_NS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_BASELINE_PIN_CALLS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_BASELINE_PIN_NS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_ADVANCE_TRX_HORIZON_CALLS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_ADVANCE_TRX_HORIZON_NS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_CLOSE_READ_VIEW_CALLS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_CLOSE_READ_VIEW_NS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_NATIVE_FLUSH_CALLS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_NATIVE_FLUSH_NS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_EXTERNAL_REFRESH_CALLS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_EXTERNAL_REFRESH_NS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_HANDLE_PIN_CALLS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_HANDLE_PIN_NS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_CLEAN_PAGE_REFRESH_CALLS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_CLEAN_PAGE_REFRESH_NS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_VISIBILITY_PUSH_CALLS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_VISIBILITY_PUSH_NS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_VISIBILITY_ENABLE_CALLS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_VISIBILITY_ENABLE_NS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_LOCAL_NATIVE_CURRENT_READ,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_PAGE_VERSION_READS_ENABLED,
     OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT
 };
 
@@ -23358,6 +23383,32 @@ static void test_ownerless_row_format_ddl_refreshes_peer_dictionary(void) {
     free(root);
 }
 
+static void assert_ownerless_compressed_row_format_post_peer_ddl_native_reads(const char *label) {
+    uint64_t stats[OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT] = {0};
+
+    mylite_ownerless_database_read_perf_stats(stats, OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT);
+    if (stats[OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_CALLS] == 0U ||
+        stats[OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_PAGE_VERSION_READS_ENABLED] != 0U) {
+        fprintf(
+            stderr,
+            "%s: compressed row-format post-peer DDL refresh stats "
+            "refresh_calls=%llu local_native_current_read=%llu "
+            "page_version_reads_enabled=%llu native_flush_calls=%llu "
+            "external_refresh_calls=%llu clean_page_refresh_calls=%llu\n",
+            label,
+            u64_ull(stats[OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_CALLS]),
+            u64_ull(stats[OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_LOCAL_NATIVE_CURRENT_READ]),
+            u64_ull(stats[OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_PAGE_VERSION_READS_ENABLED]),
+            u64_ull(stats[OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_NATIVE_FLUSH_CALLS]),
+            u64_ull(stats[OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_EXTERNAL_REFRESH_CALLS]),
+            u64_ull(stats[OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_CLEAN_PAGE_REFRESH_CALLS])
+        );
+        fflush(stderr);
+    }
+    assert(stats[OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_CALLS] > 0U);
+    assert(stats[OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_PAGE_VERSION_READS_ENABLED] == 0U);
+}
+
 static void test_ownerless_compressed_row_format_ddl_refreshes_peer_dictionary(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -23394,6 +23445,8 @@ static void test_ownerless_compressed_row_format_ddl_refreshes_peer_dictionary(v
 
     signal_pipe_message(row_format_release_pipe[1]);
     wait_for_pipe_message(row_format_ready_pipe[0]);
+    mylite_ownerless_database_set_perf_stats_enabled(1);
+    mylite_ownerless_database_reset_perf_stats();
     assert(
         query_unsigned(
             db,
@@ -23454,6 +23507,8 @@ static void test_ownerless_compressed_row_format_ddl_refreshes_peer_dictionary(v
             "SELECT SUM(LENGTH(payload)) FROM app.ownerless_compressed_row_format_base"
         ) == 3U * MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES
     );
+    assert_ownerless_compressed_row_format_post_peer_ddl_native_reads("compressed-row-format-ddl");
+    mylite_ownerless_database_set_perf_stats_enabled(0);
 
     close(row_format_ready_pipe[0]);
     close(row_format_release_pipe[1]);
@@ -23514,6 +23569,8 @@ static void test_ownerless_compressed_row_format_key_block_ddl_refreshes_peer_di
 
     signal_pipe_message(row_format_release_pipe[1]);
     wait_for_pipe_message(row_format_ready_pipe[0]);
+    mylite_ownerless_database_set_perf_stats_enabled(1);
+    mylite_ownerless_database_reset_perf_stats();
     assert(
         query_unsigned(
             db,
@@ -23641,6 +23698,10 @@ static void test_ownerless_compressed_row_format_key_block_ddl_refreshes_peer_di
             "SELECT SUM(LENGTH(payload)) FROM app.ownerless_compressed_row_format_kb16"
         ) == 3U * MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES
     );
+    assert_ownerless_compressed_row_format_post_peer_ddl_native_reads(
+        "compressed-row-format-key-block-ddl"
+    );
+    mylite_ownerless_database_set_perf_stats_enabled(0);
 
     close(row_format_ready_pipe[0]);
     close(row_format_release_pipe[1]);

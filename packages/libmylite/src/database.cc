@@ -12770,6 +12770,12 @@ int refresh_ownerless_external_pages_before_statement(
     if (dictionary_result != MYLITE_OK) {
         return dictionary_result;
     }
+    if (allow_page_version_reads &&
+        db.ownerless_peer_dictionary_refresh_requires_conservative_write) {
+        allow_page_version_reads = false;
+        release_ownerless_handle_page_version_pin(db);
+        mylite_ownerless_innodb_close_current_read_view();
+    }
 
     if (!allow_page_version_reads && !force_native_flush) {
         const std::lock_guard<std::mutex> guard(g_runtime.mutex);
