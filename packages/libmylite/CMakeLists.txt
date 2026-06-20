@@ -501,6 +501,12 @@ if(BUILD_TESTING)
           TIMEOUT 900
       )
     endforeach()
+    # This weighted shard includes the TEXT/BLOB prefix-index DDL refresh case,
+    # which is quick alone but can hit the per-case timeout under sustained
+    # parallel ownerless SQL pressure.
+    set_tests_properties(libmylite.ownerless-cross-process-sql.8 PROPERTIES
+      RUN_SERIAL TRUE
+    )
     # This weighted shard includes the FK cross-schema child-rename case, which
     # is quick alone but can hit the per-case timeout under sustained parallel
     # ownerless SQL pressure.

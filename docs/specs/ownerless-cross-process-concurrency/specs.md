@@ -4467,6 +4467,14 @@ Tasks:
    the isolated shard passed. An isolated shard `.3` run then timed out at
    `test_ownerless_foreign_key_child_rename_refreshes_peer_dictionary`, while
    the direct case passed.
+   Shard `.11` was therefore marked `RUN_SERIAL` for the FK
+   cross-schema child-rename case. CI run `27864786059` later timed out shard
+   `.8` at `test_ownerless_text_blob_prefix_index_ddl_refreshes_peer_dictionary`;
+   the exact direct case passed locally in about 3 seconds, the exact
+   `sql-weighted-shard 8 16` CTest shard passed locally in under 30 seconds,
+   and the failed CI job passed on rerun. Shard `.8` now also runs with
+   `RUN_SERIAL`, preserving coverage while avoiding the documented
+   load-sensitive DDL/dictionary timeout pattern.
    The aggregate harness now
    execs both hidden test-case children and the exclusive initializer so worker
    processes do not inherit post-runtime global state. The preset also
