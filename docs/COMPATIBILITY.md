@@ -978,17 +978,32 @@ SQL literals, avoiding per-step native prepare/close while keeping the native
 prepared-handle cache blocked until a directory-owned peer-join barrier exists.
 The mysqli adapter can preserve prepared result statements
 across ordinary no-result `INSERT`, `UPDATE`, `DELETE`, and `REPLACE`
-statements without `RETURNING`, while retaining conservative cache clears for
-DDL, schema, transaction, lock, `SET`, `USE`, `CALL`, and error paths. The
-focused production `Tests_DB` sample after this cache-retention slice reported
+statements without `RETURNING`, while dropping the immediate-repeat promotion
+marker so post-DML result queries still execute against current rows. It can
+also preserve both the prepared result cache and the immediate-repeat promotion
+marker across exact `START TRANSACTION`, `BEGIN`, `COMMIT`, and `ROLLBACK`
+controls, so eligible repeated result queries around transaction scaffolding can
+still promote into cached prepared execution. Conservative cache clears remain
+for DDL, schema, lock, `SET`, `USE`, `CALL`, non-exact transaction forms,
+reconnect, close, and error paths. The earlier DML cache-retention focused
+production `Tests_DB` sample reported
 `query_cache_preserved_no_result_calls=111`, `query_cache_hits=3`,
 `query_prepare_calls=1612`, `query_cache_clear_finalize_calls=1612`,
-`query_ms_total=15296.434`, and
-`exec_no_result_ms_total=6775.758`, with
+`query_ms_total=15296.434`, and `exec_no_result_ms_total=6775.758`, with
 `wordpress_phpunit_reported_seconds=19.314`; the previous focused attribution
 sample reported `query_cache_hits=0`, `query_prepare_calls=1615`,
 `query_cache_clear_finalize_calls=1615`, `query_ms_total=19084.516`, and
-`wordpress_phpunit_reported_seconds=26.509`. Full non-isolated shard timings
+`wordpress_phpunit_reported_seconds=26.509`.
+The transaction-control cache-retention focused production `Tests_DB` rerun on
+the current default text-result route passed `651` tests with `3` skips and
+reported `query_cache_preserved_no_result_calls=1421`,
+`query_cache_hits=0`, `query_prepare_calls=0`,
+`query_cache_lookup_calls=0`, `query_ms_total=6948.686`,
+`exec_no_result_ms_total=3675.894`,
+`libmylite_exec_result_native_control_ms_total=1747.709`, and
+`wordpress_phpunit_reported_seconds=10.064`, confirming that the remaining
+focused database-shard cost is native query and transaction execution rather
+than prepared-result cache lookup overhead. Full non-isolated shard timings
 remain the authority for suite-wide impact.
 
 `mylite_reset()` now skips MariaDB's `mysql_stmt_reset()` only when a prepared
@@ -1009,11 +1024,13 @@ fast path reported about `383.57`.
 
 The diagnostic prepared-result route uses a bounded exact-SQL LRU instead of a
 single entry. This keeps prepared result metadata for interleaved repeated
-queries while retaining the same conservative invalidation points for DDL,
-schema, transaction, lock, `SET`, `USE`, `CALL`, explicit prepared statements,
-reconnect, close, and error paths. The profile test covers non-consecutive
-exact SELECT reuse in addition to DML-preserved current-row visibility. The
-focused production `Tests_DB` profile after this LRU slice reported
+queries while retaining conservative invalidation points for DDL, schema, lock,
+`SET`, `USE`, `CALL`, non-exact transaction forms, explicit prepared
+statements, reconnect, close, and error paths. Exact transaction-control
+statements preserve cached result statements. The profile test covers
+non-consecutive exact SELECT reuse in addition to DML-preserved current-row
+visibility. The focused production `Tests_DB` profile after this LRU slice
+reported
 `query_cache_hits=13`, `query_cache_misses=1602`,
 `query_prepare_calls=1602`, `query_cache_clear_finalize_calls=1602`,
 `query_ms_total=11354.274`, and `wordpress_phpunit_reported_seconds=14.692`;

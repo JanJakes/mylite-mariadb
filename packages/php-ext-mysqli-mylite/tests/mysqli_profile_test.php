@@ -85,6 +85,30 @@ expect_true($result instanceof MyLite\MySQLiResult, 'third SELECT did not return
 $row = $result->fetch_array();
 expect_true($row['body'] === 'third' && $row[0] === 'third', 'fetch_array row mismatch');
 
+$transactionCachedSql = 'SELECT body FROM profile_notes WHERE id = 1';
+$result = $db->query($transactionCachedSql);
+expect_true($result instanceof MyLite\MySQLiResult, 'transaction cached initial SELECT failed');
+expect_true(
+    $result->fetch_all(2) === [['body' => 'first']],
+    'transaction cached initial row mismatch'
+);
+expect_true($db->query('START TRANSACTION') === true, 'transaction cache START failed');
+expect_true($db->query('ROLLBACK') === true, 'transaction cache ROLLBACK failed');
+$result = $db->query($transactionCachedSql);
+expect_true($result instanceof MyLite\MySQLiResult, 'transaction cached repeated SELECT failed');
+expect_true(
+    $result->fetch_all(2) === [['body' => 'first']],
+    'transaction cached repeated row mismatch'
+);
+expect_true($db->query('START TRANSACTION') === true, 'transaction cache second START failed');
+expect_true($db->query('ROLLBACK') === true, 'transaction cache second ROLLBACK failed');
+$result = $db->query($transactionCachedSql);
+expect_true($result instanceof MyLite\MySQLiResult, 'transaction cached hit SELECT failed');
+expect_true(
+    $result->fetch_all(2) === [['body' => 'first']],
+    'transaction cached hit row mismatch'
+);
+
 $interleavedOne = 'SELECT body FROM profile_notes WHERE id IN (1, 3) ORDER BY id';
 $interleavedTwo = 'SELECT id FROM profile_notes WHERE id IN (2, 3) ORDER BY id';
 $result = $db->query($interleavedOne);
