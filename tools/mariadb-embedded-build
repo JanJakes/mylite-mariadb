@@ -56,6 +56,7 @@ configure() {
     -C "${profile}" \
     "$@"
   require_expected_build_type
+  write_profile_signature
 }
 
 build() {
@@ -139,6 +140,37 @@ require_expected_build_type() {
   fi
 }
 
+profile_signature_marker() {
+  echo "${build_dir}/.mylite-embedded-profile.sha256"
+}
+
+profile_signature() {
+  require_command cmake
+
+  cmake -E sha256sum "${profile}" | awk '{ print $1 }'
+}
+
+write_profile_signature() {
+  profile_signature > "$(profile_signature_marker)"
+}
+
+profile_signature_matches() {
+  local cached_signature
+  local marker
+
+  marker="$(profile_signature_marker)"
+  if [ ! -f "${marker}" ]; then
+    return 1
+  fi
+
+  cached_signature="$(sed -n '1p' "${marker}")"
+  if [ -z "${cached_signature}" ]; then
+    return 1
+  fi
+
+  [ "${cached_signature}" = "$(profile_signature)" ]
+}
+
 needs_configure() {
   local cache
   local cache_build_dir
@@ -164,7 +196,7 @@ needs_configure() {
     return 0
   fi
 
-  if [ "${profile}" -nt "${cache}" ]; then
+  if ! profile_signature_matches; then
     return 0
   fi
 

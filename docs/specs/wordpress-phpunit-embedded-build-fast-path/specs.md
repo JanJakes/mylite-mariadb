@@ -49,8 +49,10 @@ Add `tools/mariadb-embedded-build ensure` for integration harnesses:
 - If the MariaDB build tree has no `CMakeCache.txt`, configure is required.
 - If the cache was created for a different absolute build directory, configure
   is required so host and Docker path reuse does not fail in CMake.
-- If `cmake/mariadb-embedded-baseline.cmake` is newer than `CMakeCache.txt`,
-  configure is required so profile changes are not hidden.
+- If `cmake/mariadb-embedded-baseline.cmake` no longer matches the profile
+  content signature written by the last successful configure, configure is
+  required so profile changes are not hidden without letting checkout/cache
+  mtime drift defeat valid CI cache hits.
 - Otherwise, skip configure and run the normal `build` plus `measure` steps.
 
 Switch the WordPress PHPUnit harness from `all` to `ensure`. Cold runs still
