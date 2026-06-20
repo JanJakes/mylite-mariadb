@@ -77,7 +77,7 @@ check-mode coverage validates the random transaction, DDL, and FK graph seeded
 wrappers plus their external wrapper plans with the same seed set, plus the
 combined seed-sweep wrapper over seeds `0` through `15` at rounds `3`, a
 wider combined seed-sweep wrapper over seeds `0` through `63` at rounds `2`,
-and a next combined seed-sweep wrapper over seeds `576` through `639` at rounds
+and a next combined seed-sweep wrapper over seeds `640` through `703` at rounds
 `2`;
 a focused seed-sweep replay through one disposable MariaDB 11.8 server covers
 the random transaction and DDL seeded suites over seeds `0`
