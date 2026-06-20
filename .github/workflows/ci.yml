@@ -213,10 +213,10 @@ jobs:
             --parallel 2 \
             --output-on-failure
 
-  wordpress-phpunit:
-    name: wordpress-phpunit-mysqli-mylite
+  wordpress-phpunit-setup:
+    name: wordpress-phpunit-mysqli-mylite-setup
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 70
 
     env:
       # Keep CI reproducible while the local runner continues to default to
@@ -225,7 +225,7 @@ jobs:
       MYLITE_WORDPRESS_COMPOSER_CACHE_DIR: build/wordpress-composer-cache
       MYLITE_WORDPRESS_CMAKE_BUILD_DIR: build/wordpress-php-embedded-prod
       MYLITE_WORDPRESS_CMAKE_BUILD_TYPE: Release
-      MYLITE_WORDPRESS_TIMING_SUMMARY_PATH: build/wordpress-phpunit-reports/timing-summary.md
+      MYLITE_WORDPRESS_TIMING_SUMMARY_PATH: build/wordpress-phpunit-reports/timing-summary-setup.md
       MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD: "1"
       MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR: "1"
       MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT: "0"
@@ -239,12 +239,8 @@ jobs:
       MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL: "0"
       MYLITE_WORDPRESS_PHPUNIT_CHILD_RESTORE_BASELINE: "0"
       MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL: "0"
-      MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_FILTER: '^Tests_Admin_ExportWp(::|$)|Tests_Sitemaps_Sitemaps::test_disable_sitemap_should_return_404|Tests_Sitemaps_Sitemaps::test_empty_url_list_should_return_404'
-      MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_SKIP_INSTALL_FILTER: '^Tests_oEmbed_HTTP_Headers(::|$)|Tests_Filesystem_WpFilesystemDirect_Chmod::test_should_handle_set_mode_when_not_passed|Tests_Functions_WpUniquePrefixedId::test_should_create_unique_prefixed_ids|Tests_Functions_WpUniquePrefixedId::test_should_raise_notice_and_use_empty_string_prefix_when_nonstring_given|Tests_Functions_WpUniquePrefixedId::test_same_prefixes_should_generate_unique_ids'
-      MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_UI_FILTER: 'Tests_Admin_WpAutomaticUpdater::test_is_allowed_dir_should_return_true_if_open_basedir_is_set_and_path_is_allowed|Tests_Admin_WpAutomaticUpdater::test_is_allowed_dir_should_return_false_if_open_basedir_is_set_and_path_is_not_allowed|Tests_Admin_WpUpgrader::test_clear_destination_should_return_wp_error_if_files_are_not_writable|Tests_Admin_WpUpgrader::test_install_package_should_return_wp_error_when_a_filtered_source_directory_file_list_cannot_be_retrieved|Tests_Admin_WpUpgrader::test_install_package_should_clear_destination_when_clear_destination_is_true|Tests_Admin_WpUpgrader::test_install_package_should_make_remote_destination_safe_when_set_to_a_protected_directory|Tests_Admin_WpUpgrader::test_install_package_should_return_wp_error_if_destination_cannot_be_created|Tests_Admin_WpUpgrader::test_maintenance_mode_should_create_maintenance_file_with_boolean|Tests_Ajax_wpAjaxResponse::test_response_charset_in_header|Tests_Filesystem_WpFilesystemDirect_Mkdir::test_should_create_directory|Tests_Filesystem_WpFilesystemDirect_Mkdir::test_should_not_create_directory|Tests_Filesystem_WpFilesystemDirect_Mkdir::test_should_set_owner|Tests_Filesystem_WpFilesystemDirect_Mkdir::test_should_set_group|Tests_Formatting_Emoji::test_print_emoji_detection_script_on_front_end|Tests_Formatting_Emoji::test_print_emoji_detection_script_on_front_end_after_footer_scripts_printed|Tests_Formatting_Emoji::test_print_emoji_detection_script_in_admin|Tests_Formatting_Emoji::test_print_emoji_detection_script_in_admin_after_footer_scripts_printed|Tests_Theme::test_default_themes_are_included_in_new_files'
-      MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER: '^(?!Tests_DB)(?!(Tests_Admin_ExportWp|Tests_oEmbed_HTTP_Headers)(::|$))(?!.*(Tests_Filesystem_WpFilesystemDirect_Chmod::test_should_handle_set_mode_when_not_passed|Tests_Functions_WpUniquePrefixedId::test_should_create_unique_prefixed_ids|Tests_Functions_WpUniquePrefixedId::test_should_raise_notice_and_use_empty_string_prefix_when_nonstring_given|Tests_Functions_WpUniquePrefixedId::test_same_prefixes_should_generate_unique_ids|Tests_Sitemaps_Sitemaps::test_disable_sitemap_should_return_404|Tests_Sitemaps_Sitemaps::test_empty_url_list_should_return_404|Tests_Admin_WpAutomaticUpdater::test_is_allowed_dir_should_return_true_if_open_basedir_is_set_and_path_is_allowed|Tests_Admin_WpAutomaticUpdater::test_is_allowed_dir_should_return_false_if_open_basedir_is_set_and_path_is_not_allowed|Tests_Admin_WpUpgrader::test_clear_destination_should_return_wp_error_if_files_are_not_writable|Tests_Admin_WpUpgrader::test_install_package_should_return_wp_error_when_a_filtered_source_directory_file_list_cannot_be_retrieved|Tests_Admin_WpUpgrader::test_install_package_should_clear_destination_when_clear_destination_is_true|Tests_Admin_WpUpgrader::test_install_package_should_make_remote_destination_safe_when_set_to_a_protected_directory|Tests_Admin_WpUpgrader::test_install_package_should_return_wp_error_if_destination_cannot_be_created|Tests_Admin_WpUpgrader::test_maintenance_mode_should_create_maintenance_file_with_boolean|Tests_Ajax_wpAjaxResponse::test_response_charset_in_header|Tests_Filesystem_WpFilesystemDirect_Mkdir::test_should_create_directory|Tests_Filesystem_WpFilesystemDirect_Mkdir::test_should_not_create_directory|Tests_Filesystem_WpFilesystemDirect_Mkdir::test_should_set_owner|Tests_Filesystem_WpFilesystemDirect_Mkdir::test_should_set_group|Tests_Formatting_Emoji::test_print_emoji_detection_script_on_front_end|Tests_Formatting_Emoji::test_print_emoji_detection_script_on_front_end_after_footer_scripts_printed|Tests_Formatting_Emoji::test_print_emoji_detection_script_in_admin|Tests_Formatting_Emoji::test_print_emoji_detection_script_in_admin_after_footer_scripts_printed|Tests_Theme::test_default_themes_are_included_in_new_files))'
-      MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE: 'Tests_REST|WP_Test_REST|WP_REST'
-      MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_BLOCK_TOKEN_RE: 'Tests_Query|Test_Query|Tests_Canonical|Tests_Theme|Tests_WpTokenMap|Tests_Block|WP_Block|Tests_Blocks'
+      MYLITE_WORDPRESS_DB_DIR: /tmp/mylite-wordpress-tests.mylite
+      MYLITE_WORDPRESS_DB_BASELINE_DIR: /tmp/mylite-wordpress-tests.mylite.baseline
 
     steps:
       - uses: actions/checkout@v5
@@ -332,131 +328,288 @@ jobs:
           tools/require-cmake-release-build build/wordpress-php-embedded-prod
           tools/wordpress-phpunit-mysqli-mylite
 
-      - name: Run WordPress PHPUnit database suite (test only)
-        env:
-          MYLITE_WORDPRESS_PHASE: phpunit
-          MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
-          MYLITE_WORDPRESS_TIMING_LABEL: phpunit-db
-          MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL: "1"
+      - name: Pack WordPress PHPUnit runtime artifact
         run: |
           set -euo pipefail
           tools/require-cmake-build-type MinSizeRel build/wordpress-mariadb-embedded
           tools/require-cmake-release-build build/wordpress-php-embedded-prod
-          tools/wordpress-phpunit-mysqli-mylite --filter '^Tests_DB'
+          test -d "${MYLITE_WORDPRESS_DB_BASELINE_DIR}"
+          {
+            echo "github_sha=${GITHUB_SHA}"
+            echo "wordpress_ref=${MYLITE_WORDPRESS_REF}"
+            echo "wordpress_sha=$(git -C build/wordpress-develop rev-parse HEAD)"
+            echo "mariadb_cmake_build_type=$(sed -n 's/^CMAKE_BUILD_TYPE:[^=]*=//p' build/wordpress-mariadb-embedded/CMakeCache.txt | tail -n 1)"
+            echo "mylite_cmake_build_type=$(sed -n 's/^CMAKE_BUILD_TYPE:[^=]*=//p' build/wordpress-php-embedded-prod/CMakeCache.txt | tail -n 1)"
+          } > build/wordpress-phpunit-runtime-manifest.txt
+          sha256sum \
+            build/wordpress-mariadb-embedded/libmysqld/libmariadbd.a \
+            build/wordpress-php-embedded-prod/packages/libmylite/libmylite.a \
+            build/wordpress-php-embedded-prod/packages/php-ext-mylite/mylite.so \
+            build/wordpress-php-embedded-prod/packages/php-ext-mysqli-mylite/mysqli_mylite.so \
+            build/wordpress-php-embedded-prod/mylite-wordpress-php \
+            build/wordpress-php-embedded-prod/php-conf.d/mylite.ini \
+            build/wordpress-phpunit-tools/vendor/bin/phpunit \
+            build/wordpress-develop/wp-tests-config.php \
+            build/wordpress-phpunit-runtime-manifest.txt \
+            > build/wordpress-phpunit-runtime-manifest.sha256
+          sha256sum -c build/wordpress-phpunit-runtime-manifest.sha256
+          rm -f \
+            build/wordpress-phpunit-runtime.tar.gz \
+            build/wordpress-phpunit-db-baseline.tar.gz
+          tar -czf build/wordpress-phpunit-runtime.tar.gz \
+            build/wordpress-develop \
+            build/wordpress-phpunit-tools \
+            build/wordpress-mariadb-embedded \
+            build/wordpress-php-embedded-prod \
+            build/wordpress-phpunit-runtime-manifest.txt \
+            build/wordpress-phpunit-runtime-manifest.sha256
+          tar -czf build/wordpress-phpunit-db-baseline.tar.gz \
+            -C "$(dirname "${MYLITE_WORDPRESS_DB_BASELINE_DIR}")" \
+            "$(basename "${MYLITE_WORDPRESS_DB_BASELINE_DIR}")"
 
-      - name: Run WordPress PHPUnit database profile probe (diagnostic)
+      - name: Upload WordPress PHPUnit runtime artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wordpress-phpunit-runtime
+          path: |
+            build/wordpress-phpunit-runtime.tar.gz
+            build/wordpress-phpunit-db-baseline.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload WordPress setup timing summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wordpress-phpunit-timing-summary-setup
+          path: build/wordpress-phpunit-reports/timing-summary-setup.md
+          if-no-files-found: warn
+
+      - name: Show generated artifact sizes
+        if: always()
+        run: |
+          du -sh \
+            "${MYLITE_WORDPRESS_DB_DIR}" \
+            "${MYLITE_WORDPRESS_DB_BASELINE_DIR}" \
+            build/wordpress-phpunit-runtime.tar.gz \
+            build/wordpress-phpunit-db-baseline.tar.gz \
+            build/wordpress-develop \
+            build/wordpress-phpunit-tools \
+            build/wordpress-composer-cache \
+            build/wordpress-mariadb-embedded \
+            build/wordpress-php-embedded-prod \
+            2>/dev/null || true
+          df -h .
+
+  wordpress-phpunit-shard:
+    name: wordpress-phpunit-mysqli-mylite (${{ matrix.label }})
+    runs-on: ubuntu-24.04
+    needs: wordpress-phpunit-setup
+    timeout-minutes: 45
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: db
+            label: phpunit-db
+            reconnect_after_child: "1"
+            child_timing_summary: "0"
+            child_script_timing_summary: "0"
+            profile_mysqli: "0"
+            keepalive: "0"
+            child_skip_install: "0"
+            child_restore_baseline: "0"
+          - shard: db-profile
+            label: phpunit-db-profile
+            reconnect_after_child: "1"
+            child_timing_summary: "0"
+            child_script_timing_summary: "0"
+            profile_mysqli: "1"
+            keepalive: "0"
+            child_skip_install: "0"
+            child_restore_baseline: "0"
+          - shard: deferred-reconnect-baseline-restored
+            label: phpunit-deferred-reconnect-baseline-restored
+            reconnect_after_child: "0"
+            child_timing_summary: "1"
+            child_script_timing_summary: "1"
+            profile_mysqli: "0"
+            keepalive: "0"
+            child_skip_install: "1"
+            child_restore_baseline: "1"
+          - shard: deferred-reconnect-skip-install
+            label: phpunit-deferred-reconnect-skip-install
+            reconnect_after_child: "0"
+            child_timing_summary: "1"
+            child_script_timing_summary: "1"
+            profile_mysqli: "0"
+            keepalive: "0"
+            child_skip_install: "1"
+            child_restore_baseline: "0"
+          - shard: deferred-reconnect-ui
+            label: phpunit-deferred-reconnect-ui
+            reconnect_after_child: "0"
+            child_timing_summary: "1"
+            child_script_timing_summary: "1"
+            profile_mysqli: "0"
+            keepalive: "0"
+            child_skip_install: "1"
+            child_restore_baseline: "0"
+          - shard: non-isolated-rest
+            label: phpunit-non-isolated-rest
+            reconnect_after_child: "1"
+            child_timing_summary: "0"
+            child_script_timing_summary: "0"
+            profile_mysqli: "0"
+            keepalive: "1"
+            child_skip_install: "0"
+            child_restore_baseline: "0"
+          - shard: non-isolated-query-theme-block-token
+            label: phpunit-non-isolated-query-theme-block-token
+            reconnect_after_child: "1"
+            child_timing_summary: "0"
+            child_script_timing_summary: "0"
+            profile_mysqli: "0"
+            keepalive: "1"
+            child_skip_install: "0"
+            child_restore_baseline: "0"
+          - shard: non-isolated-remaining
+            label: phpunit-non-isolated-remaining
+            reconnect_after_child: "1"
+            child_timing_summary: "0"
+            child_script_timing_summary: "0"
+            profile_mysqli: "0"
+            keepalive: "1"
+            child_skip_install: "0"
+            child_restore_baseline: "0"
+
+    env:
+      MYLITE_WORDPRESS_REF: 6ddfc9d9b532c6e95c1266165149815895e2eb56
+      MYLITE_WORDPRESS_COMPOSER_CACHE_DIR: build/wordpress-composer-cache
+      MYLITE_WORDPRESS_CMAKE_BUILD_DIR: build/wordpress-php-embedded-prod
+      MYLITE_WORDPRESS_CMAKE_BUILD_TYPE: Release
+      MYLITE_WORDPRESS_TIMING_SUMMARY_PATH: build/wordpress-phpunit-reports/timing-summary-${{ matrix.shard }}.md
+      MYLITE_WORDPRESS_RUNTIME_MANIFEST_PATH: build/wordpress-phpunit-runtime-manifest.sha256
+      MYLITE_WORDPRESS_RUNTIME_METADATA_PATH: build/wordpress-phpunit-runtime-manifest.txt
+      MYLITE_WORDPRESS_TRUST_RUNTIME_MANIFEST: "1"
+      MYLITE_WORDPRESS_RUNTIME_EXPECTED_GITHUB_SHA: ${{ github.sha }}
+      MYLITE_WORDPRESS_RUNTIME_EXPECTED_WORDPRESS_REF: 6ddfc9d9b532c6e95c1266165149815895e2eb56
+      MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD: "1"
+      MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR: "1"
+      MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT: "0"
+      MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING: "1"
+      MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES: "0"
+      MYLITE_WORDPRESS_PHPUNIT_CHILD_TIMING_SUMMARY: ${{ matrix.child_timing_summary }}
+      MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_TIMING_SUMMARY: ${{ matrix.child_script_timing_summary }}
+      MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI: ${{ matrix.profile_mysqli }}
+      MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE: ${{ matrix.keepalive }}
+      MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN: "0"
+      MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD: ${{ matrix.reconnect_after_child }}
+      MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL: ${{ matrix.child_skip_install }}
+      MYLITE_WORDPRESS_PHPUNIT_CHILD_RESTORE_BASELINE: ${{ matrix.child_restore_baseline }}
+      MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL: "1"
+      MYLITE_WORDPRESS_DB_DIR: /tmp/mylite-wordpress-tests.mylite
+      MYLITE_WORDPRESS_DB_BASELINE_DIR: /tmp/mylite-wordpress-tests.mylite.baseline
+      MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_FILTER: '^Tests_Admin_ExportWp(::|$)|Tests_Sitemaps_Sitemaps::test_disable_sitemap_should_return_404|Tests_Sitemaps_Sitemaps::test_empty_url_list_should_return_404'
+      MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_SKIP_INSTALL_FILTER: '^Tests_oEmbed_HTTP_Headers(::|$)|Tests_Filesystem_WpFilesystemDirect_Chmod::test_should_handle_set_mode_when_not_passed|Tests_Functions_WpUniquePrefixedId::test_should_create_unique_prefixed_ids|Tests_Functions_WpUniquePrefixedId::test_should_raise_notice_and_use_empty_string_prefix_when_nonstring_given|Tests_Functions_WpUniquePrefixedId::test_same_prefixes_should_generate_unique_ids'
+      MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_UI_FILTER: 'Tests_Admin_WpAutomaticUpdater::test_is_allowed_dir_should_return_true_if_open_basedir_is_set_and_path_is_allowed|Tests_Admin_WpAutomaticUpdater::test_is_allowed_dir_should_return_false_if_open_basedir_is_set_and_path_is_not_allowed|Tests_Admin_WpUpgrader::test_clear_destination_should_return_wp_error_if_files_are_not_writable|Tests_Admin_WpUpgrader::test_install_package_should_return_wp_error_when_a_filtered_source_directory_file_list_cannot_be_retrieved|Tests_Admin_WpUpgrader::test_install_package_should_clear_destination_when_clear_destination_is_true|Tests_Admin_WpUpgrader::test_install_package_should_make_remote_destination_safe_when_set_to_a_protected_directory|Tests_Admin_WpUpgrader::test_install_package_should_return_wp_error_if_destination_cannot_be_created|Tests_Admin_WpUpgrader::test_maintenance_mode_should_create_maintenance_file_with_boolean|Tests_Ajax_wpAjaxResponse::test_response_charset_in_header|Tests_Filesystem_WpFilesystemDirect_Mkdir::test_should_create_directory|Tests_Filesystem_WpFilesystemDirect_Mkdir::test_should_not_create_directory|Tests_Filesystem_WpFilesystemDirect_Mkdir::test_should_set_owner|Tests_Filesystem_WpFilesystemDirect_Mkdir::test_should_set_group|Tests_Formatting_Emoji::test_print_emoji_detection_script_on_front_end|Tests_Formatting_Emoji::test_print_emoji_detection_script_on_front_end_after_footer_scripts_printed|Tests_Formatting_Emoji::test_print_emoji_detection_script_in_admin|Tests_Formatting_Emoji::test_print_emoji_detection_script_in_admin_after_footer_scripts_printed|Tests_Theme::test_default_themes_are_included_in_new_files'
+      MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER: '^(?!Tests_DB)(?!(Tests_Admin_ExportWp|Tests_oEmbed_HTTP_Headers)(::|$))(?!.*(Tests_Filesystem_WpFilesystemDirect_Chmod::test_should_handle_set_mode_when_not_passed|Tests_Functions_WpUniquePrefixedId::test_should_create_unique_prefixed_ids|Tests_Functions_WpUniquePrefixedId::test_should_raise_notice_and_use_empty_string_prefix_when_nonstring_given|Tests_Functions_WpUniquePrefixedId::test_same_prefixes_should_generate_unique_ids|Tests_Sitemaps_Sitemaps::test_disable_sitemap_should_return_404|Tests_Sitemaps_Sitemaps::test_empty_url_list_should_return_404|Tests_Admin_WpAutomaticUpdater::test_is_allowed_dir_should_return_true_if_open_basedir_is_set_and_path_is_allowed|Tests_Admin_WpAutomaticUpdater::test_is_allowed_dir_should_return_false_if_open_basedir_is_set_and_path_is_not_allowed|Tests_Admin_WpUpgrader::test_clear_destination_should_return_wp_error_if_files_are_not_writable|Tests_Admin_WpUpgrader::test_install_package_should_return_wp_error_when_a_filtered_source_directory_file_list_cannot_be_retrieved|Tests_Admin_WpUpgrader::test_install_package_should_clear_destination_when_clear_destination_is_true|Tests_Admin_WpUpgrader::test_install_package_should_make_remote_destination_safe_when_set_to_a_protected_directory|Tests_Admin_WpUpgrader::test_install_package_should_return_wp_error_if_destination_cannot_be_created|Tests_Admin_WpUpgrader::test_maintenance_mode_should_create_maintenance_file_with_boolean|Tests_Ajax_wpAjaxResponse::test_response_charset_in_header|Tests_Filesystem_WpFilesystemDirect_Mkdir::test_should_create_directory|Tests_Filesystem_WpFilesystemDirect_Mkdir::test_should_not_create_directory|Tests_Filesystem_WpFilesystemDirect_Mkdir::test_should_set_owner|Tests_Filesystem_WpFilesystemDirect_Mkdir::test_should_set_group|Tests_Formatting_Emoji::test_print_emoji_detection_script_on_front_end|Tests_Formatting_Emoji::test_print_emoji_detection_script_on_front_end_after_footer_scripts_printed|Tests_Formatting_Emoji::test_print_emoji_detection_script_in_admin|Tests_Formatting_Emoji::test_print_emoji_detection_script_in_admin_after_footer_scripts_printed|Tests_Theme::test_default_themes_are_included_in_new_files))'
+      MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE: 'Tests_REST|WP_Test_REST|WP_REST'
+      MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_BLOCK_TOKEN_RE: 'Tests_Query|Test_Query|Tests_Canonical|Tests_Theme|Tests_WpTokenMap|Tests_Block|WP_Block|Tests_Blocks'
+      WORDPRESS_PHPUNIT_SHARD: ${{ matrix.shard }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Audit CI production build configuration
+        run: tools/check-ci-production-builds
+
+      - name: Show runner resources
+        run: |
+          df -h .
+          free -h
+          docker version
+
+      - name: Download WordPress PHPUnit runtime artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: wordpress-phpunit-runtime
+          path: build/wordpress-phpunit-runtime-artifact
+
+      - name: Extract WordPress PHPUnit runtime artifact
+        run: |
+          set -euo pipefail
+          rm -rf \
+            build/wordpress-develop \
+            build/wordpress-phpunit-tools \
+            build/wordpress-mariadb-embedded \
+            build/wordpress-php-embedded-prod \
+            "${MYLITE_WORDPRESS_DB_DIR}" \
+            "${MYLITE_WORDPRESS_DB_BASELINE_DIR}"
+          tar -xzf build/wordpress-phpunit-runtime-artifact/wordpress-phpunit-runtime.tar.gz
+          tar -xzf build/wordpress-phpunit-runtime-artifact/wordpress-phpunit-db-baseline.tar.gz \
+            -C "$(dirname "${MYLITE_WORDPRESS_DB_BASELINE_DIR}")"
+          sha256sum -c build/wordpress-phpunit-runtime-manifest.sha256
+          grep -Fx "github_sha=${GITHUB_SHA}" build/wordpress-phpunit-runtime-manifest.txt
+          grep -Fx "wordpress_ref=${MYLITE_WORDPRESS_REF}" build/wordpress-phpunit-runtime-manifest.txt
+
+      - name: Build WordPress PHPUnit Docker image
+        env:
+          MYLITE_WORDPRESS_PHASE: docker-image
+          MYLITE_WORDPRESS_TIMING_LABEL: docker-image-${{ matrix.shard }}
+        run: tools/wordpress-phpunit-mysqli-mylite
+
+      - name: Verify WordPress MariaDB embedded production build type
+        run: tools/require-cmake-build-type MinSizeRel build/wordpress-mariadb-embedded
+
+      - name: Verify WordPress production build type
+        run: tools/require-cmake-release-build build/wordpress-php-embedded-prod
+
+      - name: Run WordPress PHPUnit shard (test only)
         env:
           MYLITE_WORDPRESS_PHASE: phpunit
           MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
-          MYLITE_WORDPRESS_TIMING_LABEL: phpunit-db-profile
-          MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI: "1"
-          MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL: "1"
+          MYLITE_WORDPRESS_TIMING_LABEL: ${{ matrix.label }}
         run: |
           set -euo pipefail
           tools/require-cmake-build-type MinSizeRel build/wordpress-mariadb-embedded
           tools/require-cmake-release-build build/wordpress-php-embedded-prod
-          tools/wordpress-phpunit-mysqli-mylite --filter '^Tests_DB'
+          case "${WORDPRESS_PHPUNIT_SHARD}" in
+            db | db-profile)
+              wordpress_phpunit_filter='^Tests_DB'
+              ;;
+            deferred-reconnect-baseline-restored)
+              wordpress_phpunit_filter="${MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_FILTER}"
+              ;;
+            deferred-reconnect-skip-install)
+              wordpress_phpunit_filter="${MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_SKIP_INSTALL_FILTER}"
+              ;;
+            deferred-reconnect-ui)
+              wordpress_phpunit_filter="${MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_UI_FILTER}"
+              ;;
+            non-isolated-rest)
+              wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
+              ;;
+            non-isolated-query-theme-block-token)
+              wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_BLOCK_TOKEN_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
+              ;;
+            non-isolated-remaining)
+              wordpress_phpunit_filter="^(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_BLOCK_TOKEN_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
+              ;;
+            *)
+              echo "Unknown WordPress PHPUnit shard: ${WORDPRESS_PHPUNIT_SHARD}" >&2
+              exit 1
+              ;;
+          esac
+          tools/wordpress-phpunit-mysqli-mylite --filter "${wordpress_phpunit_filter}"
 
-      - name: Run WordPress PHPUnit process-isolated deferred-reconnect baseline-restored suite (test only)
-        env:
-          MYLITE_WORDPRESS_PHASE: phpunit
-          MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
-          MYLITE_WORDPRESS_TIMING_LABEL: phpunit-deferred-reconnect-baseline-restored
-          MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD: "0"
-          MYLITE_WORDPRESS_PHPUNIT_CHILD_TIMING_SUMMARY: "1"
-          MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_TIMING_SUMMARY: "1"
-          MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL: "1"
-          MYLITE_WORDPRESS_PHPUNIT_CHILD_RESTORE_BASELINE: "1"
-          MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL: "1"
-        run: |
-          set -euo pipefail
-          tools/require-cmake-build-type MinSizeRel build/wordpress-mariadb-embedded
-          tools/require-cmake-release-build build/wordpress-php-embedded-prod
-          tools/wordpress-phpunit-mysqli-mylite --filter "$MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_FILTER"
-
-      - name: Run WordPress PHPUnit process-isolated deferred-reconnect skip-install suite (test only)
-        env:
-          MYLITE_WORDPRESS_PHASE: phpunit
-          MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
-          MYLITE_WORDPRESS_TIMING_LABEL: phpunit-deferred-reconnect-skip-install
-          MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD: "0"
-          MYLITE_WORDPRESS_PHPUNIT_CHILD_TIMING_SUMMARY: "1"
-          MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_TIMING_SUMMARY: "1"
-          MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL: "1"
-          MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL: "1"
-        run: |
-          set -euo pipefail
-          tools/require-cmake-build-type MinSizeRel build/wordpress-mariadb-embedded
-          tools/require-cmake-release-build build/wordpress-php-embedded-prod
-          tools/wordpress-phpunit-mysqli-mylite --filter "$MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_SKIP_INSTALL_FILTER"
-
-      - name: Run WordPress PHPUnit process-isolated deferred-reconnect UI suite (test only)
-        env:
-          MYLITE_WORDPRESS_PHASE: phpunit
-          MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
-          MYLITE_WORDPRESS_TIMING_LABEL: phpunit-deferred-reconnect-ui
-          MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD: "0"
-          MYLITE_WORDPRESS_PHPUNIT_CHILD_TIMING_SUMMARY: "1"
-          MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_TIMING_SUMMARY: "1"
-          MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL: "1"
-          MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL: "1"
-        run: |
-          set -euo pipefail
-          tools/require-cmake-build-type MinSizeRel build/wordpress-mariadb-embedded
-          tools/require-cmake-release-build build/wordpress-php-embedded-prod
-          tools/wordpress-phpunit-mysqli-mylite --filter "$MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_UI_FILTER"
-
-      - name: Run WordPress PHPUnit non-isolated REST suite (test only)
-        env:
-          MYLITE_WORDPRESS_PHASE: phpunit
-          MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
-          MYLITE_WORDPRESS_TIMING_LABEL: phpunit-non-isolated-rest
-          MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE: "1"
-          MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL: "1"
-        run: |
-          set -euo pipefail
-          tools/require-cmake-build-type MinSizeRel build/wordpress-mariadb-embedded
-          tools/require-cmake-release-build build/wordpress-php-embedded-prod
-          non_isolated_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
-          tools/wordpress-phpunit-mysqli-mylite --filter "$non_isolated_filter"
-
-      - name: Run WordPress PHPUnit non-isolated query/theme/block/token suite (test only)
-        env:
-          MYLITE_WORDPRESS_PHASE: phpunit
-          MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
-          MYLITE_WORDPRESS_TIMING_LABEL: phpunit-non-isolated-query-theme-block-token
-          MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE: "1"
-          MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL: "1"
-        run: |
-          set -euo pipefail
-          tools/require-cmake-build-type MinSizeRel build/wordpress-mariadb-embedded
-          tools/require-cmake-release-build build/wordpress-php-embedded-prod
-          non_isolated_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_BLOCK_TOKEN_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
-          tools/wordpress-phpunit-mysqli-mylite --filter "$non_isolated_filter"
-
-      - name: Run WordPress PHPUnit non-isolated remaining suite (test only)
-        env:
-          MYLITE_WORDPRESS_PHASE: phpunit
-          MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
-          MYLITE_WORDPRESS_TIMING_LABEL: phpunit-non-isolated-remaining
-          MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE: "1"
-          MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL: "1"
-        run: |
-          set -euo pipefail
-          tools/require-cmake-build-type MinSizeRel build/wordpress-mariadb-embedded
-          tools/require-cmake-release-build build/wordpress-php-embedded-prod
-          non_isolated_filter="^(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_BLOCK_TOKEN_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
-          tools/wordpress-phpunit-mysqli-mylite --filter "$non_isolated_filter"
-
-      - name: Show WordPress timing summary
+      - name: Show WordPress shard timing summary
         if: always()
         run: |
           set -euo pipefail
           summary="${MYLITE_WORDPRESS_TIMING_SUMMARY_PATH}"
           if [ -f "${summary}" ]; then
-            if ! tools/wordpress-phpunit-timing-rollup --input "${summary}" --append; then
-              echo "WordPress timing rollup unavailable for ${summary}" >&2
-            fi
             cat "${summary}"
             if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
               cat "${summary}" >> "${GITHUB_STEP_SUMMARY}"
@@ -465,12 +618,12 @@ jobs:
             echo "Missing WordPress timing summary: ${summary}"
           fi
 
-      - name: Upload WordPress timing summary
+      - name: Upload WordPress shard timing summary
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: wordpress-phpunit-timing-summary
-          path: build/wordpress-phpunit-reports/timing-summary.md
+          name: wordpress-phpunit-timing-summary-${{ matrix.shard }}
+          path: build/wordpress-phpunit-reports/timing-summary-${{ matrix.shard }}.md
           if-no-files-found: warn
 
       - name: Show generated artifact sizes
@@ -486,6 +639,88 @@ jobs:
             build/wordpress-php-embedded-prod \
             2>/dev/null || true
           df -h .
+
+  wordpress-phpunit:
+    name: wordpress-phpunit-mysqli-mylite
+    runs-on: ubuntu-24.04
+    needs:
+      - wordpress-phpunit-setup
+      - wordpress-phpunit-shard
+    if: always()
+    timeout-minutes: 10
+
+    env:
+      MYLITE_WORDPRESS_TIMING_SUMMARY_PATH: build/wordpress-phpunit-reports/timing-summary.md
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Audit CI production build configuration
+        run: tools/check-ci-production-builds
+
+      - name: Download WordPress timing summaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wordpress-phpunit-timing-summary-*
+          path: build/wordpress-phpunit-reports/parts
+          merge-multiple: true
+
+      - name: Show WordPress timing summary
+        if: always()
+        run: |
+          set -euo pipefail
+          summary="${MYLITE_WORDPRESS_TIMING_SUMMARY_PATH}"
+          mkdir -p "$(dirname "${summary}")"
+          {
+            echo "## WordPress PHPUnit Timing"
+            echo
+            echo "| label | metric | value |"
+            echo "| --- | --- | ---: |"
+            while IFS= read -r part; do
+              awk '
+                /^\|/ {
+                  fields = split($0, cells, "|")
+                  if (fields < 4) {
+                    next
+                  }
+                  label = cells[2]
+                  metric = cells[3]
+                  gsub(/^[[:space:]]+|[[:space:]]+$/, "", label)
+                  gsub(/^[[:space:]]+|[[:space:]]+$/, "", metric)
+                  if (label == "label" || label == "---" || metric == "---") {
+                    next
+                  }
+                  print
+                }
+              ' "${part}"
+            done < <(find build/wordpress-phpunit-reports/parts -type f -name 'timing-summary*.md' | sort)
+          } > "${summary}"
+          if ! tools/wordpress-phpunit-timing-rollup --input "${summary}" --append; then
+            echo "WordPress timing rollup unavailable for ${summary}" >&2
+          fi
+          cat "${summary}"
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            cat "${summary}" >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+      - name: Upload WordPress timing summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wordpress-phpunit-timing-summary
+          path: build/wordpress-phpunit-reports/timing-summary.md
+          if-no-files-found: warn
+
+      - name: Check WordPress PHPUnit shard results
+        env:
+          WORDPRESS_SETUP_RESULT: ${{ needs.wordpress-phpunit-setup.result }}
+          WORDPRESS_SHARD_RESULT: ${{ needs.wordpress-phpunit-shard.result }}
+        run: |
+          set -euo pipefail
+          echo "wordpress_phpunit_setup_result=${WORDPRESS_SETUP_RESULT}"
+          echo "wordpress_phpunit_shard_result=${WORDPRESS_SHARD_RESULT}"
+          test "${WORDPRESS_SETUP_RESULT}" = "success"
+          test "${WORDPRESS_SHARD_RESULT}" = "success"
 
   clang-tools:
     name: clang-format and clang-tidy

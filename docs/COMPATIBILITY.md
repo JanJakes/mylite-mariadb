@@ -2055,6 +2055,12 @@ page-log APIs still validate headers.
 The WordPress mysqli adapter also skips redundant native parameter clearing for
 fully-bound prepared statement execution, preserving partial-binding behavior
 while reducing adapter work in prepared DML loops.
+The WordPress PHPUnit CI compatibility evidence now runs through a single
+production setup job plus parallel test-only shard jobs. Shards verify a
+tarred runtime SHA256 manifest and use independent external MyLite database
+directories before running the same PHPUnit filters, while the final
+`wordpress-phpunit-mysqli-mylite` job merges timing rows and preserves the
+published artifact name.
 
 Ownerless page-version WAL records can now encode zero-heavy page images by
 storing a compact 16-bit sparse nonzero-run list, the original 32-bit sparse

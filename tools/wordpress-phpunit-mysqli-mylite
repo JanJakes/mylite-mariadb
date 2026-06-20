@@ -14,6 +14,11 @@ cmake_build_type="${MYLITE_WORDPRESS_CMAKE_BUILD_TYPE:-Release}"
 composer_cache_dir="${MYLITE_WORDPRESS_COMPOSER_CACHE_DIR:-${root_dir}/build/wordpress-composer-cache}"
 phpunit_report_dir="${MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR:-${root_dir}/build/wordpress-phpunit-reports}"
 timing_summary_path="${MYLITE_WORDPRESS_TIMING_SUMMARY_PATH:-${phpunit_report_dir}/timing-summary.md}"
+runtime_manifest_path="${MYLITE_WORDPRESS_RUNTIME_MANIFEST_PATH:-}"
+runtime_metadata_path="${MYLITE_WORDPRESS_RUNTIME_METADATA_PATH:-}"
+trust_runtime_manifest="${MYLITE_WORDPRESS_TRUST_RUNTIME_MANIFEST:-0}"
+runtime_expected_github_sha="${MYLITE_WORDPRESS_RUNTIME_EXPECTED_GITHUB_SHA:-${GITHUB_SHA:-}}"
+runtime_expected_wordpress_ref="${MYLITE_WORDPRESS_RUNTIME_EXPECTED_WORDPRESS_REF:-${wordpress_ref}}"
 phpunit_log_junit="${MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT:-0}"
 phpunit_no_logging="${MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING:-0}"
 phpunit_slow_report_limit="${MYLITE_WORDPRESS_PHPUNIT_SLOW_REPORT_LIMIT:-20}"
@@ -65,6 +70,14 @@ case "${require_external_db_dir}" in
     ;;
   *)
     echo "MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR must be 0 or 1" >&2
+    exit 1
+    ;;
+esac
+case "${trust_runtime_manifest}" in
+  0 | 1)
+    ;;
+  *)
+    echo "MYLITE_WORDPRESS_TRUST_RUNTIME_MANIFEST must be 0 or 1" >&2
     exit 1
     ;;
 esac
@@ -222,6 +235,16 @@ cmake_build_dir="$(normalize_root_dir MYLITE_WORDPRESS_CMAKE_BUILD_DIR "${cmake_
 composer_cache_dir="$(normalize_root_dir MYLITE_WORDPRESS_COMPOSER_CACHE_DIR "${composer_cache_dir}")"
 phpunit_report_dir="$(normalize_root_dir MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR "${phpunit_report_dir}")"
 timing_summary_path="$(normalize_root_dir MYLITE_WORDPRESS_TIMING_SUMMARY_PATH "${timing_summary_path}")"
+if [ -n "${runtime_manifest_path}" ]; then
+  runtime_manifest_path="$(
+    normalize_root_dir MYLITE_WORDPRESS_RUNTIME_MANIFEST_PATH "${runtime_manifest_path}"
+  )"
+fi
+if [ -n "${runtime_metadata_path}" ]; then
+  runtime_metadata_path="$(
+    normalize_root_dir MYLITE_WORDPRESS_RUNTIME_METADATA_PATH "${runtime_metadata_path}"
+  )"
+fi
 
 if [[ "${db_dir}" != /* ]]; then
   db_dir="${root_dir}/${db_dir}"
@@ -437,6 +460,13 @@ host_require_wordpress_php_artifacts_fresh() {
       ;;
   esac
 
+  if [ "${trust_runtime_manifest}" = "1" ]; then
+    host_require_runtime_manifest
+    echo "wordpress_php_artifact_manifest_ok=${runtime_manifest_path}"
+    host_append_timing_summary "wordpress_php_artifact_manifest_ok=${runtime_manifest_path}"
+    return
+  fi
+
   mariadb_archive="${mariadb_build_dir}/libmysqld/libmariadbd.a"
   cmake \
     "-DMYLITE_MARIADB_SOURCE_DIR=${root_dir}/mariadb" \
@@ -459,6 +489,49 @@ host_require_wordpress_php_artifacts_fresh() {
 
   echo "wordpress_php_artifact_freshness_ok=${cmake_build_dir}"
   host_append_timing_summary "wordpress_php_artifact_freshness_ok=${cmake_build_dir}"
+}
+
+host_require_manifest_field() {
+  local key="$1"
+  local expected="$2"
+
+  if [ -z "${expected}" ]; then
+    return
+  fi
+  if [ -z "${runtime_metadata_path}" ]; then
+    echo "MYLITE_WORDPRESS_RUNTIME_METADATA_PATH is required to validate ${key}" >&2
+    exit 1
+  fi
+  if ! grep -Fxq -- "${key}=${expected}" "${runtime_metadata_path}"; then
+    echo "Runtime manifest metadata mismatch for ${key}" >&2
+    echo "Expected ${key}=${expected}" >&2
+    echo "Metadata file: ${runtime_metadata_path}" >&2
+    exit 1
+  fi
+}
+
+host_require_runtime_manifest() {
+  if [ -z "${runtime_manifest_path}" ]; then
+    echo "MYLITE_WORDPRESS_TRUST_RUNTIME_MANIFEST=1 requires MYLITE_WORDPRESS_RUNTIME_MANIFEST_PATH" >&2
+    exit 1
+  fi
+  if [ ! -s "${runtime_manifest_path}" ]; then
+    echo "Missing runtime manifest: ${runtime_manifest_path}" >&2
+    exit 1
+  fi
+  if [ -n "${runtime_metadata_path}" ] && [ ! -s "${runtime_metadata_path}" ]; then
+    echo "Missing runtime manifest metadata: ${runtime_metadata_path}" >&2
+    exit 1
+  fi
+
+  (
+    cd "${root_dir}"
+    sha256sum -c "${runtime_manifest_path}"
+  )
+  host_require_manifest_field "github_sha" "${runtime_expected_github_sha}"
+  host_require_manifest_field "wordpress_ref" "${runtime_expected_wordpress_ref}"
+  host_require_manifest_field "mariadb_cmake_build_type" "MinSizeRel"
+  host_require_manifest_field "mylite_cmake_build_type" "${cmake_build_type}"
 }
 
 build_image() {

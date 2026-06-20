@@ -960,6 +960,12 @@ summaries and emitted no `mylite_perf_summary_*_client_*` rows.
 - CI process-isolated WordPress PHPUnit logs include per-child prepared
   database baseline restore count, total time, and average time when the
   baseline-restored child mode is enabled.
+- CI now runs WordPress PHPUnit test-only shards as a matrix after a single
+  production setup job. The setup job uploads tarred runtime and prepared
+  database-baseline artifacts, shard jobs rebuild only the Docker image and
+  verify a SHA256 runtime manifest before bypassing cross-job mtime freshness
+  checks, and the final `wordpress-phpunit-mysqli-mylite` job merges the
+  per-shard timing summaries and appends the rollup rows.
 - CI's UI/filesystem process-isolated WordPress PHPUnit shard keeps parent
   reconnect disabled after each child once the exact filter has passed with
   child install skip.

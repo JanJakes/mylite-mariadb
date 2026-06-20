@@ -286,7 +286,9 @@ require_literal "cmake --build --preset tidy-prod"
 require_literal_count_at_least "Audit CI production build configuration" 4
 require_literal_count_at_least "run: tools/check-ci-production-builds" 4
 require_literal "timeout-minutes: 75"
-require_literal "timeout-minutes: 90"
+require_literal "timeout-minutes: 70"
+require_literal "timeout-minutes: 45"
+require_literal "timeout-minutes: 10"
 
 require_literal "tools/require-cmake-release-build build/prod"
 require_literal "tools/require-cmake-release-build build/php-embedded-prod"
@@ -296,6 +298,8 @@ require_literal "tools/require-cmake-build-type MinSizeRel build/wordpress-maria
 
 require_literal "MYLITE_WORDPRESS_CMAKE_BUILD_DIR: build/wordpress-php-embedded-prod"
 require_literal "MYLITE_WORDPRESS_CMAKE_BUILD_TYPE: Release"
+require_literal "MYLITE_WORDPRESS_TIMING_SUMMARY_PATH: build/wordpress-phpunit-reports/timing-summary-setup.md"
+require_literal "MYLITE_WORDPRESS_TIMING_SUMMARY_PATH: build/wordpress-phpunit-reports/timing-summary-\${{ matrix.shard }}.md"
 require_literal "MYLITE_WORDPRESS_TIMING_SUMMARY_PATH: build/wordpress-phpunit-reports/timing-summary.md"
 require_literal 'MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD: "1"'
 require_literal 'MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR: "1"'
@@ -317,9 +321,11 @@ require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER: '^(?!Tests_DB)"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_BLOCK_TOKEN_RE:"
-require_literal 'non_isolated_filter="^(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_BLOCK_TOKEN_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
+require_literal 'wordpress_phpunit_filter="^(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_BLOCK_TOKEN_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal "MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_FILTER: '^Tests_Admin_ExportWp"
 require_file_literal "${wordpress_harness}" "cp -a --reflink=auto --"
+require_file_literal "${wordpress_harness}" "MYLITE_WORDPRESS_TRUST_RUNTIME_MANIFEST"
+require_file_literal "${wordpress_harness}" "sha256sum -c"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_SKIP_INSTALL_FILTER: '^Tests_oEmbed_HTTP_Headers"
 require_literal "Tests_Filesystem_WpFilesystemDirect_Chmod::test_should_handle_set_mode_when_not_passed"
 require_literal "Tests_Admin_WpUpgrader::test_maintenance_mode_should_create_maintenance_file_with_boolean"
@@ -335,17 +341,38 @@ require_literal "Upload embedded performance reports"
 require_literal "Install WordPress PHPUnit dependencies"
 require_literal "Prepare WordPress PHPUnit database"
 require_literal "Run WordPress mysqli performance probe"
-require_literal "Run WordPress PHPUnit database suite (test only)"
-require_literal "Run WordPress PHPUnit database profile probe (diagnostic)"
-require_literal "Run WordPress PHPUnit process-isolated deferred-reconnect baseline-restored suite (test only)"
-require_literal "Run WordPress PHPUnit process-isolated deferred-reconnect skip-install suite (test only)"
-require_literal "Run WordPress PHPUnit process-isolated deferred-reconnect UI suite (test only)"
-require_literal "Run WordPress PHPUnit non-isolated REST suite (test only)"
-require_literal "Run WordPress PHPUnit non-isolated query/theme/block/token suite (test only)"
-require_literal "Run WordPress PHPUnit non-isolated remaining suite (test only)"
+require_literal "wordpress-phpunit-setup:"
+require_literal "name: wordpress-phpunit-mysqli-mylite-setup"
+require_literal "wordpress-phpunit-shard:"
+require_literal 'name: wordpress-phpunit-mysqli-mylite (${{ matrix.label }})'
+require_literal "wordpress-phpunit:"
+require_literal "name: wordpress-phpunit-mysqli-mylite"
+require_literal "needs:"
+require_literal "- wordpress-phpunit-setup"
+require_literal "- wordpress-phpunit-shard"
+require_literal "Pack WordPress PHPUnit runtime artifact"
+require_literal "Upload WordPress PHPUnit runtime artifact"
+require_literal "Download WordPress PHPUnit runtime artifact"
+require_literal "Extract WordPress PHPUnit runtime artifact"
+require_literal "Run WordPress PHPUnit shard (test only)"
+require_literal "Show WordPress shard timing summary"
+require_literal "Upload WordPress shard timing summary"
+require_literal "Download WordPress timing summaries"
+require_literal "Check WordPress PHPUnit shard results"
 require_literal "Show WordPress timing summary"
 require_literal "Upload WordPress timing summary"
-require_literal_count_at_least "actions/upload-artifact@v4" 2
+require_literal_count_at_least "actions/upload-artifact@v4" 4
+require_literal "actions/download-artifact@v4"
+require_literal "wordpress-phpunit-runtime"
+require_literal "wordpress-phpunit-runtime.tar.gz"
+require_literal "wordpress-phpunit-db-baseline.tar.gz"
+require_literal "wordpress-phpunit-runtime-manifest.txt"
+require_literal "wordpress-phpunit-runtime-manifest.sha256"
+require_literal "wordpress-phpunit-timing-summary-setup"
+require_literal "wordpress-phpunit-timing-summary-\${{ matrix.shard }}"
+require_literal "pattern: wordpress-phpunit-timing-summary-*"
+require_literal "merge-multiple: true"
+require_literal "compression-level: 0"
 require_literal "MYLITE_WORDPRESS_PHASE: docker-image"
 require_literal "MYLITE_WORDPRESS_PHASE: fetch"
 require_literal "MYLITE_WORDPRESS_PHASE: build-php"
@@ -359,17 +386,42 @@ require_literal "MYLITE_WORDPRESS_TIMING_LABEL: dependencies"
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: prepare-db"
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: perf-probe"
 require_literal 'MYLITE_WORDPRESS_PERF_PROFILE_CONNECT_PROCESSES: "1"'
-require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-db"
-require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-db-profile"
-require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-deferred-reconnect-baseline-restored"
-require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-deferred-reconnect-skip-install"
-require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-deferred-reconnect-ui"
-require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-non-isolated-rest"
-require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-non-isolated-query-theme-block-token"
-require_literal "MYLITE_WORDPRESS_TIMING_LABEL: phpunit-non-isolated-remaining"
+require_literal "MYLITE_WORDPRESS_TIMING_LABEL: \${{ matrix.label }}"
+require_literal "label: phpunit-db"
+require_literal "label: phpunit-db-profile"
+require_literal "label: phpunit-deferred-reconnect-baseline-restored"
+require_literal "label: phpunit-deferred-reconnect-skip-install"
+require_literal "label: phpunit-deferred-reconnect-ui"
+require_literal "label: phpunit-non-isolated-rest"
+require_literal "label: phpunit-non-isolated-query-theme-block-token"
+require_literal "label: phpunit-non-isolated-remaining"
+require_literal "shard: db"
+require_literal "shard: db-profile"
+require_literal "shard: deferred-reconnect-baseline-restored"
+require_literal "shard: deferred-reconnect-skip-install"
+require_literal "shard: deferred-reconnect-ui"
+require_literal "shard: non-isolated-rest"
+require_literal "shard: non-isolated-query-theme-block-token"
+require_literal "shard: non-isolated-remaining"
 require_literal 'cat "${summary}" >> "${GITHUB_STEP_SUMMARY}"'
-require_literal_count_at_least "MYLITE_WORDPRESS_PHASE: phpunit" 8
-require_literal_count_at_least 'MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"' 11
+require_literal_count_at_least "MYLITE_WORDPRESS_PHASE: phpunit" 1
+require_literal_count_at_least 'MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"' 4
+require_literal_count_at_least 'keepalive: "1"' 3
+require_literal_count_at_least 'child_timing_summary: "1"' 3
+require_literal_count_at_least 'child_script_timing_summary: "1"' 3
+require_literal_count_at_least 'child_skip_install: "1"' 3
+require_literal_count_at_least 'reconnect_after_child: "0"' 3
+require_literal 'profile_mysqli: "1"'
+require_literal 'child_restore_baseline: "1"'
+require_literal "MYLITE_WORDPRESS_DB_DIR: /tmp/mylite-wordpress-tests.mylite"
+require_literal "MYLITE_WORDPRESS_DB_BASELINE_DIR: /tmp/mylite-wordpress-tests.mylite.baseline"
+require_literal "MYLITE_WORDPRESS_RUNTIME_MANIFEST_PATH: build/wordpress-phpunit-runtime-manifest.sha256"
+require_literal "MYLITE_WORDPRESS_RUNTIME_METADATA_PATH: build/wordpress-phpunit-runtime-manifest.txt"
+require_literal 'MYLITE_WORDPRESS_TRUST_RUNTIME_MANIFEST: "1"'
+require_literal 'MYLITE_WORDPRESS_RUNTIME_EXPECTED_GITHUB_SHA: ${{ github.sha }}'
+require_literal "MYLITE_WORDPRESS_RUNTIME_EXPECTED_WORDPRESS_REF: 6ddfc9d9b532c6e95c1266165149815895e2eb56"
+require_literal 'test "${WORDPRESS_SETUP_RESULT}" = "success"'
+require_literal 'test "${WORDPRESS_SHARD_RESULT}" = "success"'
 
 require_literal "Embedded ownerless SQL weighted shards"
 require_literal "ctest --preset php-embedded-prod"
@@ -455,121 +507,75 @@ require_step_literal \
 require_wordpress_timing_step_guards "Install WordPress PHPUnit dependencies"
 require_wordpress_timing_step_guards "Prepare WordPress PHPUnit database"
 require_wordpress_timing_step_guards "Run WordPress mysqli performance probe"
-require_wordpress_timing_step_guards "Run WordPress PHPUnit database suite (test only)"
-require_wordpress_timing_step_guards "Run WordPress PHPUnit database profile probe (diagnostic)"
-require_wordpress_timing_step_guards \
-  "Run WordPress PHPUnit process-isolated deferred-reconnect baseline-restored suite (test only)"
-require_wordpress_timing_step_guards \
-  "Run WordPress PHPUnit process-isolated deferred-reconnect skip-install suite (test only)"
-require_wordpress_timing_step_guards \
-  "Run WordPress PHPUnit process-isolated deferred-reconnect UI suite (test only)"
-require_wordpress_timing_step_guards "Run WordPress PHPUnit non-isolated REST suite (test only)"
-require_wordpress_timing_step_guards \
-  "Run WordPress PHPUnit non-isolated query/theme/block/token suite (test only)"
-require_wordpress_timing_step_guards "Run WordPress PHPUnit non-isolated remaining suite (test only)"
+require_wordpress_timing_step_guards "Pack WordPress PHPUnit runtime artifact"
+require_wordpress_timing_step_guards "Run WordPress PHPUnit shard (test only)"
 require_step_literal "Prepare WordPress PHPUnit database" 'MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL: "1"'
-for phpunit_step in \
-  "Run WordPress PHPUnit database suite (test only)" \
-  "Run WordPress PHPUnit database profile probe (diagnostic)" \
-  "Run WordPress PHPUnit process-isolated deferred-reconnect baseline-restored suite (test only)" \
-  "Run WordPress PHPUnit process-isolated deferred-reconnect skip-install suite (test only)" \
-  "Run WordPress PHPUnit process-isolated deferred-reconnect UI suite (test only)" \
-  "Run WordPress PHPUnit non-isolated REST suite (test only)" \
-  "Run WordPress PHPUnit non-isolated query/theme/block/token suite (test only)" \
-  "Run WordPress PHPUnit non-isolated remaining suite (test only)"
-do
-  require_step_literal "${phpunit_step}" 'MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL: "1"'
-done
-forbid_step_literal \
-  "Run WordPress PHPUnit process-isolated deferred-reconnect baseline-restored suite (test only)" \
-  'MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES: "1"'
-forbid_step_literal \
-  "Run WordPress PHPUnit process-isolated deferred-reconnect skip-install suite (test only)" \
-  'MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES: "1"'
-forbid_step_literal \
-  "Run WordPress PHPUnit process-isolated deferred-reconnect UI suite (test only)" \
-  'MYLITE_WORDPRESS_PHPUNIT_PROFILE_CHILD_PROCESSES: "1"'
 require_step_literal \
-  "Run WordPress PHPUnit process-isolated deferred-reconnect baseline-restored suite (test only)" \
-  'MYLITE_WORDPRESS_PHPUNIT_CHILD_TIMING_SUMMARY: "1"'
+  "Run WordPress PHPUnit shard (test only)" \
+  'MYLITE_WORDPRESS_PHASE: phpunit'
 require_step_literal \
-  "Run WordPress PHPUnit process-isolated deferred-reconnect baseline-restored suite (test only)" \
-  'MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_TIMING_SUMMARY: "1"'
+  "Run WordPress PHPUnit shard (test only)" \
+  'MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"'
 require_step_literal \
-  "Run WordPress PHPUnit process-isolated deferred-reconnect skip-install suite (test only)" \
-  'MYLITE_WORDPRESS_PHPUNIT_CHILD_TIMING_SUMMARY: "1"'
+  "Run WordPress PHPUnit shard (test only)" \
+  'MYLITE_WORDPRESS_TIMING_LABEL: ${{ matrix.label }}'
 require_step_literal \
-  "Run WordPress PHPUnit process-isolated deferred-reconnect skip-install suite (test only)" \
-  'MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_TIMING_SUMMARY: "1"'
+  "Run WordPress PHPUnit shard (test only)" \
+  'tools/wordpress-phpunit-mysqli-mylite --filter "${wordpress_phpunit_filter}"'
 require_step_literal \
-  "Run WordPress PHPUnit process-isolated deferred-reconnect UI suite (test only)" \
-  'MYLITE_WORDPRESS_PHPUNIT_CHILD_TIMING_SUMMARY: "1"'
+  "Run WordPress PHPUnit shard (test only)" \
+  'db | db-profile)'
 require_step_literal \
-  "Run WordPress PHPUnit process-isolated deferred-reconnect UI suite (test only)" \
-  'MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_TIMING_SUMMARY: "1"'
+  "Run WordPress PHPUnit shard (test only)" \
+  "wordpress_phpunit_filter='^Tests_DB'"
 require_step_literal \
-  "Run WordPress PHPUnit process-isolated deferred-reconnect baseline-restored suite (test only)" \
-  'MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL: "1"'
+  "Run WordPress PHPUnit shard (test only)" \
+  'deferred-reconnect-baseline-restored)'
 require_step_literal \
-  "Run WordPress PHPUnit process-isolated deferred-reconnect baseline-restored suite (test only)" \
-  'MYLITE_WORDPRESS_PHPUNIT_CHILD_RESTORE_BASELINE: "1"'
+  "Run WordPress PHPUnit shard (test only)" \
+  'non-isolated-remaining)'
 require_step_literal \
-  "Run WordPress PHPUnit process-isolated deferred-reconnect baseline-restored suite (test only)" \
-  'MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD: "0"'
+  "Pack WordPress PHPUnit runtime artifact" \
+  "tar -czf build/wordpress-phpunit-runtime.tar.gz"
 require_step_literal \
-  "Run WordPress PHPUnit process-isolated deferred-reconnect skip-install suite (test only)" \
-  'MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD: "0"'
+  "Pack WordPress PHPUnit runtime artifact" \
+  "sha256sum -c build/wordpress-phpunit-runtime-manifest.sha256"
 require_step_literal \
-  "Run WordPress PHPUnit process-isolated deferred-reconnect skip-install suite (test only)" \
-  'MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL: "1"'
+  "Pack WordPress PHPUnit runtime artifact" \
+  "github_sha=\${GITHUB_SHA}"
 require_step_literal \
-  "Run WordPress PHPUnit process-isolated deferred-reconnect UI suite (test only)" \
-  'MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD: "0"'
+  "Pack WordPress PHPUnit runtime artifact" \
+  "wordpress_ref=\${MYLITE_WORDPRESS_REF}"
 require_step_literal \
-  "Run WordPress PHPUnit process-isolated deferred-reconnect UI suite (test only)" \
-  'MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL: "1"'
-forbid_step_literal \
-  "Run WordPress PHPUnit database suite (test only)" \
-  'MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL: "1"'
-forbid_step_literal \
-  "Run WordPress PHPUnit database profile probe (diagnostic)" \
-  'MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL: "1"'
+  "Pack WordPress PHPUnit runtime artifact" \
+  "tar -czf build/wordpress-phpunit-db-baseline.tar.gz"
 require_step_literal \
-  "Run WordPress PHPUnit database profile probe (diagnostic)" \
-  'MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI: "1"'
+  "Extract WordPress PHPUnit runtime artifact" \
+  "tar -xzf build/wordpress-phpunit-runtime-artifact/wordpress-phpunit-runtime.tar.gz"
 require_step_literal \
-  "Run WordPress PHPUnit database profile probe (diagnostic)" \
-  "tools/wordpress-phpunit-mysqli-mylite --filter '^Tests_DB'"
-forbid_step_literal \
-  "Run WordPress PHPUnit database suite (test only)" \
-  'MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI: "1"'
-forbid_step_literal \
-  "Run WordPress PHPUnit non-isolated REST suite (test only)" \
-  'MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL: "1"'
-forbid_step_literal \
-  "Run WordPress PHPUnit non-isolated query/theme/block/token suite (test only)" \
-  'MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL: "1"'
-forbid_step_literal \
-  "Run WordPress PHPUnit non-isolated remaining suite (test only)" \
-  'MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL: "1"'
-forbid_step_literal \
-  "Run WordPress PHPUnit non-isolated REST suite (test only)" \
-  'MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI: "1"'
-forbid_step_literal \
-  "Run WordPress PHPUnit non-isolated query/theme/block/token suite (test only)" \
-  'MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI: "1"'
-forbid_step_literal \
-  "Run WordPress PHPUnit non-isolated remaining suite (test only)" \
-  'MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI: "1"'
+  "Extract WordPress PHPUnit runtime artifact" \
+  "tar -xzf build/wordpress-phpunit-runtime-artifact/wordpress-phpunit-db-baseline.tar.gz"
 require_step_literal \
-  "Run WordPress PHPUnit non-isolated REST suite (test only)" \
-  'MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE: "1"'
+  "Extract WordPress PHPUnit runtime artifact" \
+  "sha256sum -c build/wordpress-phpunit-runtime-manifest.sha256"
 require_step_literal \
-  "Run WordPress PHPUnit non-isolated query/theme/block/token suite (test only)" \
-  'MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE: "1"'
+  "Extract WordPress PHPUnit runtime artifact" \
+  'grep -Fx "github_sha=${GITHUB_SHA}" build/wordpress-phpunit-runtime-manifest.txt'
 require_step_literal \
-  "Run WordPress PHPUnit non-isolated remaining suite (test only)" \
-  'MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE: "1"'
+  "Upload WordPress PHPUnit runtime artifact" \
+  "name: wordpress-phpunit-runtime"
+require_step_literal \
+  "Upload WordPress setup timing summary" \
+  "name: wordpress-phpunit-timing-summary-setup"
+require_step_literal \
+  "Upload WordPress shard timing summary" \
+  'name: wordpress-phpunit-timing-summary-${{ matrix.shard }}'
+require_step_literal \
+  "Download WordPress timing summaries" \
+  "pattern: wordpress-phpunit-timing-summary-*"
+require_step_literal \
+  "Show WordPress timing summary" \
+  "tools/wordpress-phpunit-timing-rollup --input"
 require_step_literal \
   "Upload WordPress timing summary" \
   "name: wordpress-phpunit-timing-summary"
