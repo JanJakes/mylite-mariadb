@@ -183,6 +183,18 @@ jobs:
           build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe \
             | tee build/embedded-performance-reports/ownerless-append-attribution.log
 
+      - name: Summarize embedded performance reports
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ -d build/embedded-performance-reports ]; then
+            tools/embedded-performance-rollup --input build/embedded-performance-reports \
+              | tee build/embedded-performance-reports/summary.md
+            if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+              cat build/embedded-performance-reports/summary.md >> "${GITHUB_STEP_SUMMARY}"
+            fi
+          fi
+
       - name: Upload embedded performance reports
         if: always()
         uses: actions/upload-artifact@v4

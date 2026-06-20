@@ -542,6 +542,15 @@ require_step_literal \
   "Run embedded ownerless append attribution probe" \
   "tee build/embedded-performance-reports/ownerless-append-attribution.log"
 require_step_literal \
+  "Summarize embedded performance reports" \
+  "tools/embedded-performance-rollup --input build/embedded-performance-reports"
+require_step_literal \
+  "Summarize embedded performance reports" \
+  "tee build/embedded-performance-reports/summary.md"
+require_step_literal \
+  "Summarize embedded performance reports" \
+  'cat build/embedded-performance-reports/summary.md >> "${GITHUB_STEP_SUMMARY}"'
+require_step_literal \
   "Upload embedded performance reports" \
   "name: embedded-performance-reports"
 require_step_literal \

@@ -269,6 +269,12 @@ default-checked bulk-start summaries without changing aggregate row names or
 SQL behavior. CI also separates the WordPress PHPUnit source, build,
 dependency, database-prep, performance-probe, and test-only phases so PHPUnit
 wall timings are not hidden inside build work.
+Embedded performance CI also writes a compact rollup table to
+`build/embedded-performance-reports/summary.md` and appends it to the GitHub
+step summary, surfacing warm open/close cost, point-select ratios, autocommit
+insert ratio, ownerless bulk row throughput, ownerless bulk `mysql_query()`
+time, and remaining non-empty-table undo-report MTR cost without downloading
+the raw logs.
 Those phases append compact timing rows into
 `build/wordpress-phpunit-reports/timing-summary.md`, and CI publishes that
 Markdown table to the GitHub step summary so setup, build, probe, and each

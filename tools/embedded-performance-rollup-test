@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/mylite-embedded-performance-rollup-test.XXXXXX")"
+cleanup() {
+  rm -rf "${tmp_dir}"
+}
+trap cleanup EXIT
+
+reports="${tmp_dir}/reports"
+mkdir -p "${reports}"
+
+cat > "${reports}/default.log" <<'LOG'
+mylite_perf_summary_ordinary_warm_open_close_ms_avg=120.000
+mylite_perf_summary_ownerless_warm_open_close_ms_avg=140.000
+mylite_perf_summary_ownerless_direct_point_select_ratio=0.9000
+mylite_perf_summary_ownerless_prepared_point_select_ratio=0.9200
+mylite_perf_summary_ownerless_insert_autocommit_ratio=0.4500
+LOG
+
+cat > "${reports}/large-row-ownerless-attribution.log" <<'LOG'
+mylite_perf_summary_ordinary_warm_open_close_ms_avg=125.000
+mylite_perf_summary_ownerless_warm_open_close_ms_avg=150.000
+mylite_perf_summary_ownerless_direct_point_select_ratio=0.8800
+mylite_perf_summary_ownerless_prepared_point_select_ratio=0.9100
+mylite_perf_summary_ownerless_insert_autocommit_ratio=0.4700
+mylite_perf_summary_ownerless_insert_autocommit_bulk_rows_ratio=0.3600
+mylite_perf_summary_ownerless_insert_autocommit_bulk_rows_ops_per_second=26000.00
+mylite_perf_summary_ownerless_autocommit_bulk_mysql_query_ms_per_statement=3.229
+mylite_perf_summary_ownerless_autocommit_bulk_remaining_trx_undo_report_mtr_commit_ms_per_statement=0.583
+LOG
+
+rollup="$("${script_dir}/embedded-performance-rollup" --input "${reports}")"
+
+require_row() {
+  local expected="$1"
+  if ! grep -Fqx "${expected}" <<<"${rollup}"; then
+    echo "Missing embedded performance rollup row: ${expected}" >&2
+    echo "${rollup}" >&2
+    exit 1
+  fi
+}
+
+require_row "| report | ordinary warm open/close ms | ownerless warm open/close ms | direct point-select ratio | prepared point-select ratio | autocommit insert ratio | bulk rows ratio | ownerless bulk rows/s | ownerless bulk mysql_query ms/stmt | remaining undo MTR ms/stmt |"
+require_row "| default | 120.000 | 140.000 | 0.9000 | 0.9200 | 0.4500 | n/a | n/a | n/a | n/a |"
+require_row "| large-row-ownerless-attribution | 125.000 | 150.000 | 0.8800 | 0.9100 | 0.4700 | 0.3600 | 26000.00 | 3.229 | 0.583 |"

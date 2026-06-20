@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+input_dir="build/embedded-performance-reports"
+
+usage() {
+  cat >&2 <<'USAGE'
+Usage: embedded-performance-rollup [--input PATH]
+USAGE
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --input)
+      if [ "$#" -lt 2 ]; then
+        usage
+        exit 2
+      fi
+      input_dir="$2"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+if [ ! -d "${input_dir}" ]; then
+  echo "embedded-performance-rollup: input directory not found: ${input_dir}" >&2
+  exit 1
+fi
+
+metric_value() {
+  local file="$1"
+  local metric="$2"
+  local value
+
+  value="$(awk -F= -v metric="${metric}" '$1 == metric { print $2; found = 1; exit } END { if (!found) exit 1 }' "${file}" || true)"
+  if [ -z "${value}" ]; then
+    printf 'n/a'
+  else
+    printf '%s' "${value}"
+  fi
+}
+
+markdown_cell() {
+  local value="$1"
+  value="${value//$'\n'/ }"
+  value="${value//$'\r'/ }"
+  value="${value//|/\\|}"
+  printf '%s' "${value}"
+}
+
+shopt -s nullglob
+logs=("${input_dir}"/*.log)
+shopt -u nullglob
+
+printf '## Embedded Performance Rollup\n\n'
+printf '| report | ordinary warm open/close ms | ownerless warm open/close ms | direct point-select ratio | prepared point-select ratio | autocommit insert ratio | bulk rows ratio | ownerless bulk rows/s | ownerless bulk mysql_query ms/stmt | remaining undo MTR ms/stmt |\n'
+printf '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n'
+
+if [ "${#logs[@]}" -eq 0 ]; then
+  printf '| n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |\n'
+  exit 0
+fi
+
+for log in "${logs[@]}"; do
+  label="$(basename "${log}" .log)"
+  printf '| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n' \
+    "$(markdown_cell "${label}")" \
+    "$(metric_value "${log}" mylite_perf_summary_ordinary_warm_open_close_ms_avg)" \
+    "$(metric_value "${log}" mylite_perf_summary_ownerless_warm_open_close_ms_avg)" \
+    "$(metric_value "${log}" mylite_perf_summary_ownerless_direct_point_select_ratio)" \
+    "$(metric_value "${log}" mylite_perf_summary_ownerless_prepared_point_select_ratio)" \
+    "$(metric_value "${log}" mylite_perf_summary_ownerless_insert_autocommit_ratio)" \
+    "$(metric_value "${log}" mylite_perf_summary_ownerless_insert_autocommit_bulk_rows_ratio)" \
+    "$(metric_value "${log}" mylite_perf_summary_ownerless_insert_autocommit_bulk_rows_ops_per_second)" \
+    "$(metric_value "${log}" mylite_perf_summary_ownerless_autocommit_bulk_mysql_query_ms_per_statement)" \
+    "$(metric_value "${log}" mylite_perf_summary_ownerless_autocommit_bulk_remaining_trx_undo_report_mtr_commit_ms_per_statement)"
+done

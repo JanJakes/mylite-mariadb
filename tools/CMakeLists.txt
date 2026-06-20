@@ -32,6 +32,14 @@ if(BUILD_TESTING)
     LABELS "tools;compat.build"
   )
   add_test(
+    NAME tools.embedded-performance-rollup
+    COMMAND
+      "${CMAKE_CURRENT_SOURCE_DIR}/embedded-performance-rollup-test"
+  )
+  set_tests_properties(tools.embedded-performance-rollup PROPERTIES
+    LABELS "tools;compat.build"
+  )
+  add_test(
     NAME tools.ownerless-sql-trace-runner
     COMMAND
       "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-sql-trace-runner"
