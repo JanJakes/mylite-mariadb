@@ -16,6 +16,18 @@ cat > "${summary}" <<'SUMMARY'
 | --- | --- | ---: |
 | docker-image | wordpress_docker_build_seconds | skipped |
 | docker-image | wordpress_total_seconds | 29 |
+| artifact-pack | wordpress_artifact_pack_seconds | 12 |
+| artifact-pack | wordpress_artifact_pack_runtime_tar_bytes | 100 |
+| artifact-pack | wordpress_artifact_pack_db_baseline_tar_bytes | 20 |
+| artifact-pack | wordpress_total_seconds | 12 |
+| artifact-upload | wordpress_artifact_upload_seconds | 3 |
+| artifact-upload | wordpress_total_seconds | 3 |
+| artifact-download-phpunit-db | wordpress_artifact_download_seconds | 4 |
+| artifact-download-phpunit-db | wordpress_total_seconds | 4 |
+| artifact-extract-phpunit-db | wordpress_artifact_extract_seconds | 5 |
+| artifact-extract-phpunit-db | wordpress_artifact_extract_runtime_tar_bytes | 100 |
+| artifact-extract-phpunit-db | wordpress_artifact_extract_db_baseline_tar_bytes | 20 |
+| artifact-extract-phpunit-db | wordpress_total_seconds | 5 |
 | build-php | mylite_mariadb_embedded_seconds | 406 |
 | build-php | mylite_php_configure_seconds | 2 |
 | build-php | mylite_php_build_seconds | 14 |
@@ -98,6 +110,16 @@ require_row "| timing-rollup | wordpress_phpunit_isolated_child_process_outer_mi
 require_row "| timing-rollup | wordpress_phpunit_non_isolated_shell_real_seconds_sum | 168.469 |"
 require_row "| timing-rollup | wordpress_build_mariadb_embedded_seconds | 406.000 |"
 require_row "| timing-rollup | wordpress_build_total_seconds | 424.000 |"
+require_row "| timing-rollup | wordpress_timed_phase_count | 7 |"
+require_row "| timing-rollup | wordpress_timed_phase_total_seconds_sum | 487.000 |"
+require_row "| timing-rollup | wordpress_artifact_pack_seconds | 12.000 |"
+require_row "| timing-rollup | wordpress_artifact_upload_seconds | 3.000 |"
+require_row "| timing-rollup | wordpress_artifact_download_seconds | 4.000 |"
+require_row "| timing-rollup | wordpress_artifact_extract_seconds | 5.000 |"
+require_row "| timing-rollup | wordpress_artifact_pack_runtime_tar_bytes | 100 |"
+require_row "| timing-rollup | wordpress_artifact_pack_db_baseline_tar_bytes | 20 |"
+require_row "| timing-rollup | wordpress_artifact_extract_runtime_tar_bytes_sum | 100 |"
+require_row "| timing-rollup | wordpress_artifact_extract_db_baseline_tar_bytes_sum | 20 |"
 require_row "| timing-rollup | wordpress_perf_php_extension_process_overhead_ms_avg | 7.173 |"
 require_row "| timing-rollup | wordpress_perf_select1_ops_per_second | 1545.960 |"
 

@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/mylite-wordpress-append-timing-test.XXXXXX")"
+cleanup() {
+  rm -rf "${tmp_dir}"
+}
+trap cleanup EXIT
+
+summary="${tmp_dir}/timing-summary.md"
+
+"${script_dir}/wordpress-phpunit-append-timing" \
+  --summary "${summary}" \
+  --label 'artifact|pack' \
+  'wordpress_artifact_pack_seconds=12' \
+  'metric|with-pipe=value|with-pipe'
+
+MYLITE_WORDPRESS_TIMING_SUMMARY_PATH="${summary}" \
+MYLITE_WORDPRESS_TIMING_LABEL="artifact-download" \
+  "${script_dir}/wordpress-phpunit-append-timing" \
+  "metric_with_newline=line one
+line two"
+
+require_line() {
+  local expected="$1"
+  if ! grep -Fqx "${expected}" "${summary}"; then
+    echo "Missing timing summary row: ${expected}" >&2
+    cat "${summary}" >&2
+    exit 1
+  fi
+}
+
+require_line "## WordPress PHPUnit Timing"
+require_line "| label | metric | value |"
+require_line "| --- | --- | ---: |"
+require_line '| artifact\|pack | wordpress_artifact_pack_seconds | 12 |'
+require_line '| artifact\|pack | metric\|with-pipe | value\|with-pipe |'
+require_line "| artifact-download | metric_with_newline | line one line two |"
+
+header_count="$(grep -Fxc "| label | metric | value |" "${summary}")"
+if [ "${header_count}" -ne 1 ]; then
+  echo "Expected one timing header, found ${header_count}" >&2
+  cat "${summary}" >&2
+  exit 1
+fi

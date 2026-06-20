@@ -233,9 +233,13 @@ wall timings are not hidden inside build work.
 Those phases append compact timing rows into
 `build/wordpress-phpunit-reports/timing-summary.md`, and CI publishes that
 Markdown table to the GitHub step summary so setup, build, probe, and each
-PHPUnit shard can be compared without scraping separate step logs. CI now also
-uploads that timing summary as the `wordpress-phpunit-timing-summary` artifact,
-and the embedded performance probes persist their production output as the
+PHPUnit shard can be compared without scraping separate step logs. The split
+runtime artifact handoff also records pack, upload, per-shard download, and
+per-shard extract seconds plus runtime/database-baseline tarball byte sizes, so
+branch/main timing comparisons can distinguish test execution from artifact
+transfer overhead. CI now also uploads that timing summary as the
+`wordpress-phpunit-timing-summary` artifact, and the embedded performance probes
+persist their production output as the
 `embedded-performance-reports` artifact, so branch/main timing comparisons can
 download the same evidence after a run instead of relying only on log scraping.
 The embedded ownerless SQL CI step uses the registered sixteen weighted CTest

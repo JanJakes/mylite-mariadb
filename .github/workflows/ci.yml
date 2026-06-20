@@ -331,6 +331,7 @@ jobs:
       - name: Pack WordPress PHPUnit runtime artifact
         run: |
           set -euo pipefail
+          pack_start="$(date +%s)"
           tools/require-cmake-build-type MinSizeRel build/wordpress-mariadb-embedded
           tools/require-cmake-release-build build/wordpress-php-embedded-prod
           test -d "${MYLITE_WORDPRESS_DB_BASELINE_DIR}"
@@ -366,6 +367,20 @@ jobs:
           tar -czf build/wordpress-phpunit-db-baseline.tar.gz \
             -C "$(dirname "${MYLITE_WORDPRESS_DB_BASELINE_DIR}")" \
             "$(basename "${MYLITE_WORDPRESS_DB_BASELINE_DIR}")"
+          pack_end="$(date +%s)"
+          pack_seconds="$((pack_end - pack_start))"
+          runtime_tar_bytes="$(wc -c < build/wordpress-phpunit-runtime.tar.gz | tr -d '[:space:]')"
+          db_baseline_tar_bytes="$(wc -c < build/wordpress-phpunit-db-baseline.tar.gz | tr -d '[:space:]')"
+          tools/wordpress-phpunit-append-timing --label artifact-pack \
+            "wordpress_artifact_pack_seconds=${pack_seconds}" \
+            "wordpress_artifact_pack_runtime_tar_bytes=${runtime_tar_bytes}" \
+            "wordpress_artifact_pack_db_baseline_tar_bytes=${db_baseline_tar_bytes}" \
+            "wordpress_total_seconds=${pack_seconds}"
+
+      - name: Mark WordPress PHPUnit runtime artifact upload start
+        run: |
+          set -euo pipefail
+          date +%s > build/wordpress-phpunit-runtime-upload-start.txt
 
       - name: Upload WordPress PHPUnit runtime artifact
         uses: actions/upload-artifact@v4
@@ -376,6 +391,17 @@ jobs:
             build/wordpress-phpunit-db-baseline.tar.gz
           if-no-files-found: error
           compression-level: 0
+
+      - name: Record WordPress PHPUnit runtime artifact upload timing
+        if: always()
+        run: |
+          set -euo pipefail
+          upload_start="$(cat build/wordpress-phpunit-runtime-upload-start.txt)"
+          upload_end="$(date +%s)"
+          upload_seconds="$((upload_end - upload_start))"
+          tools/wordpress-phpunit-append-timing --label artifact-upload \
+            "wordpress_artifact_upload_seconds=${upload_seconds}" \
+            "wordpress_total_seconds=${upload_seconds}"
 
       - name: Upload WordPress setup timing summary
         if: always()
@@ -531,15 +557,33 @@ jobs:
           free -h
           docker version
 
+      - name: Mark WordPress PHPUnit runtime artifact download start
+        run: |
+          set -euo pipefail
+          mkdir -p build/wordpress-phpunit-reports
+          date +%s > build/wordpress-phpunit-runtime-download-start.txt
+
       - name: Download WordPress PHPUnit runtime artifact
         uses: actions/download-artifact@v4
         with:
           name: wordpress-phpunit-runtime
           path: build/wordpress-phpunit-runtime-artifact
 
+      - name: Record WordPress PHPUnit runtime artifact download timing
+        if: always()
+        run: |
+          set -euo pipefail
+          download_start="$(cat build/wordpress-phpunit-runtime-download-start.txt)"
+          download_end="$(date +%s)"
+          download_seconds="$((download_end - download_start))"
+          tools/wordpress-phpunit-append-timing --label artifact-download-${{ matrix.shard }} \
+            "wordpress_artifact_download_seconds=${download_seconds}" \
+            "wordpress_total_seconds=${download_seconds}"
+
       - name: Extract WordPress PHPUnit runtime artifact
         run: |
           set -euo pipefail
+          extract_start="$(date +%s)"
           rm -rf \
             build/wordpress-develop \
             build/wordpress-phpunit-tools \
@@ -553,6 +597,15 @@ jobs:
           sha256sum -c build/wordpress-phpunit-runtime-manifest.sha256
           grep -Fx "github_sha=${GITHUB_SHA}" build/wordpress-phpunit-runtime-manifest.txt
           grep -Fx "wordpress_ref=${MYLITE_WORDPRESS_REF}" build/wordpress-phpunit-runtime-manifest.txt
+          extract_end="$(date +%s)"
+          extract_seconds="$((extract_end - extract_start))"
+          runtime_tar_bytes="$(wc -c < build/wordpress-phpunit-runtime-artifact/wordpress-phpunit-runtime.tar.gz | tr -d '[:space:]')"
+          db_baseline_tar_bytes="$(wc -c < build/wordpress-phpunit-runtime-artifact/wordpress-phpunit-db-baseline.tar.gz | tr -d '[:space:]')"
+          tools/wordpress-phpunit-append-timing --label artifact-extract-${{ matrix.shard }} \
+            "wordpress_artifact_extract_seconds=${extract_seconds}" \
+            "wordpress_artifact_extract_runtime_tar_bytes=${runtime_tar_bytes}" \
+            "wordpress_artifact_extract_db_baseline_tar_bytes=${db_baseline_tar_bytes}" \
+            "wordpress_total_seconds=${extract_seconds}"
 
       - name: Build WordPress PHPUnit Docker image
         env:

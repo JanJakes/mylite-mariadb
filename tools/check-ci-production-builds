@@ -4,6 +4,8 @@ set -euo pipefail
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 workflow="${root_dir}/.github/workflows/ci.yml"
 wordpress_harness="${root_dir}/tools/wordpress-phpunit-mysqli-mylite"
+wordpress_timing_append="${root_dir}/tools/wordpress-phpunit-append-timing"
+wordpress_timing_rollup="${root_dir}/tools/wordpress-phpunit-timing-rollup"
 failed=0
 
 require_literal() {
@@ -258,6 +260,14 @@ if [ ! -f "${wordpress_harness}" ]; then
   echo "Missing WordPress PHPUnit harness: ${wordpress_harness}" >&2
   exit 1
 fi
+if [ ! -f "${wordpress_timing_append}" ]; then
+  echo "Missing WordPress PHPUnit timing append helper: ${wordpress_timing_append}" >&2
+  exit 1
+fi
+if [ ! -f "${wordpress_timing_rollup}" ]; then
+  echo "Missing WordPress PHPUnit timing rollup helper: ${wordpress_timing_rollup}" >&2
+  exit 1
+fi
 
 reject_regex \
   '(^|[[:space:]])(cmake|ctest)[^#[:cntrl:]]*--preset[[:space:]]+(dev|embedded-dev|php-embedded-dev)([^[:alnum:]_-]|$)' \
@@ -328,6 +338,12 @@ require_file_literal "${wordpress_harness}" "MYLITE_WORDPRESS_TRUST_RUNTIME_MANI
 require_file_literal "${wordpress_harness}" "sha256sum -c"
 require_file_literal "${wordpress_harness}" 'if [ "${MYLITE_WORDPRESS_PHASE}" != "phpunit" ]; then'
 require_file_literal "${wordpress_harness}" "prepared MyLite WordPress baseline database directory"
+require_file_literal "${wordpress_timing_append}" "Usage: wordpress-phpunit-append-timing"
+require_file_literal "${wordpress_timing_append}" "| label | metric | value |"
+require_file_literal "${wordpress_timing_rollup}" "wordpress_artifact_pack_seconds"
+require_file_literal "${wordpress_timing_rollup}" "wordpress_artifact_upload_seconds"
+require_file_literal "${wordpress_timing_rollup}" "wordpress_artifact_download_seconds"
+require_file_literal "${wordpress_timing_rollup}" "wordpress_artifact_extract_seconds"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_SKIP_INSTALL_FILTER: '^Tests_oEmbed_HTTP_Headers"
 require_literal "Tests_Filesystem_WpFilesystemDirect_Chmod::test_should_handle_set_mode_when_not_passed"
 require_literal "Tests_Admin_WpUpgrader::test_maintenance_mode_should_create_maintenance_file_with_boolean"
@@ -552,6 +568,51 @@ require_step_literal \
   "Pack WordPress PHPUnit runtime artifact" \
   "tar -czf build/wordpress-phpunit-db-baseline.tar.gz"
 require_step_literal \
+  "Pack WordPress PHPUnit runtime artifact" \
+  "tools/wordpress-phpunit-append-timing --label artifact-pack"
+require_step_literal \
+  "Pack WordPress PHPUnit runtime artifact" \
+  "wordpress_artifact_pack_seconds="
+require_step_literal \
+  "Pack WordPress PHPUnit runtime artifact" \
+  "wordpress_artifact_pack_runtime_tar_bytes="
+require_step_literal \
+  "Mark WordPress PHPUnit runtime artifact upload start" \
+  "wordpress-phpunit-runtime-upload-start.txt"
+require_step_literal \
+  "Record WordPress PHPUnit runtime artifact upload timing" \
+  "tools/wordpress-phpunit-append-timing --label artifact-upload"
+require_step_literal \
+  "Record WordPress PHPUnit runtime artifact upload timing" \
+  "wordpress_artifact_upload_seconds="
+require_step_order \
+  "Mark WordPress PHPUnit runtime artifact upload start" \
+  "Upload WordPress PHPUnit runtime artifact"
+require_step_order \
+  "Upload WordPress PHPUnit runtime artifact" \
+  "Record WordPress PHPUnit runtime artifact upload timing"
+require_step_order \
+  "Record WordPress PHPUnit runtime artifact upload timing" \
+  "Upload WordPress setup timing summary"
+require_step_literal \
+  "Mark WordPress PHPUnit runtime artifact download start" \
+  "wordpress-phpunit-runtime-download-start.txt"
+require_step_literal \
+  "Record WordPress PHPUnit runtime artifact download timing" \
+  'tools/wordpress-phpunit-append-timing --label artifact-download-${{ matrix.shard }}'
+require_step_literal \
+  "Record WordPress PHPUnit runtime artifact download timing" \
+  "wordpress_artifact_download_seconds="
+require_step_order \
+  "Mark WordPress PHPUnit runtime artifact download start" \
+  "Download WordPress PHPUnit runtime artifact"
+require_step_order \
+  "Download WordPress PHPUnit runtime artifact" \
+  "Record WordPress PHPUnit runtime artifact download timing"
+require_step_order \
+  "Record WordPress PHPUnit runtime artifact download timing" \
+  "Extract WordPress PHPUnit runtime artifact"
+require_step_literal \
   "Extract WordPress PHPUnit runtime artifact" \
   "tar -xzf build/wordpress-phpunit-runtime-artifact/wordpress-phpunit-runtime.tar.gz"
 require_step_literal \
@@ -563,6 +624,15 @@ require_step_literal \
 require_step_literal \
   "Extract WordPress PHPUnit runtime artifact" \
   'grep -Fx "github_sha=${GITHUB_SHA}" build/wordpress-phpunit-runtime-manifest.txt'
+require_step_literal \
+  "Extract WordPress PHPUnit runtime artifact" \
+  'tools/wordpress-phpunit-append-timing --label artifact-extract-${{ matrix.shard }}'
+require_step_literal \
+  "Extract WordPress PHPUnit runtime artifact" \
+  "wordpress_artifact_extract_seconds="
+require_step_literal \
+  "Extract WordPress PHPUnit runtime artifact" \
+  "wordpress_artifact_extract_runtime_tar_bytes="
 require_step_literal \
   "Upload WordPress PHPUnit runtime artifact" \
   "name: wordpress-phpunit-runtime"

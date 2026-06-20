@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+summary="${MYLITE_WORDPRESS_TIMING_SUMMARY_PATH:-}"
+label="${MYLITE_WORDPRESS_TIMING_LABEL:-}"
+
+usage() {
+  cat <<'USAGE'
+Usage: wordpress-phpunit-append-timing [--summary PATH] [--label LABEL] metric=value...
+
+Append rows to a WordPress PHPUnit timing summary markdown table.
+USAGE
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --summary)
+      if [ "$#" -lt 2 ]; then
+        echo "--summary requires a path" >&2
+        exit 2
+      fi
+      summary="$2"
+      shift 2
+      ;;
+    --label)
+      if [ "$#" -lt 2 ]; then
+        echo "--label requires a value" >&2
+        exit 2
+      fi
+      label="$2"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+if [ -z "${summary}" ]; then
+  echo "No timing summary path supplied; use --summary or MYLITE_WORDPRESS_TIMING_SUMMARY_PATH" >&2
+  exit 2
+fi
+if [ -z "${label}" ]; then
+  echo "No timing label supplied; use --label or MYLITE_WORDPRESS_TIMING_LABEL" >&2
+  exit 2
+fi
+if [ "$#" -eq 0 ]; then
+  echo "At least one metric=value argument is required" >&2
+  exit 2
+fi
+
+markdown_cell() {
+  local value="$1"
+  value="${value//$'\n'/ }"
+  value="${value//|/\\|}"
+  printf '%s' "${value}"
+}
+
+mkdir -p "$(dirname "${summary}")"
+if [ ! -s "${summary}" ]; then
+  {
+    echo "## WordPress PHPUnit Timing"
+    echo
+    echo "| label | metric | value |"
+    echo "| --- | --- | ---: |"
+  } > "${summary}"
+fi
+
+escaped_label="$(markdown_cell "${label}")"
+for metric in "$@"; do
+  case "${metric}" in
+    *=*)
+      ;;
+    *)
+      echo "Timing metric must use metric=value form: ${metric}" >&2
+      exit 2
+      ;;
+  esac
+  value="${metric#*=}"
+  metric="${metric%%=*}"
+  printf '| %s | %s | %s |\n' \
+    "${escaped_label}" \
+    "$(markdown_cell "${metric}")" \
+    "$(markdown_cell "${value}")" \
+    >> "${summary}"
+done
