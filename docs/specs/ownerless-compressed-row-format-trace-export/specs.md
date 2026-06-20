@@ -4,9 +4,11 @@
 
 Ownerless compressed row-format DDL has focused in-process coverage for
 already-open peer refresh, key-block variants, and crash-at-dictionary-boundary
-recovery. The deterministic external SQL trace suite still has no trace family
-that exercises compressed row-format rebuilds while a concurrent reader polls
-snapshot-visible state.
+recovery. The deterministic external SQL trace suite now exercises compressed
+row-format rebuilds while a concurrent reader polls snapshot-visible state, but
+the initial exporter only cycled through a subset of accepted compressed
+`KEY_BLOCK_SIZE` values and did not prove the zip page size exposed by InnoDB
+metadata.
 
 MyLite needs external-harness input for this DDL class so MariaDB-compatible
 oracle runs and later RQG-style stress can include compressed table rebuilds
@@ -25,7 +27,8 @@ instead of relying only on embedded selectors.
 - `mariadb/storage/innobase/handler/ha_innodb.cc` validates compressed
   key-block values and maps compressed row-format options into native InnoDB
   table metadata.
-- `information_schema.INNODB_SYS_TABLES.ROW_FORMAT` and
+- `information_schema.INNODB_SYS_TABLES.ROW_FORMAT`,
+  `information_schema.INNODB_SYS_TABLES.ZIP_PAGE_SIZE`, and
   `information_schema.TABLES.ROW_FORMAT` expose compressed metadata after a
   rebuild.
 - `tools/ownerless-sql-trace-runner` consumes trace directories with
@@ -41,17 +44,19 @@ trace directory:
 - `schema.sql` creates a stable aggregate table and a file-per-table InnoDB
   table with `ROW_FORMAT=DYNAMIC`, `LONGBLOB` payloads, and an index.
 - `worker-1.sql` rebuilds the initially dynamic table through
-  `ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=<n>` for a deterministic key-block
-  cycle. It updates every payload row, advances a stable aggregate table, and
-  checks compressed metadata after each round.
+  `ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=<n>` for the deterministic
+  `1,2,4,8,16` key-block cycle. It updates every payload row, advances a stable
+  aggregate table, and checks compressed metadata plus
+  `INNODB_SYS_TABLES.ZIP_PAGE_SIZE` after each round.
 - `reader.sql` calls a stored reader procedure that repeatedly opens
   repeatable-read consistent snapshots and validates bounded row, version,
   payload, and stable aggregate values. The reader retries the whole snapshot
   block on MariaDB `1020`, `1205`, `1213`, `1412`, or SQLSTATE `40001`, which
   are ordinary external-server contention/table-definition-change outcomes for
   concurrent DDL/read replay.
-- `expected.sql` verifies final compressed metadata, row aggregates, payload
-  byte totals, final payload byte identity, and the stable aggregate oracle.
+- `expected.sql` verifies final compressed row-format and zip-page metadata,
+  row aggregates, payload byte totals, final payload byte identity, and the
+  stable aggregate oracle.
 - `manifest.txt` records rounds, rows, payload size, key-block cycle,
   retry-limit, and expected totals.
 
@@ -105,7 +110,7 @@ slice adds one shell tool, one check-mode CTest entry, and trace-suite metadata.
 
 - Run `bash -n tools/ownerless-compressed-row-format-trace`.
 - Run
-  `tools/ownerless-compressed-row-format-trace --output DIR --rounds 3 --rows 2 --payload-bytes 12000 --check`.
+  `tools/ownerless-compressed-row-format-trace --output DIR --rounds 5 --rows 2 --payload-bytes 12000 --check`.
 - Run `tools/ownerless-sql-trace-runner --trace-dir DIR --check`.
 - Run
   `tools/ownerless-sql-trace-suite --output DIR --trace compressed-row-format-ddl --check`.
@@ -120,8 +125,9 @@ slice adds one shell tool, one check-mode CTest entry, and trace-suite metadata.
 
 - The exporter writes non-empty `schema.sql`, `worker-1.sql`, `reader.sql`,
   `expected.sql`, and `manifest.txt`.
-- Generated SQL contains dynamic-to-compressed row-format ALTERs and a
-  deterministic compressed key-block cycle.
+- Generated SQL contains dynamic-to-compressed row-format ALTERs, covers the
+  deterministic `1,2,4,8,16` compressed key-block cycle in the direct smoke,
+  and checks matching `ZIP_PAGE_SIZE` metadata.
 - The reader uses repeatable-read consistent snapshots and bounded retries for
   ordinary external DDL/read contention.
 - The final oracle verifies compressed metadata and deterministic final row
@@ -135,20 +141,32 @@ slice adds one shell tool, one check-mode CTest entry, and trace-suite metadata.
 
 ## Evidence
 
-Focused Docker-backed MariaDB 11.8 replay at scale 2 passed for
-`compressed-row-format-ddl`:
+Focused Docker-backed MariaDB 11.8 replay at scale 2 passed for the widened
+`compressed-row-format-ddl` key-block cycle:
 
 ```text
 scale=2
 trace_count=1
 trace=compressed-row-format-ddl
+key_block_cycle=1,2,4,8,16
 suite_run=ok
 external_mariadb_trace_smoke=ok
 ```
 
+The focused replay's final oracle reported:
+
+```text
+observed_rows=4
+observed_value_sum=148
+observed_version_sum=32
+observed_payload_bytes=48000
+ownerless_compressed_row_format_trace_check ok
+ownerless_compressed_row_format_trace_reader_retries 0
+```
+
 The current full deterministic suite replay also passed at scale 2 with
-`trace_count=12`, including `compressed-row-format-ddl`. Its final compressed
-row-format oracle reported:
+`trace_count=12`, including `compressed-row-format-ddl`. That earlier full
+suite replay's final compressed row-format oracle reported:
 
 ```text
 observed_rows=4

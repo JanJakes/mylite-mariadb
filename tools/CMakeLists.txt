@@ -353,7 +353,7 @@ if(BUILD_TESTING)
     NAME tools.ownerless-compressed-row-format-trace
     COMMAND
       "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-compressed-row-format-trace"
-      --rounds 3
+      --rounds 5
       --rows 2
       --payload-bytes 12000
       --output "${CMAKE_CURRENT_BINARY_DIR}/ownerless-compressed-row-format-trace-smoke"

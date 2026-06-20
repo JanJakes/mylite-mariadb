@@ -7,7 +7,7 @@ payload_bytes=12000
 output_dir=""
 check=0
 retry_limit=40
-key_blocks=(8 4 16)
+key_blocks=(1 2 4 8 16)
 
 usage() {
   cat <<EOF
@@ -23,6 +23,8 @@ Options:
   --rows N           Rows in the compressed table (default: ${rows})
   --payload-bytes N  LONGBLOB payload length in bytes (default: ${payload_bytes})
   --check            Validate generated files without running SQL
+
+Default key-block cycle: 1,2,4,8,16
 EOF
 }
 
@@ -131,6 +133,7 @@ expected_anchor_total=$((30 + rounds))
 final_payload_char="$(payload_char_for_round "${rounds}")"
 expected_first_byte_sum=$((rows * $(ascii_code "${final_payload_char}")))
 key_block_cycle_value="$(key_block_cycle)"
+final_zip_page_size=$(($(key_block_for_round "${rounds}") * 1024))
 
 mkdir -p "${output_dir}"
 
@@ -240,6 +243,7 @@ manifest="${output_dir}/manifest.txt"
   echo "SET SESSION lock_wait_timeout = 30;"
   for round in $(seq 1 "${rounds}"); do
     key_block="$(key_block_for_round "${round}")"
+    zip_page_size=$((key_block * 1024))
     payload_char="$(payload_char_for_round "${round}")"
     round_value_sum=$((initial_value_sum + (rows * round * (round + 1) / 2)))
     round_version_sum=$((rows * round))
@@ -262,7 +266,8 @@ manifest="${output_dir}/manifest.txt"
     echo "   AND (SELECT COUNT(*)"
     echo "        FROM information_schema.INNODB_SYS_TABLES"
     echo "        WHERE NAME = 'app/ownerless_compressed_row_format_trace'"
-    echo "          AND ROW_FORMAT = 'Compressed') = 1"
+    echo "          AND ROW_FORMAT = 'Compressed'"
+    echo "          AND ZIP_PAGE_SIZE = ${zip_page_size}) = 1"
     echo "  THEN 'ok'"
     echo "  ELSE 'mismatch'"
     echo "END AS ownerless_compressed_row_format_metadata_check;"
@@ -315,7 +320,8 @@ manifest="${output_dir}/manifest.txt"
   echo "   AND (SELECT COUNT(*)"
   echo "        FROM information_schema.INNODB_SYS_TABLES"
   echo "        WHERE NAME = 'app/ownerless_compressed_row_format_trace'"
-  echo "          AND ROW_FORMAT = 'Compressed') = 1"
+  echo "          AND ROW_FORMAT = 'Compressed'"
+  echo "          AND ZIP_PAGE_SIZE = ${final_zip_page_size}) = 1"
   echo "  THEN 'ok'"
   echo "  ELSE 'mismatch'"
   echo "END AS ownerless_compressed_row_format_trace_check"
@@ -344,12 +350,23 @@ if [ "${check}" -eq 1 ]; then
   test -s "${expected_sql}"
   test -s "${manifest}"
   grep -q "ROW_FORMAT=DYNAMIC" "${schema_sql}"
-  grep -q "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8" "${worker_sql}"
+  grep -q "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=1" "${worker_sql}"
+  grep -q "ZIP_PAGE_SIZE = 1024" "${worker_sql}"
   if [ "${rounds}" -ge 2 ]; then
-    grep -q "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=4" "${worker_sql}"
+    grep -q "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=2" "${worker_sql}"
+    grep -q "ZIP_PAGE_SIZE = 2048" "${worker_sql}"
   fi
   if [ "${rounds}" -ge 3 ]; then
+    grep -q "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=4" "${worker_sql}"
+    grep -q "ZIP_PAGE_SIZE = 4096" "${worker_sql}"
+  fi
+  if [ "${rounds}" -ge 4 ]; then
+    grep -q "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8" "${worker_sql}"
+    grep -q "ZIP_PAGE_SIZE = 8192" "${worker_sql}"
+  fi
+  if [ "${rounds}" -ge 5 ]; then
     grep -q "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=16" "${worker_sql}"
+    grep -q "ZIP_PAGE_SIZE = 16384" "${worker_sql}"
   fi
   grep -q "DECLARE EXIT HANDLER FOR 1020, 1205, 1213, 1412, SQLSTATE '40001'" "${schema_sql}"
   grep -q "START TRANSACTION WITH CONSISTENT SNAPSHOT" "${schema_sql}"
