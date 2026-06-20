@@ -4352,6 +4352,10 @@ Tasks:
    dependency-free seed-sweep CTest window to seeds `640` through `703`,
    matching the already-recorded `640` through `671` and `672` through `703`
    Docker-backed replay windows without adding Docker to default CI.
+   The `ownerless-external-seed-704-767-check` follow-up catches that
+   persistent dependency-free window up to seeds `704` through `767`, matching
+   the already-recorded `704` through `735` and `736` through `767`
+   Docker-backed replay windows without adding Docker to default CI.
    Separate foreign-key graph stress
    coverage runs with
    `MYLITE_OWNERLESS_FK_GRAPH_STRESS_ROUNDS=48`, concurrent ownerless workers
@@ -4635,7 +4639,7 @@ Tasks:
    `672` through `703`, `704` through `735`, and `736` through `767`
    replays also cover FK graph seeds at rounds `2`. FK graph now
    participates in the
-   dependency-free combined seed-sweep command-plan windows through seed `703`,
+   dependency-free combined seed-sweep command-plan windows through seed `767`,
    and focused Docker-backed FK graph seed
    replay has passed the default seed set plus the `16` through `31`, `32`
    through `63`, `64` through `95`, `96` through `127`, `128` through `159`,
