@@ -1101,6 +1101,17 @@ enum embedded_startup_perf_stat_index {
     EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_BOOTSTRAP_CALLS,
     EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_BOOTSTRAP_TOTAL_NS,
     EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_SET_CAPACITY_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_SCAN_INITIAL_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_SCAN_RESCAN_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_CRASH_SPACES_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_MISSING_TABLESPACE_SCAN_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_DOUBLEWRITE_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_FINAL_SCAN_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_VALIDATE_CHECKPOINT_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_SET_RECOVERED_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_RENAME_FILES_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_DEFERRED_REINIT_NS,
     EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_CLOSE_FILES_NS,
     EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_IBUF_UPGRADE_NS,
     EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_DICT_BOOT_NS,
@@ -1109,6 +1120,20 @@ enum embedded_startup_perf_stat_index {
     EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_LOAD_TABLES_NS,
     EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_NS,
     EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_BINLOG_OFFSET_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_PURGE_CREATE_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_RSEG_ARRAY_INIT_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_UNDO_EMPTY_CHECK_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_RESURRECT_SCAN_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_PURGE_CLONE_VIEW_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_RSEG_MEM_RESTORE_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_RSEG_COUNT,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_UNDO_SLOT_COUNT,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_UNDO_ACTIVE_COUNT,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_UNDO_PREPARED_COUNT,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_UNDO_CACHED_COUNT,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_UNDO_EMPTY_EXIT_COUNT,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_RESURRECT_TRX_COUNT,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_TABLE_LOCKS_NS,
     EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_CALLS,
     EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_TOTAL_NS,
     EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_CREATE_OR_CHECK_NS,
@@ -8761,6 +8786,30 @@ static void emit_embedded_startup_perf_summary(const char *prefix) {
     );
     emit_embedded_startup_perf_summary_ms(
         prefix,
+        "innodb_recovery_start_scan_initial",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_SCAN_INITIAL_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_recovery_start_scan_rescan",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_SCAN_RESCAN_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_recovery_start_set_recovered",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_SET_RECOVERED_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_recovery_start_rename_files",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_RENAME_FILES_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
         "innodb_recovery_dict_boot",
         values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_DICT_BOOT_NS],
         innodb_recovery_bootstrap_calls
@@ -8775,6 +8824,30 @@ static void emit_embedded_startup_perf_summary(const char *prefix) {
         prefix,
         "innodb_recovery_load_tables",
         values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_LOAD_TABLES_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_recovery_trx_lists",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_recovery_trx_lists_rseg_array_init",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_RSEG_ARRAY_INIT_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_recovery_trx_lists_rseg_mem_restore",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_RSEG_MEM_RESTORE_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_recovery_trx_lists_purge_clone_view",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_PURGE_CLONE_VIEW_NS],
         innodb_recovery_bootstrap_calls
     );
     emit_embedded_startup_perf_summary_ms(
@@ -9308,6 +9381,72 @@ static void emit_embedded_startup_perf_stats(const char *prefix) {
     );
     emit_embedded_startup_perf_ms(
         prefix,
+        "innodb_recovery_start_set_capacity",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_SET_CAPACITY_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_recovery_start_scan_initial",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_SCAN_INITIAL_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_recovery_start_scan_rescan",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_SCAN_RESCAN_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_recovery_start_crash_spaces",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_CRASH_SPACES_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_recovery_start_missing_tablespace_scan",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_MISSING_TABLESPACE_SCAN_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_recovery_start_doublewrite",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_DOUBLEWRITE_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_recovery_start_final_scan",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_FINAL_SCAN_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_recovery_start_validate_checkpoint",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_VALIDATE_CHECKPOINT_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_recovery_start_set_recovered",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_SET_RECOVERED_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_recovery_start_rename_files",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_RENAME_FILES_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_recovery_start_deferred_reinit",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_DEFERRED_REINIT_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
         "innodb_recovery_close_files",
         values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_CLOSE_FILES_NS],
         innodb_recovery_bootstrap_calls
@@ -9352,6 +9491,83 @@ static void emit_embedded_startup_perf_stats(const char *prefix) {
         prefix,
         "innodb_recovery_binlog_offset",
         values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_BINLOG_OFFSET_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_recovery_trx_lists_purge_create",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_PURGE_CREATE_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_recovery_trx_lists_rseg_array_init",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_RSEG_ARRAY_INIT_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_recovery_trx_lists_undo_empty_check",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_UNDO_EMPTY_CHECK_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_recovery_trx_lists_resurrect_scan",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_RESURRECT_SCAN_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_recovery_trx_lists_purge_clone_view",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_PURGE_CLONE_VIEW_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_recovery_trx_lists_rseg_mem_restore",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_RSEG_MEM_RESTORE_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_value(
+        prefix,
+        "innodb_recovery_trx_lists_rseg_count",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_RSEG_COUNT]
+    );
+    emit_embedded_startup_perf_value(
+        prefix,
+        "innodb_recovery_trx_lists_undo_slot_count",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_UNDO_SLOT_COUNT]
+    );
+    emit_embedded_startup_perf_value(
+        prefix,
+        "innodb_recovery_trx_lists_undo_active_count",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_UNDO_ACTIVE_COUNT]
+    );
+    emit_embedded_startup_perf_value(
+        prefix,
+        "innodb_recovery_trx_lists_undo_prepared_count",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_UNDO_PREPARED_COUNT]
+    );
+    emit_embedded_startup_perf_value(
+        prefix,
+        "innodb_recovery_trx_lists_undo_cached_count",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_UNDO_CACHED_COUNT]
+    );
+    emit_embedded_startup_perf_value(
+        prefix,
+        "innodb_recovery_trx_lists_undo_empty_exit_count",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_UNDO_EMPTY_EXIT_COUNT]
+    );
+    emit_embedded_startup_perf_value(
+        prefix,
+        "innodb_recovery_trx_lists_resurrect_trx_count",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_RESURRECT_TRX_COUNT]
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_recovery_trx_lists_table_locks",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_TABLE_LOCKS_NS],
         innodb_recovery_bootstrap_calls
     );
 

@@ -31,6 +31,7 @@ Created 3/26/1996 Heikki Tuuri
 #include "trx0purge.h"
 #include "srv0mon.h"
 #include "log.h"
+#include "mylite_embedded_startup_perf.h"
 #include "mylite_ownerless_innodb_lock_hooks.h"
 
 #ifdef WITH_WSREP
@@ -451,6 +452,24 @@ static dberr_t trx_undo_lists_init(trx_rseg_t *rseg,
         trx_undo_mem_create_at_db_start(rseg, i, page_no);
       if (!undo)
         return DB_CORRUPTION;
+      mylite_embedded_startup_perf_count(
+        MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_UNDO_SLOT_COUNT);
+      switch (undo->state) {
+      case TRX_UNDO_ACTIVE:
+        mylite_embedded_startup_perf_count(
+          MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_UNDO_ACTIVE_COUNT);
+        break;
+      case TRX_UNDO_PREPARED:
+        mylite_embedded_startup_perf_count(
+          MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_UNDO_PREPARED_COUNT);
+        break;
+      case TRX_UNDO_CACHED:
+        mylite_embedded_startup_perf_count(
+          MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_UNDO_CACHED_COUNT);
+        break;
+      default:
+        break;
+      }
       if (is_undo_empty)
         is_undo_empty= !undo->size || undo->state == TRX_UNDO_CACHED;
       rseg->curr_size+= undo->size;
@@ -657,6 +676,7 @@ dberr_t trx_rseg_array_init()
 			const uint32_t	page_no = trx_sysf_rseg_get_page_no(
 				sys, rseg_id);
 			if (page_no != FIL_NULL) {
+				uint64_t mylite_restore_start;
 				trx_rseg_t& rseg = trx_sys.rseg_array[rseg_id];
 				uint32_t space_id=
 					trx_sysf_rseg_get_space(
@@ -678,7 +698,13 @@ dberr_t trx_rseg_array_init()
 				rseg.destroy();
 				rseg.init(rseg_space, page_no);
 				ut_ad(rseg.is_persistent());
+				mylite_embedded_startup_perf_count(
+					MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_RSEG_COUNT);
+				mylite_restore_start= mylite_embedded_startup_perf_start_ns();
 				err = trx_rseg_mem_restore(&rseg, &mtr);
+				mylite_embedded_startup_perf_add_elapsed(
+					MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_RSEG_MEM_RESTORE_NS,
+					mylite_restore_start);
 				if (rseg.needs_purge > max_trx_id) {
 					max_trx_id = rseg.needs_purge;
 				}

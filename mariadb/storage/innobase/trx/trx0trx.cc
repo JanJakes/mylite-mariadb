@@ -38,6 +38,7 @@ Created 3/26/1996 Heikki Tuuri
 #include "dict0dict.h"
 #include "lock0lock.h"
 #include "log0log.h"
+#include "mylite_embedded_startup_perf.h"
 #include "mylite_ownerless_innodb_deep_perf.h"
 #include "mylite_ownerless_innodb_lock_hooks.h"
 #include "que0que.h"
@@ -1017,6 +1018,7 @@ static dberr_t trx_resurrect(trx_undo_t *undo, trx_rseg_t *rseg,
                              time_t start_time, ulonglong start_time_micro,
                              uint64_t *rows_to_undo)
 {
+  uint64_t mylite_table_locks_start;
   trx_state_t state;
   ut_ad(rseg->needs_purge >= undo->trx_id);
   /*
@@ -1061,13 +1063,21 @@ static dberr_t trx_resurrect(trx_undo_t *undo, trx_rseg_t *rseg,
   trx_sys.rw_trx_hash.put_pins(trx);
   if (trx_state_eq(trx, TRX_STATE_ACTIVE))
     *rows_to_undo+= trx->undo_no;
-  return trx_resurrect_table_locks(trx, *undo);
+  mylite_embedded_startup_perf_count(
+    MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_RESURRECT_TRX_COUNT);
+  mylite_table_locks_start= mylite_embedded_startup_perf_start_ns();
+  dberr_t err= trx_resurrect_table_locks(trx, *undo);
+  mylite_embedded_startup_perf_add_elapsed(
+    MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_TABLE_LOCKS_NS,
+    mylite_table_locks_start);
+  return err;
 }
 
 
 /** Initialize (resurrect) transactions at startup. */
 dberr_t trx_lists_init_at_db_start()
 {
+	uint64_t mylite_stage_start;
 	ut_a(srv_is_being_started);
 	ut_ad(!srv_was_started);
 
@@ -1075,15 +1085,28 @@ dberr_t trx_lists_init_at_db_start()
 		/* mariabackup --prepare only deals with
 		the redo log and the data files, not with
 		transactions or the data dictionary. */
-		return trx_rseg_array_init();
+		mylite_stage_start= mylite_embedded_startup_perf_start_ns();
+		dberr_t err= trx_rseg_array_init();
+		mylite_embedded_startup_perf_add_elapsed(
+			MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_RSEG_ARRAY_INIT_NS,
+			mylite_stage_start);
+		return err;
 	}
 
 	if (srv_force_recovery >= SRV_FORCE_NO_UNDO_LOG_SCAN) {
 		return DB_SUCCESS;
 	}
 
+	mylite_stage_start= mylite_embedded_startup_perf_start_ns();
 	purge_sys.create();
+	mylite_embedded_startup_perf_add_elapsed(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_PURGE_CREATE_NS,
+		mylite_stage_start);
+	mylite_stage_start= mylite_embedded_startup_perf_start_ns();
 	dberr_t err = trx_rseg_array_init();
+	mylite_embedded_startup_perf_add_elapsed(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_RSEG_ARRAY_INIT_NS,
+		mylite_stage_start);
 
 	if (err != DB_SUCCESS) {
 corrupted:
@@ -1091,9 +1114,20 @@ corrupted:
 		return err;
 	}
 
-	if (trx_sys.is_undo_empty()) {
-func_exit:
+	mylite_stage_start= mylite_embedded_startup_perf_start_ns();
+	const bool mylite_undo_empty = trx_sys.is_undo_empty();
+	mylite_embedded_startup_perf_add_elapsed(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_UNDO_EMPTY_CHECK_NS,
+		mylite_stage_start);
+
+	if (mylite_undo_empty) {
+		mylite_embedded_startup_perf_count(
+			MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_UNDO_EMPTY_EXIT_COUNT);
+		mylite_stage_start= mylite_embedded_startup_perf_start_ns();
 		purge_sys.clone_oldest_view<true>();
+		mylite_embedded_startup_perf_add_elapsed(
+			MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_PURGE_CLONE_VIEW_NS,
+			mylite_stage_start);
 		return DB_SUCCESS;
 	}
 
@@ -1102,6 +1136,7 @@ func_exit:
 	const time_t	start_time	= time(NULL);
 	const ulonglong	start_time_micro= microsecond_interval_timer();
 	uint64_t	rows_to_undo	= 0;
+	mylite_stage_start= mylite_embedded_startup_perf_start_ns();
 
 	for (auto& rseg : trx_sys.rseg_array) {
 		trx_undo_t*	undo;
@@ -1141,14 +1176,25 @@ func_exit:
 
 					trx->undo_no = undo->top_undo_no + 1;
 				}
+				const uint64_t mylite_table_locks_start =
+					mylite_embedded_startup_perf_start_ns();
 				err = trx_resurrect_table_locks(trx, *undo);
+				mylite_embedded_startup_perf_add_elapsed(
+					MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_TABLE_LOCKS_NS,
+					mylite_table_locks_start);
 			}
 
 			if (err != DB_SUCCESS) {
+				mylite_embedded_startup_perf_add_elapsed(
+					MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_RESURRECT_SCAN_NS,
+					mylite_stage_start);
 				goto corrupted;
 			}
 		}
 	}
+	mylite_embedded_startup_perf_add_elapsed(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_RESURRECT_SCAN_NS,
+		mylite_stage_start);
 
 	if (const auto size = trx_sys.rw_trx_hash.size()) {
 		ib::info() << size
@@ -1158,7 +1204,12 @@ func_exit:
 		ib::info() << "Trx id counter is " << trx_sys.get_max_trx_id();
 	}
 
-	goto func_exit;
+	mylite_stage_start= mylite_embedded_startup_perf_start_ns();
+	purge_sys.clone_oldest_view<true>();
+	mylite_embedded_startup_perf_add_elapsed(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_PURGE_CLONE_VIEW_NS,
+		mylite_stage_start);
+	return DB_SUCCESS;
 }
 
 /** Assign a persistent rollback segment in a round-robin fashion,

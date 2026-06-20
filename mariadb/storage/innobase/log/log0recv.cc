@@ -55,6 +55,7 @@ Created 9/20/1997 Heikki Tuuri
 #include "srv0start.h"
 #include "fil0pagecompress.h"
 #include "log.h"
+#include "mylite_embedded_startup_perf.h"
 #include "mylite_ownerless_innodb_lock_hooks.h"
 
 /** The recovery system */
@@ -4873,6 +4874,8 @@ dberr_t recv_recovery_from_checkpoint_start()
 {
 	bool rescan = false;
 	dberr_t err = DB_SUCCESS;
+	bool mylite_deferred_reinit_failed = false;
+	uint64_t mylite_stage_start;
 
 	ut_ad(srv_operation <= SRV_OPERATION_EXPORT_RESTORED
 	      || srv_operation == SRV_OPERATION_RESTORE
@@ -4891,7 +4894,11 @@ dberr_t recv_recovery_from_checkpoint_start()
 	recv_sys.recovery_on = true;
 
 	log_sys.latch.wr_lock(SRW_LOCK_CALL);
+	mylite_stage_start= mylite_embedded_startup_perf_start_ns();
 	log_sys.set_capacity();
+	mylite_embedded_startup_perf_add_elapsed(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_SET_CAPACITY_NS,
+		mylite_stage_start);
 
 	/* Start reading the log from the checkpoint lsn. */
 
@@ -4911,7 +4918,12 @@ func_exit:
 		log_sys.last_checkpoint_lsn = log_sys.next_checkpoint_lsn;
 		parser[false] = get_parse_mmap<recv_sys_t::store::NO>();
 		parser[true] = get_parse_mmap<recv_sys_t::store::YES>();
+		mylite_stage_start=
+			mylite_embedded_startup_perf_start_ns();
 		recv_scan_log(false, parser);
+		mylite_embedded_startup_perf_add_elapsed(
+			MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_SCAN_INITIAL_NS,
+			mylite_stage_start);
 		if (recv_needed_recovery) {
 read_only_recovery:
 			sql_print_warning("InnoDB: innodb_read_only"
@@ -4934,7 +4946,12 @@ read_only_recovery:
 			recv_sys.offset = 0;
 			recv_sys.len = 0;
 		}
+		mylite_stage_start=
+			mylite_embedded_startup_perf_start_ns();
 		rescan = recv_scan_log(false, parser);
+		mylite_embedded_startup_perf_add_elapsed(
+			MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_SCAN_RESCAN_NS,
+			mylite_stage_start);
 
 		if (srv_read_only_mode && recv_needed_recovery) {
 			goto read_only_recovery;
@@ -4951,8 +4968,13 @@ read_only_recovery:
 	if (recv_needed_recovery) {
 		bool missing_tablespace = false;
 
+		mylite_stage_start=
+			mylite_embedded_startup_perf_start_ns();
 		err = recv_init_crash_recovery_spaces(
 			rescan, missing_tablespace);
+		mylite_embedded_startup_perf_add_elapsed(
+			MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_CRASH_SPACES_NS,
+			mylite_stage_start);
 
 		if (err != DB_SUCCESS) {
 			goto func_exit;
@@ -4964,7 +4986,12 @@ read_only_recovery:
 			validate the remaining log records. */
 
 			do {
+				mylite_stage_start=
+					mylite_embedded_startup_perf_start_ns();
 				rescan = recv_scan_log(false, parser);
+				mylite_embedded_startup_perf_add_elapsed(
+					MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_MISSING_TABLESPACE_SCAN_NS,
+					mylite_stage_start);
 
 				if (recv_sys.is_corrupt_log() ||
 				    recv_sys.is_corrupt_fs()) {
@@ -5004,7 +5031,12 @@ read_only_recovery:
 				mylite_ownerless_innodb_uncheckpointed_file_rename_recovery();
 			if (mylite_release_log_latch_for_dblwr)
 				log_sys.latch.wr_unlock();
+			mylite_stage_start=
+				mylite_embedded_startup_perf_start_ns();
 			buf_dblwr.recover();
+			mylite_embedded_startup_perf_add_elapsed(
+				MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_DOUBLEWRITE_NS,
+				mylite_stage_start);
 			if (mylite_release_log_latch_for_dblwr)
 				log_sys.latch.wr_lock(SRW_LOCK_CALL);
 			mysql_mutex_unlock(&recv_sys.mutex);
@@ -5013,7 +5045,12 @@ read_only_recovery:
 		ut_ad(srv_force_recovery <= SRV_FORCE_NO_UNDO_LOG_SCAN);
 
 		if (rescan) {
+			mylite_stage_start=
+				mylite_embedded_startup_perf_start_ns();
 			recv_scan_log(true, parser);
+			mylite_embedded_startup_perf_add_elapsed(
+				MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_FINAL_SCAN_NS,
+				mylite_stage_start);
 			if ((recv_sys.is_corrupt_log()
 			     && !srv_force_recovery)
 			    || recv_sys.is_corrupt_fs()) {
@@ -5030,14 +5067,27 @@ read_only_recovery:
 	}
 
 	if (!log_sys.is_recoverable()) {
-	} else if (recv_sys.validate_checkpoint()) {
-err_exit:
-		err = DB_ERROR;
-		goto func_exit;
+	} else {
+		mylite_stage_start=
+			mylite_embedded_startup_perf_start_ns();
+		if (recv_sys.validate_checkpoint()) {
+			mylite_embedded_startup_perf_add_elapsed(
+				MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_VALIDATE_CHECKPOINT_NS,
+				mylite_stage_start);
+			goto err_exit;
+		}
+		mylite_embedded_startup_perf_add_elapsed(
+			MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_VALIDATE_CHECKPOINT_NS,
+			mylite_stage_start);
 	}
 
 	if (!srv_read_only_mode && log_sys.is_recoverable()) {
+		mylite_stage_start=
+			mylite_embedded_startup_perf_start_ns();
 		log_sys.set_recovered();
+		mylite_embedded_startup_perf_add_elapsed(
+			MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_SET_RECOVERED_NS,
+			mylite_stage_start);
 	}
 
 	DBUG_EXECUTE_IF("before_final_redo_apply", goto err_exit;);
@@ -5053,7 +5103,12 @@ err_exit:
 	ut_d(recv_no_log_write = srv_operation == SRV_OPERATION_RESTORE
 	     || srv_operation == SRV_OPERATION_RESTORE_EXPORT);
 	if (srv_operation == SRV_OPERATION_NORMAL) {
+		mylite_stage_start=
+			mylite_embedded_startup_perf_start_ns();
 		err = recv_rename_files();
+		mylite_embedded_startup_perf_add_elapsed(
+			MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_RENAME_FILES_NS,
+			mylite_stage_start);
 	}
 
 	mysql_mutex_unlock(&recv_sys.mutex);
@@ -5061,11 +5116,20 @@ err_exit:
 	/* The database is now ready to start almost normal processing of user
 	transactions: transaction rollbacks and the application of the log
 	records in the hash table can be run in background. */
-	if (err == DB_SUCCESS && deferred_spaces.reinit_all()
-	    && !srv_force_recovery) {
+	mylite_stage_start= mylite_embedded_startup_perf_start_ns();
+	mylite_deferred_reinit_failed= err == DB_SUCCESS
+		&& deferred_spaces.reinit_all() && !srv_force_recovery;
+	mylite_embedded_startup_perf_add_elapsed(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_DEFERRED_REINIT_NS,
+		mylite_stage_start);
+	if (mylite_deferred_reinit_failed) {
 		err = DB_CORRUPTION;
 	}
 
+	goto func_exit;
+
+err_exit:
+	err = DB_ERROR;
 	goto func_exit;
 }
 

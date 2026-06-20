@@ -148,6 +148,19 @@ avoid unexpected warm-open redo rebuilds, and then optimize the stable
 non-rebuild native startup costs in checkpoint/recovery startup and temporary
 tablespace opening.
 
+The follow-up
+`docs/specs/embedded-innodb-recovery-start-attribution/specs.md` slice split the
+remaining recovery-start bucket. In a reduced five-iteration production sample,
+ordinary warm open/close reported `120.698 ms`, with
+`startup_innodb_recovery_start_ms_avg=18.930`,
+`startup_innodb_recovery_start_scan_initial_ms_avg=15.194`,
+`startup_innodb_recovery_start_scan_rescan_ms_avg=3.724`,
+`startup_innodb_recovery_trx_lists_ms_avg=2.931`, and
+`startup_innodb_system_tables_open_tmp_ms_avg=10.001`. The compact summary now
+includes the transaction-list child, but the measured non-rebuild startup target
+is clean redo scanning and temporary tablespace opening rather than recovered
+transaction resurrection.
+
 Verification commands run for this slice:
 
 - `tools/mariadb-embedded-build build`;

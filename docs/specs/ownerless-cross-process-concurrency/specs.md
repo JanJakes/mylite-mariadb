@@ -5243,6 +5243,21 @@ subsystems that this mode needs:
   internal/physical divergence. That moves the startup optimization target to
   clean-shutdown redo tail handling or MariaDB checkpoint policy validation,
   not ownerless coordination and not an unsafe startup-only rebuild skip.
+  Clean-shutdown redo-tail truncation then removed the repeated warm-open
+  rebuild in the ordinary reduced probe. Follow-up recovery-start attribution
+  split the remaining non-rebuild InnoDB startup cost: the ordinary
+  five-iteration sample reported warm open/close at `120.698 ms`,
+  `startup_innodb_srv_start_total_ms_avg=38.910`,
+  `startup_innodb_recovery_start_ms_avg=18.930`,
+  `startup_innodb_recovery_start_scan_initial_ms_avg=15.194`,
+  `startup_innodb_recovery_start_scan_rescan_ms_avg=3.724`,
+  `startup_innodb_recovery_trx_lists_ms_avg=2.931`, and
+  `startup_innodb_system_tables_open_tmp_ms_avg=10.001`.
+  Transaction-list restore is now present in compact summaries, but the
+  measured fixed rollback-segment restore was smaller than clean redo scanning
+  and temporary tablespace opening: 640 rollback-segment entries, five cached
+  undo slots, zero active undo slots, zero prepared undo slots, and zero
+  resurrected transactions.
   Stats-enabled
   ownerless autocommit probes now also emit per-insert summary keys for
   page-version volume, native-support page ratio, page-publish and page-log
