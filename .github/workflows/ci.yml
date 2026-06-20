@@ -91,9 +91,15 @@ jobs:
             php-dev \
             zlib1g-dev
 
+      - name: Cache embedded MariaDB archive build
+        uses: actions/cache@v4
+        with:
+          path: build/mariadb-embedded
+          key: ${{ runner.os }}-mariadb-embedded-${{ hashFiles('mariadb/**', 'cmake/mariadb-embedded-baseline.cmake', 'tools/mariadb-embedded-build') }}
+
       - name: Build MariaDB embedded archive
         timeout-minutes: 30
-        run: tools/mariadb-embedded-build all
+        run: tools/mariadb-embedded-build ensure
 
       - name: Verify MariaDB embedded production build type
         run: tools/require-cmake-build-type MinSizeRel build/mariadb-embedded
@@ -255,6 +261,12 @@ jobs:
           key: ${{ runner.os }}-wordpress-composer-${{ hashFiles('tools/wordpress-phpunit-mysqli-mylite') }}
           restore-keys: |
             ${{ runner.os }}-wordpress-composer-
+
+      - name: Cache WordPress MariaDB archive build
+        uses: actions/cache@v4
+        with:
+          path: build/wordpress-mariadb-embedded
+          key: ${{ runner.os }}-wordpress-mariadb-embedded-${{ hashFiles('mariadb/**', 'cmake/mariadb-embedded-baseline.cmake', 'tools/mariadb-embedded-build', 'tools/wordpress-phpunit-mysqli-mylite') }}
 
       - name: Show runner resources
         run: |
