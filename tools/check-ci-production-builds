@@ -311,6 +311,7 @@ require_literal "MYLITE_WORDPRESS_CMAKE_BUILD_TYPE: Release"
 require_literal "MYLITE_WORDPRESS_TIMING_SUMMARY_PATH: build/wordpress-phpunit-reports/timing-summary-setup.md"
 require_literal "MYLITE_WORDPRESS_TIMING_SUMMARY_PATH: build/wordpress-phpunit-reports/timing-summary-\${{ matrix.shard }}.md"
 require_literal "MYLITE_WORDPRESS_TIMING_SUMMARY_PATH: build/wordpress-phpunit-reports/timing-summary.md"
+require_literal 'MYLITE_WORDPRESS_PRESERVE_TIMING_SUMMARY: "1"'
 require_literal 'MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD: "1"'
 require_literal 'MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR: "1"'
 require_literal 'MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT: "0"'
@@ -335,6 +336,8 @@ require_literal 'wordpress_phpunit_filter="^(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_N
 require_literal "MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_FILTER: '^Tests_Admin_ExportWp"
 require_file_literal "${wordpress_harness}" "cp -a --reflink=auto --"
 require_file_literal "${wordpress_harness}" "MYLITE_WORDPRESS_TRUST_RUNTIME_MANIFEST"
+require_file_literal "${wordpress_harness}" "MYLITE_WORDPRESS_PRESERVE_TIMING_SUMMARY"
+require_file_literal "${wordpress_harness}" '"${preserve_timing_summary}" != "1"'
 require_file_literal "${wordpress_harness}" "sha256sum -c"
 require_file_literal "${wordpress_harness}" 'if [ "${MYLITE_WORDPRESS_PHASE}" != "phpunit" ]; then'
 require_file_literal "${wordpress_harness}" "prepared MyLite WordPress baseline database directory"

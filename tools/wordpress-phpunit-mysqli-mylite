@@ -32,6 +32,7 @@ phpunit_reconnect_after_child="${MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD:
 phpunit_child_skip_install="${MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL:-0}"
 phpunit_child_restore_baseline="${MYLITE_WORDPRESS_PHPUNIT_CHILD_RESTORE_BASELINE:-0}"
 phpunit_skip_install="${MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL:-0}"
+preserve_timing_summary="${MYLITE_WORDPRESS_PRESERVE_TIMING_SUMMARY:-0}"
 require_release_build="${MYLITE_WORDPRESS_REQUIRE_RELEASE_BUILD:-0}"
 require_external_db_dir="${MYLITE_WORDPRESS_REQUIRE_EXTERNAL_DB_DIR:-0}"
 db_dir="${MYLITE_WORDPRESS_DB_DIR:-${TMPDIR:-/tmp}/mylite-wordpress-tests-${root_hash}.mylite}"
@@ -196,6 +197,14 @@ case "${phpunit_skip_install}" in
     ;;
   *)
     echo "MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL must be 0 or 1" >&2
+    exit 1
+    ;;
+esac
+case "${preserve_timing_summary}" in
+  0 | 1)
+    ;;
+  *)
+    echo "MYLITE_WORDPRESS_PRESERVE_TIMING_SUMMARY must be 0 or 1" >&2
     exit 1
     ;;
 esac
@@ -3920,7 +3929,9 @@ CONTAINER
 }
 
 overall_start="$(date +%s)"
-if [[ "${phase}" == "docker-image" && "${skip_docker_build}" != "1" ]]; then
+if [[ "${phase}" == "docker-image" &&
+      "${skip_docker_build}" != "1" &&
+      "${preserve_timing_summary}" != "1" ]]; then
   rm -f "${timing_summary_path}"
 fi
 echo "wordpress_docker_image=${image}"
@@ -3946,6 +3957,7 @@ echo "wordpress_host_phpunit_keepalive=${phpunit_keepalive}"
 echo "wordpress_host_phpunit_child_skip_install=${phpunit_child_skip_install}"
 echo "wordpress_host_phpunit_child_restore_baseline=${phpunit_child_restore_baseline}"
 echo "wordpress_host_phpunit_skip_install=${phpunit_skip_install}"
+echo "wordpress_host_preserve_timing_summary=${preserve_timing_summary}"
 echo "wordpress_host_require_release_build=${require_release_build}"
 echo "wordpress_host_require_external_db_dir=${require_external_db_dir}"
 if [[ "${skip_docker_build}" == "1" ]]; then

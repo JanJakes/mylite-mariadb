@@ -38,6 +38,7 @@ Created 2/16/1996 Heikki Tuuri
 #include "mysql/psi/mysql_stage.h"
 #include "mysql/psi/psi.h"
 #include <mylite_embedded_shutdown_perf.h>
+#include <mylite_embedded_startup_perf.h>
 
 #include "row0ftsort.h"
 #include "ut0mem.h"
@@ -113,6 +114,30 @@ static bool		srv_start_has_been_called;
 #ifdef EMBEDDED_LIBRARY
 static bool		innodb_preshutdown_done;
 #endif
+
+class mylite_srv_start_perf_scope
+{
+public:
+	explicit mylite_srv_start_perf_scope(size_t index)
+		: m_index(index), m_start_ns(mylite_embedded_startup_perf_start_ns())
+	{
+	}
+
+	~mylite_srv_start_perf_scope()
+	{
+		mylite_embedded_startup_perf_add_elapsed(m_index, m_start_ns);
+	}
+
+private:
+	size_t		m_index;
+	uint64_t	m_start_ns;
+};
+
+static void mylite_srv_start_perf_next(size_t index, uint64_t* start_ns)
+{
+	mylite_embedded_startup_perf_add_elapsed(index, *start_ns);
+	*start_ns = mylite_embedded_startup_perf_start_ns();
+}
 
 /** Whether any undo log records can be generated */
 bool	srv_undo_sources;
@@ -1306,6 +1331,13 @@ dberr_t srv_start(bool create_new_db)
 {
 	dberr_t		err		= DB_SUCCESS;
 	mtr_t		mtr{nullptr};
+	uint64_t	mylite_stage_start;
+	mylite_srv_start_perf_scope mylite_startup_scope(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_TOTAL_NS);
+
+	mylite_embedded_startup_perf_count(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_CALLS);
+	mylite_stage_start = mylite_embedded_startup_perf_start_ns();
 
 	ut_ad(srv_operation <= SRV_OPERATION_RESTORE_EXPORT
 	      || srv_operation == SRV_OPERATION_RESTORE
@@ -1369,10 +1401,16 @@ dberr_t srv_start(bool create_new_db)
 	started which may need to be instrumented. */
 	mysql_stage_register("innodb", srv_stages,
 			     static_cast<int>(UT_ARR_SIZE(srv_stages)));
+	mylite_srv_start_perf_next(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_EARLY_NS,
+		&mylite_stage_start);
 
 	srv_boot();
 
 	ib::info() << my_crc32c_implementation();
+	mylite_srv_start_perf_next(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_BOOT_NS,
+		&mylite_stage_start);
 
 	if (!srv_read_only_mode) {
 		mysql_mutex_init(srv_monitor_file_mutex_key,
@@ -1423,18 +1461,27 @@ dberr_t srv_start(bool create_new_db)
 			err = DB_ERROR;
 		}
 	}
+	mylite_srv_start_perf_next(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_TMPFILES_NS,
+		&mylite_stage_start);
 
 	if (err != DB_SUCCESS) {
 		return(srv_init_abort(err));
 	}
 
 	if (os_aio_init()) {
+		mylite_srv_start_perf_next(
+			MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_CORE_SYSTEMS_NS,
+			&mylite_stage_start);
 		return(srv_init_abort(DB_ERROR));
 	}
 
 	fil_system.create(srv_file_per_table ? 50000 : 5000);
 
 	if (buf_pool.create()) {
+		mylite_srv_start_perf_next(
+			MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_CORE_SYSTEMS_NS,
+			&mylite_stage_start);
 		return(srv_init_abort(DB_ERROR));
 	}
 
@@ -1450,23 +1497,38 @@ dberr_t srv_start(bool create_new_db)
 	}
 
 	if (innodb_encrypt_temporary_tables && !log_crypt_init()) {
+		mylite_srv_start_perf_next(
+			MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_CORE_SYSTEMS_NS,
+			&mylite_stage_start);
 		return srv_init_abort(DB_ERROR);
 	}
+	mylite_srv_start_perf_next(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_CORE_SYSTEMS_NS,
+		&mylite_stage_start);
 
 	/* Check if undo tablespaces and redo log files exist before creating
 	a new system tablespace */
 	if (create_new_db) {
 		err = srv_check_undo_redo_logs_exists();
 		if (err != DB_SUCCESS) {
+			mylite_srv_start_perf_next(
+				MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_CHECKPOINT_OR_CREATE_NS,
+				&mylite_stage_start);
 			return(srv_init_abort(DB_ERROR));
 		}
 		recv_sys.debug_free();
 	} else {
 		err = recv_recovery_read_checkpoint();
 		if (err != DB_SUCCESS) {
+			mylite_srv_start_perf_next(
+				MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_CHECKPOINT_OR_CREATE_NS,
+				&mylite_stage_start);
 			return srv_init_abort(err);
 		}
 	}
+	mylite_srv_start_perf_next(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_CHECKPOINT_OR_CREATE_NS,
+		&mylite_stage_start);
 
 	/* Open or create the data files. */
 	ulint	sum_of_new_sizes;
@@ -1492,6 +1554,9 @@ dberr_t srv_start(bool create_new_db)
 	default:
 		/* Other errors might be flagged by
 		Datafile::validate_first_page() */
+		mylite_srv_start_perf_next(
+			MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_SYS_SPACE_OPEN_NS,
+			&mylite_stage_start);
 		return srv_init_abort(err);
 	}
 
@@ -1505,6 +1570,9 @@ dberr_t srv_start(bool create_new_db)
 				os_file_delete(innodb_data_file_key,
 					       file.filepath());
 			}
+			mylite_srv_start_perf_next(
+				MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_SYS_SPACE_OPEN_NS,
+				&mylite_stage_start);
 			return srv_init_abort(err);
 		}
 
@@ -1518,6 +1586,9 @@ dberr_t srv_start(bool create_new_db)
 	err = fil_system.sys_space->open(create_new_db)
 		? DB_SUCCESS : DB_ERROR;
 	mysql_mutex_unlock(&recv_sys.mutex);
+	mylite_srv_start_perf_next(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_SYS_SPACE_OPEN_NS,
+		&mylite_stage_start);
 
 
 	if (err == DB_SUCCESS) {
@@ -1535,8 +1606,14 @@ dberr_t srv_start(bool create_new_db)
 	if (err != DB_SUCCESS
 	    && srv_force_recovery < SRV_FORCE_NO_UNDO_LOG_SCAN) {
 
+		mylite_srv_start_perf_next(
+			MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_UNDO_INIT_NS,
+			&mylite_stage_start);
 		return(srv_init_abort(err));
 	}
+	mylite_srv_start_perf_next(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_UNDO_INIT_NS,
+		&mylite_stage_start);
 
 	/* Initialize objects used by dict stats gathering thread, which
 	can also be used by recovery if it tries to drop some table */
@@ -1586,12 +1663,18 @@ dberr_t srv_start(bool create_new_db)
 		mtr.commit();
 
 		if (err != DB_SUCCESS) {
+			mylite_srv_start_perf_next(
+				MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_NEW_DB_BOOTSTRAP_NS,
+				&mylite_stage_start);
 			return(srv_init_abort(err));
 		}
 
 		err = dict_create();
 
 		if (err != DB_SUCCESS) {
+			mylite_srv_start_perf_next(
+				MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_NEW_DB_BOOTSTRAP_NS,
+				&mylite_stage_start);
 			return(srv_init_abort(err));
 		}
 
@@ -1601,8 +1684,14 @@ dberr_t srv_start(bool create_new_db)
 		ut_d(srv_log_file_created= true);
 
 		if (log_sys.resize_rename()) {
+			mylite_srv_start_perf_next(
+				MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_NEW_DB_BOOTSTRAP_NS,
+				&mylite_stage_start);
 			return(srv_init_abort(DB_ERROR));
 		}
+		mylite_srv_start_perf_next(
+			MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_NEW_DB_BOOTSTRAP_NS,
+			&mylite_stage_start);
 	} else {
 		/* Suppress warnings in fil_space_t::create() for files
 		that are being read before dict_boot() has recovered
@@ -1651,6 +1740,9 @@ dberr_t srv_start(bool create_new_db)
 		}
 
 		if (err != DB_SUCCESS) {
+			mylite_srv_start_perf_next(
+				MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_RECOVERY_BOOTSTRAP_NS,
+				&mylite_stage_start);
 			return srv_init_abort(err);
 		}
 
@@ -1709,8 +1801,14 @@ dberr_t srv_start(bool create_new_db)
 		if (srv_operation > SRV_OPERATION_EXPORT_RESTORED) {
 			ut_ad(srv_operation == SRV_OPERATION_RESTORE_EXPORT
 			      || srv_operation == SRV_OPERATION_RESTORE);
+			mylite_srv_start_perf_next(
+				MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_RECOVERY_BOOTSTRAP_NS,
+				&mylite_stage_start);
 			return(err);
 		}
+		mylite_srv_start_perf_next(
+			MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_RECOVERY_BOOTSTRAP_NS,
+			&mylite_stage_start);
 
 		/* Upgrade or resize or rebuild the redo logs before
 		generating any dirty pages, so that the old redo log
@@ -1719,6 +1817,9 @@ dberr_t srv_start(bool create_new_db)
 		err = srv_log_rebuild_if_needed();
 
 		if (err != DB_SUCCESS) {
+			mylite_srv_start_perf_next(
+				MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_LOG_REBUILD_NS,
+				&mylite_stage_start);
 			return srv_init_abort(err);
 		}
 
@@ -1808,6 +1909,9 @@ dberr_t srv_start(bool create_new_db)
 				return(srv_init_abort(DB_ERROR));
 			}
 		}
+		mylite_srv_start_perf_next(
+			MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_LOG_REBUILD_NS,
+			&mylite_stage_start);
 	}
 
 	ut_ad(err == DB_SUCCESS);
@@ -1816,6 +1920,9 @@ dberr_t srv_start(bool create_new_db)
 	/* Create the doublewrite buffer to a new tablespace */
 	if (!srv_read_only_mode && srv_force_recovery < SRV_FORCE_NO_TRX_UNDO
 	    && !buf_dblwr.create()) {
+		mylite_srv_start_perf_next(
+			MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_DOUBLEWRITE_UNDO_NS,
+			&mylite_stage_start);
 		return(srv_init_abort(DB_ERROR));
 	}
 
@@ -1823,6 +1930,9 @@ dberr_t srv_start(bool create_new_db)
 	if (!high_level_read_only) {
 		err = srv_undo_tablespaces_reinitialize();
 		if (err) {
+			mylite_srv_start_perf_next(
+				MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_DOUBLEWRITE_UNDO_NS,
+				&mylite_stage_start);
 			return srv_init_abort(err);
 		}
 	}
@@ -1842,8 +1952,14 @@ dberr_t srv_start(bool create_new_db)
 	should be running at this stage. */
 
 	if (!trx_sys_create_rsegs()) {
+		mylite_srv_start_perf_next(
+			MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_DOUBLEWRITE_UNDO_NS,
+			&mylite_stage_start);
 		return(srv_init_abort(DB_ERROR));
 	}
+	mylite_srv_start_perf_next(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_DOUBLEWRITE_UNDO_NS,
+		&mylite_stage_start);
 
 	if (!create_new_db) {
 		ut_ad(high_level_read_only
@@ -1937,6 +2053,9 @@ dberr_t srv_start(bool create_new_db)
 #endif
 		}
 	}
+	mylite_srv_start_perf_next(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_ROLLBACK_LOAD_NS,
+		&mylite_stage_start);
 
 	srv_startup_is_before_trx_rollback_phase = false;
 
@@ -1961,6 +2080,9 @@ skip_monitors:
 			fts_optimize_init();
 		}
 	}
+	mylite_srv_start_perf_next(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_BACKGROUND_NS,
+		&mylite_stage_start);
 
 	err = dict_sys.create_or_check_sys_tables();
 	switch (err) {
@@ -1973,6 +2095,9 @@ skip_monitors:
 		ib::error() << "Cannot create system tables in read-only mode";
 		/* fall through */
 	default:
+		mylite_srv_start_perf_next(
+			MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_SYSTEM_TABLES_NS,
+			&mylite_stage_start);
 		return(srv_init_abort(err));
 	}
 
@@ -1983,6 +2108,9 @@ skip_monitors:
 		err = srv_open_tmp_tablespace(create_new_db);
 
 		if (err != DB_SUCCESS) {
+			mylite_srv_start_perf_next(
+				MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_SYSTEM_TABLES_NS,
+				&mylite_stage_start);
 			return(srv_init_abort(err));
 		}
 
@@ -1990,6 +2118,9 @@ skip_monitors:
 			srv_start_periodic_timer(srv_master_timer, srv_master_callback, 1000);
 		}
 	}
+	mylite_srv_start_perf_next(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_SYSTEM_TABLES_NS,
+		&mylite_stage_start);
 
 	srv_is_being_started = false;
 
@@ -2036,6 +2167,9 @@ skip_monitors:
 
 		srv_started_redo = true;
 	}
+	mylite_embedded_startup_perf_add_elapsed(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_SRV_START_LATE_NS,
+		mylite_stage_start);
 
 	return(DB_SUCCESS);
 }

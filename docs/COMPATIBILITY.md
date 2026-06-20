@@ -1438,6 +1438,17 @@ reported `start_mysql_server_init_ms_avg=94.364`,
 `startup_server_components_plugin_init_ms_avg=52.325`,
 `startup_storage_engine_init_innodb_ms_avg=45.038`, and
 `startup_innodb_init_srv_start_ms_avg=44.983`.
+The follow-up `srv_start()` attribution probe keeps this as native InnoDB
+startup work rather than ownerless coordination: a reduced production sample
+reported ordinary warm open/close at `162.474 ms`,
+`start_mysql_server_init_ms_avg=129.505`,
+`startup_innodb_srv_start_total_ms_avg=82.674`,
+`startup_innodb_srv_start_log_rebuild_ms_avg=31.326`,
+`startup_innodb_srv_start_recovery_bootstrap_ms_avg=25.988`, and
+`startup_innodb_srv_start_system_tables_ms_avg=12.881`, while ordinary
+active-runtime reconnect stayed cheap at `0.695 ms`. The next performance work
+should therefore inspect native redo/log rebuild and recovery bootstrap before
+claiming a broader branch regression.
 A follow-up public API branch/main parity benchmark now builds
 `tools/mylite_public_open_close_bench` and measures only portable
 `mylite_open()` plus `mylite_close()` behavior over an InnoDB table. Against

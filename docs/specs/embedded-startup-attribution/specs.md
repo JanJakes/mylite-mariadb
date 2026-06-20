@@ -136,6 +136,17 @@ and main at `346.062-347.400 ms`; the matching branch internal probe reported
 behind main on process-style startup, and that remaining branch startup work
 should target native MariaDB/InnoDB lifecycle cost.
 
+A later `docs/specs/embedded-innodb-srv-start-attribution/specs.md` slice split
+`srv_start()` itself. A reduced production sample reported ordinary warm
+open/close at `162.474 ms`, `start_mysql_server_init_ms_avg=129.505`,
+`startup_innodb_srv_start_total_ms_avg=82.674`,
+`startup_innodb_srv_start_log_rebuild_ms_avg=31.326`,
+`startup_innodb_srv_start_recovery_bootstrap_ms_avg=25.988`, and
+`startup_innodb_srv_start_system_tables_ms_avg=12.881`, with ordinary
+active-runtime reconnect at `0.695 ms`. That keeps the next startup target in
+native redo/log rebuild and recovery bootstrap evidence rather than ownerless
+coordination.
+
 ## Risks And Follow-Up
 
 The counters may identify startup as mostly native InnoDB `srv_start()` or

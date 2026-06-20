@@ -516,6 +516,7 @@ jobs:
       MYLITE_WORDPRESS_CMAKE_BUILD_DIR: build/wordpress-php-embedded-prod
       MYLITE_WORDPRESS_CMAKE_BUILD_TYPE: Release
       MYLITE_WORDPRESS_TIMING_SUMMARY_PATH: build/wordpress-phpunit-reports/timing-summary-${{ matrix.shard }}.md
+      MYLITE_WORDPRESS_PRESERVE_TIMING_SUMMARY: "1"
       MYLITE_WORDPRESS_RUNTIME_MANIFEST_PATH: build/wordpress-phpunit-runtime-manifest.sha256
       MYLITE_WORDPRESS_RUNTIME_METADATA_PATH: build/wordpress-phpunit-runtime-manifest.txt
       MYLITE_WORDPRESS_TRUST_RUNTIME_MANIFEST: "1"

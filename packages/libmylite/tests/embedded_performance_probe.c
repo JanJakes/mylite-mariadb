@@ -1058,6 +1058,23 @@ enum embedded_startup_perf_stat_index {
     EMBEDDED_STARTUP_PERF_INNODB_INIT_CHECK_FILE_SPEC_NS,
     EMBEDDED_STARTUP_PERF_INNODB_INIT_SRV_START_NS,
     EMBEDDED_STARTUP_PERF_INNODB_INIT_POST_START_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_SRV_START_CALLS,
+    EMBEDDED_STARTUP_PERF_INNODB_SRV_START_TOTAL_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_SRV_START_EARLY_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_SRV_START_BOOT_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_SRV_START_TMPFILES_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_SRV_START_CORE_SYSTEMS_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_SRV_START_CHECKPOINT_OR_CREATE_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_SRV_START_SYS_SPACE_OPEN_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_SRV_START_UNDO_INIT_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_SRV_START_NEW_DB_BOOTSTRAP_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_SRV_START_RECOVERY_BOOTSTRAP_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_SRV_START_LOG_REBUILD_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_SRV_START_DOUBLEWRITE_UNDO_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_SRV_START_ROLLBACK_LOAD_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_SRV_START_BACKGROUND_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_SRV_START_SYSTEM_TABLES_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_SRV_START_LATE_NS,
     EMBEDDED_STARTUP_PERF_STAT_COUNT
 };
 
@@ -8442,6 +8459,7 @@ static void emit_embedded_startup_perf_summary(const char *prefix) {
     uint64_t plugin_init_calls;
     uint64_t storage_engine_init_calls;
     uint64_t innodb_init_calls;
+    uint64_t innodb_srv_start_calls;
 
     mylite_embedded_startup_perf_read(values, EMBEDDED_STARTUP_PERF_STAT_COUNT);
 
@@ -8451,6 +8469,7 @@ static void emit_embedded_startup_perf_summary(const char *prefix) {
     plugin_init_calls = values[EMBEDDED_STARTUP_PERF_PLUGIN_INIT_CALLS];
     storage_engine_init_calls = values[EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_CALLS];
     innodb_init_calls = values[EMBEDDED_STARTUP_PERF_INNODB_INIT_CALLS];
+    innodb_srv_start_calls = values[EMBEDDED_STARTUP_PERF_INNODB_SRV_START_CALLS];
 
     emit_embedded_startup_perf_summary_ms(
         prefix,
@@ -8584,6 +8603,54 @@ static void emit_embedded_startup_perf_summary(const char *prefix) {
         values[EMBEDDED_STARTUP_PERF_INNODB_INIT_POST_START_NS],
         innodb_init_calls
     );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_srv_start_total",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SRV_START_TOTAL_NS],
+        innodb_srv_start_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_srv_start_core_systems",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SRV_START_CORE_SYSTEMS_NS],
+        innodb_srv_start_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_srv_start_checkpoint_or_create",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SRV_START_CHECKPOINT_OR_CREATE_NS],
+        innodb_srv_start_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_srv_start_sys_space_open",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SRV_START_SYS_SPACE_OPEN_NS],
+        innodb_srv_start_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_srv_start_recovery_bootstrap",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SRV_START_RECOVERY_BOOTSTRAP_NS],
+        innodb_srv_start_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_srv_start_log_rebuild",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SRV_START_LOG_REBUILD_NS],
+        innodb_srv_start_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_srv_start_doublewrite_undo",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SRV_START_DOUBLEWRITE_UNDO_NS],
+        innodb_srv_start_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_srv_start_system_tables",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SRV_START_SYSTEM_TABLES_NS],
+        innodb_srv_start_calls
+    );
 }
 
 static void emit_embedded_startup_perf_stats(const char *prefix) {
@@ -8594,6 +8661,7 @@ static void emit_embedded_startup_perf_stats(const char *prefix) {
     uint64_t plugin_init_calls;
     uint64_t storage_engine_init_calls;
     uint64_t innodb_init_calls;
+    uint64_t innodb_srv_start_calls;
 
     mylite_embedded_startup_perf_read(values, EMBEDDED_STARTUP_PERF_STAT_COUNT);
 
@@ -8603,6 +8671,7 @@ static void emit_embedded_startup_perf_stats(const char *prefix) {
     plugin_init_calls = values[EMBEDDED_STARTUP_PERF_PLUGIN_INIT_CALLS];
     storage_engine_init_calls = values[EMBEDDED_STARTUP_PERF_STORAGE_ENGINE_INIT_CALLS];
     innodb_init_calls = values[EMBEDDED_STARTUP_PERF_INNODB_INIT_CALLS];
+    innodb_srv_start_calls = values[EMBEDDED_STARTUP_PERF_INNODB_SRV_START_CALLS];
 
     emit_embedded_startup_perf_value(prefix, "server_init_calls", server_init_calls);
     emit_embedded_startup_perf_ms(
@@ -8840,6 +8909,104 @@ static void emit_embedded_startup_perf_stats(const char *prefix) {
         "innodb_init_post_start",
         values[EMBEDDED_STARTUP_PERF_INNODB_INIT_POST_START_NS],
         innodb_init_calls
+    );
+
+    emit_embedded_startup_perf_value(prefix, "innodb_srv_start_calls", innodb_srv_start_calls);
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_srv_start_total",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SRV_START_TOTAL_NS],
+        innodb_srv_start_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_srv_start_early",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SRV_START_EARLY_NS],
+        innodb_srv_start_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_srv_start_boot",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SRV_START_BOOT_NS],
+        innodb_srv_start_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_srv_start_tmpfiles",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SRV_START_TMPFILES_NS],
+        innodb_srv_start_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_srv_start_core_systems",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SRV_START_CORE_SYSTEMS_NS],
+        innodb_srv_start_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_srv_start_checkpoint_or_create",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SRV_START_CHECKPOINT_OR_CREATE_NS],
+        innodb_srv_start_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_srv_start_sys_space_open",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SRV_START_SYS_SPACE_OPEN_NS],
+        innodb_srv_start_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_srv_start_undo_init",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SRV_START_UNDO_INIT_NS],
+        innodb_srv_start_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_srv_start_new_db_bootstrap",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SRV_START_NEW_DB_BOOTSTRAP_NS],
+        innodb_srv_start_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_srv_start_recovery_bootstrap",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SRV_START_RECOVERY_BOOTSTRAP_NS],
+        innodb_srv_start_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_srv_start_log_rebuild",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SRV_START_LOG_REBUILD_NS],
+        innodb_srv_start_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_srv_start_doublewrite_undo",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SRV_START_DOUBLEWRITE_UNDO_NS],
+        innodb_srv_start_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_srv_start_rollback_load",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SRV_START_ROLLBACK_LOAD_NS],
+        innodb_srv_start_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_srv_start_background",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SRV_START_BACKGROUND_NS],
+        innodb_srv_start_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_srv_start_system_tables",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SRV_START_SYSTEM_TABLES_NS],
+        innodb_srv_start_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_srv_start_late",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SRV_START_LATE_NS],
+        innodb_srv_start_calls
     );
 }
 

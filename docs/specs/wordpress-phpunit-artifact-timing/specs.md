@@ -138,6 +138,15 @@ used by the workflow.
   --output-on-failure` passed 3/3 tests in 5.94 seconds.
 - `cmake --build --preset format-check-prod` passed.
 - `git diff --check` passed before staging.
+- The first green CI run after the artifact timing slice (`55dff596`) confirmed
+  setup-side `artifact-pack` and `artifact-upload` rows, but the per-shard
+  timing summaries did not retain `artifact-download` or `artifact-extract`
+  rows. The shard job runs a harness `docker-image` phase after artifact
+  extraction, and the harness intentionally cleared its timing summary at the
+  start of that phase for standalone runs. The follow-up fix adds
+  `MYLITE_WORDPRESS_PRESERVE_TIMING_SUMMARY=1` to CI shard jobs and guards the
+  harness cleanup so workflow-level download/extract rows survive into each
+  uploaded shard timing summary.
 
 ## Acceptance Criteria
 
