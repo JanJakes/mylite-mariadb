@@ -6304,6 +6304,14 @@ subsystems that this mode needs:
   This remains a bounded visible-fast redo-state hot-path reduction; it does
   not close broader redo/checkpoint reconciliation, SQL execution residuals, or
   DDL/file-lifecycle recovery.
+  The follow-up bulk engine attribution slice is diagnostic-only: stats-enabled
+  production probes now collect ordinary bulk SQL-handler, InnoDB-handler, and
+  deep InnoDB counters and emit compact ownerless-minus-ordinary bulk deltas for
+  native commit, history write, row insert, clustered insert, undo report, and
+  default-checked bulk-start buckets. This closes the measurement gap between
+  ownerless bulk `mysql_query()` time and ordinary baseline engine work without
+  changing SQL behavior, page-version publication, redo/checkpoint ordering, WAL
+  format, or recovery.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.

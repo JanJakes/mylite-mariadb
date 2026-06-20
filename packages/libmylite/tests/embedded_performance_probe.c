@@ -1277,6 +1277,12 @@ static void emit_ownerless_bulk_autocommit_phase_summary(
     unsigned insert_rows,
     unsigned insert_statements
 );
+static void emit_bulk_deep_comparison_summary(
+    const uint64_t *ordinary_deep,
+    const uint64_t *ownerless_deep,
+    unsigned insert_rows,
+    unsigned insert_statements
+);
 static void emit_bulk_exec_result_summary(const char *prefix, unsigned insert_statements);
 static void emit_insert_client_timing_summary(
     const char *prefix,
@@ -1444,6 +1450,8 @@ int main(void) {
     uint64_t ownerless_txn_innodb_deep[INNODB_DEEP_PERF_STAT_COUNT] = {0};
     uint64_t ordinary_autocommit_innodb_deep[INNODB_DEEP_PERF_STAT_COUNT] = {0};
     uint64_t ownerless_autocommit_innodb_deep[INNODB_DEEP_PERF_STAT_COUNT] = {0};
+    uint64_t ordinary_bulk_innodb_deep[INNODB_DEEP_PERF_STAT_COUNT] = {0};
+    uint64_t ownerless_bulk_innodb_deep[INNODB_DEEP_PERF_STAT_COUNT] = {0};
     insert_client_timing ordinary_txn_client_timing = {0};
     insert_client_timing ownerless_txn_client_timing = {0};
     insert_client_timing ordinary_autocommit_client_timing = {0};
@@ -1701,6 +1709,9 @@ int main(void) {
 
     if (page_publish_stats) {
         mylite_exec_result_perf_set_enabled(1);
+        mylite_ownerless_sql_handler_set_perf_stats_enabled(1);
+        mylite_ownerless_innodb_handler_set_perf_stats_enabled(1);
+        mylite_ownerless_innodb_deep_set_perf_stats_enabled(1);
     }
     seconds = measure_bulk_autocommit_insert(
         db,
@@ -1717,7 +1728,17 @@ int main(void) {
     );
     if (page_publish_stats) {
         mylite_exec_result_perf_set_enabled(0);
+        mylite_ownerless_sql_handler_set_perf_stats_enabled(0);
+        mylite_ownerless_innodb_handler_set_perf_stats_enabled(0);
+        mylite_ownerless_innodb_deep_set_perf_stats_enabled(0);
         emit_exec_result_perf_stats("mylite_perf_ordinary_insert_autocommit_bulk");
+        emit_sql_handler_perf_stats("mylite_perf_ordinary_insert_autocommit_bulk");
+        emit_innodb_handler_perf_stats("mylite_perf_ordinary_insert_autocommit_bulk");
+        emit_innodb_deep_perf_stats("mylite_perf_ordinary_insert_autocommit_bulk");
+        mylite_ownerless_innodb_deep_read_perf_stats(
+            ordinary_bulk_innodb_deep,
+            INNODB_DEEP_PERF_STAT_COUNT
+        );
         emit_bulk_exec_result_summary(
             "mylite_perf_summary_ordinary_autocommit_bulk",
             bulk_insert_statements
@@ -1964,12 +1985,22 @@ int main(void) {
         emit_sql_handler_perf_stats("mylite_perf_ownerless_insert_autocommit_bulk");
         emit_innodb_handler_perf_stats("mylite_perf_ownerless_insert_autocommit_bulk");
         emit_innodb_deep_perf_stats("mylite_perf_ownerless_insert_autocommit_bulk");
+        mylite_ownerless_innodb_deep_read_perf_stats(
+            ownerless_bulk_innodb_deep,
+            INNODB_DEEP_PERF_STAT_COUNT
+        );
         emit_page_write_perf_stats("mylite_perf_ownerless_insert_autocommit_bulk");
         emit_page_write_refresh_stats("mylite_perf_ownerless_insert_autocommit_bulk");
         emit_page_log_append_perf_stats("mylite_perf_ownerless_insert_autocommit_bulk");
         emit_page_log_scan_perf_stats("mylite_perf_ownerless_insert_autocommit_bulk");
         emit_page_log_sync_perf_stats("mylite_perf_ownerless_insert_autocommit_bulk");
         emit_ownerless_bulk_autocommit_phase_summary(insert_iterations, bulk_insert_statements);
+        emit_bulk_deep_comparison_summary(
+            ordinary_bulk_innodb_deep,
+            ownerless_bulk_innodb_deep,
+            insert_iterations,
+            bulk_insert_statements
+        );
         emit_bulk_exec_result_summary(
             "mylite_perf_summary_ownerless_autocommit_bulk",
             bulk_insert_statements
@@ -3785,6 +3816,325 @@ static void emit_ownerless_bulk_autocommit_phase_summary(
         "mylite_perf_summary_ownerless_autocommit_bulk_page_write_mtr_inline_promotions_per_"
         "statement",
         page_write[PAGE_WRITE_PERF_STAT_MTR_INLINE_PROMOTIONS],
+        insert_statements
+    );
+}
+
+static void emit_bulk_deep_ms_value(
+    const char *prefix,
+    const char *metric,
+    const char *unit_name,
+    uint64_t value_ns,
+    unsigned iterations
+) {
+    const double total_ms = (double)value_ns / 1000000.0;
+    const double average_ms = iterations > 0U ? total_ms / (double)iterations : 0.0;
+
+    printf("%s_%s_ms_per_%s=%.3f\n", prefix, metric, unit_name, average_ms);
+}
+
+static void emit_bulk_deep_ms_delta(
+    const char *metric,
+    const char *unit_name,
+    uint64_t ordinary_ns,
+    uint64_t ownerless_ns,
+    unsigned iterations
+) {
+    const double total_ms = ((double)ownerless_ns - (double)ordinary_ns) / 1000000.0;
+    const double average_ms = iterations > 0U ? total_ms / (double)iterations : 0.0;
+
+    printf(
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_bulk_%s_ms_per_%s=%.3f\n",
+        metric,
+        unit_name,
+        average_ms
+    );
+}
+
+static void emit_bulk_deep_ms_pair_for_unit(
+    const uint64_t *ordinary_deep,
+    const uint64_t *ownerless_deep,
+    size_t index,
+    const char *metric,
+    const char *unit_name,
+    unsigned iterations
+) {
+    emit_bulk_deep_ms_value(
+        "mylite_perf_summary_ordinary_autocommit_bulk",
+        metric,
+        unit_name,
+        ordinary_deep[index],
+        iterations
+    );
+    emit_bulk_deep_ms_value(
+        "mylite_perf_summary_ownerless_autocommit_bulk",
+        metric,
+        unit_name,
+        ownerless_deep[index],
+        iterations
+    );
+    emit_bulk_deep_ms_delta(
+        metric,
+        unit_name,
+        ordinary_deep[index],
+        ownerless_deep[index],
+        iterations
+    );
+}
+
+static void emit_bulk_deep_ms_pair(
+    const uint64_t *ordinary_deep,
+    const uint64_t *ownerless_deep,
+    size_t index,
+    const char *metric,
+    unsigned insert_rows,
+    unsigned insert_statements
+) {
+    emit_bulk_deep_ms_pair_for_unit(
+        ordinary_deep,
+        ownerless_deep,
+        index,
+        metric,
+        "row",
+        insert_rows
+    );
+    emit_bulk_deep_ms_pair_for_unit(
+        ordinary_deep,
+        ownerless_deep,
+        index,
+        metric,
+        "statement",
+        insert_statements
+    );
+}
+
+static void emit_bulk_deep_count_value(
+    const char *prefix,
+    const char *metric,
+    const char *unit_name,
+    uint64_t count,
+    unsigned iterations
+) {
+    const double average = iterations > 0U ? (double)count / (double)iterations : 0.0;
+
+    printf("%s_%s_per_%s=%.3f\n", prefix, metric, unit_name, average);
+}
+
+static void emit_bulk_deep_count_delta(
+    const char *metric,
+    const char *unit_name,
+    uint64_t ordinary_count,
+    uint64_t ownerless_count,
+    unsigned iterations
+) {
+    const double total = (double)ownerless_count - (double)ordinary_count;
+    const double average = iterations > 0U ? total / (double)iterations : 0.0;
+
+    printf(
+        "mylite_perf_summary_ownerless_minus_ordinary_autocommit_bulk_%s_per_%s=%.3f\n",
+        metric,
+        unit_name,
+        average
+    );
+}
+
+static void emit_bulk_deep_count_pair_for_unit(
+    const uint64_t *ordinary_deep,
+    const uint64_t *ownerless_deep,
+    size_t index,
+    const char *metric,
+    const char *unit_name,
+    unsigned iterations
+) {
+    emit_bulk_deep_count_value(
+        "mylite_perf_summary_ordinary_autocommit_bulk",
+        metric,
+        unit_name,
+        ordinary_deep[index],
+        iterations
+    );
+    emit_bulk_deep_count_value(
+        "mylite_perf_summary_ownerless_autocommit_bulk",
+        metric,
+        unit_name,
+        ownerless_deep[index],
+        iterations
+    );
+    emit_bulk_deep_count_delta(
+        metric,
+        unit_name,
+        ordinary_deep[index],
+        ownerless_deep[index],
+        iterations
+    );
+}
+
+static void emit_bulk_deep_count_pair(
+    const uint64_t *ordinary_deep,
+    const uint64_t *ownerless_deep,
+    size_t index,
+    const char *metric,
+    unsigned insert_rows,
+    unsigned insert_statements
+) {
+    emit_bulk_deep_count_pair_for_unit(
+        ordinary_deep,
+        ownerless_deep,
+        index,
+        metric,
+        "row",
+        insert_rows
+    );
+    emit_bulk_deep_count_pair_for_unit(
+        ordinary_deep,
+        ownerless_deep,
+        index,
+        metric,
+        "statement",
+        insert_statements
+    );
+}
+
+static void emit_bulk_deep_comparison_summary(
+    const uint64_t *ordinary_deep,
+    const uint64_t *ownerless_deep,
+    unsigned insert_rows,
+    unsigned insert_statements
+) {
+    emit_bulk_deep_ms_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_COMMIT_FOR_MYSQL_TOTAL_NS,
+        "trx_commit_for_mysql",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_TOTAL_NS,
+        "trx_commit_persist",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_NS,
+        "write_history",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_COMMIT_PERSIST_WRITE_HISTORY_MTR_COMMIT_NS,
+        "write_history_mtr_commit",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_COMMIT_IN_MEMORY_TOTAL_NS,
+        "commit_in_memory",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INSERT_FOR_MYSQL_TOTAL_NS,
+        "row_insert",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INSERT_STEP_NS,
+        "row_insert_step",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_TOTAL_NS,
+        "row_ins_clust_low",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_MTR_COMMIT_NS,
+        "row_ins_clust_low_mtr_commit",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_TOTAL_NS,
+        "clustered_btree_optimistic",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_BTR_OPTIMISTIC_LOCK_UNDO_NS,
+        "clustered_btree_optimistic_lock_undo",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_UNDO_REPORT_TOTAL_NS,
+        "trx_undo_report",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_UNDO_REPORT_MTR_COMMIT_NS,
+        "trx_undo_report_mtr_commit",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INSERT_FOR_MYSQL_CALLS,
+        "row_insert_calls",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_UNDO_REPORT_CALLS,
+        "trx_undo_report_calls",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_TRX_UNDO_REPORT_BULK_ALREADY_COVERED,
+        "trx_undo_report_bulk_already_covered",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_OWNERLESS_DEFAULT_CHECKED_BULK,
+        "innodb_default_checked_bulk_starts",
+        insert_rows,
         insert_statements
     );
 }

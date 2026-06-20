@@ -870,6 +870,15 @@ ownerless/ordinary ratio. The normal-build positive assertion for deferred
 latest-checkpoint coalescing in the explicit-transaction undo WAL-elision case
 was removed because redo latest/checkpoint advancement is now allowed to happen
 at the batch boundary rather than through that older coalescing counter.
+The follow-up bulk engine attribution slice keeps the same runtime semantics
+but enables ordinary bulk SQL-handler, InnoDB-handler, and deep InnoDB counters
+under the existing stats-enabled production probe. The probe now emits raw
+ordinary bulk engine rows and compact ownerless-minus-ordinary bulk deltas for
+native commit, history write, row insert, clustered insert, undo report, and
+default-checked bulk-start buckets in both per-row and per-statement form. This
+is diagnostic-only: it does not change SQL behavior, page-version publication,
+redo/checkpoint ordering, WAL format, or recovery, and it does not claim a
+throughput win.
 Profiled mysqli runs also split total query elapsed time into
 `query_verb_*` buckets for result queries, DML, DDL, connection state,
 transaction, lock, call, and other first-keyword classes so WordPress timing
