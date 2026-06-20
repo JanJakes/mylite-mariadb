@@ -559,6 +559,13 @@ seconds_since() {
   echo "$((end - start))"
 }
 
+copy_database_tree() {
+  local source_dir="$1"
+  local target_dir="$2"
+
+  cp -a --reflink=auto -- "${source_dir}" "${target_dir}"
+}
+
 markdown_cell() {
   local value="$1"
   value="${value//$'\n'/ }"
@@ -975,6 +982,7 @@ $hasChildMysqliProfileContextMarker = str_contains($source, $childMysqliProfileC
 $hasChildSkipInstallMarker = str_contains($source, $childSkipInstallMarker);
 $hasParentSkipInstallMarker = str_contains($source, $parentSkipInstallMarker);
 $hasChildBaselineRestoreMarker = str_contains($source, $childBaselineRestoreMarker);
+$hasChildBaselineRestoreReflink = str_contains($source, "cp -a --reflink=auto --");
 $hasChildRuntimeTiming =
     str_contains($source, "\$myliteWordPressChildStats['child_process_seconds'] +=");
 $hasChildReconnectTiming =
@@ -1001,6 +1009,7 @@ if ($hasTimingMarker &&
     $hasChildSkipInstallMarker &&
     $hasParentSkipInstallMarker &&
     $hasChildBaselineRestoreMarker &&
+    $hasChildBaselineRestoreReflink &&
     $hasChildRuntimeTiming &&
     $hasChildReconnectTiming) {
     exit(0);
@@ -1173,7 +1182,7 @@ $childBaselineRestore = <<<'PATCH'
             $myliteWordPressRestoreStatus = 0;
             \exec(
                 'rm -rf -- ' . \escapeshellarg($myliteWordPressDbDir) .
-                    ' && cp -a -- ' . \escapeshellarg($myliteWordPressBaselineDir) .
+                    ' && cp -a --reflink=auto -- ' . \escapeshellarg($myliteWordPressBaselineDir) .
                     ' ' . \escapeshellarg($myliteWordPressDbDir) . ' 2>&1',
                 $myliteWordPressRestoreOutput,
                 $myliteWordPressRestoreStatus
@@ -2155,6 +2164,15 @@ if (!str_contains($patched, $childBaselineRestoreMarker)) {
     $patched = $patchedWithChildBaselineRestore;
 }
 
+if (str_contains($patched, $childBaselineRestoreMarker) &&
+    str_contains($patched, "' && cp -a -- ' . \\escapeshellarg(\$myliteWordPressBaselineDir) .")) {
+    $patched = str_replace(
+        "' && cp -a -- ' . \\escapeshellarg(\$myliteWordPressBaselineDir) .",
+        "' && cp -a --reflink=auto -- ' . \\escapeshellarg(\$myliteWordPressBaselineDir) .",
+        $patched
+    );
+}
+
 if (!str_contains($patched, $keepaliveMarker)) {
     $keepaliveInsertAfter = "        \$myliteWordPressCloseWpdb(\$GLOBALS['wpdb'] ?? null);\n";
     $patchedWithKeepalive = str_replace(
@@ -2638,7 +2656,7 @@ if [ "${MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL}" = "1" ]; then
     run_core_tests
   wordpress_prepare_db_install_seconds="$(seconds_since "${wordpress_prepare_db_install_start}")"
   wordpress_prepare_db_baseline_copy_start="$(date +%s)"
-  cp -a "${MYLITE_WORDPRESS_DB_DIR}" "${MYLITE_WORDPRESS_DB_BASELINE_DIR}"
+  copy_database_tree "${MYLITE_WORDPRESS_DB_DIR}" "${MYLITE_WORDPRESS_DB_BASELINE_DIR}"
   wordpress_prepare_db_baseline_copy_seconds="$(seconds_since "${wordpress_prepare_db_baseline_copy_start}")"
   wordpress_prepare_db_metrics+=(
     "wordpress_prepare_db_install_seconds=${wordpress_prepare_db_install_seconds}"
@@ -2671,7 +2689,7 @@ phpunit_baseline_restore_seconds=
 if [ "${MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL}" = "1" ]; then
   phpunit_baseline_restore_start="$(date +%s)"
   rm -rf "${MYLITE_WORDPRESS_DB_DIR}"
-  cp -a "${MYLITE_WORDPRESS_DB_BASELINE_DIR}" "${MYLITE_WORDPRESS_DB_DIR}"
+  copy_database_tree "${MYLITE_WORDPRESS_DB_BASELINE_DIR}" "${MYLITE_WORDPRESS_DB_DIR}"
   phpunit_baseline_restore_seconds="$(seconds_since "${phpunit_baseline_restore_start}")"
   echo "wordpress_phpunit_baseline_restore_seconds=${phpunit_baseline_restore_seconds}"
 fi

@@ -3,6 +3,7 @@ set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 workflow="${root_dir}/.github/workflows/ci.yml"
+wordpress_harness="${root_dir}/tools/wordpress-phpunit-mysqli-mylite"
 failed=0
 
 require_literal() {
@@ -10,6 +11,16 @@ require_literal() {
 
   if ! grep -Fq -- "${needle}" "${workflow}"; then
     echo "Missing required CI production-build marker: ${needle}" >&2
+    failed=1
+  fi
+}
+
+require_file_literal() {
+  local file="$1"
+  local needle="$2"
+
+  if ! grep -Fq -- "${needle}" "${file}"; then
+    echo "Missing required production-build marker in ${file}: ${needle}" >&2
     failed=1
   fi
 }
@@ -243,6 +254,10 @@ if [ ! -f "${workflow}" ]; then
   echo "Missing CI workflow: ${workflow}" >&2
   exit 1
 fi
+if [ ! -f "${wordpress_harness}" ]; then
+  echo "Missing WordPress PHPUnit harness: ${wordpress_harness}" >&2
+  exit 1
+fi
 
 reject_regex \
   '(^|[[:space:]])(cmake|ctest)[^#[:cntrl:]]*--preset[[:space:]]+(dev|embedded-dev|php-embedded-dev)([^[:alnum:]_-]|$)' \
@@ -304,6 +319,7 @@ require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_BLOCK_TOKEN_RE:"
 require_literal 'non_isolated_filter="^(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_BLOCK_TOKEN_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal "MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_FILTER: '^Tests_Admin_ExportWp"
+require_file_literal "${wordpress_harness}" "cp -a --reflink=auto --"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_SKIP_INSTALL_FILTER: '^Tests_oEmbed_HTTP_Headers"
 require_literal "Tests_Filesystem_WpFilesystemDirect_Chmod::test_should_handle_set_mode_when_not_passed"
 require_literal "Tests_Admin_WpUpgrader::test_maintenance_mode_should_create_maintenance_file_with_boolean"

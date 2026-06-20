@@ -1481,8 +1481,16 @@ directory before each child and then runs the child with
 `WP_TESTS_SKIP_INSTALL=1`. The exact deferred factory-heavy filter passed `13`
 tests in `46.688s` shell real, with `13` baseline restores totaling `2.936861s`
 (`225.912 ms` per child), compared with the previous install-required local
-sample at `110.170s` shell real. CI uses that baseline-restored deferred shard
-while keeping the already-safe deferred skip-install and UI/filesystem
+sample at `110.170s` shell real. The harness now uses
+`cp -a --reflink=auto --` for prepared-baseline creation, parent restore, and
+child restore, so copy-on-write filesystems can clone unchanged MyLite database
+extents while non-CoW filesystems retain the previous archive-copy behavior. A
+2026-06-20 focused production rerun against CI's pinned WordPress ref
+`6ddfc9d9b532c6e95c1266165149815895e2eb56` passed the same factory-heavy filter
+with `13` child processes, `13` child baseline restores, `2.905252s` total child
+baseline-restore time, and `223.481 ms` average restore time per child on the
+local tmpfs-backed database mount. CI uses that baseline-restored deferred
+shard while keeping the already-safe deferred skip-install and UI/filesystem
 skip-install shards on reconnect-disabled paths.
 The long non-isolated shard now also excludes the whole `Tests_DB*` class
 family with a leading `^(?!Tests_DB)` negative lookahead, matching the

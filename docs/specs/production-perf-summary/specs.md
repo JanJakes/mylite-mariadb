@@ -255,7 +255,15 @@ skip-install. The parent closes WordPress/MyLite handles, restores the prepared
 MyLite baseline database directory, and then starts the PHPUnit child with
 `WP_TESTS_SKIP_INSTALL=1`. This keeps factory sequence state fresh for
 `Tests_Admin_ExportWp` and the process-isolated Sitemaps methods without
-running WordPress `install.php` in every child.
+running WordPress `install.php` in every child. The harness now uses
+`cp -a --reflink=auto --` for prepared-baseline creation, parent phase restore,
+and child restore, preserving full-copy fallback behavior while allowing
+copy-on-write filesystems to avoid duplicating unchanged database extents. A
+2026-06-20 focused production rerun against CI's pinned WordPress ref
+`6ddfc9d9b532c6e95c1266165149815895e2eb56` passed the factory-heavy filter with
+`13` child processes, `13` child baseline restores, `2.905252s` total child
+baseline-restore time, and `223.481 ms` average restore time per child on the
+local tmpfs-backed database mount.
 The UI/filesystem process-isolated shard also runs with child install skip and
 now keeps `MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD=0`. A fresh
 production run of the former eager filter passed `22` tests with child timing
