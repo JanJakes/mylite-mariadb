@@ -344,6 +344,8 @@ static bool ownerless_page_publish_type_has_native_support(
   }
 }
 
+static bool ownerless_space_id_is_known_undo_tablespace(uint32_t space_id)
+  noexcept;
 static bool ownerless_space_is_undo_tablespace(uint32_t space_id);
 
 static uint64_t ownerless_page_publish_mix64(uint64_t value) noexcept
@@ -1368,7 +1370,8 @@ static bool ownerless_space_path_is_undo_tablespace(const char *path)
   return true;
 }
 
-static bool ownerless_space_is_undo_tablespace(uint32_t space_id)
+static bool ownerless_space_id_is_known_undo_tablespace(
+    uint32_t space_id) noexcept
 {
   if (srv_is_undo_tablespace(space_id))
     return true;
@@ -1378,6 +1381,27 @@ static bool ownerless_space_is_undo_tablespace(uint32_t space_id)
       ((srv_undo_tablespaces_open != 0 &&
         space_id <= srv_undo_tablespaces_open) ||
        (srv_undo_tablespaces != 0 && space_id <= srv_undo_tablespaces)))
+    return true;
+  return false;
+}
+
+static bool ownerless_page_type_cannot_be_undo(uint16_t page_type) noexcept
+{
+  switch (page_type) {
+  case FIL_PAGE_INDEX:
+  case FIL_PAGE_RTREE:
+  case FIL_PAGE_TYPE_BLOB:
+  case FIL_PAGE_TYPE_ZBLOB:
+  case FIL_PAGE_TYPE_ZBLOB2:
+    return true;
+  default:
+    return false;
+  }
+}
+
+static bool ownerless_space_is_undo_tablespace(uint32_t space_id)
+{
+  if (ownerless_space_id_is_known_undo_tablespace(space_id))
     return true;
   if (space_id == TRX_SYS_SPACE || space_id >= SRV_TMP_SPACE_ID ||
       !fil_system.is_initialised())
@@ -1396,11 +1420,20 @@ static bool ownerless_space_is_undo_tablespace(uint32_t space_id)
 
 static bool ownerless_page_write_is_undo_page(const buf_page_t &page)
 {
-  if (ownerless_space_is_undo_tablespace(page.id().space()))
+  if (ownerless_space_id_is_known_undo_tablespace(page.id().space()))
     return true;
 
   const byte *source= page.zip.data ? page.zip.data : page.frame;
-  return source != nullptr && fil_page_get_type(source) == FIL_PAGE_UNDO_LOG;
+  if (source != nullptr)
+  {
+    const uint16_t page_type= fil_page_get_type(source);
+    if (page_type == FIL_PAGE_UNDO_LOG)
+      return true;
+    if (ownerless_page_type_cannot_be_undo(page_type))
+      return false;
+  }
+
+  return ownerless_space_is_undo_tablespace(page.id().space());
 }
 
 static bool ownerless_page_write_defers_for_transaction(
