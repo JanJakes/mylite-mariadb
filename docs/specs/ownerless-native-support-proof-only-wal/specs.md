@@ -161,6 +161,12 @@ show the proof-payload work no longer dominates the WAL payload summary.
   ownerless page-write lock timeouts as retryable physical-page contention.
   `ctest --preset ownerless-stress --output-on-failure` then passed all 12
   stress cases.
+- A later proof-pair header-coalescing slice kept the same proof-only WAL
+  records but writes the two adjacent native-support proof headers through one
+  physical record-header write when the session-scoped pair path is active.
+  Primitive coverage asserts adjacent logical offsets, two record-header byte
+  counts, zero payload bytes, and one `record_header_write_calls` sample for
+  the pair.
 
 ## Risks
 

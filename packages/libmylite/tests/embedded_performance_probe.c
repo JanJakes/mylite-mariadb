@@ -761,6 +761,7 @@ enum page_log_append_perf_stat_index {
     PAGE_LOG_APPEND_PERF_STAT_DELTA_BASE_STANDALONE_SLOT_REUSE_RECORDS,
     PAGE_LOG_APPEND_PERF_STAT_DELTA_BASE_PAGE_BUFFER_REUSE_RECORDS,
     PAGE_LOG_APPEND_PERF_STAT_PRECOMPUTED_CHECKSUM_RECORDS,
+    PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_WRITE_CALLS,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
@@ -2554,6 +2555,10 @@ static void emit_ownerless_append_phase_summary(
     EMIT_APPEND_MS(
         "page_log_record_header_write",
         page_log_append[PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_WRITE_NS]
+    );
+    EMIT_APPEND_COUNT(
+        "page_log_record_header_write_calls",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_WRITE_CALLS]
     );
     EMIT_APPEND_COUNT(
         "page_log_precomputed_checksum_records",
@@ -5942,6 +5947,12 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
     emit_summary_ms_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_page_log_record_header_write_ms_per_insert",
         page_log_append[PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_WRITE_NS],
+        insert_iterations
+    );
+    emit_summary_count_per_iteration(
+        "mylite_perf_summary_ownerless_autocommit_page_log_record_header_write_calls_per_"
+        "insert",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_WRITE_CALLS],
         insert_iterations
     );
     emit_summary_count_per_iteration(
@@ -12834,6 +12845,11 @@ static void emit_page_log_append_perf_stats(const char *prefix) {
         prefix,
         "record_header_write",
         values[PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_WRITE_NS]
+    );
+    emit_page_log_append_perf_count(
+        prefix,
+        "record_header_write_calls",
+        values[PAGE_LOG_APPEND_PERF_STAT_RECORD_HEADER_WRITE_CALLS]
     );
     emit_page_log_append_perf_bytes(
         prefix,

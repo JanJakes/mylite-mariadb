@@ -6261,15 +6261,15 @@ subsystems that this mode needs:
   When the ordinary page-log append session is active, the hook writes the same
   rollback-segment and undo proof headers directly as zero-payload
   native-support proof-only records, keeps append/session counters as record
-  counts, advances the session after the first proof record before writing the
-  second, and falls back to the previous generic two-append path when session
-  setup is unavailable. Primitive coverage proves latest/read rejection,
-  replay skipping, checkpoint retained-callback skipping, adjacent proof-only
-  offsets, and counter parity for the pair API; focused history-proof SQL still
-  proves successful pair publication and zero ownerless history-flush fallback
-  in normal builds. This narrows proof append overhead only; it does not change
-  WAL format, visible LSN rules, redo/checkpoint ordering, or DDL/file-lifecycle
-  recovery.
+  counts, coalesces the adjacent proof-only headers into one physical
+  record-header write, and falls back to the previous generic two-append path
+  when session setup is unavailable. Primitive coverage proves latest/read
+  rejection, replay skipping, checkpoint retained-callback skipping, adjacent
+  proof-only offsets, logical counter parity, and one `record_header_write_calls`
+  sample for the pair API; focused history-proof SQL still proves successful
+  pair publication and zero ownerless history-flush fallback in normal builds.
+  This narrows proof append overhead only; it does not change WAL format,
+  visible LSN rules, redo/checkpoint ordering, or DDL/file-lifecycle recovery.
   Larger row lists, broad DML/DDL, and unbounded append-lock hold times remain
   out of scope.
   Focused gating coverage proves active live writers, including idle explicit

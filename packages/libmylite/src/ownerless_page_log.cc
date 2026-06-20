@@ -134,6 +134,8 @@ constexpr std::uint32_t k_index_delta_base_max_delta_records = 32;
 constexpr std::uint64_t k_index_delta_fast_payload_size_limit = 4096;
 constexpr off_t k_append_lock_start = 0;
 constexpr off_t k_checkpoint_lock_start = 1;
+constexpr std::size_t k_proof_pair_record_header_bytes =
+    static_cast<std::size_t>(MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE) * 2U;
 
 using PageLogHeader = std::array<unsigned char, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE>;
 
@@ -336,6 +338,7 @@ enum PageLogAppendPerfStatIndex : std::size_t {
     PAGE_LOG_APPEND_PERF_DELTA_BASE_STANDALONE_SLOT_REUSE_RECORDS,
     PAGE_LOG_APPEND_PERF_DELTA_BASE_PAGE_BUFFER_REUSE_RECORDS,
     PAGE_LOG_APPEND_PERF_PRECOMPUTED_CHECKSUM_RECORDS,
+    PAGE_LOG_APPEND_PERF_RECORD_HEADER_WRITE_CALLS,
     PAGE_LOG_APPEND_PERF_STAT_COUNT
 };
 
@@ -628,15 +631,19 @@ int append_record_at_locked(
     std::uint64_t precomputed_checksum,
     std::uint32_t append_options
 );
-int append_native_support_proof_only_record_at_locked(
+int append_native_support_proof_only_pair_at_locked(
     int fd,
     off_t record_offset,
     std::uint32_t space_id,
     std::uint32_t page_no,
     std::uint64_t page_lsn,
-    std::uint64_t commit_lsn,
     std::uint32_t page_size,
-    std::uint64_t *out_record_offset,
+    std::uint32_t second_page_no,
+    std::uint64_t second_page_lsn,
+    std::uint32_t second_page_size,
+    std::uint64_t commit_lsn,
+    std::uint64_t *out_first_record_offset,
+    std::uint64_t *out_second_record_offset,
     std::uint64_t *out_next_record_offset,
     bool append_stats_enabled
 );
@@ -755,6 +762,7 @@ std::uint64_t header_generation(const PageLogHeader &header);
 bool increment_header_generation(int fd, off_t log_offset);
 bool header_matches(const PageLogHeader &header);
 bool read_record_header(int fd, off_t offset, PageRecordHeader &header);
+void encode_record_header(unsigned char *bytes, const PageRecordHeader &header);
 bool write_record_header(int fd, off_t offset, const PageRecordHeader &header);
 bool write_exact_at(int fd, const void *buffer, std::size_t size, off_t offset);
 bool read_exact_at(int fd, void *buffer, std::size_t size, off_t offset);
@@ -1632,54 +1640,90 @@ int mylite_ownerless_page_log_append_session_begin_initialized_at(
 
 namespace {
 
-int append_native_support_proof_only_record_at_locked(
+int append_native_support_proof_only_pair_at_locked(
     int fd,
     off_t record_offset,
     std::uint32_t space_id,
     std::uint32_t page_no,
     std::uint64_t page_lsn,
-    std::uint64_t commit_lsn,
     std::uint32_t page_size,
-    std::uint64_t *out_record_offset,
+    std::uint32_t second_page_no,
+    std::uint64_t second_page_lsn,
+    std::uint32_t second_page_size,
+    std::uint64_t commit_lsn,
+    std::uint64_t *out_first_record_offset,
+    std::uint64_t *out_second_record_offset,
     std::uint64_t *out_next_record_offset,
     bool append_stats_enabled
 ) {
+    off_t second_record_offset = 0;
     off_t next_record_offset = 0;
     if (!offset_adds(
             record_offset,
+            MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE,
+            &second_record_offset
+        ) ||
+        !offset_adds(
+            second_record_offset,
             MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE,
             &next_record_offset
         )) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
 
-    PageRecordHeader record = {};
-    record.space_id = space_id;
-    record.page_no = page_no;
-    record.page_size = page_size;
-    record.flags = k_record_flag_native_support_state | k_record_flag_proof_only;
-    record.page_lsn = page_lsn;
-    record.commit_lsn = commit_lsn;
-    record.payload_size = 0U;
-    record.checksum = 0U;
+    PageRecordHeader first_record = {};
+    first_record.space_id = space_id;
+    first_record.page_no = page_no;
+    first_record.page_size = page_size;
+    first_record.flags = k_record_flag_native_support_state | k_record_flag_proof_only;
+    first_record.page_lsn = page_lsn;
+    first_record.commit_lsn = commit_lsn;
+    first_record.payload_size = 0U;
+    first_record.checksum = 0U;
+
+    PageRecordHeader second_record = {};
+    second_record.space_id = space_id;
+    second_record.page_no = second_page_no;
+    second_record.page_size = second_page_size;
+    second_record.flags = k_record_flag_native_support_state | k_record_flag_proof_only;
+    second_record.page_lsn = second_page_lsn;
+    second_record.commit_lsn = commit_lsn;
+    second_record.payload_size = 0U;
+    second_record.checksum = 0U;
+
+    std::array<unsigned char, k_proof_pair_record_header_bytes> bytes = {};
+    encode_record_header(bytes.data(), first_record);
+    encode_record_header(
+        bytes.data() + MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE,
+        second_record
+    );
 
     const std::uint64_t stage_start_ns = append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
-    const bool record_header_written = write_record_header(fd, record_offset, record);
+    const bool record_headers_written =
+        write_exact_at(fd, bytes.data(), bytes.size(), record_offset);
     page_log_append_perf_add_elapsed_if_enabled(
         append_stats_enabled,
         PAGE_LOG_APPEND_PERF_RECORD_HEADER_WRITE_NS,
         stage_start_ns
     );
-    if (!record_header_written) {
+    if (!record_headers_written) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
     page_log_append_perf_add_if_enabled(
         append_stats_enabled,
         PAGE_LOG_APPEND_PERF_RECORD_HEADER_BYTES,
-        MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE
+        static_cast<std::uint64_t>(k_proof_pair_record_header_bytes)
     );
-    if (out_record_offset != nullptr) {
-        *out_record_offset = static_cast<std::uint64_t>(record_offset);
+    page_log_append_perf_add_if_enabled(
+        append_stats_enabled,
+        PAGE_LOG_APPEND_PERF_RECORD_HEADER_WRITE_CALLS,
+        1U
+    );
+    if (out_first_record_offset != nullptr) {
+        *out_first_record_offset = static_cast<std::uint64_t>(record_offset);
+    }
+    if (out_second_record_offset != nullptr) {
+        *out_second_record_offset = static_cast<std::uint64_t>(second_record_offset);
     }
     if (out_next_record_offset != nullptr) {
         *out_next_record_offset = static_cast<std::uint64_t>(next_record_offset);
@@ -1879,35 +1923,18 @@ int mylite_ownerless_page_log_append_session_append_native_support_proof_pair(
     }
 
     std::uint64_t next_record_offset = 0U;
-    int result = append_native_support_proof_only_record_at_locked(
+    const int result = append_native_support_proof_only_pair_at_locked(
         fd,
         static_cast<off_t>(session->next_record_offset),
         space_id,
         first_page_no,
         first_page_lsn,
-        commit_lsn,
         first_page_size,
-        out_first_record_offset,
-        &next_record_offset,
-        append_stats_enabled
-    );
-    if (result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
-        return result;
-    }
-    session->next_record_offset = next_record_offset;
-    if (session->next_record_offset >
-        static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
-        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
-    }
-
-    result = append_native_support_proof_only_record_at_locked(
-        fd,
-        static_cast<off_t>(session->next_record_offset),
-        space_id,
         second_page_no,
         second_page_lsn,
-        commit_lsn,
         second_page_size,
+        commit_lsn,
+        out_first_record_offset,
         out_second_record_offset,
         &next_record_offset,
         append_stats_enabled
@@ -3531,6 +3558,11 @@ int append_record_at_locked(
     if (!record_header_written) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
+    page_log_append_perf_add_if_enabled(
+        append_stats_enabled,
+        PAGE_LOG_APPEND_PERF_RECORD_HEADER_WRITE_CALLS,
+        1U
+    );
     stage_start_ns = append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
     if (page_delta_eligible) {
         const std::uint32_t record_delta_flags =
@@ -4475,17 +4507,21 @@ bool read_record_header(int fd, off_t offset, PageRecordHeader &header) {
     return record_payload_shape_valid(header) && header.commit_lsn != 0U;
 }
 
+void encode_record_header(unsigned char *bytes, const PageRecordHeader &header) {
+    std::memcpy(bytes + k_record_magic_offset, k_record_magic.data(), k_record_magic.size());
+    store32(bytes, k_record_space_id_offset, header.space_id);
+    store32(bytes, k_record_page_no_offset, header.page_no);
+    store32(bytes, k_record_page_size_offset, header.page_size);
+    store32(bytes, k_record_flags_offset, header.flags);
+    store64(bytes, k_record_page_lsn_offset, header.page_lsn);
+    store64(bytes, k_record_commit_lsn_offset, header.commit_lsn);
+    store64(bytes, k_record_payload_size_offset, header.payload_size);
+    store64(bytes, k_record_payload_checksum_offset, header.checksum);
+}
+
 bool write_record_header(int fd, off_t offset, const PageRecordHeader &header) {
     std::array<unsigned char, MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE> bytes = {};
-    std::memcpy(bytes.data() + k_record_magic_offset, k_record_magic.data(), k_record_magic.size());
-    store32(bytes.data(), k_record_space_id_offset, header.space_id);
-    store32(bytes.data(), k_record_page_no_offset, header.page_no);
-    store32(bytes.data(), k_record_page_size_offset, header.page_size);
-    store32(bytes.data(), k_record_flags_offset, header.flags);
-    store64(bytes.data(), k_record_page_lsn_offset, header.page_lsn);
-    store64(bytes.data(), k_record_commit_lsn_offset, header.commit_lsn);
-    store64(bytes.data(), k_record_payload_size_offset, header.payload_size);
-    store64(bytes.data(), k_record_payload_checksum_offset, header.checksum);
+    encode_record_header(bytes.data(), header);
     return write_exact_at(fd, bytes.data(), bytes.size(), offset);
 }
 

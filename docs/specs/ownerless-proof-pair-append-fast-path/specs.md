@@ -39,9 +39,12 @@ records:
 - keep the existing WAL record format;
 - write two independent 64-byte record headers in the same order as the old
   two-call path;
-- advance the append session after the first header before writing the second,
-  preserving the old partial-pair crash shape;
+- coalesce the adjacent zero-payload record headers into one physical append
+  write when the pair API is used, while leaving the two logical record offsets
+  unchanged;
 - preserve append-call and session-append counters as record counts;
+- expose a `record_header_write_calls` append counter so production probes can
+  distinguish logical proof records from physical header writes;
 - skip generic payload, checksum, page-type, and delta-encoding work that is
   impossible for proof-only records.
 
@@ -100,6 +103,9 @@ gap.
 
 - The fast path writes the same two proof-only native-support records and no
   page-image payloads.
+- The session-scoped pair path writes those adjacent proof-only headers with
+  one physical record-header write while preserving two append/session logical
+  records.
 - Generic fallback remains available when append-session setup is unavailable.
 - Existing history-proof SQL coverage still proves successful pair publication
   and zero fallback native history flush pages in normal builds.
@@ -148,3 +154,48 @@ gap.
   `tools/require-cmake-release-build build/ownerless-test-hooks`, and
   `tools/require-cmake-release-build build/ownerless-stress` passed.
 - `cmake --build --preset format-check-prod` and `git diff --check` passed.
+
+## Follow-Up: Header Write Coalescing
+
+A later proof-pair header-coalescing slice keeps the same two proof-only WAL
+records and the same append/session logical record counters, but serializes the
+adjacent 64-byte headers into one contiguous buffer before writing them. The
+primitive pair test now asserts the two record offsets remain adjacent, no
+payload bytes are written, two record-header byte counts are reported, and the
+new record-header write-call counter reports one physical write for the pair.
+
+This narrows syscall-level header work only. It does not change proof-only
+record retention, replay skipping, checkpoint behavior, history-proof
+publication requirements, visible LSN rules, native redo/checkpoint ordering,
+or DDL/file-lifecycle recovery. If a process dies during the physical header
+write, the existing incomplete/corrupt tail handling remains the recovery
+boundary.
+
+Follow-up verification:
+
+- `cmake --build --preset php-embedded-prod --target
+  mylite_ownerless_primitives_test mylite_embedded_performance_probe` passed.
+- `ctest --preset php-embedded-prod -R '^libmylite\.ownerless-primitives$'
+  --output-on-failure` passed.
+- `ctest --preset php-embedded-prod -R
+  '^libmylite\.ownerless-single-owner-(history-wal-proof|native-support-page-wal-elision|multi-row-insert-visible-fast-path)$|^libmylite\.ownerless-uncommitted-peer-hidden$'
+  --output-on-failure` passed.
+- A reduced production append probe with
+  `MYLITE_PERF_OWNERLESS_APPEND_STATS=1` reported one successful proof pair
+  per insert, single-row autocommit `3.200` logical page-log append calls per
+  insert versus `2.200` physical record-header writes, and four-row bulk
+  `4.000` logical appends per statement versus `3.000` physical
+  record-header writes.
+- `cmake --build --preset ownerless-test-hooks --target
+  mylite_ownerless_primitives_test mylite_ownerless_cross_process_sql_test`
+  passed.
+- `ctest --preset ownerless-test-hooks -R
+  '^libmylite\.(ownerless-primitives|ownerless-single-owner-(history-wal-proof|native-support-page-wal-elision|multi-row-insert-visible-fast-path))$'
+  --output-on-failure` passed.
+- `cmake --build --preset ownerless-stress --target
+  mylite_ownerless_cross_process_sql_test` passed.
+- `ctest --preset ownerless-stress -R
+  '^libmylite\.ownerless-cross-process-stress$' --output-on-failure` passed.
+- `cmake --preset prod && cmake --build --preset tidy-prod` passed.
+- `tools/check-ci-production-builds`, `cmake --build --preset
+  format-check-prod`, and `git diff --check` passed.
