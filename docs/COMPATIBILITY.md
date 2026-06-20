@@ -1459,6 +1459,22 @@ by `startup_innodb_log_rebuild_create_log_file_ms_avg=99.935` and
 steady warm-open attention shifted to recovery bootstrap and InnoDB system-table
 startup, while creation-heavy paths may separately consider first-post-create
 redo rebuild avoidance.
+The recovery/system-table attribution split then reported ordinary warm
+open/close at `118.760 ms`, `start_mysql_server_init_ms_avg=95.526`,
+`startup_innodb_srv_start_recovery_bootstrap_ms_avg=25.896`, and
+`startup_innodb_srv_start_system_tables_ms_avg=12.288` in a reduced sample where
+the redo rebuild bucket was effectively idle. Recovery bootstrap was dominated
+by `startup_innodb_recovery_start_ms_avg=21.594` while the system-table bucket
+was almost entirely `startup_innodb_system_tables_open_tmp_ms_avg=12.224`.
+A later rebuilt-binary five-iteration sample triggered two actual redo rebuilds
+and reported `startup_innodb_srv_start_log_rebuild_ms_avg=52.438`,
+`startup_innodb_log_rebuild_total_ms_avg=130.372`,
+`startup_innodb_recovery_start_ms_avg=19.767`, and
+`startup_innodb_system_tables_open_tmp_ms_avg=10.088`. These samples separate
+the remaining non-rebuild warm-open cost from redo rebuild trigger frequency:
+checkpoint/recovery startup and temporary tablespace opening are the main
+non-rebuild native startup costs, while actual redo rebuilds still dominate any
+iteration in which they occur.
 A follow-up public API branch/main parity benchmark now builds
 `tools/mylite_public_open_close_bench` and measures only portable
 `mylite_open()` plus `mylite_close()` behavior over an InnoDB table. Against

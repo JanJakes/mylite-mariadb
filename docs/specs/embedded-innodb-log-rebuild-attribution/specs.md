@@ -118,6 +118,15 @@ performance target should shift to either first-post-create redo rebuild
 avoidance, if creation-heavy workloads matter, or the steady warm-open recovery
 bootstrap and InnoDB system-table phases.
 
+The follow-up
+`docs/specs/embedded-innodb-recovery-bootstrap-attribution/specs.md` slice
+split those warm-open phases and reported
+`startup_innodb_recovery_start_ms_avg=21.594` and
+`startup_innodb_system_tables_open_tmp_ms_avg=12.224` in a sample where redo
+rebuild was idle. A later rerun triggered two actual redo rebuilds and reported
+`startup_innodb_log_rebuild_total_ms_avg=130.372`, confirming that rebuild
+trigger frequency remains a separate high-impact startup optimization target.
+
 Verification commands run for this slice:
 
 - `tools/mariadb-embedded-build build`;

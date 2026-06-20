@@ -1086,6 +1086,22 @@ enum embedded_startup_perf_stat_index {
     EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_PREPARE_NS,
     EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_CREATE_LOG_FILE_NS,
     EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_RESIZE_RENAME_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_BOOTSTRAP_CALLS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_BOOTSTRAP_TOTAL_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_CLOSE_FILES_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_IBUF_UPGRADE_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_DICT_BOOT_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_RSEG_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_APPLY_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_LOAD_TABLES_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_BINLOG_OFFSET_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_CALLS,
+    EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_TOTAL_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_CREATE_OR_CHECK_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_OPEN_TMP_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_MASTER_TIMER_NS,
     EMBEDDED_STARTUP_PERF_STAT_COUNT
 };
 
@@ -8473,6 +8489,8 @@ static void emit_embedded_startup_perf_summary(const char *prefix) {
     uint64_t innodb_srv_start_calls;
     uint64_t innodb_log_rebuild_if_needed_calls;
     uint64_t innodb_log_rebuild_calls;
+    uint64_t innodb_recovery_bootstrap_calls;
+    uint64_t innodb_system_tables_calls;
 
     mylite_embedded_startup_perf_read(values, EMBEDDED_STARTUP_PERF_STAT_COUNT);
 
@@ -8486,6 +8504,8 @@ static void emit_embedded_startup_perf_summary(const char *prefix) {
     innodb_log_rebuild_if_needed_calls =
         values[EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_IF_NEEDED_CALLS];
     innodb_log_rebuild_calls = values[EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_CALLS];
+    innodb_recovery_bootstrap_calls = values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_BOOTSTRAP_CALLS];
+    innodb_system_tables_calls = values[EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_CALLS];
 
     emit_embedded_startup_perf_summary_ms(
         prefix,
@@ -8703,6 +8723,54 @@ static void emit_embedded_startup_perf_summary(const char *prefix) {
         values[EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_RESIZE_RENAME_NS],
         innodb_log_rebuild_calls
     );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_recovery_bootstrap_total",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_BOOTSTRAP_TOTAL_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_recovery_start",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_recovery_dict_boot",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_DICT_BOOT_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_recovery_apply",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_APPLY_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_recovery_load_tables",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_LOAD_TABLES_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_system_tables_total",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_TOTAL_NS],
+        innodb_system_tables_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_system_tables_create_or_check",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_CREATE_OR_CHECK_NS],
+        innodb_system_tables_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_system_tables_open_tmp",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_OPEN_TMP_NS],
+        innodb_system_tables_calls
+    );
 }
 
 static void emit_embedded_startup_perf_stats(const char *prefix) {
@@ -8716,6 +8784,8 @@ static void emit_embedded_startup_perf_stats(const char *prefix) {
     uint64_t innodb_srv_start_calls;
     uint64_t innodb_log_rebuild_if_needed_calls;
     uint64_t innodb_log_rebuild_calls;
+    uint64_t innodb_recovery_bootstrap_calls;
+    uint64_t innodb_system_tables_calls;
 
     mylite_embedded_startup_perf_read(values, EMBEDDED_STARTUP_PERF_STAT_COUNT);
 
@@ -8729,6 +8799,8 @@ static void emit_embedded_startup_perf_stats(const char *prefix) {
     innodb_log_rebuild_if_needed_calls =
         values[EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_IF_NEEDED_CALLS];
     innodb_log_rebuild_calls = values[EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_CALLS];
+    innodb_recovery_bootstrap_calls = values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_BOOTSTRAP_CALLS];
+    innodb_system_tables_calls = values[EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_CALLS];
 
     emit_embedded_startup_perf_value(prefix, "server_init_calls", server_init_calls);
     emit_embedded_startup_perf_ms(
@@ -9122,6 +9194,102 @@ static void emit_embedded_startup_perf_stats(const char *prefix) {
         "innodb_log_rebuild_resize_rename",
         values[EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_RESIZE_RENAME_NS],
         innodb_log_rebuild_calls
+    );
+
+    emit_embedded_startup_perf_value(
+        prefix,
+        "innodb_recovery_bootstrap_calls",
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_recovery_bootstrap_total",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_BOOTSTRAP_TOTAL_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_recovery_start",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_recovery_close_files",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_CLOSE_FILES_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_recovery_ibuf_upgrade",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_IBUF_UPGRADE_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_recovery_dict_boot",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_DICT_BOOT_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_recovery_trx_rseg",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_RSEG_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_recovery_apply",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_APPLY_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_recovery_load_tables",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_LOAD_TABLES_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_recovery_trx_lists",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_NS],
+        innodb_recovery_bootstrap_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_recovery_binlog_offset",
+        values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_BINLOG_OFFSET_NS],
+        innodb_recovery_bootstrap_calls
+    );
+
+    emit_embedded_startup_perf_value(
+        prefix,
+        "innodb_system_tables_calls",
+        innodb_system_tables_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_system_tables_total",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_TOTAL_NS],
+        innodb_system_tables_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_system_tables_create_or_check",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_CREATE_OR_CHECK_NS],
+        innodb_system_tables_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_system_tables_open_tmp",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_OPEN_TMP_NS],
+        innodb_system_tables_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_system_tables_master_timer",
+        values[EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_MASTER_TIMER_NS],
+        innodb_system_tables_calls
     );
 }
 
