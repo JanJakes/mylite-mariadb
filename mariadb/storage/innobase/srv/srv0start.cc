@@ -1317,6 +1317,32 @@ static dberr_t srv_log_rebuild_if_needed()
     mylite_embedded_startup_perf_add(
       MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_DESIRED_FILE_SIZE_BYTES_TOTAL,
       srv_log_file_size);
+    std::string redo_log_path{get_log_file_path()};
+    const os_file_size_t physical_size{
+      os_file_get_size(redo_log_path.c_str())};
+    if (physical_size.m_total_size == os_offset_t(~0) ||
+        physical_size.m_total_size == os_offset_t(~0U))
+      mylite_embedded_startup_perf_count(
+        MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_PHYSICAL_SIZE_STAT_FAILURES);
+    else
+    {
+      mylite_embedded_startup_perf_count(
+        MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_PHYSICAL_SIZE_SAMPLE_CALLS);
+      if (static_cast<lsn_t>(physical_size.m_total_size) !=
+          srv_log_file_size)
+        mylite_embedded_startup_perf_count(
+          MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_PHYSICAL_SIZE_MISMATCH_CALLS);
+      if (static_cast<lsn_t>(physical_size.m_total_size) !=
+          log_sys.file_size)
+        mylite_embedded_startup_perf_count(
+          MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_INTERNAL_PHYSICAL_SIZE_MISMATCH_CALLS);
+      mylite_embedded_startup_perf_add(
+        MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_OBSERVED_PHYSICAL_FILE_SIZE_BYTES_TOTAL,
+        physical_size.m_total_size);
+      mylite_embedded_startup_perf_add(
+        MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_OBSERVED_PHYSICAL_ALLOC_SIZE_BYTES_TOTAL,
+        physical_size.m_alloc_size);
+    }
     mylite_embedded_startup_perf_add(
       MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_OBSERVED_FORMAT_TOTAL,
       log_sys.format);

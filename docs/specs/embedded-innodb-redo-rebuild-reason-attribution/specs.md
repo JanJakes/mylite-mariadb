@@ -120,11 +120,14 @@ A reduced five-iteration production probe after adding reason counters reported:
 
 The measured warm-open rebuilds are caused by redo file-size mismatch only. The
 observed native redo file is exactly 8 bytes larger than the configured 96 MiB
-`srv_log_file_size`, while the redo format already matches `FORMAT_10_8`. A
-follow-up optimization should focus on proving whether this 8-byte physical-size
-tail is an accepted MariaDB checkpoint/write boundary that can be normalized in
-`srv_log_rebuild_if_needed()`, or whether shutdown should truncate the redo file
-back to the configured size.
+`srv_log_file_size`, while the redo format already matches `FORMAT_10_8`. The
+follow-up physical-size attribution slice showed that this is not merely an
+internal `log_sys.file_size` accounting artifact: the physical `ib_logfile0`
+size also averaged `100663304` bytes at rebuild time, physical mismatch calls
+matched rebuild calls, and internal/physical divergence was zero. A follow-up
+optimization should focus on why clean embedded shutdown leaves a physical
+8-byte redo tail, or whether MariaDB's shutdown checkpoint policy requires that
+tail and must remain untouched.
 
 ## Risks And Follow-Up
 

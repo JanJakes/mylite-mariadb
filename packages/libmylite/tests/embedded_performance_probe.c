@@ -1090,6 +1090,12 @@ enum embedded_startup_perf_stat_index {
     EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_FORMAT_MISMATCH_CALLS,
     EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_OBSERVED_FILE_SIZE_BYTES_TOTAL,
     EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_DESIRED_FILE_SIZE_BYTES_TOTAL,
+    EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_PHYSICAL_SIZE_SAMPLE_CALLS,
+    EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_PHYSICAL_SIZE_STAT_FAILURES,
+    EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_PHYSICAL_SIZE_MISMATCH_CALLS,
+    EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_INTERNAL_PHYSICAL_SIZE_MISMATCH_CALLS,
+    EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_OBSERVED_PHYSICAL_FILE_SIZE_BYTES_TOTAL,
+    EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_OBSERVED_PHYSICAL_ALLOC_SIZE_BYTES_TOTAL,
     EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_OBSERVED_FORMAT_TOTAL,
     EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_DESIRED_FORMAT_TOTAL,
     EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_BOOTSTRAP_CALLS,
@@ -8802,6 +8808,7 @@ static void emit_embedded_startup_perf_stats(const char *prefix) {
     uint64_t innodb_srv_start_calls;
     uint64_t innodb_log_rebuild_if_needed_calls;
     uint64_t innodb_log_rebuild_calls;
+    uint64_t innodb_log_rebuild_physical_size_sample_calls;
     uint64_t innodb_recovery_bootstrap_calls;
     uint64_t innodb_system_tables_calls;
 
@@ -8817,6 +8824,8 @@ static void emit_embedded_startup_perf_stats(const char *prefix) {
     innodb_log_rebuild_if_needed_calls =
         values[EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_IF_NEEDED_CALLS];
     innodb_log_rebuild_calls = values[EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_CALLS];
+    innodb_log_rebuild_physical_size_sample_calls =
+        values[EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_PHYSICAL_SIZE_SAMPLE_CALLS];
     innodb_recovery_bootstrap_calls = values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_BOOTSTRAP_CALLS];
     innodb_system_tables_calls = values[EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_CALLS];
 
@@ -9234,6 +9243,38 @@ static void emit_embedded_startup_perf_stats(const char *prefix) {
         "innodb_log_rebuild_desired_file_size_bytes",
         values[EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_DESIRED_FILE_SIZE_BYTES_TOTAL],
         innodb_log_rebuild_calls
+    );
+    emit_embedded_startup_perf_value(
+        prefix,
+        "innodb_log_rebuild_physical_size_sample_calls",
+        innodb_log_rebuild_physical_size_sample_calls
+    );
+    emit_embedded_startup_perf_value(
+        prefix,
+        "innodb_log_rebuild_physical_size_stat_failures",
+        values[EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_PHYSICAL_SIZE_STAT_FAILURES]
+    );
+    emit_embedded_startup_perf_value(
+        prefix,
+        "innodb_log_rebuild_physical_size_mismatch_calls",
+        values[EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_PHYSICAL_SIZE_MISMATCH_CALLS]
+    );
+    emit_embedded_startup_perf_value(
+        prefix,
+        "innodb_log_rebuild_internal_physical_size_mismatch_calls",
+        values[EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_INTERNAL_PHYSICAL_SIZE_MISMATCH_CALLS]
+    );
+    emit_embedded_startup_perf_average_value(
+        prefix,
+        "innodb_log_rebuild_observed_physical_file_size_bytes",
+        values[EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_OBSERVED_PHYSICAL_FILE_SIZE_BYTES_TOTAL],
+        innodb_log_rebuild_physical_size_sample_calls
+    );
+    emit_embedded_startup_perf_average_value(
+        prefix,
+        "innodb_log_rebuild_observed_physical_alloc_size_bytes",
+        values[EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_OBSERVED_PHYSICAL_ALLOC_SIZE_BYTES_TOTAL],
+        innodb_log_rebuild_physical_size_sample_calls
     );
     emit_embedded_startup_perf_average_value(
         prefix,

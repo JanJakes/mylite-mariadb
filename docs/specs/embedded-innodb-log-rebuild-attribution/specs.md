@@ -129,7 +129,11 @@ trigger frequency remains a separate high-impact startup optimization target.
 The follow-up reason-attribution slice showed those rebuilds were caused by
 redo file-size mismatch only: observed file size averaged `100663304` bytes,
 desired file size averaged `100663296` bytes, and observed/desired redo format
-matched.
+matched. The later physical-size attribution slice confirmed the mismatch is
+present in the physical `ib_logfile0` size at rebuild time and not only in
+`log_sys.file_size`; the next optimization target is clean-shutdown redo tail
+handling or MariaDB checkpoint policy validation, not the no-rebuild cleanup
+scan.
 
 Verification commands run for this slice:
 

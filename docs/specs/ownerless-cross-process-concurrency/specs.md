@@ -5227,6 +5227,15 @@ subsystems that this mode needs:
   This keeps the next optimization target on full embedded lifecycle cost and
   process-isolated child startup and any remaining parent reconnect policy, not
   the steady active-runtime SQL loop.
+  Follow-up InnoDB startup attribution then split ordinary warm-open cost into
+  steady recovery/bootstrap work and actual redo rebuild spikes. A reduced
+  twenty-open production sample reported four actual redo rebuilds averaging
+  `162.922 ms`; reason and physical-size counters showed size mismatch only,
+  with both `log_sys.file_size` and physical `ib_logfile0` at `100663304`
+  bytes versus configured `100663296` bytes, matching redo format, and zero
+  internal/physical divergence. That moves the startup optimization target to
+  clean-shutdown redo tail handling or MariaDB checkpoint policy validation,
+  not ownerless coordination and not an unsafe startup-only rebuild skip.
   Stats-enabled
   ownerless autocommit probes now also emit per-insert summary keys for
   page-version volume, native-support page ratio, page-publish and page-log
