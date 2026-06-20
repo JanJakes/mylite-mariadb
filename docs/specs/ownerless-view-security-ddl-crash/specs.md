@@ -11,7 +11,8 @@ writes the native view definition file and before MyLite publishes ownerless
 dictionary finish.
 
 This slice adds deterministic crash-boundary evidence for creating a definer
-view and replacing a definer view with an invoker view.
+view, replacing a definer view with an invoker view, and altering an invoker
+view back to a definer view.
 
 ## Source Findings
 
@@ -42,7 +43,7 @@ Relevant source paths:
 
 ## Design
 
-Add two unsafe-hook selectors to `mylite_ownerless_cross_process_sql_test`:
+Add three unsafe-hook selectors to `mylite_ownerless_cross_process_sql_test`:
 
 - `dictionary-view-security-create-crash` creates an InnoDB base table, kills a
   writer after `CREATE DEFINER=CURRENT_USER SQL SECURITY DEFINER VIEW` writes
@@ -54,8 +55,13 @@ Add two unsafe-hook selectors to `mylite_ownerless_cross_process_sql_test`:
   the native view definition but before ownerless dictionary finish, then
   verifies no-live recovery exposes `SECURITY_TYPE='INVOKER'` with non-empty
   `DEFINER` metadata and the replacement predicate.
+- `dictionary-view-security-alter-crash` creates an initial invoker view, kills
+  a writer after `ALTER DEFINER=CURRENT_USER SQL SECURITY DEFINER VIEW`
+  rewrites the native view definition but before ownerless dictionary finish,
+  then verifies no-live recovery exposes `SECURITY_TYPE='DEFINER'` with
+  non-empty `DEFINER` metadata and the altered predicate.
 
-Both selectors verify ownerless and ordinary native reopen before and after a
+The selectors verify ownerless and ordinary native reopen before and after a
 forced `.shm` rebuild.
 
 ## Scope
@@ -74,7 +80,6 @@ In scope:
 
 Out of scope:
 
-- `ALTER DEFINER ... SQL SECURITY` crash coverage.
 - Invalid or missing definers.
 - Privilege enforcement and account lifecycle behavior.
 - Stored functions, routines, and randomized view oracles.
@@ -109,6 +114,7 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - Run focused selectors:
   - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-view-security-create-crash`
   - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-view-security-replace-crash`
+  - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-view-security-alter-crash`
 - Run the normal embedded `view-security-definer` selector.
 - Run adjacent view crash selectors and the relevant ownerless hook SQL shard.
 - Run DDL stress, `format-check`, `git diff --check`, and cached diff checks.
@@ -121,13 +127,14 @@ No public API, build-profile, binary-size, license, or dependency changes.
   metadata, the `.frm` file, and queryable view rows.
 - Replacement recovery exposes `SECURITY_TYPE='INVOKER'`, non-empty `DEFINER`
   metadata, the replacement predicate, and queryable view rows.
+- Alter recovery exposes `SECURITY_TYPE='DEFINER'`, non-empty `DEFINER`
+  metadata, the altered predicate, and queryable view rows.
 - Ownerless and ordinary native reopen observe the same state before and after
   forced `.shm` rebuild.
 
 ## Risks And Follow-Up
 
-- This covers deterministic definer create and invoker replacement boundaries,
-  not full security semantics.
-- `ALTER DEFINER ... SQL SECURITY` crash coverage, invalid-definer recovery,
-  privilege enforcement, randomized view oracles, and external long-running DDL
-  stress remain planned.
+- This covers deterministic definer create, invoker replacement, and definer
+  alter boundaries, not full security semantics.
+- Invalid-definer recovery, privilege enforcement, randomized view oracles, and
+  external long-running DDL stress remain planned.

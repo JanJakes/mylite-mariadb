@@ -125,16 +125,16 @@ runtime feature is added.
 - The same peer sees alteration back to `SQL SECURITY DEFINER`.
 - The same peer sees final `DROP VIEW`, and final view absence plus base-table
   rows survive ownerless/native reopen before and after forced `.shm` rebuild.
-- Docs cross-link the hook-build security crash slice while keeping privilege
-  enforcement, invalid definers, `ALTER DEFINER ... SQL SECURITY` crash
-  injection, and randomized view coverage as planned.
+- Docs cross-link the hook-build security crash slices while keeping privilege
+  enforcement, invalid definers, and randomized view coverage as planned.
 
 ## Risks And Follow-Up
 
 - This proves metadata refresh for bounded security clauses, not user privilege
   enforcement.
-- Hook-build crash recovery for definer creation and invoker replacement is
-  covered by `docs/specs/ownerless-view-security-ddl-crash/specs.md`; invalid
-  definer and `ALTER DEFINER ... SQL SECURITY` crash recovery remain separate
-  planned work.
+- Hook-build crash recovery for definer creation, invoker replacement, and
+  definer alteration is covered by
+  `docs/specs/ownerless-view-security-ddl-crash/specs.md` and
+  `docs/specs/ownerless-view-security-alter-ddl-crash/specs.md`; invalid
+  definer recovery remains planned work.
 - Invalid-definer and randomized view-oracle coverage remain planned.

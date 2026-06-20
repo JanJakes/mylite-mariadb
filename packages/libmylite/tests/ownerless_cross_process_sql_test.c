@@ -964,6 +964,7 @@ static void test_crashed_nested_view_outer_replace_ddl_recovers_cascaded(void);
 static void test_crashed_nested_view_inner_alter_ddl_recovers_predicate(void);
 static void test_crashed_view_security_create_dictionary_ddl_recovers_definer(void);
 static void test_crashed_view_security_replace_dictionary_ddl_recovers_invoker(void);
+static void test_crashed_view_security_alter_dictionary_ddl_recovers_definer(void);
 static void test_crashed_trigger_create_dictionary_ddl_recovers_trigger(void);
 static void test_crashed_trigger_drop_dictionary_ddl_recovers_absent_trigger(void);
 static void test_crashed_trigger_replace_dictionary_ddl_recovers_replaced_trigger(void);
@@ -1758,6 +1759,10 @@ static void security_create_view_until_dictionary_finish_fault(
     int ready_fd
 );
 static void security_replace_view_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void security_alter_view_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -2796,6 +2801,11 @@ static void assert_ownerless_view_security_create_crash_ddl_state(
     const char *database_path
 );
 static void assert_ownerless_view_security_replace_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_view_security_alter_crash_ddl_state(
     open_database_paths paths,
     unsigned flags,
     const char *database_path
@@ -4430,6 +4440,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-view-security-alter-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_view_security_alter_dictionary_ddl_recovers_definer();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-trigger-create-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_trigger_create_dictionary_ddl_recovers_trigger();
@@ -5012,6 +5028,7 @@ int main(int argc, char **argv) {
             "dictionary-view-nested-check-option-inner-alter-crash|"
             "dictionary-view-security-create-crash|"
             "dictionary-view-security-replace-crash|"
+            "dictionary-view-security-alter-crash|"
             "dictionary-trigger-create-crash|"
             "dictionary-trigger-drop-crash|"
             "dictionary-trigger-replace-crash|"
@@ -44273,6 +44290,89 @@ static void test_crashed_view_security_replace_dictionary_ddl_recovers_invoker(v
     free(root);
 }
 
+static void test_crashed_view_security_alter_dictionary_ddl_recovers_definer(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-dictionary-view-security-alter-crash.mylite");
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *view_path = path_join(app_path, "ownerless_view_security_alter_crash.frm");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_view_security_alter_crash_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note VARCHAR(24) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_view_security_alter_crash_base VALUES "
+        "(1, 10, 'alpha'), (2, 20, 'beta'), (3, 30, 'gamma')"
+    );
+    exec_ok(
+        db,
+        "CREATE SQL SECURITY INVOKER VIEW app.ownerless_view_security_alter_crash AS "
+        "SELECT id, value, note "
+        "FROM app.ownerless_view_security_alter_crash_base "
+        "WHERE value >= 10"
+    );
+    exec_ok(db, "COMMIT");
+    assert(path_exists(view_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_security_alter_crash' "
+            "AND security_type = 'INVOKER' "
+            "AND definer <> ''"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    crash_dictionary_writer_with_live_peer(
+        paths,
+        security_alter_view_until_dictionary_finish_fault
+    );
+
+    assert_ownerless_view_security_alter_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_view_security_alter_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_view_security_alter_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_view_security_alter_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+
+    free(view_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_trigger_create_dictionary_ddl_recovers_trigger(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -59010,6 +59110,22 @@ static void security_replace_view_until_dictionary_finish_fault(
     );
 }
 
+static void security_alter_view_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER DEFINER=CURRENT_USER SQL SECURITY DEFINER VIEW "
+        "app.ownerless_view_security_alter_crash AS "
+        "SELECT id, value, note "
+        "FROM app.ownerless_view_security_alter_crash_base "
+        "WHERE value >= 25"
+    );
+}
+
 static void create_trigger_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
     execute_sql_until_dictionary_fault(
         paths,
@@ -72416,6 +72532,79 @@ static void assert_ownerless_view_security_replace_crash_ddl_state(
     );
     assert(
         query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_security_replace_crash") == 2U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(path_exists(view_path));
+
+    free(view_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_view_security_alter_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *view_path = path_join(app_path, "ownerless_view_security_alter_crash.frm");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(path_exists(view_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_security_alter_crash' "
+            "AND security_type = 'DEFINER' "
+            "AND definer <> ''"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_security_alter_crash' "
+            "AND table_type = 'VIEW'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_security_alter_crash_base") ==
+        3U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_security_alter_crash_base") ==
+        60U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_security_alter_crash") == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_security_alter_crash") == 30U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_view_security_alter_crash_base VALUES "
+        "(4, 40, 'delta')"
+    );
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_security_alter_crash") == 2U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_security_alter_crash") == 70U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_view_security_alter_crash_base WHERE id = 4");
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_security_alter_crash_base") ==
+        3U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_security_alter_crash") == 1U
     );
     assert(mylite_close(db) == MYLITE_OK);
     assert(path_exists(view_path));

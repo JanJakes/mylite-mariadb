@@ -2865,10 +2865,12 @@ Tasks:
    Hook-build view security crash coverage now kills
    `CREATE DEFINER=CURRENT_USER SQL SECURITY DEFINER VIEW` and
    `CREATE OR REPLACE SQL SECURITY INVOKER VIEW` writers after native view
-   definition storage but before ownerless dictionary finish, then verifies
-   recovered `SECURITY_TYPE`, non-empty definer metadata, view query behavior,
-   base-table writes, and ownerless/native reopen before and after forced
-   `.shm` rebuild.
+   definition storage, and
+   `ALTER DEFINER=CURRENT_USER SQL SECURITY DEFINER VIEW` writers after native
+   view definition rewrite, but before ownerless dictionary finish, then
+   verifies recovered `SECURITY_TYPE`, non-empty definer metadata, view query
+   behavior, base-table writes, and ownerless/native reopen before and after
+   forced `.shm` rebuild.
    View idempotent DDL coverage verifies that an already-open ownerless peer
    observes `CREATE VIEW IF NOT EXISTS`, duplicate plain `CREATE VIEW` returns
    MariaDB errno 1050, repeated `CREATE VIEW IF NOT EXISTS` preserves the
@@ -3113,11 +3115,11 @@ Tasks:
    ownerless dictionary finish, then verifies recovered nested metadata and
    DML enforcement through ownerless/native reopen before and after forced
    `.shm` rebuild.
-   Hook-build view security crash coverage kills explicit definer create and
-   invoker replacement writers after native view definition storage but before
-   ownerless dictionary finish, then verifies recovered security metadata and
-   query behavior through ownerless/native reopen before and after forced
-   `.shm` rebuild.
+   Hook-build view security crash coverage kills explicit definer create,
+   invoker replacement, and definer-security alter writers after native view
+   definition storage or rewrite but before ownerless dictionary finish, then
+   verifies recovered security metadata and query behavior through
+   ownerless/native reopen before and after forced `.shm` rebuild.
    Trigger crash coverage now kills simple `CREATE TRIGGER` and `DROP TRIGGER`
    writers after native `.TRG`/`.TRN` metadata creation/removal, plus
    duplicate `CREATE TRIGGER IF NOT EXISTS` and missing
