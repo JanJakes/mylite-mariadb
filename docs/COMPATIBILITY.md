@@ -235,7 +235,11 @@ small-bulk shape; it now uses `MYLITE_PERF_INSERT_ITERATIONS=5000`, producing
 embedded probe now also splits ordinary and ownerless bulk timing into the
 first row-list statement and the remaining row-list statements, exposing the
 current empty-table default-checked bulk path separately from later
-non-empty-table insert execution. CI also separates the WordPress PHPUnit source, build,
+non-empty-table insert execution. Stats-enabled bulk attribution now mirrors
+that split for the existing deep InnoDB comparison rows, emitting `first_` and
+`remaining_` commit, row-insert, clustered B-tree, undo-report, and
+default-checked bulk-start summaries without changing aggregate row names or
+SQL behavior. CI also separates the WordPress PHPUnit source, build,
 dependency, database-prep, performance-probe, and test-only phases so PHPUnit
 wall timings are not hidden inside build work.
 Those phases append compact timing rows into
