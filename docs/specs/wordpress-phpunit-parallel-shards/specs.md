@@ -84,7 +84,11 @@ configuration, PHPUnit binary, WordPress test config, and the metadata file.
 Shard jobs verify the manifest immediately after extraction and pass
 `MYLITE_WORDPRESS_TRUST_RUNTIME_MANIFEST=1` to the harness so the host-side
 freshness check uses this manifest instead of cross-job mtimes. Local and setup
-runs keep the existing source-mtime freshness checks.
+runs keep the existing source-mtime freshness checks. For `phpunit` phases with
+`MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL=1`, the harness accepts a baseline-only
+handoff and restores `MYLITE_WORDPRESS_DB_DIR` from
+`MYLITE_WORDPRESS_DB_BASELINE_DIR` immediately before executing PHPUnit; other
+phases still require the active prepared database directory to exist up front.
 
 ## Compatibility Impact
 

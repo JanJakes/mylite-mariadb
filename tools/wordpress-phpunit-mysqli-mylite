@@ -849,12 +849,16 @@ PHP
 
 require_prepared_database() {
   require_path "${MYLITE_WORDPRESS_DIR}/wp-tests-config.php" prepare-db "WordPress test config"
-  require_path "${MYLITE_WORDPRESS_DB_DIR}" prepare-db "prepared MyLite database directory"
   if [ "${MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL}" = "1" ]; then
     require_path \
       "${MYLITE_WORDPRESS_DB_BASELINE_DIR}" \
       prepare-db \
       "prepared MyLite WordPress baseline database directory"
+    if [ "${MYLITE_WORDPRESS_PHASE}" != "phpunit" ]; then
+      require_path "${MYLITE_WORDPRESS_DB_DIR}" prepare-db "prepared MyLite database directory"
+    fi
+  else
+    require_path "${MYLITE_WORDPRESS_DB_DIR}" prepare-db "prepared MyLite database directory"
   fi
 }
 

@@ -326,6 +326,8 @@ require_literal "MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_FILTER: '^Tests_Adm
 require_file_literal "${wordpress_harness}" "cp -a --reflink=auto --"
 require_file_literal "${wordpress_harness}" "MYLITE_WORDPRESS_TRUST_RUNTIME_MANIFEST"
 require_file_literal "${wordpress_harness}" "sha256sum -c"
+require_file_literal "${wordpress_harness}" 'if [ "${MYLITE_WORDPRESS_PHASE}" != "phpunit" ]; then'
+require_file_literal "${wordpress_harness}" "prepared MyLite WordPress baseline database directory"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_SKIP_INSTALL_FILTER: '^Tests_oEmbed_HTTP_Headers"
 require_literal "Tests_Filesystem_WpFilesystemDirect_Chmod::test_should_handle_set_mode_when_not_passed"
 require_literal "Tests_Admin_WpUpgrader::test_maintenance_mode_should_create_maintenance_file_with_boolean"
