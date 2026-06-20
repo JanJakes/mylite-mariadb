@@ -5258,6 +5258,17 @@ subsystems that this mode needs:
   and temporary tablespace opening: 640 rollback-segment entries, five cached
   undo slots, zero active undo slots, zero prepared undo slots, and zero
   resurrected transactions.
+  Temporary-tablespace startup attribution then split the
+  `innodb_system_tables_open_tmp` bucket. The ordinary reduced production
+  sample reported `startup_innodb_temp_tablespace_total_ms_avg=12.255`,
+  dominated by repeated 12 MiB temp tablespace file create/open work
+  (`startup_innodb_temp_tablespace_open_or_create_ms_avg=10.007`,
+  `create_new_calls=5`, `reuse_existing_calls=0`) and followed by temporary
+  rollback-segment creation
+  (`startup_innodb_temp_tablespace_rseg_create_ms_avg=2.153`). The ownerless
+  sample showed the same temp tablespace shape, while still occasionally
+  paying actual redo rebuild time; redo rebuild trigger frequency remains a
+  separate performance target from the temp file create/open cost.
   Stats-enabled
   ownerless autocommit probes now also emit per-insert summary keys for
   page-version volume, native-support page ratio, page-publish and page-log

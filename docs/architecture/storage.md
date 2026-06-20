@@ -433,10 +433,10 @@ violations of the single-directory model.
   durable application state.
 - Internal temporary spill should use `tmp/` under the MyLite database directory
   by default.
-- The shared InnoDB temporary tablespace (`datadir/ibtmp1`) is part of the
-  ownerless directory lifecycle while ownerless peers are active; startup and
-  shutdown must not delete it unless the current process is the last active
-  ownerless runtime.
+- Ordinary embedded opens use the native InnoDB temporary tablespace name
+  (`datadir/ibtmp1`). Ownerless read/write opens use a private InnoDB
+  temporary tablespace under that process's runtime `tmp/` directory, so startup
+  and shutdown cleanup only touch the current runtime's temporary tablespace.
 - Strict no-temp-file modes may exist, but they trade off query limits and
   performance.
 - Runtime companions must use deterministic names or subdirectories and must be

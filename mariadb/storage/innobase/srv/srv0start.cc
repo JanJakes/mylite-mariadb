@@ -983,19 +983,33 @@ dberr_t
 srv_open_tmp_tablespace(bool create_new_db)
 {
 	ulint	sum_of_new_sizes;
+	uint64_t mylite_tmp_stage_start;
+
+	mylite_srv_start_perf_scope mylite_tmp_tablespace_scope(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_TOTAL_NS);
+	mylite_embedded_startup_perf_count(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_CALLS);
 
 	/* Will try to remove if there is existing file left-over by last
 	unclean shutdown */
+	mylite_tmp_stage_start = mylite_embedded_startup_perf_start_ns();
 	srv_tmp_space.set_sanity_check_status(true);
 	srv_tmp_space.delete_files();
+	mylite_embedded_startup_perf_add_elapsed(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_DELETE_FILES_NS,
+		mylite_tmp_stage_start);
 	srv_tmp_space.set_ignore_read_only(true);
 
 	bool	create_new_temp_space;
 
 	srv_tmp_space.set_space_id(SRV_TMP_SPACE_ID);
 
+	mylite_tmp_stage_start = mylite_embedded_startup_perf_start_ns();
 	dberr_t	err = srv_tmp_space.check_file_spec(
 		&create_new_temp_space, 12 * 1024 * 1024);
+	mylite_embedded_startup_perf_add_elapsed(
+		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_CHECK_FILE_SPEC_NS,
+		mylite_tmp_stage_start);
 
 	if (err == DB_FAIL) {
 		ib::error() << "The innodb_temporary"
@@ -1003,28 +1017,60 @@ srv_open_tmp_tablespace(bool create_new_db)
 		err = DB_ERROR;
 	} else if (err != DB_SUCCESS) {
 		ib::error() << "Could not create the shared innodb_temporary.";
-	} else if ((err = srv_tmp_space.open_or_create(
-			    true, create_new_db, &sum_of_new_sizes))
-		   != DB_SUCCESS) {
-		ib::error() << "Unable to create the shared innodb_temporary";
-	} else if (fil_system.temp_space->open(true)) {
-		/* Initialize the header page */
-		mtr_t mtr{nullptr};
-		mtr.start();
-		mtr.set_log_mode(MTR_LOG_NO_REDO);
-		err = fsp_header_init(fil_system.temp_space,
-				      srv_tmp_space.get_sum_of_sizes(),
-				      &mtr);
-		mtr.commit();
-		if (err == DB_SUCCESS) {
-			err = trx_temp_rseg_create(&mtr);
-		}
 	} else {
-		/* This file was just opened in the code above! */
-		ib::error() << "The innodb_temporary"
-			" data file cannot be re-opened"
-			" after check_file_spec() succeeded!";
-		err = DB_ERROR;
+		mylite_embedded_startup_perf_count(
+			create_new_temp_space
+				? MYLITE_EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_CREATE_NEW_CALLS
+				: MYLITE_EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_REUSE_EXISTING_CALLS);
+
+		mylite_tmp_stage_start = mylite_embedded_startup_perf_start_ns();
+		err = srv_tmp_space.open_or_create(
+			true, create_new_db, &sum_of_new_sizes);
+		mylite_embedded_startup_perf_add_elapsed(
+			MYLITE_EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_OPEN_OR_CREATE_NS,
+			mylite_tmp_stage_start);
+
+		if (err != DB_SUCCESS) {
+			ib::error() << "Unable to create the shared innodb_temporary";
+		} else {
+			mylite_tmp_stage_start =
+				mylite_embedded_startup_perf_start_ns();
+			const bool temp_space_open =
+				fil_system.temp_space->open(true);
+			mylite_embedded_startup_perf_add_elapsed(
+				MYLITE_EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_FIL_OPEN_NS,
+				mylite_tmp_stage_start);
+
+			if (temp_space_open) {
+				/* Initialize the header page */
+				mtr_t mtr{nullptr};
+				mtr.start();
+				mtr.set_log_mode(MTR_LOG_NO_REDO);
+				mylite_tmp_stage_start =
+					mylite_embedded_startup_perf_start_ns();
+				err = fsp_header_init(
+					fil_system.temp_space,
+					srv_tmp_space.get_sum_of_sizes(), &mtr);
+				mtr.commit();
+				mylite_embedded_startup_perf_add_elapsed(
+					MYLITE_EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_HEADER_INIT_NS,
+					mylite_tmp_stage_start);
+				if (err == DB_SUCCESS) {
+					mylite_tmp_stage_start =
+						mylite_embedded_startup_perf_start_ns();
+					err = trx_temp_rseg_create(&mtr);
+					mylite_embedded_startup_perf_add_elapsed(
+						MYLITE_EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_RSEG_CREATE_NS,
+						mylite_tmp_stage_start);
+				}
+			} else {
+				/* This file was just opened in the code above! */
+				ib::error() << "The innodb_temporary"
+					" data file cannot be re-opened"
+					" after check_file_spec() succeeded!";
+				err = DB_ERROR;
+			}
+		}
 	}
 
 	return(err);

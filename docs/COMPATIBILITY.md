@@ -1496,6 +1496,20 @@ dominated by rollback-segment restore over 640 fixed rollback-segment entries
 and five cached undo slots with no active or prepared recovered transactions.
 The next non-rebuild startup optimization targets are therefore clean redo scan
 work and temporary tablespace opening, not ownerless coordination setup.
+A follow-up temporary-tablespace attribution split the latter bucket. In a
+reduced production sample, ordinary warm open/close reported
+`startup_innodb_system_tables_open_tmp_ms_avg=12.255`, exactly matched by
+`startup_innodb_temp_tablespace_total_ms_avg=12.255`. The dominant child was
+repeated file create/open work
+(`startup_innodb_temp_tablespace_open_or_create_ms_avg=10.007`,
+`create_new_calls=5`, `reuse_existing_calls=0`), followed by temporary
+rollback-segment creation
+(`startup_innodb_temp_tablespace_rseg_create_ms_avg=2.153`). Cleanup,
+file-spec validation, fil-system open, and header initialization were
+sub-millisecond in that sample. Ownerless warm opens showed the same temporary
+tablespace shape, while still occasionally paying actual redo rebuild time;
+redo rebuild trigger frequency remains a separate performance target from the
+temporary tablespace create/open cost.
 A follow-up public API branch/main parity benchmark now builds
 `tools/mylite_public_open_close_bench` and measures only portable
 `mylite_open()` plus `mylite_close()` behavior over an InnoDB table. Against

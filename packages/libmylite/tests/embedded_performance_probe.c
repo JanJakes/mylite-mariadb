@@ -1138,6 +1138,16 @@ enum embedded_startup_perf_stat_index {
     EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_TOTAL_NS,
     EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_CREATE_OR_CHECK_NS,
     EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_OPEN_TMP_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_CALLS,
+    EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_TOTAL_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_DELETE_FILES_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_CHECK_FILE_SPEC_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_CREATE_NEW_CALLS,
+    EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_REUSE_EXISTING_CALLS,
+    EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_OPEN_OR_CREATE_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_FIL_OPEN_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_HEADER_INIT_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_RSEG_CREATE_NS,
     EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_MASTER_TIMER_NS,
     EMBEDDED_STARTUP_PERF_STAT_COUNT
 };
@@ -8540,6 +8550,7 @@ static void emit_embedded_startup_perf_summary(const char *prefix) {
     uint64_t innodb_log_rebuild_calls;
     uint64_t innodb_recovery_bootstrap_calls;
     uint64_t innodb_system_tables_calls;
+    uint64_t innodb_temp_tablespace_calls;
 
     mylite_embedded_startup_perf_read(values, EMBEDDED_STARTUP_PERF_STAT_COUNT);
 
@@ -8555,6 +8566,7 @@ static void emit_embedded_startup_perf_summary(const char *prefix) {
     innodb_log_rebuild_calls = values[EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_CALLS];
     innodb_recovery_bootstrap_calls = values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_BOOTSTRAP_CALLS];
     innodb_system_tables_calls = values[EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_CALLS];
+    innodb_temp_tablespace_calls = values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_CALLS];
 
     emit_embedded_startup_perf_summary_ms(
         prefix,
@@ -8868,6 +8880,48 @@ static void emit_embedded_startup_perf_summary(const char *prefix) {
         values[EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_OPEN_TMP_NS],
         innodb_system_tables_calls
     );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_temp_tablespace_total",
+        values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_TOTAL_NS],
+        innodb_temp_tablespace_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_temp_tablespace_delete_files",
+        values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_DELETE_FILES_NS],
+        innodb_temp_tablespace_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_temp_tablespace_check_file_spec",
+        values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_CHECK_FILE_SPEC_NS],
+        innodb_temp_tablespace_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_temp_tablespace_open_or_create",
+        values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_OPEN_OR_CREATE_NS],
+        innodb_temp_tablespace_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_temp_tablespace_fil_open",
+        values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_FIL_OPEN_NS],
+        innodb_temp_tablespace_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_temp_tablespace_header_init",
+        values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_HEADER_INIT_NS],
+        innodb_temp_tablespace_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_temp_tablespace_rseg_create",
+        values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_RSEG_CREATE_NS],
+        innodb_temp_tablespace_calls
+    );
 }
 
 static void emit_embedded_startup_perf_stats(const char *prefix) {
@@ -8884,6 +8938,7 @@ static void emit_embedded_startup_perf_stats(const char *prefix) {
     uint64_t innodb_log_rebuild_physical_size_sample_calls;
     uint64_t innodb_recovery_bootstrap_calls;
     uint64_t innodb_system_tables_calls;
+    uint64_t innodb_temp_tablespace_calls;
 
     mylite_embedded_startup_perf_read(values, EMBEDDED_STARTUP_PERF_STAT_COUNT);
 
@@ -8901,6 +8956,7 @@ static void emit_embedded_startup_perf_stats(const char *prefix) {
         values[EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_PHYSICAL_SIZE_SAMPLE_CALLS];
     innodb_recovery_bootstrap_calls = values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_BOOTSTRAP_CALLS];
     innodb_system_tables_calls = values[EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_CALLS];
+    innodb_temp_tablespace_calls = values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_CALLS];
 
     emit_embedded_startup_perf_value(prefix, "server_init_calls", server_init_calls);
     emit_embedded_startup_perf_ms(
@@ -9593,6 +9649,63 @@ static void emit_embedded_startup_perf_stats(const char *prefix) {
         "innodb_system_tables_open_tmp",
         values[EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_OPEN_TMP_NS],
         innodb_system_tables_calls
+    );
+    emit_embedded_startup_perf_value(
+        prefix,
+        "innodb_temp_tablespace_calls",
+        innodb_temp_tablespace_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_temp_tablespace_total",
+        values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_TOTAL_NS],
+        innodb_temp_tablespace_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_temp_tablespace_delete_files",
+        values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_DELETE_FILES_NS],
+        innodb_temp_tablespace_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_temp_tablespace_check_file_spec",
+        values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_CHECK_FILE_SPEC_NS],
+        innodb_temp_tablespace_calls
+    );
+    emit_embedded_startup_perf_value(
+        prefix,
+        "innodb_temp_tablespace_create_new_calls",
+        values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_CREATE_NEW_CALLS]
+    );
+    emit_embedded_startup_perf_value(
+        prefix,
+        "innodb_temp_tablespace_reuse_existing_calls",
+        values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_REUSE_EXISTING_CALLS]
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_temp_tablespace_open_or_create",
+        values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_OPEN_OR_CREATE_NS],
+        innodb_temp_tablespace_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_temp_tablespace_fil_open",
+        values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_FIL_OPEN_NS],
+        innodb_temp_tablespace_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_temp_tablespace_header_init",
+        values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_HEADER_INIT_NS],
+        innodb_temp_tablespace_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_temp_tablespace_rseg_create",
+        values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_RSEG_CREATE_NS],
+        innodb_temp_tablespace_calls
     );
     emit_embedded_startup_perf_ms(
         prefix,
