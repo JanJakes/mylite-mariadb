@@ -1086,6 +1086,12 @@ enum embedded_startup_perf_stat_index {
     EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_PREPARE_NS,
     EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_CREATE_LOG_FILE_NS,
     EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_RESIZE_RENAME_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_SIZE_MISMATCH_CALLS,
+    EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_FORMAT_MISMATCH_CALLS,
+    EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_OBSERVED_FILE_SIZE_BYTES_TOTAL,
+    EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_DESIRED_FILE_SIZE_BYTES_TOTAL,
+    EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_OBSERVED_FORMAT_TOTAL,
+    EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_DESIRED_FORMAT_TOTAL,
     EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_BOOTSTRAP_CALLS,
     EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_BOOTSTRAP_TOTAL_NS,
     EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_NS,
@@ -8434,6 +8440,18 @@ static void emit_embedded_startup_perf_value(const char *prefix, const char *nam
     printf("%s_startup_phase_%s=%" PRIu64 "\n", prefix, name, value);
 }
 
+static void emit_embedded_startup_perf_average_value(
+    const char *prefix,
+    const char *name,
+    uint64_t value,
+    uint64_t calls
+) {
+    const double average = calls > 0U ? (double)value / (double)calls : 0.0;
+
+    printf("%s_startup_phase_%s_total=%" PRIu64 "\n", prefix, name, value);
+    printf("%s_startup_phase_%s_avg=%.3f\n", prefix, name, average);
+}
+
 static void emit_embedded_startup_perf_ms(
     const char *prefix,
     const char *name,
@@ -9193,6 +9211,40 @@ static void emit_embedded_startup_perf_stats(const char *prefix) {
         prefix,
         "innodb_log_rebuild_resize_rename",
         values[EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_RESIZE_RENAME_NS],
+        innodb_log_rebuild_calls
+    );
+    emit_embedded_startup_perf_value(
+        prefix,
+        "innodb_log_rebuild_size_mismatch_calls",
+        values[EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_SIZE_MISMATCH_CALLS]
+    );
+    emit_embedded_startup_perf_value(
+        prefix,
+        "innodb_log_rebuild_format_mismatch_calls",
+        values[EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_FORMAT_MISMATCH_CALLS]
+    );
+    emit_embedded_startup_perf_average_value(
+        prefix,
+        "innodb_log_rebuild_observed_file_size_bytes",
+        values[EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_OBSERVED_FILE_SIZE_BYTES_TOTAL],
+        innodb_log_rebuild_calls
+    );
+    emit_embedded_startup_perf_average_value(
+        prefix,
+        "innodb_log_rebuild_desired_file_size_bytes",
+        values[EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_DESIRED_FILE_SIZE_BYTES_TOTAL],
+        innodb_log_rebuild_calls
+    );
+    emit_embedded_startup_perf_average_value(
+        prefix,
+        "innodb_log_rebuild_observed_format",
+        values[EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_OBSERVED_FORMAT_TOTAL],
+        innodb_log_rebuild_calls
+    );
+    emit_embedded_startup_perf_average_value(
+        prefix,
+        "innodb_log_rebuild_desired_format",
+        values[EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_DESIRED_FORMAT_TOTAL],
         innodb_log_rebuild_calls
     );
 

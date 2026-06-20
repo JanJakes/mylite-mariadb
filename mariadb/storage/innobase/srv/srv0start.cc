@@ -1282,9 +1282,12 @@ static dberr_t srv_log_rebuild_if_needed()
     return DB_SUCCESS;
   }
 
-  if (log_sys.file_size == srv_log_file_size &&
-      log_sys.format ==
-      (srv_encrypt_log ? log_t::FORMAT_ENC_11 : log_t::FORMAT_10_8))
+  const uint32_t desired_format{
+    srv_encrypt_log ? log_t::FORMAT_ENC_11 : log_t::FORMAT_10_8};
+  const bool log_size_matches{log_sys.file_size == srv_log_file_size};
+  const bool log_format_matches{log_sys.format == desired_format};
+
+  if (log_size_matches && log_format_matches)
   {
     /* No need to add or remove encryption, upgrade, or resize. */
     mylite_embedded_startup_perf_count(
@@ -1298,6 +1301,28 @@ static dberr_t srv_log_rebuild_if_needed()
       MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_IF_NEEDED_TOTAL_NS,
       mylite_log_start);
     return DB_SUCCESS;
+  }
+
+  if (!log_size_matches)
+    mylite_embedded_startup_perf_count(
+      MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_SIZE_MISMATCH_CALLS);
+  if (!log_format_matches)
+    mylite_embedded_startup_perf_count(
+      MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_FORMAT_MISMATCH_CALLS);
+  if (mylite_embedded_startup_perf_stats_enabled())
+  {
+    mylite_embedded_startup_perf_add(
+      MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_OBSERVED_FILE_SIZE_BYTES_TOTAL,
+      log_sys.file_size);
+    mylite_embedded_startup_perf_add(
+      MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_DESIRED_FILE_SIZE_BYTES_TOTAL,
+      srv_log_file_size);
+    mylite_embedded_startup_perf_add(
+      MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_OBSERVED_FORMAT_TOTAL,
+      log_sys.format);
+    mylite_embedded_startup_perf_add(
+      MYLITE_EMBEDDED_STARTUP_PERF_INNODB_LOG_REBUILD_DESIRED_FORMAT_TOTAL,
+      desired_format);
   }
 
   dberr_t err= srv_log_rebuild();

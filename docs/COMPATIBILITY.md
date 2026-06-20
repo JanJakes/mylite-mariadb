@@ -1474,7 +1474,10 @@ and reported `startup_innodb_srv_start_log_rebuild_ms_avg=52.438`,
 the remaining non-rebuild warm-open cost from redo rebuild trigger frequency:
 checkpoint/recovery startup and temporary tablespace opening are the main
 non-rebuild native startup costs, while actual redo rebuilds still dominate any
-iteration in which they occur.
+iteration in which they occur. Reason attribution then showed the repeated
+actual rebuilds were caused by size mismatch only, with `ib_logfile0` observed
+at `100663304` bytes versus the configured `100663296` bytes and matching
+`FORMAT_10_8` format.
 A follow-up public API branch/main parity benchmark now builds
 `tools/mylite_public_open_close_bench` and measures only portable
 `mylite_open()` plus `mylite_close()` behavior over an InnoDB table. Against

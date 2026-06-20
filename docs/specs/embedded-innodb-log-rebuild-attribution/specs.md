@@ -126,6 +126,10 @@ split those warm-open phases and reported
 rebuild was idle. A later rerun triggered two actual redo rebuilds and reported
 `startup_innodb_log_rebuild_total_ms_avg=130.372`, confirming that rebuild
 trigger frequency remains a separate high-impact startup optimization target.
+The follow-up reason-attribution slice showed those rebuilds were caused by
+redo file-size mismatch only: observed file size averaged `100663304` bytes,
+desired file size averaged `100663296` bytes, and observed/desired redo format
+matched.
 
 Verification commands run for this slice:
 
