@@ -643,6 +643,8 @@ public:
   trx_id_t mylite_ownerless_page_write_trx_id;
   typedef std::vector<uint64_t, ut_allocator<uint64_t> >
       mylite_ownerless_page_vector;
+  typedef std::vector<uint64_t, ut_allocator<uint64_t> >
+      mylite_ownerless_page_set;
   struct mylite_ownerless_page_image
   {
     uint64_t packed_page;
@@ -659,6 +661,10 @@ public:
   mylite_ownerless_page_vector *mylite_ownerless_modified_pages;
   /** Persistent pages dirtied by this transaction, packed as space:page. */
   mylite_ownerless_page_vector *mylite_ownerless_dirty_pages;
+  /** Exact membership cache for persistent page-write locks. */
+  mylite_ownerless_page_set *mylite_ownerless_modified_page_set;
+  /** Exact membership cache for persistent dirtied pages. */
+  mylite_ownerless_page_set *mylite_ownerless_dirty_page_set;
   /** Latest transaction-deferred page images captured while mtr pages are latched. */
   mylite_ownerless_page_image_vector *mylite_ownerless_page_images;
   /** Whether an ownerless MTR page-write image was not published. */
@@ -706,6 +712,18 @@ public:
   /** @return ownerless page images, allocating storage on first use. */
   mylite_ownerless_page_image_vector &mylite_ownerless_page_images_for_write()
       noexcept;
+  /** @return whether the packed page is tracked as modified. */
+  bool mylite_ownerless_modified_page_contains(uint64_t packed_page) const
+      noexcept;
+  /** @return whether the packed page is tracked as dirty. */
+  bool mylite_ownerless_dirty_page_contains(uint64_t packed_page) const
+      noexcept;
+  /** Track a modified page after the caller has checked uniqueness. */
+  void mylite_ownerless_note_modified_page(uint64_t packed_page) noexcept;
+  /** Track a dirty page after the caller has checked uniqueness. */
+  void mylite_ownerless_note_dirty_page(uint64_t packed_page) noexcept;
+  /** Rebuild the modified-page membership cache after vector erasure. */
+  void mylite_ownerless_rebuild_modified_page_set() noexcept;
   /** @return whether this transaction has no tracked ownerless modified pages. */
   bool mylite_ownerless_modified_pages_empty() const noexcept
   {
@@ -725,6 +743,10 @@ public:
       mylite_ownerless_modified_pages->clear();
     if (mylite_ownerless_dirty_pages != nullptr)
       mylite_ownerless_dirty_pages->clear();
+    if (mylite_ownerless_modified_page_set != nullptr)
+      mylite_ownerless_modified_page_set->clear();
+    if (mylite_ownerless_dirty_page_set != nullptr)
+      mylite_ownerless_dirty_page_set->clear();
     if (mylite_ownerless_page_images != nullptr)
       mylite_ownerless_page_images->clear();
   }

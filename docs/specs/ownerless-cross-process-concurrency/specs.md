@@ -6206,6 +6206,19 @@ subsystems that this mode needs:
   larger write-performance target. Larger row-list admission remains planned
   separately so this slice does not infer unbounded append-lock deferral from
   the bounded proof.
+  A follow-up transaction page-membership cache reduces repeated exact
+  modified/dirty page lookups from linear scans to lazy per-transaction
+  open-addressed sets once page vectors reach 16 entries. The vectors remain
+  authoritative and are still used for collection, cleanup, and predicate
+  scans; cache entries are rebuilt after transaction gate erasure. The reduced
+  2048-row production probe preserved the same append-batch shape, kept
+  remaining default-checked bulk starts at `0.000` and remaining undo-report
+  calls at `2048.000` per statement, and moved later-statement
+  ownerless/ordinary rows ratio from `0.3195` to `0.3347`. Remaining
+  row-insert time moved from `55.134 ms` to `51.364 ms` per statement and
+  remaining undo-report MTR commit time from `16.498 ms` to `14.724 ms` per
+  statement, so the next larger performance target is still native row-level
+  undo work rather than page-log append sessions.
   The history-proof publication harness then tightens the controlled fast-path
   and unsafe fallback selectors without changing production code: rollback-
   segment proof publication must match published native-support

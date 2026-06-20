@@ -423,6 +423,17 @@ first statement at `1.3253` and later statements at `0.3195`; this keeps the
 next write-performance target on remaining native row-insert/undo-report
 attribution, not append-session churn. Broader row lists remain planned rather
 than inferred from this boundary.
+Ownerless transaction page tracking now adds a lazy exact membership cache over
+the existing modified/dirty page vectors so repeated MTR and lock-hook page
+ownership checks do not linearly scan large per-transaction page lists. The
+vectors remain authoritative, caches are cleared with the vectors and rebuilt
+after transaction gate erasure, and the change does not broaden the
+default-checked bulk path for non-empty tables. The reduced 2048-row production
+probe preserved `2048.000` remaining undo-report calls and `0.000` remaining
+default-checked bulk starts per statement while moving later-statement
+ownerless/ordinary rows ratio from `0.3195` to `0.3347`, remaining row-insert
+time from `55.134 ms` to `51.364 ms` per statement, and remaining
+undo-report MTR commit time from `16.498 ms` to `14.724 ms` per statement.
 This remains a large row-list optimization; the dominant single-row
 history-proof/native-support publication volume is still a separate target.
 The history-proof publication harness then tightens the fast-path and unsafe

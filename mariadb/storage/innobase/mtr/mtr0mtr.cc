@@ -1910,10 +1910,7 @@ static bool ownerless_page_write_transaction_owns_page(
   if (trx == nullptr)
     return false;
 
-  const trx_t::mylite_ownerless_page_vector *pages=
-      trx->mylite_ownerless_modified_pages_for_read();
-  return pages != nullptr &&
-         std::find(pages->begin(), pages->end(), packed_page) != pages->end();
+  return trx->mylite_ownerless_modified_page_contains(packed_page);
 }
 
 static void ownerless_page_write_release_lock(
@@ -1980,15 +1977,10 @@ static bool ownerless_page_write_transaction_has_modified_page(
   if (trx == nullptr)
     return false;
 
-  const trx_t::mylite_ownerless_page_vector *pages=
-      trx->mylite_ownerless_dirty_pages_for_read();
-  if (pages == nullptr)
-    return false;
-
   const page_id_t id{bpage.id()};
   const uint64_t packed_page=
       ownerless_page_write_pack(id.space(), id.page_no());
-  return std::find(pages->begin(), pages->end(), packed_page) != pages->end();
+  return trx->mylite_ownerless_dirty_page_contains(packed_page);
 }
 
 static void ownerless_page_write_forget_transaction_gate(trx_t *trx)
@@ -2003,6 +1995,7 @@ static void ownerless_page_write_forget_transaction_gate(trx_t *trx)
   pages->erase(std::remove_if(pages->begin(), pages->end(),
                               ownerless_page_write_is_transaction_gate),
                pages->end());
+  trx->mylite_ownerless_rebuild_modified_page_set();
 }
 
 void mtr_t::finisher_update()
@@ -2590,11 +2583,8 @@ ATTRIBUTE_NOINLINE bool mtr_t::ownerless_page_write_enter(
   bool page_already_modified_by_transaction= false;
   if (holds_for_transaction && ownerless_trx != nullptr)
   {
-    const trx_t::mylite_ownerless_page_vector *pages=
-        ownerless_trx->mylite_ownerless_dirty_pages_for_read();
     page_already_modified_by_transaction=
-        pages != nullptr &&
-        std::find(pages->begin(), pages->end(), packed_page) != pages->end();
+        ownerless_trx->mylite_ownerless_dirty_page_contains(packed_page);
   }
   if (page_already_modified_by_transaction)
   {
@@ -3370,10 +3360,7 @@ bool mtr_t::ownerless_page_write_release_deferred(
   const page_id_t id{bpage->id()};
   uint64_t packed_page=
       ownerless_page_write_pack(id.space(), id.page_no());
-  const trx_t::mylite_ownerless_page_vector *pages=
-      ownerless_trx->mylite_ownerless_modified_pages_for_read();
-  return pages != nullptr &&
-         std::find(pages->begin(), pages->end(), packed_page) != pages->end();
+  return ownerless_trx->mylite_ownerless_modified_page_contains(packed_page);
 }
 
 void mtr_t::ownerless_page_write_note_transaction_page(
@@ -3392,11 +3379,9 @@ void mtr_t::ownerless_page_write_note_transaction_page(
   const page_id_t id{bpage.id()};
   const uint64_t packed_page=
       ownerless_page_write_pack(id.space(), id.page_no());
-  trx_t::mylite_ownerless_page_vector &pages=
-      ownerless_trx->mylite_ownerless_modified_pages_for_write();
-  if (std::find(pages.begin(), pages.end(), packed_page) == pages.end())
+  if (!ownerless_trx->mylite_ownerless_modified_page_contains(packed_page))
   {
-    pages.push_back(packed_page);
+    ownerless_trx->mylite_ownerless_note_modified_page(packed_page);
     ownerless_page_write_perf_add(
         OWNERLESS_PAGE_WRITE_PERF_PUBLISH_DEFERRED_PAGES, 1);
   }
@@ -3433,10 +3418,8 @@ void mtr_t::ownerless_page_write_note_dirty_transaction_page(
       return;
   }
 
-  trx_t::mylite_ownerless_page_vector &pages=
-      ownerless_trx->mylite_ownerless_dirty_pages_for_write();
-  if (std::find(pages.begin(), pages.end(), packed_page) == pages.end())
-    pages.push_back(packed_page);
+  if (!ownerless_trx->mylite_ownerless_dirty_page_contains(packed_page))
+    ownerless_trx->mylite_ownerless_note_dirty_page(packed_page);
 }
 
 void mtr_t::ownerless_page_write_capture_dirty_transaction_page(

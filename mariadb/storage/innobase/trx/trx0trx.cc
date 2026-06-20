@@ -58,6 +58,7 @@ Created 3/26/1996 Heikki Tuuri
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <limits>
 #include <new>
 
 /** The bit pattern corresponding to TRX_ID_MAX */
@@ -78,6 +79,136 @@ const byte timestamp_max_bytes[7] = {
 #endif /* SIZEOF_VOIDP */
 
 static const ulint MAX_DETAILED_ERROR_LEN = 512;
+
+namespace {
+
+const size_t MYLITE_OWNERLESS_PAGE_SET_MIN_PAGES = 16;
+const uint64_t MYLITE_OWNERLESS_PAGE_SET_EMPTY =
+    std::numeric_limits<uint64_t>::max();
+
+size_t mylite_ownerless_page_set_hash(uint64_t value) noexcept
+{
+  value ^= value >> 33;
+  value *= 0xff51afd7ed558ccdULL;
+  value ^= value >> 33;
+  value *= 0xc4ceb9fe1a85ec53ULL;
+  value ^= value >> 33;
+  return static_cast<size_t>(value);
+}
+
+size_t mylite_ownerless_page_set_capacity(size_t page_count) noexcept
+{
+  size_t capacity= 64;
+  while (capacity < page_count * 2)
+    capacity <<= 1;
+  return capacity;
+}
+
+bool mylite_ownerless_page_set_contains(
+    const trx_t::mylite_ownerless_page_set &page_set,
+    uint64_t packed_page) noexcept
+{
+  ut_ad(packed_page != MYLITE_OWNERLESS_PAGE_SET_EMPTY);
+  ut_ad(!page_set.empty());
+  const size_t mask= page_set.size() - 1;
+  size_t slot= mylite_ownerless_page_set_hash(packed_page) & mask;
+  for (;;)
+  {
+    const uint64_t candidate= page_set[slot];
+    if (candidate == packed_page)
+      return true;
+    if (candidate == MYLITE_OWNERLESS_PAGE_SET_EMPTY)
+      return false;
+    slot= (slot + 1) & mask;
+  }
+}
+
+void mylite_ownerless_page_set_insert(
+    trx_t::mylite_ownerless_page_set &page_set,
+    uint64_t packed_page) noexcept
+{
+  if (packed_page == MYLITE_OWNERLESS_PAGE_SET_EMPTY)
+    return;
+  const size_t mask= page_set.size() - 1;
+  size_t slot= mylite_ownerless_page_set_hash(packed_page) & mask;
+  for (;;)
+  {
+    uint64_t &candidate= page_set[slot];
+    if (candidate == packed_page)
+      return;
+    if (candidate == MYLITE_OWNERLESS_PAGE_SET_EMPTY)
+    {
+      candidate= packed_page;
+      return;
+    }
+    slot= (slot + 1) & mask;
+  }
+}
+
+void mylite_ownerless_page_set_rebuild(
+    trx_t::mylite_ownerless_page_set &page_set,
+    const trx_t::mylite_ownerless_page_vector *pages) noexcept
+{
+  if (pages == nullptr ||
+      pages->size() < MYLITE_OWNERLESS_PAGE_SET_MIN_PAGES)
+  {
+    page_set.clear();
+    return;
+  }
+
+  page_set.assign(
+      mylite_ownerless_page_set_capacity(pages->size()),
+      MYLITE_OWNERLESS_PAGE_SET_EMPTY);
+  for (uint64_t packed_page : *pages)
+    mylite_ownerless_page_set_insert(page_set, packed_page);
+}
+
+trx_t::mylite_ownerless_page_set &mylite_ownerless_page_set_for_write(
+    trx_t::mylite_ownerless_page_set *&page_set) noexcept
+{
+  if (page_set == nullptr)
+  {
+    page_set= UT_NEW_NOKEY(trx_t::mylite_ownerless_page_set());
+    ut_a(page_set != nullptr);
+  }
+  return *page_set;
+}
+
+bool mylite_ownerless_page_vector_contains(
+    const trx_t::mylite_ownerless_page_vector *pages,
+    const trx_t::mylite_ownerless_page_set *page_set,
+    uint64_t packed_page) noexcept
+{
+  if (packed_page != MYLITE_OWNERLESS_PAGE_SET_EMPTY &&
+      page_set != nullptr && !page_set->empty())
+    return mylite_ownerless_page_set_contains(*page_set, packed_page);
+
+  return pages != nullptr &&
+         std::find(pages->begin(), pages->end(), packed_page) != pages->end();
+}
+
+void mylite_ownerless_note_page(
+    trx_t::mylite_ownerless_page_vector &pages,
+    trx_t::mylite_ownerless_page_set *&page_set,
+    uint64_t packed_page) noexcept
+{
+  pages.push_back(packed_page);
+  if (page_set != nullptr && !page_set->empty())
+  {
+    if (pages.size() > page_set->size() / 2)
+    {
+      mylite_ownerless_page_set_rebuild(*page_set, &pages);
+      return;
+    }
+    mylite_ownerless_page_set_insert(*page_set, packed_page);
+    return;
+  }
+  if (pages.size() >= MYLITE_OWNERLESS_PAGE_SET_MIN_PAGES)
+    mylite_ownerless_page_set_rebuild(
+        mylite_ownerless_page_set_for_write(page_set), &pages);
+}
+
+} /* namespace */
 
 static std::atomic<bool> ownerless_commit_visibility_stats_enabled{false};
 static std::atomic<uint64_t> ownerless_commit_visibility_fast{0};
@@ -480,6 +611,51 @@ trx_t::mylite_ownerless_page_images_for_write() noexcept
   return *mylite_ownerless_page_images;
 }
 
+bool trx_t::mylite_ownerless_modified_page_contains(
+    uint64_t packed_page) const noexcept
+{
+  return mylite_ownerless_page_vector_contains(
+      mylite_ownerless_modified_pages,
+      mylite_ownerless_modified_page_set,
+      packed_page);
+}
+
+bool trx_t::mylite_ownerless_dirty_page_contains(
+    uint64_t packed_page) const noexcept
+{
+  return mylite_ownerless_page_vector_contains(
+      mylite_ownerless_dirty_pages,
+      mylite_ownerless_dirty_page_set,
+      packed_page);
+}
+
+void trx_t::mylite_ownerless_note_modified_page(
+    uint64_t packed_page) noexcept
+{
+  mylite_ownerless_note_page(
+      mylite_ownerless_modified_pages_for_write(),
+      mylite_ownerless_modified_page_set,
+      packed_page);
+}
+
+void trx_t::mylite_ownerless_note_dirty_page(uint64_t packed_page) noexcept
+{
+  mylite_ownerless_note_page(
+      mylite_ownerless_dirty_pages_for_write(),
+      mylite_ownerless_dirty_page_set,
+      packed_page);
+}
+
+void trx_t::mylite_ownerless_rebuild_modified_page_set() noexcept
+{
+  if (mylite_ownerless_modified_page_set == nullptr)
+    return;
+
+  mylite_ownerless_page_set_rebuild(
+      *mylite_ownerless_modified_page_set,
+      mylite_ownerless_modified_pages);
+}
+
 /** For managing the life-cycle of the trx_t instance that we get
 from the pool. */
 struct TrxFactory {
@@ -567,6 +743,14 @@ struct TrxFactory {
 			if (trx->mylite_ownerless_dirty_pages != nullptr) {
 				UT_DELETE(trx->mylite_ownerless_dirty_pages);
 				trx->mylite_ownerless_dirty_pages = nullptr;
+			}
+			if (trx->mylite_ownerless_modified_page_set != nullptr) {
+				UT_DELETE(trx->mylite_ownerless_modified_page_set);
+				trx->mylite_ownerless_modified_page_set = nullptr;
+			}
+			if (trx->mylite_ownerless_dirty_page_set != nullptr) {
+				UT_DELETE(trx->mylite_ownerless_dirty_page_set);
+				trx->mylite_ownerless_dirty_page_set = nullptr;
 			}
 			if (trx->mylite_ownerless_page_images != nullptr) {
 				UT_DELETE(trx->mylite_ownerless_page_images);
@@ -794,6 +978,10 @@ void trx_t::free() noexcept
 	               sizeof mylite_ownerless_modified_pages);
 	  MEM_NOACCESS(&mylite_ownerless_dirty_pages,
 	               sizeof mylite_ownerless_dirty_pages);
+	  MEM_NOACCESS(&mylite_ownerless_modified_page_set,
+	               sizeof mylite_ownerless_modified_page_set);
+	  MEM_NOACCESS(&mylite_ownerless_dirty_page_set,
+	               sizeof mylite_ownerless_dirty_page_set);
 	  MEM_NOACCESS(&mylite_ownerless_page_images,
 	               sizeof mylite_ownerless_page_images);
   MEM_NOACCESS(&mylite_ownerless_page_write_publish_failed,

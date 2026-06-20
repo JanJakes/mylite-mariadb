@@ -1481,6 +1481,7 @@ mylite_ownerless_innodb_lock_release_transaction_page_write_gates(trx_t *trx)
   pages->erase(std::remove_if(pages->begin(), pages->end(),
                               packed_page_write_transaction_gate),
                pages->end());
+  trx->mylite_ownerless_rebuild_modified_page_set();
 }
 
 extern "C" int mylite_ownerless_innodb_lock_publish_record_wait(
@@ -4094,18 +4095,11 @@ bool transaction_has_page_write_gate(const trx_t *trx, uint64_t gate_page)
   if (trx == nullptr)
     return false;
 
-  const trx_t::mylite_ownerless_page_vector *pages=
-      trx->mylite_ownerless_modified_pages_for_read();
-  if (pages == nullptr)
-    return false;
-
-  return std::find(pages->begin(), pages->end(), gate_page) != pages->end() ||
-         std::find(
-             pages->begin(), pages->end(),
+  return trx->mylite_ownerless_modified_page_contains(gate_page) ||
+         trx->mylite_ownerless_modified_page_contains(
              page_write_pack(
                  MYLITE_OWNERLESS_INNODB_TRANSACTION_WRITE_SPACE_ID,
-                 MYLITE_OWNERLESS_INNODB_TRANSACTION_WRITE_PAGE_NO)) !=
-             pages->end();
+                 MYLITE_OWNERLESS_INNODB_TRANSACTION_WRITE_PAGE_NO));
 }
 
 bool transaction_has_page_write_entry(const trx_t *trx, uint64_t packed_page)
@@ -4113,10 +4107,7 @@ bool transaction_has_page_write_entry(const trx_t *trx, uint64_t packed_page)
   if (trx == nullptr)
     return false;
 
-  const trx_t::mylite_ownerless_page_vector *pages=
-      trx->mylite_ownerless_modified_pages_for_read();
-  return pages != nullptr &&
-         std::find(pages->begin(), pages->end(), packed_page) != pages->end();
+  return trx->mylite_ownerless_modified_page_contains(packed_page);
 }
 
 void note_transaction_page_write_gate(trx_t *trx, uint64_t gate_page)
@@ -4124,7 +4115,7 @@ void note_transaction_page_write_gate(trx_t *trx, uint64_t gate_page)
   if (trx == nullptr || transaction_has_page_write_gate(trx, gate_page))
     return;
 
-  trx->mylite_ownerless_modified_pages_for_write().push_back(gate_page);
+  trx->mylite_ownerless_note_modified_page(gate_page);
 }
 
 void note_transaction_page_write_page(trx_t *trx, uint64_t packed_page)
@@ -4133,7 +4124,7 @@ void note_transaction_page_write_page(trx_t *trx, uint64_t packed_page)
       transaction_has_page_write_entry(trx, packed_page))
     return;
 
-  trx->mylite_ownerless_modified_pages_for_write().push_back(packed_page);
+  trx->mylite_ownerless_note_modified_page(packed_page);
 }
 
 bool packed_page_write_transaction_gate(uint64_t packed_page)
