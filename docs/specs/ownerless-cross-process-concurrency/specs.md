@@ -1920,13 +1920,13 @@ Tasks:
    redo/checkpoint reconciliation, and DDL/file lifecycle recovery remain
    planned work.
    Parser-proven pure `INSERT ... VALUES` visible-fast-path statements with one
-   through 1024 row constructors reuse one page-log append session across the
+   through 2048 row constructors reuse one page-log append session across the
    statement's ownerless mini-transactions and release it before page-log
    sync/page-visible LSN publication. Focused SQL coverage keeps the existing
    native history WAL proof, capped multi-row visible-fast proof, single-row
    append-session proof, and conservative upsert fallback checks while asserting
    that append-session begin/end counts collapse for successful capped
-   visible-fast inserts. The 1025-row boundary stays outside append batching
+   visible-fast inserts. The 2049-row boundary stays outside append batching
    and deferred latest-checkpoint coalescing. Later latest-only checkpoint
    updates inside the same implicit/autocommit deferred append-batch statement
    are coalesced only after the first successful latest-only checkpoint has
@@ -6193,6 +6193,19 @@ subsystems that this mode needs:
   snapshot-boundary publications, `2.000` page versions and native-support
   proof pages per statement, `1.000` visible-fast commits per statement, and
   `2049.000` deferred latest-checkpoint coalesces per statement.
+  A 2048-row follow-up keeps the same parser-proven policy for the next bounded
+  row-list edge: the focused selector now proves the 2048-row positive boundary
+  and the 2049-row conservative boundary. The reduced 20480-row production
+  probe with 2048 rows per statement reported `10` append-session begin/end
+  calls for `10` statements, `0` snapshot-boundary publications, `2.000` page
+  versions and native-support proof pages per statement, `1.000` visible-fast
+  commits per statement, and `115.200` deferred latest-checkpoint coalesces per
+  statement. That same sample kept ownerless/ordinary bulk rows ratio at
+  `0.3477`, with the first statement at `1.3253` and later statements at
+  `0.3195`, leaving native row-insert/undo-report attribution as the next
+  larger write-performance target. Larger row-list admission remains planned
+  separately so this slice does not infer unbounded append-lock deferral from
+  the bounded proof.
   The history-proof publication harness then tightens the controlled fast-path
   and unsafe fallback selectors without changing production code: rollback-
   segment proof publication must match published native-support
