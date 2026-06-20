@@ -16462,8 +16462,8 @@ int ownerless_innodb_redo_written_leave_batch_hook(
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
 
-    mylite_ownerless_redo_state_range redo_ranges[MYLITE_OWNERLESS_INNODB_REDO_BATCH_MAX_RANGES] =
-        {};
+    using RedoRange = mylite_ownerless_redo_state_range;
+    RedoRange redo_ranges[MYLITE_OWNERLESS_INNODB_REDO_BATCH_MAX_RANGES] = {};
     for (std::size_t index = 0; index < range_count; ++index) {
         if (ranges[index].start_lsn == 0U || ranges[index].end_lsn <= ranges[index].start_lsn) {
             return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
