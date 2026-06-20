@@ -1687,10 +1687,10 @@ disabled by default after completed production branch runs without JUnit
 reported the long non-isolated shard at `1156.633s` shell real in an earlier
 run, `691.743s` shell real in the post-compressed-BLOB-size-matrix run, and
 `661.843s` shell real in a later green run where the whole WordPress job
-completed in about `19m45s`. CI now derives three visible non-isolated timing
+completed in about `19m45s`. CI first derived three visible non-isolated timing
 steps from the same restored `MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER`:
 REST classes, query/theme/block/token classes, and the remaining core classes.
-This keeps the same test coverage while showing which broad class family owns
+That kept the same test coverage while showing which broad class family owned
 the remaining non-isolated wall time. The harness-owned JUnit slowest-class
 and slowest-method report remains available through
 `MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT=1` for targeted diagnostics, but it is not
@@ -1718,6 +1718,15 @@ production/test-only phases but records their key `wordpress_*`,
 `wordpress_perf_summary_*`, and any explicitly profiled
 `mylite_mysqli_profile_*` metrics in one Markdown file that the final WordPress
 CI step publishes to the GitHub step summary.
+The next production timing split uses the latest green `6d7afdae` timing
+summary, where `phpunit-non-isolated-remaining` was still the largest shard at
+`263.471s` shell real versus `162.786s` for REST and `155.892s` for
+query/theme/block/token. CI now adds a fourth visible non-isolated shard,
+`phpunit-non-isolated-content-user`, for content, user, customize, template,
+XML-RPC, option, and metadata class families, and the remaining shard excludes
+that family in addition to REST and query/theme/block/token. The production
+audit guards the new split and keeps all timing-producing WordPress shards on
+the same Release MyLite and MinSizeRel MariaDB embedded artifacts.
 Current stats-enabled ownerless autocommit attribution also shows zero
 non-SELECT page-version read probes after the InnoDB read-complete overlay was
 limited to MyLite-classified plain reads. A 1000-row serial production
