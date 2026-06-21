@@ -103,11 +103,12 @@ behavior changes.
 
 ## Build, Size, License, And Dependency Impact
 
-No compiled-code, binary-size, license, or dependency changes. CI gains four
-additional WordPress PHPUnit shard jobs. The expected benefit is a shorter
-WordPress critical path and clearer remaining-platform timing attribution, at
-the cost of more parallel artifact download/extract and Docker image reuse
-paths.
+No compiled-code, binary-size, license, or dependency changes. CI gains two
+net WordPress PHPUnit shard jobs after replacing one remaining-platform shard
+with three side-effect-compatible platform shards. The expected benefit is a
+shorter WordPress critical path and clearer remaining-platform timing
+attribution, at the cost of more parallel artifact download/extract and Docker
+image reuse paths.
 
 ## Test And Verification Plan
 
@@ -175,16 +176,30 @@ remaining-platform split positives to class-prefix boundaries, makes
 format/dependencies/embed in one side-effect-compatible shard, and updates the
 production-build audit to require that shape.
 
-CI must provide the first full production timing for the corrected
-remaining-platform fanout shards.
+The corrected follow-up passed in CI run `27914755402` on `21e72e017`. The
+published timing rollup reported setup action time at `67s`, critical shard
+`non-isolated-canonical` at `75s`, and estimated WordPress critical path at
+`142s`. The corrected remaining-platform fanout shards no longer controlled
+the critical path:
+
+- `non-isolated-remaining-platform-format-dependencies-embed`: `62s` total,
+  including `26.652s` shell real, `24s` Docker image setup, `9s` artifact
+  download, and `2s` artifact extract;
+- `non-isolated-remaining-platform-image`: `45s` total, including `7s`
+  PHPUnit total, `26s` Docker image setup, `9s` artifact download, and `3s`
+  artifact extract;
+- `non-isolated-remaining-platform-html-interactivity`: `44s` total,
+  including `12s` PHPUnit total, `23s` Docker image setup, `6s` artifact
+  download, and `3s` artifact extract.
 
 ## Risks
 
 - Static direct `test*` method counts do not expand data-provider cases. CI
   timing remains the authority for the actual wall-clock split.
-- Adding four matrix jobs increases total runner work. The current timing data
-  shows remaining-platform as the wall-clock critical shard, so this is
-  acceptable for a visibility and wall-clock slice.
+- Adding two net matrix jobs increases total runner work. The corrected timing
+  data shows remaining-platform no longer controls the estimated critical
+  path, so future wall-clock work should target the new top shards or fixed
+  per-shard setup cost rather than further platform-family splitting.
 - Fixed artifact and Docker-image overhead remains visible. Removing it would
   require a larger CI architecture change that could alter the timing
   environment; this slice keeps the test runtime shape constant.

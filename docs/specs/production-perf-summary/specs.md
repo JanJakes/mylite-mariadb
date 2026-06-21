@@ -1037,6 +1037,17 @@ regex as the exclusion authority. The split filters must be class-prefix
 filters because PHPUnit filters also match method names. This is expected to
 make the fixed per-shard Docker/artifact cost and the single slow REST
 pages-controller body the dominant remaining timing questions.
+The first remaining-platform split CI run, `27914070086`, proved the production
+job shape but failed an embed/KSES/shortcode shard because the positive filter
+matched method names as well as classes. The corrected split in green CI run
+`27914755402` on `21e72e017` uses class-prefix filters and keeps
+format/dependencies/embed together for WordPress side effects. It reported
+setup action time at `67s`, critical shard `non-isolated-canonical` at `75s`
+with `36.352s` shell real, and estimated WordPress critical path at `142s`.
+The remaining-platform shards measured `62s`, `45s`, and `44s`, so the next
+performance question moved from platform-family attribution to the
+canonical/theme/REST primary tails and the fixed Docker/artifact overhead paid
+by every shard.
 
 The next production ownerless SQL run exposed `sql-case 46`
 (`test_ownerless_active_reader_pressure_limit_blocks_write_classes`) during a

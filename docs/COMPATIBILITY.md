@@ -2599,7 +2599,11 @@ broad remaining-platform regex remains the remaining-shard exclusion authority;
 the split changes only CI test-only filters and audit guards. The split shard
 filters are class-prefix filters so PHPUnit method names cannot pull unrelated
 classes into a shard, with `Tests_Embed_*` and `WP_Tests_Image_*` represented
-as explicit class families rather than accidental substring matches.
+as explicit class families rather than accidental substring matches. Green CI
+run `27914755402` on `21e72e017` reported setup action time at `67s`, critical
+shard `non-isolated-canonical` at `75s`, estimated WordPress critical path at
+`142s`, and corrected remaining-platform shard totals of `62s`, `45s`, and
+`44s`, so remaining-platform is no longer the measured critical shard.
 
 Ownerless page-version WAL records can now encode zero-heavy page images by
 storing a compact 16-bit sparse nonzero-run list, the original 32-bit sparse
