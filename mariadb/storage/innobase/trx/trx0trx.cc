@@ -516,6 +516,12 @@ trx_init(
 	trx->mylite_ownerless_history_proof_space_id = 0;
 	trx->mylite_ownerless_history_proof_rseg_page_no = 0;
 	trx->mylite_ownerless_history_proof_undo_page_no = 0;
+	trx->mylite_ownerless_modified_page_last_hit = 0;
+	trx->mylite_ownerless_dirty_page_last_hit = 0;
+	trx->mylite_ownerless_native_support_page_write_last_hit = 0;
+	trx->mylite_ownerless_modified_page_last_hit_valid = false;
+	trx->mylite_ownerless_dirty_page_last_hit_valid = false;
+	trx->mylite_ownerless_native_support_page_write_last_hit_valid = false;
 	trx->mylite_ownerless_page_write_waited_before_preread = false;
 	trx->mylite_ownerless_page_refreshed_after_wait = false;
 
@@ -626,28 +632,55 @@ trx_t::mylite_ownerless_native_support_page_write_pages_for_write() noexcept
 bool trx_t::mylite_ownerless_modified_page_contains(
     uint64_t packed_page) const noexcept
 {
-  return mylite_ownerless_page_vector_contains(
+  if (mylite_ownerless_modified_page_last_hit_valid &&
+      mylite_ownerless_modified_page_last_hit == packed_page)
+    return true;
+  const bool found= mylite_ownerless_page_vector_contains(
       mylite_ownerless_modified_pages,
       mylite_ownerless_modified_page_set,
       packed_page);
+  if (found)
+  {
+    mylite_ownerless_modified_page_last_hit= packed_page;
+    mylite_ownerless_modified_page_last_hit_valid= true;
+  }
+  return found;
 }
 
 bool trx_t::mylite_ownerless_dirty_page_contains(
     uint64_t packed_page) const noexcept
 {
-  return mylite_ownerless_page_vector_contains(
+  if (mylite_ownerless_dirty_page_last_hit_valid &&
+      mylite_ownerless_dirty_page_last_hit == packed_page)
+    return true;
+  const bool found= mylite_ownerless_page_vector_contains(
       mylite_ownerless_dirty_pages,
       mylite_ownerless_dirty_page_set,
       packed_page);
+  if (found)
+  {
+    mylite_ownerless_dirty_page_last_hit= packed_page;
+    mylite_ownerless_dirty_page_last_hit_valid= true;
+  }
+  return found;
 }
 
 bool trx_t::mylite_ownerless_native_support_page_write_contains(
     uint64_t packed_page) const noexcept
 {
-  return mylite_ownerless_page_vector_contains(
+  if (mylite_ownerless_native_support_page_write_last_hit_valid &&
+      mylite_ownerless_native_support_page_write_last_hit == packed_page)
+    return true;
+  const bool found= mylite_ownerless_page_vector_contains(
       mylite_ownerless_native_support_page_write_pages,
       mylite_ownerless_native_support_page_write_page_set,
       packed_page);
+  if (found)
+  {
+    mylite_ownerless_native_support_page_write_last_hit= packed_page;
+    mylite_ownerless_native_support_page_write_last_hit_valid= true;
+  }
+  return found;
 }
 
 void trx_t::mylite_ownerless_note_modified_page(
@@ -657,6 +690,8 @@ void trx_t::mylite_ownerless_note_modified_page(
       mylite_ownerless_modified_pages_for_write(),
       mylite_ownerless_modified_page_set,
       packed_page);
+  mylite_ownerless_modified_page_last_hit= packed_page;
+  mylite_ownerless_modified_page_last_hit_valid= true;
 }
 
 void trx_t::mylite_ownerless_note_dirty_page(uint64_t packed_page) noexcept
@@ -665,6 +700,8 @@ void trx_t::mylite_ownerless_note_dirty_page(uint64_t packed_page) noexcept
       mylite_ownerless_dirty_pages_for_write(),
       mylite_ownerless_dirty_page_set,
       packed_page);
+  mylite_ownerless_dirty_page_last_hit= packed_page;
+  mylite_ownerless_dirty_page_last_hit_valid= true;
 }
 
 void trx_t::mylite_ownerless_note_native_support_page_write(
@@ -674,10 +711,14 @@ void trx_t::mylite_ownerless_note_native_support_page_write(
       mylite_ownerless_native_support_page_write_pages_for_write(),
       mylite_ownerless_native_support_page_write_page_set,
       packed_page);
+  mylite_ownerless_native_support_page_write_last_hit= packed_page;
+  mylite_ownerless_native_support_page_write_last_hit_valid= true;
 }
 
 void trx_t::mylite_ownerless_rebuild_modified_page_set() noexcept
 {
+  mylite_ownerless_modified_page_last_hit= 0;
+  mylite_ownerless_modified_page_last_hit_valid= false;
   if (mylite_ownerless_modified_page_set == nullptr)
     return;
 
@@ -966,6 +1007,12 @@ void trx_t::free() noexcept
   mylite_ownerless_history_proof_space_id= 0;
   mylite_ownerless_history_proof_rseg_page_no= 0;
   mylite_ownerless_history_proof_undo_page_no= 0;
+  mylite_ownerless_modified_page_last_hit= 0;
+  mylite_ownerless_dirty_page_last_hit= 0;
+  mylite_ownerless_native_support_page_write_last_hit= 0;
+  mylite_ownerless_modified_page_last_hit_valid= false;
+  mylite_ownerless_dirty_page_last_hit_valid= false;
+  mylite_ownerless_native_support_page_write_last_hit_valid= false;
   mylite_ownerless_page_write_waited_before_preread= false;
   mylite_ownerless_page_refreshed_after_wait= false;
   mylite_ownerless_modified_pages_clear();
@@ -1563,6 +1610,12 @@ trx_start_low(
 	trx->mylite_ownerless_history_proof_space_id = 0;
 	trx->mylite_ownerless_history_proof_rseg_page_no = 0;
 	trx->mylite_ownerless_history_proof_undo_page_no = 0;
+	trx->mylite_ownerless_modified_page_last_hit = 0;
+	trx->mylite_ownerless_dirty_page_last_hit = 0;
+	trx->mylite_ownerless_native_support_page_write_last_hit = 0;
+	trx->mylite_ownerless_modified_page_last_hit_valid = false;
+	trx->mylite_ownerless_dirty_page_last_hit_valid = false;
+	trx->mylite_ownerless_native_support_page_write_last_hit_valid = false;
 
 	/* Check whether it is an AUTOCOMMIT SELECT */
         if (const THD* thd = trx->mysql_thd) {

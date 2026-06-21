@@ -6433,6 +6433,14 @@ subsystems that this mode needs:
   page-write visibility proof. Transaction page-write release clears that
   membership when it releases the shared locks, including deadlock retry and
   rollback/forget paths.
+  The transaction page last-hit cache follow-up keeps the authoritative
+  modified, dirty, and held native-support page vectors plus their lazy exact
+  sets unchanged, but remembers the last exact positive membership result for
+  each class. Repeated hot-page checks in non-empty bulk row/undo
+  mini-transactions can return from that process-local positive cache, while
+  misses, vector/set rebuilds, clear paths, lock ownership, page-version
+  publication, redo/checkpoint ordering, and rollback semantics stay on the
+  existing paths.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.

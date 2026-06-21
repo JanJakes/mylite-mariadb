@@ -671,6 +671,18 @@ public:
   mylite_ownerless_page_vector *mylite_ownerless_native_support_page_write_pages;
   /** Exact membership cache for native-support page-write locks. */
   mylite_ownerless_page_set *mylite_ownerless_native_support_page_write_page_set;
+  /** Last exact positive modified-page membership lookup. */
+  mutable uint64_t mylite_ownerless_modified_page_last_hit;
+  /** Last exact positive dirty-page membership lookup. */
+  mutable uint64_t mylite_ownerless_dirty_page_last_hit;
+  /** Last exact positive native-support page-write membership lookup. */
+  mutable uint64_t mylite_ownerless_native_support_page_write_last_hit;
+  /** Whether the modified-page last-hit cache is valid. */
+  mutable bool mylite_ownerless_modified_page_last_hit_valid;
+  /** Whether the dirty-page last-hit cache is valid. */
+  mutable bool mylite_ownerless_dirty_page_last_hit_valid;
+  /** Whether the native-support page-write last-hit cache is valid. */
+  mutable bool mylite_ownerless_native_support_page_write_last_hit_valid;
   /** Whether an ownerless MTR page-write image was not published. */
   bool mylite_ownerless_page_write_publish_failed;
   /** Whether an ownerless MTR page-write image was published. */
@@ -768,6 +780,8 @@ public:
       mylite_ownerless_native_support_page_write_pages->clear();
     if (mylite_ownerless_native_support_page_write_page_set != nullptr)
       mylite_ownerless_native_support_page_write_page_set->clear();
+    mylite_ownerless_native_support_page_write_last_hit= 0;
+    mylite_ownerless_native_support_page_write_last_hit_valid= false;
   }
   /** Clear tracked ownerless modified pages if the vector was allocated. */
   void mylite_ownerless_modified_pages_clear() noexcept
@@ -782,6 +796,10 @@ public:
       mylite_ownerless_dirty_page_set->clear();
     if (mylite_ownerless_page_images != nullptr)
       mylite_ownerless_page_images->clear();
+    mylite_ownerless_modified_page_last_hit= 0;
+    mylite_ownerless_dirty_page_last_hit= 0;
+    mylite_ownerless_modified_page_last_hit_valid= false;
+    mylite_ownerless_dirty_page_last_hit_valid= false;
     mylite_ownerless_native_support_page_write_pages_clear();
   }
   /** Whether ownerless page-write acquisition waited before a preread imported

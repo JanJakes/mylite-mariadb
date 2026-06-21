@@ -975,6 +975,15 @@ reported `47` held native-support page-write locks and `36947` already-held
 hits in the ownerless bulk phase; the companion stats-off sample reported
 ownerless 2048-row bulk rows at `63087.14 ops/s` versus ordinary at
 `125321.71 ops/s`, ratio `0.5034`.
+The transaction page last-hit cache follow-up keeps those authoritative
+modified, dirty, and held native-support page vectors plus their lazy exact
+sets unchanged, but remembers the last exact positive membership result for
+each class inside `trx_t`. Repeated hot-page checks in ownerless non-empty
+bulk row/undo mini-transactions can return from that process-local cache, while
+misses, vector/set clear and rebuild paths, page-write lock ownership,
+page-version publication, native undo/redo, and recovery semantics stay on the
+existing paths. This is a bounded hot-path cleanup, not a broad non-empty-table
+undo elision or ownerless completion claim.
 Profiled mysqli runs also split total query elapsed time into
 `query_verb_*` buckets for result queries, DML, DDL, connection state,
 transaction, lock, call, and other first-keyword classes so WordPress timing
