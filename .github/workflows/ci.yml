@@ -318,6 +318,8 @@ jobs:
 
       - name: Build WordPress setup Docker image
         uses: docker/build-push-action@v7
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
         with:
           context: ./tools
           file: ./tools/wordpress-phpunit.Dockerfile
@@ -344,6 +346,8 @@ jobs:
 
       - name: Build WordPress runtime Docker image cache
         uses: docker/build-push-action@v7
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
         with:
           context: ./tools
           file: ./tools/wordpress-phpunit-runtime.Dockerfile
@@ -1006,6 +1010,8 @@ jobs:
 
       - name: Build WordPress shard runtime Docker image
         uses: docker/build-push-action@v7
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
         with:
           context: ./tools
           file: ./tools/wordpress-phpunit-runtime.Dockerfile

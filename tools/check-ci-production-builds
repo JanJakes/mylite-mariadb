@@ -451,6 +451,15 @@ require_literal "Cache WordPress MariaDB archive build"
 require_literal "Normalize embedded MariaDB archive source mtimes"
 require_literal "Normalize WordPress MariaDB archive source mtimes"
 require_literal_count_at_least "tools/normalize-mariadb-embedded-cache-mtimes" 2
+require_step_literal \
+  "Build WordPress setup Docker image" \
+  'DOCKER_BUILD_RECORD_UPLOAD: "false"'
+require_step_literal \
+  "Build WordPress runtime Docker image cache" \
+  'DOCKER_BUILD_RECORD_UPLOAD: "false"'
+require_step_literal \
+  "Build WordPress shard runtime Docker image" \
+  'DOCKER_BUILD_RECORD_UPLOAD: "false"'
 require_literal "path: build/mariadb-embedded"
 require_literal "path: build/wordpress-mariadb-embedded"
 require_literal "\${{ runner.os }}-mariadb-embedded-\${{ hashFiles('mariadb/**', 'cmake/mariadb-embedded-baseline.cmake', 'tools/mariadb-embedded-build') }}"
