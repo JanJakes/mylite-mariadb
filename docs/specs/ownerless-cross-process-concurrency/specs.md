@@ -1920,13 +1920,13 @@ Tasks:
    redo/checkpoint reconciliation, and DDL/file lifecycle recovery remain
    planned work.
    Parser-proven pure `INSERT ... VALUES` visible-fast-path statements with one
-   through 4096 row constructors reuse one page-log append session across the
+   through 8192 row constructors reuse one page-log append session across the
    statement's ownerless mini-transactions and release it before page-log
    sync/page-visible LSN publication. Focused SQL coverage keeps the existing
    native history WAL proof, capped multi-row visible-fast proof, single-row
    append-session proof, and conservative upsert fallback checks while asserting
    that append-session begin/end counts collapse for successful capped
-   visible-fast inserts. The 4097-row boundary stays outside append batching
+   visible-fast inserts. The 8193-row boundary stays outside append batching
    and deferred latest-checkpoint coalescing. Later latest-only checkpoint
    updates inside the same implicit/autocommit deferred append-batch statement
    are coalesced only after the first successful latest-only checkpoint has
@@ -6309,6 +6309,24 @@ subsystems that this mode needs:
   `66.720 ms` per statement, and `58904.02` ownerless rows/s. Larger row-list
   admission remains planned separately so this slice does not infer unbounded
   append-lock deferral from the bounded proof.
+  An 8192-row follow-up keeps the same parser-proven policy for the next
+  bounded row-list edge: the focused selector now proves the 8192-row positive
+  boundary and the 8193-row conservative boundary. Before the cap increase, a
+  reduced 16384-row probe with 8192 rows per statement stayed outside append
+  batching, with `16387` append-session begin/end calls for two statements,
+  `16458` snapshot-boundary page publications, `8268.000` page versions per
+  statement, `8270.500` page-log appends per statement, `39.000`
+  native-support published pages per statement, zero deferred latest-checkpoint
+  coalesces, and `11128.17` ownerless rows/s. After the cap increase, the same
+  reduced shape reported `2` append-session begin/end calls for two
+  statements, zero snapshot-boundary page publications, `2.000` page versions
+  per statement, `27.500` page-log appends per statement, `2.000`
+  native-support published pages per statement, `1.000` visible-fast commits
+  per statement, `256.500` deferred latest-checkpoint coalesces per statement,
+  ownerless `mysql_query()` at `130.506 ms` per statement, and `61240.24`
+  ownerless rows/s. Larger row-list admission remains planned separately so
+  this slice does not infer unbounded append-lock deferral from the bounded
+  proof.
   A follow-up transaction page-membership cache reduces repeated exact
   modified/dirty page lookups from linear scans to lazy per-transaction
   open-addressed sets once page vectors reach 16 entries. The vectors remain
