@@ -2568,6 +2568,15 @@ but splits the former `phpunit-non-isolated-content-entity` bucket into
 `phpunit-non-isolated-content-term-taxonomy`, preserving the broad content
 regexes for remaining-shard exclusion and adding no SQL, mysqli, native
 storage, recovery, or ownerless behavior change.
+The follow-up timing fanout keeps that same production surface while replacing
+the former `phpunit-non-isolated-rest-controller-other` bucket with
+`phpunit-non-isolated-rest-controller-tests-rest`,
+`phpunit-non-isolated-rest-controller-wp-test`, and
+`phpunit-non-isolated-rest-controller-wp-rest`, and reducing
+`phpunit-non-isolated-remaining-other` by moving AI/connectors, navigation, and
+runtime/I/O helper families into their own visible shards. The split is
+guarded by the production-build audit and does not change SQL, mysqli, native
+storage, recovery, or ownerless behavior.
 
 Ownerless page-version WAL records can now encode zero-heavy page images by
 storing a compact 16-bit sparse nonzero-run list, the original 32-bit sparse

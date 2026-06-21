@@ -987,6 +987,20 @@ pure PHPUnit body was `phpunit-non-isolated-rest-controller-other` at
 entity bucket into post/template classes and term/taxonomy classes while
 keeping the broad content/entity regex as the union authority and the broader
 content/data regex as the remaining-shard exclusion authority.
+That content/entity split passed in CI run `27912330939`, with
+content-post-template at `30.366s` shell real and `67s` total, and
+content-term-taxonomy at `29.651s` shell real and `54s` total. The estimated
+WordPress critical path fell from `175s` to `158s`. The new critical shard was
+`non-isolated-remaining-other` at `97s`, including `61.927s` PHPUnit shell
+real, `26s` Docker image setup, `6s` artifact download, and `3s` artifact
+extract. The slowest pure PHPUnit body was
+`phpunit-non-isolated-rest-controller-other` at `69.468s`, with `93s` total
+shard time. Splitting only remaining-other would probably move the critical
+path to REST controller-other, so the next bounded wall-clock slice fans out
+both tails: REST controller-other by `Tests_REST`, `WP_Test_REST`, and
+`WP_REST` class prefixes, and remaining-other into AI/connectors,
+navigation/content-adjacent helpers, runtime/I/O helpers, and a reduced
+catch-all.
 
 The next production ownerless SQL run exposed `sql-case 46`
 (`test_ownerless_active_reader_pressure_limit_blocks_write_classes`) during a
