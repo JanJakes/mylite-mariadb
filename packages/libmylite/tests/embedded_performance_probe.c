@@ -397,6 +397,7 @@ enum page_write_perf_stat_index {
     PAGE_WRITE_PERF_STAT_REDO_LEAVE_FALLBACK_HOOK_CALLS,
     PAGE_WRITE_PERF_STAT_NATIVE_SUPPORT_TRANSACTION_HELD,
     PAGE_WRITE_PERF_STAT_NATIVE_SUPPORT_TRANSACTION_HIT,
+    PAGE_WRITE_PERF_STAT_NATIVE_SUPPORT_TRANSACTION_PUBLISH_SKIPPED,
     PAGE_WRITE_PERF_STAT_COUNT
 };
 
@@ -1479,7 +1480,9 @@ int main(void) {
     unsigned bulk_insert_statements;
     const int page_publish_stats = env_flag("MYLITE_PERF_OWNERLESS_PAGE_PUBLISH_STATS");
     const int append_stats = env_flag("MYLITE_PERF_OWNERLESS_APPEND_STATS") && !page_publish_stats;
-    const int ownerless_insert_stats = page_publish_stats || append_stats;
+    const int page_write_stats =
+        env_flag("MYLITE_PERF_OWNERLESS_PAGE_WRITE_STATS") && !page_publish_stats;
+    const int ownerless_insert_stats = page_publish_stats || append_stats || page_write_stats;
     const int page_log_detail_stats = env_flag("MYLITE_PERF_OWNERLESS_PAGE_LOG_DETAIL_STATS");
     const unsigned ordinary_flags = MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE;
     const unsigned ownerless_flags =
@@ -1565,6 +1568,7 @@ int main(void) {
     printf("mylite_perf_durability=%s\n", durability_name(durability));
     printf("mylite_perf_ownerless_page_publish_stats=%d\n", page_publish_stats);
     printf("mylite_perf_ownerless_append_stats=%d\n", append_stats);
+    printf("mylite_perf_ownerless_page_write_stats=%d\n", page_write_stats);
     printf("mylite_perf_ownerless_page_log_detail_stats=%d\n", page_log_detail_stats);
     printf("mylite_perf_database_path=%s\n", paths.database_path);
 
@@ -1959,12 +1963,15 @@ int main(void) {
     }
     ownerless_prepared_point_select_rate = operations_per_second(select_iterations, seconds);
 
-    if (ownerless_insert_stats) {
+    if (page_publish_stats || append_stats) {
         mylite_ownerless_database_set_perf_stats_enabled(1);
         mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
         mylite_ownerless_page_log_set_append_detail_perf_stats_enabled(page_log_detail_stats);
         mylite_ownerless_page_log_set_scan_perf_stats_enabled(1);
         mylite_ownerless_page_log_set_sync_perf_stats_enabled(1);
+    }
+    if (page_write_stats) {
+        mylite_ownerless_innodb_set_page_write_perf_stats_enabled(1);
     }
     if (page_publish_stats) {
         mylite_ownerless_innodb_set_page_publish_stats_enabled(1);
@@ -2031,6 +2038,8 @@ int main(void) {
             1U,
             "transaction"
         );
+    } else if (page_write_stats) {
+        emit_page_write_perf_stats("mylite_perf_ownerless_insert_txn");
     }
     ownerless_insert_txn_rate = operations_per_second(insert_iterations, seconds);
     rate = ownerless_insert_txn_rate;
@@ -2087,6 +2096,8 @@ int main(void) {
             insert_iterations,
             "insert"
         );
+    } else if (page_write_stats) {
+        emit_page_write_perf_stats("mylite_perf_ownerless_insert_autocommit");
     }
     ownerless_insert_autocommit_rate = operations_per_second(insert_iterations, seconds);
     rate = ownerless_insert_autocommit_rate;
@@ -2193,6 +2204,10 @@ int main(void) {
             "mylite_perf_summary_ownerless_autocommit_bulk",
             bulk_insert_statements
         );
+    } else if (page_write_stats) {
+        mylite_exec_result_perf_set_enabled(0);
+        emit_exec_result_perf_stats("mylite_perf_ownerless_insert_autocommit_bulk");
+        emit_page_write_perf_stats("mylite_perf_ownerless_insert_autocommit_bulk");
     }
     if (ownerless_insert_stats) {
         mylite_ownerless_innodb_set_page_publish_stats_enabled(0);
@@ -4241,6 +4256,12 @@ static void emit_ownerless_bulk_page_write_phase_summary(
         prefix,
         "page_write_native_support_transaction_hit_per_statement",
         page_write[PAGE_WRITE_PERF_STAT_NATIVE_SUPPORT_TRANSACTION_HIT],
+        insert_statements
+    );
+    emit_prefixed_count_per_iteration(
+        prefix,
+        "page_write_native_support_transaction_publish_skipped_per_statement",
+        page_write[PAGE_WRITE_PERF_STAT_NATIVE_SUPPORT_TRANSACTION_PUBLISH_SKIPPED],
         insert_statements
     );
 }
@@ -12596,6 +12617,11 @@ static void emit_page_write_perf_stats(const char *prefix) {
         "%s_page_write_native_support_transaction_hit=%" PRIu64 "\n",
         prefix,
         values[PAGE_WRITE_PERF_STAT_NATIVE_SUPPORT_TRANSACTION_HIT]
+    );
+    printf(
+        "%s_page_write_native_support_transaction_publish_skipped=%" PRIu64 "\n",
+        prefix,
+        values[PAGE_WRITE_PERF_STAT_NATIVE_SUPPORT_TRANSACTION_PUBLISH_SKIPPED]
     );
     printf(
         "%s_page_write_commit_log_publish_ms=%.3f\n",

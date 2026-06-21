@@ -305,6 +305,7 @@ enum ownerless_page_write_perf_stat_index {
   OWNERLESS_PAGE_WRITE_PERF_REDO_LEAVE_FALLBACK_HOOK_CALLS,
   OWNERLESS_PAGE_WRITE_PERF_NATIVE_SUPPORT_TRANSACTION_HELD,
   OWNERLESS_PAGE_WRITE_PERF_NATIVE_SUPPORT_TRANSACTION_HIT,
+  OWNERLESS_PAGE_WRITE_PERF_NATIVE_SUPPORT_TRANSACTION_PUBLISH_SKIPPED,
   OWNERLESS_PAGE_WRITE_PERF_STAT_COUNT
 };
 
@@ -1952,6 +1953,36 @@ static bool ownerless_page_write_transaction_holds_native_support_page(
       packed_page);
 }
 
+static bool ownerless_page_write_can_skip_held_native_support_publish(
+    const trx_t *trx, const buf_page_t &bpage, lsn_t commit_lsn,
+    bool page_write_perf_enabled) noexcept
+{
+  if (UNIV_UNLIKELY(ownerless_page_publish_stats_enabled.load(
+          std::memory_order_relaxed)))
+    return false;
+  if (commit_lsn == 0 || trx == nullptr || trx->read_only ||
+      trx->dict_operation)
+    return false;
+
+  const page_id_t id{bpage.id()};
+  if (id.space() >= SRV_TMP_SPACE_ID || !bpage.in_file())
+    return false;
+  if (ownerless_page_write_history_proof_roles(
+          trx, id.space(), id.page_no()) != 0)
+    return false;
+
+  const uint64_t packed_page=
+      ownerless_page_write_pack(id.space(), id.page_no());
+  if (!ownerless_page_write_transaction_holds_native_support_page(
+          trx, packed_page))
+    return false;
+
+  ownerless_page_write_perf_add_if_enabled(
+      page_write_perf_enabled,
+      OWNERLESS_PAGE_WRITE_PERF_NATIVE_SUPPORT_TRANSACTION_PUBLISH_SKIPPED, 1);
+  return true;
+}
+
 static bool ownerless_page_write_can_hold_native_support_page(
     const trx_t *trx, const buf_page_t &page) noexcept
 {
@@ -2964,6 +2995,7 @@ void mtr_t::ownerless_page_writes_publish_list(
     return;
 
   bool batch_started= false;
+  const bool page_write_perf_enabled= ownerless_page_write_perf_enabled();
   const bool uses_transaction= ownerless_page_write_uses_transaction_release();
   trx_t *ownerless_trx= ownerless_page_write_trx();
   for (size_t i= 0; i < page_count; ++i)
@@ -2981,6 +3013,10 @@ void mtr_t::ownerless_page_writes_publish_list(
       ownerless_page_write_capture_dirty_transaction_page(*bpage, true);
       continue;
     }
+
+    if (ownerless_page_write_can_skip_held_native_support_publish(
+            ownerless_trx, *bpage, m_commit_lsn, page_write_perf_enabled))
+      continue;
 
     if (ownerless_page_write_can_fast_skip_elided_native_support_publish(
             ownerless_trx, *bpage, m_commit_lsn))
@@ -3002,8 +3038,10 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_writes_publish() noexcept
 
   ownerless_page_write_perf_add(
       OWNERLESS_PAGE_WRITE_PERF_PUBLISH_SCAN_CALLS, 1);
+  const bool page_write_perf_enabled= ownerless_page_write_perf_enabled();
   ownerless_page_write_perf_scope perf_scope(
-      OWNERLESS_PAGE_WRITE_PERF_PUBLISH_SCAN_TOTAL_NS);
+      OWNERLESS_PAGE_WRITE_PERF_PUBLISH_SCAN_TOTAL_NS,
+      page_write_perf_enabled);
 
   bool batch_started= false;
   const bool uses_transaction=
@@ -3024,6 +3062,10 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_writes_publish() noexcept
       ownerless_page_write_capture_dirty_transaction_page(*bpage, true);
       continue;
     }
+
+    if (ownerless_page_write_can_skip_held_native_support_publish(
+            ownerless_trx, *bpage, m_commit_lsn, page_write_perf_enabled))
+      continue;
 
     if (ownerless_page_write_can_fast_skip_elided_native_support_publish(
             ownerless_trx, *bpage, m_commit_lsn))
@@ -3960,7 +4002,10 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
             }
             else
             {
-              if (!ownerless_page_write_can_fast_skip_elided_native_support_publish(
+              if (!ownerless_page_write_can_skip_held_native_support_publish(
+                      ownerless_publish_trx, *bpage, mtr->m_commit_lsn,
+                      ownerless_perf) &&
+                  !ownerless_page_write_can_fast_skip_elided_native_support_publish(
                       ownerless_publish_trx, *bpage, mtr->m_commit_lsn))
               {
                 ownerless_page_write_begin_publish_batch_if_needed(

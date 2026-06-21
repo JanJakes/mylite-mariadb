@@ -309,6 +309,7 @@ enum ownerless_test_page_write_perf_stat_index {
     OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_REDO_LEAVE_FALLBACK_HOOK_CALLS,
     OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_NATIVE_SUPPORT_TRANSACTION_HELD,
     OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_NATIVE_SUPPORT_TRANSACTION_HIT,
+    OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_NATIVE_SUPPORT_TRANSACTION_PUBLISH_SKIPPED,
     OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_COUNT
 };
 
@@ -10138,6 +10139,7 @@ static void test_ownerless_single_owner_native_support_page_wal_elision(void) {
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     uint64_t page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT] = {0};
     uint64_t page_write_stats[OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_COUNT] = {0};
+    uint64_t perf_only_page_write_stats[OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_COUNT] = {0};
     uint64_t disabled_page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT] = {0};
     uint64_t database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT] = {0};
     uint64_t disabled_database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT] = {0};
@@ -10147,7 +10149,9 @@ static void test_ownerless_single_owner_native_support_page_wal_elision(void) {
     mylite_db *db;
     char sql[256];
     const unsigned rows = 16U;
-    const unsigned disabled_insert_id = rows + 1U;
+    const unsigned perf_only_first_insert_id = rows + 1U;
+    const unsigned perf_only_second_insert_id = rows + 2U;
+    const unsigned disabled_insert_id = rows + 3U;
     uint64_t native_support_published_type_pages;
     uint64_t native_support_elided_type_pages;
     uint64_t native_support_published_system_type_pages;
@@ -10206,6 +10210,33 @@ static void test_ownerless_single_owner_native_support_page_wal_elision(void) {
         page_write_stats,
         OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_COUNT
     );
+
+    mylite_ownerless_innodb_set_page_publish_stats_enabled(0);
+    mylite_ownerless_database_set_perf_stats_enabled(0);
+    mylite_ownerless_innodb_set_page_write_perf_stats_enabled(1);
+    mylite_ownerless_innodb_reset_page_publish_stats();
+    mylite_ownerless_database_reset_perf_stats();
+    mylite_ownerless_innodb_reset_page_write_perf_stats();
+    assert(
+        snprintf(
+            sql,
+            sizeof(sql),
+            "INSERT INTO app.ownerless_native_support_elision VALUES "
+            "(%u, REPEAT('p', 4000)), (%u, REPEAT('p', 4000))",
+            perf_only_first_insert_id,
+            perf_only_second_insert_id
+        ) > 0
+    );
+    exec_ok(db, sql);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_native_support_elision") ==
+        perf_only_second_insert_id
+    );
+    mylite_ownerless_innodb_read_page_write_perf_stats(
+        perf_only_page_write_stats,
+        OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_COUNT
+    );
+
     mylite_ownerless_database_set_perf_stats_enabled(0);
     mylite_ownerless_innodb_set_page_write_perf_stats_enabled(0);
     mylite_ownerless_innodb_set_page_publish_stats_enabled(0);
@@ -10254,6 +10285,18 @@ static void test_ownerless_single_owner_native_support_page_wal_elision(void) {
     assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED] > 0U);
     assert(
         page_write_stats[OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_NATIVE_SUPPORT_TRANSACTION_HELD] > 0U
+    );
+    assert(
+        page_write_stats
+            [OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_NATIVE_SUPPORT_TRANSACTION_PUBLISH_SKIPPED] == 0U
+    );
+    assert(
+        perf_only_page_write_stats
+            [OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_NATIVE_SUPPORT_TRANSACTION_HIT] > 0U
+    );
+    assert(
+        perf_only_page_write_stats
+            [OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_NATIVE_SUPPORT_TRANSACTION_PUBLISH_SKIPPED] > 0U
     );
     assert(
         database_stats

@@ -6433,6 +6433,22 @@ subsystems that this mode needs:
   page-write visibility proof. Transaction page-write release clears that
   membership when it releases the shared locks, including deadlock retry and
   rollback/forget paths.
+  The held native-support publish-skip follow-up then reuses that
+  transaction-local held-page proof to avoid a redundant publish-helper dispatch
+  for pages that have no active rollback-segment or undo history-proof role and
+  are already in the held native-support page-write list. Page-publish
+  diagnostics still force the full helper so native-support elision and
+  history-proof counters keep their existing meaning, while the production
+  performance probe now supports `MYLITE_PERF_OWNERLESS_PAGE_WRITE_STATS=1` to
+  expose the new `native_support_transaction_publish_skipped` counter without
+  enabling page-publish stats. A reduced 1000-row page-write-only bulk sample
+  reported `20` held native-support page-write locks, `1822` already-held hits,
+  and `901` held-publish skips; a page-publish stats phase-split sample kept
+  `2.000` published native-support proof pages, `100.000` elided
+  native-support pages, and `0.000` held-publish skips per remaining 100-row
+  statement. Page-write lock lifetime, native undo, history-proof WAL,
+  redo/checkpoint ordering, page-version WAL format, and SQL behavior are
+  unchanged.
   The transaction page last-hit cache follow-up keeps the authoritative
   modified, dirty, and held native-support page vectors plus their lazy exact
   sets unchanged, but remembers the last exact positive membership result for
