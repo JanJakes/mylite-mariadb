@@ -942,6 +942,7 @@ static void test_crashed_check_constraint_drop_dictionary_ddl_recovers_absent_co
 static void test_crashed_field_generated_check_dictionary_ddl_recovers_constraints(void);
 static void test_crashed_field_generated_check_drop_ddl_absent_constraints(void);
 static void test_crashed_create_like_dictionary_ddl_recovers_table(void);
+static void test_crashed_create_like_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_create_table_select_dictionary_ddl_recovers_table(void);
 static void test_crashed_create_or_replace_table_dictionary_ddl_recovers_replacement(void);
 static void test_crashed_create_or_replace_after_drop_dictionary_ddl_recovers_absence(void);
@@ -4363,6 +4364,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-create-like-file-op-marker-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_create_like_dictionary_ddl_marks_file_op_checkpoint();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-ctas-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_create_table_select_dictionary_ddl_recovers_table();
@@ -5086,7 +5093,8 @@ int main(int argc, char **argv) {
             "dictionary-check-constraint-drop-crash|"
             "dictionary-field-generated-check-crash|"
             "dictionary-field-generated-check-drop-crash|"
-            "dictionary-create-like-crash|dictionary-ctas-crash|"
+            "dictionary-create-like-crash|dictionary-create-like-file-op-marker-crash|"
+            "dictionary-ctas-crash|"
             "dictionary-create-or-replace-table-crash|"
             "dictionary-create-or-replace-after-drop-crash|"
             "dictionary-create-or-replace-like-crash|"
@@ -41837,7 +41845,7 @@ static void test_crashed_field_generated_check_drop_ddl_absent_constraints(void)
     free(root);
 }
 
-static void test_crashed_create_like_dictionary_ddl_recovers_table(void) {
+static void run_crashed_create_like_dictionary_ddl_recovers_table(int assert_file_op_marker) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(root, "ownerless-dictionary-create-like-crash.mylite");
@@ -41846,6 +41854,12 @@ static void test_crashed_create_like_dictionary_ddl_recovers_table(void) {
     char *copy_frm_path = path_join(app_path, "ownerless_create_like_crash_copy.frm");
     char *copy_ibd_path = path_join(app_path, "ownerless_create_like_crash_copy.ibd");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int writer_ready_pipe[2];
+    int peer_ready_pipe[2];
+    int peer_release_pipe[2];
+    pid_t writer_child;
+    pid_t peer_child;
+    pid_t probe_child;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -41878,7 +41892,56 @@ static void test_crashed_create_like_dictionary_ddl_recovers_table(void) {
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(paths, create_like_until_dictionary_finish_fault);
+    assert(pipe(writer_ready_pipe) == 0);
+    assert(pipe(peer_ready_pipe) == 0);
+    assert(pipe(peer_release_pipe) == 0);
+
+    peer_child = fork();
+    assert(peer_child >= 0);
+    if (peer_child == 0) {
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        close(writer_ready_pipe[0]);
+        close(writer_ready_pipe[1]);
+        hold_ownerless_open_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = peer_ready_pipe[1],
+                .release_read_fd = peer_release_pipe[0],
+            }
+        );
+    }
+
+    close(peer_ready_pipe[1]);
+    close(peer_release_pipe[0]);
+    wait_for_pipe(peer_ready_pipe[0]);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(writer_ready_pipe[0]);
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        create_like_until_dictionary_finish_fault(paths, writer_ready_pipe[1]);
+    }
+
+    close(writer_ready_pipe[1]);
+    wait_for_pipe(writer_ready_pipe[0]);
+    assert(kill(writer_child, SIGKILL) == 0);
+    wait_for_signaled_child(writer_child, SIGKILL);
+    if (assert_file_op_marker) {
+        assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    }
+
+    probe_child = fork();
+    assert(probe_child >= 0);
+    if (probe_child == 0) {
+        assert_ownerless_open_returns_busy(paths);
+    }
+    wait_for_child(probe_child);
+
+    signal_pipe(peer_release_pipe[1]);
+    wait_for_child(peer_child);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(path_exists(copy_frm_path));
@@ -41945,6 +42008,14 @@ static void test_crashed_create_like_dictionary_ddl_recovers_table(void) {
     free(runtime_root);
     remove_tree(root);
     free(root);
+}
+
+static void test_crashed_create_like_dictionary_ddl_recovers_table(void) {
+    run_crashed_create_like_dictionary_ddl_recovers_table(0);
+}
+
+static void test_crashed_create_like_dictionary_ddl_marks_file_op_checkpoint(void) {
+    run_crashed_create_like_dictionary_ddl_recovers_table(1);
 }
 
 static void test_crashed_create_table_select_dictionary_ddl_recovers_table(void) {
