@@ -50,7 +50,12 @@ method exclusions. A later production timing slice further split the REST
 partition into `Controller` and non-`Controller` filters after the REST shard
 became the longest single PHPUnit gate. A follow-up split then separated the
 query/theme/canonical classes from block/token classes after
-`phpunit-non-isolated-query-theme-block-token` became the longest shard.
+`phpunit-non-isolated-query-theme-block-token` became the longest shard. Run
+`27895890622` later showed the broad content/user shard as the longest
+remaining test-only gate at `139.988s` shell real, ahead of REST controller at
+`127.890s` and remaining at `115.693s`, so the next split divides content/media
+classes from user/auth/privacy classes while preserving the same non-isolated
+exclusion authority.
 
 The REST shard includes
 `WP_Test_REST_Schema_Initialization::test_build_wp_api_client_fixtures`, which

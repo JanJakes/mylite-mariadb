@@ -343,8 +343,9 @@ require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER: '^(?!Tests_DB)"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE:"
-require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_USER_RE:"
-require_literal 'wordpress_phpunit_filter="^(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_USER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
+require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_MEDIA_RE:"
+require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE:"
+require_literal 'wordpress_phpunit_filter="^(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_MEDIA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal "MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_FILTER: '^Tests_Admin_ExportWp"
 require_file_literal "${wordpress_harness}" "cp -a --reflink=auto --"
 require_file_literal "${wordpress_harness}" "MYLITE_WORDPRESS_TRUST_RUNTIME_MANIFEST"
@@ -429,7 +430,8 @@ require_literal "label: phpunit-non-isolated-rest-controller"
 require_literal "label: phpunit-non-isolated-rest-other"
 require_literal "label: phpunit-non-isolated-query-theme"
 require_literal "label: phpunit-non-isolated-block-token"
-require_literal "label: phpunit-non-isolated-content-user"
+require_literal "label: phpunit-non-isolated-content-media"
+require_literal "label: phpunit-non-isolated-user-auth"
 require_literal "label: phpunit-non-isolated-remaining"
 require_literal "shard: db"
 require_literal "shard: db-profile"
@@ -440,7 +442,8 @@ require_literal "shard: non-isolated-rest-controller"
 require_literal "shard: non-isolated-rest-other"
 require_literal "shard: non-isolated-query-theme"
 require_literal "shard: non-isolated-block-token"
-require_literal "shard: non-isolated-content-user"
+require_literal "shard: non-isolated-content-media"
+require_literal "shard: non-isolated-user-auth"
 require_literal "shard: non-isolated-remaining"
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?!.*Controller)${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
@@ -449,7 +452,7 @@ require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_N
 require_literal 'cat "${summary}" >> "${GITHUB_STEP_SUMMARY}"'
 require_literal_count_at_least "MYLITE_WORDPRESS_PHASE: phpunit" 1
 require_literal_count_at_least 'MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"' 4
-require_literal_count_at_least 'keepalive: "1"' 6
+require_literal_count_at_least 'keepalive: "1"' 7
 require_literal_count_at_least 'child_timing_summary: "1"' 3
 require_literal_count_at_least 'child_script_timing_summary: "1"' 3
 require_literal_count_at_least 'child_skip_install: "1"' 3
@@ -585,7 +588,10 @@ require_step_literal \
   'deferred-reconnect-baseline-restored)'
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
-  'non-isolated-content-user)'
+  'non-isolated-content-media)'
+require_step_literal \
+  "Run WordPress PHPUnit shard (test only)" \
+  'non-isolated-user-auth)'
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
   'non-isolated-remaining)'

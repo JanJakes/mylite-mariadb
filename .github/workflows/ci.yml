@@ -548,8 +548,17 @@ jobs:
             keepalive: "1"
             child_skip_install: "0"
             child_restore_baseline: "0"
-          - shard: non-isolated-content-user
-            label: phpunit-non-isolated-content-user
+          - shard: non-isolated-content-media
+            label: phpunit-non-isolated-content-media
+            reconnect_after_child: "1"
+            child_timing_summary: "0"
+            child_script_timing_summary: "0"
+            profile_mysqli: "0"
+            keepalive: "1"
+            child_skip_install: "0"
+            child_restore_baseline: "0"
+          - shard: non-isolated-user-auth
+            label: phpunit-non-isolated-user-auth
             reconnect_after_child: "1"
             child_timing_summary: "0"
             child_script_timing_summary: "0"
@@ -602,7 +611,8 @@ jobs:
       MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE: 'Tests_REST|WP_Test_REST|WP_REST'
       MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE: 'Tests_Query|Test_Query|Tests_Canonical|Tests_Theme'
       MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE: 'Tests_WpTokenMap|Tests_Block|WP_Block|Tests_Blocks'
-      MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_USER_RE: 'Tests_Term|Tests_Taxonomy|Tests_Post|Tests_Comment|Tests_Media|Tests_Attachment|Tests_User|Tests_Auth|Tests_Roles|Tests_Capabilities|Tests_Privacy|Tests_Template|Tests_XMLRPC|Tests_Xmlrpc|Tests_Customize|Tests_WP_Customize|Tests_Option|Tests_Meta'
+      MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_MEDIA_RE: 'Tests_Term|Tests_Taxonomy|Tests_Post|Tests_Comment|Tests_Media|Tests_Attachment|Tests_Template|Tests_XMLRPC|Tests_Xmlrpc|Tests_Customize|Tests_WP_Customize|Tests_Option|Tests_Meta'
+      MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE: 'Tests_User|Tests_Auth|Tests_Roles|Tests_Capabilities|Tests_Privacy'
       WORDPRESS_PHPUNIT_SHARD: ${{ matrix.shard }}
 
     steps:
@@ -713,11 +723,14 @@ jobs:
             non-isolated-block-token)
               wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
               ;;
-            non-isolated-content-user)
-              wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_USER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
+            non-isolated-content-media)
+              wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_MEDIA_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
+              ;;
+            non-isolated-user-auth)
+              wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
               ;;
             non-isolated-remaining)
-              wordpress_phpunit_filter="^(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_USER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
+              wordpress_phpunit_filter="^(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_MEDIA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
               ;;
             *)
               echo "Unknown WordPress PHPUnit shard: ${WORDPRESS_PHPUNIT_SHARD}" >&2
