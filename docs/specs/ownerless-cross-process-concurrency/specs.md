@@ -4540,7 +4540,8 @@ Tasks:
    `FILE_CREATE`, CTAS populated `FILE_CREATE`, `TRUNCATE TABLE` native
    truncate/recreate, `DROP TABLE` `FILE_DELETE`, and replacement-copy
    `CREATE OR REPLACE TABLE ... LIKE`/`CREATE OR REPLACE TABLE ... AS SELECT`
-   marker coverage; final
+   marker coverage plus representative `ALTER TABLE ... FORCE` and
+   `ALTER TABLE ... ROW_FORMAT=DYNAMIC` rebuild marker coverage; final
    no-live close forces native checkpoint
    proof for retained page-version WAL
    after active pins release, restores the 12 KiB redo startup prefix if
@@ -5111,9 +5112,11 @@ writer after native `FILE_CREATE`, a CTAS writer after native `FILE_CREATE`
 and row population, a `TRUNCATE TABLE` writer after native truncate/recreate,
 and a `DROP TABLE` writer after native `FILE_DELETE`, replacement-copy
 `CREATE OR REPLACE TABLE ... LIKE` and `CREATE OR REPLACE TABLE ... AS SELECT`
-writers after native replacement-copy completion, an
-`ALTER TABLE ... FORCE, ALGORITHM=COPY`
-writer after native table-copy rebuild, a `CREATE OR REPLACE TABLE` writer
+writers after native replacement-copy completion, marker-specific coverage for
+representative `ALTER TABLE ... FORCE` and
+`ALTER TABLE ... ROW_FORMAT=DYNAMIC` rebuild writers after native rebuild
+completion, an `ALTER TABLE ... FORCE, ALGORITHM=COPY` writer after native
+table-copy rebuild, a `CREATE OR REPLACE TABLE` writer
 after native old-table replacement, duplicate `CREATE TABLE IF NOT EXISTS` and
 missing
 `DROP TABLE IF EXISTS` no-op writers, duplicate top-level

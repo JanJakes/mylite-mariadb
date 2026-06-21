@@ -242,8 +242,10 @@ coverage for `RENAME TABLE` `FILE_RENAME`, `CREATE TABLE ... LIKE`
 `FILE_CREATE`, CTAS populated `FILE_CREATE`, `TRUNCATE TABLE` native
 truncate/recreate, `DROP TABLE` `FILE_DELETE`, and replacement-copy
 `CREATE OR REPLACE TABLE ... LIKE`/`CREATE OR REPLACE TABLE ... AS SELECT`
-boundaries, so a killed writer cannot lose the durable checkpoint-needed
-boundary before no-live recovery for those classes.
+boundaries plus representative `ALTER TABLE ... FORCE` and
+`ALTER TABLE ... ROW_FORMAT=DYNAMIC` rebuild boundaries, so a killed writer
+cannot lose the durable checkpoint-needed boundary before no-live recovery for
+those classes.
 Ownerless AUTO_INCREMENT publishes now also mark a shared registry
 native-checkpoint pending bit when they raise a table high watermark. The
 final no-live ownerless close path drains that bit through the existing native
