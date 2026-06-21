@@ -37,6 +37,11 @@ state to consult.
   record resource and delegates to
   `mylite_ownerless_innodb_lock_registry_wait_until_record_available()` or the
   page-write-cycle-aware variant.
+- `packages/libmylite/src/ownerless_innodb_lock_registry.cc` owns the shared
+  record-lock registry slots used by product-hook tests and cross-process SQL
+  waits. A single active process in the process registry does not by itself
+  prove the record-lock registry is empty; same-process tests can seed an
+  external ownerless record lock directly in the shared lock registry.
 - `packages/libmylite/src/ownerless_process_registry.cc` increments the shared
   process-registry generation on both slot allocation and slot release.
   Therefore `active_count == 1` plus `registry_generation == owner_generation`
@@ -55,11 +60,18 @@ The fast path returns `MYLITE_OWNERLESS_INNODB_LOCK_OK` only when:
 - the current owner generation is nonzero;
 - the shared process registry reports exactly one active process;
 - the shared process registry generation still equals this owner's generation.
+- the shared record-lock registry has no waiting entries and either has no
+  active entries, has a first active entry owned by the current owner, or a
+  non-mutating exact availability check proves the requested record resource is
+  available.
 
 The fast path does not run before MariaDB's local lock check. Same-process
 record, gap, and insert-intention conflicts therefore remain native InnoDB
 behavior. Once another ownerless process joins or leaves, generation equality
-fails and the hook returns to the shared record-lock registry path.
+fails and the hook returns to the shared record-lock registry path. A foreign
+active lock-registry entry without matching process-registry evidence also
+keeps the shared registry path, preserving the product-hook coverage that
+injects an external ownerless record lock inside one process.
 
 Dedicated database perf counters report skip calls, allowed skips, unmapped
 blocks, active-count blocks, and generation blocks. The existing record
@@ -87,9 +99,11 @@ reduction, not a full ownerless write-parity claim. Row insert, undo-report MTR
 commit, and page-write commit-log work remain larger performance targets.
 
 Stats-off production overhead remains bounded to the existing hook dispatch,
-the normal context validation, and two process-registry loads in eligible
-ownerless mode. Stats atomics for the new counters execute only when database
-perf stats are enabled.
+the normal context validation, two process-registry loads, and cheap
+record-registry header/first-active-slot checks in eligible ownerless mode.
+The exact shared-registry availability check is only reached for a foreign
+first active lock-registry owner. Stats atomics for the new counters execute
+only when database perf stats are enabled.
 
 Final local production probe:
 
@@ -117,6 +131,13 @@ Key metrics from that run:
   (`285.786 ms`), undo report (`104.685 ms`), undo-report MTR commit
   (`77.828 ms`), and page-write commit-log work (`58.187 ms`).
 
+A corrective follow-up after CI caught the same-process external-lock product
+hook case kept the same skip proof active while adding the non-mutating
+record-registry availability guard. A reduced local production probe with the
+same 16K-row statement shape reported `16384` allowed bulk skips,
+`0.861 ms` aggregate record wait-until time per statement, and `1.723 ms` for
+the remaining non-empty statement.
+
 ## Test Plan
 
 - Build `mylite_embedded_performance_probe`,
@@ -139,6 +160,9 @@ Key metrics from that run:
 - Focused SQL coverage proves a single-owner non-empty multi-row insert has
   positive record wait-until calls and that every such call is skipped by the
   single-owner proof.
+- Embedded product-hook coverage proves a same-process synthetic external
+  ownerless record lock still publishes a shared waiting entry instead of being
+  hidden by the single-owner process-registry proof.
 - The stale-generation peer-history selector proves a later insert after peer
   join/leave has positive record wait-until calls, zero allowed skips, and a
   positive generation-block counter.

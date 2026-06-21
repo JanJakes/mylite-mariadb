@@ -16069,6 +16069,13 @@ int ownerless_innodb_lock_wait_record_hook(
 
 bool ownerless_record_wait_until_single_owner_skip_allowed(
     OwnerlessInnoDBLockHookContext *hook,
+    std::uint64_t trx_id,
+    std::uint64_t index_id,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint32_t heap_no,
+    std::uint32_t mode,
+    std::uint32_t flags,
     bool perf_stats_enabled
 ) {
     const auto record = [&](OwnerlessDatabasePerfStatIndex index) {
@@ -16097,6 +16104,25 @@ bool ownerless_record_wait_until_single_owner_skip_allowed(
     }
     if (registry_generation != hook->owner_generation) {
         record(OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_BLOCKED_GENERATION);
+        return false;
+    }
+
+    int record_available = 0;
+    const int lock_result = mylite_ownerless_innodb_lock_registry_record_available_now(
+        hook->lock_registry,
+        hook->lock_registry_size,
+        hook->owner_id,
+        hook->owner_generation,
+        trx_id,
+        index_id,
+        space_id,
+        page_no,
+        heap_no,
+        mode,
+        flags,
+        &record_available
+    );
+    if (lock_result != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK || record_available == 0) {
         return false;
     }
 
@@ -16146,7 +16172,17 @@ int ownerless_innodb_lock_wait_until_record_hook(
     std::uint32_t normalized_heap_no = heap_no;
     std::uint32_t normalized_flags = flags;
     normalize_ownerless_record_lock_resource(mode, &normalized_heap_no, &normalized_flags);
-    if (ownerless_record_wait_until_single_owner_skip_allowed(hook, perf_stats_enabled)) {
+    if (ownerless_record_wait_until_single_owner_skip_allowed(
+            hook,
+            trx_id,
+            index_id,
+            space_id,
+            page_no,
+            normalized_heap_no,
+            mode,
+            normalized_flags,
+            perf_stats_enabled
+        )) {
         record_perf_result(OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_OK);
         return MYLITE_OWNERLESS_INNODB_LOCK_OK;
     }

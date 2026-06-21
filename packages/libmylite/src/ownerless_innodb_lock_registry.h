@@ -205,6 +205,20 @@ int mylite_ownerless_innodb_lock_registry_wait_until_record_available_with_cycle
     uint32_t flags,
     unsigned timeout_ms
 );
+int mylite_ownerless_innodb_lock_registry_record_available_now(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t owner_id,
+    uint64_t owner_generation,
+    uint64_t trx_id,
+    uint64_t index_id,
+    uint32_t space_id,
+    uint32_t page_no,
+    uint32_t heap_no,
+    uint32_t mode,
+    uint32_t flags,
+    int *out_available
+);
 int mylite_ownerless_innodb_lock_registry_clear_wait(
     void *mapping,
     size_t mapping_size,

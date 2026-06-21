@@ -817,6 +817,78 @@ int mylite_ownerless_innodb_lock_registry_wait_until_record_available_with_cycle
     );
 }
 
+int mylite_ownerless_innodb_lock_registry_record_available_now(
+    void *mapping,
+    std::size_t mapping_size,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
+    std::uint64_t trx_id,
+    std::uint64_t index_id,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint32_t heap_no,
+    std::uint32_t mode,
+    std::uint32_t flags,
+    int *out_available
+) {
+    if (!mapping_can_hold_registry(mapping, mapping_size) || owner_id == 0U ||
+        owner_generation == 0U || trx_id == 0U || index_id == 0U || !record_mode_valid(mode) ||
+        !record_flags_valid(flags) || out_available == nullptr) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ERROR;
+    }
+
+    *out_available = 0;
+    auto *registry = static_cast<unsigned char *>(mapping);
+    if (mylite_ownerless_innodb_lock_registry_waiting_count(mapping) != 0U) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK;
+    }
+    if (mylite_ownerless_innodb_lock_registry_active_count(mapping) == 0U) {
+        *out_available = 1;
+        return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK;
+    }
+
+    const std::uint32_t count = scan_slot_limit(registry);
+    for (std::uint32_t index = 0; index < count; ++index) {
+        const unsigned char *slot = slot_at(registry, index);
+        if (static_cast<std::size_t>(
+                slot + MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_SLOT_SIZE - registry
+            ) > mapping_size) {
+            break;
+        }
+        if (load32(slot, k_slot_state_offset) != MYLITE_OWNERLESS_INNODB_LOCK_STATE_ACTIVE) {
+            continue;
+        }
+        if (load32(slot, k_slot_owner_id_offset) == owner_id) {
+            *out_available = 1;
+            return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK;
+        }
+        break;
+    }
+
+    const int latch_result =
+        acquire_registry_latch(registry, owner_id, owner_generation, wait_deadline(0U));
+    if (latch_result != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK) {
+        return latch_result;
+    }
+
+    const LockRequest request{
+        owner_id,
+        trx_id,
+        MYLITE_OWNERLESS_INNODB_LOCK_KIND_RECORD,
+        mode,
+        flags,
+        0U,
+        index_id,
+        space_id,
+        page_no,
+        heap_no
+    };
+    const LockSearchResult search = find_lock_slot(registry, mapping_size, request);
+    *out_available = lock_request_available(search) ? 1 : 0;
+    release_registry_latch(registry, owner_id, owner_generation);
+    return MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK;
+}
+
 int mylite_ownerless_innodb_lock_registry_clear_wait(
     void *mapping,
     std::size_t mapping_size,
