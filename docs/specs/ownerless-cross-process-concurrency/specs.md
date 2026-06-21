@@ -2772,9 +2772,14 @@ Tasks:
    three-pair `RENAME TABLE` swap in one statement, verifies an already-open
    peer sees row contents under the swapped names, checks that InnoDB `SPACE`
    identities swap with the table names, and verifies final ownerless/native
-   reopen before and after forced `.shm` rebuild. View metadata coverage now
-   creates and queries a simple view over an InnoDB base table from one
-   ownerless process,
+   reopen before and after forced `.shm` rebuild. Hook-build cross-schema
+   multi-rename crash coverage now kills the same three-pair swap shape after
+   native file movement but before ownerless dictionary finish, verifies
+   live-peer cleanup remains busy until no-live recovery, and checks swapped
+   InnoDB `SPACE` identities, final schema-directory files, post-recovery
+   writes, ownerless/native reopen, and forced `.shm` rebuild. View metadata
+   coverage now creates and queries a simple view over an InnoDB base table
+   from one ownerless process,
    verifies that an already-open peer observes the view and base-table changes
    through it, drops the view, and verifies final view absence plus base-table
    durability through ownerless/native reopen before and after forced `.shm`
@@ -5072,7 +5077,8 @@ suppresses native snapshot-boundary synthesis plus external space-allocation
 refresh for those local post-DDL writes,
 and
 hook-build coverage now kills same-schema,
-cross-schema, and same-schema multi-pair swap `RENAME TABLE` writers after the
+cross-schema, same-schema multi-pair swap, and cross-schema multi-pair swap
+`RENAME TABLE` writers after the
 native file move but before ownerless dictionary finish, plus marker-specific
 coverage for the same `RENAME TABLE` boundary and a `TRUNCATE TABLE` writer
 after native truncate/recreate, an `ALTER TABLE ... FORCE, ALGORITHM=COPY`

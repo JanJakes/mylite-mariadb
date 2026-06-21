@@ -56,7 +56,8 @@ In scope:
 Out of scope:
 
 - Crash or error injection inside MariaDB's multi-pair rename loop.
-- Cross-schema multi-rename crash recovery.
+- Cross-schema multi-rename crash recovery, which is covered separately by
+  `docs/specs/ownerless-cross-schema-multi-rename-crash/specs.md`.
 - Foreign-key multi-rename crash recovery.
 - Durable DDL file-lifecycle metadata for every native rename/rebuild/drop
   class.
