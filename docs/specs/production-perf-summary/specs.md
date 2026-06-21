@@ -900,6 +900,11 @@ After the later content/user split, green run `27896266558` reported setup at
 workflow critical path at `260s`, and slowest PHPUnit test-only shell real time
 at `147.060s`. That production evidence made the REST controller tail the next
 CI timing split target.
+The REST controller tail split then produced green run `27896697422`, with
+setup at `78s`, the slowest shard `non-isolated-remaining` at `158s`,
+estimated workflow critical path at `236s`, and slowest PHPUnit test-only shell
+real time at `121.495s`. The broad remaining and content/media buckets are now
+the measured WordPress CI wall-clock targets.
 
 The next production ownerless SQL run exposed `sql-case 46`
 (`test_ownerless_active_reader_pressure_limit_blocks_write_classes`) during a

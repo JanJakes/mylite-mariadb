@@ -557,8 +557,17 @@ jobs:
             keepalive: "1"
             child_skip_install: "0"
             child_restore_baseline: "0"
-          - shard: non-isolated-content-media
-            label: phpunit-non-isolated-content-media
+          - shard: non-isolated-media-comment
+            label: phpunit-non-isolated-media-comment
+            reconnect_after_child: "1"
+            child_timing_summary: "0"
+            child_script_timing_summary: "0"
+            profile_mysqli: "0"
+            keepalive: "1"
+            child_skip_install: "0"
+            child_restore_baseline: "0"
+          - shard: non-isolated-content-data
+            label: phpunit-non-isolated-content-data
             reconnect_after_child: "1"
             child_timing_summary: "0"
             child_script_timing_summary: "0"
@@ -575,8 +584,26 @@ jobs:
             keepalive: "1"
             child_skip_install: "0"
             child_restore_baseline: "0"
-          - shard: non-isolated-remaining
-            label: phpunit-non-isolated-remaining
+          - shard: non-isolated-remaining-platform
+            label: phpunit-non-isolated-remaining-platform
+            reconnect_after_child: "1"
+            child_timing_summary: "0"
+            child_script_timing_summary: "0"
+            profile_mysqli: "0"
+            keepalive: "1"
+            child_skip_install: "0"
+            child_restore_baseline: "0"
+          - shard: non-isolated-remaining-admin-site
+            label: phpunit-non-isolated-remaining-admin-site
+            reconnect_after_child: "1"
+            child_timing_summary: "0"
+            child_script_timing_summary: "0"
+            profile_mysqli: "0"
+            keepalive: "1"
+            child_skip_install: "0"
+            child_restore_baseline: "0"
+          - shard: non-isolated-remaining-other
+            label: phpunit-non-isolated-remaining-other
             reconnect_after_child: "1"
             child_timing_summary: "0"
             child_script_timing_summary: "0"
@@ -621,8 +648,11 @@ jobs:
       MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_CONTROLLER_RE: 'WP_Test_REST_(?:Posts|Pages|Attachments|Comments|Users|Tags|Categories|Taxonomies|Revisions|Autosaves|Search|Post_Types|Post_Statuses)_Controller'
       MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE: 'Tests_Query|Test_Query|Tests_Canonical|Tests_Theme'
       MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE: 'Tests_WpTokenMap|Tests_Block|WP_Block|Tests_Blocks'
-      MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_MEDIA_RE: 'Tests_Term|Tests_Taxonomy|Tests_Post|Tests_Comment|Tests_Media|Tests_Attachment|Tests_Template|Tests_XMLRPC|Tests_Xmlrpc|Tests_Customize|Tests_WP_Customize|Tests_Option|Tests_Meta'
+      MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE: 'Tests_Media|Tests_Attachment|Tests_Comment|Tests_XMLRPC|Tests_Xmlrpc'
+      MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE: 'Tests_Term|Tests_Taxonomy|Tests_Post|Tests_Template|Tests_Customize|Tests_WP_Customize|Tests_Option|Tests_Meta'
       MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE: 'Tests_User|Tests_Auth|Tests_Roles|Tests_Capabilities|Tests_Privacy'
+      MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_PLATFORM_RE: 'Test_Autoembed|Tests_HtmlApi|Tests_Dependencies|Tests_Script_Modules|Tests_Interactivity_API|Tests_WP_Interactivity_API|Tests_Kses|Tests_Formatting|Tests_Shortcode|Tests_Widgets|Tests_Date|Tests_Image|Tests_oEmbed|Test_oEmbed|REST_Block_Type_Controller_Test'
+      MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_ADMIN_SITE_RE: 'Tests_Admin|Tests_Ajax|Tests_Multisite|Tests_General|Tests_Functions|Tests_Cron|Tests_L10n|Tests_Pluggable|WP_Translation'
       WORDPRESS_PHPUNIT_SHARD: ${{ matrix.shard }}
 
     steps:
@@ -736,14 +766,23 @@ jobs:
             non-isolated-block-token)
               wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
               ;;
-            non-isolated-content-media)
-              wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_MEDIA_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
+            non-isolated-media-comment)
+              wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
+              ;;
+            non-isolated-content-data)
+              wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
               ;;
             non-isolated-user-auth)
               wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
               ;;
-            non-isolated-remaining)
-              wordpress_phpunit_filter="^(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_MEDIA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
+            non-isolated-remaining-platform)
+              wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_PLATFORM_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
+              ;;
+            non-isolated-remaining-admin-site)
+              wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_ADMIN_SITE_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
+              ;;
+            non-isolated-remaining-other)
+              wordpress_phpunit_filter="^(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_PLATFORM_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_ADMIN_SITE_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
               ;;
             *)
               echo "Unknown WordPress PHPUnit shard: ${WORDPRESS_PHPUNIT_SHARD}" >&2

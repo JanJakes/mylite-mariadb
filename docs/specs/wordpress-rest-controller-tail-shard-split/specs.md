@@ -158,9 +158,21 @@ Passed:
 - `cmake --build --preset format-check-prod`
 - `git diff --check`
 
-CI must provide the first full production timing for
-`phpunit-non-isolated-rest-content-controller` and
-`phpunit-non-isolated-rest-controller-other`.
+CI run `27896697422` on `59df9940` provided the first full production timing
+for the split:
+
+- `phpunit-non-isolated-rest-content-controller`: `71.608s` shell real,
+  `68.429s` reported, `72s` total;
+- `phpunit-non-isolated-rest-controller-other`: `58.761s` shell real,
+  `55.723s` reported, `58s` total;
+- `phpunit-non-isolated-remaining`: `121.495s` shell real, `118.374s`
+  reported, `122s` total;
+- `phpunit-non-isolated-content-media`: `118.110s` shell real,
+  `115.029s` reported, `119s` total.
+
+The REST controller split moved the test-only tail from REST controllers to
+the broad remaining and content/media shards, so the next production timing
+slice fans out both measured tails.
 
 ## Risks
 

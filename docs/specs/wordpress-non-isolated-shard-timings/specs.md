@@ -60,7 +60,13 @@ exclusion authority. Run `27896266558` then showed
 `147.060s` shell real, ahead of `phpunit-non-isolated-remaining` at
 `122.608s` and `phpunit-non-isolated-content-media` at `117.366s`, so the
 next split divides REST content-object controllers from the remaining REST
-controllers.
+controllers. Run `27896697422` then showed the REST split succeeded:
+`phpunit-non-isolated-rest-content-controller` reported `71.608s`,
+`phpunit-non-isolated-rest-controller-other` reported `58.761s`, and the
+new tail moved to `phpunit-non-isolated-remaining` at `121.495s` with
+`phpunit-non-isolated-content-media` close behind at `118.110s`. The next
+timing fanout therefore divides both broad tails while preserving the same
+non-isolated exclusion authority.
 
 The REST shard includes
 `WP_Test_REST_Schema_Initialization::test_build_wp_api_client_fixtures`, which

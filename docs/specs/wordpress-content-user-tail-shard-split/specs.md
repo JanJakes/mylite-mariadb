@@ -149,6 +149,10 @@ for the split:
 
 The content/user split reduced the old broad content/user timing boundary and
 made REST controller classes the next visible production critical path.
+The later REST controller split moved the tail back to the broad remaining and
+content/media shards, so the follow-up top-tail fanout replaces
+`phpunit-non-isolated-content-media` with media/comment and content/data
+subshards.
 
 ## Risks
 
