@@ -61,17 +61,17 @@ logs=("${input_dir}"/*.log)
 shopt -u nullglob
 
 printf '## Embedded Performance Rollup\n\n'
-printf '| report | ordinary warm open/close ms | ownerless warm open/close ms | direct point-select ratio | prepared point-select ratio | autocommit insert ratio | bulk rows ratio | ownerless bulk rows/s | ownerless bulk mysql_query ms/stmt | remaining undo MTR ms/stmt |\n'
-printf '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n'
+printf '| report | ordinary warm open/close ms | ownerless warm open/close ms | direct point-select ratio | prepared point-select ratio | autocommit insert ratio | bulk rows ratio | ownerless bulk rows/s | ownerless bulk mysql_query ms/stmt | remaining undo MTR ms/stmt | remaining page-write ms/stmt | remaining page-publish ms/stmt | remaining redo-leave ms/stmt | remaining no-dirty loop ms/stmt |\n'
+printf '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n'
 
 if [ "${#logs[@]}" -eq 0 ]; then
-  printf '| n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |\n'
+  printf '| n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |\n'
   exit 0
 fi
 
 for log in "${logs[@]}"; do
   label="$(basename "${log}" .log)"
-  printf '| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n' \
+  printf '| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n' \
     "$(markdown_cell "${label}")" \
     "$(metric_value "${log}" mylite_perf_summary_ordinary_warm_open_close_ms_avg)" \
     "$(metric_value "${log}" mylite_perf_summary_ownerless_warm_open_close_ms_avg)" \
@@ -81,5 +81,9 @@ for log in "${logs[@]}"; do
     "$(metric_value "${log}" mylite_perf_summary_ownerless_insert_autocommit_bulk_rows_ratio)" \
     "$(metric_value "${log}" mylite_perf_summary_ownerless_insert_autocommit_bulk_rows_ops_per_second)" \
     "$(metric_value "${log}" mylite_perf_summary_ownerless_autocommit_bulk_mysql_query_ms_per_statement)" \
-    "$(metric_value "${log}" mylite_perf_summary_ownerless_autocommit_bulk_remaining_trx_undo_report_mtr_commit_ms_per_statement)"
+    "$(metric_value "${log}" mylite_perf_summary_ownerless_autocommit_bulk_remaining_trx_undo_report_mtr_commit_ms_per_statement)" \
+    "$(metric_value "${log}" mylite_perf_summary_ownerless_autocommit_bulk_remaining_page_write_commit_log_ms_per_statement)" \
+    "$(metric_value "${log}" mylite_perf_summary_ownerless_autocommit_bulk_remaining_page_publish_hook_ms_per_statement)" \
+    "$(metric_value "${log}" mylite_perf_summary_ownerless_autocommit_bulk_remaining_page_write_commit_log_redo_leave_ms_per_statement)" \
+    "$(metric_value "${log}" mylite_perf_summary_ownerless_autocommit_bulk_remaining_page_write_commit_log_no_dirty_loop_ms_per_statement)"
 done

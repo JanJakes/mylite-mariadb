@@ -41,6 +41,8 @@ Markdown table with the key metrics:
 - ownerless bulk rows ratio and rows per second;
 - ownerless bulk `mysql_query()` milliseconds per statement;
 - remaining non-empty-table undo-report MTR milliseconds per statement.
+- remaining non-empty-table page-write commit-log, page-publish hook,
+  redo-leave, and no-dirty-loop milliseconds per statement.
 
 Wire the tool into CI after the embedded performance probes and before the
 artifact upload. CI writes the rollup to
@@ -69,6 +71,9 @@ formats, recovery, directory layout, or build presets.
   summary.
 - The uploaded embedded performance artifact includes `summary.md`.
 - Missing metrics render as `n/a` rather than hiding a report.
+- Remaining page-write phase columns are visible in the GitHub step summary so
+  reviewers can compare undo MTR cost against page publication and commit-log
+  subphases without downloading artifacts.
 - Production-build guard coverage fails if the rollup step is removed.
 - Docs keep the current write-path performance target explicit and do not
   claim ownerless concurrency completion.
@@ -87,4 +92,13 @@ Passed:
   --output-on-failure`
 - `tools/embedded-performance-rollup --input build/perf-investigation`
 - `cmake --build --preset format-check-prod`
+- `git diff --check`
+
+Follow-up page-write phase column refresh passed:
+
+- `tools/embedded-performance-rollup-test`
+- `ctest --preset prod -R
+  '^tools\.(embedded-performance-rollup|ci-production-builds)$'
+  --output-on-failure`
+- `tools/check-ci-production-builds`
 - `git diff --check`
