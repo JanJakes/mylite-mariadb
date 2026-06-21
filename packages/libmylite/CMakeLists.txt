@@ -410,6 +410,12 @@ if(BUILD_TESTING)
           dictionary-create-like-file-op-marker-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-ctas-file-op-marker-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-ctas-file-op-marker-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-cross-schema-multi-rename-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -688,6 +694,7 @@ if(BUILD_TESTING)
       )
       set_tests_properties(
         libmylite.ownerless-dictionary-create-like-file-op-marker-crash
+        libmylite.ownerless-dictionary-ctas-file-op-marker-crash
         PROPERTIES
           LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
           TIMEOUT 120

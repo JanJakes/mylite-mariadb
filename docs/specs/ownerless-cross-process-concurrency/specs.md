@@ -4537,8 +4537,8 @@ Tasks:
    the same marker after native `FILE_*` redo evidence but before the
    `dictionary-before-finish` crash hook can interrupt dictionary finish, with
    focused `RENAME TABLE` `FILE_RENAME`, `CREATE TABLE ... LIKE`
-   `FILE_CREATE`, `TRUNCATE TABLE` native truncate/recreate, and `DROP TABLE`
-   `FILE_DELETE` marker coverage; final
+   `FILE_CREATE`, CTAS populated `FILE_CREATE`, `TRUNCATE TABLE` native
+   truncate/recreate, and `DROP TABLE` `FILE_DELETE` marker coverage; final
    no-live close forces native checkpoint
    proof for retained page-version WAL
    after active pins release, restores the 12 KiB redo startup prefix if
@@ -5105,8 +5105,9 @@ cross-schema, same-schema multi-pair swap, and cross-schema multi-pair swap
 `RENAME TABLE` writers after the
 native file move but before ownerless dictionary finish, plus marker-specific
 coverage for the same `RENAME TABLE` boundary, a `CREATE TABLE ... LIKE`
-writer after native `FILE_CREATE`, a `TRUNCATE TABLE` writer after native
-truncate/recreate, and a `DROP TABLE` writer after native `FILE_DELETE`, an
+writer after native `FILE_CREATE`, a CTAS writer after native `FILE_CREATE`
+and row population, a `TRUNCATE TABLE` writer after native truncate/recreate,
+and a `DROP TABLE` writer after native `FILE_DELETE`, an
 `ALTER TABLE ... FORCE, ALGORITHM=COPY`
 writer after native table-copy rebuild, a `CREATE OR REPLACE TABLE` writer
 after native old-table replacement, `CREATE OR REPLACE TABLE ... LIKE` and
