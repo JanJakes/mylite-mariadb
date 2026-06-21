@@ -211,6 +211,11 @@ enum database_perf_stat_index {
     DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_TIMEOUTS,
     DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_UNAVAILABLE,
     DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_ERRORS,
+    DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_CALLS,
+    DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_ALLOWED,
+    DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_BLOCKED_UNMAPPED,
+    DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_COUNT,
+    DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_BLOCKED_GENERATION,
     DATABASE_PERF_STAT_MDL_ACQUIRE_CALLS,
     DATABASE_PERF_STAT_MDL_ACQUIRE_NS,
     DATABASE_PERF_STAT_MDL_RELEASE_CALLS,
@@ -3204,6 +3209,43 @@ static void emit_record_wait_until_hook_summary(
         prefix,
         "record_lock_wait_until_errors",
         database_perf[DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_ERRORS],
+        iterations,
+        unit
+    );
+    emit_summary_count_per_named_unit(
+        prefix,
+        "record_lock_wait_until_single_owner_skip_calls",
+        database_perf[DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_CALLS],
+        iterations,
+        unit
+    );
+    emit_summary_count_per_named_unit(
+        prefix,
+        "record_lock_wait_until_single_owner_skip_allowed",
+        database_perf[DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_ALLOWED],
+        iterations,
+        unit
+    );
+    emit_summary_count_per_named_unit(
+        prefix,
+        "record_lock_wait_until_single_owner_skip_blocked_unmapped",
+        database_perf[DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_BLOCKED_UNMAPPED],
+        iterations,
+        unit
+    );
+    emit_summary_count_per_named_unit(
+        prefix,
+        "record_lock_wait_until_single_owner_skip_blocked_active_count",
+        database_perf
+            [DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_COUNT],
+        iterations,
+        unit
+    );
+    emit_summary_count_per_named_unit(
+        prefix,
+        "record_lock_wait_until_single_owner_skip_blocked_generation",
+        database_perf
+            [DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_BLOCKED_GENERATION],
         iterations,
         unit
     );
@@ -9328,6 +9370,31 @@ static void emit_database_perf_stats(const char *prefix) {
         "%s_record_lock_wait_until_errors=%" PRIu64 "\n",
         prefix,
         values[DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_ERRORS]
+    );
+    printf(
+        "%s_record_lock_wait_until_single_owner_skip_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_CALLS]
+    );
+    printf(
+        "%s_record_lock_wait_until_single_owner_skip_allowed=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_ALLOWED]
+    );
+    printf(
+        "%s_record_lock_wait_until_single_owner_skip_blocked_unmapped=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_BLOCKED_UNMAPPED]
+    );
+    printf(
+        "%s_record_lock_wait_until_single_owner_skip_blocked_active_count=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_COUNT]
+    );
+    printf(
+        "%s_record_lock_wait_until_single_owner_skip_blocked_generation=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_BLOCKED_GENERATION]
     );
     printf(
         "%s_mdl_acquire_calls=%" PRIu64 "\n",

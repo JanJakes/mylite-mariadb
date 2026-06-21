@@ -226,21 +226,32 @@ extern void mylite_ownerless_page_log_read_append_perf_stats(
 );
 
 enum ownerless_test_database_perf_stat_index {
-    OWNERLESS_TEST_DATABASE_PERF_STAT_REDO_ENTER_CALLS = 51,
-    OWNERLESS_TEST_DATABASE_PERF_STAT_REDO_RESERVE_CALLS = 55,
-    OWNERLESS_TEST_DATABASE_PERF_STAT_REDO_WRITTEN_CALLS = 57,
-    OWNERLESS_TEST_DATABASE_PERF_STAT_REDO_LEAVE_CALLS = 59,
-    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_CALLS = 61,
-    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_INDEX_HITS = 65,
-    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_INDEX_MISSES = 66,
-    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_INDEX_SCAN_REQUIRED = 67,
-    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_INDEX_STALE = 68,
-    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_INDEX_ERRORS = 69,
-    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_CALLS = 70,
-    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_FOUND = 72,
-    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_MISSES = 73,
-    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_ERRORS = 76,
-    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_WRITE_TRACKED_RELEASE_CALLS = 100,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_CALLS = 25,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_NS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_OK,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_TIMEOUTS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_UNAVAILABLE,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_ERRORS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_CALLS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_ALLOWED,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_BLOCKED_UNMAPPED,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_COUNT,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_BLOCKED_GENERATION,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REDO_ENTER_CALLS = 56,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REDO_RESERVE_CALLS = 60,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REDO_WRITTEN_CALLS = 62,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_REDO_LEAVE_CALLS = 64,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_CALLS = 66,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_INDEX_HITS = 70,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_INDEX_MISSES = 71,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_INDEX_SCAN_REQUIRED = 72,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_INDEX_STALE = 73,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_INDEX_ERRORS = 74,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_CALLS = 75,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_FOUND = 77,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_MISSES = 78,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_WAL_SCAN_ERRORS = 81,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_WRITE_TRACKED_RELEASE_CALLS = 105,
     OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_WRITE_TRACKED_RELEASE_NS,
     OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_WRITE_TRACKED_RELEASE_EMPTY,
     OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_WRITE_TRACKED_RELEASE_TRX_IDS,
@@ -314,6 +325,40 @@ enum ownerless_test_page_write_perf_stat_index {
     OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_NATIVE_SUPPORT_TRANSACTION_PUBLISH_SKIPPED,
     OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_COUNT
 };
+
+static void assert_single_owner_record_wait_skip_applied(const uint64_t *database_stats) {
+    const uint64_t wait_calls =
+        database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_CALLS];
+    assert(wait_calls > 0U);
+    assert(
+        database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_OK] == wait_calls
+    );
+    assert(
+        database_stats
+            [OWNERLESS_TEST_DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_CALLS] ==
+        wait_calls
+    );
+    assert(
+        database_stats
+            [OWNERLESS_TEST_DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_ALLOWED] ==
+        wait_calls
+    );
+    assert(
+        database_stats
+            [OWNERLESS_TEST_DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_BLOCKED_UNMAPPED] ==
+        0U
+    );
+    assert(
+        database_stats
+            [OWNERLESS_TEST_DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_COUNT] ==
+        0U
+    );
+    assert(
+        database_stats
+            [OWNERLESS_TEST_DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_BLOCKED_GENERATION] ==
+        0U
+    );
+}
 
 enum ownerless_test_page_log_append_perf_stat_index {
     OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_CALLS = 0,
@@ -11998,6 +12043,42 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
         query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_16384_row_insert_fast_path") ==
         134225920U
     );
+    mylite_ownerless_database_set_perf_stats_enabled(1);
+    mylite_ownerless_database_reset_perf_stats();
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_16384_row_insert_fast_path VALUES "
+        "(16385, 'mylite-perf'),"
+        "(16386, 'mylite-perf'),"
+        "(16387, 'mylite-perf'),"
+        "(16388, 'mylite-perf'),"
+        "(16389, 'mylite-perf'),"
+        "(16390, 'mylite-perf'),"
+        "(16391, 'mylite-perf'),"
+        "(16392, 'mylite-perf'),"
+        "(16393, 'mylite-perf'),"
+        "(16394, 'mylite-perf'),"
+        "(16395, 'mylite-perf'),"
+        "(16396, 'mylite-perf'),"
+        "(16397, 'mylite-perf'),"
+        "(16398, 'mylite-perf'),"
+        "(16399, 'mylite-perf'),"
+        "(16400, 'mylite-perf')"
+    );
+    mylite_ownerless_database_read_perf_stats(
+        database_stats,
+        OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT
+    );
+    mylite_ownerless_database_set_perf_stats_enabled(0);
+    assert_single_owner_record_wait_skip_applied(database_stats);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_16384_row_insert_fast_path") ==
+        16400U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_16384_row_insert_fast_path") ==
+        134488200U
+    );
 
     exec_ok(
         db,
@@ -12631,6 +12712,7 @@ static void test_ownerless_peer_history_blocks_single_owner_skip_proof(void) {
     char *database_path = path_join(root, "ownerless-single-owner-skip-peer-history.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     uint64_t deep_stats[OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT] = {0};
+    uint64_t database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT] = {0};
     int start_pipe[2];
     int ready_pipe[2];
     int release_pipe[2];
@@ -12699,7 +12781,9 @@ static void test_ownerless_peer_history_blocks_single_owner_skip_proof(void) {
     sleep_microseconds(100000U);
 
     mylite_ownerless_innodb_deep_set_perf_stats_enabled(1);
+    mylite_ownerless_database_set_perf_stats_enabled(1);
     mylite_ownerless_innodb_deep_reset_perf_stats();
+    mylite_ownerless_database_reset_perf_stats();
     assert(
         mylite_ownerless_innodb_can_skip_external_page_refresh() !=
         MYLITE_TEST_OWNERLESS_INNODB_LOCK_OK
@@ -12708,11 +12792,20 @@ static void test_ownerless_peer_history_blocks_single_owner_skip_proof(void) {
         writer_db,
         "UPDATE app.ownerless_single_owner_peer_history SET payload = REPEAT('b', 4000)"
     );
+    exec_ok(
+        writer_db,
+        "INSERT INTO app.ownerless_single_owner_peer_history VALUES (9, REPEAT('c', 4000))"
+    );
     mylite_ownerless_innodb_deep_read_perf_stats(
         deep_stats,
         OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT
     );
+    mylite_ownerless_database_read_perf_stats(
+        database_stats,
+        OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT
+    );
     mylite_ownerless_innodb_deep_set_perf_stats_enabled(0);
+    mylite_ownerless_database_set_perf_stats_enabled(0);
 
     assert(
         query_unsigned(
@@ -12722,8 +12815,26 @@ static void test_ownerless_peer_history_blocks_single_owner_skip_proof(void) {
         ) == 8U
     );
     assert(
+        query_unsigned(
+            writer_db,
+            "SELECT COUNT(*) FROM app.ownerless_single_owner_peer_history "
+            "WHERE payload = REPEAT('c', 4000)"
+        ) == 1U
+    );
+    assert(
         deep_stats
             [OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES] > 0U
+    );
+    assert(database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_CALLS] > 0U);
+    assert(
+        database_stats
+            [OWNERLESS_TEST_DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_ALLOWED] ==
+        0U
+    );
+    assert(
+        database_stats
+            [OWNERLESS_TEST_DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_BLOCKED_GENERATION] >
+        0U
     );
     assert(mylite_close(writer_db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
@@ -12736,6 +12847,13 @@ static void test_ownerless_peer_history_blocks_single_owner_skip_proof(void) {
             "SELECT COUNT(*) FROM app.ownerless_single_owner_peer_history "
             "WHERE payload = REPEAT('b', 4000)"
         ) == 8U
+    );
+    assert(
+        query_unsigned(
+            writer_db,
+            "SELECT COUNT(*) FROM app.ownerless_single_owner_peer_history "
+            "WHERE payload = REPEAT('c', 4000)"
+        ) == 1U
     );
     assert(mylite_close(writer_db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));

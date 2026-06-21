@@ -95,6 +95,11 @@ enum OwnerlessDatabasePerfStatIndex : std::size_t {
     OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_TIMEOUTS,
     OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_UNAVAILABLE,
     OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_ERRORS,
+    OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_CALLS,
+    OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_ALLOWED,
+    OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_BLOCKED_UNMAPPED,
+    OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_COUNT,
+    OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_BLOCKED_GENERATION,
     OWNERLESS_DATABASE_PERF_MDL_ACQUIRE_CALLS,
     OWNERLESS_DATABASE_PERF_MDL_ACQUIRE_NS,
     OWNERLESS_DATABASE_PERF_MDL_RELEASE_CALLS,
@@ -16062,6 +16067,43 @@ int ownerless_innodb_lock_wait_record_hook(
     return result;
 }
 
+bool ownerless_record_wait_until_single_owner_skip_allowed(
+    OwnerlessInnoDBLockHookContext *hook,
+    bool perf_stats_enabled
+) {
+    const auto record = [&](OwnerlessDatabasePerfStatIndex index) {
+        if (perf_stats_enabled) {
+            ownerless_database_perf_stats[index].fetch_add(1U, std::memory_order_relaxed);
+        }
+    };
+    record(OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_CALLS);
+
+    if (hook == nullptr || hook->process_registry == nullptr ||
+        hook->process_registry_size < MYLITE_OWNERLESS_PROCESS_REGISTRY_HEADER_SIZE ||
+        hook->owner_generation == 0U) {
+        record(OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_BLOCKED_UNMAPPED);
+        return false;
+    }
+
+    const std::uint64_t active_count =
+        mylite_ownerless_process_registry_active_count(hook->process_registry);
+    const std::uint64_t registry_generation =
+        mylite_ownerless_process_registry_generation(hook->process_registry);
+    if (active_count != 1U) {
+        const auto blocked_active_count_index =
+            OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_BLOCKED_ACTIVE_COUNT;
+        record(blocked_active_count_index);
+        return false;
+    }
+    if (registry_generation != hook->owner_generation) {
+        record(OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_BLOCKED_GENERATION);
+        return false;
+    }
+
+    record(OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_SINGLE_OWNER_SKIP_ALLOWED);
+    return true;
+}
+
 int ownerless_innodb_lock_wait_until_record_hook(
     std::uint64_t trx_id,
     std::uint64_t index_id,
@@ -16104,6 +16146,10 @@ int ownerless_innodb_lock_wait_until_record_hook(
     std::uint32_t normalized_heap_no = heap_no;
     std::uint32_t normalized_flags = flags;
     normalize_ownerless_record_lock_resource(mode, &normalized_heap_no, &normalized_flags);
+    if (ownerless_record_wait_until_single_owner_skip_allowed(hook, perf_stats_enabled)) {
+        record_perf_result(OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_OK);
+        return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+    }
     const int registry_result =
         hook->page_write_lock_registry != nullptr && hook->page_write_lock_registry_size != 0U
             ? mylite_ownerless_innodb_lock_registry_wait_until_record_available_with_cycle_registry(

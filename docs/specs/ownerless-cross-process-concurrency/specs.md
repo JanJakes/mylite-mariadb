@@ -5985,10 +5985,21 @@ subsystems that this mode needs:
   `row_ins_btr_lock_undo_rec_lock` bucket, but larger remaining gaps still sit
   in row insert (`190.280 ms` ownerless-minus-ordinary), undo report
   (`76.220 ms`), undo-report MTR commit (`70.608 ms`), and page-write
-  commit-log work (`58.450 ms`) per statement. A single-owner record-wait
-  bypass is therefore a bounded follow-up candidate, not the primary remaining
-  parity fix, and must prove peer-join/stale-generation semantics before any
-  behavior change.
+  commit-log work (`58.450 ms`) per statement. A follow-up
+  `ownerless-single-owner-record-wait-skip` slice now bypasses that shared
+  record-lock registry availability probe only after the process registry
+  proves a continuous single-owner epoch through `active_count == 1` and
+  generation equality with the current owner slot. MariaDB's local record-lock
+  check still runs first, live-peer and prior-peer generations keep the shared
+  registry path, and dedicated counters report skip calls, allowed skips,
+  unmapped blocks, active-count blocks, and stale-generation blocks. This is a
+  bounded follow-up reduction, not the primary remaining parity fix. The final
+  16K-row production probe after the skip reported the same `16384` logical
+  ownerless bulk wait-until calls with `16384` allowed single-owner skips and
+  reduced wait-until time to `1.098 ms` per remaining statement, while
+  remaining row insert (`285.786 ms`), undo report (`104.685 ms`),
+  undo-report MTR commit (`77.828 ms`), and page-write commit-log work
+  (`58.187 ms`) stayed larger targets.
   Reduced 50-row stats-enabled probes after
   that split showed both standalone encoding and delta-base note update can be
   visible inside the previous aggregate append total, with small-sample ranking
