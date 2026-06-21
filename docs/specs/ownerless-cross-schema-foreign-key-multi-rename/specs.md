@@ -66,7 +66,9 @@ Out of scope:
   `docs/specs/ownerless-cyclic-foreign-key/specs.md` and
   `docs/specs/ownerless-cyclic-foreign-key-variants/specs.md`.
 - Error-in-the-middle rollback injection or crash injection during the
-  multi-rename statement.
+  multi-rename statement. Post-native-DDL, pre-ownerless-finish crash coverage
+  for this shape is covered separately by
+  `docs/specs/ownerless-cross-schema-foreign-key-multi-rename-crash/specs.md`.
 
 ## Design
 
@@ -141,4 +143,6 @@ No binary-size, dependency, or license changes.
 
 - This proves one cross-schema multi-pair parent/child FK rename shape.
   Unsupported generated-column FK variants, external randomized FK graph stress,
-  and crash/error injection during FK rename remain follow-up DDL/recovery work.
+  native-loop crash/error injection during FK rename, and same-schema
+  parent-through-temporary FK multi-rename crash coverage remain follow-up
+  DDL/recovery work.

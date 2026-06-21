@@ -410,6 +410,12 @@ if(BUILD_TESTING)
           dictionary-cross-schema-multi-rename-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-fk-cross-schema-multi-rename-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-foreign-key-cross-schema-multi-rename-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-truncate-file-op-marker-crash
         COMMAND mylite_ownerless_cross_process_sql_test dictionary-truncate-file-op-marker-crash
       )
@@ -650,6 +656,12 @@ if(BUILD_TESTING)
       )
       set_tests_properties(
         libmylite.ownerless-dictionary-cross-schema-multi-rename-crash
+        PROPERTIES
+          LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
+          TIMEOUT 120
+      )
+      set_tests_properties(
+        libmylite.ownerless-dictionary-fk-cross-schema-multi-rename-crash
         PROPERTIES
           LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
           TIMEOUT 120

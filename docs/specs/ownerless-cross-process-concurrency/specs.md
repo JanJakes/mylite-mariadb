@@ -3837,6 +3837,12 @@ Tasks:
    moved child, rejects a missing-parent child insert with errno 1452, rejects
    deleting a still-referenced moved parent with errno 1451, and checks
    ownerless/native reopen before and after forced `.shm` rebuild.
+   Hook-build cross-schema foreign-key multi-pair rename crash coverage now
+   kills the moved parent/child writer after native FK metadata and file moves
+   but before ownerless dictionary finish, then verifies no-live recovery of the
+   moved generated constraint identity, target-schema parent/child files,
+   FK enforcement, and ownerless/native reopen before and after forced `.shm`
+   rebuild.
    Generated-column foreign-key policy coverage now verifies that indexed
    virtual generated child columns can participate in `CREATE TABLE` and
    `ALTER TABLE` foreign keys with `ON UPDATE RESTRICT` and
@@ -5098,8 +5104,10 @@ ignored/not-ignored metadata writers after native index metadata changes, a
 primary-key replacement writer after native clustered-key rebuild, foreign-key
 ADD/DROP writers after native
 constraint metadata creation/removal, CHECK ADD/DROP writers after native
-table-definition mutation, a CHECK ADD variant that combines column-level
-CHECK metadata with a generated-column CHECK expression, missing
+table-definition mutation, a cross-schema foreign-key multi-pair rename writer
+after native FK metadata rewrite and file movement, a CHECK ADD variant that
+combines column-level CHECK metadata with a generated-column CHECK expression,
+missing
 `ALTER TABLE ... MODIFY COLUMN IF EXISTS`,
 missing `ALTER TABLE ... RENAME COLUMN IF EXISTS`, missing
 `ALTER TABLE ... CHANGE COLUMN IF EXISTS`, missing
