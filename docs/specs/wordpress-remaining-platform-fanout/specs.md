@@ -34,39 +34,39 @@ and test-only runtime shape constant.
   remaining-platform shard union and as part of the final remaining-other
   exclusion boundary.
 - A local direct `test*` method proxy over the pinned WordPress sources found
-  the old remaining-platform bucket contains `1211` test methods across `157`
-  classes:
-  - HTML/interactivity: `305` methods, `30` classes, selecting
+  the class-prefix remaining-platform bucket contains `1567` test methods
+  across `160` classes:
+  - HTML/interactivity: `408` methods, `30` classes, selecting
     `Tests_HtmlApi|Tests_Interactivity_API|Tests_WP_Interactivity_API`;
-  - formatting/date: `475` methods, `85` classes, selecting
-    `Tests_Formatting|Tests_Date`;
-  - image: `143` methods, `10` classes, selecting `Tests_Image`;
-  - dependencies/widgets: `143` methods, `20` classes, selecting
-    `Tests_Dependencies|Tests_Script_Modules|Tests_Widgets`;
-  - embed/KSES/shortcode: `145` methods, `12` classes, selecting
-    `Test_Autoembed|Tests_oEmbed|Test_oEmbed|Tests_Kses|Tests_Shortcode|REST_Block_Type_Controller_Test`.
-- The candidate split matched the old direct test-method proxy exactly:
-  `overlap=0`, `missing=0`, `extra=0`.
+  - image: `144` methods, `10` classes, selecting
+    `Tests_Image|WP_Tests_Image`;
+  - format/dependencies/embed: `1015` methods, `120` classes, selecting
+    `Tests_Formatting|Tests_Date|Tests_Dependencies|Tests_Script_Modules|Tests_Widgets|Test_Autoembed|Tests_oEmbed|Test_oEmbed|Tests_Embed|Tests_Kses|Tests_Shortcode|REST_Block_Type_Controller_Test`.
+- The corrected split matched the class-prefix remaining-platform proxy
+  exactly: `overlap=0`, `missing=0`, `extra=0`.
 
 ## Design
 
-Replace `non-isolated-remaining-platform` with five visible shards:
+Replace `non-isolated-remaining-platform` with three visible shards:
 
 - `non-isolated-remaining-platform-html-interactivity` /
   `phpunit-non-isolated-remaining-platform-html-interactivity`;
-- `non-isolated-remaining-platform-format-date` /
-  `phpunit-non-isolated-remaining-platform-format-date`;
 - `non-isolated-remaining-platform-image` /
   `phpunit-non-isolated-remaining-platform-image`;
-- `non-isolated-remaining-platform-dependencies-widgets` /
-  `phpunit-non-isolated-remaining-platform-dependencies-widgets`;
-- `non-isolated-remaining-platform-embed-kses-shortcode` /
-  `phpunit-non-isolated-remaining-platform-embed-kses-shortcode`.
+- `non-isolated-remaining-platform-format-dependencies-embed` /
+  `phpunit-non-isolated-remaining-platform-format-dependencies-embed`.
 
 Keep `MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_PLATFORM_RE` as the
 documented union and as the final remaining-other exclusion authority. The
 split changes only visible matrix jobs, shard case arms, and the
-production-build audit.
+production-build audit. The replacement shard positives match only class-name
+prefix boundaries with `^(?=(?:...)(?:_|::|$))`; PHPUnit `--filter` also
+matches method names, so an unrestricted token search can pull unrelated
+classes such as `Tests_Embed_Template::test_oembed_output_post` into the wrong
+bucket. `Tests_Embed_*` and `WP_Tests_Image_*` are explicit class families in
+the union instead of accidental substring matches, and format/dependencies/embed
+stay in one shard because the first CI split showed oEmbed tests depend on
+WordPress script and emoji-loader side effects from those families.
 
 All replacement shards keep the same production test-only settings as the old
 remaining-platform shard: Release MyLite PHP artifacts, MinSizeRel MariaDB
@@ -125,14 +125,15 @@ paths.
 
 ## Acceptance Criteria
 
-- CI contains distinct remaining-platform labels for HTML/interactivity,
-  formatting/date, image, dependencies/widgets, and embed/KSES/shortcode.
+- CI contains distinct remaining-platform labels for HTML/interactivity, image,
+  and merged format/dependencies/embed.
 - The old visible `phpunit-non-isolated-remaining-platform` matrix label and
   case arm are rejected by the production-build audit.
 - The broad `MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_PLATFORM_RE`
   remains present and stays the final remaining-other exclusion authority.
 - Focused PCRE samples show pinned WordPress direct `test*` proxy names match
-  exactly one non-isolated shard or none when intentionally excluded.
+  exactly one non-isolated shard by class prefix or none when intentionally
+  excluded.
 - The old remaining-platform proxy bucket is exactly covered by the
   replacement shard set.
 
@@ -147,50 +148,34 @@ Passed:
 - `bash -n tools/wordpress-phpunit-mysqli-mylite`
 - `tools/check-ci-production-builds`
 - a focused PHP PCRE partition proof reading regex values directly from
-  `.github/workflows/ci.yml`; it checked the pinned WordPress direct `test*`
-  method proxy and reported:
-  - `rest-content-primary`: `34` test methods, `1` class;
-  - `rest-content-history`: `19` test methods, `2` classes;
-  - `rest-content-support`: `74` test methods, `4` classes;
-  - `rest-controller-tests-rest`: `315` test methods, `15` classes;
-  - `rest-controller-wp-test`: `243` test methods, `8` classes;
-  - `rest-controller-wp-rest`: `179` test methods, `7` classes;
-  - `rest-other`: `270` test methods, `9` classes;
-  - `query-filter`: `189` test methods, `7` classes;
-  - `query-core`: `205` test methods, `16` classes;
-  - `canonical`: `29` test methods, `11` classes;
-  - `theme`: `204` test methods, `16` classes;
-  - `block-library`: `287` test methods, `31` classes;
-  - `block-supports`: `93` test methods, `24` classes;
-  - `block-template-binding`: `94` test methods, `12` classes;
-  - `media`: `59` test methods, `16` classes;
-  - `comment`: `419` test methods, `38` classes;
-  - `xmlrpc`: `264` test methods, `39` classes;
-  - `content-post-template`: `465` test methods, `62` classes;
-  - `content-term-taxonomy`: `495` test methods, `35` classes;
-  - `content-settings-meta`: `335` test methods, `34` classes;
-  - `user-auth`: `491` test methods, `41` classes;
-  - `remaining-platform-html-interactivity`: `305` test methods,
+  `.github/workflows/ci.yml`; it checked the corrected class-prefix
+  remaining-platform proxy over pinned WordPress direct `test*` names and
+  reported:
+  - `platform_class_union`: `1567` test methods;
+  - `remaining-platform-html-interactivity`: `408` test methods,
     `30` classes;
-  - `remaining-platform-format-date`: `475` test methods, `85` classes;
-  - `remaining-platform-image`: `143` test methods, `10` classes;
-  - `remaining-platform-dependencies-widgets`: `143` test methods,
-    `20` classes;
-  - `remaining-platform-embed-kses-shortcode`: `145` test methods,
-    `12` classes;
-  - `remaining-admin-site`: `1285` test methods, `209` classes;
-  - `remaining-ai-connectors`: `98` test methods, `20` classes;
-  - `remaining-navigation`: `430` test methods, `80` classes;
-  - `remaining-runtime-io`: `194` test methods, `61` classes;
-  - `remaining-other`: `1389` test methods, `179` classes;
+  - `remaining-platform-image`: `144` test methods, `10` classes;
+  - `remaining-platform-format-dependencies-embed`: `1015` test methods,
+    `120` classes;
   - `overlap_count=0`;
-  - `remaining_platform_union_overlap=0 missing=0 extra=0 old=1211 split=1211`.
+  - `remaining_platform_union_overlap=0 missing=0 extra=0 old=1567 split=1567`.
 - `ctest --preset prod -R '^tools\.ci-production-builds$'
   --output-on-failure`
 - `cmake --build --preset format-check-prod`
 - `git diff --check`
 
-CI must provide the first full production timing for the new
+First CI run `27914070086` validated the new production job shape but failed
+`phpunit-non-isolated-remaining-platform-embed-kses-shortcode`. The failing
+filter used an unrestricted positive lookahead, and PHPUnit matched method
+names in addition to class names; that pulled `Tests_Embed_Template` into the
+embed/KSES/shortcode shard and produced WordPress harness errors unrelated to
+MyLite engine behavior. The follow-up correction constrains the three
+remaining-platform split positives to class-prefix boundaries, makes
+`Tests_Embed_*` and `WP_Tests_Image_*` explicit, keeps
+format/dependencies/embed in one side-effect-compatible shard, and updates the
+production-build audit to require that shape.
+
+CI must provide the first full production timing for the corrected
 remaining-platform fanout shards.
 
 ## Risks

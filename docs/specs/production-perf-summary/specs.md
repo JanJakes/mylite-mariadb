@@ -1031,9 +1031,10 @@ to `73s`, and the estimated WordPress workflow critical path moved from `144s`
 to `146s`. The critical shard became `non-isolated-remaining-platform` at
 `73s` total, including `38.804s` shell real, `24s` Docker image setup, `6s`
 artifact download, and `3s` artifact extract. The next bounded fanout therefore
-splits remaining-platform into HTML/interactivity, formatting/date, image,
-dependencies/widgets, and embed/KSES/shortcode buckets while preserving the
-broad remaining-platform regex as the exclusion authority. This is expected to
+splits remaining-platform into HTML/interactivity, image, and merged
+format/dependencies/embed buckets while preserving the broad remaining-platform
+regex as the exclusion authority. The split filters must be class-prefix
+filters because PHPUnit filters also match method names. This is expected to
 make the fixed per-shard Docker/artifact cost and the single slow REST
 pages-controller body the dominant remaining timing questions.
 
