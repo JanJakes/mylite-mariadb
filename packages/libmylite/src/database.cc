@@ -5618,7 +5618,7 @@ bool ownerless_insert_values_statement_row_count(std::string_view sql, std::size
     return true;
 }
 
-constexpr std::size_t k_ownerless_append_batch_fast_path_max_insert_values_rows = 8192U;
+constexpr std::size_t k_ownerless_append_batch_fast_path_max_insert_values_rows = 16384U;
 
 bool ownerless_transaction_commit_allows_visible_fast_path(
     const mylite_db &db,

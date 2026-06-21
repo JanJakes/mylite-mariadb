@@ -1920,13 +1920,13 @@ Tasks:
    redo/checkpoint reconciliation, and DDL/file lifecycle recovery remain
    planned work.
    Parser-proven pure `INSERT ... VALUES` visible-fast-path statements with one
-   through 8192 row constructors reuse one page-log append session across the
+   through 16384 row constructors reuse one page-log append session across the
    statement's ownerless mini-transactions and release it before page-log
    sync/page-visible LSN publication. Focused SQL coverage keeps the existing
    native history WAL proof, capped multi-row visible-fast proof, single-row
    append-session proof, and conservative upsert fallback checks while asserting
    that append-session begin/end counts collapse for successful capped
-   visible-fast inserts. The 8193-row boundary stays outside append batching
+   visible-fast inserts. The 16385-row boundary stays outside append batching
    and deferred latest-checkpoint coalescing. Later latest-only checkpoint
    updates inside the same implicit/autocommit deferred append-batch statement
    are coalesced only after the first successful latest-only checkpoint has
@@ -6351,6 +6351,20 @@ subsystems that this mode needs:
   ownerless rows/s. Larger row-list admission remains planned separately so
   this slice does not infer unbounded append-lock deferral from the bounded
   proof.
+  A 16384-row follow-up applies the same parser-proven policy to the next
+  bounded row-list edge: the focused selector now proves the 16384-row
+  positive boundary and the 16385-row conservative boundary. The reduced
+  32768-row production probe with 16384 rows per statement reported `2`
+  append-session begin/end calls for two statements, zero snapshot-boundary
+  publications, `2.000` page versions per statement, `45.000` page-log appends
+  per statement, `2.000` native-support published pages per statement,
+  `1.000` visible-fast commits per statement, `513.000` deferred
+  latest-checkpoint coalesces per statement, ownerless `mysql_query()` at
+  `220.533 ms` per statement, and `72415.68` ownerless rows/s. The later
+  non-empty-table statement still shows remaining native row-level undo/MTR
+  cost, including `301.249 ms` row-insert time and `74.959 ms` undo-report MTR
+  commit time per statement, so still larger row lists and native undo work
+  remain planned separately.
   A follow-up transaction page-membership cache reduces repeated exact
   modified/dirty page lookups from linear scans to lazy per-transaction
   open-addressed sets once page vectors reach 16 entries. The vectors remain
