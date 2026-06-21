@@ -303,6 +303,15 @@ reject_regex \
   '^[[:space:]]+non-isolated-rest-content-post\)' \
   "WordPress PHPUnit CI must split the old REST content-post case arm"
 reject_regex \
+  'label:[[:space:]]*phpunit-non-isolated-rest-content-primary$' \
+  "WordPress PHPUnit CI must split the old REST content-primary label"
+reject_regex \
+  'shard:[[:space:]]*non-isolated-rest-content-primary$' \
+  "WordPress PHPUnit CI must split the old REST content-primary shard"
+reject_regex \
+  '^[[:space:]]+non-isolated-rest-content-primary\)' \
+  "WordPress PHPUnit CI must split the old REST content-primary case arm"
+reject_regex \
   'label:[[:space:]]*phpunit-non-isolated-rest-controller-other$' \
   "WordPress PHPUnit CI must split the old REST controller-other label"
 reject_regex \
@@ -311,6 +320,15 @@ reject_regex \
 reject_regex \
   '^[[:space:]]+non-isolated-rest-controller-other\)' \
   "WordPress PHPUnit CI must split the old REST controller-other case arm"
+reject_regex \
+  'label:[[:space:]]*phpunit-non-isolated-rest-controller-tests-rest$' \
+  "WordPress PHPUnit CI must split the old REST Tests_REST controller label"
+reject_regex \
+  'shard:[[:space:]]*non-isolated-rest-controller-tests-rest$' \
+  "WordPress PHPUnit CI must split the old REST Tests_REST controller shard"
+reject_regex \
+  '^[[:space:]]+non-isolated-rest-controller-tests-rest\)' \
+  "WordPress PHPUnit CI must split the old REST Tests_REST controller case arm"
 reject_regex \
   'label:[[:space:]]*phpunit-non-isolated-query$' \
   "WordPress PHPUnit CI must split the old query label"
@@ -461,9 +479,12 @@ require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_CONTROLLER_RE:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_POST_RE:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_PRIMARY_RE:"
+require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_PRIMARY_POSTS_RE:"
+require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_PRIMARY_OTHER_RE:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_HISTORY_RE:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_SUPPORT_RE:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_TESTS_REST_RE:"
+require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_TESTS_REST_FONT_ICON_RE:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_WP_TEST_RE:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_WP_REST_RE:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE:"
@@ -597,10 +618,12 @@ require_literal "label: phpunit-db-profile"
 require_literal "label: phpunit-deferred-reconnect-baseline-restored"
 require_literal "label: phpunit-deferred-reconnect-skip-install"
 require_literal "label: phpunit-deferred-reconnect-ui"
-require_literal "label: phpunit-non-isolated-rest-content-primary"
+require_literal "label: phpunit-non-isolated-rest-content-primary-posts"
+require_literal "label: phpunit-non-isolated-rest-content-primary-other"
 require_literal "label: phpunit-non-isolated-rest-content-history"
 require_literal "label: phpunit-non-isolated-rest-content-support"
-require_literal "label: phpunit-non-isolated-rest-controller-tests-rest"
+require_literal "label: phpunit-non-isolated-rest-controller-tests-rest-font-icon"
+require_literal "label: phpunit-non-isolated-rest-controller-tests-rest-other"
 require_literal "label: phpunit-non-isolated-rest-controller-wp-test"
 require_literal "label: phpunit-non-isolated-rest-controller-wp-rest"
 require_literal "label: phpunit-non-isolated-rest-other"
@@ -631,10 +654,12 @@ require_literal "shard: db-profile"
 require_literal "shard: deferred-reconnect-baseline-restored"
 require_literal "shard: deferred-reconnect-skip-install"
 require_literal "shard: deferred-reconnect-ui"
-require_literal "shard: non-isolated-rest-content-primary"
+require_literal "shard: non-isolated-rest-content-primary-posts"
+require_literal "shard: non-isolated-rest-content-primary-other"
 require_literal "shard: non-isolated-rest-content-history"
 require_literal "shard: non-isolated-rest-content-support"
-require_literal "shard: non-isolated-rest-controller-tests-rest"
+require_literal "shard: non-isolated-rest-controller-tests-rest-font-icon"
+require_literal "shard: non-isolated-rest-controller-tests-rest-other"
 require_literal "shard: non-isolated-rest-controller-wp-test"
 require_literal "shard: non-isolated-rest-controller-wp-rest"
 require_literal "shard: non-isolated-rest-other"
@@ -660,10 +685,12 @@ require_literal "shard: non-isolated-remaining-ai-connectors"
 require_literal "shard: non-isolated-remaining-navigation"
 require_literal "shard: non-isolated-remaining-runtime-io"
 require_literal "shard: non-isolated-remaining-other"
-require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_PRIMARY_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
+require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_PRIMARY_POSTS_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
+require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_PRIMARY_OTHER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_HISTORY_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_SUPPORT_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
-require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_TESTS_REST_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_CONTROLLER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
+require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_TESTS_REST_RE}))(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_TESTS_REST_FONT_ICON_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_CONTROLLER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
+require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_TESTS_REST_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_TESTS_REST_FONT_ICON_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_CONTROLLER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_WP_TEST_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_CONTROLLER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_WP_REST_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_CONTROLLER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?!.*Controller)${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
@@ -848,7 +875,10 @@ require_step_literal \
   'deferred-reconnect-baseline-restored)'
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
-  'non-isolated-rest-content-primary)'
+  'non-isolated-rest-content-primary-posts)'
+require_step_literal \
+  "Run WordPress PHPUnit shard (test only)" \
+  'non-isolated-rest-content-primary-other)'
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
   'non-isolated-rest-content-history)'
@@ -857,7 +887,10 @@ require_step_literal \
   'non-isolated-rest-content-support)'
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
-  'non-isolated-rest-controller-tests-rest)'
+  'non-isolated-rest-controller-tests-rest-font-icon)'
+require_step_literal \
+  "Run WordPress PHPUnit shard (test only)" \
+  'non-isolated-rest-controller-tests-rest-other)'
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
   'non-isolated-rest-controller-wp-test)'

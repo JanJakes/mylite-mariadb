@@ -2592,6 +2592,13 @@ block supports and block template/binding shards, and
 The broad REST content-post, block support/template, and media/comment regexes
 remain union and exclusion authorities; no SQL, mysqli, native storage,
 recovery, or ownerless behavior changes.
+The follow-up REST top-tail fanout keeps that same production surface while
+replacing `phpunit-non-isolated-rest-content-primary` with posts and
+pages/attachments/comments shards, and replacing
+`phpunit-non-isolated-rest-controller-tests-rest` with font/icon and remaining
+`Tests_REST*Controller` shards. The broad REST primary and `Tests_REST`
+controller regexes remain union authorities; the split changes only CI
+test-only filters and audit guards.
 The follow-up remaining-platform fanout keeps that same production surface
 while replacing `phpunit-non-isolated-remaining-platform` with
 HTML/interactivity, image, and merged format/dependencies/embed shards. The

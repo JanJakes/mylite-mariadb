@@ -1048,6 +1048,17 @@ The remaining-platform shards measured `62s`, `45s`, and `44s`, so the next
 performance question moved from platform-family attribution to the
 canonical/theme/REST primary tails and the fixed Docker/artifact overhead paid
 by every shard.
+The green docs-only timing run `27915041462` on `9f7305938` reported setup
+action time at `72s`, critical shard `non-isolated-rest-content-primary` at
+`67s` with `42.434s` shell real, and estimated WordPress critical path at
+`139s`. The next total shard was
+`non-isolated-rest-controller-tests-rest` at `66s`, including `31.098s` shell
+real and `23s` Docker image setup. The follow-up bounded REST fanout keeps the
+production environment unchanged while replacing those two REST tails with
+posts versus pages/attachments/comments shards and font/icon versus remaining
+`Tests_REST*Controller` shards. CI remains the authority for the first timing
+sample after the split; the expected next critical path is one of the existing
+non-REST shards unless fixed Docker/artifact overhead dominates.
 
 The next production ownerless SQL run exposed `sql-case 46`
 (`test_ownerless_active_reader_pressure_limit_blocks_write_classes`) during a
