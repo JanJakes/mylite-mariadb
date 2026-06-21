@@ -66,7 +66,12 @@ controllers. Run `27896697422` then showed the REST split succeeded:
 new tail moved to `phpunit-non-isolated-remaining` at `121.495s` with
 `phpunit-non-isolated-content-media` close behind at `118.110s`. The next
 timing fanout therefore divides both broad tails while preserving the same
-non-isolated exclusion authority.
+non-isolated exclusion authority. Run `27897052195` showed that fanout moved
+both broad tails below the existing query/theme shard: `content-data` reported
+`72.858s`, `media-comment` `44.906s`, `remaining-other` `61.672s`,
+`remaining-platform` `37.853s`, and `remaining-admin-site` `26.378s`, while
+`phpunit-non-isolated-query-theme` became the new test-only tail at
+`105.802s`. The next split divides query/canonical classes from theme classes.
 
 The REST shard includes
 `WP_Test_REST_Schema_Initialization::test_build_wp_api_client_fixtures`, which

@@ -1208,6 +1208,10 @@ The green `27896697422` run after that split reported setup at `78s`, slowest
 shard `non-isolated-remaining` at `158s`, estimated workflow critical path at
 `236s`, and slowest PHPUnit test-only shell time at `121.495s`, making the
 broad remaining and content/media shards the next timing fanout target.
+The green `27897052195` run after that fanout reported setup at `82s`, slowest
+shard `non-isolated-query-theme` at `147s`, estimated workflow critical path
+at `229s`, and slowest PHPUnit test-only shell time at `105.802s`, making
+query/theme the next timing split target.
 
 `mylite_reset()` now skips MariaDB's `mysql_stmt_reset()` only when a prepared
 statement has been fully drained to `MYLITE_DONE`; partial results and active
@@ -1932,6 +1936,11 @@ remained close at `118.110s`. CI now fans out those two broad tails into
 media/comment, content/data, remaining/platform, remaining/admin-site, and
 remaining/other shards, preserving the existing DB, isolated, REST,
 query/theme, block/token, and user/auth boundaries.
+After that fanout, green run `27897052195` reported the new fanout shards at
+`72.858s`, `44.906s`, `37.853s`, `26.378s`, and `61.672s` shell real while
+`phpunit-non-isolated-query-theme` became the new tail at `105.802s`. CI now
+splits query/canonical classes from theme classes while keeping the broad
+query/theme regex as the remaining-shard exclusion authority.
 Current stats-enabled ownerless autocommit attribution also shows zero
 non-SELECT page-version read probes after the InnoDB read-complete overlay was
 limited to MyLite-classified plain reads. A 1000-row serial production

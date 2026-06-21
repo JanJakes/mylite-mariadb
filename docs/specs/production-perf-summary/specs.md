@@ -905,6 +905,10 @@ setup at `78s`, the slowest shard `non-isolated-remaining` at `158s`,
 estimated workflow critical path at `236s`, and slowest PHPUnit test-only shell
 real time at `121.495s`. The broad remaining and content/media buckets are now
 the measured WordPress CI wall-clock targets.
+The top-tail fanout produced green run `27897052195`, with setup at `82s`, the
+slowest shard `non-isolated-query-theme` at `147s`, estimated workflow critical
+path at `229s`, and slowest PHPUnit test-only shell real time at `105.802s`.
+That makes the query/theme bucket the next visible timing target.
 
 The next production ownerless SQL run exposed `sql-case 46`
 (`test_ownerless_active_reader_pressure_limit_blocks_write_classes`) during a

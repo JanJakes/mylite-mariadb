@@ -165,8 +165,23 @@ Passed:
 - `cmake --build --preset format-check-prod`
 - `git diff --check`
 
-CI must provide the first full production timing for the five new fanout
-shards.
+CI run `27897052195` on `eec8f351` provided the first full production timing
+for the fanout:
+
+- `phpunit-non-isolated-content-data`: `72.858s` shell real, `69.790s`
+  reported, `74s` total;
+- `phpunit-non-isolated-media-comment`: `44.906s` shell real, `41.710s`
+  reported, `45s` total;
+- `phpunit-non-isolated-remaining-admin-site`: `26.378s` shell real,
+  `23.001s` reported, `27s` total;
+- `phpunit-non-isolated-remaining-other`: `61.672s` shell real, `58.537s`
+  reported, `62s` total;
+- `phpunit-non-isolated-remaining-platform`: `37.853s` shell real,
+  `34.709s` reported, `38s` total.
+
+The fanout moved the test-only tail to `phpunit-non-isolated-query-theme` at
+`105.802s` shell real, so the next timing slice splits query/canonical from
+theme tests.
 
 ## Risks
 
