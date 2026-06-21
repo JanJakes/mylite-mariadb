@@ -537,21 +537,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - shard: db
-            label: phpunit-db
+          - shard: db-short
+            label: phpunit-db-short
             reconnect_after_child: "1"
             child_timing_summary: "0"
             child_script_timing_summary: "0"
             profile_mysqli: "0"
-            keepalive: "0"
-            child_skip_install: "0"
-            child_restore_baseline: "0"
-          - shard: db-profile
-            label: phpunit-db-profile
-            reconnect_after_child: "1"
-            child_timing_summary: "0"
-            child_script_timing_summary: "0"
-            profile_mysqli: "1"
             keepalive: "0"
             child_skip_install: "0"
             child_restore_baseline: "0"
@@ -816,15 +807,6 @@ jobs:
             keepalive: "1"
             child_skip_install: "0"
             child_restore_baseline: "0"
-          - shard: non-isolated-remaining-runtime-io
-            label: phpunit-non-isolated-remaining-runtime-io
-            reconnect_after_child: "1"
-            child_timing_summary: "0"
-            child_script_timing_summary: "0"
-            profile_mysqli: "0"
-            keepalive: "1"
-            child_skip_install: "0"
-            child_restore_baseline: "0"
           - shard: non-isolated-remaining-other
             label: phpunit-non-isolated-remaining-other
             reconnect_after_child: "1"
@@ -1023,7 +1005,9 @@ jobs:
           run_wordpress_phpunit_filter() {
             local label="$1"
             local filter="$2"
-            MYLITE_WORDPRESS_TIMING_LABEL="${label}" \
+            shift 2
+            env "$@" \
+              MYLITE_WORDPRESS_TIMING_LABEL="${label}" \
               tools/wordpress-phpunit-mysqli-mylite --filter "${filter}"
           }
           record_wordpress_phpunit_group() {
@@ -1037,8 +1021,17 @@ jobs:
               "wordpress_total_seconds=${elapsed_seconds}"
           }
           case "${WORDPRESS_PHPUNIT_SHARD}" in
-            db | db-profile)
-              wordpress_phpunit_filter='^Tests_DB'
+            db-short)
+              group_start="$(date +%s)"
+              run_wordpress_phpunit_filter \
+                phpunit-db \
+                '^Tests_DB'
+              run_wordpress_phpunit_filter \
+                phpunit-db-profile \
+                '^Tests_DB' \
+                MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI=1
+              record_wordpress_phpunit_group "${WORDPRESS_PHPUNIT_SHARD}" "${group_start}"
+              exit 0
               ;;
             deferred-reconnect-baseline-restored)
               wordpress_phpunit_filter="${MYLITE_WORDPRESS_PHPUNIT_DEFERRED_RECONNECT_FILTER}"
@@ -1134,6 +1127,9 @@ jobs:
               run_wordpress_phpunit_filter \
                 phpunit-non-isolated-remaining-ai-connectors \
                 "^(?!${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_PLATFORM_RE}(?:_|::|$))(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_AI_CONNECTORS_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_ADMIN_SITE_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
+              run_wordpress_phpunit_filter \
+                phpunit-non-isolated-remaining-runtime-io \
+                "^(?!${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_PLATFORM_RE}(?:_|::|$))(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_RUNTIME_IO_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_ADMIN_SITE_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
               record_wordpress_phpunit_group "${WORDPRESS_PHPUNIT_SHARD}" "${group_start}"
               exit 0
               ;;
@@ -1145,9 +1141,6 @@ jobs:
               ;;
             non-isolated-remaining-navigation)
               wordpress_phpunit_filter="^(?!${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_PLATFORM_RE}(?:_|::|$))(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_NAVIGATION_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_ADMIN_SITE_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
-              ;;
-            non-isolated-remaining-runtime-io)
-              wordpress_phpunit_filter="^(?!${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_PLATFORM_RE}(?:_|::|$))(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_RUNTIME_IO_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_ADMIN_SITE_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
               ;;
             non-isolated-remaining-other)
               wordpress_phpunit_filter="^(?!${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_PLATFORM_RE}(?:_|::|$))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_ADMIN_SITE_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_AI_CONNECTORS_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_NAVIGATION_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_RUNTIME_IO_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"

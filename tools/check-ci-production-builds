@@ -646,8 +646,7 @@ require_literal "MYLITE_WORDPRESS_TIMING_LABEL: prepare-db"
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: perf-probe"
 require_literal 'MYLITE_WORDPRESS_PERF_PROFILE_CONNECT_PROCESSES: "1"'
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: \${{ matrix.label }}"
-require_literal "label: phpunit-db"
-require_literal "label: phpunit-db-profile"
+require_literal "label: phpunit-db-short"
 require_literal "label: phpunit-deferred-reconnect-baseline-restored"
 require_literal "label: phpunit-deferred-reconnect-skip-install"
 require_literal "label: phpunit-deferred-reconnect-ui"
@@ -677,10 +676,8 @@ require_literal "label: phpunit-non-isolated-remaining-short"
 require_literal "label: phpunit-non-isolated-remaining-platform-format-dependencies-embed"
 require_literal "label: phpunit-non-isolated-remaining-admin-site"
 require_literal "label: phpunit-non-isolated-remaining-navigation"
-require_literal "label: phpunit-non-isolated-remaining-runtime-io"
 require_literal "label: phpunit-non-isolated-remaining-other"
-require_literal "shard: db"
-require_literal "shard: db-profile"
+require_literal "shard: db-short"
 require_literal "shard: deferred-reconnect-baseline-restored"
 require_literal "shard: deferred-reconnect-skip-install"
 require_literal "shard: deferred-reconnect-ui"
@@ -710,7 +707,6 @@ require_literal "shard: non-isolated-remaining-short"
 require_literal "shard: non-isolated-remaining-platform-format-dependencies-embed"
 require_literal "shard: non-isolated-remaining-admin-site"
 require_literal "shard: non-isolated-remaining-navigation"
-require_literal "shard: non-isolated-remaining-runtime-io"
 require_literal "shard: non-isolated-remaining-other"
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_PRIMARY_POSTS_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_PRIMARY_OTHER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
@@ -739,10 +735,10 @@ require_literal "phpunit-non-isolated-remaining-platform-image"
 require_literal 'wordpress_phpunit_filter="^(?=(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_PLATFORM_FORMAT_DEPENDENCIES_EMBED_RE})(?:_|::|$))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_ADMIN_SITE_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal "phpunit-non-isolated-remaining-ai-connectors"
+require_literal "phpunit-non-isolated-remaining-runtime-io"
 require_literal "record_wordpress_phpunit_group"
 require_literal 'group-phpunit-${shard}'
 require_literal 'wordpress_phpunit_filter="^(?!${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_PLATFORM_RE}(?:_|::|$))(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_NAVIGATION_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_ADMIN_SITE_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
-require_literal 'wordpress_phpunit_filter="^(?!${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_PLATFORM_RE}(?:_|::|$))(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_RUNTIME_IO_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_ADMIN_SITE_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'cat "${summary}" >> "${GITHUB_STEP_SUMMARY}"'
 require_literal_count_at_least "MYLITE_WORDPRESS_PHASE: phpunit" 1
 require_literal_count_at_least 'MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"' 4
@@ -751,7 +747,7 @@ require_literal_count_at_least 'child_timing_summary: "1"' 3
 require_literal_count_at_least 'child_script_timing_summary: "1"' 3
 require_literal_count_at_least 'child_skip_install: "1"' 3
 require_literal_count_at_least 'reconnect_after_child: "0"' 3
-require_literal 'profile_mysqli: "1"'
+require_literal "MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI=1"
 require_literal 'child_restore_baseline: "1"'
 require_literal "MYLITE_WORDPRESS_DB_DIR: /tmp/mylite-wordpress-tests.mylite"
 require_literal "MYLITE_WORDPRESS_DB_BASELINE_DIR: /tmp/mylite-wordpress-tests.mylite.baseline"
@@ -895,10 +891,16 @@ require_step_literal \
   'tools/wordpress-phpunit-mysqli-mylite --filter "${wordpress_phpunit_filter}"'
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
-  'db | db-profile)'
+  'db-short)'
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
-  "wordpress_phpunit_filter='^Tests_DB'"
+  "phpunit-db \\"
+require_step_literal \
+  "Run WordPress PHPUnit shard (test only)" \
+  "phpunit-db-profile \\"
+require_step_literal \
+  "Run WordPress PHPUnit shard (test only)" \
+  "MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI=1"
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
   'deferred-reconnect-baseline-restored)'
@@ -977,9 +979,6 @@ require_step_literal \
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
   'non-isolated-remaining-navigation)'
-require_step_literal \
-  "Run WordPress PHPUnit shard (test only)" \
-  'non-isolated-remaining-runtime-io)'
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
   'non-isolated-remaining-other)'
