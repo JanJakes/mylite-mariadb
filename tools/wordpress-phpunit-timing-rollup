@@ -157,6 +157,12 @@ function add_shard_phase(row_label, value, shard, phase) {
   shard_phase_seen[shard SUBSEP phase] = 1
 }
 
+function shard_is_matrix_job(shard) {
+  return shard_has_phase(shard, "artifact_download") ||
+    shard_has_phase(shard, "artifact_extract") ||
+    shard_has_phase(shard, "docker_image")
+}
+
 function add_shard_phpunit_shell(row_label, value, shard) {
   if (!is_number(value)) {
     return
@@ -400,7 +406,12 @@ BEGIN {
 END {
   shard_max_seconds = 0
   shard_max_label = ""
+  matrix_shard_count = 0
   for (shard in shard_seen) {
+    if (!shard_is_matrix_job(shard)) {
+      continue
+    }
+    matrix_shard_count++
     if (shard_seconds[shard] > shard_max_seconds) {
       shard_max_seconds = shard_seconds[shard]
       shard_max_label = shard
@@ -445,8 +456,8 @@ END {
     row_int("wordpress_setup_phase_count", counts["setup_phase"])
     emit_sum("setup_phase", "wordpress_total_seconds", "wordpress_setup_total_seconds_sum")
   }
-  if (shard_count > 0) {
-    row_int("wordpress_shard_phase_count", shard_count)
+  if (matrix_shard_count > 0) {
+    row_int("wordpress_shard_phase_count", matrix_shard_count)
     row("wordpress_shard_critical_path_label", shard_max_label)
     row_num("wordpress_shard_critical_path_seconds_max", shard_max_seconds)
     row_num("wordpress_shard_critical_path_artifact_download_seconds", shard_phase_value(shard_max_label, "artifact_download"))
