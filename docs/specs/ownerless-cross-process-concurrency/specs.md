@@ -4840,14 +4840,16 @@ Minimum suites before support can be claimed:
     retries the insert through ownerless/native reopen and forced `.shm`
     rebuild. Hook-build SQL negative proof arms the
     local ownerless table-wait callback while representative blocked `ALTER TABLE`,
-    CHECK/FK add, `CREATE INDEX`, online index add/drop, existing-index
-    drop/rename/ignored, copy-force `ALTER TABLE`, charset conversion,
-    row-format ALTER, `TRUNCATE TABLE`, `RENAME TABLE`, `DROP TABLE`,
-    `CREATE OR REPLACE TABLE ... LIKE`, and
+    instant add/rename column, column modify/default, table comment,
+    CHECK/FK add, `CREATE INDEX`, unique and online index add, existing-index
+    drop/rename/ignored, copy-force and primary-key replacement `ALTER TABLE`,
+    charset conversion, row-format ALTER, `TRUNCATE TABLE`, `RENAME TABLE`,
+    `DROP TABLE`, `CREATE OR REPLACE TABLE ... LIKE`, and
     `CREATE OR REPLACE TABLE ... AS SELECT` variants time out, verify blocked
     metadata remains unchanged, and fail if any tested SQL shape reaches the
-    local callback, so SQL-level table-lock fault injection remains planned
-    beyond the covered external native table-wait registry path.
+    local callback, so positive SQL-level local table-wait fault injection
+    remains unclaimed beyond the covered external native table-wait registry
+    path.
     Ownerless SQL `LOCK TABLES`/`UNLOCK TABLES` is rejected until SQL locked-table
     mode has a design,
   - before/after page-version append,

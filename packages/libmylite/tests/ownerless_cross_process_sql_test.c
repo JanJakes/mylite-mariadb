@@ -20120,7 +20120,28 @@ static void assert_ownerless_table_wait_negative_state(mylite_db *db) {
             "SELECT COUNT(*) FROM information_schema.statistics "
             "WHERE table_schema = 'app' "
             "AND table_name = 'ownerless_sql' "
-            "AND index_name = 'ownerless_table_wait_existing_idx'"
+            "AND index_name = 'ownerless_table_wait_existing_idx' "
+            "AND ignored = 'NO'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_sql' "
+            "AND index_name LIKE 'ownerless_table_wait_negative%'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_sql' "
+            "AND index_name = 'PRIMARY' "
+            "AND column_name = 'id' "
+            "AND seq_in_index = 1"
         ) == 1U
     );
     assert(
@@ -20154,10 +20175,31 @@ static void assert_ownerless_table_wait_negative_state(mylite_db *db) {
     assert(
         query_unsigned(
             db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_sql' "
+            "AND column_name = 'value' "
+            "AND data_type = 'int' "
+            "AND column_default IS NULL"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_sql' "
+            "AND column_name LIKE 'wait_negative_%'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
             "SELECT COUNT(*) FROM information_schema.tables "
             "WHERE table_schema = 'app' "
             "AND table_name = 'ownerless_sql' "
-            "AND row_format = 'Compact'"
+            "AND row_format = 'Compact' "
+            "AND table_comment = ''"
         ) == 1U
     );
 }
@@ -20167,6 +20209,36 @@ static void test_ownerless_table_wait_sql_negative_proof(void) {
         {
             .name = "alter-add-column",
             .sql = "ALTER TABLE app.ownerless_sql ADD COLUMN wait_negative_note VARCHAR(32)",
+        },
+        {
+            .name = "alter-add-column-instant-lock-none",
+            .sql = "ALTER TABLE app.ownerless_sql "
+                   "ADD COLUMN wait_negative_first INT NOT NULL DEFAULT 7 FIRST, "
+                   "ALGORITHM=INSTANT, LOCK=NONE",
+        },
+        {
+            .name = "alter-add-column-instant-lock-shared",
+            .sql = "ALTER TABLE app.ownerless_sql "
+                   "ADD COLUMN wait_negative_after INT NOT NULL DEFAULT 11 AFTER value, "
+                   "ALGORITHM=INSTANT, LOCK=SHARED",
+        },
+        {
+            .name = "alter-rename-column-instant",
+            .sql = "ALTER TABLE app.ownerless_sql "
+                   "RENAME COLUMN value TO wait_negative_value, "
+                   "ALGORITHM=INSTANT, LOCK=DEFAULT",
+        },
+        {
+            .name = "alter-modify-column",
+            .sql = "ALTER TABLE app.ownerless_sql MODIFY COLUMN value BIGINT NOT NULL",
+        },
+        {
+            .name = "alter-column-default",
+            .sql = "ALTER TABLE app.ownerless_sql ALTER COLUMN value SET DEFAULT 42",
+        },
+        {
+            .name = "alter-table-comment",
+            .sql = "ALTER TABLE app.ownerless_sql COMMENT='ownerless table wait negative'",
         },
         {
             .name = "alter-add-check-constraint",
@@ -20183,6 +20255,11 @@ static void test_ownerless_table_wait_sql_negative_proof(void) {
             .name = "create-index",
             .sql = "CREATE INDEX ownerless_table_wait_negative_idx "
                    "ON app.ownerless_sql(value)",
+        },
+        {
+            .name = "alter-add-unique-index",
+            .sql = "ALTER TABLE app.ownerless_sql "
+                   "ADD UNIQUE INDEX ownerless_table_wait_negative_unique_idx (value)",
         },
         {
             .name = "alter-add-index-online",
@@ -20215,6 +20292,11 @@ static void test_ownerless_table_wait_sql_negative_proof(void) {
             .name = "alter-force-copy",
             .sql = "ALTER TABLE app.ownerless_sql "
                    "FORCE, ALGORITHM=COPY, LOCK=EXCLUSIVE",
+        },
+        {
+            .name = "alter-primary-key-replace",
+            .sql = "ALTER TABLE app.ownerless_sql "
+                   "DROP PRIMARY KEY, ADD PRIMARY KEY (value)",
         },
         {
             .name = "alter-convert-charset",

@@ -2,9 +2,9 @@
 
 ## Problem
 
-SQL-level ownerless table-lock fault injection remains planned because explored
-blocked DDL shapes stop before the native InnoDB table-wait callback. Recent
-ownerless work added `CREATE OR REPLACE TABLE ... LIKE` and
+Positive SQL-level ownerless table-lock fault injection remains unclaimed
+because explored blocked DDL shapes stop before the native InnoDB table-wait
+callback. Recent ownerless work added `CREATE OR REPLACE TABLE ... LIKE` and
 `CREATE OR REPLACE TABLE ... AS SELECT` evidence in pressure and crash
 selectors. The hook-only table-wait negative proof should include these
 replacement-copy DDL spellings so the unsupported table-wait boundary remains
@@ -47,7 +47,8 @@ Extend `test_ownerless_table_wait_sql_negative_proof()`:
 In scope:
 
 - Hook-only negative proof for replacement-copy DDL shapes.
-- Documentation that keeps SQL-level table-lock fault injection marked planned.
+- Documentation that keeps positive SQL-level table-lock fault injection
+  unclaimed.
 
 Out of scope:
 
@@ -101,7 +102,8 @@ No production binary-size impact. The change is hook-build test and docs only.
 - Neither case signals the `table-lock-wait` fault pipe.
 - The original target table remains readable and unchanged through ownerless
   reopen, forced `.shm` rebuild, and native exclusive reopen.
-- Docs continue to mark SQL-level table-lock fault injection as planned.
+- Docs continue to keep positive SQL-level table-lock fault injection
+  unclaimed.
 
 ## Risks And Follow-Up
 

@@ -101,6 +101,6 @@ No production code changes. Test-only C code grows slightly.
 ## Risks And Open Questions
 
 - This is direct hook coverage, not a SQL-level table-lock fault-injection
-  breakthrough. SQL-level table-lock fault injection remains planned unless a
-  MariaDB execution shape reaches the local table-wait callback in a
-  deterministic and product-relevant way.
+  breakthrough. Positive SQL-level local table-wait fault injection remains
+  unclaimed unless a MariaDB execution shape reaches the local table-wait
+  callback in a deterministic and product-relevant way.

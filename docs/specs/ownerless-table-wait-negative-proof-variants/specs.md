@@ -3,10 +3,11 @@
 ## Problem
 
 Ownerless lock fault coverage proves record-lock wait cleanup through SQL and
-table-lock waiter cleanup through the primitive registry. SQL-level table-lock
-fault injection remains unclaimed because the explored blocked SQL shapes stop
-at MariaDB metadata-lock waits before InnoDB publishes a native table-lock wait
-through MyLite's ownerless table-wait callback.
+table-lock waiter cleanup through the primitive registry, embedded hook
+dispatch, and the external native table-wait registry path. Positive SQL-level
+table-lock fault injection remains unclaimed because the explored blocked SQL
+shapes stop at MariaDB metadata-lock waits before InnoDB publishes a local
+native table-lock wait through MyLite's ownerless table-wait callback.
 
 The existing hook SQL negative proof covers one blocked `ALTER TABLE` shape and
 an initial DDL matrix. It should continue to track representative DDL variants,
@@ -43,15 +44,23 @@ mark ignored, a parent table that FK-add can reference, a latin1 string column,
 and a compact row-format baseline:
 
 - `ALTER TABLE ... ADD COLUMN`
+- `ALTER TABLE ... ADD COLUMN ..., ALGORITHM=INSTANT` with `LOCK=NONE` and
+  `LOCK=SHARED`
+- `ALTER TABLE ... RENAME COLUMN ..., ALGORITHM=INSTANT, LOCK=DEFAULT`
+- `ALTER TABLE ... MODIFY COLUMN`
+- `ALTER TABLE ... ALTER COLUMN ... SET DEFAULT`
+- `ALTER TABLE ... COMMENT`
 - `ALTER TABLE ... ADD CONSTRAINT ... CHECK`
 - `ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY`
 - `CREATE INDEX`
+- `ALTER TABLE ... ADD UNIQUE INDEX`
 - `ALTER TABLE ... ADD INDEX ..., ALGORITHM=INPLACE, LOCK=NONE`
 - `DROP INDEX` against an existing secondary index
 - `ALTER TABLE ... DROP INDEX ..., ALGORITHM=NOCOPY, LOCK=NONE`
 - `ALTER TABLE ... RENAME INDEX`
 - `ALTER TABLE ... ALTER INDEX ... IGNORED`
 - `ALTER TABLE ... FORCE, ALGORITHM=COPY, LOCK=EXCLUSIVE`
+- `ALTER TABLE ... DROP PRIMARY KEY, ADD PRIMARY KEY`
 - `ALTER TABLE ... CONVERT TO CHARACTER SET ... COLLATE ...`
 - `ALTER TABLE ... ROW_FORMAT=DYNAMIC`
 - `TRUNCATE TABLE`
@@ -65,13 +74,16 @@ and the `table-lock-wait` unsafe fault armed. Passing behavior is a MariaDB lock
 wait timeout with no fault-pipe signal. A fault-pipe signal means the SQL shape
 did reach the ownerless InnoDB table-wait callback, so the negative proof fails
 and the paused child is killed. After the holder releases, the test verifies
-that blocked variants left the original secondary index, absent CHECK/FK
-constraints, latin1 column collation, and compact row-format metadata intact
-across ownerless reopen, forced `.shm` rebuild, and native exclusive reopen.
+that blocked variants left the original secondary and primary-key metadata,
+absent attempted secondary indexes, absent CHECK/FK constraints, original
+column layout/defaults, latin1 column collation, compact row-format metadata,
+and empty table comment intact across ownerless reopen, forced `.shm` rebuild,
+and native exclusive reopen.
 
 The slice does not treat a broader negative proof as positive SQL table-lock
-fault coverage. The compatibility docs must continue to say that SQL-level
-table-lock fault injection remains planned for native table-wait paths.
+fault coverage. The compatibility docs must continue to keep positive
+SQL-level local table-wait fault injection unclaimed beyond the covered
+external native table-wait registry path.
 
 ## Scope And Non-Goals
 
@@ -81,12 +93,13 @@ In scope:
   including online option, existing-index metadata mutations, constraint DDL,
   storage/rebuild ALTER variants, and replacement-copy DDL.
 - A focused hook CTest label for the table-wait SQL negative proof.
-- Compatibility/spec documentation that narrows the claim to negative evidence.
+- Compatibility/spec documentation that narrows the claim to negative evidence
+  and the covered external native table-wait registry path.
 
 Out of scope:
 
 - Enabling ownerless `LOCK TABLES` or SQL locked-table mode.
-- Claiming SQL-level table-lock fault injection coverage.
+- Claiming positive SQL-level local table-wait callback coverage.
 - Changing production lock acquisition or recovery behavior.
 - Broader randomized DDL or external MariaDB/RQG oracles.
 
@@ -94,7 +107,7 @@ Out of scope:
 
 No supported SQL behavior changes. The test evidence tightens the documented
 unsupported boundary: ownerless mode still rejects SQL locked-table mode, and
-tested blocked DDL variants are known to stop before the ownerless native
+tested blocked DDL variants are known to stop before the local ownerless native
 table-wait fault hook.
 
 ## Directory And Lifecycle Impact
@@ -139,11 +152,14 @@ are added under the existing unsafe ownerless hook build.
 - No variant signals the `table-lock-wait` fault pipe.
 - The final table state can be altered, read through ownerless reopen, read
   after forced `.shm` rebuild, and read through native exclusive reopen, while
-  the pre-existing secondary index remains present, the attempted CHECK/FK
-  constraints remain absent, the latin1 column collation remains unchanged, and
-  the compact row-format baseline remains unchanged.
-- Docs keep SQL-level table-lock fault injection marked planned rather than
-  covered.
+  the pre-existing secondary index remains present and non-ignored, attempted
+  secondary indexes remain absent, the primary key remains on `id`, the
+  attempted CHECK/FK constraints remain absent, the latin1 column collation
+  remains unchanged, the original `value` type/default remains unchanged, the
+  attempted `wait_negative_%` columns remain absent, the compact row-format
+  baseline remains unchanged, and the table comment remains empty.
+- Docs keep positive SQL-level local table-wait fault injection unclaimed
+  rather than covered.
 
 ## Risks And Follow-Up
 
@@ -152,4 +168,5 @@ are added under the existing unsafe ownerless hook build.
   intended signal to replace the negative proof with positive SQL fault
   injection coverage.
 - Native table-lock waits may be reachable through SQL shapes not in this
-  matrix. They remain a planned investigation, not an ownerless support claim.
+  matrix. They remain unclaimed unless a future slice proves a positive SQL
+  callback path, not an ownerless support claim.
