@@ -135,8 +135,20 @@ Passed:
 - `cmake --build --preset format-check-prod`
 - `git diff --check`
 
-CI must provide the first full production timing for
-`phpunit-non-isolated-content-media` and `phpunit-non-isolated-user-auth`.
+CI run `27896266558` on `5385dc28` provided the first full production timing
+for the split:
+
+- `phpunit-non-isolated-content-media`: `117.366s` shell real,
+  `114.134s` reported, `118s` total;
+- `phpunit-non-isolated-user-auth`: `30.253s` shell real, `27.034s`
+  reported, `31s` total;
+- `phpunit-non-isolated-rest-controller`: `147.060s` shell real,
+  `143.930s` reported, `147s` total;
+- `phpunit-non-isolated-remaining`: `122.608s` shell real, `119.399s`
+  reported, `124s` total.
+
+The content/user split reduced the old broad content/user timing boundary and
+made REST controller classes the next visible production critical path.
 
 ## Risks
 

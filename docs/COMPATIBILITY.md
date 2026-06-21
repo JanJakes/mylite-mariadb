@@ -1199,6 +1199,11 @@ the green `1f8313b0` production run showed setup at `476s`, slowest shard
 `non-isolated-rest-controller` at `182s`, estimated workflow critical path at
 `658s`, and slowest PHPUnit test-only shell time at `140.722s`, while summed
 parallel non-isolated test work was `552.648s`.
+The later green `27896266558` run, after splitting content/media from
+user/auth, reported setup at `74s`, slowest shard
+`non-isolated-rest-controller` at `186s`, estimated workflow critical path at
+`260s`, and slowest PHPUnit test-only shell time at `147.060s`, which is the
+evidence for the REST controller tail split.
 
 `mylite_reset()` now skips MariaDB's `mysql_stmt_reset()` only when a prepared
 statement has been fully drained to `MYLITE_DONE`; partial results and active
@@ -1908,6 +1913,14 @@ XML-RPC, option, and metadata class families, and the remaining shard excludes
 that family in addition to REST and query/theme/block/token. The production
 audit guards the new split and keeps all timing-producing WordPress shards on
 the same Release MyLite and MinSizeRel MariaDB embedded artifacts.
+After the follow-up content/user split, green run `27896266558` showed
+`phpunit-non-isolated-rest-controller` as the new PHPUnit test-only tail at
+`147.060s` shell real, ahead of `phpunit-non-isolated-remaining` at
+`122.608s`, `phpunit-non-isolated-content-media` at `117.366s`, and
+`phpunit-non-isolated-user-auth` at `30.253s`. CI now splits the REST
+controller tail into WordPress content-object controllers and other REST
+controllers while preserving the same production build guards and REST
+non-controller boundary.
 Current stats-enabled ownerless autocommit attribution also shows zero
 non-SELECT page-version read probes after the InnoDB read-complete overlay was
 limited to MyLite-classified plain reads. A 1000-row serial production

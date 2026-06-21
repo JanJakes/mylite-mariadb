@@ -895,6 +895,11 @@ run for `1f8313b0` would report setup at `476s`, the slowest shard
 `658s`, and slowest PHPUnit test-only shell real time at `140.722s`. That keeps
 the visible performance answer separate from summed parallel shard work, which
 was `552.648s` across non-isolated shards in the same run.
+After the later content/user split, green run `27896266558` reported setup at
+`74s`, the slowest shard `non-isolated-rest-controller` at `186s`, estimated
+workflow critical path at `260s`, and slowest PHPUnit test-only shell real time
+at `147.060s`. That production evidence made the REST controller tail the next
+CI timing split target.
 
 The next production ownerless SQL run exposed `sql-case 46`
 (`test_ownerless_active_reader_pressure_limit_blocks_write_classes`) during a

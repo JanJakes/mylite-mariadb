@@ -102,3 +102,6 @@ This is a CI wall-clock and observability optimization, not an engine
 throughput improvement. If the first production run shows one REST subshard
 still dominates, the next bounded follow-up is a second split using the
 reported labels rather than changing MyLite runtime code without evidence.
+That follow-up became the REST controller tail split after later production
+run `27896266558` showed `phpunit-non-isolated-rest-controller` as the longest
+test-only shard.

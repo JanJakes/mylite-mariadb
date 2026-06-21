@@ -55,7 +55,12 @@ query/theme/canonical classes from block/token classes after
 remaining test-only gate at `139.988s` shell real, ahead of REST controller at
 `127.890s` and remaining at `115.693s`, so the next split divides content/media
 classes from user/auth/privacy classes while preserving the same non-isolated
-exclusion authority.
+exclusion authority. Run `27896266558` then showed
+`phpunit-non-isolated-rest-controller` as the longest test-only gate at
+`147.060s` shell real, ahead of `phpunit-non-isolated-remaining` at
+`122.608s` and `phpunit-non-isolated-content-media` at `117.366s`, so the
+next split divides REST content-object controllers from the remaining REST
+controllers.
 
 The REST shard includes
 `WP_Test_REST_Schema_Initialization::test_build_wp_api_client_fixtures`, which
