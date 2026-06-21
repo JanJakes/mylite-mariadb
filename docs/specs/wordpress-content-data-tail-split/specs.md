@@ -150,8 +150,25 @@ Passed:
 - `cmake --build --preset format-check-prod`
 - `git diff --check`
 
-CI must provide the first full production timing for the two new content
-shards.
+CI run `27898995461` for `a2a0b8f4` passed. The production timing rollup
+reported:
+
+- setup: `71s`;
+- `non-isolated-content-entity`: `87s` total, with `61.447s` PHPUnit shell;
+- `non-isolated-content-settings-meta`: `50s` total, with `12.382s` PHPUnit
+  shell;
+- critical shard: `non-isolated-query-canonical` at `106s`, with `5s`
+  artifact download, `2s` artifact extract, `35s` Docker image setup, and
+  `64s` PHPUnit total;
+- max PHPUnit shell body:
+  `phpunit-non-isolated-rest-content-controller` at `73.871s`;
+- estimated WordPress workflow critical path: `177s`;
+- total shard Docker setup rows: `473s`.
+
+Compared with the preceding hot-cache Buildx timing (`184s` estimated critical
+path), the slice removed `non-isolated-content-data` as the critical shard but
+only bought about `7s` wall-clock because `query-canonical` and REST content
+were already close behind it.
 
 ## Risks
 

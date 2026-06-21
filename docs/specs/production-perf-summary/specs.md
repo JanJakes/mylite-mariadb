@@ -939,6 +939,14 @@ The next bounded wall-clock slice splits that hot-cache critical
 regex as the remaining-shard exclusion authority. The local pinned-test-name
 proxy divides the current content-data surface into `1200` entity tests and
 `422` settings/meta tests. CI remains the authority for the actual timing win.
+CI run `27898995461` for that slice passed and reported setup at `71s`, the
+new critical shard `non-isolated-query-canonical` at `106s`, estimated
+WordPress critical path at `177s`, and total Docker setup rows at `473s`. The
+two new content shards were `87s` (`content-entity`) and `50s`
+(`content-settings-meta`). The split therefore removed the `117s`
+content-data tail but bought only about `7s` against the preceding `184s`
+hot-cache estimate because query/canonical and REST content were already close
+behind it.
 
 The next production ownerless SQL run exposed `sql-case 46`
 (`test_ownerless_active_reader_pressure_limit_blocks_write_classes`) during a
