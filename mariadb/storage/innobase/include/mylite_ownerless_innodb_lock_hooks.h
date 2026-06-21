@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define MYLITE_OWNERLESS_INNODB_REDO_BATCH_MAX_RANGES 48U
+#define MYLITE_OWNERLESS_INNODB_REDO_BATCH_MAX_RANGES 61U
 
 #ifdef __cplusplus
 #include <atomic>

@@ -32,6 +32,7 @@
 #include "ownerless_trx_registry.h"
 #include "ownerless_wait.h"
 
+#include "mylite_ownerless_innodb_lock_hooks.h"
 #include "ownerless_test_latch_compat.h"
 
 #define MYLITE_TEST_REMOVE_TREE_MAX_FDS 32
@@ -410,6 +411,7 @@ static void test_redo_state_tracks_lsn_and_owner_lifecycle(void);
 static void test_redo_state_seeds_checkpoint_monotonically(void);
 static void test_redo_state_reserves_ranges_for_same_owner_threads(void);
 static void test_redo_state_allows_bounded_fanout_reservations(void);
+static void test_redo_state_deferred_batch_cap_preserves_peer_headroom(void);
 static void test_redo_state_tracks_contiguous_written_ranges(void);
 static void test_redo_state_combines_write_and_leave_like_separate_steps(void);
 static void test_redo_state_batches_write_and_leave_ranges(void);
@@ -600,6 +602,7 @@ int main(void) {
     test_redo_state_seeds_checkpoint_monotonically();
     test_redo_state_reserves_ranges_for_same_owner_threads();
     test_redo_state_allows_bounded_fanout_reservations();
+    test_redo_state_deferred_batch_cap_preserves_peer_headroom();
     test_redo_state_tracks_contiguous_written_ranges();
     test_redo_state_combines_write_and_leave_like_separate_steps();
     test_redo_state_batches_write_and_leave_ranges();
@@ -14429,6 +14432,108 @@ static void test_redo_state_allows_bounded_fanout_reservations(void) {
     );
     assert(snapshot.active_reservation_count == 0U);
     assert(snapshot.written_lsn == 400U + reservation_count);
+}
+
+static void test_redo_state_deferred_batch_cap_preserves_peer_headroom(void) {
+    uint8_t state[MYLITE_OWNERLESS_REDO_STATE_SIZE];
+    mylite_ownerless_redo_state_range ranges[MYLITE_OWNERLESS_INNODB_REDO_BATCH_MAX_RANGES];
+    uint64_t latest_lsn = 0U;
+    uint64_t peer_start_lsn = 0U;
+    uint64_t peer_end_lsn = 0U;
+    uint64_t written_lsn = 0U;
+    uint64_t advanced_lsn = 0U;
+    uint32_t remaining = 0U;
+    size_t completed_count = 0U;
+    mylite_ownerless_redo_state_snapshot snapshot;
+
+    assert(
+        mylite_ownerless_redo_state_initialize(state, sizeof(state), 1000U, 1000U) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    for (uint32_t index = 0U; index < MYLITE_OWNERLESS_INNODB_REDO_BATCH_MAX_RANGES; ++index) {
+        assert(
+            mylite_ownerless_redo_state_enter(state, sizeof(state), 1U, 10U, 100U, &latest_lsn) ==
+            MYLITE_OWNERLESS_REDO_STATE_OK
+        );
+        assert(
+            mylite_ownerless_redo_state_reserve(
+                state,
+                sizeof(state),
+                1U,
+                10U,
+                0U,
+                1U,
+                &ranges[index].start_lsn,
+                &ranges[index].end_lsn
+            ) == MYLITE_OWNERLESS_REDO_STATE_OK
+        );
+    }
+    assert(
+        mylite_ownerless_redo_state_read_snapshot(state, sizeof(state), &snapshot) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(snapshot.refcount == MYLITE_OWNERLESS_INNODB_REDO_BATCH_MAX_RANGES);
+    assert(snapshot.active_reservation_count == MYLITE_OWNERLESS_INNODB_REDO_BATCH_MAX_RANGES);
+
+    assert(
+        mylite_ownerless_redo_state_enter(state, sizeof(state), 2U, 20U, 100U, &latest_lsn) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(
+        mylite_ownerless_redo_state_reserve(
+            state,
+            sizeof(state),
+            2U,
+            20U,
+            0U,
+            1U,
+            &peer_start_lsn,
+            &peer_end_lsn
+        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(
+        mylite_ownerless_redo_state_complete_write_and_leave(
+            state,
+            sizeof(state),
+            2U,
+            20U,
+            peer_start_lsn,
+            peer_end_lsn,
+            0U,
+            &written_lsn,
+            &advanced_lsn,
+            &remaining
+        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(remaining == MYLITE_OWNERLESS_INNODB_REDO_BATCH_MAX_RANGES);
+
+    assert(
+        mylite_ownerless_redo_state_complete_write_and_leave_batch(
+            state,
+            sizeof(state),
+            1U,
+            10U,
+            ranges,
+            MYLITE_OWNERLESS_INNODB_REDO_BATCH_MAX_RANGES,
+            1200U,
+            &written_lsn,
+            &advanced_lsn,
+            &remaining,
+            &completed_count
+        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(completed_count == MYLITE_OWNERLESS_INNODB_REDO_BATCH_MAX_RANGES);
+    assert(advanced_lsn == 1200U);
+    assert(remaining == 0U);
+    assert(
+        mylite_ownerless_redo_state_read_snapshot(state, sizeof(state), &snapshot) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(snapshot.refcount == 0U);
+    assert(snapshot.active_reservation_count == 0U);
+    assert(snapshot.completed_range_count == 0U);
+    assert(snapshot.latest_lsn == 1200U);
+    assert(snapshot.written_lsn == 1200U);
 }
 
 static void test_redo_state_tracks_contiguous_written_ranges(void) {

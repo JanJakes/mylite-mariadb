@@ -201,6 +201,7 @@ if(BUILD_TESTING)
     )
     mylite_configure_embedded_c_test(mylite_ownerless_primitives_test)
     target_include_directories(mylite_ownerless_primitives_test PRIVATE
+      "${PROJECT_SOURCE_DIR}/mariadb/storage/innobase/include"
       "${CMAKE_CURRENT_SOURCE_DIR}/src"
     )
 

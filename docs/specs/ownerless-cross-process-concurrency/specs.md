@@ -6604,6 +6604,19 @@ subsystems that this mode needs:
   `0.7717`. This reduces callback and progress-latch churn for large
   visible-fast row lists without changing native redo bytes, page-visible
   ordering, WAL format, or group-commit policy.
+  A later bounded range-cap follow-up raises the fixed deferred-redo buffer from
+  `48` to `61` ranges, deliberately below the `64` shared redo-state slots after
+  accounting for the active-owner entry and two peer headroom slots. Primitive
+  coverage proves a full configured batch still leaves room for a newly arriving
+  peer to enter and reserve one redo range, while embedded hook coverage proves
+  the full `61`-range batch is delivered as one batch callback. The accepted
+  100-row stats-enabled page-publish attribution probe reported database redo
+  written/leave callbacks at `39`/`38` across ten bulk statements while
+  preserving `181.800` logical page-write written-hook events per statement,
+  `2.000` page-version records per statement, and `32.300` page-log append calls
+  per statement; stats-off local samples remained noisy, so this is recorded as
+  a bounded callback/progress-latch reduction rather than a broad throughput
+  claim.
   The follow-up bulk engine attribution slice is diagnostic-only: stats-enabled
   production probes now collect ordinary bulk SQL-handler, InnoDB-handler, and
   deep InnoDB counters and emit compact ownerless-minus-ordinary bulk deltas for

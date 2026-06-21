@@ -56,6 +56,16 @@ constexpr size_t k_page_write_refresh_negative_cache_entries= 64;
 constexpr size_t k_external_page_observation_entries= 128;
 constexpr size_t k_deferred_redo_batch_capacity=
     MYLITE_OWNERLESS_INNODB_REDO_BATCH_MAX_RANGES;
+constexpr size_t k_shared_redo_state_slot_count= 64;
+constexpr size_t k_deferred_redo_batch_active_owner_slots= 1;
+constexpr size_t k_deferred_redo_batch_peer_headroom_slots= 2;
+
+static_assert(
+    k_deferred_redo_batch_capacity <=
+        k_shared_redo_state_slot_count -
+            k_deferred_redo_batch_active_owner_slots -
+            k_deferred_redo_batch_peer_headroom_slots,
+    "deferred redo batches must leave peer entry and reservation headroom");
 
 struct deferred_redo_range
 {
