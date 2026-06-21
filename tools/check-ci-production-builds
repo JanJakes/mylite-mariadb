@@ -518,14 +518,17 @@ require_literal "build/php-embedded-prod/packages/libmylite/mylite_embedded_perf
 require_step_order "Run embedded performance probe" "Run embedded non-ownerless tests"
 require_step_order "Run embedded large-row bulk performance probe" "Run embedded non-ownerless tests"
 require_step_order "Run embedded large-row ownerless attribution probe" "Run embedded non-ownerless tests"
+require_step_order "Run embedded large-row ownerless page-write attribution probe" "Run embedded non-ownerless tests"
 require_step_order "Run embedded ownerless attribution probe" "Run embedded non-ownerless tests"
 require_step_order "Run embedded ownerless append attribution probe" "Run embedded non-ownerless tests"
 require_step_order "Run embedded performance probe" "Run embedded ownerless SQL tests"
 require_step_order "Run embedded large-row bulk performance probe" "Run embedded ownerless SQL tests"
 require_step_order "Run embedded large-row ownerless attribution probe" "Run embedded ownerless SQL tests"
+require_step_order "Run embedded large-row ownerless page-write attribution probe" "Run embedded ownerless SQL tests"
 require_step_order "Run embedded ownerless attribution probe" "Run embedded ownerless SQL tests"
 require_step_order "Run embedded ownerless append attribution probe" "Run embedded ownerless SQL tests"
 require_step_order "Run embedded large-row ownerless attribution probe" "Upload embedded performance reports"
+require_step_order "Run embedded large-row ownerless page-write attribution probe" "Upload embedded performance reports"
 require_step_order "Run embedded ownerless attribution probe" "Upload embedded performance reports"
 require_step_order "Run embedded ownerless append attribution probe" "Upload embedded performance reports"
 require_step_order "Show WordPress timing summary" "Upload WordPress timing summary"
@@ -571,6 +574,25 @@ forbid_step_literal \
 require_step_literal \
   "Run embedded large-row ownerless attribution probe" \
   "tee build/embedded-performance-reports/large-row-ownerless-attribution.log"
+require_embedded_timing_step_guards "Run embedded large-row ownerless page-write attribution probe"
+require_step_literal \
+  "Run embedded large-row ownerless page-write attribution probe" \
+  'MYLITE_PERF_BULK_INSERT_ROWS_PER_STATEMENT: "100"'
+require_step_literal \
+  "Run embedded large-row ownerless page-write attribution probe" \
+  'MYLITE_PERF_INSERT_ITERATIONS: "1000"'
+require_step_literal \
+  "Run embedded large-row ownerless page-write attribution probe" \
+  'MYLITE_PERF_OWNERLESS_PAGE_WRITE_STATS: "1"'
+forbid_step_literal \
+  "Run embedded large-row ownerless page-write attribution probe" \
+  "MYLITE_PERF_OWNERLESS_PAGE_PUBLISH_STATS"
+forbid_step_literal \
+  "Run embedded large-row ownerless page-write attribution probe" \
+  "MYLITE_PERF_OWNERLESS_APPEND_STATS"
+require_step_literal \
+  "Run embedded large-row ownerless page-write attribution probe" \
+  "tee build/embedded-performance-reports/large-row-ownerless-page-write-attribution.log"
 require_embedded_timing_step_guards "Run embedded ownerless attribution probe"
 require_step_literal \
   "Run embedded ownerless attribution probe" \

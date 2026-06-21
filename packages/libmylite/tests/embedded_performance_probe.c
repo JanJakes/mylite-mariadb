@@ -1561,14 +1561,20 @@ int main(void) {
     bulk_insert_timing ordinary_bulk_timing = {0};
     bulk_insert_timing ownerless_bulk_timing = {0};
 
+    const int ownerless_bulk_needs_first_stats = page_publish_stats || page_write_stats;
+
     if (page_publish_stats) {
         ordinary_bulk_first_stats.innodb_deep = ordinary_bulk_first_innodb_deep;
+    }
+    if (ownerless_bulk_needs_first_stats) {
         ownerless_bulk_first_stats.page_publish = ownerless_bulk_first_page_publish;
         ownerless_bulk_first_stats.database_perf = ownerless_bulk_first_database_perf;
         ownerless_bulk_first_stats.page_write = ownerless_bulk_first_page_write;
         ownerless_bulk_first_stats.page_log_append = ownerless_bulk_first_page_log_append;
         ownerless_bulk_first_stats.commit_visibility = ownerless_bulk_first_commit_visibility;
-        ownerless_bulk_first_stats.innodb_deep = ownerless_bulk_first_innodb_deep;
+        if (page_publish_stats) {
+            ownerless_bulk_first_stats.innodb_deep = ownerless_bulk_first_innodb_deep;
+        }
     }
 
     if (bulk_insert_rows_per_statement == 0U) {
@@ -2130,7 +2136,7 @@ int main(void) {
         bulk_insert_rows_per_statement,
         ownerless_insert_stats,
         &ownerless_bulk_timing,
-        page_publish_stats ? &ownerless_bulk_first_stats : NULL
+        ownerless_bulk_needs_first_stats ? &ownerless_bulk_first_stats : NULL
     );
     emit_rate("mylite_perf_ownerless_insert_autocommit_bulk_rows", insert_iterations, seconds);
     emit_rate(
@@ -2225,6 +2231,12 @@ int main(void) {
         mylite_exec_result_perf_set_enabled(0);
         emit_exec_result_perf_stats("mylite_perf_ownerless_insert_autocommit_bulk");
         emit_page_write_perf_stats("mylite_perf_ownerless_insert_autocommit_bulk");
+        emit_ownerless_bulk_autocommit_phase_summary(
+            insert_iterations,
+            bulk_insert_statements,
+            &ownerless_bulk_timing,
+            &ownerless_bulk_first_stats
+        );
     }
     if (ownerless_insert_stats) {
         mylite_ownerless_innodb_set_page_publish_stats_enabled(0);

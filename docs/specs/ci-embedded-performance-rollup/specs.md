@@ -102,3 +102,13 @@ Follow-up page-write phase column refresh passed:
   --output-on-failure`
 - `tools/check-ci-production-builds`
 - `git diff --check`
+
+Follow-up page-write-only phase split:
+
+- The embedded performance probe now captures first-statement snapshots for
+  `MYLITE_PERF_OWNERLESS_PAGE_WRITE_STATS=1` runs, so remaining page-write
+  phase rows are available without enabling page-publish diagnostics.
+- CI adds `large-row-ownerless-page-write-attribution.log`, a reduced
+  production-build probe that keeps page-publish and append diagnostics
+  disabled while surfacing remaining commit-log, redo-leave, no-dirty-loop, and
+  no-dirty page-publish attribution in the rollup.

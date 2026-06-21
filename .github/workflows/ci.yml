@@ -155,6 +155,21 @@ jobs:
           build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe \
             | tee build/embedded-performance-reports/large-row-ownerless-attribution.log
 
+      - name: Run embedded large-row ownerless page-write attribution probe
+        env:
+          MYLITE_PERF_OPEN_CLOSE_ITERATIONS: "1"
+          MYLITE_PERF_SELECT_ITERATIONS: "20"
+          MYLITE_PERF_INSERT_ITERATIONS: "1000"
+          MYLITE_PERF_BULK_INSERT_ROWS_PER_STATEMENT: "100"
+          MYLITE_PERF_OWNERLESS_PAGE_WRITE_STATS: "1"
+        run: |
+          set -euo pipefail
+          mkdir -p build/embedded-performance-reports
+          tools/require-cmake-build-type MinSizeRel build/mariadb-embedded
+          tools/require-cmake-release-build build/php-embedded-prod
+          build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe \
+            | tee build/embedded-performance-reports/large-row-ownerless-page-write-attribution.log
+
       - name: Run embedded ownerless attribution probe
         env:
           MYLITE_PERF_OPEN_CLOSE_ITERATIONS: "1"
