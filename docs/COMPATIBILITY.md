@@ -392,11 +392,12 @@ versions, page-log appends, native-support publication, and commit-visibility
 choices. This separates the single-row prepared autocommit cost from the
 multi-row fast-path SQL shape that ownerless concurrency now admits.
 Ownerless page-log append batching now covers streaming-proven visible-fast
-`INSERT ... VALUES` statements with one through 16384 row constructors, matching
+`INSERT ... VALUES` statements with one through 32768 row constructors, matching
 the default production bulk probe shape plus bounded eight-row, sixteen-row,
 thirty-two-row, sixty-four-row, 128-row, 256-row, 512-row, 1024-row, and
-2048-row, plus 4096-row, 8192-row, and 16384-row bulk diagnostics while keeping
-larger row lists and broader DML on the previous append-session policy.
+2048-row, plus 4096-row, 8192-row, 16384-row, and 32768-row bulk diagnostics
+while keeping row lists above 32768 and broader DML on the previous
+append-session policy.
 The row-list proof now scans the original SQL text instead of relying on the
 fixed policy token snapshot, so large statements are not admitted by accidental
 token-window undercounting. Page-version record volume, history-proof
@@ -504,8 +505,8 @@ from `4136.000` to `2.000` per statement, page-log append calls dropping from
 statement, deferred latest-checkpoint coalesces moving from `0.000` to
 `128.000` per statement, ownerless `mysql_query()` moving from `424.537` to
 `66.720 ms` per statement, and ownerless bulk throughput moving from `9587.08`
-to `58904.02` rows/s on the reduced sample. Still larger row lists remain
-planned rather than inferred from this bounded proof.
+to `58904.02` rows/s on the reduced sample. At that boundary, larger row lists
+remained planned rather than inferred from the bounded proof.
 The 8192-row follow-up applies the same parser-proven policy to the next row-
 list edge. Focused SQL coverage now proves an 8192-row single-owner statement
 uses one append session and transaction-deferred page publication, while the
@@ -521,8 +522,8 @@ statement, deferred latest-checkpoint coalesces moving from `0.000` to
 `256.500` per statement, ownerless `mysql_query()` moving from `732.644` to
 `130.506 ms` per statement, and ownerless bulk throughput moving from
 `11128.17` to `61240.24` rows/s on the reduced sample. The later non-empty-
-table statement still shows remaining native row-level undo/MTR cost, so still
-larger row lists and native undo work remain planned separately.
+table statement still shows remaining native row-level undo/MTR cost, so row
+lists above that edge and native undo work remained planned at that boundary.
 The 16384-row follow-up applies the same parser-proven policy to the next row-
 list edge. Focused SQL coverage now proves a 16384-row single-owner statement
 uses one append session and transaction-deferred page publication, while the
@@ -537,7 +538,24 @@ latest-checkpoint coalesces at `513.000` per statement, ownerless
 `72415.68` rows/s with an ownerless/ordinary ratio of `0.6971`. The later
 non-empty-table statement still shows native row-level undo/MTR cost, including
 `301.249 ms` row-insert time and `74.959 ms` undo-report MTR commit time per
-statement, so still larger row lists and native undo work remain planned.
+statement, so row lists above that edge and native undo work remained planned
+at that boundary.
+The 32768-row follow-up applies the same parser-proven policy to the next row-
+list edge. Focused SQL coverage now proves a 32768-row single-owner statement
+uses one append session and transaction-deferred page publication, while the
+adjacent 32769-row statement stays outside append batching and deferred
+latest-checkpoint coalescing. A reduced 65536-row production probe with 32768
+rows per statement reported `2` append-session begin/end calls, zero
+snapshot-boundary publications, `2.000` page versions per statement,
+`1598.500` page-log appends per statement, `2.000` native-support published
+pages per statement, visible-fast commits at `1.000` per statement, deferred
+latest-checkpoint coalesces at `685.000` per statement, ownerless
+`mysql_query()` at `422.337 ms` per statement, and ownerless bulk throughput at
+`60797.81` rows/s with an ownerless/ordinary ratio of `0.9550`. The later
+non-empty-table statement still shows native row-level undo/MTR cost, including
+`115.835 ms` page-write commit-log time, `28.976 ms` redo-leave time, and
+`153.153 ms` undo-report MTR commit time per statement, so row lists above
+32768 and native undo work remain planned.
 Ownerless transaction page tracking now adds a lazy exact membership cache over
 the existing modified/dirty page vectors so repeated MTR and lock-hook page
 ownership checks do not linearly scan large per-transaction page lists. The
@@ -2852,7 +2870,7 @@ reopen without changing crash recovery policy.
 | Ownerless read hook attribution | 🟡&nbsp;Partial | The stats-enabled production embedded performance probe now splits ownerless MDL, transaction, and read-view hook counts and elapsed time for tableless and InnoDB point-select read windows, allowing the real-table read slowdown to be separated from page-version read hooks, WAL scans, and statement-boundary refresh. A reduced 100-select attribution sample reported zero hooks for tableless reads and about one MDL acquire/release, one transaction snapshot, and one read-view register/deregister per point select, with only about `0.008-0.011 ms/select` in those hook callback bodies. This is diagnostic instrumentation only; it does not skip MDL/read-view publication or change snapshot, DDL, active-reader, or directory-lifecycle correctness policy |
 | Ownerless refresh attribution | 🟡&nbsp;Partial | The stats-enabled production embedded performance probe now splits ownerless statement-boundary refresh into dictionary check, shared redo/process/transaction snapshot, active-pin snapshot, baseline pin, transaction-horizon advance, current-read-view close, native flush, external refresh, handle pin, clean-page refresh, visibility push/enable, and local-native-current-read decision counters. A reduced 100-select attribution sample showed tableless reads doing none of the expensive refresh work, while direct/prepared point selects used the local-native-current-read path and spent almost all refresh time in the shared snapshot (`0.034-0.035 ms/select`). This is diagnostic instrumentation only; it does not change dictionary, page-version pin, native visibility, DDL, active-reader, or peer join/leave policy |
 | Ownerless single-owner refresh snapshot | 🟡&nbsp;Partial | Ownerless statement refresh now uses process active count and process generation to infer no other live ownerless process exists in the current single-owner epoch, avoiding repeated process-registry explicit-transaction scans and transaction-registry owner-active scans while preserving the existing conservative helper paths whenever the single-owner epoch is not proven. A reduced stats-enabled point-select sample moved refresh shared-snapshot time from `0.034-0.035 ms/select` to `0.001 ms/select`, and a 1000-select stats-off sample reported direct point-select ratio `0.9028` and prepared point-select ratio `0.7707`; peer-present refresh, page-version pins, DDL, active-reader, and generation-change behavior stay on the existing paths |
-| Ownerless page-log visible-fast append batching | 🟡&nbsp;Partial | Pure `INSERT ... VALUES` visible-fast-path ownerless statements with one through 16384 streaming-proven row constructors now keep one page-log append session across the statement's ownerless mini-transactions, coalesce repeated user data/index page images through the existing transaction-deferred page publication proof only while the process registry proves a single-owner epoch, and release/sync before page-visible LSN publication; peer-present ownerless statements keep immediate page publication, and focused SQL coverage verifies page-version records still publish, native history WAL proof remains active, page-log append session begin/end counts collapse for single-row and capped multi-row visible-fast inserts, 16384-row single-owner statements use transaction-deferred image/buffer publication without snapshot-boundary immediate user-page publication, the 16385-row boundary stays outside append batching and deferred latest-checkpoint coalescing, deferred redo completion now batches up to 48 ranges while staying below the 64-slot active-reservation table, peer-open truncate/allocation coverage keeps large single-row inserts safe, and unsupported upsert branches keep conservative flush behavior after a previous unbounded row-list attempt regressed bulk timing, while larger row lists, broader DML/DDL, native row/undo reductions, and group-commit batching remain planned |
+| Ownerless page-log visible-fast append batching | 🟡&nbsp;Partial | Pure `INSERT ... VALUES` visible-fast-path ownerless statements with one through 32768 streaming-proven row constructors now keep one page-log append session across the statement's ownerless mini-transactions, coalesce repeated user data/index page images through the existing transaction-deferred page publication proof only while the process registry proves a single-owner epoch, and release/sync before page-visible LSN publication; peer-present ownerless statements keep immediate page publication, and focused SQL coverage verifies page-version records still publish, native history WAL proof remains active, page-log append session begin/end counts collapse for single-row and capped multi-row visible-fast inserts, 32768-row single-owner statements use transaction-deferred image/buffer publication without snapshot-boundary immediate user-page publication, the 32769-row boundary stays outside append batching and deferred latest-checkpoint coalescing, deferred redo completion now batches up to 48 ranges while staying below the 64-slot active-reservation table, peer-open truncate/allocation coverage keeps large single-row inserts safe, and unsupported upsert branches keep conservative flush behavior after a previous unbounded row-list attempt regressed bulk timing, while row lists above 32768, broader DML/DDL, native row/undo reductions, and group-commit batching remain planned |
 | Ownerless default-checked bulk insert | 🟡&nbsp;Partial | Ownerless single-owner autocommit direct `INSERT ... VALUES` row lists into an empty InnoDB table with exactly one clustered index and no foreign-key relationships may now use MariaDB's existing `TRX_UNDO_EMPTY` bulk-buffer path even when SQL `unique_checks` and `foreign_key_checks` remain at their defaults; focused coverage asserts the new ownerless-only default-checked bulk-start counter is positive, duplicate-key row-list failure leaves no partial rows, a later valid row list succeeds, CTAS and `INSERT ... SELECT` copy rows without using that counter, peer-present cross-process SQL does not use the counter, and visible-fast/page-version/history-proof/native-support publication remains active. Ordinary non-ownerless opens keep upstream MariaDB's stricter check-disabled bulk requirement, and secondary indexes, foreign-key tables, peer-present cross-process statements, explicit transactions, duplicate-handling DML, `INSERT ... SELECT`, DDL, and broader SQL bulk coverage remain planned |
 | Ownerless single-owner record-wait skip | 🟡&nbsp;Partial | Ownerless insert-intention record wait-until callbacks now skip the shared record-lock registry availability probe only when the process registry proves a continuous single-owner epoch (`active_count == 1` and registry generation equals the current owner generation) and the record-lock registry proof finds no waiting entries or foreign active record owner. MariaDB's local record-lock conflict check still runs before the callback, and live-peer, stale-generation, unmapped, foreign-lock, and error cases keep the shared-registry path. Focused SQL coverage asserts positive wait-until calls and all skipped calls in the single-owner multi-row insert path, product-hook coverage proves a same-process synthetic external ownerless record lock still becomes a visible shared wait, and peer-history coverage proves zero allowed skips plus a positive generation-block counter after a peer joins and leaves; the production performance probe emits compact and raw skip counters, while broader multi-peer rollback/redo/checkpoint and DDL recovery work remains planned |
 | Ownerless page-log checksum handoff | 🟡&nbsp;Partial | Ownerless InnoDB page publish now precomputes the MyLite page-log full-page checksum after a page passes publish checks and before the page-log append path, then passes that checksum through direct, external-snapshot-lineage, and append-session page-log append variants; the durable WAL checksum field and recovery validation are unchanged, primitive coverage proves checksum-handoff append readback and production performance output reports precomputed-checksum records plus moved publish-hook checksum time, while the optimization moves the checksum scan out of the append path rather than eliminating the scan entirely |
