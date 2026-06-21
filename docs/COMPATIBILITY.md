@@ -707,6 +707,10 @@ samples leave the existing process timing loop unprofiled, but append
 `wordpress_perf_summary_mysqli_process_implicit_profile_*` rows for native
 open/close attribution so the next process-isolated PHPUnit optimization can
 target startup, close, or teardown with evidence.
+The final WordPress timing rollup now preserves those explicit/implicit
+process connect/close rows and native open/close profile rows, not just the
+older combined connect/close alias, so the published timing artifact keeps the
+per-process PHPUnit cost model visible for branch/main comparisons.
 Ownerless mini-transaction page-write release now skips transaction lookup and
 external release policy checks when the current MTR has no ownerless
 page-write pages left to release. In the CI-shaped stats-enabled bulk probe,

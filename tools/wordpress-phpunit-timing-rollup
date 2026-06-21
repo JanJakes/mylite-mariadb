@@ -275,8 +275,33 @@ BEGIN {
   phase_metric["wordpress_perf_summary_stock_php_process_start_ms_avg"] = 1
   phase_metric["wordpress_perf_summary_php_process_start_ms_avg"] = 1
   phase_metric["wordpress_perf_summary_php_extension_process_overhead_ms_avg"] = 1
+  phase_metric["wordpress_perf_summary_php_connect_process_ms_avg"] = 1
+  phase_metric["wordpress_perf_summary_php_connect_process_explicit_close_ms_avg"] = 1
+  phase_metric["wordpress_perf_summary_php_connect_process_implicit_object_free_ms_avg"] = 1
+  phase_metric["wordpress_perf_summary_php_connect_process_delta_ms_avg"] = 1
+  phase_metric["wordpress_perf_summary_php_connect_process_implicit_object_free_delta_ms_avg"] = 1
+  phase_metric["wordpress_perf_summary_php_connect_process_implicit_minus_explicit_ms_avg"] = 1
   phase_metric["wordpress_perf_summary_php_process_connect_close_ms_avg"] = 1
   phase_metric["wordpress_perf_summary_php_process_connect_close_delta_ms_avg"] = 1
+  phase_metric["wordpress_perf_summary_php_process_connect_close_iterations"] = 1
+  phase_metric["wordpress_perf_summary_mysqli_process_explicit_profile_open_calls"] = 1
+  phase_metric["wordpress_perf_summary_mysqli_process_explicit_profile_open_ms_total"] = 1
+  phase_metric["wordpress_perf_summary_mysqli_process_explicit_profile_open_ms_avg"] = 1
+  phase_metric["wordpress_perf_summary_mysqli_process_explicit_profile_close_calls"] = 1
+  phase_metric["wordpress_perf_summary_mysqli_process_explicit_profile_close_explicit_calls"] = 1
+  phase_metric["wordpress_perf_summary_mysqli_process_explicit_profile_close_object_free_calls"] = 1
+  phase_metric["wordpress_perf_summary_mysqli_process_explicit_profile_close_reopen_calls"] = 1
+  phase_metric["wordpress_perf_summary_mysqli_process_explicit_profile_close_ms_total"] = 1
+  phase_metric["wordpress_perf_summary_mysqli_process_explicit_profile_close_ms_avg"] = 1
+  phase_metric["wordpress_perf_summary_mysqli_process_implicit_profile_open_calls"] = 1
+  phase_metric["wordpress_perf_summary_mysqli_process_implicit_profile_open_ms_total"] = 1
+  phase_metric["wordpress_perf_summary_mysqli_process_implicit_profile_open_ms_avg"] = 1
+  phase_metric["wordpress_perf_summary_mysqli_process_implicit_profile_close_calls"] = 1
+  phase_metric["wordpress_perf_summary_mysqli_process_implicit_profile_close_explicit_calls"] = 1
+  phase_metric["wordpress_perf_summary_mysqli_process_implicit_profile_close_object_free_calls"] = 1
+  phase_metric["wordpress_perf_summary_mysqli_process_implicit_profile_close_reopen_calls"] = 1
+  phase_metric["wordpress_perf_summary_mysqli_process_implicit_profile_close_ms_total"] = 1
+  phase_metric["wordpress_perf_summary_mysqli_process_implicit_profile_close_ms_avg"] = 1
   phase_metric["wordpress_perf_summary_mysqli_inprocess_connect_close_ms_avg"] = 1
   phase_metric["wordpress_perf_summary_mysqli_active_runtime_reconnect_ms_avg"] = 1
   phase_metric["wordpress_perf_summary_select1_ops_per_second"] = 1
@@ -454,8 +479,33 @@ END {
   emit_sum("phase_metric", "wordpress_perf_summary_stock_php_process_start_ms_avg", "wordpress_perf_stock_php_process_start_ms_avg")
   emit_sum("phase_metric", "wordpress_perf_summary_php_process_start_ms_avg", "wordpress_perf_php_process_start_ms_avg")
   emit_sum("phase_metric", "wordpress_perf_summary_php_extension_process_overhead_ms_avg", "wordpress_perf_php_extension_process_overhead_ms_avg")
+  emit_sum("phase_metric", "wordpress_perf_summary_php_connect_process_ms_avg", "wordpress_perf_php_connect_process_ms_avg")
+  emit_sum("phase_metric", "wordpress_perf_summary_php_connect_process_explicit_close_ms_avg", "wordpress_perf_php_connect_process_explicit_close_ms_avg")
+  emit_sum("phase_metric", "wordpress_perf_summary_php_connect_process_implicit_object_free_ms_avg", "wordpress_perf_php_connect_process_implicit_object_free_ms_avg")
+  emit_sum("phase_metric", "wordpress_perf_summary_php_connect_process_delta_ms_avg", "wordpress_perf_php_connect_process_delta_ms_avg")
+  emit_sum("phase_metric", "wordpress_perf_summary_php_connect_process_implicit_object_free_delta_ms_avg", "wordpress_perf_php_connect_process_implicit_object_free_delta_ms_avg")
+  emit_sum("phase_metric", "wordpress_perf_summary_php_connect_process_implicit_minus_explicit_ms_avg", "wordpress_perf_php_connect_process_implicit_minus_explicit_ms_avg")
   emit_sum("phase_metric", "wordpress_perf_summary_php_process_connect_close_ms_avg", "wordpress_perf_php_process_connect_close_ms_avg")
   emit_sum("phase_metric", "wordpress_perf_summary_php_process_connect_close_delta_ms_avg", "wordpress_perf_php_process_connect_close_delta_ms_avg")
+  emit_int_sum("phase_metric", "wordpress_perf_summary_php_process_connect_close_iterations", "wordpress_perf_php_process_connect_close_iterations")
+  emit_int_sum("phase_metric", "wordpress_perf_summary_mysqli_process_explicit_profile_open_calls", "wordpress_perf_mysqli_process_explicit_profile_open_calls")
+  emit_sum("phase_metric", "wordpress_perf_summary_mysqli_process_explicit_profile_open_ms_total", "wordpress_perf_mysqli_process_explicit_profile_open_ms_total")
+  emit_sum("phase_metric", "wordpress_perf_summary_mysqli_process_explicit_profile_open_ms_avg", "wordpress_perf_mysqli_process_explicit_profile_open_ms_avg")
+  emit_int_sum("phase_metric", "wordpress_perf_summary_mysqli_process_explicit_profile_close_calls", "wordpress_perf_mysqli_process_explicit_profile_close_calls")
+  emit_int_sum("phase_metric", "wordpress_perf_summary_mysqli_process_explicit_profile_close_explicit_calls", "wordpress_perf_mysqli_process_explicit_profile_close_explicit_calls")
+  emit_int_sum("phase_metric", "wordpress_perf_summary_mysqli_process_explicit_profile_close_object_free_calls", "wordpress_perf_mysqli_process_explicit_profile_close_object_free_calls")
+  emit_int_sum("phase_metric", "wordpress_perf_summary_mysqli_process_explicit_profile_close_reopen_calls", "wordpress_perf_mysqli_process_explicit_profile_close_reopen_calls")
+  emit_sum("phase_metric", "wordpress_perf_summary_mysqli_process_explicit_profile_close_ms_total", "wordpress_perf_mysqli_process_explicit_profile_close_ms_total")
+  emit_sum("phase_metric", "wordpress_perf_summary_mysqli_process_explicit_profile_close_ms_avg", "wordpress_perf_mysqli_process_explicit_profile_close_ms_avg")
+  emit_int_sum("phase_metric", "wordpress_perf_summary_mysqli_process_implicit_profile_open_calls", "wordpress_perf_mysqli_process_implicit_profile_open_calls")
+  emit_sum("phase_metric", "wordpress_perf_summary_mysqli_process_implicit_profile_open_ms_total", "wordpress_perf_mysqli_process_implicit_profile_open_ms_total")
+  emit_sum("phase_metric", "wordpress_perf_summary_mysqli_process_implicit_profile_open_ms_avg", "wordpress_perf_mysqli_process_implicit_profile_open_ms_avg")
+  emit_int_sum("phase_metric", "wordpress_perf_summary_mysqli_process_implicit_profile_close_calls", "wordpress_perf_mysqli_process_implicit_profile_close_calls")
+  emit_int_sum("phase_metric", "wordpress_perf_summary_mysqli_process_implicit_profile_close_explicit_calls", "wordpress_perf_mysqli_process_implicit_profile_close_explicit_calls")
+  emit_int_sum("phase_metric", "wordpress_perf_summary_mysqli_process_implicit_profile_close_object_free_calls", "wordpress_perf_mysqli_process_implicit_profile_close_object_free_calls")
+  emit_int_sum("phase_metric", "wordpress_perf_summary_mysqli_process_implicit_profile_close_reopen_calls", "wordpress_perf_mysqli_process_implicit_profile_close_reopen_calls")
+  emit_sum("phase_metric", "wordpress_perf_summary_mysqli_process_implicit_profile_close_ms_total", "wordpress_perf_mysqli_process_implicit_profile_close_ms_total")
+  emit_sum("phase_metric", "wordpress_perf_summary_mysqli_process_implicit_profile_close_ms_avg", "wordpress_perf_mysqli_process_implicit_profile_close_ms_avg")
   emit_sum("phase_metric", "wordpress_perf_summary_mysqli_inprocess_connect_close_ms_avg", "wordpress_perf_mysqli_inprocess_connect_close_ms_avg")
   emit_sum("phase_metric", "wordpress_perf_summary_mysqli_active_runtime_reconnect_ms_avg", "wordpress_perf_mysqli_active_runtime_reconnect_ms_avg")
   emit_sum("phase_metric", "wordpress_perf_summary_select1_ops_per_second", "wordpress_perf_select1_ops_per_second")
