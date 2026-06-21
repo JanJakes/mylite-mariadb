@@ -4538,7 +4538,9 @@ Tasks:
    `dictionary-before-finish` crash hook can interrupt dictionary finish, with
    focused `RENAME TABLE` `FILE_RENAME`, `CREATE TABLE ... LIKE`
    `FILE_CREATE`, CTAS populated `FILE_CREATE`, `TRUNCATE TABLE` native
-   truncate/recreate, and `DROP TABLE` `FILE_DELETE` marker coverage; final
+   truncate/recreate, `DROP TABLE` `FILE_DELETE`, and replacement-copy
+   `CREATE OR REPLACE TABLE ... LIKE`/`CREATE OR REPLACE TABLE ... AS SELECT`
+   marker coverage; final
    no-live close forces native checkpoint
    proof for retained page-version WAL
    after active pins release, restores the 12 KiB redo startup prefix if
@@ -5107,12 +5109,13 @@ native file move but before ownerless dictionary finish, plus marker-specific
 coverage for the same `RENAME TABLE` boundary, a `CREATE TABLE ... LIKE`
 writer after native `FILE_CREATE`, a CTAS writer after native `FILE_CREATE`
 and row population, a `TRUNCATE TABLE` writer after native truncate/recreate,
-and a `DROP TABLE` writer after native `FILE_DELETE`, an
+and a `DROP TABLE` writer after native `FILE_DELETE`, replacement-copy
+`CREATE OR REPLACE TABLE ... LIKE` and `CREATE OR REPLACE TABLE ... AS SELECT`
+writers after native replacement-copy completion, an
 `ALTER TABLE ... FORCE, ALGORITHM=COPY`
 writer after native table-copy rebuild, a `CREATE OR REPLACE TABLE` writer
-after native old-table replacement, `CREATE OR REPLACE TABLE ... LIKE` and
-`CREATE OR REPLACE TABLE ... AS SELECT` writers after replacement-copy
-completion, duplicate `CREATE TABLE IF NOT EXISTS` and missing
+after native old-table replacement, duplicate `CREATE TABLE IF NOT EXISTS` and
+missing
 `DROP TABLE IF EXISTS` no-op writers, duplicate top-level
 `CREATE INDEX IF NOT EXISTS`, missing top-level `DROP INDEX IF EXISTS`,
 duplicate `ALTER TABLE ... ADD INDEX IF NOT EXISTS`, and missing

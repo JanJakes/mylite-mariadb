@@ -56,7 +56,7 @@ Out of scope:
 
 - Changing MariaDB redo, InnoDB tablespace, MyLite WAL, or checkpoint formats.
 - Claiming full DDL/file-lifecycle recovery for every `FILE_CREATE` path.
-- Replacement CTAS marker coverage, `FILE_MODIFY` marker coverage,
+- Replacement-copy CTAS marker coverage, `FILE_MODIFY` marker coverage,
   partition/tablespace import-export classes, SQL-level table-lock fault
   injection, or external MariaDB/RQG stress.
 
@@ -142,6 +142,8 @@ enabled.
 
 - This covers a focused CTAS `FILE_CREATE` crash boundary, not every
   create-style or replacement-copy DDL combination.
-- Replacement CTAS marker coverage, `FILE_MODIFY` marker coverage, broader
-  native redo/checkpoint reconciliation, durable DDL lifecycle metadata, and
-  external MariaDB/RQG stress remain planned.
+- Representative replacement-copy CTAS marker coverage is handled by the
+  follow-up `ownerless-replacement-copy-file-op-marker-crash` slice.
+  `FILE_MODIFY` marker coverage, broader native redo/checkpoint
+  reconciliation, durable DDL lifecycle metadata, and external MariaDB/RQG
+  stress remain planned.

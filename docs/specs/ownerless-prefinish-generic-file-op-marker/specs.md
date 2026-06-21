@@ -168,9 +168,13 @@ build-profile changes. The new CTest is hook-build only.
   `ownerless-create-like-file-op-marker-crash` slice covers a representative
   `CREATE TABLE ... LIKE` `FILE_CREATE` boundary, and a later
   `ownerless-ctas-file-op-marker-crash` slice covers populated CTAS
-  `FILE_CREATE`. Other create-style, replacement-copy, `FILE_MODIFY`, and
-  multi-file DDL combinations still need additional evidence before the broader
-  DDL lifecycle claim can be upgraded.
+  `FILE_CREATE`. A later
+  `ownerless-replacement-copy-file-op-marker-crash` slice covers representative
+  `CREATE OR REPLACE TABLE ... LIKE` and
+  `CREATE OR REPLACE TABLE ... AS SELECT` replacement-copy boundaries. Other
+  create-style, rebuild/replacement, `FILE_MODIFY`, and multi-file DDL
+  combinations still need additional evidence before the broader DDL lifecycle
+  claim can be upgraded.
 - The native startup recovery mode is still named for rename because the
   original bridge was introduced for uncheckpointed file rename recovery.
   Renaming that API would be mechanical churn and is left out of this slice.
