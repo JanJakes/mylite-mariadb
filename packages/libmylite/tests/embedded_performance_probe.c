@@ -205,6 +205,12 @@ enum database_perf_stat_index {
     DATABASE_PERF_STAT_RECORD_LOCK_ACQUIRE_NS,
     DATABASE_PERF_STAT_RECORD_LOCK_RELEASE_CALLS,
     DATABASE_PERF_STAT_RECORD_LOCK_RELEASE_NS,
+    DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_CALLS,
+    DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_NS,
+    DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_OK,
+    DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_TIMEOUTS,
+    DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_UNAVAILABLE,
+    DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_ERRORS,
     DATABASE_PERF_STAT_MDL_ACQUIRE_CALLS,
     DATABASE_PERF_STAT_MDL_ACQUIRE_NS,
     DATABASE_PERF_STAT_MDL_RELEASE_CALLS,
@@ -1276,6 +1282,12 @@ static void emit_prefixed_ms_per_iteration(
     unsigned iterations
 );
 static void emit_redo_hook_summary(
+    const char *prefix,
+    const uint64_t *database_perf,
+    unsigned iterations,
+    const char *unit
+);
+static void emit_record_wait_until_hook_summary(
     const char *prefix,
     const uint64_t *database_perf,
     unsigned iterations,
@@ -3147,6 +3159,56 @@ static void emit_redo_hook_summary(
     );
 }
 
+static void emit_record_wait_until_hook_summary(
+    const char *prefix,
+    const uint64_t *database_perf,
+    unsigned iterations,
+    const char *unit
+) {
+    emit_summary_count_per_named_unit(
+        prefix,
+        "record_lock_wait_until_calls",
+        database_perf[DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_CALLS],
+        iterations,
+        unit
+    );
+    emit_summary_ms_per_named_unit(
+        prefix,
+        "record_lock_wait_until_ms",
+        database_perf[DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_NS],
+        iterations,
+        unit
+    );
+    emit_summary_count_per_named_unit(
+        prefix,
+        "record_lock_wait_until_ok",
+        database_perf[DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_OK],
+        iterations,
+        unit
+    );
+    emit_summary_count_per_named_unit(
+        prefix,
+        "record_lock_wait_until_timeouts",
+        database_perf[DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_TIMEOUTS],
+        iterations,
+        unit
+    );
+    emit_summary_count_per_named_unit(
+        prefix,
+        "record_lock_wait_until_unavailable",
+        database_perf[DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_UNAVAILABLE],
+        iterations,
+        unit
+    );
+    emit_summary_count_per_named_unit(
+        prefix,
+        "record_lock_wait_until_errors",
+        database_perf[DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_ERRORS],
+        iterations,
+        unit
+    );
+}
+
 static void emit_page_write_redo_leave_subphase_summary(
     const char *prefix,
     const uint64_t *page_write,
@@ -3953,6 +4015,18 @@ static void emit_ownerless_bulk_autocommit_phase_summary(
         commit_visibility[COMMIT_VISIBILITY_STAT_FLUSH],
         insert_statements
     );
+    emit_record_wait_until_hook_summary(
+        "mylite_perf_summary_ownerless_autocommit_bulk",
+        database_perf,
+        insert_rows,
+        "row"
+    );
+    emit_record_wait_until_hook_summary(
+        "mylite_perf_summary_ownerless_autocommit_bulk",
+        database_perf,
+        insert_statements,
+        "statement"
+    );
     emit_summary_count_per_iteration(
         "mylite_perf_summary_ownerless_autocommit_bulk_checkpoint_update_deferred_latest_"
         "coalesced_per_row",
@@ -4131,6 +4205,8 @@ static void emit_ownerless_bulk_page_write_phase_summary(
         commit_visibility[COMMIT_VISIBILITY_STAT_FLUSH],
         insert_statements
     );
+    emit_record_wait_until_hook_summary(prefix, database_perf, insert_rows, "row");
+    emit_record_wait_until_hook_summary(prefix, database_perf, insert_statements, "statement");
     emit_prefixed_count_per_iteration(
         prefix,
         "page_publish_hook_calls_per_statement",
@@ -5151,6 +5227,18 @@ static void emit_ownerless_transaction_phase_summary(
         "insert"
     );
     emit_redo_hook_summary(
+        "mylite_perf_summary_ownerless_insert_txn",
+        database_perf,
+        1U,
+        "transaction"
+    );
+    emit_record_wait_until_hook_summary(
+        "mylite_perf_summary_ownerless_insert_txn",
+        database_perf,
+        insert_iterations,
+        "insert"
+    );
+    emit_record_wait_until_hook_summary(
         "mylite_perf_summary_ownerless_insert_txn",
         database_perf,
         1U,
@@ -6575,6 +6663,12 @@ static void emit_ownerless_autocommit_phase_summary(unsigned insert_iterations) 
                                         : 0U;
 
     emit_redo_hook_summary(
+        "mylite_perf_summary_ownerless_autocommit",
+        database_perf,
+        insert_iterations,
+        "insert"
+    );
+    emit_record_wait_until_hook_summary(
         "mylite_perf_summary_ownerless_autocommit",
         database_perf,
         insert_iterations,
@@ -9204,6 +9298,36 @@ static void emit_database_perf_stats(const char *prefix) {
         "%s_record_lock_release_ms=%.3f\n",
         prefix,
         (double)values[DATABASE_PERF_STAT_RECORD_LOCK_RELEASE_NS] / 1000000.0
+    );
+    printf(
+        "%s_record_lock_wait_until_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_CALLS]
+    );
+    printf(
+        "%s_record_lock_wait_until_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_NS] / 1000000.0
+    );
+    printf(
+        "%s_record_lock_wait_until_ok=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_OK]
+    );
+    printf(
+        "%s_record_lock_wait_until_timeouts=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_TIMEOUTS]
+    );
+    printf(
+        "%s_record_lock_wait_until_unavailable=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_UNAVAILABLE]
+    );
+    printf(
+        "%s_record_lock_wait_until_errors=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_ERRORS]
     );
     printf(
         "%s_mdl_acquire_calls=%" PRIu64 "\n",

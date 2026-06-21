@@ -5972,6 +5972,23 @@ subsystems that this mode needs:
   work, but ordinary and inactive MTR paths no longer pay disabled diagnostic
   overhead. This slice deliberately leaves page-version volume, latch release
   ordering, and redo/checkpoint reconciliation unchanged.
+  A follow-up record-wait attribution slice adds first-party database perf
+  counters for `ownerless_innodb_lock_wait_until_record_hook()` calls, elapsed
+  time, and OK/timeout/unavailable/error result classes, then emits compact
+  per-insert, per-row, per-statement, and bulk first/remaining summaries. This
+  times the insert-intention availability probe reached from MariaDB
+  `lock_rec_insert_check_and_lock()`, not the explicit record
+  acquire/release hook. The final 16K-row local production attribution sample
+  reported `16384` ownerless bulk record wait-until calls, `24.478 ms` total,
+  all OK, and zero timeout/unavailable/error results; in the remaining bulk
+  statement this explains most of the `29.046 ms` ownerless
+  `row_ins_btr_lock_undo_rec_lock` bucket, but larger remaining gaps still sit
+  in row insert (`190.280 ms` ownerless-minus-ordinary), undo report
+  (`76.220 ms`), undo-report MTR commit (`70.608 ms`), and page-write
+  commit-log work (`58.450 ms`) per statement. A single-owner record-wait
+  bypass is therefore a bounded follow-up candidate, not the primary remaining
+  parity fix, and must prove peer-join/stale-generation semantics before any
+  behavior change.
   Reduced 50-row stats-enabled probes after
   that split showed both standalone encoding and delta-base note update can be
   visible inside the previous aggregate append total, with small-sample ranking

@@ -89,6 +89,12 @@ enum OwnerlessDatabasePerfStatIndex : std::size_t {
     OWNERLESS_DATABASE_PERF_RECORD_LOCK_ACQUIRE_NS,
     OWNERLESS_DATABASE_PERF_RECORD_LOCK_RELEASE_CALLS,
     OWNERLESS_DATABASE_PERF_RECORD_LOCK_RELEASE_NS,
+    OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_CALLS,
+    OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_NS,
+    OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_OK,
+    OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_TIMEOUTS,
+    OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_UNAVAILABLE,
+    OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_ERRORS,
     OWNERLESS_DATABASE_PERF_MDL_ACQUIRE_CALLS,
     OWNERLESS_DATABASE_PERF_MDL_ACQUIRE_NS,
     OWNERLESS_DATABASE_PERF_MDL_RELEASE_CALLS,
@@ -16067,13 +16073,31 @@ int ownerless_innodb_lock_wait_until_record_hook(
     unsigned int timeout_ms,
     void *ctx
 ) {
+    const bool perf_stats_enabled = ownerless_database_perf_stats_are_enabled();
+    const std::uint64_t perf_start_ns = perf_stats_enabled ? ownerless_database_perf_now_ns() : 0U;
+    auto record_perf_result = [&](OwnerlessDatabasePerfStatIndex result_index) {
+        if (!perf_stats_enabled) {
+            return;
+        }
+        ownerless_database_perf_stats[result_index].fetch_add(1U, std::memory_order_relaxed);
+        ownerless_database_perf_stats[OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_NS].fetch_add(
+            ownerless_database_perf_now_ns() - perf_start_ns,
+            std::memory_order_relaxed
+        );
+    };
+    if (perf_stats_enabled) {
+        ownerless_database_perf_stats[OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_CALLS]
+            .fetch_add(1U, std::memory_order_relaxed);
+    }
     if (ctx == nullptr) {
+        record_perf_result(OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_ERRORS);
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
 
     auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
     if (hook->lock_registry == nullptr || hook->lock_registry_size == 0U || hook->owner_id == 0U ||
         hook->owner_generation == 0U) {
+        record_perf_result(OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_ERRORS);
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
 
@@ -16113,6 +16137,15 @@ int ownerless_innodb_lock_wait_until_record_hook(
                   timeout_ms
               );
     const int result = ownerless_innodb_lock_result_from_registry_result(registry_result);
+    if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+        record_perf_result(OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_OK);
+    } else if (result == MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT) {
+        record_perf_result(OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_TIMEOUTS);
+    } else if (result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE) {
+        record_perf_result(OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_UNAVAILABLE);
+    } else {
+        record_perf_result(OWNERLESS_DATABASE_PERF_RECORD_LOCK_WAIT_UNTIL_ERRORS);
+    }
     return result;
 }
 

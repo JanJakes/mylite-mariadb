@@ -1616,7 +1616,18 @@ for that flush, the page-type-bucket sum and ratio guard, ownerless history
 flush identity uniqueness, persistent undo assignment/cache-reuse decisions,
 history cache eligibility and ownerless-blocked ratio, and ownerless release
 time, ownerless visibility time, row-insert time, and clustered B-tree insert
-time. The same stats-enabled attribution probe also emits ordinary insert
+time. The same stats-enabled attribution probe also emits ownerless
+record-lock wait-until calls, elapsed time, and OK/timeout/unavailable/error
+result classes, with bulk first/remaining splits, because the insert-intention
+availability probe is distinct from explicit record lock acquire/release
+publication. The final local 16K-row production attribution sample reported
+`16384` ownerless bulk record wait-until calls, `24.478 ms` total, all OK, and
+zero timeout/unavailable/error results; in the remaining bulk statement this
+accounted for most of the `29.046 ms` ownerless record-lock bucket, but the
+larger remaining deltas were still row insert (`190.280 ms`), undo report
+(`76.220 ms`), undo-report MTR commit (`70.608 ms`), and page-write commit-log
+work (`58.450 ms`) per statement. The same stats-enabled attribution probe
+also emits ordinary insert
 transaction and autocommit raw deep InnoDB counters, then summarizes ordinary
 autocommit baselines and ownerless-minus-ordinary deltas for commit,
 write-history, history-list, commit-in-memory, ownerless visibility,
