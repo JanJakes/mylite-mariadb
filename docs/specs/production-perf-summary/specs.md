@@ -966,6 +966,16 @@ bounded wall-clock slice therefore splits REST content-controller into
 post/autosave/revision-style controllers and support controllers while keeping
 the broad REST content-controller regex as the controller-other exclusion
 authority.
+That REST content split passed in CI run `27911524826`, with REST content-post
+at `47.604s` shell real and `48s` total, REST content-support at `16.850s`
+shell real and `17s` total, and estimated WordPress critical path falling from
+`174s` to `157s`. The new critical shard was `non-isolated-query` at `89s`
+total, including `43.721s` PHPUnit shell real, `35s` Docker image setup, `8s`
+artifact download, and `2s` artifact extract. The slowest PHPUnit body was
+`phpunit-non-isolated-rest-controller-other` at `64.146s`, but query controlled
+wall clock because of the larger fixed setup cost. The next bounded wall-clock
+slice therefore splits query into filter-heavy query classes and core/cache
+query classes while keeping the broad query regex as the union authority.
 
 The next production ownerless SQL run exposed `sql-case 46`
 (`test_ownerless_active_reader_pressure_limit_blocks_write_classes`) during a

@@ -725,6 +725,12 @@ shards while keeping the broad REST content-controller regex as the
 controller-other exclusion authority. This is another production timing
 partition only; it does not change REST, SQL, mysqli, native storage, or
 ownerless concurrency semantics.
+The follow-up WordPress PHPUnit timing split also divides the visible
+`non-isolated-query` shard into `non-isolated-query-filter` and
+`non-isolated-query-core` while keeping the broad query and query/theme regexes
+as union and remaining-shard exclusion authorities. This again changes only CI
+timing attribution and expected wall-clock shape, not SQL, mysqli, native
+storage, or ownerless concurrency behavior.
 Ownerless mini-transaction page-write release now skips transaction lookup and
 external release policy checks when the current MTR has no ownerless
 page-write pages left to release. In the CI-shaped stats-enabled bulk probe,
