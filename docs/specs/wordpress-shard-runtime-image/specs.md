@@ -152,6 +152,24 @@ local PHPUnit harness smoke was not used as verification because the local
 relative to the MariaDB source tree; CI will test the production artifact path
 with a freshly checked manifest.
 
+CI run `27916382040` passed on `70fe4caf3` with the runtime-image shard shape.
+The published timing rollup reported setup action time at `70s`, including a
+new `12s` runtime Docker cache seed. The critical shard moved to
+`non-isolated-content-post-template` at `68s`, including `34.160s` PHPUnit
+shell real time, `23s` Docker image setup, `7s` artifact download, and `3s`
+artifact extract. The estimated WordPress critical path was `138s`, down from
+`146s` in the prior green run `27915469258`. Total shard Docker setup fell
+from `815s` to `737s`; artifact download and extract stayed effectively flat
+at `167s` and `105s` versus prior `168s` and `103s`.
+
+The same CI run reported current process and engine probe values of `14.847ms`
+stock PHP process start, `21.367ms` PHP process start with extensions loaded,
+`6.520ms` extension-load overhead, `127.032ms` explicit process connect/close,
+`95.232ms` in-process connect/close, `0.976ms` active-runtime reconnect,
+`3208.580` `SELECT 1` ops/s, `3024.050` transactional insert ops/s,
+`2766.380` point-select ops/s, `1979.890` prepared autocommit insert ops/s,
+and `1947.930` direct autocommit insert ops/s.
+
 ## Risks
 
 - A smaller image can reduce per-shard load time while increasing setup time;

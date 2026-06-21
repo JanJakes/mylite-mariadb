@@ -2609,6 +2609,11 @@ production, but it also seeds a separate runtime-image cache. Shards now load a
 test-only runtime Dockerfile under the existing harness tag before running the
 unchanged PHPUnit filters. This changes CI timing architecture only; SQL,
 mysqli, native storage, recovery, and ownerless behavior are unchanged.
+Green CI run `27916382040` on `70fe4caf3` passed with that runtime-image shape.
+The timing rollup reported setup at `70s`, a `12s` runtime Docker cache seed,
+total shard Docker setup at `737s`, and estimated WordPress critical path at
+`138s`, improving over the previous green run's `76s` setup, `815s` Docker
+setup sum, and `146s` estimated critical path.
 The follow-up remaining-platform fanout keeps that same production surface
 while replacing `phpunit-non-isolated-remaining-platform` with
 HTML/interactivity, image, and merged format/dependencies/embed shards. The

@@ -1075,6 +1075,19 @@ build toolchain from shard jobs while preserving PHP `gd`/`zip` and the same
 Release MyLite plus MinSizeRel MariaDB artifacts. The timing rollup reports
 `wordpress_runtime_docker_cache_seconds` so the setup-side cache seed is
 visible when comparing the first CI run against prior shard Docker timings.
+Green CI run `27916382040` on `70fe4caf3` showed the runtime-image shape was
+a net wall-clock improvement in its first production sample. Setup action time
+fell from `76s` to `70s` even with the new `12s` runtime Docker cache seed,
+total shard Docker setup fell from `815s` to `737s`, and estimated WordPress
+critical path fell from `146s` to `138s`. Artifact download and extract were
+flat at `167s` and `105s` versus the prior `168s` and `103s`. The new critical
+shard was `non-isolated-content-post-template` at `68s`, with `34.160s`
+PHPUnit shell real time, `23s` Docker setup, `7s` artifact download, and `3s`
+artifact extract. The process/engine probe in the same run reported
+`14.847ms` stock PHP process start, `21.367ms` PHP process start with MyLite
+extensions, `127.032ms` explicit process connect/close, `95.232ms`
+in-process connect/close, `0.976ms` active-runtime reconnect, and `3208.580`
+`SELECT 1` ops/s.
 
 The next production ownerless SQL run exposed `sql-case 46`
 (`test_ownerless_active_reader_pressure_limit_blocks_write_classes`) during a
