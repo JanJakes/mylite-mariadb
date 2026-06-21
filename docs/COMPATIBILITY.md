@@ -2592,6 +2592,12 @@ block supports and block template/binding shards, and
 The broad REST content-post, block support/template, and media/comment regexes
 remain union and exclusion authorities; no SQL, mysqli, native storage,
 recovery, or ownerless behavior changes.
+The follow-up remaining-platform fanout keeps that same production surface
+while replacing `phpunit-non-isolated-remaining-platform` with
+HTML/interactivity, formatting/date, image, dependencies/widgets, and
+embed/KSES/shortcode shards. The broad remaining-platform regex remains the
+remaining-shard exclusion authority; the split changes only CI test-only
+filters and audit guards.
 
 Ownerless page-version WAL records can now encode zero-heavy page images by
 storing a compact 16-bit sparse nonzero-run list, the original 32-bit sparse
