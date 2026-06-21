@@ -3827,7 +3827,13 @@ Tasks:
    child row through the moved child, rejects a missing-parent child insert with
    errno 1452, rejects deleting a still-referenced moved parent with errno
    1451, and checks ownerless/native reopen before and after forced `.shm`
-   rebuild. Cross-schema foreign-key multi-pair rename coverage now moves both
+   rebuild. Hook-build same-schema foreign-key multi-pair rename crash coverage
+   now kills that parent-through-temporary plus child-rename writer after native
+   FK metadata and file moves but before ownerless dictionary finish, then
+   verifies no-live recovery of the moved generated constraint identity,
+   absence of the temporary parent name, FK enforcement, and ownerless/native
+   reopen before and after forced `.shm` rebuild.
+   Cross-schema foreign-key multi-pair rename coverage now moves both
    the referenced parent table and the child table owning an unnamed foreign key
    from `app` into another schema in one `RENAME TABLE` statement, verifies an
    already-open peer observes target-schema `CONSTRAINT_SCHEMA`,
@@ -5105,9 +5111,10 @@ primary-key replacement writer after native clustered-key rebuild, foreign-key
 ADD/DROP writers after native
 constraint metadata creation/removal, CHECK ADD/DROP writers after native
 table-definition mutation, a cross-schema foreign-key multi-pair rename writer
-after native FK metadata rewrite and file movement, a CHECK ADD variant that
-combines column-level CHECK metadata with a generated-column CHECK expression,
-missing
+after native FK metadata rewrite and file movement, a same-schema
+parent-through-temporary foreign-key multi-pair rename writer after native FK
+metadata rewrite and file movement, a CHECK ADD variant that combines
+column-level CHECK metadata with a generated-column CHECK expression, missing
 `ALTER TABLE ... MODIFY COLUMN IF EXISTS`,
 missing `ALTER TABLE ... RENAME COLUMN IF EXISTS`, missing
 `ALTER TABLE ... CHANGE COLUMN IF EXISTS`, missing

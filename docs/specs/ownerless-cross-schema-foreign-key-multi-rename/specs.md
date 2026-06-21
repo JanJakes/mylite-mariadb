@@ -143,6 +143,7 @@ No binary-size, dependency, or license changes.
 
 - This proves one cross-schema multi-pair parent/child FK rename shape.
   Unsupported generated-column FK variants, external randomized FK graph stress,
-  native-loop crash/error injection during FK rename, and same-schema
-  parent-through-temporary FK multi-rename crash coverage remain follow-up
-  DDL/recovery work.
+  native-loop crash/error injection during FK rename remain follow-up
+  DDL/recovery work. Same-schema parent-through-temporary FK multi-rename crash
+  coverage is covered separately by
+  `docs/specs/ownerless-foreign-key-multi-rename-crash/specs.md`.

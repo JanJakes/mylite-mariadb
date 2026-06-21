@@ -154,7 +154,7 @@ hook-build test code, a CTest entry, and documentation only.
 ## Risks And Open Questions
 
 - This proves only the post-native-DDL, pre-ownerless-finish boundary.
-- Same-schema parent-through-temporary FK multi-rename crash coverage remains a
-  separate focused follow-up.
+- Same-schema parent-through-temporary FK multi-rename crash coverage is covered
+  separately by `docs/specs/ownerless-foreign-key-multi-rename-crash/specs.md`.
 - Broader DDL/file-lifecycle recovery, redo/checkpoint reconciliation, and
   randomized external DDL/FK oracle stress remain planned.
