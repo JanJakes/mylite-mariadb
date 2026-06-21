@@ -1148,6 +1148,11 @@ reported `query_cache_preserved_no_result_calls=1421`,
 focused database-shard cost is native query and transaction execution rather
 than prepared-result cache lookup overhead. Full non-isolated shard timings
 remain the authority for suite-wide impact.
+The WordPress timing rollup now also reports wall-clock critical-path evidence:
+the green `1f8313b0` production run showed setup at `476s`, slowest shard
+`non-isolated-rest-controller` at `182s`, estimated workflow critical path at
+`658s`, and slowest PHPUnit test-only shell time at `140.722s`, while summed
+parallel non-isolated test work was `552.648s`.
 
 `mylite_reset()` now skips MariaDB's `mysql_stmt_reset()` only when a prepared
 statement has been fully drained to `MYLITE_DONE`; partial results and active

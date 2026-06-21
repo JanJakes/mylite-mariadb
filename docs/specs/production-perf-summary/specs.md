@@ -885,6 +885,17 @@ averages. The workflow still runs the WordPress harness with production build
 guards, so the rollup is a reporting change rather than a benchmark-shape
 change.
 
+The follow-up critical-path rollup keeps those same inputs but emits the
+wall-clock-oriented rows that explain why a green WordPress job took as long as
+it did: setup phase count and total seconds, shard phase count, slowest shard
+label, slowest shard total seconds, estimated workflow critical-path seconds,
+and the slowest PHPUnit test-only label and seconds. The green production CI
+run for `1f8313b0` would report setup at `476s`, the slowest shard
+`non-isolated-rest-controller` at `182s`, estimated workflow critical path at
+`658s`, and slowest PHPUnit test-only shell real time at `140.722s`. That keeps
+the visible performance answer separate from summed parallel shard work, which
+was `552.648s` across non-isolated shards in the same run.
+
 The next production ownerless SQL run exposed `sql-case 46`
 (`test_ownerless_active_reader_pressure_limit_blocks_write_classes`) during a
 same-runtime direct read after a local AUTO_INCREMENT insert and before later
@@ -957,6 +968,10 @@ summaries and emitted no `mylite_perf_summary_*_client_*` rows.
   child-process runtime, child-script runtime, outer-minus-script runtime,
   parent lock-release, reconnect, and baseline-restore timing with weighted
   per-child averages.
+- CI WordPress timing rollup rows also report setup total seconds, slowest
+  shard label/seconds, estimated workflow critical-path seconds, and slowest
+  PHPUnit test-only label/seconds so wall-clock regressions are visible without
+  manually summing per-shard artifacts.
 - CI process-isolated WordPress PHPUnit logs include per-child prepared
   database baseline restore count, total time, and average time when the
   baseline-restored child mode is enabled.

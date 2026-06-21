@@ -112,6 +112,42 @@ function row_num(metric, value) {
   row(metric, sprintf("%.3f", value))
 }
 
+function note_max(metric, value, row_label) {
+  if (!is_number(value)) {
+    return
+  }
+  if (!(metric in max_seen) || value + 0 > max_values[metric]) {
+    max_seen[metric] = 1
+    max_values[metric] = value + 0
+    max_labels[metric] = row_label
+  }
+}
+
+function add_shard_phase(row_label, value, shard) {
+  if (!is_number(value)) {
+    return
+  }
+  if (row_label ~ /^artifact-download-/) {
+    shard = substr(row_label, length("artifact-download-") + 1)
+  } else if (row_label ~ /^artifact-extract-/) {
+    shard = substr(row_label, length("artifact-extract-") + 1)
+  } else if (row_label ~ /^docker-image-/) {
+    shard = substr(row_label, length("docker-image-") + 1)
+  } else if (row_label ~ /^phpunit-/) {
+    shard = substr(row_label, length("phpunit-") + 1)
+  } else {
+    return
+  }
+  if (shard == "") {
+    return
+  }
+  if (!(shard in shard_seen)) {
+    shard_seen[shard] = 1
+    shard_count++
+  }
+  shard_seconds[shard] += value + 0
+}
+
 function emit_sum(bucket, metric, output_metric) {
   if (metric_seen(bucket, metric)) {
     row_num(output_metric, metric_sum(bucket, metric))
@@ -241,6 +277,11 @@ BEGIN {
   if (metric == "wordpress_total_seconds" && is_number(value)) {
     count_once("phase_all", row_label)
     add_sum("phase_all", metric, value)
+    add_shard_phase(row_label, value)
+    if (row_label !~ /^(artifact-download|artifact-extract|docker-image|phpunit)-/) {
+      count_once("setup_phase", row_label)
+      add_sum("setup_phase", metric, value)
+    }
   }
 
   if (row_label == "build-php" && metric in build_metric) {
@@ -258,6 +299,12 @@ BEGIN {
 
   count_once("phpunit_all", row_label)
   add_sum("phpunit_all", metric, value)
+  if (metric == "wordpress_phpunit_shell_real_seconds") {
+    note_max("wordpress_phpunit_shell_real_seconds", value, row_label)
+  }
+  if (metric == "wordpress_total_seconds") {
+    note_max("wordpress_phpunit_total_seconds", value, row_label)
+  }
 
   if (row_label == "phpunit-db-profile") {
     count_once("phpunit_diagnostic", row_label)
@@ -284,6 +331,15 @@ BEGIN {
 }
 
 END {
+  shard_max_seconds = 0
+  shard_max_label = ""
+  for (shard in shard_seen) {
+    if (shard_seconds[shard] > shard_max_seconds) {
+      shard_max_seconds = shard_seconds[shard]
+      shard_max_label = shard
+    }
+  }
+
   emit_bucket("phpunit_test", "wordpress_phpunit_test")
   emit_bucket("phpunit_diagnostic", "wordpress_phpunit_diagnostic")
   emit_bucket("phpunit_all", "wordpress_phpunit_all")
@@ -306,6 +362,27 @@ END {
   if (counts["phase_all"] > 0) {
     row_int("wordpress_timed_phase_count", counts["phase_all"])
     emit_sum("phase_all", "wordpress_total_seconds", "wordpress_timed_phase_total_seconds_sum")
+  }
+  if (counts["setup_phase"] > 0) {
+    row_int("wordpress_setup_phase_count", counts["setup_phase"])
+    emit_sum("setup_phase", "wordpress_total_seconds", "wordpress_setup_total_seconds_sum")
+  }
+  if (shard_count > 0) {
+    row_int("wordpress_shard_phase_count", shard_count)
+    row("wordpress_shard_critical_path_label", shard_max_label)
+    row_num("wordpress_shard_critical_path_seconds_max", shard_max_seconds)
+    if (metric_seen("setup_phase", "wordpress_total_seconds")) {
+      estimated_critical_path = metric_sum("setup_phase", "wordpress_total_seconds") + shard_max_seconds
+      row_num("wordpress_estimated_workflow_critical_path_seconds", estimated_critical_path)
+    }
+  }
+  if ("wordpress_phpunit_shell_real_seconds" in max_seen) {
+    row("wordpress_phpunit_shell_real_seconds_max_label", max_labels["wordpress_phpunit_shell_real_seconds"])
+    row_num("wordpress_phpunit_shell_real_seconds_max", max_values["wordpress_phpunit_shell_real_seconds"])
+  }
+  if ("wordpress_phpunit_total_seconds" in max_seen) {
+    row("wordpress_phpunit_total_seconds_max_label", max_labels["wordpress_phpunit_total_seconds"])
+    row_num("wordpress_phpunit_total_seconds_max", max_values["wordpress_phpunit_total_seconds"])
   }
 
   emit_sum("phase_metric", "wordpress_docker_build_seconds", "wordpress_docker_build_seconds")
