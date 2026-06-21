@@ -162,9 +162,11 @@ build-profile changes. The new CTest is hook-build only.
 
 ## Risks And Follow-Up
 
-- The new focused proof covers `TRUNCATE TABLE`; other `FILE_CREATE`,
-  `FILE_DELETE`, `FILE_MODIFY`, and multi-file DDL combinations still need
-  additional evidence before the broader DDL lifecycle claim can be upgraded.
+- The original focused proof covers `TRUNCATE TABLE`, and the follow-up
+  `ownerless-drop-file-op-marker-crash` slice covers a representative
+  `DROP TABLE` `FILE_DELETE` boundary. Other `FILE_CREATE`, `FILE_MODIFY`, and
+  multi-file DDL combinations still need additional evidence before the broader
+  DDL lifecycle claim can be upgraded.
 - The native startup recovery mode is still named for rename because the
   original bridge was introduced for uncheckpointed file rename recovery.
   Renaming that API would be mechanical churn and is left out of this slice.

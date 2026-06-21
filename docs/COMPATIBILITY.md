@@ -238,9 +238,10 @@ marker record has been written, and treat corrupt marker-record-only evidence
 as checkpoint-needed so a torn clear cannot suppress required native drain.
 Ownerless dictionary DDL now persists that marker after native `FILE_*` redo
 evidence and before the dictionary-finish hook window, with focused hook
-coverage for `RENAME TABLE` `FILE_RENAME` and `TRUNCATE TABLE` native
-truncate/recreate boundaries, so a killed writer cannot lose the durable
-checkpoint-needed boundary before no-live recovery for those classes.
+coverage for `RENAME TABLE` `FILE_RENAME`, `TRUNCATE TABLE` native
+truncate/recreate, and `DROP TABLE` `FILE_DELETE` boundaries, so a killed
+writer cannot lose the durable checkpoint-needed boundary before no-live
+recovery for those classes.
 Ownerless AUTO_INCREMENT publishes now also mark a shared registry
 native-checkpoint pending bit when they raise a table high watermark. The
 final no-live ownerless close path drains that bit through the existing native

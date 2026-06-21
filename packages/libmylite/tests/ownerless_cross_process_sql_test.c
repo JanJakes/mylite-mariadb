@@ -1015,6 +1015,7 @@ static void test_crashed_table_comment_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_truncate_dictionary_ddl_recovers_empty_table(void);
 static void test_crashed_truncate_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_drop_dictionary_ddl_recovers_absent_table(void);
+static void test_crashed_drop_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_stale_drop_dictionary_ddl_skips_retained_tablespace(void);
 static void test_crashed_schema_create_dictionary_ddl_recovers_schema(void);
 static void test_crashed_schema_alter_dictionary_ddl_recovers_defaults(void);
@@ -4756,6 +4757,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-drop-file-op-marker-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_drop_dictionary_ddl_marks_file_op_checkpoint();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "stale-drop-crash-recovery") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_stale_drop_dictionary_ddl_skips_retained_tablespace();
@@ -5145,7 +5152,7 @@ int main(int argc, char **argv) {
             "dictionary-table-comment-crash|"
             "dictionary-truncate-crash|"
             "dictionary-truncate-file-op-marker-crash|"
-            "dictionary-drop-crash|"
+            "dictionary-drop-crash|dictionary-drop-file-op-marker-crash|"
             "stale-drop-crash-recovery|"
             "dictionary-schema-create-crash|"
             "dictionary-schema-alter-crash|"
@@ -49924,7 +49931,7 @@ static void test_crashed_truncate_dictionary_ddl_marks_file_op_checkpoint(void) 
     run_crashed_truncate_dictionary_ddl_recovers_empty_table(1);
 }
 
-static void test_crashed_drop_dictionary_ddl_recovers_absent_table(void) {
+static void run_crashed_drop_dictionary_ddl_recovers_absent_table(int assert_file_op_marker) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(root, "ownerless-dictionary-drop-crash.mylite");
@@ -49999,6 +50006,9 @@ static void test_crashed_drop_dictionary_ddl_recovers_absent_table(void) {
     wait_for_pipe(writer_ready_pipe[0]);
     assert(kill(writer_child, SIGKILL) == 0);
     wait_for_signaled_child(writer_child, SIGKILL);
+    if (assert_file_op_marker) {
+        assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    }
 
     probe_child = fork();
     assert(probe_child >= 0);
@@ -50061,6 +50071,14 @@ static void test_crashed_drop_dictionary_ddl_recovers_absent_table(void) {
     free(runtime_root);
     remove_tree(root);
     free(root);
+}
+
+static void test_crashed_drop_dictionary_ddl_recovers_absent_table(void) {
+    run_crashed_drop_dictionary_ddl_recovers_absent_table(0);
+}
+
+static void test_crashed_drop_dictionary_ddl_marks_file_op_checkpoint(void) {
+    run_crashed_drop_dictionary_ddl_recovers_absent_table(1);
 }
 
 static void assert_ownerless_drop_crash_absent_state(
