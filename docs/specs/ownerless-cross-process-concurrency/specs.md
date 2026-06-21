@@ -6441,6 +6441,18 @@ subsystems that this mode needs:
   misses, vector/set rebuilds, clear paths, lock ownership, page-version
   publication, redo/checkpoint ordering, and rollback semantics stay on the
   existing paths.
+  The bulk page-write phase split follow-up is diagnostic-only. The embedded
+  performance probe now snapshots the first ownerless row-list statement for
+  existing page-publish, database hook, page-write, page-log append, and
+  commit-visibility counters and subtracts it from aggregate totals to emit
+  `first_` and `remaining_` phase rows. A reduced two-statement 100-row
+  production probe reported the later non-empty-table statement at
+  `0.438 ms` page-write commit-log time, including `0.105 ms` redo leave,
+  `0.178 ms` commit-log publish, `0.244 ms` no-dirty loop,
+  `0.157 ms` no-dirty page-publish, `0.010 ms` page-leave, and `0.011 ms`
+  page-unlock time per statement. A one-statement guard emitted `0.000`
+  remaining phase averages, so the remaining rows are not inferred from
+  aggregate counters when there is no later statement.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.

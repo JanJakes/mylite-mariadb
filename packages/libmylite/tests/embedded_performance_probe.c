@@ -51,6 +51,15 @@ typedef struct bulk_insert_timing {
     unsigned remaining_statement_count;
 } bulk_insert_timing;
 
+typedef struct bulk_insert_first_stats {
+    uint64_t *page_publish;
+    uint64_t *database_perf;
+    uint64_t *page_write;
+    uint64_t *page_log_append;
+    uint64_t *commit_visibility;
+    uint64_t *innodb_deep;
+} bulk_insert_first_stats;
+
 enum page_publish_stat_index {
     PAGE_PUBLISH_STAT_CANDIDATES = 0,
     PAGE_PUBLISH_STAT_PUBLISHED,
@@ -1286,7 +1295,28 @@ static void emit_ownerless_transaction_phase_summary(
 );
 static void emit_ownerless_bulk_autocommit_phase_summary(
     unsigned insert_rows,
+    unsigned insert_statements,
+    const bulk_insert_timing *timing,
+    const bulk_insert_first_stats *first_stats
+);
+static void emit_ownerless_bulk_page_write_phase_summary(
+    const char *phase,
+    const uint64_t *page_publish,
+    const uint64_t *database_perf,
+    const uint64_t *page_write,
+    const uint64_t *page_log_append,
+    const uint64_t *commit_visibility,
+    unsigned insert_rows,
     unsigned insert_statements
+);
+static void emit_ownerless_bulk_page_write_phase_split_summary(
+    const uint64_t *page_publish,
+    const uint64_t *database_perf,
+    const uint64_t *page_write,
+    const uint64_t *page_log_append,
+    const uint64_t *commit_visibility,
+    const bulk_insert_timing *timing,
+    const bulk_insert_first_stats *first_stats
 );
 static void emit_bulk_deep_comparison_summary(
     const uint64_t *ordinary_deep,
@@ -1309,6 +1339,13 @@ static void emit_bulk_deep_phase_comparison_summary(
     const uint64_t *ownerless_first_deep,
     const bulk_insert_timing *ownerless_timing
 );
+static void subtract_counter_snapshot(
+    uint64_t *out_remaining,
+    const uint64_t *total,
+    const uint64_t *first,
+    size_t value_count
+);
+static void capture_bulk_first_stats(const bulk_insert_first_stats *first_stats);
 static void emit_bulk_exec_result_summary(const char *prefix, unsigned insert_statements);
 static void emit_insert_client_timing_summary(
     const char *prefix,
@@ -1408,7 +1445,7 @@ static double measure_bulk_autocommit_insert(
     unsigned rows_per_statement,
     int reset_page_publish_stats,
     bulk_insert_timing *timing,
-    uint64_t *first_innodb_deep
+    const bulk_insert_first_stats *first_stats
 );
 
 static void reset_embedded_lifecycle_perf_stats(void) {
@@ -1490,12 +1527,29 @@ int main(void) {
     uint64_t ownerless_bulk_innodb_deep[INNODB_DEEP_PERF_STAT_COUNT] = {0};
     uint64_t ordinary_bulk_first_innodb_deep[INNODB_DEEP_PERF_STAT_COUNT] = {0};
     uint64_t ownerless_bulk_first_innodb_deep[INNODB_DEEP_PERF_STAT_COUNT] = {0};
+    uint64_t ownerless_bulk_first_page_publish[PAGE_PUBLISH_STAT_COUNT] = {0};
+    uint64_t ownerless_bulk_first_database_perf[DATABASE_PERF_STAT_COUNT] = {0};
+    uint64_t ownerless_bulk_first_page_write[PAGE_WRITE_PERF_STAT_COUNT] = {0};
+    uint64_t ownerless_bulk_first_page_log_append[PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
+    uint64_t ownerless_bulk_first_commit_visibility[COMMIT_VISIBILITY_STAT_COUNT] = {0};
+    bulk_insert_first_stats ordinary_bulk_first_stats = {0};
+    bulk_insert_first_stats ownerless_bulk_first_stats = {0};
     insert_client_timing ordinary_txn_client_timing = {0};
     insert_client_timing ownerless_txn_client_timing = {0};
     insert_client_timing ordinary_autocommit_client_timing = {0};
     insert_client_timing ownerless_autocommit_client_timing = {0};
     bulk_insert_timing ordinary_bulk_timing = {0};
     bulk_insert_timing ownerless_bulk_timing = {0};
+
+    if (page_publish_stats) {
+        ordinary_bulk_first_stats.innodb_deep = ordinary_bulk_first_innodb_deep;
+        ownerless_bulk_first_stats.page_publish = ownerless_bulk_first_page_publish;
+        ownerless_bulk_first_stats.database_perf = ownerless_bulk_first_database_perf;
+        ownerless_bulk_first_stats.page_write = ownerless_bulk_first_page_write;
+        ownerless_bulk_first_stats.page_log_append = ownerless_bulk_first_page_log_append;
+        ownerless_bulk_first_stats.commit_visibility = ownerless_bulk_first_commit_visibility;
+        ownerless_bulk_first_stats.innodb_deep = ownerless_bulk_first_innodb_deep;
+    }
 
     if (bulk_insert_rows_per_statement == 0U) {
         bulk_insert_rows_per_statement = 1U;
@@ -1760,7 +1814,7 @@ int main(void) {
         bulk_insert_rows_per_statement,
         page_publish_stats,
         &ordinary_bulk_timing,
-        page_publish_stats ? ordinary_bulk_first_innodb_deep : NULL
+        page_publish_stats ? &ordinary_bulk_first_stats : NULL
     );
     emit_rate("mylite_perf_ordinary_insert_autocommit_bulk_rows", insert_iterations, seconds);
     emit_rate(
@@ -2048,7 +2102,7 @@ int main(void) {
         bulk_insert_rows_per_statement,
         ownerless_insert_stats,
         &ownerless_bulk_timing,
-        page_publish_stats ? ownerless_bulk_first_innodb_deep : NULL
+        page_publish_stats ? &ownerless_bulk_first_stats : NULL
     );
     emit_rate("mylite_perf_ownerless_insert_autocommit_bulk_rows", insert_iterations, seconds);
     emit_rate(
@@ -2094,7 +2148,12 @@ int main(void) {
         emit_page_log_append_perf_stats("mylite_perf_ownerless_insert_autocommit_bulk");
         emit_page_log_scan_perf_stats("mylite_perf_ownerless_insert_autocommit_bulk");
         emit_page_log_sync_perf_stats("mylite_perf_ownerless_insert_autocommit_bulk");
-        emit_ownerless_bulk_autocommit_phase_summary(insert_iterations, bulk_insert_statements);
+        emit_ownerless_bulk_autocommit_phase_summary(
+            insert_iterations,
+            bulk_insert_statements,
+            &ownerless_bulk_timing,
+            &ownerless_bulk_first_stats
+        );
         emit_bulk_deep_comparison_summary(
             ordinary_bulk_innodb_deep,
             ownerless_bulk_innodb_deep,
@@ -3781,7 +3840,9 @@ static void emit_point_select_engine_summary(const char *prefix, unsigned select
 
 static void emit_ownerless_bulk_autocommit_phase_summary(
     unsigned insert_rows,
-    unsigned insert_statements
+    unsigned insert_statements,
+    const bulk_insert_timing *timing,
+    const bulk_insert_first_stats *first_stats
 ) {
     uint64_t page_publish[PAGE_PUBLISH_STAT_COUNT] = {0};
     uint64_t database_perf[DATABASE_PERF_STAT_COUNT] = {0};
@@ -3993,6 +4054,269 @@ static void emit_ownerless_bulk_autocommit_phase_summary(
         "statement",
         page_write[PAGE_WRITE_PERF_STAT_MTR_INLINE_PROMOTIONS],
         insert_statements
+    );
+    emit_ownerless_bulk_page_write_phase_split_summary(
+        page_publish,
+        database_perf,
+        page_write,
+        page_log_append,
+        commit_visibility,
+        timing,
+        first_stats
+    );
+}
+
+static void emit_ownerless_bulk_page_write_phase_summary(
+    const char *phase,
+    const uint64_t *page_publish,
+    const uint64_t *database_perf,
+    const uint64_t *page_write,
+    const uint64_t *page_log_append,
+    const uint64_t *commit_visibility,
+    unsigned insert_rows,
+    unsigned insert_statements
+) {
+    char prefix[160];
+
+    (void)
+        snprintf(prefix, sizeof(prefix), "mylite_perf_summary_ownerless_autocommit_bulk_%s", phase);
+
+    emit_prefixed_count_per_iteration(
+        prefix,
+        "page_versions_per_row",
+        page_publish[PAGE_PUBLISH_STAT_PUBLISHED],
+        insert_rows
+    );
+    emit_prefixed_count_per_iteration(
+        prefix,
+        "page_versions_per_statement",
+        page_publish[PAGE_PUBLISH_STAT_PUBLISHED],
+        insert_statements
+    );
+    emit_prefixed_count_per_iteration(
+        prefix,
+        "native_support_published_pages_per_statement",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED],
+        insert_statements
+    );
+    emit_prefixed_count_per_iteration(
+        prefix,
+        "native_support_elided_pages_per_statement",
+        page_publish[PAGE_PUBLISH_STAT_NATIVE_SUPPORT_ELIDED],
+        insert_statements
+    );
+    emit_prefixed_count_per_iteration(
+        prefix,
+        "commit_visibility_fast_per_statement",
+        commit_visibility[COMMIT_VISIBILITY_STAT_FAST],
+        insert_statements
+    );
+    emit_prefixed_count_per_iteration(
+        prefix,
+        "commit_visibility_flush_per_statement",
+        commit_visibility[COMMIT_VISIBILITY_STAT_FLUSH],
+        insert_statements
+    );
+    emit_prefixed_count_per_iteration(
+        prefix,
+        "page_publish_hook_calls_per_statement",
+        database_perf[DATABASE_PERF_STAT_PAGE_PUBLISH_CALLS],
+        insert_statements
+    );
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "page_publish_hook_ms_per_statement",
+        database_perf[DATABASE_PERF_STAT_PAGE_PUBLISH_TOTAL_NS],
+        insert_statements
+    );
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "page_publish_append_ms_per_statement",
+        database_perf[DATABASE_PERF_STAT_PAGE_PUBLISH_APPEND_NS],
+        insert_statements
+    );
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "page_publish_page_log_checksum_ms_per_statement",
+        database_perf[DATABASE_PERF_STAT_PAGE_PUBLISH_PAGE_LOG_CHECKSUM_NS],
+        insert_statements
+    );
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "page_publish_index_ms_per_statement",
+        database_perf[DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_NS],
+        insert_statements
+    );
+    emit_prefixed_count_per_iteration(
+        prefix,
+        "history_proof_pair_calls_per_statement",
+        database_perf[DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_CALLS],
+        insert_statements
+    );
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "history_proof_pair_ms_per_statement",
+        database_perf[DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_NS],
+        insert_statements
+    );
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "history_proof_pair_append_ms_per_statement",
+        database_perf[DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_APPEND_NS],
+        insert_statements
+    );
+    emit_prefixed_count_per_iteration(
+        prefix,
+        "page_log_append_calls_per_statement",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_CALLS],
+        insert_statements
+    );
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "page_log_append_ms_per_statement",
+        page_log_append[PAGE_LOG_APPEND_PERF_STAT_TOTAL_NS],
+        insert_statements
+    );
+    emit_prefixed_count_per_iteration(
+        prefix,
+        "page_write_commit_log_calls_per_statement",
+        page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_CALLS],
+        insert_statements
+    );
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "page_write_commit_log_ms_per_statement",
+        page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_TOTAL_NS],
+        insert_statements
+    );
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "page_write_commit_log_redo_leave_ms_per_statement",
+        page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_REDO_LEAVE_NS],
+        insert_statements
+    );
+    emit_page_write_redo_leave_subphase_summary(prefix, page_write, insert_statements, "statement");
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "page_write_commit_log_publish_ms_per_statement",
+        page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_PUBLISH_NS],
+        insert_statements
+    );
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "page_write_commit_log_release_memo_ms_per_statement",
+        page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_RELEASE_MEMO_NS],
+        insert_statements
+    );
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "page_write_commit_log_no_dirty_loop_ms_per_statement",
+        page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_NO_DIRTY_LOOP_NS],
+        insert_statements
+    );
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "page_write_commit_log_no_dirty_page_publish_ms_per_statement",
+        page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_NO_DIRTY_PAGE_PUBLISH_NS],
+        insert_statements
+    );
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "page_write_commit_log_no_dirty_page_leave_ms_per_statement",
+        page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_NO_DIRTY_PAGE_LEAVE_NS],
+        insert_statements
+    );
+    emit_prefixed_ms_per_iteration(
+        prefix,
+        "page_write_commit_log_no_dirty_page_unlock_ms_per_statement",
+        page_write[PAGE_WRITE_PERF_STAT_COMMIT_LOG_NO_DIRTY_PAGE_UNLOCK_NS],
+        insert_statements
+    );
+    emit_prefixed_count_per_iteration(
+        prefix,
+        "page_write_native_support_transaction_held_per_statement",
+        page_write[PAGE_WRITE_PERF_STAT_NATIVE_SUPPORT_TRANSACTION_HELD],
+        insert_statements
+    );
+    emit_prefixed_count_per_iteration(
+        prefix,
+        "page_write_native_support_transaction_hit_per_statement",
+        page_write[PAGE_WRITE_PERF_STAT_NATIVE_SUPPORT_TRANSACTION_HIT],
+        insert_statements
+    );
+}
+
+static void emit_ownerless_bulk_page_write_phase_split_summary(
+    const uint64_t *page_publish,
+    const uint64_t *database_perf,
+    const uint64_t *page_write,
+    const uint64_t *page_log_append,
+    const uint64_t *commit_visibility,
+    const bulk_insert_timing *timing,
+    const bulk_insert_first_stats *first_stats
+) {
+    uint64_t remaining_page_publish[PAGE_PUBLISH_STAT_COUNT] = {0};
+    uint64_t remaining_database_perf[DATABASE_PERF_STAT_COUNT] = {0};
+    uint64_t remaining_page_write[PAGE_WRITE_PERF_STAT_COUNT] = {0};
+    uint64_t remaining_page_log_append[PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
+    uint64_t remaining_commit_visibility[COMMIT_VISIBILITY_STAT_COUNT] = {0};
+
+    if (timing == NULL || first_stats == NULL || first_stats->page_publish == NULL ||
+        first_stats->database_perf == NULL || first_stats->page_write == NULL ||
+        first_stats->page_log_append == NULL || first_stats->commit_visibility == NULL) {
+        return;
+    }
+
+    subtract_counter_snapshot(
+        remaining_page_publish,
+        page_publish,
+        first_stats->page_publish,
+        PAGE_PUBLISH_STAT_COUNT
+    );
+    subtract_counter_snapshot(
+        remaining_database_perf,
+        database_perf,
+        first_stats->database_perf,
+        DATABASE_PERF_STAT_COUNT
+    );
+    subtract_counter_snapshot(
+        remaining_page_write,
+        page_write,
+        first_stats->page_write,
+        PAGE_WRITE_PERF_STAT_COUNT
+    );
+    subtract_counter_snapshot(
+        remaining_page_log_append,
+        page_log_append,
+        first_stats->page_log_append,
+        PAGE_LOG_APPEND_PERF_STAT_COUNT
+    );
+    subtract_counter_snapshot(
+        remaining_commit_visibility,
+        commit_visibility,
+        first_stats->commit_visibility,
+        COMMIT_VISIBILITY_STAT_COUNT
+    );
+
+    emit_ownerless_bulk_page_write_phase_summary(
+        "first",
+        first_stats->page_publish,
+        first_stats->database_perf,
+        first_stats->page_write,
+        first_stats->page_log_append,
+        first_stats->commit_visibility,
+        timing->first_statement_rows,
+        timing->first_statement_count
+    );
+    emit_ownerless_bulk_page_write_phase_summary(
+        "remaining",
+        remaining_page_publish,
+        remaining_database_perf,
+        remaining_page_write,
+        remaining_page_log_append,
+        remaining_commit_visibility,
+        timing->remaining_statement_rows,
+        timing->remaining_statement_count
     );
 }
 
@@ -4633,7 +4957,16 @@ static void subtract_deep_counter_snapshot(
     const uint64_t *total,
     const uint64_t *first
 ) {
-    for (size_t i = 0; i < INNODB_DEEP_PERF_STAT_COUNT; ++i) {
+    subtract_counter_snapshot(out_remaining, total, first, INNODB_DEEP_PERF_STAT_COUNT);
+}
+
+static void subtract_counter_snapshot(
+    uint64_t *out_remaining,
+    const uint64_t *total,
+    const uint64_t *first,
+    size_t value_count
+) {
+    for (size_t i = 0; i < value_count; ++i) {
         out_remaining[i] = total[i] >= first[i] ? total[i] - first[i] : 0U;
     }
 }
@@ -14360,6 +14693,48 @@ static void reset_ownerless_insert_stats(void) {
     mylite_ownerless_innodb_deep_reset_perf_stats();
 }
 
+static void capture_bulk_first_stats(const bulk_insert_first_stats *first_stats) {
+    if (first_stats == NULL) {
+        return;
+    }
+    if (first_stats->page_publish != NULL) {
+        mylite_ownerless_innodb_read_page_publish_stats(
+            first_stats->page_publish,
+            PAGE_PUBLISH_STAT_COUNT
+        );
+    }
+    if (first_stats->database_perf != NULL) {
+        mylite_ownerless_database_read_perf_stats(
+            first_stats->database_perf,
+            DATABASE_PERF_STAT_COUNT
+        );
+    }
+    if (first_stats->page_write != NULL) {
+        mylite_ownerless_innodb_read_page_write_perf_stats(
+            first_stats->page_write,
+            PAGE_WRITE_PERF_STAT_COUNT
+        );
+    }
+    if (first_stats->page_log_append != NULL) {
+        mylite_ownerless_page_log_read_append_perf_stats(
+            first_stats->page_log_append,
+            PAGE_LOG_APPEND_PERF_STAT_COUNT
+        );
+    }
+    if (first_stats->commit_visibility != NULL) {
+        mylite_ownerless_innodb_read_commit_visibility_stats(
+            first_stats->commit_visibility,
+            COMMIT_VISIBILITY_STAT_COUNT
+        );
+    }
+    if (first_stats->innodb_deep != NULL) {
+        mylite_ownerless_innodb_deep_read_perf_stats(
+            first_stats->innodb_deep,
+            INNODB_DEEP_PERF_STAT_COUNT
+        );
+    }
+}
+
 static mylite_db *open_database(
     const performance_paths *paths,
     unsigned flags,
@@ -14610,7 +14985,7 @@ static double measure_bulk_autocommit_insert(
     unsigned rows_per_statement,
     int reset_page_publish_stats,
     bulk_insert_timing *timing,
-    uint64_t *first_innodb_deep
+    const bulk_insert_first_stats *first_stats
 ) {
     char ddl[256];
     char *sql;
@@ -14694,13 +15069,7 @@ static double measure_bulk_autocommit_insert(
                 timing->first_statement_ns += statement_ns;
                 timing->first_statement_rows += statement_rows;
                 timing->first_statement_count = 1U;
-                if (first_innodb_deep != NULL) {
-                    mylite_ownerless_innodb_deep_read_perf_stats(
-                        first_innodb_deep,
-                        INNODB_DEEP_PERF_STAT_COUNT
-                    );
-                    first_innodb_deep = NULL;
-                }
+                capture_bulk_first_stats(first_stats);
             } else {
                 timing->remaining_statements_ns += statement_ns;
                 timing->remaining_statement_rows += statement_rows;
