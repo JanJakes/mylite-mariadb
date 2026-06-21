@@ -718,6 +718,13 @@ broad query/canonical and query/theme regexes as union and remaining-shard
 exclusion authorities. This changes CI timing attribution and expected
 wall-clock shape only; SQL, mysqli, native storage, and WordPress compatibility
 semantics are unchanged.
+WordPress PHPUnit CI also splits the former visible
+`non-isolated-rest-content-controller` tail into separate
+`non-isolated-rest-content-post` and `non-isolated-rest-content-support`
+shards while keeping the broad REST content-controller regex as the
+controller-other exclusion authority. This is another production timing
+partition only; it does not change REST, SQL, mysqli, native storage, or
+ownerless concurrency semantics.
 Ownerless mini-transaction page-write release now skips transaction lookup and
 external release policy checks when the current MTR has no ownerless
 page-write pages left to release. In the CI-shaped stats-enabled bulk probe,

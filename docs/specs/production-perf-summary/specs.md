@@ -956,6 +956,16 @@ PHP process startup at `25.432 ms`, explicit process connect/close at
 explicit native close at `26.729 ms`, so the next bounded wall-clock slice
 splits query/canonical into separate query and canonical shards before chasing
 native open/close or process startup.
+That split passed in CI run `27911082968`, with query at `29.888s` shell real
+and `31s` total, canonical at `36.817s` shell real and `38s` total, and a new
+critical shard `non-isolated-rest-content-controller` at `113s` total. The
+estimated WordPress critical path moved only from `177s` to `174s` because the
+REST content-controller shard still carried `68.785s` PHPUnit shell real plus
+`44.215s` of artifact, extract, Docker, and container overhead. The next
+bounded wall-clock slice therefore splits REST content-controller into
+post/autosave/revision-style controllers and support controllers while keeping
+the broad REST content-controller regex as the controller-other exclusion
+authority.
 
 The next production ownerless SQL run exposed `sql-case 46`
 (`test_ownerless_active_reader_pressure_limit_blocks_write_classes`) during a
