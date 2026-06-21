@@ -711,6 +711,13 @@ The final WordPress timing rollup now preserves those explicit/implicit
 process connect/close rows and native open/close profile rows, not just the
 older combined connect/close alias, so the published timing artifact keeps the
 per-process PHPUnit cost model visible for branch/main comparisons.
+WordPress PHPUnit CI now splits the former visible
+`non-isolated-query-canonical` timing tail into separate
+`non-isolated-query` and `non-isolated-canonical` shards while keeping the
+broad query/canonical and query/theme regexes as union and remaining-shard
+exclusion authorities. This changes CI timing attribution and expected
+wall-clock shape only; SQL, mysqli, native storage, and WordPress compatibility
+semantics are unchanged.
 Ownerless mini-transaction page-write release now skips transaction lookup and
 external release policy checks when the current MTR has no ownerless
 page-write pages left to release. In the CI-shaped stats-enabled bulk probe,

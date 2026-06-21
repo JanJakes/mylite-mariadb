@@ -578,8 +578,17 @@ jobs:
             keepalive: "1"
             child_skip_install: "0"
             child_restore_baseline: "0"
-          - shard: non-isolated-query-canonical
-            label: phpunit-non-isolated-query-canonical
+          - shard: non-isolated-query
+            label: phpunit-non-isolated-query
+            reconnect_after_child: "1"
+            child_timing_summary: "0"
+            child_script_timing_summary: "0"
+            profile_mysqli: "0"
+            keepalive: "1"
+            child_skip_install: "0"
+            child_restore_baseline: "0"
+          - shard: non-isolated-canonical
+            label: phpunit-non-isolated-canonical
             reconnect_after_child: "1"
             child_timing_summary: "0"
             child_script_timing_summary: "0"
@@ -705,6 +714,8 @@ jobs:
       MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_CONTROLLER_RE: 'WP_Test_REST_(?:Posts|Pages|Attachments|Comments|Users|Tags|Categories|Taxonomies|Revisions|Autosaves|Search|Post_Types|Post_Statuses)_Controller'
       MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE: 'Tests_Query|Test_Query|Tests_Canonical|Tests_Theme'
       MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_CANONICAL_RE: 'Tests_Query|Test_Query|Tests_Canonical'
+      MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_RE: 'Tests_Query|Test_Query'
+      MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CANONICAL_RE: 'Tests_Canonical'
       MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_THEME_RE: 'Tests_Theme'
       MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE: 'Tests_WpTokenMap|Tests_Block|WP_Block|Tests_Blocks'
       MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE: 'Tests_Media|Tests_Attachment|Tests_Comment|Tests_XMLRPC|Tests_Xmlrpc'
@@ -843,8 +854,11 @@ jobs:
             non-isolated-rest-other)
               wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?!.*Controller)${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
               ;;
-            non-isolated-query-canonical)
-              wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_CANONICAL_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
+            non-isolated-query)
+              wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
+              ;;
+            non-isolated-canonical)
+              wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CANONICAL_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
               ;;
             non-isolated-theme)
               wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_THEME_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"

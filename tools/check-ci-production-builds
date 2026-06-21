@@ -284,6 +284,15 @@ reject_regex \
 reject_regex \
   'MYLITE_WORDPRESS_PHPUNIT_ISOLATED_FILTER' \
   "WordPress PHPUnit CI must not keep the stale broad isolated-class filter"
+reject_regex \
+  'label:[[:space:]]*phpunit-non-isolated-query-canonical' \
+  "WordPress PHPUnit CI must split the old query-canonical label"
+reject_regex \
+  'shard:[[:space:]]*non-isolated-query-canonical' \
+  "WordPress PHPUnit CI must split the old query-canonical shard"
+reject_regex \
+  '^[[:space:]]+non-isolated-query-canonical\)' \
+  "WordPress PHPUnit CI must split the old query-canonical case arm"
 
 require_literal "cmake --preset prod"
 require_literal "cmake --build --preset prod"
@@ -344,6 +353,8 @@ require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_CONTROLLER_RE:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_CANONICAL_RE:"
+require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_RE:"
+require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CANONICAL_RE:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_THEME_RE:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE:"
@@ -457,7 +468,8 @@ require_literal "label: phpunit-deferred-reconnect-ui"
 require_literal "label: phpunit-non-isolated-rest-content-controller"
 require_literal "label: phpunit-non-isolated-rest-controller-other"
 require_literal "label: phpunit-non-isolated-rest-other"
-require_literal "label: phpunit-non-isolated-query-canonical"
+require_literal "label: phpunit-non-isolated-query"
+require_literal "label: phpunit-non-isolated-canonical"
 require_literal "label: phpunit-non-isolated-theme"
 require_literal "label: phpunit-non-isolated-block-token"
 require_literal "label: phpunit-non-isolated-media-comment"
@@ -475,7 +487,8 @@ require_literal "shard: deferred-reconnect-ui"
 require_literal "shard: non-isolated-rest-content-controller"
 require_literal "shard: non-isolated-rest-controller-other"
 require_literal "shard: non-isolated-rest-other"
-require_literal "shard: non-isolated-query-canonical"
+require_literal "shard: non-isolated-query"
+require_literal "shard: non-isolated-canonical"
 require_literal "shard: non-isolated-theme"
 require_literal "shard: non-isolated-block-token"
 require_literal "shard: non-isolated-media-comment"
@@ -488,7 +501,8 @@ require_literal "shard: non-isolated-remaining-other"
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_CONTROLLER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_CONTROLLER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?!.*Controller)${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
-require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_CANONICAL_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
+require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
+require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CANONICAL_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_THEME_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
@@ -663,7 +677,10 @@ require_step_literal \
   'non-isolated-rest-controller-other)'
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
-  'non-isolated-query-canonical)'
+  'non-isolated-query)'
+require_step_literal \
+  "Run WordPress PHPUnit shard (test only)" \
+  'non-isolated-canonical)'
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
   'non-isolated-theme)'

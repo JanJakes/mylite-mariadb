@@ -947,6 +947,15 @@ two new content shards were `87s` (`content-entity`) and `50s`
 content-data tail but bought only about `7s` against the preceding `184s`
 hot-cache estimate because query/canonical and REST content were already close
 behind it.
+The rollup-metrics follow-up, green run `27910514312` on `552ff0d4`, kept
+`non-isolated-query-canonical` as the critical shard at `114s`, with `7s`
+artifact download, `3s` artifact extract, `20s` Docker image setup, `84s`
+PHPUnit total, and `82.489s` PHPUnit shell real time. The same run reported
+PHP process startup at `25.432 ms`, explicit process connect/close at
+`147.183 ms`, profiled explicit native open at `85.333 ms`, and profiled
+explicit native close at `26.729 ms`, so the next bounded wall-clock slice
+splits query/canonical into separate query and canonical shards before chasing
+native open/close or process startup.
 
 The next production ownerless SQL run exposed `sql-case 46`
 (`test_ownerless_active_reader_pressure_limit_blocks_write_classes`) during a
