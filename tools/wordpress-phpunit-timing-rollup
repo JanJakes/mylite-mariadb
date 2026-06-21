@@ -136,6 +136,9 @@ function add_shard_phase(row_label, value, shard, phase) {
   } else if (row_label ~ /^docker-image-/) {
     shard = substr(row_label, length("docker-image-") + 1)
     phase = "docker_image"
+  } else if (row_label ~ /^group-phpunit-/) {
+    shard = substr(row_label, length("group-phpunit-") + 1)
+    phase = "phpunit_total"
   } else if (row_label ~ /^phpunit-/) {
     shard = substr(row_label, length("phpunit-") + 1)
     phase = "phpunit_total"
@@ -155,10 +158,16 @@ function add_shard_phase(row_label, value, shard, phase) {
 }
 
 function add_shard_phpunit_shell(row_label, value, shard) {
-  if (!is_number(value) || row_label !~ /^phpunit-/) {
+  if (!is_number(value)) {
     return
   }
-  shard = substr(row_label, length("phpunit-") + 1)
+  if (row_label ~ /^group-phpunit-/) {
+    shard = substr(row_label, length("group-phpunit-") + 1)
+  } else if (row_label ~ /^phpunit-/) {
+    shard = substr(row_label, length("phpunit-") + 1)
+  } else {
+    return
+  }
   if (shard == "") {
     return
   }
@@ -327,10 +336,12 @@ BEGIN {
   }
 
   if (metric == "wordpress_total_seconds" && is_number(value)) {
-    count_once("phase_all", row_label)
-    add_sum("phase_all", metric, value)
     add_shard_phase(row_label, value)
-    if (row_label !~ /^(artifact-download|artifact-extract|docker-image|phpunit)-/) {
+    if (row_label !~ /^group-phpunit-/) {
+      count_once("phase_all", row_label)
+      add_sum("phase_all", metric, value)
+    }
+    if (row_label !~ /^(artifact-download|artifact-extract|docker-image|phpunit|group-phpunit)-/) {
       count_once("setup_phase", row_label)
       add_sum("setup_phase", metric, value)
     }
@@ -345,6 +356,10 @@ BEGIN {
     add_sum("phase_metric", metric, value)
   }
 
+  if (metric == "wordpress_phpunit_shell_real_seconds") {
+    add_shard_phpunit_shell(row_label, value)
+  }
+
   if (row_label !~ /^phpunit-/ || !(metric in phpunit_metric)) {
     next
   }
@@ -353,7 +368,6 @@ BEGIN {
   add_sum("phpunit_all", metric, value)
   if (metric == "wordpress_phpunit_shell_real_seconds") {
     note_max("wordpress_phpunit_shell_real_seconds", value, row_label)
-    add_shard_phpunit_shell(row_label, value)
   }
   if (metric == "wordpress_total_seconds") {
     note_max("wordpress_phpunit_total_seconds", value, row_label)

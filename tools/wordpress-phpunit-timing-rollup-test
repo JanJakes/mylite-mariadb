@@ -79,6 +79,14 @@ cat > "${summary}" <<'SUMMARY'
 | artifact-extract-non-isolated-rest | wordpress_total_seconds | 7 |
 | docker-image-non-isolated-rest | wordpress_docker_build_seconds | 30 |
 | docker-image-non-isolated-rest | wordpress_total_seconds | 30 |
+| artifact-download-non-isolated-short | wordpress_artifact_download_seconds | 3 |
+| artifact-download-non-isolated-short | wordpress_total_seconds | 3 |
+| artifact-extract-non-isolated-short | wordpress_artifact_extract_seconds | 4 |
+| artifact-extract-non-isolated-short | wordpress_total_seconds | 4 |
+| docker-image-non-isolated-short | wordpress_docker_build_seconds | 20 |
+| docker-image-non-isolated-short | wordpress_total_seconds | 20 |
+| group-phpunit-non-isolated-short | wordpress_phpunit_shell_real_seconds | 25 |
+| group-phpunit-non-isolated-short | wordpress_total_seconds | 26 |
 | phpunit-db-profile | wordpress_phpunit_shell_real_seconds | 7.432 |
 | phpunit-db-profile | wordpress_phpunit_reported_seconds | 4.223 |
 | phpunit-db-profile | wordpress_phpunit_seconds | 8 |
@@ -101,6 +109,14 @@ cat > "${summary}" <<'SUMMARY'
 | phpunit-non-isolated-rest | wordpress_phpunit_reported_seconds | 165.226 |
 | phpunit-non-isolated-rest | wordpress_phpunit_seconds | 169 |
 | phpunit-non-isolated-rest | wordpress_total_seconds | 170 |
+| phpunit-non-isolated-short-a | wordpress_phpunit_shell_real_seconds | 10 |
+| phpunit-non-isolated-short-a | wordpress_phpunit_reported_seconds | 9 |
+| phpunit-non-isolated-short-a | wordpress_phpunit_seconds | 10 |
+| phpunit-non-isolated-short-a | wordpress_total_seconds | 11 |
+| phpunit-non-isolated-short-b | wordpress_phpunit_shell_real_seconds | 12 |
+| phpunit-non-isolated-short-b | wordpress_phpunit_reported_seconds | 11 |
+| phpunit-non-isolated-short-b | wordpress_phpunit_seconds | 12 |
+| phpunit-non-isolated-short-b | wordpress_total_seconds | 13 |
 SUMMARY
 
 rollup="$("${script_dir}/wordpress-phpunit-timing-rollup" --input "${summary}")"
@@ -114,13 +130,13 @@ require_row() {
   fi
 }
 
-require_row "| timing-rollup | wordpress_phpunit_test_phase_count | 3 |"
-require_row "| timing-rollup | wordpress_phpunit_test_shell_real_seconds_sum | 202.908 |"
-require_row "| timing-rollup | wordpress_phpunit_test_reported_seconds_sum | 193.362 |"
-require_row "| timing-rollup | wordpress_phpunit_test_seconds_sum | 203.000 |"
+require_row "| timing-rollup | wordpress_phpunit_test_phase_count | 5 |"
+require_row "| timing-rollup | wordpress_phpunit_test_shell_real_seconds_sum | 224.908 |"
+require_row "| timing-rollup | wordpress_phpunit_test_reported_seconds_sum | 213.362 |"
+require_row "| timing-rollup | wordpress_phpunit_test_seconds_sum | 225.000 |"
 require_row "| timing-rollup | wordpress_phpunit_diagnostic_phase_count | 1 |"
 require_row "| timing-rollup | wordpress_phpunit_diagnostic_shell_real_seconds_sum | 7.432 |"
-require_row "| timing-rollup | wordpress_phpunit_all_phase_count | 4 |"
+require_row "| timing-rollup | wordpress_phpunit_all_phase_count | 6 |"
 require_row "| timing-rollup | wordpress_phpunit_db_shell_real_seconds_sum | 7.522 |"
 require_row "| timing-rollup | wordpress_phpunit_isolated_shell_real_seconds_sum | 26.917 |"
 require_row "| timing-rollup | wordpress_phpunit_isolated_child_process_count_sum | 7 |"
@@ -141,14 +157,14 @@ require_row "| timing-rollup | wordpress_phpunit_isolated_child_process_runtime_
 require_row "| timing-rollup | wordpress_phpunit_isolated_child_process_reconnect_ms_avg | 2.000 |"
 require_row "| timing-rollup | wordpress_phpunit_isolated_child_script_ms_avg | 900.000 |"
 require_row "| timing-rollup | wordpress_phpunit_isolated_child_process_outer_minus_script_ms_avg | 100.000 |"
-require_row "| timing-rollup | wordpress_phpunit_non_isolated_shell_real_seconds_sum | 168.469 |"
+require_row "| timing-rollup | wordpress_phpunit_non_isolated_shell_real_seconds_sum | 190.469 |"
 require_row "| timing-rollup | wordpress_build_mariadb_embedded_seconds | 406.000 |"
 require_row "| timing-rollup | wordpress_build_total_seconds | 424.000 |"
-require_row "| timing-rollup | wordpress_timed_phase_count | 12 |"
-require_row "| timing-rollup | wordpress_timed_phase_total_seconds_sum | 728.000 |"
+require_row "| timing-rollup | wordpress_timed_phase_count | 17 |"
+require_row "| timing-rollup | wordpress_timed_phase_total_seconds_sum | 779.000 |"
 require_row "| timing-rollup | wordpress_setup_phase_count | 4 |"
 require_row "| timing-rollup | wordpress_setup_total_seconds_sum | 468.000 |"
-require_row "| timing-rollup | wordpress_shard_phase_count | 2 |"
+require_row "| timing-rollup | wordpress_shard_phase_count | 5 |"
 require_row "| timing-rollup | wordpress_shard_critical_path_label | non-isolated-rest |"
 require_row "| timing-rollup | wordpress_shard_critical_path_seconds_max | 213.000 |"
 require_row "| timing-rollup | wordpress_shard_critical_path_artifact_download_seconds | 6.000 |"
@@ -166,13 +182,13 @@ require_row "| timing-rollup | wordpress_phpunit_total_seconds_max_label | phpun
 require_row "| timing-rollup | wordpress_phpunit_total_seconds_max | 170.000 |"
 require_row "| timing-rollup | wordpress_artifact_pack_seconds | 12.000 |"
 require_row "| timing-rollup | wordpress_artifact_upload_seconds | 3.000 |"
-require_row "| timing-rollup | wordpress_artifact_download_seconds | 10.000 |"
-require_row "| timing-rollup | wordpress_artifact_extract_seconds | 12.000 |"
+require_row "| timing-rollup | wordpress_artifact_download_seconds | 13.000 |"
+require_row "| timing-rollup | wordpress_artifact_extract_seconds | 16.000 |"
 require_row "| timing-rollup | wordpress_artifact_pack_runtime_tar_bytes | 100 |"
 require_row "| timing-rollup | wordpress_artifact_pack_db_baseline_tar_bytes | 20 |"
 require_row "| timing-rollup | wordpress_artifact_extract_runtime_tar_bytes_sum | 100 |"
 require_row "| timing-rollup | wordpress_artifact_extract_db_baseline_tar_bytes_sum | 20 |"
-require_row "| timing-rollup | wordpress_docker_build_seconds | 58.000 |"
+require_row "| timing-rollup | wordpress_docker_build_seconds | 78.000 |"
 require_row "| timing-rollup | wordpress_perf_php_extension_process_overhead_ms_avg | 7.173 |"
 require_row "| timing-rollup | wordpress_perf_php_connect_process_ms_avg | 620.000 |"
 require_row "| timing-rollup | wordpress_perf_php_connect_process_explicit_close_ms_avg | 620.000 |"
@@ -204,7 +220,7 @@ require_row "| timing-rollup | wordpress_perf_select1_ops_per_second | 1545.960 
 "${script_dir}/wordpress-phpunit-timing-rollup" --input "${summary}" --append
 "${script_dir}/wordpress-phpunit-timing-rollup" --input "${summary}" --append
 
-rollup_count="$(grep -c '^| timing-rollup | wordpress_phpunit_test_phase_count | 3 |$' "${summary}")"
+rollup_count="$(grep -c '^| timing-rollup | wordpress_phpunit_test_phase_count | 5 |$' "${summary}")"
 if [ "${rollup_count}" -ne 1 ]; then
   echo "Expected idempotent append to keep one rollup row, got ${rollup_count}" >&2
   exit 1

@@ -600,8 +600,8 @@ jobs:
             keepalive: "1"
             child_skip_install: "0"
             child_restore_baseline: "0"
-          - shard: non-isolated-rest-content-history
-            label: phpunit-non-isolated-rest-content-history
+          - shard: non-isolated-rest-short
+            label: phpunit-non-isolated-rest-short
             reconnect_after_child: "1"
             child_timing_summary: "0"
             child_script_timing_summary: "0"
@@ -611,15 +611,6 @@ jobs:
             child_restore_baseline: "0"
           - shard: non-isolated-rest-content-support
             label: phpunit-non-isolated-rest-content-support
-            reconnect_after_child: "1"
-            child_timing_summary: "0"
-            child_script_timing_summary: "0"
-            profile_mysqli: "0"
-            keepalive: "1"
-            child_skip_install: "0"
-            child_restore_baseline: "0"
-          - shard: non-isolated-rest-controller-tests-rest-font-icon
-            label: phpunit-non-isolated-rest-controller-tests-rest-font-icon
             reconnect_after_child: "1"
             child_timing_summary: "0"
             child_script_timing_summary: "0"
@@ -789,17 +780,8 @@ jobs:
             keepalive: "1"
             child_skip_install: "0"
             child_restore_baseline: "0"
-          - shard: non-isolated-remaining-platform-html-interactivity
-            label: phpunit-non-isolated-remaining-platform-html-interactivity
-            reconnect_after_child: "1"
-            child_timing_summary: "0"
-            child_script_timing_summary: "0"
-            profile_mysqli: "0"
-            keepalive: "1"
-            child_skip_install: "0"
-            child_restore_baseline: "0"
-          - shard: non-isolated-remaining-platform-image
-            label: phpunit-non-isolated-remaining-platform-image
+          - shard: non-isolated-remaining-short
+            label: phpunit-non-isolated-remaining-short
             reconnect_after_child: "1"
             child_timing_summary: "0"
             child_script_timing_summary: "0"
@@ -818,15 +800,6 @@ jobs:
             child_restore_baseline: "0"
           - shard: non-isolated-remaining-admin-site
             label: phpunit-non-isolated-remaining-admin-site
-            reconnect_after_child: "1"
-            child_timing_summary: "0"
-            child_script_timing_summary: "0"
-            profile_mysqli: "0"
-            keepalive: "1"
-            child_skip_install: "0"
-            child_restore_baseline: "0"
-          - shard: non-isolated-remaining-ai-connectors
-            label: phpunit-non-isolated-remaining-ai-connectors
             reconnect_after_child: "1"
             child_timing_summary: "0"
             child_script_timing_summary: "0"
@@ -1047,6 +1020,22 @@ jobs:
           set -euo pipefail
           tools/require-cmake-build-type MinSizeRel build/wordpress-mariadb-embedded
           tools/require-cmake-release-build build/wordpress-php-embedded-prod
+          run_wordpress_phpunit_filter() {
+            local label="$1"
+            local filter="$2"
+            MYLITE_WORDPRESS_TIMING_LABEL="${label}" \
+              tools/wordpress-phpunit-mysqli-mylite --filter "${filter}"
+          }
+          record_wordpress_phpunit_group() {
+            local shard="$1"
+            local start_seconds="$2"
+            local elapsed_seconds
+            elapsed_seconds="$(($(date +%s) - start_seconds))"
+            tools/wordpress-phpunit-append-timing \
+              --label "group-phpunit-${shard}" \
+              "wordpress_phpunit_shell_real_seconds=${elapsed_seconds}" \
+              "wordpress_total_seconds=${elapsed_seconds}"
+          }
           case "${WORDPRESS_PHPUNIT_SHARD}" in
             db | db-profile)
               wordpress_phpunit_filter='^Tests_DB'
@@ -1066,14 +1055,19 @@ jobs:
             non-isolated-rest-content-primary-other)
               wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_PRIMARY_OTHER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
               ;;
-            non-isolated-rest-content-history)
-              wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_HISTORY_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
+            non-isolated-rest-short)
+              group_start="$(date +%s)"
+              run_wordpress_phpunit_filter \
+                phpunit-non-isolated-rest-content-history \
+                "^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_HISTORY_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
+              run_wordpress_phpunit_filter \
+                phpunit-non-isolated-rest-controller-tests-rest-font-icon \
+                "^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_TESTS_REST_RE}))(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_TESTS_REST_FONT_ICON_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_CONTROLLER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
+              record_wordpress_phpunit_group "${WORDPRESS_PHPUNIT_SHARD}" "${group_start}"
+              exit 0
               ;;
             non-isolated-rest-content-support)
               wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_SUPPORT_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
-              ;;
-            non-isolated-rest-controller-tests-rest-font-icon)
-              wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_TESTS_REST_RE}))(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_TESTS_REST_FONT_ICON_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_CONTROLLER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
               ;;
             non-isolated-rest-controller-tests-rest-other)
               wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_TESTS_REST_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_TESTS_REST_FONT_ICON_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_CONTROLLER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
@@ -1129,20 +1123,25 @@ jobs:
             non-isolated-user-auth)
               wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
               ;;
-            non-isolated-remaining-platform-html-interactivity)
-              wordpress_phpunit_filter="^(?=(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_PLATFORM_HTML_INTERACTIVITY_RE})(?:_|::|$))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
-              ;;
-            non-isolated-remaining-platform-image)
-              wordpress_phpunit_filter="^(?=(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_PLATFORM_IMAGE_RE})(?:_|::|$))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
+            non-isolated-remaining-short)
+              group_start="$(date +%s)"
+              run_wordpress_phpunit_filter \
+                phpunit-non-isolated-remaining-platform-html-interactivity \
+                "^(?=(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_PLATFORM_HTML_INTERACTIVITY_RE})(?:_|::|$))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
+              run_wordpress_phpunit_filter \
+                phpunit-non-isolated-remaining-platform-image \
+                "^(?=(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_PLATFORM_IMAGE_RE})(?:_|::|$))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
+              run_wordpress_phpunit_filter \
+                phpunit-non-isolated-remaining-ai-connectors \
+                "^(?!${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_PLATFORM_RE}(?:_|::|$))(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_AI_CONNECTORS_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_ADMIN_SITE_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
+              record_wordpress_phpunit_group "${WORDPRESS_PHPUNIT_SHARD}" "${group_start}"
+              exit 0
               ;;
             non-isolated-remaining-platform-format-dependencies-embed)
               wordpress_phpunit_filter="^(?=(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_PLATFORM_FORMAT_DEPENDENCIES_EMBED_RE})(?:_|::|$))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
               ;;
             non-isolated-remaining-admin-site)
               wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_ADMIN_SITE_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
-              ;;
-            non-isolated-remaining-ai-connectors)
-              wordpress_phpunit_filter="^(?!${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_PLATFORM_RE}(?:_|::|$))(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_AI_CONNECTORS_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_ADMIN_SITE_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
               ;;
             non-isolated-remaining-navigation)
               wordpress_phpunit_filter="^(?!${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_PLATFORM_RE}(?:_|::|$))(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_NAVIGATION_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_ADMIN_SITE_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
