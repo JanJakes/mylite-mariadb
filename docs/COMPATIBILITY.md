@@ -2577,6 +2577,13 @@ the former `phpunit-non-isolated-rest-controller-other` bucket with
 runtime/I/O helper families into their own visible shards. The split is
 guarded by the production-build audit and does not change SQL, mysqli, native
 storage, recovery, or ownerless behavior.
+The next timing fanout keeps the same production surface while replacing the
+former `phpunit-non-isolated-block-token` bucket with
+`phpunit-non-isolated-block-library` for `Tests_Blocks*` classes and
+`phpunit-non-isolated-block-support-template` for block supports, templates,
+bindings, token-map, and small `WP_Block*` classes. The broad block/token regex
+remains the remaining-shard exclusion authority, and the split changes only CI
+test-only filters and audit guards.
 
 Ownerless page-version WAL records can now encode zero-heavy page images by
 storing a compact 16-bit sparse nonzero-run list, the original 32-bit sparse

@@ -1001,6 +1001,17 @@ both tails: REST controller-other by `Tests_REST`, `WP_Test_REST`, and
 `WP_REST` class prefixes, and remaining-other into AI/connectors,
 navigation/content-adjacent helpers, runtime/I/O helpers, and a reduced
 catch-all.
+That REST and remaining fanout passed in CI run `27912810694`, with
+REST-controller fanout shards at `57s`, `47s`, and `40s` total, and the
+remaining fanout shards at `57s`, `38s`, `34s`, and `52s` total. The intended
+tails stopped controlling the WordPress job, but an artifact-download outlier
+and the still-broad block/token PHPUnit body made `non-isolated-block-token`
+the new critical shard at `105s` total, including `56.428s` shell real, `22s`
+Docker image setup, `23s` artifact download, and `3s` artifact extract. The
+estimated workflow critical path was `175s`. The next bounded wall-clock slice
+therefore splits block/token into a `Tests_Blocks*` library shard and a
+block-support/template/token shard while keeping the broad block/token regex
+as the union and remaining-shard exclusion authority.
 
 The next production ownerless SQL run exposed `sql-case 46`
 (`test_ownerless_active_reader_pressure_limit_blocks_write_classes`) during a
