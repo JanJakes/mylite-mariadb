@@ -8,9 +8,14 @@ harder to target from SQL. MariaDB emits `FILE_MODIFY` when a persistent
 non-predefined tablespace is modified after checkpoint bookkeeping has reset
 that tablespace, not from a distinct SQL statement type.
 
-This slice adds a bounded hook-build proof that ordinary DML on a
-file-per-table InnoDB table can reach that `FILE_MODIFY` redo path. It does
-not claim durable marker coverage for every DML `FILE_MODIFY` case.
+This slice originally added a bounded hook-build proof that ordinary DML on a
+file-per-table InnoDB table can reach that `FILE_MODIFY` redo path. A later
+`ownerless-dml-file-op-marker` slice promotes the checkpointed-DML case to
+bounded durable marker coverage for autocommit writes by consuming the same
+flag during successful write cleanup, so the hook selector now observes the
+durable marker rather than taking the raw flag after SQL returns. This
+observation slice by itself does not claim durable marker coverage for every
+DML `FILE_MODIFY` case.
 
 ## Source Findings
 
@@ -41,7 +46,8 @@ In scope:
 - Add a hook-only `native-file-modify-redo-observation` selector and CTest.
 - Create and modify a file-per-table InnoDB table in ownerless mode.
 - Force a native checkpoint, clear the existing ownerless file-op redo flag,
-  run a DML update, and assert the file-op redo flag is set again.
+  run a DML update, and assert the production cleanup consumed the flag by
+  setting the native file-op checkpoint-needed marker.
 - Verify the table remains readable and writable after the observation.
 
 Out of scope:
@@ -66,8 +72,10 @@ It then executes:
 UPDATE app.ownerless_file_modify_redo SET value = 11 WHERE id = 1
 ```
 
-No DDL file operation occurs in that statement. A true result from
-`mylite_ownerless_innodb_take_file_op_redo()` after the update is therefore
+No DDL file operation occurs in that statement. After the
+`ownerless-dml-file-op-marker` follow-up, the production successful-write
+cleanup consumes the same file-op flag and persists the native
+checkpoint-needed marker. A set marker after the update is therefore
 source-backed evidence that InnoDB emitted file-operation redo from the
 post-checkpoint DML path, which is the `FILE_MODIFY` path described above.
 
@@ -118,7 +126,9 @@ CTest is registered only when unsafe ownerless test hooks are enabled.
 
 - `cmake --build --preset ownerless-test-hooks --target
   mylite_ownerless_cross_process_sql_test -j2` passed.
-- Direct hook selector `native-file-modify-redo-observation` passed.
+- Direct hook selector `native-file-modify-redo-observation` passed before the
+  durable-marker follow-up; after that follow-up, the selector asserts the
+  marker produced by the consumed flag instead of taking the flag directly.
 - `ctest --preset ownerless-test-hooks -R
   '^libmylite\.ownerless-native-file-modify-redo-observation$'
   --output-on-failure` passed 1/1.
@@ -139,7 +149,8 @@ CTest is registered only when unsafe ownerless test hooks are enabled.
 
 - The test can force a native checkpoint while the ownerless database is open.
 - Any pre-existing file-op redo flag is cleared before the observed DML.
-- A post-checkpoint `UPDATE` sets the file-op redo flag.
+- A post-checkpoint `UPDATE` sets the native file-op checkpoint-needed marker
+  through the production successful-write cleanup path.
 - The updated row is visible before close and after reopen.
 - The selector is registered as a hook-only CTest.
 
@@ -148,6 +159,7 @@ CTest is registered only when unsafe ownerless test hooks are enabled.
 - The hook flag is type-agnostic. The `FILE_MODIFY` conclusion depends on the
   source-backed absence of DDL file operations in the observed statement.
 - Durable marker coverage for all DML-origin `FILE_MODIFY` cases remains
-  unclaimed.
+  unclaimed; the later `ownerless-dml-file-op-marker` slice covers the
+  focused checkpointed autocommit-DML case only.
 - Broader native redo/checkpoint reconciliation and external MariaDB/RQG stress
   remain planned.

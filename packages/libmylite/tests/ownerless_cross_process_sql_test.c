@@ -778,6 +778,7 @@ static void test_ownerless_checkpoint_lsn_skips_legacy_after_record_init(void);
 static void test_ownerless_native_file_op_marker_clears_without_page_log(void);
 static void test_ownerless_native_file_op_marker_recovers_from_torn_clear_record(void);
 static void test_ownerless_native_file_op_marker_drains_after_real_sql_ddl(void);
+static void test_ownerless_native_file_op_marker_drains_after_checkpointed_dml(void);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void test_ownerless_file_modify_redo_observed_after_checkpointed_dml(void);
 static void test_ownerless_redo_header_backup_validation_boundaries(void);
@@ -3931,6 +3932,10 @@ int main(int argc, char **argv) {
         test_ownerless_native_file_op_marker_drains_after_real_sql_ddl();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "native-dml-file-op-marker-drain") == 0) {
+        test_ownerless_native_file_op_marker_drains_after_checkpointed_dml();
+        return 0;
+    }
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
     if (argc == 2 && strcmp(argv[1], "native-file-modify-redo-observation") == 0) {
         test_ownerless_file_modify_redo_observed_after_checkpointed_dml();
@@ -5117,7 +5122,7 @@ int main(int argc, char **argv) {
             "prepared-committed-read|tableless-select-fast-path|"
             "local-write-first-read|isolation|"
             "shared-readonly|checkpoint-evidence|checkpoint-lsn-noop-elision|native-reclaim|"
-            "native-file-op-marker-drain|"
+            "native-file-op-marker-drain|native-dml-file-op-marker-drain|"
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
             "native-file-modify-redo-observation|"
             "redo-header-backup-validation|"
@@ -5676,6 +5681,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     ),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_zombie_writer_cleanup_before_reap),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_native_file_op_marker_drains_after_real_sql_ddl),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_native_file_op_marker_drains_after_checkpointed_dml),
 };
 // clang-format on
 
@@ -9496,6 +9502,80 @@ static void test_ownerless_native_file_op_marker_drains_after_real_sql_ddl(void)
     free(root);
 }
 
+static void test_ownerless_native_file_op_marker_drains_after_checkpointed_dml(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-dml-file-op-marker.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_dml_file_op_marker ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "payload VARBINARY(256) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_dml_file_op_marker VALUES "
+        "(1, 10, REPEAT('a', 256))"
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_dml_file_op_marker") == 10U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(mylite_ownerless_innodb_make_checkpoint() == MYLITE_TEST_OWNERLESS_INNODB_LOCK_OK);
+    (void)mylite_ownerless_innodb_take_file_op_redo();
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_dml_file_op_marker "
+        "SET value = 11, payload = REPEAT('b', 256) "
+        "WHERE id = 1"
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_dml_file_op_marker") == 11U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_dml_file_op_marker") == 11U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.ownerless_dml_file_op_marker"
+        ) == (unsigned)'b'
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_dml_file_op_marker "
+        "SET value = 12 "
+        "WHERE id = 1"
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_dml_file_op_marker") == 12U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void test_ownerless_file_modify_redo_observed_after_checkpointed_dml(void) {
     char *root = make_temp_root();
@@ -9531,7 +9611,7 @@ static void test_ownerless_file_modify_redo_observed_after_checkpointed_dml(void
         "SET value = 11, payload = REPEAT('b', 256) "
         "WHERE id = 1"
     );
-    assert(mylite_ownerless_innodb_take_file_op_redo());
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_file_modify_redo") == 11U);
     assert(
         query_unsigned(
@@ -9541,6 +9621,7 @@ static void test_ownerless_file_modify_redo_observed_after_checkpointed_dml(void
         ) == (unsigned)'b'
     );
     assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_file_modify_redo") == 11U);

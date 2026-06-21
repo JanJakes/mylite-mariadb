@@ -255,6 +255,16 @@ ownerless file-op redo flag, updates a file-per-table InnoDB table, and
 observes the flag set again, proving ordinary post-checkpoint DML reaches
 MariaDB's `FILE_MODIFY` redo path. That is observation evidence, not a broad
 durable-marker claim for every DML-origin `FILE_MODIFY` case.
+Ownerless successful autocommit non-DDL write cleanup now consumes the same
+native file-op redo flag and persists the existing checkpoint-needed marker
+when post-checkpoint DML emits file-operation redo. Focused SQL coverage forces
+a checkpoint, runs an ownerless autocommit `UPDATE` on a file-per-table InnoDB
+table, observes the marker before close, drains it on final no-live close,
+forces `.shm` rebuild, and verifies ownerless and ordinary native reopen
+preserve the updated row. This is bounded durable marker coverage for
+checkpointed autocommit DML, not a claim that every possible DML-origin
+`FILE_MODIFY` shape or explicit-transaction DML path has been exhaustively
+classified.
 Ownerless AUTO_INCREMENT publishes now also mark a shared registry
 native-checkpoint pending bit when they raise a table high watermark. The
 final no-live ownerless close path drains that bit through the existing native

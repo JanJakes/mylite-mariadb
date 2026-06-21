@@ -4564,7 +4564,16 @@ Tasks:
    file-per-table InnoDB table, and observes the flag set again. That proves
    ordinary post-checkpoint DML can reach MariaDB's `FILE_MODIFY` redo path,
    while durable marker coverage for every DML-origin `FILE_MODIFY` case
-   remains unclaimed. The no-argument aggregate harness remains
+   remains unclaimed. A bounded DML marker follow-up now consumes the same
+   native file-op redo flag after successful autocommit non-DDL ownerless
+   writes and persists the existing checkpoint-needed marker when checkpointed
+   DML emits file-operation redo. Focused SQL coverage forces a checkpoint,
+   updates a file-per-table InnoDB table, observes the marker before close,
+   drains it on final no-live close, and verifies ownerless plus ordinary
+   native reopen after forced `.shm` rebuild. That closes the focused
+   checkpointed autocommit-DML marker gap, not the broader DML-origin
+   `FILE_MODIFY` matrix or explicit-transaction path. The no-argument
+   aggregate harness remains
    available for manual runs, while CTest registers the normal ownerless SQL
    coverage as sixteen deterministic weighted shards under the same
    `compat.ownerless-cross-process-sql` label so long aggregate runs expose

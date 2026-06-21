@@ -1925,6 +1925,11 @@ void mark_ownerless_native_file_op_checkpoint_after_dictionary_ddl(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 );
+void mark_ownerless_native_file_op_checkpoint_after_successful_write(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    bool statement_started_in_explicit_transaction
+);
 void mark_ownerless_native_file_op_checkpoint_before_dictionary_finish(mylite_db &db);
 bool advance_ownerless_no_live_page_visible_lsn_for_reclaim(
     RuntimeState &runtime,
@@ -3714,6 +3719,12 @@ int mylite_step(mylite_stmt *stmt) {
         }
         if (dictionary_ddl_started) {
             mark_ownerless_native_file_op_checkpoint_after_dictionary_ddl(*stmt->db, policy_tokens);
+        } else {
+            mark_ownerless_native_file_op_checkpoint_after_successful_write(
+                *stmt->db,
+                policy_tokens,
+                statement_started_in_explicit_transaction
+            );
         }
         if (!statement_started_in_explicit_transaction ||
             sql_ends_explicit_transaction(policy_tokens) ||
@@ -5086,6 +5097,12 @@ ownerless_query_success:
     }
     if (dictionary_ddl_started) {
         mark_ownerless_native_file_op_checkpoint_after_dictionary_ddl(*db, policy_tokens);
+    } else {
+        mark_ownerless_native_file_op_checkpoint_after_successful_write(
+            *db,
+            policy_tokens,
+            statement_started_in_explicit_transaction
+        );
     }
     if (!statement_started_in_explicit_transaction ||
         sql_ends_explicit_transaction(policy_tokens) ||
@@ -11132,6 +11149,34 @@ void mark_ownerless_native_file_op_checkpoint_after_dictionary_ddl(
     static_cast<void>(
         mark_concurrency_native_file_op_checkpoint_needed(g_runtime.concurrency_checkpoint_fd)
     );
+}
+
+void mark_ownerless_native_file_op_checkpoint_after_successful_write(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    bool statement_started_in_explicit_transaction
+) {
+    if (!db.ownerless_rw_open || db.readonly_open || statement_started_in_explicit_transaction ||
+        !sql_statement_requires_write(tokens) || ownerless_dictionary_ddl_statement(tokens)) {
+        return;
+    }
+    if (mylite_ownerless_innodb_take_file_op_redo() == 0) {
+        return;
+    }
+
+    bool marker_written = false;
+    {
+        const std::lock_guard<std::mutex> guard(g_runtime.mutex);
+        if (g_runtime.ref_count != 0U && g_runtime.ownerless_rw_mode &&
+            g_runtime.concurrency_checkpoint_fd >= 0) {
+            marker_written = mark_concurrency_native_file_op_checkpoint_needed(
+                g_runtime.concurrency_checkpoint_fd
+            );
+        }
+    }
+    if (!marker_written) {
+        mylite_ownerless_innodb_note_file_op_redo();
+    }
 }
 
 void mark_ownerless_native_file_op_checkpoint_before_dictionary_finish(mylite_db &db) {
