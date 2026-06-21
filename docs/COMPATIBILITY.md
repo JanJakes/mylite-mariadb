@@ -246,6 +246,11 @@ boundaries plus representative `ALTER TABLE ... FORCE` and
 `ALTER TABLE ... ROW_FORMAT=DYNAMIC` rebuild boundaries, so a killed writer
 cannot lose the durable checkpoint-needed boundary before no-live recovery for
 those classes.
+Focused hook coverage also now forces a native checkpoint, clears the
+ownerless file-op redo flag, updates a file-per-table InnoDB table, and
+observes the flag set again, proving ordinary post-checkpoint DML reaches
+MariaDB's `FILE_MODIFY` redo path. That is observation evidence, not a broad
+durable-marker claim for every DML-origin `FILE_MODIFY` case.
 Ownerless AUTO_INCREMENT publishes now also mark a shared registry
 native-checkpoint pending bit when they raise a table high watermark. The
 final no-live ownerless close path drains that bit through the existing native

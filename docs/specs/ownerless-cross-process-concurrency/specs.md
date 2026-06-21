@@ -4552,7 +4552,12 @@ Tasks:
    observed leading-separator-stripped datadir form before prepending the active
    datadir, synthesize a missing checkpoint boundary only at a clean
    EOF/no-corrupt-FS recovery boundary, and drop the redo latch around
-   doublewrite recovery before reacquiring it. The no-argument aggregate harness remains
+   doublewrite recovery before reacquiring it. Focused hook coverage now also
+   forces a native checkpoint, clears the ownerless file-op redo flag, updates a
+   file-per-table InnoDB table, and observes the flag set again. That proves
+   ordinary post-checkpoint DML can reach MariaDB's `FILE_MODIFY` redo path,
+   while durable marker coverage for every DML-origin `FILE_MODIFY` case
+   remains unclaimed. The no-argument aggregate harness remains
    available for manual runs, while CTest registers the normal ownerless SQL
    coverage as sixteen deterministic weighted shards under the same
    `compat.ownerless-cross-process-sql` label so long aggregate runs expose
@@ -5115,8 +5120,9 @@ and a `DROP TABLE` writer after native `FILE_DELETE`, replacement-copy
 writers after native replacement-copy completion, marker-specific coverage for
 representative `ALTER TABLE ... FORCE` and
 `ALTER TABLE ... ROW_FORMAT=DYNAMIC` rebuild writers after native rebuild
-completion, an `ALTER TABLE ... FORCE, ALGORITHM=COPY` writer after native
-table-copy rebuild, a `CREATE OR REPLACE TABLE` writer
+completion, focused post-checkpoint DML observation of the native
+`FILE_MODIFY` redo flag, an `ALTER TABLE ... FORCE, ALGORITHM=COPY` writer
+after native table-copy rebuild, a `CREATE OR REPLACE TABLE` writer
 after native old-table replacement, duplicate `CREATE TABLE IF NOT EXISTS` and
 missing
 `DROP TABLE IF EXISTS` no-op writers, duplicate top-level

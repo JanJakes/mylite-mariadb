@@ -171,12 +171,14 @@ build-profile changes. The new CTest is hook-build only.
   `FILE_CREATE`. A later
   `ownerless-replacement-copy-file-op-marker-crash` slice covers representative
   `CREATE OR REPLACE TABLE ... LIKE` and
-  `CREATE OR REPLACE TABLE ... AS SELECT` replacement-copy boundaries. Other
-  later evidence covers representative `ALTER TABLE ... FORCE` and
+  `CREATE OR REPLACE TABLE ... AS SELECT` replacement-copy boundaries. Later
+  evidence covers representative `ALTER TABLE ... FORCE` and
   `ALTER TABLE ... ROW_FORMAT=DYNAMIC` rebuild boundaries. Other create-style,
-  rebuild/replacement, `FILE_MODIFY`, and multi-file DDL combinations still
-  need additional evidence before the broader DDL lifecycle claim can be
-  upgraded.
+  rebuild/replacement, and multi-file DDL combinations still need additional
+  evidence before the broader DDL lifecycle claim can be upgraded. Later
+  hook-build evidence observes post-checkpoint DML reaching the native
+  `FILE_MODIFY` redo flag, but durable marker coverage for every DML-origin
+  `FILE_MODIFY` case remains unclaimed.
 - The native startup recovery mode is still named for rename because the
   original bridge was introduced for uncheckpointed file rename recovery.
   Renaming that API would be mechanical churn and is left out of this slice.
