@@ -6526,6 +6526,18 @@ subsystems that this mode needs:
   This remains a bounded visible-fast redo-state hot-path reduction; it does
   not close broader redo/checkpoint reconciliation, SQL execution residuals, or
   DDL/file-lifecycle recovery.
+  A larger deferred-redo range follow-up raises the fixed InnoDB hook buffer
+  from `32` to `48` ranges, still below the shared redo state's `64`
+  active-reservation slots. Embedded hook coverage fills the entire `48`-range
+  batch and verifies one batch callback with full completed-count reporting,
+  while the focused visible-fast SQL selector continues to prove database-level
+  redo leave callbacks are fewer than logical page-write events. The accepted
+  16384-row production rerun moved database-level redo written/leave callbacks
+  from `1029`/`1028` to `686`/`685`, page-write redo hook time from `6.060` to
+  `5.703 ms/statement`, and ownerless/ordinary bulk ratio from `0.6971` to
+  `0.7717`. This reduces callback and progress-latch churn for large
+  visible-fast row lists without changing native redo bytes, page-visible
+  ordering, WAL format, or group-commit policy.
   The follow-up bulk engine attribution slice is diagnostic-only: stats-enabled
   production probes now collect ordinary bulk SQL-handler, InnoDB-handler, and
   deep InnoDB counters and emit compact ownerless-minus-ordinary bulk deltas for

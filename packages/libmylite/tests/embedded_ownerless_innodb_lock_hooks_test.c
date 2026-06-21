@@ -438,6 +438,38 @@ static void test_redo_deferred_flush_uses_batch_hook(void) {
     memset(&state, 0, sizeof(state));
     install_page_hooks(&state);
     mylite_ownerless_innodb_lock_set_redo_written_leave_hook(redo_written_leave_hook);
+    mylite_ownerless_innodb_lock_set_redo_written_leave_batch_hook(redo_written_leave_batch_hook);
+    assert(mylite_ownerless_innodb_set_statement_deferred_page_publish(1) == 0);
+    for (unsigned index = 0U; index < MYLITE_OWNERLESS_INNODB_REDO_BATCH_MAX_RANGES; ++index) {
+        const uint64_t start_lsn = 600U + ((uint64_t)index * 12U);
+        assert(mylite_ownerless_innodb_redo_enter(&latest_lsn) == MYLITE_OWNERLESS_INNODB_LOCK_OK);
+        assert(
+            mylite_ownerless_innodb_redo_defer_written_and_leave(
+                start_lsn,
+                start_lsn + 12U,
+                700U + index,
+                &written_lsn
+            ) == MYLITE_OWNERLESS_INNODB_LOCK_OK
+        );
+    }
+    assert(state.written_leave_count == 0U);
+    assert(state.written_leave_batch_count == 0U);
+    assert(mylite_ownerless_innodb_redo_flush_deferred() == MYLITE_OWNERLESS_INNODB_LOCK_OK);
+    assert(state.written_leave_batch_count == 1U);
+    assert(state.last_batch_range_count == MYLITE_OWNERLESS_INNODB_REDO_BATCH_MAX_RANGES);
+    assert(state.last_batch_completed_count == MYLITE_OWNERLESS_INNODB_REDO_BATCH_MAX_RANGES);
+    assert(state.written_leave_count == 0U);
+    assert(
+        state.written_lsn == 600U + ((uint64_t)MYLITE_OWNERLESS_INNODB_REDO_BATCH_MAX_RANGES * 12U)
+    );
+    assert(
+        state.last_batch_latest_lsn == 700U + MYLITE_OWNERLESS_INNODB_REDO_BATCH_MAX_RANGES - 1U
+    );
+    assert(mylite_ownerless_innodb_set_statement_deferred_page_publish(0) == 1);
+
+    memset(&state, 0, sizeof(state));
+    install_page_hooks(&state);
+    mylite_ownerless_innodb_lock_set_redo_written_leave_hook(redo_written_leave_hook);
     mylite_ownerless_innodb_lock_set_redo_written_leave_batch_hook(NULL);
     assert(mylite_ownerless_innodb_set_statement_deferred_page_publish(1) == 0);
     assert(mylite_ownerless_innodb_redo_enter(&latest_lsn) == MYLITE_OWNERLESS_INNODB_LOCK_OK);
