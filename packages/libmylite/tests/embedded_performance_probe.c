@@ -4078,8 +4078,7 @@ static void emit_ownerless_bulk_page_write_phase_summary(
 ) {
     char prefix[160];
 
-    (void)
-        snprintf(prefix, sizeof(prefix), "mylite_perf_summary_ownerless_autocommit_bulk_%s", phase);
+    snprintf(prefix, sizeof(prefix), "mylite_perf_summary_ownerless_autocommit_bulk_%s", phase);
 
     emit_prefixed_count_per_iteration(
         prefix,
