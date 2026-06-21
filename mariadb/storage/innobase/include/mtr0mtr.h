@@ -766,12 +766,20 @@ private:
   /** Track a page-write lock acquired by this mini-transaction. */
   void ownerless_page_write_note_mtr_page(const buf_page_t &bpage) noexcept;
 
+  /** Track a native-support page that can skip publish in this mtr. */
+  void ownerless_page_write_note_native_support_mtr_page(
+      const buf_page_t &bpage) noexcept;
+
   /** Check whether this mini-transaction has page-write locks to release. */
   bool ownerless_page_write_has_mtr_pages() const noexcept;
 
   /** Check whether this mini-transaction acquired a page-write lock. */
   bool ownerless_page_write_has_mtr_page(const buf_page_t &bpage) const
     noexcept;
+
+  /** Check whether this mini-transaction has a native-support skip page. */
+  bool ownerless_page_write_has_native_support_mtr_page(
+      const buf_page_t &bpage) const noexcept;
 
   /** Stop tracking a page-write lock acquired by this mini-transaction. */
   bool ownerless_page_write_forget_mtr_page(const buf_page_t &bpage) noexcept;
@@ -918,6 +926,9 @@ private:
   /** whether the inline ownerless MTR page-write slot is occupied */
   uint16_t m_ownerless_page_write_inline_mtr_page_set:1;
 
+  /** whether the inline ownerless native-support skip slot is occupied */
+  uint16_t m_ownerless_page_write_native_support_mtr_page_set:1;
+
   /** whether the pages has been trimmed */
   uint16_t m_trim_pages:1;
 
@@ -946,6 +957,9 @@ private:
 
   /** first ownerless page-write lock acquired by this mini-transaction */
   uint64_t m_ownerless_page_write_inline_mtr_page= 0;
+
+  /** first native-support page skip proven for this mini-transaction */
+  uint64_t m_ownerless_page_write_native_support_mtr_page= 0;
 
   /** ownerless page-write locks acquired by this mini-transaction */
   ownerless_page_write_mtr_page_vector *m_ownerless_page_write_mtr_pages= nullptr;

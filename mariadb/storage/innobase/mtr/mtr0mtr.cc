@@ -1994,6 +1994,30 @@ static bool ownerless_page_write_can_skip_held_native_support_publish(
   return true;
 }
 
+static bool ownerless_page_write_can_skip_mtr_native_support_publish(
+    bool native_support_mtr_page, const trx_t *trx, const buf_page_t &bpage,
+    lsn_t commit_lsn, bool page_write_perf_enabled) noexcept
+{
+  if (UNIV_UNLIKELY(page_write_perf_enabled) ||
+      UNIV_UNLIKELY(ownerless_page_publish_stats_enabled.load(
+          std::memory_order_relaxed)))
+    return false;
+  if (commit_lsn == 0 || trx == nullptr || trx->read_only ||
+      trx->dict_operation)
+    return false;
+
+  const page_id_t id{bpage.id()};
+  if (id.space() >= SRV_TMP_SPACE_ID || !bpage.in_file())
+    return false;
+  if (!native_support_mtr_page)
+    return false;
+  if (ownerless_page_write_history_proof_roles(
+          trx, id.space(), id.page_no()) != 0)
+    return false;
+
+  return true;
+}
+
 static bool ownerless_page_write_can_hold_native_support_page(
     const trx_t *trx, const buf_page_t &page) noexcept
 {
@@ -2269,6 +2293,8 @@ void mtr_t::start()
   MEM_MAKE_DEFINED(&m_memo, sizeof m_memo);
   MEM_MAKE_DEFINED(&m_ownerless_page_write_inline_mtr_page,
                    sizeof m_ownerless_page_write_inline_mtr_page);
+  MEM_MAKE_DEFINED(&m_ownerless_page_write_native_support_mtr_page,
+                   sizeof m_ownerless_page_write_native_support_mtr_page);
   MEM_MAKE_DEFINED(&m_ownerless_page_write_mtr_pages,
                    sizeof m_ownerless_page_write_mtr_pages);
   MEM_MAKE_DEFINED(&m_freed_space, sizeof m_freed_space);
@@ -2298,6 +2324,8 @@ void mtr_t::start()
   m_ownerless_page_write_trx= nullptr;
   m_ownerless_page_write_inline_mtr_page_set= false;
   m_ownerless_page_write_inline_mtr_page= 0;
+  m_ownerless_page_write_native_support_mtr_page_set= false;
+  m_ownerless_page_write_native_support_mtr_page= 0;
   if (m_ownerless_page_write_mtr_pages != nullptr)
     m_ownerless_page_write_mtr_pages->clear();
   m_trim_pages= false;
@@ -2312,6 +2340,8 @@ inline void mtr_t::release_resources()
   m_log.erase();
   m_ownerless_page_write_inline_mtr_page_set= false;
   m_ownerless_page_write_inline_mtr_page= 0;
+  m_ownerless_page_write_native_support_mtr_page_set= false;
+  m_ownerless_page_write_native_support_mtr_page= 0;
   if (m_ownerless_page_write_mtr_pages != nullptr)
   {
     UT_DELETE(m_ownerless_page_write_mtr_pages);
@@ -2606,6 +2636,9 @@ ATTRIBUTE_NOINLINE bool mtr_t::ownerless_page_write_enter(
     return false;
 
   const bool page_write_perf_enabled= ownerless_page_write_perf_enabled();
+  const bool native_support_mtr_skip_enabled=
+      !page_write_perf_enabled &&
+      !ownerless_page_publish_stats_enabled.load(std::memory_order_relaxed);
   ownerless_page_write_perf_add_if_enabled(
       page_write_perf_enabled, OWNERLESS_PAGE_WRITE_PERF_ENTER_CALLS, 1);
   ownerless_page_write_perf_scope perf_scope(
@@ -2640,6 +2673,8 @@ ATTRIBUTE_NOINLINE bool mtr_t::ownerless_page_write_enter(
   {
     ownerless_page_write_perf_add(
         OWNERLESS_PAGE_WRITE_PERF_NATIVE_SUPPORT_TRANSACTION_HIT, 1);
+    if (native_support_mtr_skip_enabled)
+      ownerless_page_write_note_native_support_mtr_page(block.page);
     return false;
   }
   const bool uses_transaction_release=
@@ -2787,8 +2822,12 @@ ATTRIBUTE_NOINLINE bool mtr_t::ownerless_page_write_enter(
           OWNERLESS_PAGE_WRITE_PERF_TRANSACTION_DEFERRED_MTR_ELIDED, 1);
     }
     else if (holds_native_support_for_transaction && !page_write_waited)
+    {
       ownerless_page_write_note_native_support_transaction_page(
           ownerless_trx, packed_page);
+      if (native_support_mtr_skip_enabled)
+        ownerless_page_write_note_native_support_mtr_page(block.page);
+    }
     else
       ownerless_page_write_note_mtr_page(block.page);
   }
@@ -3674,6 +3713,15 @@ void mtr_t::ownerless_page_write_note_mtr_page(
   }
 }
 
+void mtr_t::ownerless_page_write_note_native_support_mtr_page(
+    const buf_page_t &bpage) noexcept
+{
+  const page_id_t id{bpage.id()};
+  m_ownerless_page_write_native_support_mtr_page=
+      ownerless_page_write_pack(id.space(), id.page_no());
+  m_ownerless_page_write_native_support_mtr_page_set= true;
+}
+
 bool mtr_t::ownerless_page_write_has_mtr_pages() const noexcept
 {
   return m_ownerless_page_write_inline_mtr_page_set ||
@@ -3696,6 +3744,18 @@ bool mtr_t::ownerless_page_write_has_mtr_page(
   return std::find(m_ownerless_page_write_mtr_pages->begin(),
                    m_ownerless_page_write_mtr_pages->end(),
                    packed_page) != m_ownerless_page_write_mtr_pages->end();
+}
+
+bool mtr_t::ownerless_page_write_has_native_support_mtr_page(
+    const buf_page_t &bpage) const noexcept
+{
+  if (!m_ownerless_page_write_native_support_mtr_page_set)
+    return false;
+
+  const page_id_t id{bpage.id()};
+  const uint64_t packed_page=
+      ownerless_page_write_pack(id.space(), id.page_no());
+  return m_ownerless_page_write_native_support_mtr_page == packed_page;
 }
 
 bool mtr_t::ownerless_page_write_forget_mtr_page(
@@ -4016,7 +4076,15 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
             }
             else
             {
-              if (!ownerless_page_write_can_skip_held_native_support_publish(
+              const bool ownerless_mtr_native_support_publish_skip=
+                  !ownerless_perf &&
+                  ownerless_page_write_can_skip_mtr_native_support_publish(
+                      mtr->ownerless_page_write_has_native_support_mtr_page(
+                          *bpage),
+                      ownerless_publish_trx, *bpage, mtr->m_commit_lsn,
+                      ownerless_perf);
+              if (!ownerless_mtr_native_support_publish_skip &&
+                  !ownerless_page_write_can_skip_held_native_support_publish(
                       ownerless_publish_trx, *bpage, mtr->m_commit_lsn,
                       ownerless_perf) &&
                   !ownerless_page_write_can_fast_skip_elided_native_support_publish(
