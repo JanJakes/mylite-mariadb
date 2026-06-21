@@ -1274,7 +1274,10 @@ their production cache guards instead of merely carrying those guard strings
 elsewhere in the workflow, and that embedded performance probes stay ahead of
 embedded test steps. It also guards the CI performance artifact names and
 paths so timing evidence remains downloadable when future workflow edits touch
-the performance jobs.
+the performance jobs. The WordPress timing rollup also reports the critical
+shard's artifact download, artifact extraction, Docker image, PHPUnit total,
+PHPUnit shell, and non-PHPUnit-shell seconds so CI can distinguish fixed shard
+setup cost from test-body and engine execution time.
 Guarded ownerless SQL page-version reads are now enabled only when statement
 refresh actually needs page-version WAL. In a continuous single-owner epoch,
 local autocommit writes advance a separate local-native read boundary; eligible

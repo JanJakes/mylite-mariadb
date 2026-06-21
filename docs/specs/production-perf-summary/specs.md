@@ -908,7 +908,14 @@ the measured WordPress CI wall-clock targets.
 The top-tail fanout produced green run `27897052195`, with setup at `82s`, the
 slowest shard `non-isolated-query-theme` at `147s`, estimated workflow critical
 path at `229s`, and slowest PHPUnit test-only shell real time at `105.802s`.
-That makes the query/theme bucket the next visible timing target.
+The query/theme tail split produced green run `27897391876`, with setup at
+`87s`, the slowest shard `non-isolated-query-canonical` at `124s`, estimated
+workflow critical path at `211s`, and slowest PHPUnit test-only shell real time
+at `75.965s`. That leaves about `48.035s` of critical-shard time outside the
+PHPUnit shell process, so further performance work should first distinguish
+artifact, Docker image, and harness overhead from MyLite engine execution. The
+WordPress timing rollup now emits that critical-shard phase decomposition and
+the largest non-PHPUnit-shell shard cost directly.
 
 The next production ownerless SQL run exposed `sql-case 46`
 (`test_ownerless_active_reader_pressure_limit_blocks_write_classes`) during a

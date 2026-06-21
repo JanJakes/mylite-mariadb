@@ -734,6 +734,24 @@ require_step_literal \
 require_step_literal \
   "Show WordPress timing summary" \
   "tools/wordpress-phpunit-timing-rollup --input"
+require_file_literal \
+  "${wordpress_timing_rollup}" \
+  "wordpress_shard_critical_path_artifact_download_seconds"
+require_file_literal \
+  "${wordpress_timing_rollup}" \
+  "wordpress_shard_critical_path_artifact_extract_seconds"
+require_file_literal \
+  "${wordpress_timing_rollup}" \
+  "wordpress_shard_critical_path_docker_image_seconds"
+require_file_literal \
+  "${wordpress_timing_rollup}" \
+  "wordpress_shard_critical_path_phpunit_shell_real_seconds"
+require_file_literal \
+  "${wordpress_timing_rollup}" \
+  "wordpress_shard_critical_path_non_phpunit_shell_seconds"
+require_file_literal \
+  "${wordpress_timing_rollup}" \
+  "wordpress_shard_non_phpunit_shell_seconds_max"
 require_step_literal \
   "Upload WordPress timing summary" \
   "name: wordpress-phpunit-timing-summary"

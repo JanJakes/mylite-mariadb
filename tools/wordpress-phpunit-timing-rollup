@@ -123,18 +123,22 @@ function note_max(metric, value, row_label) {
   }
 }
 
-function add_shard_phase(row_label, value, shard) {
+function add_shard_phase(row_label, value, shard, phase) {
   if (!is_number(value)) {
     return
   }
   if (row_label ~ /^artifact-download-/) {
     shard = substr(row_label, length("artifact-download-") + 1)
+    phase = "artifact_download"
   } else if (row_label ~ /^artifact-extract-/) {
     shard = substr(row_label, length("artifact-extract-") + 1)
+    phase = "artifact_extract"
   } else if (row_label ~ /^docker-image-/) {
     shard = substr(row_label, length("docker-image-") + 1)
+    phase = "docker_image"
   } else if (row_label ~ /^phpunit-/) {
     shard = substr(row_label, length("phpunit-") + 1)
+    phase = "phpunit_total"
   } else {
     return
   }
@@ -146,6 +150,28 @@ function add_shard_phase(row_label, value, shard) {
     shard_count++
   }
   shard_seconds[shard] += value + 0
+  shard_phase_seconds[shard SUBSEP phase] += value + 0
+  shard_phase_seen[shard SUBSEP phase] = 1
+}
+
+function add_shard_phpunit_shell(row_label, value, shard) {
+  if (!is_number(value) || row_label !~ /^phpunit-/) {
+    return
+  }
+  shard = substr(row_label, length("phpunit-") + 1)
+  if (shard == "") {
+    return
+  }
+  shard_phpunit_shell_seconds[shard] += value + 0
+  shard_phase_seen[shard SUBSEP "phpunit_shell"] = 1
+}
+
+function shard_phase_value(shard, phase) {
+  return shard_phase_seconds[shard SUBSEP phase] + 0
+}
+
+function shard_has_phase(shard, phase) {
+  return (shard SUBSEP phase) in shard_phase_seen
 }
 
 function emit_sum(bucket, metric, output_metric) {
@@ -301,6 +327,7 @@ BEGIN {
   add_sum("phpunit_all", metric, value)
   if (metric == "wordpress_phpunit_shell_real_seconds") {
     note_max("wordpress_phpunit_shell_real_seconds", value, row_label)
+    add_shard_phpunit_shell(row_label, value)
   }
   if (metric == "wordpress_total_seconds") {
     note_max("wordpress_phpunit_total_seconds", value, row_label)
@@ -338,6 +365,17 @@ END {
       shard_max_seconds = shard_seconds[shard]
       shard_max_label = shard
     }
+    if (shard_has_phase(shard, "phpunit_shell")) {
+      shard_non_phpunit_shell_seconds = shard_seconds[shard] - shard_phpunit_shell_seconds[shard]
+      if (shard_non_phpunit_shell_seconds < 0) {
+        shard_non_phpunit_shell_seconds = 0
+      }
+      if (!shard_non_phpunit_shell_max_seen || shard_non_phpunit_shell_seconds > shard_non_phpunit_shell_max) {
+        shard_non_phpunit_shell_max_seen = 1
+        shard_non_phpunit_shell_max = shard_non_phpunit_shell_seconds
+        shard_non_phpunit_shell_max_label = shard
+      }
+    }
   }
 
   emit_bucket("phpunit_test", "wordpress_phpunit_test")
@@ -371,10 +409,26 @@ END {
     row_int("wordpress_shard_phase_count", shard_count)
     row("wordpress_shard_critical_path_label", shard_max_label)
     row_num("wordpress_shard_critical_path_seconds_max", shard_max_seconds)
+    row_num("wordpress_shard_critical_path_artifact_download_seconds", shard_phase_value(shard_max_label, "artifact_download"))
+    row_num("wordpress_shard_critical_path_artifact_extract_seconds", shard_phase_value(shard_max_label, "artifact_extract"))
+    row_num("wordpress_shard_critical_path_docker_image_seconds", shard_phase_value(shard_max_label, "docker_image"))
+    row_num("wordpress_shard_critical_path_phpunit_total_seconds", shard_phase_value(shard_max_label, "phpunit_total"))
+    if (shard_has_phase(shard_max_label, "phpunit_shell")) {
+      row_num("wordpress_shard_critical_path_phpunit_shell_real_seconds", shard_phpunit_shell_seconds[shard_max_label])
+      shard_critical_non_phpunit_shell_seconds = shard_max_seconds - shard_phpunit_shell_seconds[shard_max_label]
+      if (shard_critical_non_phpunit_shell_seconds < 0) {
+        shard_critical_non_phpunit_shell_seconds = 0
+      }
+      row_num("wordpress_shard_critical_path_non_phpunit_shell_seconds", shard_critical_non_phpunit_shell_seconds)
+    }
     if (metric_seen("setup_phase", "wordpress_total_seconds")) {
       estimated_critical_path = metric_sum("setup_phase", "wordpress_total_seconds") + shard_max_seconds
       row_num("wordpress_estimated_workflow_critical_path_seconds", estimated_critical_path)
     }
+  }
+  if (shard_non_phpunit_shell_max_seen) {
+    row("wordpress_shard_non_phpunit_shell_seconds_max_label", shard_non_phpunit_shell_max_label)
+    row_num("wordpress_shard_non_phpunit_shell_seconds_max", shard_non_phpunit_shell_max)
   }
   if ("wordpress_phpunit_shell_real_seconds" in max_seen) {
     row("wordpress_phpunit_shell_real_seconds_max_label", max_labels["wordpress_phpunit_shell_real_seconds"])
