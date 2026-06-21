@@ -348,6 +348,8 @@ require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_THEME_RE:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE:"
+require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_ENTITY_RE:"
+require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_SETTINGS_META_RE:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_PLATFORM_RE:"
 require_literal "MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_ADMIN_SITE_RE:"
@@ -453,7 +455,8 @@ require_literal "label: phpunit-non-isolated-query-canonical"
 require_literal "label: phpunit-non-isolated-theme"
 require_literal "label: phpunit-non-isolated-block-token"
 require_literal "label: phpunit-non-isolated-media-comment"
-require_literal "label: phpunit-non-isolated-content-data"
+require_literal "label: phpunit-non-isolated-content-entity"
+require_literal "label: phpunit-non-isolated-content-settings-meta"
 require_literal "label: phpunit-non-isolated-user-auth"
 require_literal "label: phpunit-non-isolated-remaining-platform"
 require_literal "label: phpunit-non-isolated-remaining-admin-site"
@@ -470,7 +473,8 @@ require_literal "shard: non-isolated-query-canonical"
 require_literal "shard: non-isolated-theme"
 require_literal "shard: non-isolated-block-token"
 require_literal "shard: non-isolated-media-comment"
-require_literal "shard: non-isolated-content-data"
+require_literal "shard: non-isolated-content-entity"
+require_literal "shard: non-isolated-content-settings-meta"
 require_literal "shard: non-isolated-user-auth"
 require_literal "shard: non-isolated-remaining-platform"
 require_literal "shard: non-isolated-remaining-admin-site"
@@ -482,13 +486,14 @@ require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_N
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_THEME_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
-require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
+require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_ENTITY_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
+require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_SETTINGS_META_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_PLATFORM_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_ADMIN_SITE_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'cat "${summary}" >> "${GITHUB_STEP_SUMMARY}"'
 require_literal_count_at_least "MYLITE_WORDPRESS_PHASE: phpunit" 1
 require_literal_count_at_least 'MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"' 4
-require_literal_count_at_least 'keepalive: "1"' 12
+require_literal_count_at_least 'keepalive: "1"' 13
 require_literal_count_at_least 'child_timing_summary: "1"' 3
 require_literal_count_at_least 'child_script_timing_summary: "1"' 3
 require_literal_count_at_least 'child_skip_install: "1"' 3
@@ -639,7 +644,10 @@ require_step_literal \
   'non-isolated-media-comment)'
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
-  'non-isolated-content-data)'
+  'non-isolated-content-entity)'
+require_step_literal \
+  "Run WordPress PHPUnit shard (test only)" \
+  'non-isolated-content-settings-meta)'
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
   'non-isolated-user-auth)'

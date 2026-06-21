@@ -933,6 +933,12 @@ after cache seeding passed with setup at `67s`, critical shard
 `184s`, and total Docker setup rows at `447s`. That is a modest hot-cache win
 over `c9005932` (`194s` estimated critical path and `599s` Docker setup), but
 per-shard Buildx setup/load still leaves `20-36s` Docker cost on each shard.
+The next bounded wall-clock slice splits that hot-cache critical
+`non-isolated-content-data` shard into `non-isolated-content-entity` and
+`non-isolated-content-settings-meta`, while keeping the broad content-data
+regex as the remaining-shard exclusion authority. The local pinned-test-name
+proxy divides the current content-data surface into `1200` entity tests and
+`422` settings/meta tests. CI remains the authority for the actual timing win.
 
 The next production ownerless SQL run exposed `sql-case 46`
 (`test_ownerless_active_reader_pressure_limit_blocks_write_classes`) during a
