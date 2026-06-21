@@ -94,6 +94,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
   `ownerless-test-hooks`.
 - Run the focused selector:
   - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-trigger-definer-crash`
+- Run the visible CTest wrapper:
+  - `ctest --preset ownerless-test-hooks -R '^libmylite\.ownerless-dictionary-trigger-definer-crash$' --output-on-failure`
 - Run adjacent hook trigger crash selectors and `crash-tail`.
 - Run adjacent embedded trigger selectors.
 - Run ownerless SQL CTest filters, ownerless stress, `format-check`, `tidy`,

@@ -2894,7 +2894,9 @@ Tasks:
    after MariaDB success but before ownerless dictionary finish, then verifies
    recovered original view-definition preservation, missing-view absence,
    queryability, base-table writes, and ownerless/native reopen before and after
-   forced `.shm` rebuild.
+   forced `.shm` rebuild. The two view-idempotent crash selectors are also
+   registered as standalone hook CTests so CI reports their timing and failures
+   separately from larger crash-tail coverage.
    Trigger
    metadata coverage now creates an InnoDB base/audit pair and an `AFTER INSERT`
    trigger from one ownerless process, verifies an already-open peer observes
@@ -2947,7 +2949,9 @@ Tasks:
    native trigger files and `SHOW CREATE TRIGGER`, fails closed under the
    ownerless stored-routine execution guard when fired, and still fires through
    ordinary native reopen. Broader privilege/security and randomized trigger
-   crash variants remain planned.
+   crash variants remain planned. The explicit-definer crash selector is also
+   registered as a standalone hook CTest so CI reports its timing and failures
+   separately from larger crash-tail coverage.
    Stored-routine DDL is a deliberately unsupported ownerless class for now:
    the routine path writes `mysql.proc`/`mysql.procs_priv` and a proof attempt
    hit a MariaDB error 145 `proc` system-table failure, so ownerless mode now

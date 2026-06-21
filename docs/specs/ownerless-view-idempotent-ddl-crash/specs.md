@@ -101,6 +101,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - Run focused selectors:
   - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-view-idempotent-create-crash`
   - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-view-idempotent-drop-crash`
+- Run the visible CTest wrappers:
+  - `ctest --preset ownerless-test-hooks -R '^libmylite\.ownerless-dictionary-view-idempotent-(create|drop)-crash$' --output-on-failure`
 - Run normal `view-idempotent-ddl` selectors in `embedded-dev` and
   `ownerless-test-hooks`.
 - Run the relevant ownerless SQL CTest shards, `format-check`, and diff checks.

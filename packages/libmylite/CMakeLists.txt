@@ -422,6 +422,22 @@ if(BUILD_TESTING)
           dictionary-foreign-key-cross-schema-multi-rename-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-view-idempotent-create-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-view-idempotent-create-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-view-idempotent-drop-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-view-idempotent-drop-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-trigger-definer-crash
+        COMMAND mylite_ownerless_cross_process_sql_test dictionary-trigger-definer-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-truncate-file-op-marker-crash
         COMMAND mylite_ownerless_cross_process_sql_test dictionary-truncate-file-op-marker-crash
       )
@@ -674,6 +690,14 @@ if(BUILD_TESTING)
       )
       set_tests_properties(
         libmylite.ownerless-dictionary-fk-cross-schema-multi-rename-crash
+        PROPERTIES
+          LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
+          TIMEOUT 120
+      )
+      set_tests_properties(
+        libmylite.ownerless-dictionary-view-idempotent-create-crash
+        libmylite.ownerless-dictionary-view-idempotent-drop-crash
+        libmylite.ownerless-dictionary-trigger-definer-crash
         PROPERTIES
           LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
           TIMEOUT 120
