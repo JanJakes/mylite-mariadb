@@ -1004,6 +1004,23 @@ misses, vector/set clear and rebuild paths, page-write lock ownership,
 page-version publication, native undo/redo, and recovery semantics stay on the
 existing paths. This is a bounded hot-path cleanup, not a broad non-empty-table
 undo elision or ownerless completion claim.
+The held native-support hit fast path now moves that already-held
+native-support membership check earlier in ownerless page-write prepare/enter
+classification. Repeated undo and rollback-segment mini-transactions that hit a
+native-support page already retained by the visible-fast transaction can return
+before broader transaction-release classification, while the authoritative
+held-page vector, native-support elision predicate, rollback-segment/undo
+history-proof publication, page-version WAL, redo/checkpoint ordering, and
+non-empty-table rollback semantics stay unchanged.
+The reduced 100-row stats-enabled attribution sample kept `2.000` page
+versions and `2.000` published native-support pages per remaining statement,
+while earlier prepare classification reduced reported enter-path held hits from
+`202.000` to `102.000` per remaining statement. In that local sample,
+ownerless bulk `mysql_query()` moved from `3.431 ms/statement` to `2.912`, and
+the ownerless bulk rows ratio moved from `0.2966` to `0.4640`; the matching
+stats-off 5000-row production probe reported ownerless bulk at `34064.01`
+rows/s and a `0.3391` ownerless/ordinary ratio. Remaining undo-report MTR
+commit time is still a larger native undo target.
 The bulk page-write phase split then keeps the same diagnostics-only boundary
 but snapshots the first row-list statement for page-publish, database hook,
 page-write, page-log append, and commit-visibility counters. A reduced

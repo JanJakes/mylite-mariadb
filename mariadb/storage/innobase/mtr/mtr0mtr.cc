@@ -1953,6 +1953,17 @@ static bool ownerless_page_write_transaction_holds_native_support_page(
       packed_page);
 }
 
+static bool ownerless_page_write_transaction_holds_native_support_page(
+    const trx_t *trx, const buf_page_t &page)
+{
+  if (trx == nullptr || !ownerless_page_write_requires_lock(page))
+    return false;
+
+  const page_id_t id{page.id()};
+  return ownerless_page_write_transaction_holds_native_support_page(
+      trx, ownerless_page_write_pack(id.space(), id.page_no()));
+}
+
 static bool ownerless_page_write_can_skip_held_native_support_publish(
     const trx_t *trx, const buf_page_t &bpage, lsn_t commit_lsn,
     bool page_write_perf_enabled) noexcept
@@ -2624,6 +2635,13 @@ ATTRIBUTE_NOINLINE bool mtr_t::ownerless_page_write_enter(
       ownerless_page_write_refresh(block);
     return false;
   }
+  if (ownerless_page_write_transaction_holds_native_support_page(
+          ownerless_trx, block.page))
+  {
+    ownerless_page_write_perf_add(
+        OWNERLESS_PAGE_WRITE_PERF_NATIVE_SUPPORT_TRANSACTION_HIT, 1);
+    return false;
+  }
   const bool uses_transaction_release=
       ownerless_page_write_uses_transaction_release();
   const bool holds_for_transaction=
@@ -2642,13 +2660,6 @@ ATTRIBUTE_NOINLINE bool mtr_t::ownerless_page_write_enter(
   if (holds_for_transaction &&
       ownerless_page_write_transaction_owns_page(ownerless_trx, packed_page))
     return holds_for_transaction;
-  if (ownerless_page_write_transaction_holds_native_support_page(
-          ownerless_trx, packed_page))
-  {
-    ownerless_page_write_perf_add(
-        OWNERLESS_PAGE_WRITE_PERF_NATIVE_SUPPORT_TRANSACTION_HIT, 1);
-    return false;
-  }
   const bool holds_native_support_for_transaction=
       uses_transaction_release && !holds_for_transaction &&
       ownerless_page_write_can_hold_native_support_page(
@@ -3762,6 +3773,9 @@ bool mtr_t::ownerless_page_write_should_prepare(
   if (ownerless_trx != nullptr && ownerless_trx->read_only)
     return false;
   if (ownerless_page_write_sql_is_select(ownerless_trx))
+    return false;
+  if (ownerless_page_write_transaction_holds_native_support_page(
+          ownerless_trx, bpage))
     return false;
   if (!ownerless_page_write_holds_for_transaction(bpage))
     return true;
