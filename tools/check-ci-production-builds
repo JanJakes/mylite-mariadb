@@ -358,6 +358,9 @@ require_file_literal "${wordpress_harness}" "MYLITE_WORDPRESS_TRUST_RUNTIME_MANI
 require_file_literal "${wordpress_harness}" "MYLITE_WORDPRESS_PRESERVE_TIMING_SUMMARY"
 require_file_literal "${wordpress_harness}" '"${preserve_timing_summary}" != "1"'
 require_file_literal "${wordpress_harness}" "sha256sum -c"
+require_file_literal "${wordpress_harness}" "tools/wordpress-phpunit.Dockerfile"
+require_file_literal "${root_dir}/tools/wordpress-phpunit.Dockerfile" "FROM php:8.3-cli-bookworm"
+require_file_literal "${root_dir}/tools/wordpress-phpunit.Dockerfile" "docker-php-ext-install"
 require_file_literal "${wordpress_harness}" 'if [ "${MYLITE_WORDPRESS_PHASE}" != "phpunit" ]; then'
 require_file_literal "${wordpress_harness}" "prepared MyLite WordPress baseline database directory"
 require_file_literal "${wordpress_timing_append}" "Usage: wordpress-phpunit-append-timing"
@@ -371,7 +374,20 @@ require_literal "Tests_Filesystem_WpFilesystemDirect_Chmod::test_should_handle_s
 require_literal "Tests_Admin_WpUpgrader::test_maintenance_mode_should_create_maintenance_file_with_boolean"
 require_literal "Tests_Formatting_Emoji::test_print_emoji_detection_script_on_front_end_after_footer_scripts_printed"
 require_literal "Tests_Theme::test_default_themes_are_included_in_new_files"
-require_literal "Build WordPress PHPUnit Docker image"
+require_literal "Mark WordPress setup Docker image build start"
+require_literal "Set up WordPress setup Docker Buildx"
+require_literal "Build WordPress setup Docker image"
+require_literal "Record WordPress setup Docker image timing"
+require_literal "Mark WordPress shard Docker image build start"
+require_literal "Set up WordPress shard Docker Buildx"
+require_literal "Build WordPress shard Docker image"
+require_literal "Record WordPress shard Docker image timing"
+require_literal "docker/setup-buildx-action@v4"
+require_literal "docker/build-push-action@v7"
+require_literal "cache-from: type=gha,scope=wordpress-phpunit-php83"
+require_literal "cache-to: type=gha,mode=max,scope=wordpress-phpunit-php83"
+require_literal "tags: mylite-wordpress-phpunit:php83"
+require_literal "file: ./tools/wordpress-phpunit.Dockerfile"
 require_literal "Fetch WordPress PHPUnit sources"
 require_literal "Build MyLite PHP extensions for WordPress PHPUnit"
 require_literal "Run embedded large-row bulk performance probe"
@@ -413,13 +429,11 @@ require_literal "wordpress-phpunit-timing-summary-\${{ matrix.shard }}"
 require_literal "pattern: wordpress-phpunit-timing-summary-*"
 require_literal "merge-multiple: true"
 require_literal "compression-level: 0"
-require_literal "MYLITE_WORDPRESS_PHASE: docker-image"
 require_literal "MYLITE_WORDPRESS_PHASE: fetch"
 require_literal "MYLITE_WORDPRESS_PHASE: build-php"
 require_literal "MYLITE_WORDPRESS_PHASE: dependencies"
 require_literal "MYLITE_WORDPRESS_PHASE: prepare-db"
 require_literal "MYLITE_WORDPRESS_PHASE: perf-probe"
-require_literal "MYLITE_WORDPRESS_TIMING_LABEL: docker-image"
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: fetch"
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: build-php"
 require_literal "MYLITE_WORDPRESS_TIMING_LABEL: dependencies"
@@ -651,6 +665,33 @@ require_step_literal \
   "Pack WordPress PHPUnit runtime artifact" \
   "wordpress_ref=\${MYLITE_WORDPRESS_REF}"
 require_step_literal \
+  "Mark WordPress setup Docker image build start" \
+  "wordpress-docker-image-build-start.txt"
+require_step_literal \
+  "Build WordPress setup Docker image" \
+  "cache-from: type=gha,scope=wordpress-phpunit-php83"
+require_step_literal \
+  "Build WordPress setup Docker image" \
+  "cache-to: type=gha,mode=max,scope=wordpress-phpunit-php83"
+require_step_literal \
+  "Build WordPress setup Docker image" \
+  "load: true"
+require_step_literal \
+  "Record WordPress setup Docker image timing" \
+  "tools/wordpress-phpunit-append-timing --label docker-image"
+require_step_literal \
+  "Record WordPress setup Docker image timing" \
+  "wordpress_docker_build_seconds="
+require_step_order \
+  "Mark WordPress setup Docker image build start" \
+  "Set up WordPress setup Docker Buildx"
+require_step_order \
+  "Set up WordPress setup Docker Buildx" \
+  "Build WordPress setup Docker image"
+require_step_order \
+  "Build WordPress setup Docker image" \
+  "Record WordPress setup Docker image timing"
+require_step_literal \
   "Pack WordPress PHPUnit runtime artifact" \
   "tar -czf build/wordpress-phpunit-db-baseline.tar.gz"
 require_step_literal \
@@ -719,6 +760,33 @@ require_step_literal \
 require_step_literal \
   "Extract WordPress PHPUnit runtime artifact" \
   "wordpress_artifact_extract_runtime_tar_bytes="
+require_step_literal \
+  "Mark WordPress shard Docker image build start" \
+  "wordpress-docker-image-build-start.txt"
+require_step_literal \
+  "Build WordPress shard Docker image" \
+  "cache-from: type=gha,scope=wordpress-phpunit-php83"
+require_step_literal \
+  "Build WordPress shard Docker image" \
+  "load: true"
+require_step_literal \
+  "Record WordPress shard Docker image timing" \
+  'tools/wordpress-phpunit-append-timing --label docker-image-${{ matrix.shard }}'
+require_step_literal \
+  "Record WordPress shard Docker image timing" \
+  "wordpress_docker_build_seconds="
+require_step_order \
+  "Extract WordPress PHPUnit runtime artifact" \
+  "Mark WordPress shard Docker image build start"
+require_step_order \
+  "Mark WordPress shard Docker image build start" \
+  "Set up WordPress shard Docker Buildx"
+require_step_order \
+  "Set up WordPress shard Docker Buildx" \
+  "Build WordPress shard Docker image"
+require_step_order \
+  "Build WordPress shard Docker image" \
+  "Record WordPress shard Docker image timing"
 require_step_literal \
   "Upload WordPress PHPUnit runtime artifact" \
   "name: wordpress-phpunit-runtime"

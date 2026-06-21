@@ -916,6 +916,15 @@ PHPUnit shell process, so further performance work should first distinguish
 artifact, Docker image, and harness overhead from MyLite engine execution. The
 WordPress timing rollup now emits that critical-shard phase decomposition and
 the largest non-PHPUnit-shell shard cost directly.
+The first green run with that overhead decomposition, `27897843305` for
+`c9005932`, reported `deferred-reconnect-baseline-restored` as the critical
+shard at `120s`: `7s` artifact download, `2s` artifact extract, `73s` Docker
+image setup, and `38s` PHPUnit total. The largest PHPUnit shell body was still
+`phpunit-non-isolated-query-canonical` at `79.971s`, but its full shard path
+was `114s`, below the Docker-heavy critical shard. The next CI performance
+slice therefore moves the WordPress PHPUnit image into a shared Dockerfile and
+builds it through Docker Buildx with the GitHub Actions cache backend while
+preserving the existing `docker-image*` timing labels.
 
 The next production ownerless SQL run exposed `sql-case 46`
 (`test_ownerless_active_reader_pressure_limit_blocks_write_classes`) during a

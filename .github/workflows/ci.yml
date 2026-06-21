@@ -292,11 +292,35 @@ jobs:
           free -h
           docker version
 
-      - name: Build WordPress PHPUnit Docker image
-        env:
-          MYLITE_WORDPRESS_PHASE: docker-image
-          MYLITE_WORDPRESS_TIMING_LABEL: docker-image
-        run: tools/wordpress-phpunit-mysqli-mylite
+      - name: Mark WordPress setup Docker image build start
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          date +%s > build/wordpress-docker-image-build-start.txt
+
+      - name: Set up WordPress setup Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build WordPress setup Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./tools
+          file: ./tools/wordpress-phpunit.Dockerfile
+          load: true
+          tags: mylite-wordpress-phpunit:php83
+          cache-from: type=gha,scope=wordpress-phpunit-php83
+          cache-to: type=gha,mode=max,scope=wordpress-phpunit-php83
+
+      - name: Record WordPress setup Docker image timing
+        if: always()
+        run: |
+          set -euo pipefail
+          docker_start="$(cat build/wordpress-docker-image-build-start.txt)"
+          docker_end="$(date +%s)"
+          docker_seconds="$((docker_end - docker_start))"
+          tools/wordpress-phpunit-append-timing --label docker-image \
+            "wordpress_docker_build_seconds=${docker_seconds}" \
+            "wordpress_total_seconds=${docker_seconds}"
 
       - name: Fetch WordPress PHPUnit sources
         env:
@@ -728,11 +752,33 @@ jobs:
             "wordpress_artifact_extract_db_baseline_tar_bytes=${db_baseline_tar_bytes}" \
             "wordpress_total_seconds=${extract_seconds}"
 
-      - name: Build WordPress PHPUnit Docker image
-        env:
-          MYLITE_WORDPRESS_PHASE: docker-image
-          MYLITE_WORDPRESS_TIMING_LABEL: docker-image-${{ matrix.shard }}
-        run: tools/wordpress-phpunit-mysqli-mylite
+      - name: Mark WordPress shard Docker image build start
+        run: |
+          set -euo pipefail
+          date +%s > build/wordpress-docker-image-build-start.txt
+
+      - name: Set up WordPress shard Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build WordPress shard Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./tools
+          file: ./tools/wordpress-phpunit.Dockerfile
+          load: true
+          tags: mylite-wordpress-phpunit:php83
+          cache-from: type=gha,scope=wordpress-phpunit-php83
+
+      - name: Record WordPress shard Docker image timing
+        if: always()
+        run: |
+          set -euo pipefail
+          docker_start="$(cat build/wordpress-docker-image-build-start.txt)"
+          docker_end="$(date +%s)"
+          docker_seconds="$((docker_end - docker_start))"
+          tools/wordpress-phpunit-append-timing --label docker-image-${{ matrix.shard }} \
+            "wordpress_docker_build_seconds=${docker_seconds}" \
+            "wordpress_total_seconds=${docker_seconds}"
 
       - name: Verify WordPress MariaDB embedded production build type
         run: tools/require-cmake-build-type MinSizeRel build/wordpress-mariadb-embedded
