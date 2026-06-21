@@ -411,6 +411,28 @@ static void test_redo_deferred_flush_uses_batch_hook(void) {
     uint64_t written_lsn = 0U;
 
     install_page_hooks(&state);
+    assert(mylite_ownerless_innodb_set_statement_deferred_page_publish(1) == 0);
+    assert(mylite_ownerless_innodb_redo_enter(&latest_lsn) == MYLITE_OWNERLESS_INNODB_LOCK_OK);
+    assert(
+        mylite_ownerless_innodb_redo_defer_written_and_leave(380U, 392U, 430U, &written_lsn) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE
+    );
+    assert(
+        mylite_ownerless_innodb_redo_written_and_leave(380U, 392U, 430U, &written_lsn) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_OK
+    );
+    assert(written_lsn == 392U);
+    assert(!mylite_ownerless_innodb_redo_is_active());
+    assert(state.written_leave_count == 0U);
+    assert(state.written_count == 1U);
+    assert(state.leave_count == 1U);
+    assert(mylite_ownerless_innodb_set_statement_deferred_page_publish(0) == 1);
+    mylite_ownerless_innodb_lock_reset_hooks();
+    memset(&state, 0, sizeof(state));
+    written_lsn = 0U;
+    latest_lsn = 0U;
+
+    install_page_hooks(&state);
     mylite_ownerless_innodb_lock_set_redo_written_leave_hook(redo_written_leave_hook);
     mylite_ownerless_innodb_lock_set_redo_written_leave_batch_hook(redo_written_leave_batch_hook);
     assert(mylite_ownerless_innodb_set_statement_deferred_page_publish(1) == 0);

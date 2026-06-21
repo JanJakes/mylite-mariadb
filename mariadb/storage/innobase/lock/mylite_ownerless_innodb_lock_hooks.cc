@@ -38,6 +38,8 @@ std::atomic<bool> mylite_ownerless_innodb_autoinc_hooks_enabled{false};
 std::atomic<bool> mylite_ownerless_innodb_test_faults_enabled{false};
 thread_local bool mylite_ownerless_statement_visible_fast_path= false;
 thread_local bool mylite_ownerless_statement_deferred_page_publish= false;
+thread_local bool mylite_ownerless_statement_deferred_redo_admission_ready=
+    false;
 thread_local bool mylite_ownerless_statement_plain_read= false;
 thread_local bool mylite_ownerless_statement_plain_read_preserve_local_pages=
     false;
@@ -555,6 +557,7 @@ extern "C" void mylite_ownerless_innodb_lock_reset_hooks(void)
   redo_depth= 0;
   redo_latest_lsn= 0;
   page_write_lock_trx_id= 0;
+  mylite_ownerless_statement_deferred_redo_admission_ready= false;
   checkpoint_suppression_bypass= false;
   mylite_ownerless_innodb_reset_thread_redo_latch_depth();
   callback_context.store(nullptr, std::memory_order_release);
@@ -701,7 +704,10 @@ extern "C" int mylite_ownerless_innodb_take_file_rename_redo(void)
 extern "C" void mylite_ownerless_innodb_set_test_faults_enabled(int enabled)
 {
   if (enabled != 0)
+  {
     test_fault_match_count.store(0, std::memory_order_release);
+    mylite_ownerless_statement_deferred_redo_admission_ready= false;
+  }
   mylite_ownerless_innodb_test_faults_enabled.store(enabled != 0,
                                                     std::memory_order_release);
 }
@@ -1581,6 +1587,17 @@ mylite_ownerless_innodb_set_statement_deferred_page_publish(int enabled)
   }
   const bool previous= mylite_ownerless_statement_deferred_page_publish;
   mylite_ownerless_statement_deferred_page_publish= enabled != 0;
+  if (enabled != 0 && !previous)
+  {
+    mylite_ownerless_statement_deferred_redo_admission_ready=
+        ownerless_lock_hooks_enabled() &&
+        !mylite_ownerless_innodb_test_faults_enabled_fast() &&
+        redo_written_leave_callback.load(std::memory_order_acquire) !=
+            nullptr &&
+        callback_context.load(std::memory_order_acquire) != nullptr;
+  }
+  else if (enabled == 0)
+    mylite_ownerless_statement_deferred_redo_admission_ready= false;
   return previous ? 1 : 0;
 }
 
@@ -2819,15 +2836,8 @@ extern "C" int mylite_ownerless_innodb_redo_defer_written_and_leave(
   if (out_written_lsn != nullptr)
     *out_written_lsn= 0;
 
-  if (!ownerless_lock_hooks_enabled() || redo_depth != 1 ||
-      !mylite_ownerless_statement_deferred_page_publish ||
-      mylite_ownerless_innodb_test_faults_enabled_fast())
-    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
-
-  mylite_ownerless_innodb_redo_written_leave_callback hook=
-      redo_written_leave_callback.load(std::memory_order_acquire);
-  void *context= callback_context.load(std::memory_order_acquire);
-  if (hook == nullptr || context == nullptr)
+  if (redo_depth != 1 ||
+      !mylite_ownerless_statement_deferred_redo_admission_ready)
     return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
 
   if (deferred_redo_batch_count == k_deferred_redo_batch_capacity)
