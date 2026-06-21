@@ -976,6 +976,17 @@ artifact download, and `2s` artifact extract. The slowest PHPUnit body was
 wall clock because of the larger fixed setup cost. The next bounded wall-clock
 slice therefore splits query into filter-heavy query classes and core/cache
 query classes while keeping the broad query regex as the union authority.
+That query split passed in CI run `27911929025`, with query-core at `22.507s`
+shell real and `57s` total, query-filter at `22.904s` shell real and `58s`
+total, and all WordPress PHPUnit shards green. The critical shard moved to
+`non-isolated-content-entity` at `99s`, including `60.910s` PHPUnit shell real,
+`28s` Docker image setup, `7s` artifact download, and `2s` artifact extract.
+The estimated WordPress workflow critical path was `175s`, while the slowest
+pure PHPUnit body was `phpunit-non-isolated-rest-controller-other` at
+`67.223s`. The next bounded wall-clock slice therefore splits the content
+entity bucket into post/template classes and term/taxonomy classes while
+keeping the broad content/entity regex as the union authority and the broader
+content/data regex as the remaining-shard exclusion authority.
 
 The next production ownerless SQL run exposed `sql-case 46`
 (`test_ownerless_active_reader_pressure_limit_blocks_write_classes`) during a

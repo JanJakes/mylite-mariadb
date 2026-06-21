@@ -2562,6 +2562,12 @@ tarred runtime SHA256 manifest and use independent external MyLite database
 directories before running the same PHPUnit filters, while the final
 `wordpress-phpunit-mysqli-mylite` job merges timing rows and preserves the
 published artifact name.
+The latest timing fanout keeps the same production WordPress PHPUnit surface
+but splits the former `phpunit-non-isolated-content-entity` bucket into
+`phpunit-non-isolated-content-post-template` and
+`phpunit-non-isolated-content-term-taxonomy`, preserving the broad content
+regexes for remaining-shard exclusion and adding no SQL, mysqli, native
+storage, recovery, or ownerless behavior change.
 
 Ownerless page-version WAL records can now encode zero-heavy page images by
 storing a compact 16-bit sparse nonzero-run list, the original 32-bit sparse
