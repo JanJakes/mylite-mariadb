@@ -925,6 +925,14 @@ was `114s`, below the Docker-heavy critical shard. The next CI performance
 slice therefore moves the WordPress PHPUnit image into a shared Dockerfile and
 builds it through Docker Buildx with the GitHub Actions cache backend while
 preserving the existing `docker-image*` timing labels.
+The first CI attempt for that Buildx slice (`27898291213` on `29e8cfcb`) was a
+cold-cache seed and worsened estimated WordPress critical path to `246s`
+despite reducing total Docker setup rows to `482s`. Rerunning the same commit
+after cache seeding passed with setup at `67s`, critical shard
+`non-isolated-content-data` at `117s`, estimated WordPress critical path at
+`184s`, and total Docker setup rows at `447s`. That is a modest hot-cache win
+over `c9005932` (`194s` estimated critical path and `599s` Docker setup), but
+per-shard Buildx setup/load still leaves `20-36s` Docker cost on each shard.
 
 The next production ownerless SQL run exposed `sql-case 46`
 (`test_ownerless_active_reader_pressure_limit_blocks_write_classes`) during a

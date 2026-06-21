@@ -145,6 +145,18 @@ Actions BuildKit cache for the PHP/GD/ZIP toolchain layers.
   --output-on-failure`: passed two tests.
 - `cmake --build --preset format-check-prod`: passed.
 - `git diff --check`: passed.
+- CI run `27898291213` for `29e8cfcb` passed on the first attempt. That
+  first Buildx run seeded/exported the cache and was not a wall-clock win:
+  setup rose to `133s`, the critical shard was
+  `non-isolated-query-canonical` at `113s`, estimated WordPress critical path
+  was `246s`, and total Docker setup rows fell from the previous `599s` to
+  `482s`.
+- Rerunning the same commit after cache seeding passed and provided the first
+  hot-cache timing sample: setup was `67s`, the critical shard was
+  `non-isolated-content-data` at `117s`, estimated WordPress critical path was
+  `184s`, and total Docker setup rows fell to `447s`. The critical shard
+  breakdown was `8s` artifact download, `3s` artifact extract, `36s` Docker
+  image setup, and `70s` PHPUnit total.
 
 ## Risks
 
