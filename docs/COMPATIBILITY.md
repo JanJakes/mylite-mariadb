@@ -2598,7 +2598,10 @@ pages/attachments/comments shards, and replacing
 `phpunit-non-isolated-rest-controller-tests-rest` with font/icon and remaining
 `Tests_REST*Controller` shards. The broad REST primary and `Tests_REST`
 controller regexes remain union authorities; the split changes only CI
-test-only filters and audit guards.
+test-only filters and audit guards. Green CI run `27915469258` on `a30256b3a`
+passed with those shards, moved the split REST tails below the critical path,
+and left fixed per-shard Docker/artifact overhead as the next measured
+WordPress timing bottleneck.
 The follow-up remaining-platform fanout keeps that same production surface
 while replacing `phpunit-non-isolated-remaining-platform` with
 HTML/interactivity, image, and merged format/dependencies/embed shards. The

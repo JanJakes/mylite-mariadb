@@ -1059,6 +1059,13 @@ posts versus pages/attachments/comments shards and font/icon versus remaining
 `Tests_REST*Controller` shards. CI remains the authority for the first timing
 sample after the split; the expected next critical path is one of the existing
 non-REST shards unless fixed Docker/artifact overhead dominates.
+Green CI run `27915469258` on `a30256b3a` proved the REST fanout shape but also
+showed the limits of filter-only splitting: setup action time drifted to `76s`,
+the critical shard moved to `non-isolated-content-term-taxonomy` at `70s`, and
+estimated WordPress critical path rose to `146s`. The split REST shards were
+below that (`58s`, `44s`, `34s`, and `41s`), so the new evidence points the
+next performance slice at fixed per-shard Docker/artifact overhead rather than
+another class-family split.
 
 The next production ownerless SQL run exposed `sql-case 46`
 (`test_ownerless_active_reader_pressure_limit_blocks_write_classes`) during a

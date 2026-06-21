@@ -160,8 +160,29 @@ Passed:
 - `cmake --build --preset format-check-prod`
 - `git diff --check`
 
-CI must provide the first full production timing for the new REST fanout
-shards.
+CI run `27915469258` passed on `a30256b3a` with `43/43` jobs green. The
+published timing rollup reported setup action time at `76s`, critical shard
+`non-isolated-content-term-taxonomy` at `70s`, and estimated WordPress
+critical path at `146s`. The REST fanout did move the split REST tails below
+the critical path:
+
+- `non-isolated-rest-content-primary-posts`: `58s` total, including
+  `21.746s` shell real, `25s` Docker image setup, `7s` artifact download, and
+  `3s` artifact extract;
+- `non-isolated-rest-content-primary-other`: `44s` total, including
+  `22.046s` shell real, `17s` Docker image setup, `2s` artifact download, and
+  `3s` artifact extract;
+- `non-isolated-rest-controller-tests-rest-font-icon`: `34s` total, including
+  `8.002s` shell real, `20s` Docker image setup, `2s` artifact download, and
+  `3s` artifact extract;
+- `non-isolated-rest-controller-tests-rest-other`: `41s` total, including
+  `16.972s` shell real, `18s` Docker image setup, `4s` artifact download, and
+  `2s` artifact extract.
+
+The estimated critical path worsened from `139s` to `146s` because setup and
+fixed per-shard Docker/artifact overhead drifted upward; the split removed the
+REST test-body tails as the measured bottleneck but did not solve the fixed
+overhead problem.
 
 ## Risks
 
