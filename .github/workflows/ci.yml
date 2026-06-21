@@ -337,6 +337,33 @@ jobs:
             "wordpress_docker_build_seconds=${docker_seconds}" \
             "wordpress_total_seconds=${docker_seconds}"
 
+      - name: Mark WordPress runtime Docker image cache seed start
+        run: |
+          set -euo pipefail
+          date +%s > build/wordpress-runtime-docker-image-cache-start.txt
+
+      - name: Build WordPress runtime Docker image cache
+        uses: docker/build-push-action@v7
+        with:
+          context: ./tools
+          file: ./tools/wordpress-phpunit-runtime.Dockerfile
+          tags: mylite-wordpress-phpunit-runtime:php83
+          cache-from: |
+            type=gha,scope=wordpress-phpunit-runtime-php83
+            type=gha,scope=wordpress-phpunit-php83
+          cache-to: type=gha,mode=max,scope=wordpress-phpunit-runtime-php83
+
+      - name: Record WordPress runtime Docker image cache timing
+        if: always()
+        run: |
+          set -euo pipefail
+          docker_start="$(cat build/wordpress-runtime-docker-image-cache-start.txt)"
+          docker_end="$(date +%s)"
+          docker_seconds="$((docker_end - docker_start))"
+          tools/wordpress-phpunit-append-timing --label runtime-docker-image-cache \
+            "wordpress_runtime_docker_cache_seconds=${docker_seconds}" \
+            "wordpress_total_seconds=${docker_seconds}"
+
       - name: Fetch WordPress PHPUnit sources
         env:
           MYLITE_WORDPRESS_PHASE: fetch
@@ -977,14 +1004,16 @@ jobs:
       - name: Set up WordPress shard Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Build WordPress shard Docker image
+      - name: Build WordPress shard runtime Docker image
         uses: docker/build-push-action@v7
         with:
           context: ./tools
-          file: ./tools/wordpress-phpunit.Dockerfile
+          file: ./tools/wordpress-phpunit-runtime.Dockerfile
           load: true
           tags: mylite-wordpress-phpunit:php83
-          cache-from: type=gha,scope=wordpress-phpunit-php83
+          cache-from: |
+            type=gha,scope=wordpress-phpunit-runtime-php83
+            type=gha,scope=wordpress-phpunit-php83
 
       - name: Record WordPress shard Docker image timing
         if: always()

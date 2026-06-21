@@ -2602,6 +2602,13 @@ test-only filters and audit guards. Green CI run `27915469258` on `a30256b3a`
 passed with those shards, moved the split REST tails below the critical path,
 and left fixed per-shard Docker/artifact overhead as the next measured
 WordPress timing bottleneck.
+The shard runtime-image follow-up keeps the same production WordPress PHPUnit
+surface and artifacts while changing the shard container image. Setup still
+uses the build-capable WordPress Dockerfile for MariaDB/MyLite artifact
+production, but it also seeds a separate runtime-image cache. Shards now load a
+test-only runtime Dockerfile under the existing harness tag before running the
+unchanged PHPUnit filters. This changes CI timing architecture only; SQL,
+mysqli, native storage, recovery, and ownerless behavior are unchanged.
 The follow-up remaining-platform fanout keeps that same production surface
 while replacing `phpunit-non-isolated-remaining-platform` with
 HTML/interactivity, image, and merged format/dependencies/embed shards. The

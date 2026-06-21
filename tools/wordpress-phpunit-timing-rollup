@@ -261,6 +261,7 @@ BEGIN {
   build_metric["wordpress_total_seconds"] = 1
 
   phase_metric["wordpress_docker_build_seconds"] = 1
+  phase_metric["wordpress_runtime_docker_cache_seconds"] = 1
   phase_metric["wordpress_fetch_seconds"] = 1
   phase_metric["wordpress_dependency_seconds"] = 1
   phase_metric["wordpress_prepare_db_seconds"] = 1
@@ -465,6 +466,7 @@ END {
   }
 
   emit_sum("phase_metric", "wordpress_docker_build_seconds", "wordpress_docker_build_seconds")
+  emit_sum("phase_metric", "wordpress_runtime_docker_cache_seconds", "wordpress_runtime_docker_cache_seconds")
   emit_sum("phase_metric", "wordpress_fetch_seconds", "wordpress_fetch_seconds")
   emit_sum("phase_metric", "wordpress_dependency_seconds", "wordpress_dependency_seconds")
   emit_sum("phase_metric", "wordpress_prepare_db_seconds", "wordpress_prepare_db_seconds")

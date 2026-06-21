@@ -1066,6 +1066,15 @@ estimated WordPress critical path rose to `146s`. The split REST shards were
 below that (`58s`, `44s`, `34s`, and `41s`), so the new evidence points the
 next performance slice at fixed per-shard Docker/artifact overhead rather than
 another class-family split.
+The shard runtime-image follow-up keeps the setup Dockerfile for build phases
+but adds a test-only `tools/wordpress-phpunit-runtime.Dockerfile` for shard
+jobs. Setup seeds a distinct `wordpress-phpunit-runtime-php83` Buildx cache,
+while shards load the runtime image under the existing harness tag
+`mylite-wordpress-phpunit:php83`. The final runtime image drops the C/CMake
+build toolchain from shard jobs while preserving PHP `gd`/`zip` and the same
+Release MyLite plus MinSizeRel MariaDB artifacts. The timing rollup reports
+`wordpress_runtime_docker_cache_seconds` so the setup-side cache seed is
+visible when comparing the first CI run against prior shard Docker timings.
 
 The next production ownerless SQL run exposed `sql-case 46`
 (`test_ownerless_active_reader_pressure_limit_blocks_write_classes`) during a
