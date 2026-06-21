@@ -1012,6 +1012,19 @@ estimated workflow critical path was `175s`. The next bounded wall-clock slice
 therefore splits block/token into a `Tests_Blocks*` library shard and a
 block-support/template/token shard while keeping the broad block/token regex
 as the union and remaining-shard exclusion authority.
+That block/token split passed in CI run `27913295801`, with setup at `67s`,
+`non-isolated-block-library` at `48s` total and `15.617s` shell real, and
+`non-isolated-block-support-template` as the new critical shard at `77s` total
+with `44.068s` shell real, `25s` Docker image setup, `5s` artifact download,
+and `3s` artifact extract. The estimated WordPress workflow critical path fell
+from `175s` to `144s`. The next measured tails are close enough that one more
+bounded fanout should split the top PHPUnit bodies together: REST
+content-post into primary content controllers and revision/autosave history
+controllers, block support/template into supports and template/binding buckets,
+and media/comment into media, comment, and XML-RPC buckets. The fixed per-shard
+Docker/artifact cost remains visible, but changing the container architecture
+would also change the timing environment and is larger than this filter-only
+slice.
 
 The next production ownerless SQL run exposed `sql-case 46`
 (`test_ownerless_active_reader_pressure_limit_blocks_write_classes`) during a

@@ -2584,6 +2584,14 @@ former `phpunit-non-isolated-block-token` bucket with
 bindings, token-map, and small `WP_Block*` classes. The broad block/token regex
 remains the remaining-shard exclusion authority, and the split changes only CI
 test-only filters and audit guards.
+The latest top-tail fanout keeps the same production surface while replacing
+`phpunit-non-isolated-rest-content-post` with primary REST content and
+history-controller shards, `phpunit-non-isolated-block-support-template` with
+block supports and block template/binding shards, and
+`phpunit-non-isolated-media-comment` with media, comment, and XML-RPC shards.
+The broad REST content-post, block support/template, and media/comment regexes
+remain union and exclusion authorities; no SQL, mysqli, native storage,
+recovery, or ownerless behavior changes.
 
 Ownerless page-version WAL records can now encode zero-heavy page images by
 storing a compact 16-bit sparse nonzero-run list, the original 32-bit sparse
