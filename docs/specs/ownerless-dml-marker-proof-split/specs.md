@@ -41,8 +41,9 @@ In scope:
 
 - Add a DML-specific durable checkpoint-needed marker in
   `concurrency/mylite-concurrency.ckpt`.
-- Make successful autocommit DML and successful explicit transaction end after
-  local writes publish that DML marker when the InnoDB file-op redo flag is set.
+- Make successful autocommit DML and successful explicit transaction `COMMIT`
+  after local writes publish that DML marker when the InnoDB file-op redo flag
+  is set.
 - Let the DML marker force native checkpoint drain and startup uncheckpointed
   file-operation recovery.
 - Keep no-live user-page LSN/payload proof required when only the DML marker is
@@ -56,8 +57,9 @@ Out of scope:
 
 - Parsing native redo payloads or classifying every `FILE_MODIFY` source.
 - Changing dictionary DDL/file-lifecycle proof relaxation.
-- Rollback, deadlock, killed-transaction, or crash coverage for every explicit
-  transaction outcome.
+- Deadlock, killed-transaction, or crash coverage for every explicit
+  transaction outcome. Successful rollback marker discard is covered by
+  `docs/specs/ownerless-dml-marker-transaction-outcomes/specs.md`.
 - Immediate checkpointing at every DML commit, background scheduling, group
   commit, or broader redo/checkpoint reconciliation.
 - External MariaDB/RQG stress and SQL-level table-lock fault injection.
@@ -80,8 +82,8 @@ The existing native file-op marker remains unchanged:
 
 The DML marker is separate:
 
-- autocommit non-DDL write cleanup and explicit transaction-end cleanup consume
-  `mylite_ownerless_innodb_take_file_op_redo()`;
+- autocommit non-DDL write cleanup and explicit transaction `COMMIT` cleanup
+  consume `mylite_ownerless_innodb_take_file_op_redo()`;
 - when the flag is set, they write the DML marker under the runtime/checkpoint
   lock;
 - if the marker cannot be written, they re-note the flag for later cleanup;
@@ -174,6 +176,8 @@ tests.
   DML-specific checkpoint-needed marker, not the proof-relaxing DDL marker.
 - A live idle ownerless peer can be present while explicit transaction DML
   commits and publishes the DML marker.
+- Successful explicit transaction rollback after local writes leaves the DML
+  marker clear and discards stale process-local file-op evidence.
 - The DML marker remains set while that peer keeps the runtime live, then clears
   after final no-live native checkpoint/reclaim.
 - User page-version WAL reclaim still requires native page LSN/payload proof
@@ -187,8 +191,8 @@ tests.
 - The DML marker is still type-agnostic; the focused tests rely on
   source-backed checkpointed file-per-table `UPDATE` shapes to produce
   `FILE_MODIFY`.
-- Rollback, killed-transaction, deadlock, savepoint, and crash windows remain
-  planned follow-up matrices.
+- Killed-transaction, deadlock, savepoint, and crash windows remain planned
+  follow-up matrices.
 - If DDL and DML markers are both present, the DDL marker still permits the
   existing proof relaxation. That preserves current file-lifecycle behavior but
   leaves mixed DDL/DML proof interaction for broader native redo/checkpoint

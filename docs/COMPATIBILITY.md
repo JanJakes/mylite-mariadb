@@ -282,20 +282,26 @@ observes the flag set again, proving ordinary post-checkpoint DML reaches
 MariaDB's `FILE_MODIFY` redo path. That is observation evidence, not a broad
 durable-marker claim for every DML-origin `FILE_MODIFY` case.
 Ownerless successful autocommit non-DDL write cleanup, and successful explicit
-transaction end after local writes, now consume the same native file-op redo
-flag and persist a DML-specific checkpoint-needed marker when post-checkpoint
-DML emits file-operation redo. The DML marker forces native checkpoint drain
-but does not relax no-live user-page LSN/payload proof, leaving the existing
-native file-op marker as the proof-relaxing dictionary DDL/file-lifecycle
-marker. Focused SQL coverage forces a checkpoint, runs ownerless autocommit,
-single-owner explicit-transaction, and idle-peer explicit-transaction `UPDATE`
-shapes on file-per-table InnoDB tables, observes the DML marker before close or
-before final peer release as appropriate, drains it on final no-live close,
-forces `.shm` rebuild, and verifies ownerless and ordinary native reopen
-preserve the updated rows. This is bounded durable marker coverage for
-checkpointed representative DML commit shapes, not a claim that every possible
-DML-origin `FILE_MODIFY`, rollback/deadlock/crash, or concurrent-writer
-explicit transaction path has been exhaustively classified.
+transaction `COMMIT` after local writes, now consume the same native file-op
+redo flag and persist a DML-specific checkpoint-needed marker when
+post-checkpoint DML emits file-operation redo. The DML marker forces native
+checkpoint drain but does not relax no-live user-page LSN/payload proof,
+leaving the existing native file-op marker as the proof-relaxing dictionary
+DDL/file-lifecycle marker. Focused SQL coverage forces a checkpoint, runs
+ownerless autocommit, single-owner explicit-transaction, and idle-peer
+explicit-transaction `UPDATE` commit shapes on file-per-table InnoDB tables,
+observes the DML marker before close or before final peer release as
+appropriate, drains it on final no-live close, forces `.shm` rebuild, and
+verifies ownerless and ordinary native reopen preserve the updated rows.
+Successful explicit transaction rollback after local writes is now covered as
+a separate outcome: it leaves both native file-op markers clear, consumes the
+process-local ownerless InnoDB file-op redo flag so stale evidence cannot leak
+into later statements, and preserves the pre-transaction row after forced
+`.shm` rebuild plus ordinary native reopen. This is bounded durable marker
+coverage for checkpointed representative DML commit and successful rollback
+shapes, not a claim that every possible DML-origin `FILE_MODIFY`,
+deadlock/crash, killed-transaction, savepoint, or concurrent-writer explicit
+transaction path has been exhaustively classified.
 Ownerless AUTO_INCREMENT publishes now also mark a shared registry
 native-checkpoint pending bit when they raise a table high watermark. The
 final no-live ownerless close path drains that bit through the existing native

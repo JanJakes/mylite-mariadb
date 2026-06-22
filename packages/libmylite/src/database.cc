@@ -1989,7 +1989,11 @@ void mark_ownerless_native_file_op_checkpoint_after_successful_write(
     mylite_db &db,
     const SqlPolicyTokens &tokens,
     bool statement_started_in_explicit_transaction,
-    bool transaction_end_had_local_write
+    bool transaction_commit_had_local_write
+);
+void discard_ownerless_native_file_op_redo_after_rolled_back_write(
+    mylite_db &db,
+    bool transaction_rollback_had_local_write
 );
 void mark_ownerless_native_file_op_checkpoint_before_dictionary_finish(mylite_db &db);
 bool advance_ownerless_no_live_page_visible_lsn_for_reclaim(
@@ -2209,9 +2213,18 @@ bool sql_sets_transaction_isolation(
 );
 bool sql_starts_consistent_snapshot_transaction(const SqlPolicyTokens &tokens);
 bool sql_starts_explicit_transaction(const SqlPolicyTokens &tokens);
+bool sql_commits_explicit_transaction(const SqlPolicyTokens &tokens);
 bool sql_ends_explicit_transaction(const SqlPolicyTokens &tokens);
 bool sql_chains_transaction(const SqlPolicyTokens &tokens);
 bool ownerless_transaction_end_has_local_write(const mylite_db &db, const SqlPolicyTokens &tokens);
+bool ownerless_transaction_commit_has_local_write(
+    const mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
+bool ownerless_transaction_rollback_has_local_write(
+    const mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
 bool ownerless_transaction_end_blocks_waiting_native_lock(mylite_db &db);
 int acquire_ownerless_statement_locks(
     mylite_db &db,
@@ -3772,6 +3785,10 @@ int mylite_step(mylite_stmt *stmt) {
         update_ownerless_temporary_table_state_after_successful_sql(*stmt->db, policy_tokens);
         const bool transaction_end_had_local_write =
             ownerless_transaction_end_has_local_write(*stmt->db, policy_tokens);
+        const bool transaction_commit_had_local_write =
+            ownerless_transaction_commit_has_local_write(*stmt->db, policy_tokens);
+        const bool transaction_rollback_had_local_write =
+            ownerless_transaction_rollback_has_local_write(*stmt->db, policy_tokens);
         const int transaction_state_result =
             update_ownerless_transaction_state_after_successful_sql(*stmt->db, policy_tokens);
         ownerless_database_perf_add_elapsed(
@@ -3807,7 +3824,7 @@ int mylite_step(mylite_stmt *stmt) {
                 *stmt->db,
                 policy_tokens,
                 statement_started_in_explicit_transaction,
-                transaction_end_had_local_write
+                transaction_commit_had_local_write
             );
         }
         if (!statement_started_in_explicit_transaction ||
@@ -3872,12 +3889,17 @@ int mylite_step(mylite_stmt *stmt) {
                 OWNERLESS_DATABASE_PERF_PREPARED_STEP_RECLAIM_NS,
                 ownerless_stage_start
             );
-            if (!dictionary_ddl_started && transaction_end_had_local_write) {
+            if (!dictionary_ddl_started && transaction_commit_had_local_write) {
                 mark_ownerless_native_file_op_checkpoint_after_successful_write(
                     *stmt->db,
                     policy_tokens,
                     statement_started_in_explicit_transaction,
-                    transaction_end_had_local_write
+                    transaction_commit_had_local_write
+                );
+            } else if (!dictionary_ddl_started && transaction_rollback_had_local_write) {
+                discard_ownerless_native_file_op_redo_after_rolled_back_write(
+                    *stmt->db,
+                    transaction_rollback_had_local_write
                 );
             }
             clear_statement_ownerless_page_visibility(*stmt);
@@ -5165,6 +5187,10 @@ ownerless_query_success:
     update_ownerless_temporary_table_state_after_successful_sql(*db, policy_tokens);
     const bool transaction_end_had_local_write =
         ownerless_transaction_end_has_local_write(*db, policy_tokens);
+    const bool transaction_commit_had_local_write =
+        ownerless_transaction_commit_has_local_write(*db, policy_tokens);
+    const bool transaction_rollback_had_local_write =
+        ownerless_transaction_rollback_has_local_write(*db, policy_tokens);
     const int transaction_state_result =
         update_ownerless_transaction_state_after_successful_sql(*db, policy_tokens);
     exec_result_perf_add_elapsed(EXEC_RESULT_PERF_STATUS_UPDATE_NS, stage_start_ns);
@@ -5196,7 +5222,7 @@ ownerless_query_success:
             *db,
             policy_tokens,
             statement_started_in_explicit_transaction,
-            transaction_end_had_local_write
+            transaction_commit_had_local_write
         );
     }
     if (!statement_started_in_explicit_transaction ||
@@ -5257,12 +5283,17 @@ ownerless_query_success:
     }
     statement_locks.release();
     maybe_reclaim_ownerless_page_log_after_statement(*db, policy_tokens);
-    if (!dictionary_ddl_started && transaction_end_had_local_write) {
+    if (!dictionary_ddl_started && transaction_commit_had_local_write) {
         mark_ownerless_native_file_op_checkpoint_after_successful_write(
             *db,
             policy_tokens,
             statement_started_in_explicit_transaction,
-            transaction_end_had_local_write
+            transaction_commit_had_local_write
+        );
+    } else if (!dictionary_ddl_started && transaction_rollback_had_local_write) {
+        discard_ownerless_native_file_op_redo_after_rolled_back_write(
+            *db,
+            transaction_rollback_had_local_write
         );
     }
     return MYLITE_OK;
@@ -6106,6 +6137,24 @@ bool sql_statement_needs_ownerless_current_read_refresh(const SqlPolicyTokens &t
 
 bool ownerless_transaction_end_has_local_write(const mylite_db &db, const SqlPolicyTokens &tokens) {
     return sql_ends_explicit_transaction(tokens) &&
+           ownerless_connection_is_in_explicit_transaction(db) &&
+           db.ownerless_transaction_has_local_write;
+}
+
+bool ownerless_transaction_commit_has_local_write(
+    const mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    return sql_commits_explicit_transaction(tokens) &&
+           ownerless_connection_is_in_explicit_transaction(db) &&
+           db.ownerless_transaction_has_local_write;
+}
+
+bool ownerless_transaction_rollback_has_local_write(
+    const mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    return sql_ends_explicit_transaction(tokens) && !sql_commits_explicit_transaction(tokens) &&
            ownerless_connection_is_in_explicit_transaction(db) &&
            db.ownerless_transaction_has_local_write;
 }
@@ -11480,13 +11529,13 @@ void mark_ownerless_native_file_op_checkpoint_after_successful_write(
     mylite_db &db,
     const SqlPolicyTokens &tokens,
     bool statement_started_in_explicit_transaction,
-    bool transaction_end_had_local_write
+    bool transaction_commit_had_local_write
 ) {
     const bool autocommit_write =
         !statement_started_in_explicit_transaction && sql_statement_requires_write(tokens);
-    const bool transaction_end_write = transaction_end_had_local_write;
+    const bool transaction_commit_write = transaction_commit_had_local_write;
     if (!db.ownerless_rw_open || db.readonly_open || ownerless_dictionary_ddl_statement(tokens) ||
-        (!autocommit_write && !transaction_end_write)) {
+        (!autocommit_write && !transaction_commit_write)) {
         return;
     }
     if (mylite_ownerless_innodb_take_file_op_redo() == 0) {
@@ -11507,6 +11556,16 @@ void mark_ownerless_native_file_op_checkpoint_after_successful_write(
     if (!marker_written) {
         mylite_ownerless_innodb_note_file_op_redo();
     }
+}
+
+void discard_ownerless_native_file_op_redo_after_rolled_back_write(
+    mylite_db &db,
+    bool transaction_rollback_had_local_write
+) {
+    if (!db.ownerless_rw_open || db.readonly_open || !transaction_rollback_had_local_write) {
+        return;
+    }
+    static_cast<void>(mylite_ownerless_innodb_take_file_op_redo());
 }
 
 void mark_ownerless_native_file_op_checkpoint_before_dictionary_finish(mylite_db &db) {
@@ -15306,11 +15365,15 @@ bool sql_starts_explicit_transaction(const SqlPolicyTokens &tokens) {
     return tokens.count == 1U || token_equals(second, "WORK");
 }
 
+bool sql_commits_explicit_transaction(const SqlPolicyTokens &tokens) {
+    return token_equals(identifier_token_at(tokens, 0), "COMMIT");
+}
+
 bool sql_ends_explicit_transaction(const SqlPolicyTokens &tokens) {
     const std::string_view first = identifier_token_at(tokens, 0);
     const std::string_view second = identifier_token_at(tokens, 1);
 
-    if (token_equals(first, "COMMIT")) {
+    if (sql_commits_explicit_transaction(tokens)) {
         return true;
     }
     return token_equals(first, "ROLLBACK") && !token_equals(second, "TO");

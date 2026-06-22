@@ -4614,18 +4614,23 @@ Tasks:
    while durable marker coverage for every DML-origin `FILE_MODIFY` case
    remains unclaimed. Bounded DML marker follow-ups now consume the same native
    file-op redo flag after successful autocommit non-DDL ownerless writes and
-   successful explicit transaction end after local writes, and persist a
+   successful explicit transaction `COMMIT` after local writes, and persist a
    DML-specific checkpoint-needed marker when checkpointed DML emits
    file-operation redo. That marker forces native checkpoint drain but does not
    relax no-live user-page LSN/payload proof; the existing native file-op marker
    remains the proof-relaxing dictionary DDL/file-lifecycle marker. Focused SQL
    coverage forces a checkpoint, updates file-per-table InnoDB tables through
    autocommit, single-owner explicit-transaction, and idle-peer explicit
-   transaction shapes, observes the DML marker before close or before final
-   peer release as appropriate, drains it on final no-live close, and verifies
-   ownerless plus ordinary native reopen after forced `.shm` rebuild. That
-   closes the focused checkpointed representative DML commit marker gaps, not
-   the broader DML-origin `FILE_MODIFY`, rollback/deadlock/crash, or
+   transaction commit shapes, observes the DML marker before close or before
+   final peer release as appropriate, drains it on final no-live close, and
+   verifies ownerless plus ordinary native reopen after forced `.shm` rebuild.
+   Successful explicit transaction rollback after local writes is covered as a
+   separate outcome: it leaves both native file-op markers clear, consumes the
+   process-local ownerless InnoDB file-op redo flag, and preserves the
+   pre-transaction row after forced `.shm` rebuild plus ordinary native reopen.
+   That closes the focused checkpointed representative DML commit marker and
+   successful rollback classification gaps, not the broader DML-origin
+   `FILE_MODIFY`, deadlock/crash, killed-transaction, savepoint, or
    concurrent-writer explicit-transaction matrices.
    The no-argument
    aggregate harness remains

@@ -48,7 +48,7 @@ while an idle ownerless peer is live, without relaxing no-live user-page proof.
 
 In scope:
 
-- At successful explicit transaction end with local writes, consume the
+- At successful explicit transaction `COMMIT` with local writes, consume the
   existing InnoDB file-op redo flag.
 - When the flag is set, persist durable checkpoint-needed evidence in
   `concurrency/mylite-concurrency.ckpt`; the current implementation uses the
@@ -65,11 +65,13 @@ Out of scope:
 
 - Parsing native redo payloads or classifying every DML-origin `FILE_MODIFY`
   shape.
-- Proving rollback, deadlock, killed-transaction, or crash windows for every
-  explicit transaction outcome.
+- Proving deadlock, killed-transaction, or crash windows for every explicit
+  transaction outcome. Successful rollback marker discard is covered by
+  `docs/specs/ownerless-dml-marker-transaction-outcomes/specs.md`.
 - Exhaustive multi-writer explicit transaction DML-origin coverage. The
-  DML-marker proof split covers an idle-peer explicit DML marker drain, but
-  rollback, deadlock, crash, and concurrent-writer matrices remain planned.
+  DML-marker proof split covers an idle-peer explicit DML marker drain, and the
+  transaction-outcome follow-up covers successful rollback discard, but
+  deadlock, crash, and concurrent-writer matrices remain planned.
 - Immediate checkpointing at `COMMIT`, background checkpoint scheduling,
   group commit, or broader redo/checkpoint reconciliation.
 - SQL-level table-lock fault injection and external MariaDB/RQG stress.
@@ -86,17 +88,17 @@ The helper publishes the marker when either of these conditions is true:
 
 - the current statement is a successful autocommit non-DDL write, preserving
   the previous DML marker behavior;
-- the current statement successfully ends an explicit transaction that had
+- the current statement is a successful explicit transaction `COMMIT` that had
   local writes.
 
 Dictionary DDL keeps its existing pre-finish and post-DDL marker paths. The
-explicit transaction path remains type-agnostic: if the InnoDB file-op redo
-flag is set at transaction end, the original slice persisted the same
+explicit transaction commit path remains type-agnostic: if the InnoDB file-op
+redo flag is set at `COMMIT`, the original slice persisted the same
 checkpoint-needed marker already used for dictionary DDL and autocommit DML.
 The current proof split persists the DML-specific marker instead, so explicit
-DML can publish checkpoint-needed evidence while keeping no-live user-page
-proof required. If the marker cannot be written because the runtime or
-checkpoint file is unavailable, the helper re-notes the flag so a later
+DML commits can publish checkpoint-needed evidence while keeping no-live
+user-page proof required. If the marker cannot be written because the runtime
+or checkpoint file is unavailable, the helper re-notes the flag so a later
 ownerless cleanup path can still observe it.
 
 ## Compatibility Impact
@@ -104,8 +106,10 @@ ownerless cleanup path can still observe it.
 No SQL syntax, public C API, native storage format, or directory layout changes.
 Successful ownerless explicit transaction commits that emit native
 file-operation redo may now leave a conservative DML checkpoint-needed marker
-until the existing no-live close path drains it. SQL results, commit semantics,
-and MariaDB diagnostics are unchanged.
+until the existing no-live close path drains it. Successful rollback after
+local writes does not publish the committed-DML marker and is covered by the
+transaction-outcome follow-up. SQL results, commit/rollback semantics, and
+MariaDB diagnostics are unchanged.
 
 ## Directory And Lifecycle Impact
 
@@ -136,6 +140,8 @@ profile.
   `mylite_ownerless_cross_process_sql_test`.
 - Add `native-multi-peer-explicit-dml-file-op-marker-drain` in the DML-marker
   proof split.
+- Add `native-explicit-dml-rollback-file-op-marker-discard` in the
+  transaction-outcome follow-up.
 - Add the focused test to the weighted ownerless SQL case list.
 - Run the focused selector and adjacent autocommit DML marker selector in the
   production embedded preset.
@@ -179,21 +185,23 @@ profile.
   file-per-table InnoDB table does not set the checkpoint-needed marker before
   `COMMIT`.
 - The successful `COMMIT` sets durable DML file-op checkpoint-needed evidence.
+- The successful rollback follow-up proves rolled-back explicit DML leaves that
+  committed-DML marker clear and clears stale process-local file-op evidence.
 - Final no-live ownerless close clears the marker only after native checkpoint
   proof succeeds.
 - Committed data remains readable after forced `.shm` rebuild and ordinary
   native reopen.
 - Autocommit DML marker behavior remains covered.
 - Docs describe this as bounded explicit transaction commit marker coverage,
-  with broader DML-origin, rollback/deadlock/crash, and concurrent-writer
-  matrices still planned.
+  with broader DML-origin, deadlock/crash, killed-transaction, savepoint, and
+  concurrent-writer matrices still planned.
 
 ## Risks
 
 - The marker is type-agnostic, so the `FILE_MODIFY` conclusion depends on the
   source-backed checkpointed file-per-table DML setup.
-- Rollback and killed explicit-transaction windows remain unproven by this
-  slice.
+- Deadlock, killed explicit-transaction, and crash windows remain unproven by
+  this slice.
 - Multi-peer explicit DML marker coverage is bounded to the idle-peer proof
   split case; concurrent-writer and crash outcomes remain unproven.
 - Broader native redo/checkpoint reconciliation, DDL/file-lifecycle recovery,
