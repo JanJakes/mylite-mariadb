@@ -147,7 +147,9 @@ The follow-up
 remaining `trx_temp_rseg_create()` bucket without changing native temporary
 rollback segment semantics. Its reduced production probe showed the remaining
 ordinary warm-open `rseg_create=2.091 ms` bucket was dominated by rollback
-segment header creation (`2.007 ms`) across 128 temp segments per open.
+segment header creation (`2.007 ms`) across 128 temp segments per open. The
+follow-up `../embedded-innodb-temp-rseg-pool-size/specs.md` slice reduces that
+embedded temp rollback segment pool to 16 created and assignable entries.
 
 ## Risks
 

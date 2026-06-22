@@ -138,6 +138,10 @@ mini-transaction setup, in-memory `trx_rseg_t` reset, or commit work. The
 created count confirms 128 temporary rollback segments per successful temporary
 tablespace startup.
 
+The follow-up `../embedded-innodb-temp-rseg-pool-size/specs.md` slice reduces
+the embedded temp rollback segment create and assignment pool while preserving
+the upstream 128-entry arrays and durable rollback segment behavior.
+
 ## Risks
 
 - This does not reduce the remaining startup cost by itself. It is intentionally

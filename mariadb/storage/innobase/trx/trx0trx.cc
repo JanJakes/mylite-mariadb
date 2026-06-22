@@ -1570,13 +1570,13 @@ trx_rseg_t *trx_t::assign_temp_rseg()
 {
 	ut_ad(!rsegs.m_noredo.rseg);
 	ut_ad(!is_autocommit_non_locking());
-	compile_time_assert(ut_is_2pow(TRX_SYS_N_RSEGS));
+	compile_time_assert(ut_is_2pow(MYLITE_EMBEDDED_TEMP_RSEGS));
 
-	/* Choose a temporary rollback segment between 0 and 127
+	/* Choose from the embedded temporary rollback segment pool
 	in a round-robin fashion. */
 	static Atomic_counter<unsigned> rseg_slot;
 	trx_rseg_t*	rseg = &trx_sys.temp_rsegs[
-		rseg_slot++ & (TRX_SYS_N_RSEGS - 1)];
+		rseg_slot++ & (MYLITE_EMBEDDED_TEMP_RSEGS - 1)];
 	ut_ad(!rseg->is_persistent());
 	rsegs.m_noredo.rseg = rseg;
 

@@ -5542,13 +5542,19 @@ subsystems that this mode needs:
   ownerless warm-open temp `open_or_create` was `0.065 ms` with the same counts.
   The remaining temp tablespace bucket is now temporary rollback-segment
   creation, not physical 12 MiB temp-file sizing.
-  A follow-up temp rollback-segment attribution slice now emits per-open
+  A temp rollback-segment attribution slice emitted per-open
   `trx_temp_rseg_create()` setup, header-create, in-memory reset, commit, call,
-  and created-segment counters. It keeps native temporary rollback segment
-  semantics unchanged because `trx_t::assign_temp_rseg()` still selects across
-  all 128 `TRX_SYS_N_RSEGS` slots. The reduced production probe reported
+  and created-segment counters. At that point it kept native temporary rollback
+  segment semantics unchanged while `trx_t::assign_temp_rseg()` still selected
+  across all 128 `TRX_SYS_N_RSEGS` slots. The reduced production probe reported
   ownerless warm-open temp rseg creation at `2.117 ms`, with `2.039 ms` in
   header creation and 256 created temp rollback segments across two opens.
+  A follow-up embedded temp rollback-segment pool slice now creates and assigns
+  a 16-entry power-of-two prefix, preserving ownerless temporary-table SQL
+  semantics while reducing per-process temp rollback-segment startup work. A
+  reduced production probe reported ownerless warm-open temp rseg header
+  creation at `0.309 ms` per open and 32 created temp rollback segments across
+  two opens.
   A follow-up final-ownerless shutdown slice then made that redo-rebuild target
   payload-aware: when the closing ownerless runtime holds the startup lock,
   has no live ownerless peers, and the retained WAL has no page-version payload

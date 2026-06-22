@@ -132,5 +132,13 @@ static constexpr size_t TRX_PURGE_TABLE_BUCKETS= 128;
 /** The number of rollback segments; rollback segment id must fit in
 the 7 bits reserved for it in DB_ROLL_PTR. */
 static constexpr unsigned TRX_SYS_N_RSEGS= 128;
+
+/** Embedded temporary rollback segments created and assigned at startup. */
+static constexpr unsigned MYLITE_EMBEDDED_TEMP_RSEGS= 16;
+static_assert(MYLITE_EMBEDDED_TEMP_RSEGS <= TRX_SYS_N_RSEGS, "");
+static_assert((MYLITE_EMBEDDED_TEMP_RSEGS &
+               (MYLITE_EMBEDDED_TEMP_RSEGS - 1)) == 0,
+              "");
+
 /** Maximum number of undo tablespaces (not counting the system tablespace) */
 static constexpr unsigned TRX_SYS_MAX_UNDO_SPACES= TRX_SYS_N_RSEGS - 1;

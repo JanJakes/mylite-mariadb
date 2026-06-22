@@ -773,7 +773,7 @@ dberr_t trx_temp_rseg_create(mtr_t *mtr)
   mylite_embedded_startup_perf_count(
     MYLITE_EMBEDDED_STARTUP_PERF_INNODB_TEMP_RSEG_CREATE_CALLS);
 
-  for (ulong i= 0; i < array_elements(trx_sys.temp_rsegs); i++)
+  for (ulong i= 0; i < MYLITE_EMBEDDED_TEMP_RSEGS; i++)
   {
     uint64_t mylite_stage_start=
       mylite_embedded_startup_perf_start_ns();

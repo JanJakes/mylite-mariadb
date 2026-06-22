@@ -2069,6 +2069,14 @@ The reduced production probe reported ordinary warm-open temp rseg creation at
 `2.091 ms`, with `2.007 ms` in header creation and `created_count=256` across
 two opens; ownerless reported `2.117 ms`, with `2.039 ms` in header creation and
 the same 256 created segments across two opens.
+The embedded temp rollback segment pool now creates and assigns a 16-entry
+power-of-two prefix while retaining the upstream 128-entry arrays and durable
+rollback segment behavior. This preserves ordinary and ownerless temp-table SQL
+semantics, but intentionally trades upstream daemon-scale temp-table undo
+distribution for lower process startup cost. A reduced production probe
+reported ordinary warm-open temp rseg header creation falling from `2.007 ms`
+to `0.238 ms` per open, and ownerless falling from `2.039 ms` to `0.309 ms` per
+open, with `created_count=32` across two opens in both modes.
 A follow-up public API branch/main parity benchmark now builds
 `tools/mylite_public_open_close_bench` and measures only portable
 `mylite_open()` plus `mylite_close()` behavior over an InnoDB table. Against

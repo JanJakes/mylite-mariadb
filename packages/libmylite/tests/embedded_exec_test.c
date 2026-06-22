@@ -54,6 +54,7 @@ typedef struct metadata_only_context {
 static void test_select_callback(void);
 static void test_result_metadata_callback(void);
 static void test_empty_result_metadata_callback(void);
+static void test_innodb_temporary_table_dml(void);
 static void test_ordinary_write_does_not_publish_ownerless_page_log(void);
 static void test_stored_procedure_call_callback(void);
 static void test_callback_abort(void);
@@ -110,6 +111,7 @@ int main(void) {
     test_select_callback();
     test_result_metadata_callback();
     test_empty_result_metadata_callback();
+    test_innodb_temporary_table_dml();
     test_ordinary_write_does_not_publish_ownerless_page_log();
     test_stored_procedure_call_callback();
     test_callback_abort();
@@ -196,6 +198,30 @@ static void test_empty_result_metadata_callback(void) {
     );
     assert(ctx.metadata_calls == 1);
     assert(ctx.rows == 0);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(database_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_innodb_temporary_table_dml(void) {
+    char *root = make_temp_root();
+    char *database_path = NULL;
+    mylite_db *db = open_database(root, &database_path);
+
+    exec_ok(db, "CREATE DATABASE app");
+    exec_ok(
+        db,
+        "CREATE TEMPORARY TABLE app.temp_undo_probe ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.temp_undo_probe VALUES (1, 10), (2, 20)");
+    exec_ok(db, "UPDATE app.temp_undo_probe SET value = value + 1 WHERE id = 2");
+    expect_scalar(db, "SELECT SUM(value) FROM app.temp_undo_probe", "31");
+    exec_ok(db, "DROP TEMPORARY TABLE app.temp_undo_probe");
 
     assert(mylite_close(db) == MYLITE_OK);
     free(database_path);
