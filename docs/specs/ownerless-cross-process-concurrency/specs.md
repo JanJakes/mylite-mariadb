@@ -6610,6 +6610,14 @@ subsystems that this mode needs:
   visible LSN rules, redo/checkpoint ordering, or DDL/file-lifecycle recovery.
   Larger row lists, broad DML/DDL, and unbounded append-lock hold times remain
   out of scope.
+  The proof-only readable-WAL scan follow-up keeps uncheckpointed-record
+  detection file-size based, but changes open/close retained-payload decisions
+  to scan complete page-log records and ignore proof-only metadata records.
+  Proof-only-only WAL therefore remains durable and retained without enabling
+  ordinary native page-log read handling or retained-payload shutdown policy.
+  Mixed logs still report readable page-version WAL as soon as any complete
+  non-proof record is present, and incomplete tail bytes after proof-only
+  records do not count as readable page payload evidence.
   The visible-fast redo batch-completion follow-up then defers top-level
   mini-transaction redo completion inside the existing statement deferred
   page-publication boundary. It writes native redo once per bounded batch,

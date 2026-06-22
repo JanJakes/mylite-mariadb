@@ -10783,8 +10783,18 @@ bool ownerless_page_log_has_payload_records(RuntimeState &runtime) {
     }
 
     struct stat wal_stat = {};
-    return ::fstat(runtime.concurrency_wal_fd, &wal_stat) == 0 &&
-           wal_stat.st_size > static_cast<off_t>(k_empty_ownerless_page_log_size);
+    if (::fstat(runtime.concurrency_wal_fd, &wal_stat) != 0 ||
+        wal_stat.st_size <= static_cast<off_t>(k_empty_ownerless_page_log_size)) {
+        return false;
+    }
+
+    int has_readable_records = 1;
+    const int result = mylite_ownerless_page_log_has_readable_page_records_at(
+        runtime.concurrency_wal_fd,
+        k_concurrency_recovery_header_size,
+        &has_readable_records
+    );
+    return result != MYLITE_OWNERLESS_PAGE_LOG_OK || has_readable_records != 0;
 }
 
 void set_ownerless_native_file_op_checkpoint_cache(RuntimeState &runtime, bool needed) {

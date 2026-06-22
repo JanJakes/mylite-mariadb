@@ -2324,6 +2324,62 @@ int mylite_ownerless_page_log_record_next_offset_at(
     return MYLITE_OWNERLESS_PAGE_LOG_OK;
 }
 
+int mylite_ownerless_page_log_has_readable_page_records_at(
+    int fd,
+    std::uint64_t log_offset,
+    int *out_has_records
+) {
+    if (out_has_records != nullptr) {
+        *out_has_records = 0;
+    }
+    if (fd < 0 || out_has_records == nullptr ||
+        log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    const auto physical_log_offset = static_cast<off_t>(log_offset);
+    struct stat file_stat = {};
+    off_t records_offset = 0;
+    if (validate_existing_header(fd, physical_log_offset) != MYLITE_OWNERLESS_PAGE_LOG_OK ||
+        ::fstat(fd, &file_stat) != 0 ||
+        !offset_adds(physical_log_offset, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE, &records_offset) ||
+        file_stat.st_size < records_offset) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+
+    for (off_t record_offset = records_offset; record_offset < file_stat.st_size;) {
+        PageRecordHeader record = {};
+        off_t payload_offset = 0;
+        off_t next_record_offset = 0;
+        if (!offset_adds(
+                record_offset,
+                MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE,
+                &payload_offset
+            )) {
+            return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+        }
+        if (payload_offset > file_stat.st_size) {
+            break;
+        }
+        if (!read_record_header(fd, record_offset, record)) {
+            return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+        }
+        if (!offset_adds(payload_offset, record.payload_size, &next_record_offset)) {
+            return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+        }
+        if (next_record_offset > file_stat.st_size) {
+            break;
+        }
+        if (!record_is_proof_only(record)) {
+            *out_has_records = 1;
+            return MYLITE_OWNERLESS_PAGE_LOG_OK;
+        }
+        record_offset = next_record_offset;
+    }
+
+    return MYLITE_OWNERLESS_PAGE_LOG_OK;
+}
+
 int mylite_ownerless_page_log_snapshot(int fd, std::uint64_t *out_snapshot_end_offset) {
     return mylite_ownerless_page_log_snapshot_at(fd, 0U, out_snapshot_end_offset);
 }

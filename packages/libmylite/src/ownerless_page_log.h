@@ -302,6 +302,11 @@ int mylite_ownerless_page_log_record_next_offset_at(
     uint64_t record_offset,
     uint64_t *out_next_record_offset
 );
+int mylite_ownerless_page_log_has_readable_page_records_at(
+    int fd,
+    uint64_t log_offset,
+    int *out_has_records
+);
 int mylite_ownerless_page_log_snapshot(int fd, uint64_t *out_snapshot_end_offset);
 int mylite_ownerless_page_log_snapshot_at(
     int fd,
