@@ -1920,19 +1920,20 @@ Tasks:
    redo/checkpoint reconciliation, and DDL/file lifecycle recovery remain
    planned work.
    Parser-proven pure `INSERT ... VALUES` visible-fast-path statements with one
-   through 32768 row constructors reuse one page-log append session across the
+   through 65536 row constructors reuse one page-log append session across the
    statement's ownerless mini-transactions and release it before page-log
    sync/page-visible LSN publication. Focused SQL coverage keeps the existing
    native history WAL proof, capped multi-row visible-fast proof, single-row
    append-session proof, and conservative upsert fallback checks while asserting
    that append-session begin/end counts collapse for successful capped
-   visible-fast inserts. The 32769-row boundary stays outside append batching
+   visible-fast inserts. The 65537-row boundary stays outside append batching
    and deferred latest-checkpoint coalescing. Later latest-only checkpoint
    updates inside the same implicit/autocommit deferred append-batch statement
    are coalesced only after the first successful latest-only checkpoint has
    been preserved; final durable page-visible checkpoint publication is
-   unchanged. Broader DML, DDL, foreign-key shapes, row lists above 32768, and
-   cross-statement group-commit batching remain future work.
+   unchanged. Broader DML, DDL, foreign-key shapes, row lists above 65536,
+   single-row autocommit performance, and cross-statement group-commit batching
+   remain future work.
    Undo, allocation,
    tablespace-header, extent, transaction-system, change-buffer, and system page
    records remain primitive evidence for future active-pin compaction.
@@ -6461,6 +6462,19 @@ subsystems that this mode needs:
   `115.835 ms` page-write commit-log time, `28.976 ms` redo-leave time, and
   `153.153 ms` undo-report MTR commit time per statement, so row lists above
   32768 and native undo work remain planned separately.
+  A 65536-row follow-up applies the same parser-proven policy to the next
+  bounded row-list edge: the focused selector now proves the 65536-row
+  positive boundary and the 65537-row conservative boundary. The reduced
+  131072-row production probe with 65536 rows per statement reported ownerless
+  two-statement bulk throughput at `87019.79` rows/s against ordinary
+  `157447.10` rows/s (`0.5527` ratio). The first 65536-row statement stayed
+  close to ordinary at `148537.52` rows/s against `151011.68` rows/s
+  (`0.9836` ratio), while the remaining non-empty-table statement reported
+  `62337.71` rows/s against ordinary `171418.80` rows/s (`0.3637` ratio).
+  The same sample exposed the larger remaining single-row autocommit gap at
+  `435.56` ownerless ops/s versus `3420.87` ordinary ops/s (`0.1273` ratio),
+  so row lists above 65536, native undo work, and single-row autocommit
+  performance remain planned separately.
   A follow-up transaction page-membership cache reduces repeated exact
   modified/dirty page lookups from linear scans to lazy per-transaction
   open-addressed sets once page vectors reach 16 entries. The vectors remain
