@@ -85,8 +85,9 @@ In scope:
 
 Out of scope:
 
-- exhaustive `KEY_BLOCK_SIZE` crash variants for 1 KiB or 2 KiB in this
-  selector,
+- 1 KiB and 2 KiB crash variants in this original 4 KiB plus 16 KiB selector;
+  the follow-up `ownerless-compressed-row-format-low-key-block-ddl` slice covers
+  those values,
 - redundant row-format, encryption, page compression, external-directory,
   partition, tablespace import/discard, or general tablespace variants,
 - randomized DDL oracle execution,
@@ -147,5 +148,4 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 - This is deterministic `KEY_BLOCK_SIZE=4` and `KEY_BLOCK_SIZE=16` compressed
   row-format crash coverage, not the full compressed storage-option matrix.
-- 1 KiB and 2 KiB key-block crash coverage and full external MariaDB/RQG
-  long-running stress remain planned.
+- Full external MariaDB/RQG long-running stress remains planned.

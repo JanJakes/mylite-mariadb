@@ -47,7 +47,10 @@ In scope:
 
 Out of scope:
 
-- Exhaustive 1 KiB and 2 KiB compressed row-format DDL refresh coverage.
+- 1 KiB and 2 KiB compressed row-format DDL refresh coverage in this 16 KiB
+  slice; the follow-up
+  `ownerless-compressed-row-format-low-key-block-ddl` slice covers those
+  values.
 - Page compression, encryption, tablespace options, partitioned tables, and
   external MariaDB/RQG DDL oracles.
 
@@ -118,6 +121,5 @@ No production binary-size impact beyond focused test code and docs.
 - This is 16 KiB refresh coverage. Hook-build crash injection for the same
   key-block size is covered separately by
   `ownerless-compressed-row-format-key-block-16-ddl-crash`.
-- 1 KiB and 2 KiB compressed row-format DDL refresh, storage option
-  combinations, SQL-level table-lock fault injection, and external MariaDB/RQG
-  DDL stress remain separate gaps.
+- Storage option combinations, SQL-level table-lock fault injection, and
+  external MariaDB/RQG DDL stress remain separate gaps.

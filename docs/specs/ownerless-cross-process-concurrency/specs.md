@@ -3175,9 +3175,9 @@ Tasks:
    row-format metadata, retained row payloads, and later writes through
    ownerless/native reopen before and after forced `.shm` rebuild.
    Compressed row-format crash coverage now kills
-   `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=4` and
-   `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8` plus
-   `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=16` writers after
+   `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=1`,
+   `KEY_BLOCK_SIZE=2`, `KEY_BLOCK_SIZE=4`, `KEY_BLOCK_SIZE=8`, and
+   `KEY_BLOCK_SIZE=16` writers after
    native compressed table-option rebuild but before ownerless dictionary
    finish, then verifies recovered compressed metadata, retained prepared BLOB
    payloads, native ZBLOB page evidence, and later writes through
@@ -3449,9 +3449,9 @@ Tasks:
    `SHOW CREATE TRIGGER` rejection for the dropped trigger through ownerless
    and native reopen. Hook-build
    crash coverage also kills
-   `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=4` and
-   `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8` plus
-   `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=16` before ownerless
+   `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=1`,
+   `KEY_BLOCK_SIZE=2`, `KEY_BLOCK_SIZE=4`, `KEY_BLOCK_SIZE=8`, and
+   `KEY_BLOCK_SIZE=16` before ownerless
    dictionary finish and verifies recovered native compressed metadata,
    retained prepared BLOB rows, ZBLOB page evidence, and post-recovery writes
    through ownerless and native reopen. The broader
@@ -4020,7 +4020,8 @@ Tasks:
    table, and verifies final metadata and rows before and after forced `.shm`
    rebuild. Compressed row-format coverage adds ownerless
    `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8` plus focused
-   `KEY_BLOCK_SIZE=4` and `KEY_BLOCK_SIZE=16` rebuilds, verifies an
+   `KEY_BLOCK_SIZE=1`, `KEY_BLOCK_SIZE=2`, `KEY_BLOCK_SIZE=4`, and
+   `KEY_BLOCK_SIZE=16` rebuilds, verifies an
    already-open peer observes the
    native compressed row-format transition, inserts a prepared BLOB row through
    the rebuilt table, and verifies final compressed metadata plus native
