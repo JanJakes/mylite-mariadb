@@ -686,17 +686,8 @@ jobs:
             keepalive: "1"
             child_skip_install: "0"
             child_restore_baseline: "0"
-          - shard: non-isolated-rest-controller-wp-test
-            label: phpunit-non-isolated-rest-controller-wp-test
-            reconnect_after_child: "1"
-            child_timing_summary: "0"
-            child_script_timing_summary: "0"
-            profile_mysqli: "0"
-            keepalive: "1"
-            child_skip_install: "0"
-            child_restore_baseline: "0"
-          - shard: non-isolated-rest-controller-wp-rest
-            label: phpunit-non-isolated-rest-controller-wp-rest
+          - shard: non-isolated-rest-controller-wp-short
+            label: phpunit-non-isolated-rest-controller-wp-short
             reconnect_after_child: "1"
             child_timing_summary: "0"
             child_script_timing_summary: "0"
@@ -749,17 +740,8 @@ jobs:
             keepalive: "1"
             child_skip_install: "0"
             child_restore_baseline: "0"
-          - shard: non-isolated-block-library
-            label: phpunit-non-isolated-block-library
-            reconnect_after_child: "1"
-            child_timing_summary: "0"
-            child_script_timing_summary: "0"
-            profile_mysqli: "0"
-            keepalive: "1"
-            child_skip_install: "0"
-            child_restore_baseline: "0"
-          - shard: non-isolated-block-supports
-            label: phpunit-non-isolated-block-supports
+          - shard: non-isolated-block-library-supports-short
+            label: phpunit-non-isolated-block-library-supports-short
             reconnect_after_child: "1"
             child_timing_summary: "0"
             child_script_timing_summary: "0"
@@ -1124,11 +1106,16 @@ jobs:
             non-isolated-rest-controller-tests-rest-other)
               wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_TESTS_REST_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_TESTS_REST_FONT_ICON_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_CONTROLLER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
               ;;
-            non-isolated-rest-controller-wp-test)
-              wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_WP_TEST_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_CONTROLLER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
-              ;;
-            non-isolated-rest-controller-wp-rest)
-              wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_WP_REST_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_CONTROLLER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
+            non-isolated-rest-controller-wp-short)
+              group_start="$(date +%s)"
+              run_wordpress_phpunit_filter \
+                phpunit-non-isolated-rest-controller-wp-test \
+                "^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_WP_TEST_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_CONTROLLER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
+              run_wordpress_phpunit_filter \
+                phpunit-non-isolated-rest-controller-wp-rest \
+                "^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_WP_REST_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_CONTROLLER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
+              record_wordpress_phpunit_group "${WORDPRESS_PHPUNIT_SHARD}" "${group_start}"
+              exit 0
               ;;
             non-isolated-rest-other)
               wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?!.*Controller)${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
@@ -1145,11 +1132,16 @@ jobs:
             non-isolated-theme)
               wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_THEME_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
               ;;
-            non-isolated-block-library)
-              wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_LIBRARY_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
-              ;;
-            non-isolated-block-supports)
-              wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_SUPPORTS_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
+            non-isolated-block-library-supports-short)
+              group_start="$(date +%s)"
+              run_wordpress_phpunit_filter \
+                phpunit-non-isolated-block-library \
+                "^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_LIBRARY_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
+              run_wordpress_phpunit_filter \
+                phpunit-non-isolated-block-supports \
+                "^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_SUPPORTS_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"
+              record_wordpress_phpunit_group "${WORDPRESS_PHPUNIT_SHARD}" "${group_start}"
+              exit 0
               ;;
             non-isolated-block-template-binding)
               wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TEMPLATE_BINDING_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"

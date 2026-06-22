@@ -390,6 +390,24 @@ reject_regex \
   '^[[:space:]]+non-isolated-block-support-template\)' \
   "WordPress PHPUnit CI must split the old block-support-template case arm"
 reject_regex \
+  'label:[[:space:]]*phpunit-non-isolated-block-library$' \
+  "WordPress PHPUnit CI must group the standalone block-library label"
+reject_regex \
+  'label:[[:space:]]*phpunit-non-isolated-block-supports$' \
+  "WordPress PHPUnit CI must group the standalone block-supports label"
+reject_regex \
+  'shard:[[:space:]]*non-isolated-block-library$' \
+  "WordPress PHPUnit CI must group the standalone block-library shard"
+reject_regex \
+  'shard:[[:space:]]*non-isolated-block-supports$' \
+  "WordPress PHPUnit CI must group the standalone block-supports shard"
+reject_regex \
+  '^[[:space:]]+non-isolated-block-library\)' \
+  "WordPress PHPUnit CI must group the standalone block-library case arm"
+reject_regex \
+  '^[[:space:]]+non-isolated-block-supports\)' \
+  "WordPress PHPUnit CI must group the standalone block-supports case arm"
+reject_regex \
   'label:[[:space:]]*phpunit-non-isolated-media-comment$' \
   "WordPress PHPUnit CI must split the old media-comment label"
 reject_regex \
@@ -416,6 +434,24 @@ reject_regex \
 reject_regex \
   '^[[:space:]]+non-isolated-content-settings-meta\)' \
   "WordPress PHPUnit CI must group the standalone content-settings-meta case arm"
+reject_regex \
+  'label:[[:space:]]*phpunit-non-isolated-rest-controller-wp-test$' \
+  "WordPress PHPUnit CI must group the standalone REST WP test label"
+reject_regex \
+  'label:[[:space:]]*phpunit-non-isolated-rest-controller-wp-rest$' \
+  "WordPress PHPUnit CI must group the standalone REST WP REST label"
+reject_regex \
+  'shard:[[:space:]]*non-isolated-rest-controller-wp-test$' \
+  "WordPress PHPUnit CI must group the standalone REST WP test shard"
+reject_regex \
+  'shard:[[:space:]]*non-isolated-rest-controller-wp-rest$' \
+  "WordPress PHPUnit CI must group the standalone REST WP REST shard"
+reject_regex \
+  '^[[:space:]]+non-isolated-rest-controller-wp-test\)' \
+  "WordPress PHPUnit CI must group the standalone REST WP test case arm"
+reject_regex \
+  '^[[:space:]]+non-isolated-rest-controller-wp-rest\)' \
+  "WordPress PHPUnit CI must group the standalone REST WP REST case arm"
 reject_regex \
   'label:[[:space:]]*phpunit-non-isolated-remaining-platform$' \
   "WordPress PHPUnit CI must split the old remaining-platform label"
@@ -686,15 +722,17 @@ require_literal "label: phpunit-non-isolated-rest-content-primary-other"
 require_literal "label: phpunit-non-isolated-rest-short"
 require_literal "label: phpunit-non-isolated-rest-content-support"
 require_literal "label: phpunit-non-isolated-rest-controller-tests-rest-other"
-require_literal "label: phpunit-non-isolated-rest-controller-wp-test"
-require_literal "label: phpunit-non-isolated-rest-controller-wp-rest"
+require_literal "label: phpunit-non-isolated-rest-controller-wp-short"
+require_literal "phpunit-non-isolated-rest-controller-wp-test"
+require_literal "phpunit-non-isolated-rest-controller-wp-rest"
 require_literal "label: phpunit-non-isolated-rest-other"
 require_literal "label: phpunit-non-isolated-query-filter"
 require_literal "label: phpunit-non-isolated-query-core"
 require_literal "label: phpunit-non-isolated-canonical"
 require_literal "label: phpunit-non-isolated-theme"
-require_literal "label: phpunit-non-isolated-block-library"
-require_literal "label: phpunit-non-isolated-block-supports"
+require_literal "label: phpunit-non-isolated-block-library-supports-short"
+require_literal "phpunit-non-isolated-block-library"
+require_literal "phpunit-non-isolated-block-supports"
 require_literal "label: phpunit-non-isolated-block-template-binding"
 require_literal "label: phpunit-non-isolated-content-media-short"
 require_literal "phpunit-non-isolated-media"
@@ -718,15 +756,13 @@ require_literal "shard: non-isolated-rest-content-primary-other"
 require_literal "shard: non-isolated-rest-short"
 require_literal "shard: non-isolated-rest-content-support"
 require_literal "shard: non-isolated-rest-controller-tests-rest-other"
-require_literal "shard: non-isolated-rest-controller-wp-test"
-require_literal "shard: non-isolated-rest-controller-wp-rest"
+require_literal "shard: non-isolated-rest-controller-wp-short"
 require_literal "shard: non-isolated-rest-other"
 require_literal "shard: non-isolated-query-filter"
 require_literal "shard: non-isolated-query-core"
 require_literal "shard: non-isolated-canonical"
 require_literal "shard: non-isolated-theme"
-require_literal "shard: non-isolated-block-library"
-require_literal "shard: non-isolated-block-supports"
+require_literal "shard: non-isolated-block-library-supports-short"
 require_literal "shard: non-isolated-block-template-binding"
 require_literal "shard: non-isolated-content-media-short"
 require_literal "shard: non-isolated-comment"
@@ -745,15 +781,15 @@ require_literal "phpunit-non-isolated-rest-content-history"
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_SUPPORT_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal "phpunit-non-isolated-rest-controller-tests-rest-font-icon"
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_TESTS_REST_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_TESTS_REST_FONT_ICON_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_CONTROLLER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
-require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_WP_TEST_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_CONTROLLER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
-require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_WP_REST_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_CONTROLLER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
+require_literal '"^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_WP_TEST_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_CONTROLLER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
+require_literal '"^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_WP_REST_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_CONTROLLER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?!.*Controller)${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_FILTER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_CORE_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CANONICAL_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_THEME_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
-require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_LIBRARY_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
-require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_SUPPORTS_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
+require_literal '"^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_LIBRARY_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
+require_literal '"^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_SUPPORTS_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TEMPLATE_BINDING_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal '"^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_COMMENT_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
@@ -952,10 +988,13 @@ require_step_literal \
   'non-isolated-rest-controller-tests-rest-other)'
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
-  'non-isolated-rest-controller-wp-test)'
+  'non-isolated-rest-controller-wp-short)'
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
-  'non-isolated-rest-controller-wp-rest)'
+  'phpunit-non-isolated-rest-controller-wp-test'
+require_step_literal \
+  "Run WordPress PHPUnit shard (test only)" \
+  'phpunit-non-isolated-rest-controller-wp-rest'
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
   'non-isolated-query-filter)'
@@ -970,10 +1009,13 @@ require_step_literal \
   'non-isolated-theme)'
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
-  'non-isolated-block-library)'
+  'non-isolated-block-library-supports-short)'
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
-  'non-isolated-block-supports)'
+  'phpunit-non-isolated-block-library'
+require_step_literal \
+  "Run WordPress PHPUnit shard (test only)" \
+  'phpunit-non-isolated-block-supports'
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
   'non-isolated-block-template-binding)'
