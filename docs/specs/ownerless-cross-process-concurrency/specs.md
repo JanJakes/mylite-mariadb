@@ -915,11 +915,17 @@ The design must be fast in the common case:
   point-select direct/prepared ratios of `0.8475`/`0.8276`.
   Native redo attribution then showed repeated actual rebuilds came from a
   physical clean-shutdown `ib_logfile0` tail (`100663304` observed versus
-  `100663296` configured). Embedded clean-shutdown tail truncation now
+  the then-configured `100663296`). Embedded clean-shutdown tail truncation now
   normalizes that tail only after MariaDB's clean shutdown LSN/checkpoint
   checks pass; the focused reduced production probe reported zero warm-open
   redo rebuilds and `124.153 ms` ordinary warm open/close, while the public
-  open/close bench left `ib_logfile0` at exactly `100663296` bytes after close.
+  open/close bench left `ib_logfile0` at the configured size after close. The
+  embedded redo log size profile later changes that configured size to
+  `16777216` bytes to reduce repeated clean redo scan cost while leaving native
+  recovery and rebuild predicates in MariaDB; its focused before/after
+  production probe moved ordinary `startup_innodb_recovery_start_ms_avg` from
+  `45.391 ms` to `23.570 ms` and ownerless from `32.755 ms` to `20.636 ms`,
+  with zero warm-open redo rebuilds in both samples.
 - Page-version lookup should be O(1) average by `(space_id, page_no)` with a
   short version chain filtered by reader end mark.
 - Ordinary exclusive opens must stay on the native MariaDB embedded hot path:
@@ -5505,9 +5511,9 @@ subsystems that this mode needs:
   twenty-open production sample reported four actual redo rebuilds averaging
   `162.922 ms`; reason and physical-size counters showed size mismatch only,
   with both `log_sys.file_size` and physical `ib_logfile0` at `100663304`
-  bytes versus configured `100663296` bytes, matching redo format, and zero
-  internal/physical divergence. That moves the startup optimization target to
-  clean-shutdown redo tail handling or MariaDB checkpoint policy validation,
+  bytes versus the then-configured `100663296` bytes, matching redo format, and
+  zero internal/physical divergence. That moves the startup optimization target
+  to clean-shutdown redo tail handling or MariaDB checkpoint policy validation,
   not ownerless coordination and not an unsafe startup-only rebuild skip.
   Clean-shutdown redo-tail truncation then removed the repeated warm-open
   rebuild in the ordinary reduced probe. Follow-up recovery-start attribution

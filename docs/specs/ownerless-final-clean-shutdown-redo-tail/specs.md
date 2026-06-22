@@ -91,7 +91,8 @@ global and focused lifecycle tests. It adds no dependency and no public API.
 - Build `mylite_embedded_open_close_test` and
   `mylite_embedded_performance_probe` with `php-embedded-prod`.
 - Run the ownerless-directory lifecycle selector and confirm repeated
-  ownerless final closes leave `datadir/ib_logfile0` at `100663296` bytes.
+  ownerless final closes leave `datadir/ib_logfile0` at the configured redo
+  size.
 - Run a reduced production performance probe and confirm ownerless warm
   open/close reports zero actual redo rebuilds in the focused sample.
 - Run focused embedded lifecycle coverage.
@@ -134,6 +135,10 @@ global and focused lifecycle tests. It adds no dependency and no public API.
 - `tools/check-ci-production-builds` passed.
 - `cmake --build --preset format-check-prod` passed.
 - `git diff --check` passed.
+
+The later embedded redo log size profile changes the configured redo size from
+the historical 96 MiB sample to `16777216` bytes while keeping the ownerless
+final-close invariant tied to the configured native size.
 
 ## Risks And Follow-Up
 

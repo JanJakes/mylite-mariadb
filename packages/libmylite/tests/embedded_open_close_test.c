@@ -165,7 +165,7 @@
 #define MYLITE_TEST_EMBEDDED_OPEN_PERF_STAT_COUNT 64U
 #define MYLITE_TEST_EMBEDDED_OPEN_PERF_SYSTEM_TABLES_CALLS 32U
 #define MYLITE_TEST_EMBEDDED_OPEN_PERF_SYSTEM_TABLES_EXECUTIONS 33U
-#define MYLITE_TEST_INNODB_REDO_FILE_SIZE 100663296
+#define MYLITE_TEST_INNODB_REDO_FILE_SIZE 16777216
 
 typedef struct text_file {
     const char *path;
@@ -196,6 +196,7 @@ typedef struct external_update_thread_args {
 
 static void test_open_close_repeatedly(void);
 static void test_innodb_open_close_repeatedly(void);
+static void test_embedded_innodb_uses_mylite_redo_size(void);
 static void test_configured_durability_controls_innodb_flush_policy(void);
 static void test_capabilities(void);
 static void test_memory_path_open_close(void);
@@ -368,6 +369,7 @@ static void run_baseline_tests(void) {
     test_capabilities();
     test_open_close_repeatedly();
     test_innodb_open_close_repeatedly();
+    test_embedded_innodb_uses_mylite_redo_size();
     test_configured_durability_controls_innodb_flush_policy();
     test_memory_path_open_close();
     test_readonly_open_fails();
@@ -496,6 +498,44 @@ static void test_innodb_open_close_repeatedly(void) {
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.repeated_open") == 15U);
     assert(mylite_close(db) == MYLITE_OK);
 
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_embedded_innodb_uses_mylite_redo_size(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "innodb-redo-size.mylite");
+    char *datadir_path = path_join(database_path, "datadir");
+    char *redo_path = path_join(datadir_path, "ib_logfile0");
+    mylite_open_config config = open_config(runtime_root);
+    mylite_db *db = NULL;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+
+    assert(
+        mylite_open(database_path, &db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
+        MYLITE_OK
+    );
+    assert(
+        query_unsigned(db, "SELECT @@innodb_log_file_size") == MYLITE_TEST_INNODB_REDO_FILE_SIZE
+    );
+    exec_ok(db, "CREATE DATABASE app");
+    exec_ok(
+        db,
+        "CREATE TABLE app.redo_size ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.redo_size VALUES (1, 10)");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(file_size(redo_path) == MYLITE_TEST_INNODB_REDO_FILE_SIZE);
+
+    free(redo_path);
+    free(datadir_path);
     free(database_path);
     free(runtime_root);
     remove_tree(root);

@@ -647,6 +647,7 @@ constexpr const char *k_statement_lock_filename = "mylite-statements.lock";
 constexpr const char *k_mariadb_base_ref = "mariadb-11.8.6";
 constexpr const char *k_metadata_format_line = "format=1";
 constexpr const char *k_concurrency_mode_line = "mode=exclusive";
+constexpr const char *k_innodb_log_file_size = "16777216";
 constexpr const char *k_innodb_temp_data_file_path = "ibtmp1:12M:autoextend";
 constexpr const char *k_create_mysql_database_sql = "CREATE DATABASE IF NOT EXISTS mysql";
 constexpr const char *k_create_proc_table_sql =
@@ -22476,6 +22477,7 @@ std::vector<std::string> runtime_arguments(
         "--aria-log-dir-path=" + layout.data_directory.string(),
         "--innodb-data-home-dir=" + layout.data_directory.string(),
         "--innodb-log-group-home-dir=" + layout.data_directory.string(),
+        std::string("--innodb-log-file-size=") + k_innodb_log_file_size,
         "--innodb-undo-directory=" + layout.data_directory.string(),
         "--innodb-tmpdir=" + layout.tmp_directory.string(),
         "--innodb-temp-data-file-path=" +

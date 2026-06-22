@@ -34,9 +34,12 @@ would risk native InnoDB redo compatibility and crash recovery.
 - `mariadb/storage/innobase/handler/ha_innodb.cc` defines the upstream
   `innodb_log_file_size` sysvar default as `96 << 20` with 4096-byte block
   increments.
-- `packages/libmylite/src/database.cc:runtime_arguments()` passes
-  `--no-defaults`, routes InnoDB data/log/undo/temp paths into the MyLite
-  directory layout, and does not currently set `--innodb-log-file-size`.
+- At the time of this attribution slice,
+  `packages/libmylite/src/database.cc:runtime_arguments()` passed
+  `--no-defaults`, routed InnoDB data/log/undo/temp paths into the MyLite
+  directory layout, and inherited the upstream `innodb_log_file_size` default.
+  The later embedded redo log size profile sets an explicit embedded
+  `--innodb-log-file-size=16777216`.
 
 ## Design
 

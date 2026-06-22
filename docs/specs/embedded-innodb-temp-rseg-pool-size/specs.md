@@ -151,4 +151,6 @@ segments per successful temporary tablespace startup.
   temp-table writers may see more rollback-segment latch sharing than upstream
   MariaDB. This is an embedded startup-performance tradeoff and should be
   revisited if application evidence shows temp-table writer contention.
-- This intentionally does not address the larger clean redo scan startup cost.
+- This intentionally did not address the larger clean redo scan startup cost;
+  the later embedded redo log size profile reduces that cost through native
+  configuration rather than recovery-path bypassing.

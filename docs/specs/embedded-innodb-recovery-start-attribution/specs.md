@@ -150,6 +150,9 @@ active or prepared recovered work.
 ## Risks And Follow-Up
 
 The likely optimization targets are now narrower but still recovery-sensitive:
-avoiding or reducing the clean redo rescan, and reducing temporary tablespace
-open cost. Either optimization must be a separate slice with crash-recovery,
-clean-shutdown, read-only, and native file-lifecycle evidence.
+reducing clean redo scan/rescan work and reducing temporary tablespace open
+cost. Later slices reduced temporary rollback-segment creation and set the
+embedded native redo size to `16777216` bytes, reducing clean scan time while
+keeping MariaDB recovery and rebuild predicates intact. Any future scan skip or
+fast path must still be a separate slice with crash-recovery, clean-shutdown,
+read-only, and native file-lifecycle evidence.

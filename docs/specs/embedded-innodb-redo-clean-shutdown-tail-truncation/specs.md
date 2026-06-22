@@ -11,7 +11,7 @@ matches.
 
 A reduced twenty-open production probe reported four rebuilds averaging
 `162.922 ms` each, with `log_sys.file_size` and physical `ib_logfile0` both at
-`100663304` bytes versus the configured `100663296` bytes. The public
+`100663304` bytes versus the then-configured `100663296` bytes. The public
 open/close bench can finish at the configured size, so the tail is
 workload/LSN-position dependent rather than every close.
 
@@ -96,8 +96,8 @@ branch. It adds no dependency and no public API.
   `php-embedded-prod`.
 - Run a reduced twenty-open production probe and confirm ordinary warm
   open/close no longer reports physical-size redo rebuilds in that sample.
-- Run the public open/close bench and verify `ib_logfile0` remains at
-  `100663296` bytes after close.
+- Run the public open/close bench and verify `ib_logfile0` remains at the
+  configured redo size after close.
 - Run focused embedded lifecycle coverage.
 - Run `tools/check-ci-production-builds`, `format-check-prod`,
   `git diff --check`, and `git diff --cached --check`.
@@ -129,8 +129,10 @@ truncation reported:
 
 The same production build's public open/close bench over twenty iterations
 reported `mylite_public_open_close_avg_ms=109.834`, and `stat(2)` showed
-`ib_logfile0` at `100663296` bytes after close. Focused production lifecycle
-coverage passed with `libmylite.embedded-open-close`.
+`ib_logfile0` at the then-configured `100663296` bytes after close. Focused
+production lifecycle coverage passed with `libmylite.embedded-open-close`.
+The later embedded redo log size profile changes the configured size to
+`16777216` bytes while preserving this exact-configured-size invariant.
 
 ## Risks And Follow-Up
 
