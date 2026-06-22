@@ -492,6 +492,10 @@ jobs:
           cp -a \
             build/wordpress-develop/vendor/yoast/phpunit-polyfills \
             "${runtime_root}/build/wordpress-develop/vendor/yoast/"
+          mkdir -p "${runtime_root}/build/wordpress-develop/tests/qunit"
+          cp -a \
+            build/wordpress-develop/tests/qunit/fixtures \
+            "${runtime_root}/build/wordpress-develop/tests/qunit/"
           cp -a build/wordpress-phpunit-tools "${runtime_root}/build/"
           cp -a \
             build/wordpress-mariadb-embedded/CMakeCache.txt \

@@ -342,8 +342,9 @@ the compressed tarball sizes. This changes CI artifact transport only; SQL,
 mysqli, native storage, recovery, and ownerless behavior are unchanged. CI now
 also excludes non-PHPUnit WordPress test trees and root Composer development
 dependencies from the staged shard snapshot while retaining `src`,
-`tests/phpunit`, root metadata, Composer autoload metadata, and Yoast PHPUnit
-polyfills. CI now also uploads that timing summary as the
+`tests/phpunit`, the writable REST fixture directory under
+`tests/qunit/fixtures`, root metadata, Composer autoload metadata, and Yoast
+PHPUnit polyfills. CI now also uploads that timing summary as the
 `wordpress-phpunit-timing-summary` artifact, and the embedded performance probes
 persist their production output as the
 `embedded-performance-reports` artifact, so branch/main timing comparisons can

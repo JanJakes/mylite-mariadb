@@ -31,9 +31,11 @@ not use.
   the currently known reads.
 - Local inspection showed non-PHPUnit test trees under `tests/e2e`,
   `tests/gutenberg`, `tests/performance`, `tests/phpstan`, `tests/qunit`, and
-  `tests/visual-regression`. The root `vendor/` tree is about `54 MiB`, while
-  the PHPUnit-required Yoast polyfills plus Composer autoload metadata are
-  under `1 MiB`.
+  `tests/visual-regression`. The REST schema initialization test still writes
+  `tests/qunit/fixtures/wp-api-generated.js`, so the runtime snapshot must copy
+  back `tests/qunit/fixtures` after excluding the broader QUnit tree. The root
+  `vendor/` tree is about `54 MiB`, while the PHPUnit-required Yoast polyfills
+  plus Composer autoload metadata are under `1 MiB`.
 
 ## Design
 
@@ -46,6 +48,9 @@ WordPress checkout copy:
   `tests/e2e`, `tests/gutenberg`, `tests/performance`, `tests/phpstan`,
   `tests/qunit`, and `tests/visual-regression`;
 - exclude the root `vendor/` tree during the tar stream;
+- copy back `tests/qunit/fixtures`, because
+  `WP_Test_REST_Schema_Initialization::test_build_wp_api_client_fixtures`
+  writes its generated REST API fixture there;
 - copy back only `vendor/autoload.php`, `vendor/composer`, and
   `vendor/yoast/phpunit-polyfills`.
 
@@ -110,8 +115,8 @@ download, and extraction vary with GitHub runner conditions.
 - The setup job excludes non-PHPUnit test trees and root `vendor/` while
   staging `build/wordpress-develop`.
 - The staged WordPress snapshot retains `src`, `tests/phpunit`, root files,
-  minimal `.git` marker metadata, Composer autoload metadata, and Yoast
-  PHPUnit polyfills.
+  minimal `.git` marker metadata, `tests/qunit/fixtures`, Composer autoload
+  metadata, and Yoast PHPUnit polyfills.
 - The staged manifest check passes before upload.
 - The production-build audit fails if the workflow stops enforcing the reduced
   source snapshot.
@@ -131,11 +136,12 @@ git diff --check                                                      # passed
 ```
 
 A local staged-artifact smoke validated the manifest, asserted retained and
-omitted WordPress paths, and reported:
+omitted WordPress paths, including the retained writable
+`tests/qunit/fixtures` directory, and reported:
 
 ```text
-runtime_root_bytes=180271906
-runtime_tar_bytes=75451546
+runtime_root_bytes=180933290
+runtime_tar_bytes=75490187
 ```
 
 A one-test staged PHPUnit smoke used the reduced source snapshot, the local
@@ -146,6 +152,18 @@ tools/wordpress-phpunit-mysqli-mylite --filter '^Tests_Basic::test_package_json$
 # passed, 1 test / 1 assertion
 wordpress_phpunit_reported_seconds=1.266
 wordpress_phpunit_shell_real_seconds=13.897
+```
+
+After CI run `27922515446` exposed the missing writable REST fixture directory,
+a focused staged smoke used the same reduced source snapshot with
+`tests/qunit/fixtures` copied back:
+
+```text
+tools/wordpress-phpunit-mysqli-mylite \
+  --filter '^WP_Test_REST_Schema_Initialization::test_build_wp_api_client_fixtures$'
+# passed, 1 test / 68 assertions
+wordpress_phpunit_reported_seconds=1.832
+wordpress_phpunit_shell_real_seconds=10.370
 ```
 
 CI timing remains pending for the pushed workflow.

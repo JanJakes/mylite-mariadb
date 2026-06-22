@@ -1024,6 +1024,12 @@ require_step_literal \
   "build/wordpress-develop/vendor/yoast/phpunit-polyfills"
 require_step_literal \
   "Pack WordPress PHPUnit runtime artifact" \
+  '${runtime_root}/build/wordpress-develop/tests/qunit'
+require_step_literal \
+  "Pack WordPress PHPUnit runtime artifact" \
+  "build/wordpress-develop/tests/qunit/fixtures"
+require_step_literal \
+  "Pack WordPress PHPUnit runtime artifact" \
   '${runtime_root}/build/wordpress-mariadb-embedded/libmysqld'
 require_step_literal \
   "Pack WordPress PHPUnit runtime artifact" \
