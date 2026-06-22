@@ -684,6 +684,25 @@ enum innodb_deep_perf_stat_index {
     INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_BUFFER_POOL_SCAN_ATTEMPTS,
     INNODB_DEEP_PERF_STAT_PAGE_PUBLISH_BUFFER_POOL_SCAN_PUBLISHED,
     INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_OWNERLESS_DEFAULT_CHECKED_BULK,
+    INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_CALLS,
+    INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_TOTAL_NS,
+    INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_REQUIRES_LOCK,
+    INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_NATIVE_SUPPORT_HIT,
+    INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_MTR_DUPLICATE,
+    INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_TRANSACTION_OWNED_SKIP,
+    INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_TRANSACTION_DIRTY_SKIP,
+    INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_GATE_ACQUIRE_NS,
+    INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_PAGE_ACQUIRE_CALLS,
+    INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_PAGE_ACQUIRE_NS,
+    INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_PAGE_ACQUIRED,
+    INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_PAGE_UNAVAILABLE,
+    INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_HOLDS_TRANSACTION,
+    INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_HOLDS_NATIVE_SUPPORT,
+    INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_TRANSACTION_PAGE_NOTES,
+    INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_DIRTY_PAGE_NOTES,
+    INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_NS,
+    INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_INSERTS,
+    INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_UPDATES,
     INNODB_DEEP_PERF_STAT_COUNT
 };
 
@@ -1529,7 +1548,11 @@ int main(void) {
     const int append_stats = env_flag("MYLITE_PERF_OWNERLESS_APPEND_STATS") && !page_publish_stats;
     const int page_write_stats =
         env_flag("MYLITE_PERF_OWNERLESS_PAGE_WRITE_STATS") && !page_publish_stats;
-    const int ownerless_insert_stats = page_publish_stats || append_stats || page_write_stats;
+    const int deep_stats =
+        env_flag("MYLITE_PERF_OWNERLESS_INNODB_DEEP_STATS") && !page_publish_stats;
+    const int innodb_deep_stats = page_publish_stats || deep_stats;
+    const int ownerless_insert_stats =
+        page_publish_stats || append_stats || page_write_stats || deep_stats;
     const int page_log_detail_stats = env_flag("MYLITE_PERF_OWNERLESS_PAGE_LOG_DETAIL_STATS");
     const unsigned ordinary_flags = MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE;
     const unsigned ownerless_flags =
@@ -1591,9 +1614,10 @@ int main(void) {
     bulk_insert_timing ordinary_bulk_timing = {0};
     bulk_insert_timing ownerless_bulk_timing = {0};
 
-    const int ownerless_bulk_needs_first_stats = page_publish_stats || page_write_stats;
+    const int ownerless_bulk_needs_first_stats =
+        page_publish_stats || page_write_stats || deep_stats;
 
-    if (page_publish_stats) {
+    if (innodb_deep_stats) {
         ordinary_bulk_first_stats.innodb_deep = ordinary_bulk_first_innodb_deep;
     }
     if (ownerless_bulk_needs_first_stats) {
@@ -1602,7 +1626,7 @@ int main(void) {
         ownerless_bulk_first_stats.page_write = ownerless_bulk_first_page_write;
         ownerless_bulk_first_stats.page_log_append = ownerless_bulk_first_page_log_append;
         ownerless_bulk_first_stats.commit_visibility = ownerless_bulk_first_commit_visibility;
-        if (page_publish_stats) {
+        if (innodb_deep_stats) {
             ownerless_bulk_first_stats.innodb_deep = ownerless_bulk_first_innodb_deep;
         }
     }
@@ -1622,6 +1646,7 @@ int main(void) {
     printf("mylite_perf_ownerless_page_publish_stats=%d\n", page_publish_stats);
     printf("mylite_perf_ownerless_append_stats=%d\n", append_stats);
     printf("mylite_perf_ownerless_page_write_stats=%d\n", page_write_stats);
+    printf("mylite_perf_ownerless_innodb_deep_stats=%d\n", deep_stats);
     printf("mylite_perf_ownerless_page_log_detail_stats=%d\n", page_log_detail_stats);
     printf("mylite_perf_database_path=%s\n", paths.database_path);
 
@@ -1805,7 +1830,7 @@ int main(void) {
     }
     ordinary_prepared_point_select_rate = operations_per_second(select_iterations, seconds);
 
-    if (page_publish_stats) {
+    if (innodb_deep_stats) {
         mylite_ownerless_innodb_deep_set_perf_stats_enabled(1);
     }
 
@@ -1813,16 +1838,18 @@ int main(void) {
         db,
         "mylite_perf_ordinary_insert",
         insert_iterations,
-        page_publish_stats,
+        innodb_deep_stats,
         page_publish_stats ? &ordinary_txn_client_timing : NULL
     );
     emit_rate("mylite_perf_ordinary_insert_txn", insert_iterations, seconds);
-    if (page_publish_stats) {
+    if (innodb_deep_stats) {
         emit_innodb_deep_perf_stats("mylite_perf_ordinary_insert_txn");
         mylite_ownerless_innodb_deep_read_perf_stats(
             ordinary_txn_innodb_deep,
             INNODB_DEEP_PERF_STAT_COUNT
         );
+    }
+    if (page_publish_stats) {
         emit_insert_client_timing_summary(
             "mylite_perf_summary_ordinary_insert_txn_client",
             &ordinary_txn_client_timing,
@@ -1837,21 +1864,25 @@ int main(void) {
         db,
         "mylite_perf_ordinary_autocommit",
         insert_iterations,
-        page_publish_stats,
+        innodb_deep_stats,
         page_publish_stats ? &ordinary_autocommit_client_timing : NULL
     );
     emit_rate("mylite_perf_ordinary_insert_autocommit", insert_iterations, seconds);
-    if (page_publish_stats) {
+    if (innodb_deep_stats) {
         emit_innodb_deep_perf_stats("mylite_perf_ordinary_insert_autocommit");
         mylite_ownerless_innodb_deep_read_perf_stats(
             ordinary_autocommit_innodb_deep,
             INNODB_DEEP_PERF_STAT_COUNT
         );
+    }
+    if (page_publish_stats) {
         emit_insert_client_timing_summary(
             "mylite_perf_summary_ordinary_autocommit_client",
             &ordinary_autocommit_client_timing,
             insert_iterations
         );
+    }
+    if (innodb_deep_stats) {
         mylite_ownerless_innodb_deep_set_perf_stats_enabled(0);
     }
     ordinary_insert_autocommit_rate = operations_per_second(insert_iterations, seconds);
@@ -1862,6 +1893,8 @@ int main(void) {
         mylite_exec_result_perf_set_enabled(1);
         mylite_ownerless_sql_handler_set_perf_stats_enabled(1);
         mylite_ownerless_innodb_handler_set_perf_stats_enabled(1);
+    }
+    if (innodb_deep_stats) {
         mylite_ownerless_innodb_deep_set_perf_stats_enabled(1);
     }
     seconds = measure_bulk_autocommit_insert(
@@ -1869,9 +1902,9 @@ int main(void) {
         "mylite_perf_ordinary_autocommit_bulk",
         insert_iterations,
         bulk_insert_rows_per_statement,
-        page_publish_stats,
+        innodb_deep_stats,
         &ordinary_bulk_timing,
-        page_publish_stats ? &ordinary_bulk_first_stats : NULL
+        innodb_deep_stats ? &ordinary_bulk_first_stats : NULL
     );
     emit_rate("mylite_perf_ordinary_insert_autocommit_bulk_rows", insert_iterations, seconds);
     emit_rate(
@@ -1903,15 +1936,23 @@ int main(void) {
         mylite_exec_result_perf_set_enabled(0);
         mylite_ownerless_sql_handler_set_perf_stats_enabled(0);
         mylite_ownerless_innodb_handler_set_perf_stats_enabled(0);
+    }
+    if (innodb_deep_stats) {
         mylite_ownerless_innodb_deep_set_perf_stats_enabled(0);
+    }
+    if (page_publish_stats) {
         emit_exec_result_perf_stats("mylite_perf_ordinary_insert_autocommit_bulk");
         emit_sql_handler_perf_stats("mylite_perf_ordinary_insert_autocommit_bulk");
         emit_innodb_handler_perf_stats("mylite_perf_ordinary_insert_autocommit_bulk");
+    }
+    if (innodb_deep_stats) {
         emit_innodb_deep_perf_stats("mylite_perf_ordinary_insert_autocommit_bulk");
         mylite_ownerless_innodb_deep_read_perf_stats(
             ordinary_bulk_innodb_deep,
             INNODB_DEEP_PERF_STAT_COUNT
         );
+    }
+    if (page_publish_stats) {
         emit_bulk_exec_result_summary(
             "mylite_perf_summary_ordinary_autocommit_bulk",
             bulk_insert_statements
@@ -2039,6 +2080,8 @@ int main(void) {
         mylite_ownerless_innodb_set_commit_visibility_stats_enabled(1);
         mylite_ownerless_sql_handler_set_perf_stats_enabled(1);
         mylite_ownerless_innodb_handler_set_perf_stats_enabled(1);
+    }
+    if (innodb_deep_stats) {
         mylite_ownerless_innodb_deep_set_perf_stats_enabled(1);
     }
 
@@ -2056,11 +2099,15 @@ int main(void) {
         emit_database_perf_stats("mylite_perf_ownerless_insert_txn");
         emit_sql_handler_perf_stats("mylite_perf_ownerless_insert_txn");
         emit_innodb_handler_perf_stats("mylite_perf_ownerless_insert_txn");
+    }
+    if (innodb_deep_stats) {
         emit_innodb_deep_perf_stats("mylite_perf_ownerless_insert_txn");
         mylite_ownerless_innodb_deep_read_perf_stats(
             ownerless_txn_innodb_deep,
             INNODB_DEEP_PERF_STAT_COUNT
         );
+    }
+    if (page_publish_stats) {
         emit_page_write_perf_stats("mylite_perf_ownerless_insert_txn");
         emit_page_write_refresh_stats("mylite_perf_ownerless_insert_txn");
         emit_page_log_append_perf_stats("mylite_perf_ownerless_insert_txn");
@@ -2080,6 +2127,12 @@ int main(void) {
             "mylite_perf_summary_ownerless_minus_ordinary_insert_txn_client",
             &ownerless_txn_client_timing,
             &ordinary_txn_client_timing,
+            insert_iterations
+        );
+    } else if (deep_stats) {
+        emit_ownerless_transaction_phase_summary(
+            ordinary_txn_innodb_deep,
+            ownerless_txn_innodb_deep,
             insert_iterations
         );
     } else if (append_stats) {
@@ -2118,11 +2171,15 @@ int main(void) {
         emit_database_perf_stats("mylite_perf_ownerless_insert_autocommit");
         emit_sql_handler_perf_stats("mylite_perf_ownerless_insert_autocommit");
         emit_innodb_handler_perf_stats("mylite_perf_ownerless_insert_autocommit");
+    }
+    if (innodb_deep_stats) {
         emit_innodb_deep_perf_stats("mylite_perf_ownerless_insert_autocommit");
         mylite_ownerless_innodb_deep_read_perf_stats(
             ownerless_autocommit_innodb_deep,
             INNODB_DEEP_PERF_STAT_COUNT
         );
+    }
+    if (page_publish_stats) {
         emit_page_write_perf_stats("mylite_perf_ownerless_insert_autocommit");
         emit_page_write_refresh_stats("mylite_perf_ownerless_insert_autocommit");
         emit_page_log_append_perf_stats("mylite_perf_ownerless_insert_autocommit");
@@ -2145,6 +2202,12 @@ int main(void) {
             &ordinary_autocommit_client_timing,
             insert_iterations
         );
+    } else if (deep_stats) {
+        emit_autocommit_deep_comparison_summary(
+            ordinary_autocommit_innodb_deep,
+            ownerless_autocommit_innodb_deep,
+            insert_iterations
+        );
     } else if (append_stats) {
         emit_database_perf_stats("mylite_perf_ownerless_insert_autocommit");
         emit_page_log_append_perf_stats("mylite_perf_ownerless_insert_autocommit");
@@ -2162,7 +2225,7 @@ int main(void) {
     rate = ownerless_insert_autocommit_rate;
     check_min_rate("MYLITE_PERF_MIN_OWNERLESS_AUTOCOMMIT_INSERT_OPS", rate);
 
-    if (ownerless_insert_stats) {
+    if (page_publish_stats || append_stats || page_write_stats) {
         mylite_exec_result_perf_set_enabled(1);
     }
     seconds = measure_bulk_autocommit_insert_existing(
@@ -2241,6 +2304,26 @@ int main(void) {
         emit_bulk_exec_result_summary(
             "mylite_perf_summary_ownerless_autocommit_bulk",
             bulk_insert_statements
+        );
+    } else if (deep_stats) {
+        emit_innodb_deep_perf_stats("mylite_perf_ownerless_insert_autocommit_bulk");
+        mylite_ownerless_innodb_deep_read_perf_stats(
+            ownerless_bulk_innodb_deep,
+            INNODB_DEEP_PERF_STAT_COUNT
+        );
+        emit_bulk_deep_comparison_summary(
+            ordinary_bulk_innodb_deep,
+            ownerless_bulk_innodb_deep,
+            insert_iterations,
+            bulk_insert_statements
+        );
+        emit_bulk_deep_phase_comparison_summary(
+            ordinary_bulk_innodb_deep,
+            ordinary_bulk_first_innodb_deep,
+            &ordinary_bulk_timing,
+            ownerless_bulk_innodb_deep,
+            ownerless_bulk_first_innodb_deep,
+            &ownerless_bulk_timing
         );
     } else if (append_stats) {
         mylite_exec_result_perf_set_enabled(0);
@@ -4986,6 +5069,42 @@ static void emit_bulk_deep_comparison_summary_for_phase(
     emit_bulk_deep_ms_phase_pair(
         ordinary_deep,
         ownerless_deep,
+        INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_TOTAL_NS,
+        phase,
+        "ownerless_page_write_enter",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_GATE_ACQUIRE_NS,
+        phase,
+        "ownerless_page_write_gate_acquire",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_PAGE_ACQUIRE_NS,
+        phase,
+        "ownerless_page_write_page_acquire",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_NS,
+        phase,
+        "ownerless_page_write_capture_image",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
         INNODB_DEEP_PERF_STAT_TRX_UNDO_REPORT_SUCCESS_BOOKKEEPING_NS,
         phase,
         "trx_undo_report_success_bookkeeping",
@@ -5133,6 +5252,141 @@ static void emit_bulk_deep_comparison_summary_for_phase(
         INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_OWNERLESS_DEFAULT_CHECKED_BULK,
         phase,
         "innodb_default_checked_bulk_starts",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_CALLS,
+        phase,
+        "ownerless_page_write_enter_calls",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_REQUIRES_LOCK,
+        phase,
+        "ownerless_page_write_enter_requires_lock",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_NATIVE_SUPPORT_HIT,
+        phase,
+        "ownerless_page_write_native_support_hit",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_MTR_DUPLICATE,
+        phase,
+        "ownerless_page_write_mtr_duplicate",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_TRANSACTION_OWNED_SKIP,
+        phase,
+        "ownerless_page_write_transaction_owned_skip",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_TRANSACTION_DIRTY_SKIP,
+        phase,
+        "ownerless_page_write_transaction_dirty_skip",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_PAGE_ACQUIRE_CALLS,
+        phase,
+        "ownerless_page_write_page_acquire_calls",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_PAGE_ACQUIRED,
+        phase,
+        "ownerless_page_write_page_acquired",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_PAGE_UNAVAILABLE,
+        phase,
+        "ownerless_page_write_page_unavailable",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_HOLDS_TRANSACTION,
+        phase,
+        "ownerless_page_write_holds_transaction",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_HOLDS_NATIVE_SUPPORT,
+        phase,
+        "ownerless_page_write_holds_native_support",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_TRANSACTION_PAGE_NOTES,
+        phase,
+        "ownerless_page_write_transaction_page_notes",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_DIRTY_PAGE_NOTES,
+        phase,
+        "ownerless_page_write_dirty_page_notes",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_INSERTS,
+        phase,
+        "ownerless_page_write_capture_image_inserts",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_UPDATES,
+        phase,
+        "ownerless_page_write_capture_image_updates",
         insert_rows,
         insert_statements
     );
@@ -14199,6 +14453,101 @@ static void emit_innodb_deep_perf_stats(const char *prefix) {
         prefix,
         "row_ins_clust_low_ownerless_default_checked_bulk",
         values[INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_OWNERLESS_DEFAULT_CHECKED_BULK]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "ownerless_page_write_enter_calls",
+        values[INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_CALLS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "ownerless_page_write_enter_total",
+        values[INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_TOTAL_NS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "ownerless_page_write_enter_requires_lock",
+        values[INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_REQUIRES_LOCK]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "ownerless_page_write_enter_native_support_hit",
+        values[INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_NATIVE_SUPPORT_HIT]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "ownerless_page_write_enter_mtr_duplicate",
+        values[INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_MTR_DUPLICATE]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "ownerless_page_write_enter_transaction_owned_skip",
+        values[INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_TRANSACTION_OWNED_SKIP]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "ownerless_page_write_enter_transaction_dirty_skip",
+        values[INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_TRANSACTION_DIRTY_SKIP]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "ownerless_page_write_enter_gate_acquire",
+        values[INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_GATE_ACQUIRE_NS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "ownerless_page_write_enter_page_acquire_calls",
+        values[INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_PAGE_ACQUIRE_CALLS]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "ownerless_page_write_enter_page_acquire",
+        values[INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_PAGE_ACQUIRE_NS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "ownerless_page_write_enter_page_acquired",
+        values[INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_PAGE_ACQUIRED]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "ownerless_page_write_enter_page_unavailable",
+        values[INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_PAGE_UNAVAILABLE]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "ownerless_page_write_enter_holds_transaction",
+        values[INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_HOLDS_TRANSACTION]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "ownerless_page_write_enter_holds_native_support",
+        values[INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_ENTER_HOLDS_NATIVE_SUPPORT]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "ownerless_page_write_transaction_page_notes",
+        values[INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_TRANSACTION_PAGE_NOTES]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "ownerless_page_write_dirty_page_notes",
+        values[INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_DIRTY_PAGE_NOTES]
+    );
+    emit_innodb_deep_perf_ms(
+        prefix,
+        "ownerless_page_write_capture_image",
+        values[INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_NS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "ownerless_page_write_capture_image_inserts",
+        values[INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_INSERTS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "ownerless_page_write_capture_image_updates",
+        values[INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_UPDATES]
     );
     emit_innodb_deep_perf_ms(
         prefix,

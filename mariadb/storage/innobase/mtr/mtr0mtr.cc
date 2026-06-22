@@ -44,6 +44,7 @@ Created 11/26/1995 Heikki Tuuri
 #include "trx0sys.h"
 #include "trx0trx.h"
 #include "sql_class.h" // THD
+#include "mylite_ownerless_innodb_deep_perf.h"
 #include "mylite_ownerless_innodb_lock_hooks.h"
 #include "log.h"
 #include "my_cpu.h"
@@ -2635,6 +2636,10 @@ ATTRIBUTE_NOINLINE bool mtr_t::ownerless_page_write_enter(
   if (UNIV_LIKELY(!ownerless_hooks_enabled()))
     return false;
 
+  mylite_ownerless_innodb_deep_perf_count(
+      MYLITE_OWNERLESS_INNODB_DEEP_OWNERLESS_PAGE_WRITE_ENTER_CALLS);
+  mylite_ownerless_innodb_deep_perf_scope mylite_deep_perf_scope(
+      MYLITE_OWNERLESS_INNODB_DEEP_OWNERLESS_PAGE_WRITE_ENTER_TOTAL_NS);
   const bool page_write_perf_enabled= ownerless_page_write_perf_enabled();
   const bool native_support_mtr_skip_enabled=
       !page_write_perf_enabled &&
@@ -2650,6 +2655,8 @@ ATTRIBUTE_NOINLINE bool mtr_t::ownerless_page_write_enter(
       ownerless_page_write_refresh(block);
     return false;
   }
+  mylite_ownerless_innodb_deep_perf_count(
+      MYLITE_OWNERLESS_INNODB_DEEP_OWNERLESS_PAGE_WRITE_ENTER_REQUIRES_LOCK);
 
   const page_id_t id{block.page.id()};
   trx_t *ownerless_trx= ownerless_page_write_trx();
@@ -2671,6 +2678,8 @@ ATTRIBUTE_NOINLINE bool mtr_t::ownerless_page_write_enter(
   if (ownerless_page_write_transaction_holds_native_support_page(
           ownerless_trx, block.page))
   {
+    mylite_ownerless_innodb_deep_perf_count(
+        MYLITE_OWNERLESS_INNODB_DEEP_OWNERLESS_PAGE_WRITE_ENTER_NATIVE_SUPPORT_HIT);
     ownerless_page_write_perf_add(
         OWNERLESS_PAGE_WRITE_PERF_NATIVE_SUPPORT_TRANSACTION_HIT, 1);
     if (native_support_mtr_skip_enabled)
@@ -2682,23 +2691,41 @@ ATTRIBUTE_NOINLINE bool mtr_t::ownerless_page_write_enter(
   const bool holds_for_transaction=
       uses_transaction_release &&
       ownerless_page_write_holds_for_transaction(block.page);
+  if (holds_for_transaction)
+    mylite_ownerless_innodb_deep_perf_count(
+        MYLITE_OWNERLESS_INNODB_DEEP_OWNERLESS_PAGE_WRITE_ENTER_HOLDS_TRANSACTION);
   uint64_t packed_page=
       ownerless_page_write_pack(id.space(), id.page_no());
   if (m_ownerless_page_write_inline_mtr_page_set &&
       m_ownerless_page_write_inline_mtr_page == packed_page)
+  {
+    mylite_ownerless_innodb_deep_perf_count(
+        MYLITE_OWNERLESS_INNODB_DEEP_OWNERLESS_PAGE_WRITE_ENTER_MTR_DUPLICATE);
     return holds_for_transaction;
+  }
   if (m_ownerless_page_write_mtr_pages != nullptr &&
       std::find(m_ownerless_page_write_mtr_pages->begin(),
                 m_ownerless_page_write_mtr_pages->end(),
                 packed_page) != m_ownerless_page_write_mtr_pages->end())
+  {
+    mylite_ownerless_innodb_deep_perf_count(
+        MYLITE_OWNERLESS_INNODB_DEEP_OWNERLESS_PAGE_WRITE_ENTER_MTR_DUPLICATE);
     return holds_for_transaction;
+  }
   if (holds_for_transaction &&
       ownerless_page_write_transaction_owns_page(ownerless_trx, packed_page))
+  {
+    mylite_ownerless_innodb_deep_perf_count(
+        MYLITE_OWNERLESS_INNODB_DEEP_OWNERLESS_PAGE_WRITE_ENTER_TRANSACTION_OWNED_SKIP);
     return holds_for_transaction;
+  }
   const bool holds_native_support_for_transaction=
       uses_transaction_release && !holds_for_transaction &&
       ownerless_page_write_can_hold_native_support_page(
           ownerless_trx, block.page);
+  if (holds_native_support_for_transaction)
+    mylite_ownerless_innodb_deep_perf_count(
+        MYLITE_OWNERLESS_INNODB_DEEP_OWNERLESS_PAGE_WRITE_ENTER_HOLDS_NATIVE_SUPPORT);
 
   bool page_write_waited= false;
   if (ownerless_trx != nullptr &&
@@ -2715,9 +2742,14 @@ ATTRIBUTE_NOINLINE bool mtr_t::ownerless_page_write_enter(
       const unsigned timeout_ms=
         ownerless_page_write_lock_timeout_ms(ownerless_trx);
       uint32_t gate_acquire_flags= 0U;
+      const uint64_t gate_acquire_start_ns=
+          mylite_ownerless_innodb_deep_perf_start_ns();
       const int result=
         mylite_ownerless_innodb_lock_acquire_transaction_page_write_gate(
             ownerless_trx, id.space(), timeout_ms, &gate_acquire_flags);
+      mylite_ownerless_innodb_deep_perf_add_elapsed(
+          MYLITE_OWNERLESS_INNODB_DEEP_OWNERLESS_PAGE_WRITE_ENTER_GATE_ACQUIRE_NS,
+          gate_acquire_start_ns);
       page_write_waited= page_write_waited ||
           (gate_acquire_flags &
            MYLITE_OWNERLESS_INNODB_LOCK_ACQUIRE_WAITED) != 0U;
@@ -2752,6 +2784,8 @@ ATTRIBUTE_NOINLINE bool mtr_t::ownerless_page_write_enter(
   }
   if (page_already_modified_by_transaction)
   {
+    mylite_ownerless_innodb_deep_perf_count(
+        MYLITE_OWNERLESS_INNODB_DEEP_OWNERLESS_PAGE_WRITE_ENTER_TRANSACTION_DIRTY_SKIP);
     return holds_for_transaction;
   }
   bool page_write_acquired= false;
@@ -2760,18 +2794,29 @@ ATTRIBUTE_NOINLINE bool mtr_t::ownerless_page_write_enter(
     uint32_t acquire_flags= 0U;
     const unsigned timeout_ms=
       ownerless_page_write_lock_timeout_ms(ownerless_trx);
+    mylite_ownerless_innodb_deep_perf_count(
+        MYLITE_OWNERLESS_INNODB_DEEP_OWNERLESS_PAGE_WRITE_ENTER_PAGE_ACQUIRE_CALLS);
     const uint64_t start_ns=
         ownerless_page_write_perf_enabled() ?
             ownerless_page_write_perf_now_ns() :
             0;
+    const uint64_t page_acquire_start_ns=
+        mylite_ownerless_innodb_deep_perf_start_ns();
     const int result= mylite_ownerless_innodb_lock_acquire_page_write(
       ownerless_trx, id.space(), id.page_no(), timeout_ms, &acquire_flags);
     ownerless_page_write_perf_add_elapsed(OWNERLESS_PAGE_WRITE_PERF_ACQUIRE_NS,
                                           start_ns);
+    mylite_ownerless_innodb_deep_perf_add_elapsed(
+        MYLITE_OWNERLESS_INNODB_DEEP_OWNERLESS_PAGE_WRITE_ENTER_PAGE_ACQUIRE_NS,
+        page_acquire_start_ns);
     if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK ||
         result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
     {
       page_write_acquired= result == MYLITE_OWNERLESS_INNODB_LOCK_OK;
+      mylite_ownerless_innodb_deep_perf_count(
+          page_write_acquired
+              ? MYLITE_OWNERLESS_INNODB_DEEP_OWNERLESS_PAGE_WRITE_ENTER_PAGE_ACQUIRED
+              : MYLITE_OWNERLESS_INNODB_DEEP_OWNERLESS_PAGE_WRITE_ENTER_PAGE_UNAVAILABLE);
       page_write_waited= page_write_waited ||
           (acquire_flags & MYLITE_OWNERLESS_INNODB_LOCK_ACQUIRE_WAITED) != 0U;
       break;
@@ -3574,6 +3619,8 @@ void mtr_t::ownerless_page_write_note_transaction_page(
   if (!ownerless_trx->mylite_ownerless_modified_page_contains(packed_page))
   {
     ownerless_trx->mylite_ownerless_note_modified_page(packed_page);
+    mylite_ownerless_innodb_deep_perf_count(
+        MYLITE_OWNERLESS_INNODB_DEEP_OWNERLESS_PAGE_WRITE_TRANSACTION_PAGE_NOTES);
     ownerless_page_write_perf_add(
         OWNERLESS_PAGE_WRITE_PERF_PUBLISH_DEFERRED_PAGES, 1);
   }
@@ -3611,7 +3658,11 @@ void mtr_t::ownerless_page_write_note_dirty_transaction_page(
   }
 
   if (!ownerless_trx->mylite_ownerless_dirty_page_contains(packed_page))
+  {
     ownerless_trx->mylite_ownerless_note_dirty_page(packed_page);
+    mylite_ownerless_innodb_deep_perf_count(
+        MYLITE_OWNERLESS_INNODB_DEEP_OWNERLESS_PAGE_WRITE_DIRTY_PAGE_NOTES);
+  }
 }
 
 void mtr_t::ownerless_page_write_capture_dirty_transaction_page(
@@ -3630,6 +3681,8 @@ void mtr_t::ownerless_page_write_capture_dirty_transaction_page(
   if (!transaction_release_holds_page)
     return;
 
+  mylite_ownerless_innodb_deep_perf_scope mylite_deep_perf_scope(
+      MYLITE_OWNERLESS_INNODB_DEEP_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_NS);
   trx_t *ownerless_trx= ownerless_page_write_trx();
   if (ownerless_trx == nullptr)
     return;
@@ -3664,6 +3717,8 @@ void mtr_t::ownerless_page_write_capture_dirty_transaction_page(
     image.compressed= bpage.zip.data != nullptr;
     image.page.assign(source, source + image.page_size);
     images.push_back(std::move(image));
+    mylite_ownerless_innodb_deep_perf_count(
+        MYLITE_OWNERLESS_INNODB_DEEP_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_INSERTS);
     return;
   }
 
@@ -3673,6 +3728,8 @@ void mtr_t::ownerless_page_write_capture_dirty_transaction_page(
   it->page_size= static_cast<uint32_t>(bpage.physical_size());
   it->compressed= bpage.zip.data != nullptr;
   it->page.assign(source, source + it->page_size);
+  mylite_ownerless_innodb_deep_perf_count(
+      MYLITE_OWNERLESS_INNODB_DEEP_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_UPDATES);
 }
 
 void mtr_t::ownerless_page_write_note_mtr_page(

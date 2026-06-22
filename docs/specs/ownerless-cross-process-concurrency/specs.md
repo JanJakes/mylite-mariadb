@@ -6759,6 +6759,14 @@ subsystems that this mode needs:
   page-unlock time per statement. A one-statement guard emitted `0.000`
   remaining phase averages, so the remaining rows are not inferred from
   aggregate counters when there is no later statement.
+  The ownerless page-write deep attribution follow-up adds a lighter
+  `MYLITE_PERF_OWNERLESS_INNODB_DEEP_STATS=1` probe mode that enables only
+  InnoDB deep counters and first/remaining bulk snapshots. It keeps
+  page-publish, page-write, page-log, database-hook, and exec-result
+  diagnostics disabled, then emits ownerless page-write enter/acquire,
+  native-support hit, transaction-owned/dirty skip, and page-image capture
+  rows. This targets the remaining non-empty-table `trx_undo_report_mtr_commit`
+  attribution gap without claiming a throughput fix or undo elision.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.

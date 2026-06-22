@@ -1236,6 +1236,14 @@ statement at `0.438 ms` in page-write commit-log time, split into
 `0.105 ms` redo leave, `0.178 ms` commit-log publish, and `0.244 ms`
 no-dirty-loop time per statement, while a one-statement guard emitted `0.000`
 for remaining page-write phase rows.
+The ownerless page-write deep attribution follow-up adds
+`MYLITE_PERF_OWNERLESS_INNODB_DEEP_STATS=1`, which enables only InnoDB deep
+counters and first/remaining bulk snapshots without page-publish, page-write,
+page-log, database-hook, or exec-result diagnostic modes. It emits ownerless
+page-write enter/acquire, native-support hit, transaction-owned/dirty skip, and
+page-image capture rows so the remaining `trx_undo_report_mtr_commit` cost can
+be assigned without changing normal stats-off production behavior. This is
+diagnostic evidence, not a throughput fix or a non-empty-table undo elision.
 Profiled mysqli runs also split total query elapsed time into
 `query_verb_*` buckets for result queries, DML, DDL, connection state,
 transaction, lock, call, and other first-keyword classes so WordPress timing
