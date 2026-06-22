@@ -4618,9 +4618,17 @@ Tasks:
    DML emits file-operation redo. Focused SQL coverage forces a checkpoint,
    updates a file-per-table InnoDB table, observes the marker before close,
    drains it on final no-live close, and verifies ownerless plus ordinary
-   native reopen after forced `.shm` rebuild. That closes the focused
-   checkpointed autocommit-DML marker gap, not the broader DML-origin
-   `FILE_MODIFY` matrix or explicit-transaction path. The no-argument
+   native reopen after forced `.shm` rebuild. A bounded single-owner
+   explicit-transaction follow-up now computes transaction-end-with-local-write
+   before clearing the connection's transaction state, consumes the same native
+   file-op redo flag on successful `COMMIT` only when the process registry
+   proves no peer joined since this handle registered, and proves the marker is
+   clear before `COMMIT`, set after `COMMIT`, drained on final no-live close,
+   and rebuild-safe across ownerless plus ordinary native reopen. That closes
+   the focused checkpointed autocommit-DML and single-owner
+   explicit-transaction commit marker gaps, not the broader DML-origin
+   `FILE_MODIFY` matrix or multi-peer explicit-transaction DML marker path.
+   The no-argument
    aggregate harness remains
    available for manual runs, while CTest registers the normal ownerless SQL
    coverage as sixteen deterministic weighted shards under the same

@@ -50,9 +50,10 @@ Out of scope:
 - Parsing native redo payload types or distinguishing `FILE_MODIFY` from other
   file-operation redo in the marker.
 - Immediate native checkpointing after every DML-origin `FILE_MODIFY`.
-- Explicit-transaction DML-origin marker coverage; the commit-race path keeps
-  its existing transaction visibility behavior and remains a follow-up for a
-  transaction-scoped file-op marker design.
+- Single-owner explicit-transaction DML-origin marker coverage, which is
+  handled separately by
+  `docs/specs/ownerless-explicit-transaction-dml-file-op-marker/specs.md`;
+  multi-peer explicit DML remains separate follow-up work.
 - New checkpoint scheduling policy, background checkpoint workers, or broad
   redo/checkpoint reconciliation.
 - SQL-level table-lock fault injection or external MariaDB/RQG stress.
@@ -157,7 +158,9 @@ It adds no dependencies and does not change the embedded MariaDB profile.
 - The marker is type-agnostic; the `FILE_MODIFY` conclusion depends on the
   source-backed checkpointed DML setup.
 - This slice does not prove every possible DML shape that can emit
-  `FILE_MODIFY`, and it deliberately leaves explicit-transaction DML for a
-  transaction-scoped follow-up.
+  `FILE_MODIFY`; single-owner explicit-transaction DML commit coverage is
+  handled by
+  `docs/specs/ownerless-explicit-transaction-dml-file-op-marker/specs.md`,
+  while multi-peer explicit DML remains follow-up work.
 - Broader native redo/checkpoint reconciliation, DDL/file-lifecycle recovery,
   and external MariaDB/RQG stress remain planned.

@@ -1961,7 +1961,8 @@ void mark_ownerless_native_file_op_checkpoint_after_dictionary_ddl(
 void mark_ownerless_native_file_op_checkpoint_after_successful_write(
     mylite_db &db,
     const SqlPolicyTokens &tokens,
-    bool statement_started_in_explicit_transaction
+    bool statement_started_in_explicit_transaction,
+    bool transaction_end_had_local_write
 );
 void mark_ownerless_native_file_op_checkpoint_before_dictionary_finish(mylite_db &db);
 bool advance_ownerless_no_live_page_visible_lsn_for_reclaim(
@@ -3722,6 +3723,8 @@ int mylite_step(mylite_stmt *stmt) {
         ownerless_stage_start =
             ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
         update_ownerless_temporary_table_state_after_successful_sql(*stmt->db, policy_tokens);
+        const bool transaction_end_had_local_write =
+            ownerless_transaction_end_has_local_write(*stmt->db, policy_tokens);
         const int transaction_state_result =
             update_ownerless_transaction_state_after_successful_sql(*stmt->db, policy_tokens);
         ownerless_database_perf_add_elapsed(
@@ -3752,11 +3755,12 @@ int mylite_step(mylite_stmt *stmt) {
         }
         if (dictionary_ddl_started) {
             mark_ownerless_native_file_op_checkpoint_after_dictionary_ddl(*stmt->db, policy_tokens);
-        } else {
+        } else if (!transaction_end_had_local_write) {
             mark_ownerless_native_file_op_checkpoint_after_successful_write(
                 *stmt->db,
                 policy_tokens,
-                statement_started_in_explicit_transaction
+                statement_started_in_explicit_transaction,
+                transaction_end_had_local_write
             );
         }
         if (!statement_started_in_explicit_transaction ||
@@ -3821,6 +3825,14 @@ int mylite_step(mylite_stmt *stmt) {
                 OWNERLESS_DATABASE_PERF_PREPARED_STEP_RECLAIM_NS,
                 ownerless_stage_start
             );
+            if (!dictionary_ddl_started && transaction_end_had_local_write) {
+                mark_ownerless_native_file_op_checkpoint_after_successful_write(
+                    *stmt->db,
+                    policy_tokens,
+                    statement_started_in_explicit_transaction,
+                    transaction_end_had_local_write
+                );
+            }
             clear_statement_ownerless_page_visibility(*stmt);
             return MYLITE_DONE;
         }
@@ -5104,6 +5116,8 @@ ownerless_query_success:
     stage_start_ns = exec_result_perf_start_ns();
     update_ownerless_statement_lock_timeout_after_successful_sql(*db, policy_tokens);
     update_ownerless_temporary_table_state_after_successful_sql(*db, policy_tokens);
+    const bool transaction_end_had_local_write =
+        ownerless_transaction_end_has_local_write(*db, policy_tokens);
     const int transaction_state_result =
         update_ownerless_transaction_state_after_successful_sql(*db, policy_tokens);
     exec_result_perf_add_elapsed(EXEC_RESULT_PERF_STATUS_UPDATE_NS, stage_start_ns);
@@ -5130,11 +5144,12 @@ ownerless_query_success:
     }
     if (dictionary_ddl_started) {
         mark_ownerless_native_file_op_checkpoint_after_dictionary_ddl(*db, policy_tokens);
-    } else {
+    } else if (!transaction_end_had_local_write) {
         mark_ownerless_native_file_op_checkpoint_after_successful_write(
             *db,
             policy_tokens,
-            statement_started_in_explicit_transaction
+            statement_started_in_explicit_transaction,
+            transaction_end_had_local_write
         );
     }
     if (!statement_started_in_explicit_transaction ||
@@ -5195,6 +5210,14 @@ ownerless_query_success:
     }
     statement_locks.release();
     maybe_reclaim_ownerless_page_log_after_statement(*db, policy_tokens);
+    if (!dictionary_ddl_started && transaction_end_had_local_write) {
+        mark_ownerless_native_file_op_checkpoint_after_successful_write(
+            *db,
+            policy_tokens,
+            statement_started_in_explicit_transaction,
+            transaction_end_had_local_write
+        );
+    }
     return MYLITE_OK;
 #endif
 }
@@ -11333,10 +11356,18 @@ void mark_ownerless_native_file_op_checkpoint_after_dictionary_ddl(
 void mark_ownerless_native_file_op_checkpoint_after_successful_write(
     mylite_db &db,
     const SqlPolicyTokens &tokens,
-    bool statement_started_in_explicit_transaction
+    bool statement_started_in_explicit_transaction,
+    bool transaction_end_had_local_write
 ) {
-    if (!db.ownerless_rw_open || db.readonly_open || statement_started_in_explicit_transaction ||
-        !sql_statement_requires_write(tokens) || ownerless_dictionary_ddl_statement(tokens)) {
+    const bool autocommit_write =
+        !statement_started_in_explicit_transaction && sql_statement_requires_write(tokens);
+    bool single_owner_transaction_end = transaction_end_had_local_write;
+    if (single_owner_transaction_end) {
+        const std::lock_guard<std::mutex> guard(g_runtime.mutex);
+        single_owner_transaction_end = ownerless_runtime_in_single_owner_epoch_locked(g_runtime);
+    }
+    if (!db.ownerless_rw_open || db.readonly_open || ownerless_dictionary_ddl_statement(tokens) ||
+        (!autocommit_write && !single_owner_transaction_end)) {
         return;
     }
     if (mylite_ownerless_innodb_take_file_op_redo() == 0) {
