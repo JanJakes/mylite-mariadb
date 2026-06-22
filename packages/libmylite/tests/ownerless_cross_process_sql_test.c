@@ -301,6 +301,12 @@ enum ownerless_test_database_perf_stat_index {
     OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_VISIBILITY_ENABLE_NS,
     OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_LOCAL_NATIVE_CURRENT_READ,
     OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_PAGE_VERSION_READS_ENABLED,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_CALLS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_ALLOWED,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_MARKER_CACHE_HITS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_MARKER_FILE_READS,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_BLOCKED_MARKER,
+    OWNERLESS_TEST_DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_BLOCKED_MARKER_READ,
     OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT
 };
 
@@ -12587,6 +12593,7 @@ static void test_ownerless_single_owner_foreground_reclaim_budget_defers_to_time
     mylite_ownerless_pressure_info info = {
         .size = sizeof(info),
     };
+    uint64_t database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT] = {0};
     char sql[256];
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -12635,7 +12642,27 @@ static void test_ownerless_single_owner_foreground_reclaim_budget_defers_to_time
     assert(mylite_step(stmt) == MYLITE_ROW);
     assert(mylite_column_uint64(stmt, 0) == 1U);
 
+    mylite_ownerless_database_set_perf_stats_enabled(1);
+    mylite_ownerless_database_reset_perf_stats();
     exec_ok(writer_db, "UPDATE app.ownerless_foreground_reclaim SET payload = REPEAT('b', 4000)");
+    mylite_ownerless_database_read_perf_stats(
+        database_stats,
+        OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT
+    );
+    mylite_ownerless_database_set_perf_stats_enabled(0);
+    assert(
+        database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_CALLS] > 0U
+    );
+    assert(
+        database_stats
+            [OWNERLESS_TEST_DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_MARKER_CACHE_HITS] >
+        0U
+    );
+    assert(
+        database_stats
+            [OWNERLESS_TEST_DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_MARKER_FILE_READS] ==
+        0U
+    );
     assert(
         query_unsigned(
             writer_db,

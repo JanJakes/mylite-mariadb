@@ -335,6 +335,12 @@ enum database_perf_stat_index {
     DATABASE_PERF_STAT_REFRESH_VISIBILITY_ENABLE_NS,
     DATABASE_PERF_STAT_REFRESH_LOCAL_NATIVE_CURRENT_READ,
     DATABASE_PERF_STAT_REFRESH_PAGE_VERSION_READS_ENABLED,
+    DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_CALLS,
+    DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_ALLOWED,
+    DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_MARKER_CACHE_HITS,
+    DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_MARKER_FILE_READS,
+    DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_BLOCKED_MARKER,
+    DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_BLOCKED_MARKER_READ,
     DATABASE_PERF_STAT_COUNT
 };
 
@@ -9838,6 +9844,36 @@ static void emit_database_perf_stats(const char *prefix) {
         "%s_single_owner_skip_blocked_baseline=%" PRIu64 "\n",
         prefix,
         values[DATABASE_PERF_STAT_SINGLE_OWNER_SKIP_BLOCKED_BASELINE]
+    );
+    printf(
+        "%s_foreground_reclaim_budget_skip_calls=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_CALLS]
+    );
+    printf(
+        "%s_foreground_reclaim_budget_skip_allowed=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_ALLOWED]
+    );
+    printf(
+        "%s_foreground_reclaim_budget_skip_marker_cache_hits=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_MARKER_CACHE_HITS]
+    );
+    printf(
+        "%s_foreground_reclaim_budget_skip_marker_file_reads=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_MARKER_FILE_READS]
+    );
+    printf(
+        "%s_foreground_reclaim_budget_skip_blocked_marker=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_BLOCKED_MARKER]
+    );
+    printf(
+        "%s_foreground_reclaim_budget_skip_blocked_marker_read=%" PRIu64 "\n",
+        prefix,
+        values[DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_BLOCKED_MARKER_READ]
     );
 }
 
