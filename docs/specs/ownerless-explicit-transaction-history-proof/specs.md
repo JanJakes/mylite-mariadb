@@ -59,6 +59,10 @@ This does not let arbitrary explicit transactions skip the history flush:
 - constrained single-table `REPLACE ... VALUES` transactions get the marker
   only after the follow-up replace proof classifier accepts the statement and
   the first-party transaction proof survives until `COMMIT`;
+- mixed explicit transactions can combine those already-accepted insert,
+  update, delete, and replace statements, because the transaction proof tracks
+  whether every write stayed proven rather than pinning the proof to one DML
+  class;
 - savepoints, locking reads, non-visible-fast writes, DDL, dictionary
   conservative refresh, and foreign-key target inserts disqualify the marker;
 - the existing history proof still has to publish both active history pages and
@@ -77,14 +81,16 @@ In scope:
   `../ownerless-explicit-delete-history-proof/specs.md`.
 - The follow-up constrained single-table replace proof documented in
   `../ownerless-explicit-replace-history-proof/specs.md`.
+- The follow-up mixed-DML proof documented in
+  `../ownerless-explicit-mixed-dml-history-proof/specs.md`.
 - The existing rollback-segment/undo history WAL proof and counters.
 - Focused SQL coverage for prepared explicit inserts and savepoint negative
   coverage.
 
 Out of scope:
 
-- Mixed DML, `INSERT ... SELECT`, `REPLACE ... SELECT`, broader `UPDATE`
-  shapes, broader `DELETE`/`REPLACE` shapes, DDL, foreign-key target inserts,
+- `INSERT ... SELECT`, `REPLACE ... SELECT`, broader `UPDATE` shapes, broader
+  `DELETE`/`REPLACE` shapes, DDL, foreign-key target inserts,
   savepoint-controlled transactions, and locking reads.
 - Replacing history proof page contents with a smaller proof representation.
 - Transaction-scoped append batching.
@@ -153,6 +159,10 @@ Implementation:
   explicit-transaction replacements carry that marker through the existing
   transaction proof while rejecting `REPLACE ... SELECT`, trigger-bearing,
   auto-increment, and referential-constraint shapes.
+- `packages/libmylite/tests/ownerless_cross_process_sql_test.c` now proves a
+  mixed explicit transaction composed of prepared insert, update, delete, and
+  replace statements carries the same marker through COMMIT, while a mixed
+  transaction with one unproven subquery update remains conservative.
 - `packages/libmylite/tests/ownerless_cross_process_sql_test.c` now requires
   the explicit transaction undo-WAL selector to report zero ownerless
   write-history flush pages, zero exact fallback rounds, and positive

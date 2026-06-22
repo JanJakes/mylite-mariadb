@@ -6176,6 +6176,12 @@ subsystems that this mode needs:
   visibility and the rollback-segment/undo history WAL proof, while
   `REPLACE ... SELECT`, trigger-bearing replacement targets, and
   auto-increment replacement targets remain conservative.
+  The same explicit-transaction proof is now covered for mixed proven DML: one
+  transaction can combine prepared `INSERT ... VALUES`, constrained
+  single-table `UPDATE`, constrained single-table `DELETE`, and constrained
+  single-table `REPLACE ... VALUES` statements, while a later mixed transaction
+  containing one unproven subquery update still falls back to the conservative
+  unproven-statement path.
   The page-write publish summary slice then promoted existing detailed native
   page-write counters into CI-facing per-insert summary rows for publish
   calls, dirty-page scan work, deferred pages, lookup/allocation/copy/checksum/
