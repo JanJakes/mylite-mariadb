@@ -305,6 +305,7 @@ BEGIN {
   phase_metric["wordpress_runtime_docker_cache_seconds"] = 1
   phase_metric["wordpress_runtime_docker_image_pack_seconds"] = 1
   phase_metric["wordpress_runtime_docker_image_tar_bytes"] = 1
+  phase_metric["wordpress_runtime_docker_image_upload_seconds"] = 1
   phase_metric["wordpress_docker_image_load_seconds"] = 1
   phase_metric["wordpress_docker_image_load_tar_bytes"] = 1
   phase_metric["wordpress_fetch_seconds"] = 1
@@ -317,7 +318,6 @@ BEGIN {
   phase_metric["wordpress_artifact_pack_runtime_root_bytes"] = 1
   phase_metric["wordpress_artifact_pack_runtime_tar_bytes"] = 1
   phase_metric["wordpress_artifact_pack_db_baseline_tar_bytes"] = 1
-  phase_metric["wordpress_artifact_pack_runtime_image_tar_bytes"] = 1
   phase_metric["wordpress_artifact_extract_runtime_tar_bytes"] = 1
   phase_metric["wordpress_artifact_extract_db_baseline_tar_bytes"] = 1
   phase_metric["wordpress_perf_summary_stock_php_process_start_ms_avg"] = 1
@@ -398,7 +398,10 @@ BEGIN {
       count_once("phase_all", row_label)
       add_sum("phase_all", metric, value)
     }
-    if (row_label !~ /^(artifact-download|artifact-extract|docker-image|phpunit|group-phpunit)-/) {
+    if (row_label ~ /^runtime-docker-image-/) {
+      count_once("runtime_image_setup", row_label)
+      add_sum("runtime_image_setup", metric, value)
+    } else if (row_label !~ /^(artifact-download|artifact-extract|docker-image|phpunit|group-phpunit)-/) {
       count_once("setup_phase", row_label)
       add_sum("setup_phase", metric, value)
     }
@@ -507,6 +510,10 @@ END {
     row_int("wordpress_setup_phase_count", counts["setup_phase"])
     emit_sum("setup_phase", "wordpress_total_seconds", "wordpress_setup_total_seconds_sum")
   }
+  if (counts["runtime_image_setup"] > 0) {
+    row_int("wordpress_runtime_image_phase_count", counts["runtime_image_setup"])
+    emit_sum("runtime_image_setup", "wordpress_total_seconds", "wordpress_runtime_image_total_seconds_sum")
+  }
   if (matrix_shard_count > 0) {
     row_int("wordpress_shard_phase_count", matrix_shard_count)
     row("wordpress_shard_critical_path_label", shard_max_label)
@@ -524,7 +531,13 @@ END {
       row_num("wordpress_shard_critical_path_non_phpunit_shell_seconds", shard_critical_non_phpunit_shell_seconds)
     }
     if (metric_seen("setup_phase", "wordpress_total_seconds")) {
-      estimated_critical_path = metric_sum("setup_phase", "wordpress_total_seconds") + shard_max_seconds
+      setup_critical_path = metric_sum("setup_phase", "wordpress_total_seconds")
+      if (metric_seen("runtime_image_setup", "wordpress_total_seconds") &&
+        metric_sum("runtime_image_setup", "wordpress_total_seconds") > setup_critical_path) {
+        setup_critical_path = metric_sum("runtime_image_setup", "wordpress_total_seconds")
+      }
+      row_num("wordpress_setup_critical_path_seconds", setup_critical_path)
+      estimated_critical_path = setup_critical_path + shard_max_seconds
       row_num("wordpress_estimated_workflow_critical_path_seconds", estimated_critical_path)
     }
   }
@@ -545,6 +558,7 @@ END {
   emit_sum("phase_metric", "wordpress_runtime_docker_cache_seconds", "wordpress_runtime_docker_cache_seconds")
   emit_sum("phase_metric", "wordpress_runtime_docker_image_pack_seconds", "wordpress_runtime_docker_image_pack_seconds")
   emit_int_sum("phase_metric", "wordpress_runtime_docker_image_tar_bytes", "wordpress_runtime_docker_image_tar_bytes")
+  emit_sum("phase_metric", "wordpress_runtime_docker_image_upload_seconds", "wordpress_runtime_docker_image_upload_seconds")
   emit_sum("phase_metric", "wordpress_docker_image_load_seconds", "wordpress_docker_image_load_seconds")
   emit_int_sum("phase_metric", "wordpress_docker_image_load_tar_bytes", "wordpress_docker_image_load_tar_bytes_sum")
   emit_sum("phase_metric", "wordpress_fetch_seconds", "wordpress_fetch_seconds")
@@ -557,7 +571,6 @@ END {
   emit_int_sum("phase_metric", "wordpress_artifact_pack_runtime_root_bytes", "wordpress_artifact_pack_runtime_root_bytes")
   emit_int_sum("phase_metric", "wordpress_artifact_pack_runtime_tar_bytes", "wordpress_artifact_pack_runtime_tar_bytes")
   emit_int_sum("phase_metric", "wordpress_artifact_pack_db_baseline_tar_bytes", "wordpress_artifact_pack_db_baseline_tar_bytes")
-  emit_int_sum("phase_metric", "wordpress_artifact_pack_runtime_image_tar_bytes", "wordpress_artifact_pack_runtime_image_tar_bytes")
   emit_int_sum("phase_metric", "wordpress_artifact_extract_runtime_tar_bytes", "wordpress_artifact_extract_runtime_tar_bytes_sum")
   emit_int_sum("phase_metric", "wordpress_artifact_extract_db_baseline_tar_bytes", "wordpress_artifact_extract_db_baseline_tar_bytes_sum")
   emit_sum("phase_metric", "wordpress_perf_summary_stock_php_process_start_ms_avg", "wordpress_perf_stock_php_process_start_ms_avg")

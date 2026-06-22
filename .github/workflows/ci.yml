@@ -339,36 +339,6 @@ jobs:
             "wordpress_docker_build_seconds=${docker_seconds}" \
             "wordpress_total_seconds=${docker_seconds}"
 
-      - name: Mark WordPress runtime Docker image cache seed start
-        run: |
-          set -euo pipefail
-          date +%s > build/wordpress-runtime-docker-image-cache-start.txt
-
-      - name: Build WordPress runtime Docker image cache
-        uses: docker/build-push-action@v7
-        env:
-          DOCKER_BUILD_RECORD_UPLOAD: "false"
-        with:
-          context: ./tools
-          file: ./tools/wordpress-phpunit-runtime.Dockerfile
-          load: true
-          tags: mylite-wordpress-phpunit-runtime:php83
-          cache-from: |
-            type=gha,scope=wordpress-phpunit-runtime-php83
-            type=gha,scope=wordpress-phpunit-php83
-          cache-to: type=gha,mode=max,scope=wordpress-phpunit-runtime-php83
-
-      - name: Record WordPress runtime Docker image cache timing
-        if: always()
-        run: |
-          set -euo pipefail
-          docker_start="$(cat build/wordpress-runtime-docker-image-cache-start.txt)"
-          docker_end="$(date +%s)"
-          docker_seconds="$((docker_end - docker_start))"
-          tools/wordpress-phpunit-append-timing --label runtime-docker-image-cache \
-            "wordpress_runtime_docker_cache_seconds=${docker_seconds}" \
-            "wordpress_total_seconds=${docker_seconds}"
-
       - name: Fetch WordPress PHPUnit sources
         env:
           MYLITE_WORDPRESS_PHASE: fetch
@@ -459,8 +429,7 @@ jobs:
           zstd --version
           rm -f \
             build/wordpress-phpunit-runtime.tar.zst \
-            build/wordpress-phpunit-db-baseline.tar.zst \
-            build/wordpress-phpunit-runtime-image.tar.zst
+            build/wordpress-phpunit-db-baseline.tar.zst
           rm -rf "${runtime_root}"
           mkdir -p \
             "${runtime_root}/build/wordpress-develop" \
@@ -535,26 +504,16 @@ jobs:
             -cf - \
             "$(basename "${MYLITE_WORDPRESS_DB_BASELINE_DIR}")" \
             | zstd -T0 -3 -o build/wordpress-phpunit-db-baseline.tar.zst
-          docker image inspect mylite-wordpress-phpunit-runtime:php83 >/dev/null
-          runtime_image_pack_start="$(date +%s)"
-          docker image save mylite-wordpress-phpunit-runtime:php83 \
-            | zstd -T0 -3 -o build/wordpress-phpunit-runtime-image.tar.zst
-          runtime_image_pack_end="$(date +%s)"
-          runtime_image_pack_seconds="$((runtime_image_pack_end - runtime_image_pack_start))"
           pack_end="$(date +%s)"
           pack_seconds="$((pack_end - pack_start))"
           runtime_root_bytes="$(du -sb "${runtime_root}" | awk '{print $1}')"
           runtime_tar_bytes="$(wc -c < build/wordpress-phpunit-runtime.tar.zst | tr -d '[:space:]')"
           db_baseline_tar_bytes="$(wc -c < build/wordpress-phpunit-db-baseline.tar.zst | tr -d '[:space:]')"
-          runtime_image_tar_bytes="$(wc -c < build/wordpress-phpunit-runtime-image.tar.zst | tr -d '[:space:]')"
           tools/wordpress-phpunit-append-timing --label artifact-pack \
             "wordpress_artifact_pack_seconds=${pack_seconds}" \
             "wordpress_artifact_pack_runtime_root_bytes=${runtime_root_bytes}" \
             "wordpress_artifact_pack_runtime_tar_bytes=${runtime_tar_bytes}" \
             "wordpress_artifact_pack_db_baseline_tar_bytes=${db_baseline_tar_bytes}" \
-            "wordpress_artifact_pack_runtime_image_tar_bytes=${runtime_image_tar_bytes}" \
-            "wordpress_runtime_docker_image_pack_seconds=${runtime_image_pack_seconds}" \
-            "wordpress_runtime_docker_image_tar_bytes=${runtime_image_tar_bytes}" \
             "wordpress_total_seconds=${pack_seconds}"
 
       - name: Mark WordPress PHPUnit runtime artifact upload start
@@ -569,7 +528,6 @@ jobs:
           path: |
             build/wordpress-phpunit-runtime.tar.zst
             build/wordpress-phpunit-db-baseline.tar.zst
-            build/wordpress-phpunit-runtime-image.tar.zst
           if-no-files-found: error
           compression-level: 0
 
@@ -600,7 +558,6 @@ jobs:
             "${MYLITE_WORDPRESS_DB_BASELINE_DIR}" \
             build/wordpress-phpunit-runtime.tar.zst \
             build/wordpress-phpunit-db-baseline.tar.zst \
-            build/wordpress-phpunit-runtime-image.tar.zst \
             build/wordpress-phpunit-runtime-root \
             build/wordpress-develop \
             build/wordpress-phpunit-tools \
@@ -610,10 +567,123 @@ jobs:
             2>/dev/null || true
           df -h .
 
+  wordpress-phpunit-runtime-image:
+    name: wordpress-phpunit-mysqli-mylite-runtime-image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    env:
+      MYLITE_WORDPRESS_TIMING_SUMMARY_PATH: build/wordpress-phpunit-reports/timing-summary-runtime-image.md
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Audit CI production build configuration
+        run: tools/check-ci-production-builds
+
+      - name: Show runner resources
+        run: |
+          df -h .
+          free -h
+          docker version
+
+      - name: Mark WordPress runtime Docker image build start
+        run: |
+          set -euo pipefail
+          mkdir -p build/wordpress-phpunit-reports
+          date +%s > build/wordpress-runtime-docker-image-build-start.txt
+
+      - name: Set up WordPress runtime Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build WordPress runtime Docker image
+        uses: docker/build-push-action@v7
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
+        with:
+          context: ./tools
+          file: ./tools/wordpress-phpunit-runtime.Dockerfile
+          load: true
+          tags: mylite-wordpress-phpunit-runtime:php83
+          cache-from: |
+            type=gha,scope=wordpress-phpunit-runtime-php83
+            type=gha,scope=wordpress-phpunit-php83
+          cache-to: type=gha,mode=max,scope=wordpress-phpunit-runtime-php83
+
+      - name: Record WordPress runtime Docker image timing
+        if: always()
+        run: |
+          set -euo pipefail
+          docker_start="$(cat build/wordpress-runtime-docker-image-build-start.txt)"
+          docker_end="$(date +%s)"
+          docker_seconds="$((docker_end - docker_start))"
+          tools/wordpress-phpunit-append-timing --label runtime-docker-image-build \
+            "wordpress_runtime_docker_cache_seconds=${docker_seconds}" \
+            "wordpress_total_seconds=${docker_seconds}"
+
+      - name: Pack WordPress runtime Docker image artifact
+        run: |
+          set -euo pipefail
+          pack_start="$(date +%s)"
+          zstd --version
+          rm -f build/wordpress-phpunit-runtime-image.tar.zst
+          docker image inspect mylite-wordpress-phpunit-runtime:php83 >/dev/null
+          docker image save mylite-wordpress-phpunit-runtime:php83 \
+            | zstd -T0 -3 -o build/wordpress-phpunit-runtime-image.tar.zst
+          pack_end="$(date +%s)"
+          pack_seconds="$((pack_end - pack_start))"
+          runtime_image_tar_bytes="$(wc -c < build/wordpress-phpunit-runtime-image.tar.zst | tr -d '[:space:]')"
+          tools/wordpress-phpunit-append-timing --label runtime-docker-image-pack \
+            "wordpress_runtime_docker_image_pack_seconds=${pack_seconds}" \
+            "wordpress_runtime_docker_image_tar_bytes=${runtime_image_tar_bytes}" \
+            "wordpress_total_seconds=${pack_seconds}"
+
+      - name: Mark WordPress runtime Docker image artifact upload start
+        run: |
+          set -euo pipefail
+          date +%s > build/wordpress-runtime-docker-image-upload-start.txt
+
+      - name: Upload WordPress runtime Docker image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wordpress-phpunit-runtime-image
+          path: build/wordpress-phpunit-runtime-image.tar.zst
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Record WordPress runtime Docker image artifact upload timing
+        if: always()
+        run: |
+          set -euo pipefail
+          upload_start="$(cat build/wordpress-runtime-docker-image-upload-start.txt)"
+          upload_end="$(date +%s)"
+          upload_seconds="$((upload_end - upload_start))"
+          tools/wordpress-phpunit-append-timing --label runtime-docker-image-upload \
+            "wordpress_runtime_docker_image_upload_seconds=${upload_seconds}" \
+            "wordpress_total_seconds=${upload_seconds}"
+
+      - name: Upload WordPress runtime Docker image timing summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wordpress-phpunit-timing-summary-runtime-image
+          path: build/wordpress-phpunit-reports/timing-summary-runtime-image.md
+          if-no-files-found: warn
+
+      - name: Show generated artifact sizes
+        if: always()
+        run: |
+          du -sh \
+            build/wordpress-phpunit-runtime-image.tar.zst \
+            2>/dev/null || true
+          df -h .
+
   wordpress-phpunit-shard:
     name: wordpress-phpunit-mysqli-mylite (${{ matrix.label }})
     runs-on: ubuntu-24.04
-    needs: wordpress-phpunit-setup
+    needs:
+      - wordpress-phpunit-setup
+      - wordpress-phpunit-runtime-image
     timeout-minutes: 45
 
     strategy:
@@ -961,19 +1031,20 @@ jobs:
           free -h
           docker version
 
-      - name: Mark WordPress PHPUnit runtime artifact download start
+      - name: Mark WordPress PHPUnit runtime artifacts download start
         run: |
           set -euo pipefail
           mkdir -p build/wordpress-phpunit-reports
           date +%s > build/wordpress-phpunit-runtime-download-start.txt
 
-      - name: Download WordPress PHPUnit runtime artifact
+      - name: Download WordPress PHPUnit runtime artifacts
         uses: actions/download-artifact@v4
         with:
-          name: wordpress-phpunit-runtime
+          pattern: wordpress-phpunit-runtime*
           path: build/wordpress-phpunit-runtime-artifact
+          merge-multiple: true
 
-      - name: Record WordPress PHPUnit runtime artifact download timing
+      - name: Record WordPress PHPUnit runtime artifacts download timing
         if: always()
         run: |
           set -euo pipefail
@@ -1239,6 +1310,7 @@ jobs:
     runs-on: ubuntu-24.04
     needs:
       - wordpress-phpunit-setup
+      - wordpress-phpunit-runtime-image
       - wordpress-phpunit-shard
     if: always()
     timeout-minutes: 10
@@ -1308,12 +1380,15 @@ jobs:
       - name: Check WordPress PHPUnit shard results
         env:
           WORDPRESS_SETUP_RESULT: ${{ needs.wordpress-phpunit-setup.result }}
+          WORDPRESS_RUNTIME_IMAGE_RESULT: ${{ needs.wordpress-phpunit-runtime-image.result }}
           WORDPRESS_SHARD_RESULT: ${{ needs.wordpress-phpunit-shard.result }}
         run: |
           set -euo pipefail
           echo "wordpress_phpunit_setup_result=${WORDPRESS_SETUP_RESULT}"
+          echo "wordpress_phpunit_runtime_image_result=${WORDPRESS_RUNTIME_IMAGE_RESULT}"
           echo "wordpress_phpunit_shard_result=${WORDPRESS_SHARD_RESULT}"
           test "${WORDPRESS_SETUP_RESULT}" = "success"
+          test "${WORDPRESS_RUNTIME_IMAGE_RESULT}" = "success"
           test "${WORDPRESS_SHARD_RESULT}" = "success"
 
   clang-tools:

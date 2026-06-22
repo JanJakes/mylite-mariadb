@@ -19,6 +19,20 @@ test-only runtime Dockerfile and has the runtime image loaded in a production
 job. Rebuilding or materializing that image independently in every shard adds
 high-variance work before PHPUnit starts.
 
+The first artifacted-image run, `27971579104` on `f6a71cf62`, proved the
+image artifact path but showed that saving and uploading the image inside the
+main setup job moved cost onto the setup critical path:
+
+- shard Docker work fell from `599s` to `278s`;
+- shard image-load work was `253s`;
+- critical shard non-PHPUnit shell time fell from `42.839s` to `31.101s`;
+- artifact download rose from `96s` to `213s`;
+- setup rose from `67s` to `83s`;
+- estimated workflow critical path rose from `140s` to `146s`.
+
+The follow-up shape must keep the shard-side image-load win while moving
+runtime image build, save, and upload into a parallel prerequisite job.
+
 ## Source Findings
 
 - MariaDB base remains `mariadb-11.8.6`
@@ -29,7 +43,7 @@ high-variance work before PHPUnit starts.
   `MYLITE_WORDPRESS_SKIP_DOCKER_BUILD=1`, so CI can prepare the Docker image
   outside the harness and keep PHPUnit execution unchanged.
 - The setup job builds `tools/wordpress-phpunit.Dockerfile` as the
-  build-capable image and separately seeds
+  build-capable image. A separate runtime-image job builds
   `tools/wordpress-phpunit-runtime.Dockerfile` under
   `mylite-wordpress-phpunit-runtime:php83`.
 - The shard job currently runs Buildx against the runtime Dockerfile in every
@@ -45,15 +59,18 @@ Keep the setup image and the runtime image distinct:
 
 - the setup job continues to use `mylite-wordpress-phpunit:php83` for build,
   dependency, database preparation, and performance-probe phases;
-- the runtime image cache seed now uses `load: true` while keeping the separate
-  tag `mylite-wordpress-phpunit-runtime:php83`;
-- the runtime artifact pack step saves that loaded runtime image with
-  `docker image save` and zstd compression as
+- a parallel `wordpress-phpunit-runtime-image` job builds the runtime Dockerfile
+  with `load: true` while keeping the separate tag
+  `mylite-wordpress-phpunit-runtime:php83`;
+- the runtime-image job saves that loaded image with `docker image save` and
+  zstd compression as
   `build/wordpress-phpunit-runtime-image.tar.zst`;
-- the existing `wordpress-phpunit-runtime` artifact uploads the runtime root,
-  database baseline, and runtime image tarballs together;
-- each shard downloads the same artifact, extracts only the runtime root and
-  database baseline, then loads the Docker image tarball with `docker load`;
+- the runtime-image job uploads `wordpress-phpunit-runtime-image`, separate
+  from the setup job's `wordpress-phpunit-runtime` artifact;
+- each shard has both setup jobs in `needs`, downloads both artifacts with one
+  merged `wordpress-phpunit-runtime*` artifact action, extracts only the
+  runtime root and database baseline, then loads the Docker image tarball with
+  `docker load`;
 - after loading, the shard retags
   `mylite-wordpress-phpunit-runtime:php83` to the harness default
   `mylite-wordpress-phpunit:php83`;
@@ -62,9 +79,10 @@ Keep the setup image and the runtime image distinct:
   `wordpress_docker_image_load_seconds` and
   `wordpress_docker_image_load_tar_bytes`.
 
-The production-build audit requires the runtime-image tarball, the setup-side
-image pack metrics, the shard-side Docker load metrics, and rejects the stale
-per-shard Buildx runtime-image steps.
+The production-build audit requires the parallel runtime-image job, the
+runtime-image artifact tarball, runtime-image pack/upload metrics, shard-side
+Docker load metrics, aggregate result checks for the new job, and rejection of
+stale per-shard Buildx runtime-image steps.
 
 ## Non-Goals
 
@@ -97,10 +115,14 @@ page-version behavior changes.
 
 The expected benefit is lower and less variable per-shard Docker setup time
 because shards load one setup-produced image artifact instead of running Buildx.
-The tradeoff is a larger runtime artifact and a setup-side image save/compress
-cost. CI timing must compare:
+The tradeoff is larger per-shard artifact download. The runtime image build,
+save, and upload now run in parallel with the main setup job, and the rollup
+uses the larger of main setup time and runtime-image setup time for estimated
+workflow critical path. CI timing must compare:
 
-- setup `wordpress_runtime_docker_image_pack_seconds`;
+- `wordpress_runtime_docker_cache_seconds`;
+- `wordpress_runtime_docker_image_pack_seconds`;
+- `wordpress_runtime_docker_image_upload_seconds`;
 - runtime artifact upload/download seconds and bytes;
 - shard `wordpress_docker_image_load_seconds`;
 - critical-path non-PHPUnit shell seconds;
@@ -121,14 +143,16 @@ cost. CI timing must compare:
 
 ## Acceptance Criteria
 
-- Setup CI loads the runtime Dockerfile image under
+- Runtime-image CI loads the runtime Dockerfile image under
   `mylite-wordpress-phpunit-runtime:php83`.
-- The uploaded WordPress runtime artifact includes
+- The uploaded WordPress runtime-image artifact includes
   `wordpress-phpunit-runtime-image.tar.zst`.
-- Shards load that image artifact, retag it to
+- Shards download the runtime root and runtime-image artifacts through one
+  merged artifact action, load that image artifact, retag it to
   `mylite-wordpress-phpunit:php83`, and run the existing test-only harness with
   `MYLITE_WORDPRESS_SKIP_DOCKER_BUILD=1`.
-- The timing rollup reports both setup image-pack and shard image-load metrics.
+- The timing rollup reports runtime-image build/pack/upload, shard image-load,
+  and parallel setup critical-path metrics.
 - The production audit rejects stale per-shard Buildx runtime-image builds.
 
 ## Verification Results
@@ -152,8 +176,22 @@ Local verification on 2026-06-22:
 - `cmake --build --preset format-check-prod`: passed.
 - `git diff --check`: passed.
 
+Follow-up local verification after splitting the runtime image artifact into a
+parallel CI job:
+
+- `bash -n tools/check-ci-production-builds`: passed.
+- `bash -n tools/wordpress-phpunit-timing-rollup`: passed.
+- `bash -n tools/wordpress-phpunit-timing-rollup-test`: passed.
+- `tools/check-ci-production-builds`: passed.
+- `tools/wordpress-phpunit-timing-rollup-test`: passed.
+- `ctest --preset prod -R
+  '^tools\.(ci-production-builds|wordpress-phpunit-timing-rollup)$'
+  --output-on-failure`: passed, 2/2 tests in 5.03s.
+- `cmake --build --preset format-check-prod`: passed.
+- `git diff --check`: passed.
+
 Pushed CI must provide the first full production timing for the runtime image
-artifact shape.
+artifact shape after the runtime-image job split.
 
 ## Risks
 

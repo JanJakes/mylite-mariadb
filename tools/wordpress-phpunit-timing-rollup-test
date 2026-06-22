@@ -20,12 +20,16 @@ cat > "${summary}" <<'SUMMARY'
 | artifact-pack | wordpress_artifact_pack_runtime_root_bytes | 180 |
 | artifact-pack | wordpress_artifact_pack_runtime_tar_bytes | 100 |
 | artifact-pack | wordpress_artifact_pack_db_baseline_tar_bytes | 20 |
-| artifact-pack | wordpress_artifact_pack_runtime_image_tar_bytes | 300 |
-| artifact-pack | wordpress_runtime_docker_image_pack_seconds | 2 |
-| artifact-pack | wordpress_runtime_docker_image_tar_bytes | 300 |
 | artifact-pack | wordpress_total_seconds | 12 |
 | artifact-upload | wordpress_artifact_upload_seconds | 3 |
 | artifact-upload | wordpress_total_seconds | 3 |
+| runtime-docker-image-build | wordpress_runtime_docker_cache_seconds | 6 |
+| runtime-docker-image-build | wordpress_total_seconds | 6 |
+| runtime-docker-image-pack | wordpress_runtime_docker_image_pack_seconds | 2 |
+| runtime-docker-image-pack | wordpress_runtime_docker_image_tar_bytes | 300 |
+| runtime-docker-image-pack | wordpress_total_seconds | 2 |
+| runtime-docker-image-upload | wordpress_runtime_docker_image_upload_seconds | 1 |
+| runtime-docker-image-upload | wordpress_total_seconds | 1 |
 | artifact-download-db | wordpress_artifact_download_seconds | 4 |
 | artifact-download-db | wordpress_total_seconds | 4 |
 | artifact-extract-db | wordpress_artifact_extract_seconds | 5 |
@@ -176,10 +180,12 @@ require_row "| timing-rollup | wordpress_phpunit_isolated_child_process_outer_mi
 require_row "| timing-rollup | wordpress_phpunit_non_isolated_shell_real_seconds_sum | 190.469 |"
 require_row "| timing-rollup | wordpress_build_mariadb_embedded_seconds | 406.000 |"
 require_row "| timing-rollup | wordpress_build_total_seconds | 424.000 |"
-require_row "| timing-rollup | wordpress_timed_phase_count | 17 |"
-require_row "| timing-rollup | wordpress_timed_phase_total_seconds_sum | 779.000 |"
+require_row "| timing-rollup | wordpress_timed_phase_count | 20 |"
+require_row "| timing-rollup | wordpress_timed_phase_total_seconds_sum | 788.000 |"
 require_row "| timing-rollup | wordpress_setup_phase_count | 4 |"
 require_row "| timing-rollup | wordpress_setup_total_seconds_sum | 468.000 |"
+require_row "| timing-rollup | wordpress_runtime_image_phase_count | 3 |"
+require_row "| timing-rollup | wordpress_runtime_image_total_seconds_sum | 9.000 |"
 require_row "| timing-rollup | wordpress_shard_phase_count | 3 |"
 require_row "| timing-rollup | wordpress_shard_critical_path_label | non-isolated-rest |"
 require_row "| timing-rollup | wordpress_shard_critical_path_seconds_max | 213.000 |"
@@ -189,6 +195,7 @@ require_row "| timing-rollup | wordpress_shard_critical_path_docker_image_second
 require_row "| timing-rollup | wordpress_shard_critical_path_phpunit_total_seconds | 170.000 |"
 require_row "| timing-rollup | wordpress_shard_critical_path_phpunit_shell_real_seconds | 168.469 |"
 require_row "| timing-rollup | wordpress_shard_critical_path_non_phpunit_shell_seconds | 44.531 |"
+require_row "| timing-rollup | wordpress_setup_critical_path_seconds | 468.000 |"
 require_row "| timing-rollup | wordpress_estimated_workflow_critical_path_seconds | 681.000 |"
 require_row "| timing-rollup | wordpress_shard_non_phpunit_shell_seconds_max_label | non-isolated-rest |"
 require_row "| timing-rollup | wordpress_shard_non_phpunit_shell_seconds_max | 44.531 |"
@@ -203,12 +210,13 @@ require_row "| timing-rollup | wordpress_artifact_extract_seconds | 16.000 |"
 require_row "| timing-rollup | wordpress_artifact_pack_runtime_root_bytes | 180 |"
 require_row "| timing-rollup | wordpress_artifact_pack_runtime_tar_bytes | 100 |"
 require_row "| timing-rollup | wordpress_artifact_pack_db_baseline_tar_bytes | 20 |"
-require_row "| timing-rollup | wordpress_artifact_pack_runtime_image_tar_bytes | 300 |"
 require_row "| timing-rollup | wordpress_artifact_extract_runtime_tar_bytes_sum | 100 |"
 require_row "| timing-rollup | wordpress_artifact_extract_db_baseline_tar_bytes_sum | 20 |"
 require_row "| timing-rollup | wordpress_docker_build_seconds | 78.000 |"
+require_row "| timing-rollup | wordpress_runtime_docker_cache_seconds | 6.000 |"
 require_row "| timing-rollup | wordpress_runtime_docker_image_pack_seconds | 2.000 |"
 require_row "| timing-rollup | wordpress_runtime_docker_image_tar_bytes | 300 |"
+require_row "| timing-rollup | wordpress_runtime_docker_image_upload_seconds | 1.000 |"
 require_row "| timing-rollup | wordpress_docker_image_load_seconds | 78.000 |"
 require_row "| timing-rollup | wordpress_docker_image_load_tar_bytes_sum | 930 |"
 require_row "| timing-rollup | wordpress_perf_php_extension_process_overhead_ms_avg | 7.173 |"
