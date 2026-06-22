@@ -35,6 +35,7 @@ Refactored 2013-7-26 by Kevin Lewis
 #include "buf0dblwr.h"
 #include "log.h"
 
+#include <mylite_embedded_startup_perf.h>
 #include <mylite_ownerless_file_lock_policy.h>
 
 /** The server header file is included to access opt_initialize global variable.
@@ -403,21 +404,25 @@ SysTablespace::check_size(
 
 /** Set the size of the file.
 @param[in]	file	data file object
+@param[in]	is_sparse	whether to size the file sparsely
 @return DB_SUCCESS or error code */
 dberr_t
 SysTablespace::set_size(
-	Datafile&	file)
+	Datafile&	file,
+	bool		is_sparse)
 {
 	ut_ad(!srv_read_only_mode || m_ignore_read_only);
 	const ib::bytes_iec b{uint64_t{file.m_size} << srv_page_size_shift};
 
-	/* We created the data file and now write it full of zeros */
 	ib::info() << "Setting file '" << file.filepath() << "' size to " << b
-		<< ". Physically writing the file full; Please wait ...";
+		<< (is_sparse
+			    ? ". Sizing the file sparsely; Please wait ..."
+			    : ". Physically writing the file full; Please wait ...");
 
 	bool	success = os_file_set_size(
 		file.m_filepath, file.m_handle,
-		static_cast<os_offset_t>(file.m_size) << srv_page_size_shift);
+		static_cast<os_offset_t>(file.m_size) << srv_page_size_shift,
+		is_sparse);
 
 	if (success) {
 		ib::info() << "File '" << file.filepath() << "' size is now "
@@ -435,10 +440,12 @@ SysTablespace::set_size(
 
 /** Create a data file.
 @param[in]	file	data file object
+@param[in]	is_temp	whether this is a temporary tablespace
 @return DB_SUCCESS or error code */
 dberr_t
 SysTablespace::create_file(
-	Datafile&	file)
+	Datafile&	file,
+	bool		is_temp)
 {
 	dberr_t	err = DB_SUCCESS;
 
@@ -484,7 +491,15 @@ SysTablespace::create_file(
 #endif
 		/* fall through */
 	case SRV_NEW_RAW:
-		err = set_size(file);
+	{
+		const bool sparse_size= is_temp && file.m_type == SRV_NOT_RAW;
+		if (sparse_size) {
+			mylite_embedded_startup_perf_count(
+				MYLITE_EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_SPARSE_SET_SIZE_CALLS);
+		}
+		err = set_size(file, sparse_size);
+		break;
+	}
 	}
 
 	return(err);
@@ -928,7 +943,7 @@ SysTablespace::open_or_create(
 			}
 
 		} else {
-			err = create_file(*it);
+			err = create_file(*it, is_temp);
 
 			if (sum_new_sizes) {
 				*sum_new_sizes += it->m_size;

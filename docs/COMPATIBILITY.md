@@ -2050,6 +2050,15 @@ sub-millisecond in that sample. Ownerless warm opens showed the same temporary
 tablespace shape, while still occasionally paying actual redo rebuild time;
 redo rebuild trigger frequency remains a separate performance target from the
 temporary tablespace create/open cost.
+InnoDB temporary tablespace startup now sizes newly created temp tablespace
+files sparsely on non-Windows builds while preserving the existing delete,
+spec-check, fil-open, header initialization, and temp rollback-segment creation
+order. A reduced production probe reported ordinary warm-open temp
+`open_or_create` at `0.084 ms` with `sparse_set_size_calls=2`,
+`create_new_calls=2`, and `reuse_existing_calls=0`, and ownerless warm-open
+temp `open_or_create` at `0.065 ms` with the same sparse/create/reuse counts;
+the remaining temp tablespace bucket was about `2.2-2.4 ms`, dominated by
+temporary rollback-segment creation rather than 12 MiB physical file sizing.
 A follow-up public API branch/main parity benchmark now builds
 `tools/mylite_public_open_close_bench` and measures only portable
 `mylite_open()` plus `mylite_close()` behavior over an InnoDB table. Against

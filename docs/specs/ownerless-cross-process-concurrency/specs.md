@@ -5535,6 +5535,13 @@ subsystems that this mode needs:
   sample showed the same temp tablespace shape, while still occasionally
   paying actual redo rebuild time; redo rebuild trigger frequency remains a
   separate performance target from the temp file create/open cost.
+  A follow-up temp sparse-size slice now uses sparse sizing for newly created
+  InnoDB temporary tablespace files on non-Windows builds. A reduced production
+  probe reported ordinary warm-open temp `open_or_create` at `0.084 ms` with
+  `sparse_set_size_calls=2`, `create_new_calls=2`, and `reuse_existing_calls=0`;
+  ownerless warm-open temp `open_or_create` was `0.065 ms` with the same counts.
+  The remaining temp tablespace bucket is now temporary rollback-segment
+  creation, not physical 12 MiB temp-file sizing.
   A follow-up final-ownerless shutdown slice then made that redo-rebuild target
   payload-aware: when the closing ownerless runtime holds the startup lock,
   has no live ownerless peers, and the retained WAL has no page-version payload

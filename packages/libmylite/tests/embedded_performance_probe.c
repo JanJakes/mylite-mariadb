@@ -1222,6 +1222,7 @@ enum embedded_startup_perf_stat_index {
     EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_CHECK_FILE_SPEC_NS,
     EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_CREATE_NEW_CALLS,
     EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_REUSE_EXISTING_CALLS,
+    EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_SPARSE_SET_SIZE_CALLS,
     EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_OPEN_OR_CREATE_NS,
     EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_FIL_OPEN_NS,
     EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_HEADER_INIT_NS,
@@ -10884,6 +10885,11 @@ static void emit_embedded_startup_perf_summary(const char *prefix) {
         values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_CHECK_FILE_SPEC_NS],
         innodb_temp_tablespace_calls
     );
+    printf(
+        "%s_startup_innodb_temp_tablespace_sparse_set_size_calls=%" PRIu64 "\n",
+        prefix,
+        values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_SPARSE_SET_SIZE_CALLS]
+    );
     emit_embedded_startup_perf_summary_ms(
         prefix,
         "innodb_temp_tablespace_open_or_create",
@@ -11668,6 +11674,11 @@ static void emit_embedded_startup_perf_stats(const char *prefix) {
         prefix,
         "innodb_temp_tablespace_reuse_existing_calls",
         values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_REUSE_EXISTING_CALLS]
+    );
+    emit_embedded_startup_perf_value(
+        prefix,
+        "innodb_temp_tablespace_sparse_set_size_calls",
+        values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_SPARSE_SET_SIZE_CALLS]
     );
     emit_embedded_startup_perf_ms(
         prefix,

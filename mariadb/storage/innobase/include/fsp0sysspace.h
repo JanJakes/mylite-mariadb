@@ -213,8 +213,9 @@ private:
 
 	/** Create a data file.
 	@param[in,out]	file	data file object
+	@param[in]	is_temp	whether this is a temporary tablespace
 	@return DB_SUCCESS or error code */
-	dberr_t create_file(Datafile& file);
+	dberr_t create_file(Datafile& file, bool is_temp= false);
 
 	/** Open a data file.
 	@param[in,out]	file	data file object
@@ -223,8 +224,9 @@ private:
 
 	/** Set the size of the file.
 	@param[in,out]	file	data file object
+	@param[in]	is_sparse	whether to size the file sparsely
 	@return DB_SUCCESS or error code */
-	dberr_t set_size(Datafile& file);
+	dberr_t set_size(Datafile& file, bool is_sparse= false);
 
 	/** Convert a numeric string that optionally ends in G or M, to a
 	number containing megabytes.

@@ -154,7 +154,10 @@ startup attribution.
 
 ## Risks And Follow-Up
 
-The likely optimization target may still be upstream InnoDB-required temporary
-tablespace initialization. Any future optimization must be a separate slice
-with clean shutdown, crash recovery, read-only startup, ordinary embedded open,
-ownerless cross-process open, and runtime cleanup evidence.
+The follow-up `../embedded-innodb-temp-tablespace-sparse-size/specs.md` slice
+addresses the measured file create/open child by sizing newly created temporary
+tablespace files sparsely while keeping InnoDB temp header initialization and
+temporary rollback-segment creation intact. Further startup optimization should
+target clean redo scan or temp rollback-segment creation with separate clean
+shutdown, crash recovery, read-only startup, ordinary embedded open, ownerless
+cross-process open, and runtime cleanup evidence.
