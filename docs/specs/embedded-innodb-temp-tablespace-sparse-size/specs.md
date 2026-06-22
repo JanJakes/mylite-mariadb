@@ -142,6 +142,13 @@ The remaining temp tablespace startup cost is temporary rollback-segment
 creation (`2.102 ms` ordinary, `2.263 ms` ownerless in the same reduced
 sample), not physical 12 MiB temp-file sizing.
 
+The follow-up
+`../embedded-innodb-temp-rseg-startup-attribution/specs.md` slice splits that
+remaining `trx_temp_rseg_create()` bucket without changing native temporary
+rollback segment semantics. Its reduced production probe showed the remaining
+ordinary warm-open `rseg_create=2.091 ms` bucket was dominated by rollback
+segment header creation (`2.007 ms`) across 128 temp segments per open.
+
 ## Risks
 
 - Sparse temp sizing can defer ENOSPC from startup to later temporary

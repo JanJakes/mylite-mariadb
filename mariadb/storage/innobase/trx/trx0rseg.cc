@@ -770,23 +770,52 @@ dberr_t trx_rseg_array_init()
 /** Create the temporary rollback segments. */
 dberr_t trx_temp_rseg_create(mtr_t *mtr)
 {
+  mylite_embedded_startup_perf_count(
+    MYLITE_EMBEDDED_STARTUP_PERF_INNODB_TEMP_RSEG_CREATE_CALLS);
+
   for (ulong i= 0; i < array_elements(trx_sys.temp_rsegs); i++)
   {
+    uint64_t mylite_stage_start=
+      mylite_embedded_startup_perf_start_ns();
     mtr->start();
     mtr->set_log_mode(MTR_LOG_NO_REDO);
     mtr->x_lock_space(fil_system.temp_space);
+    mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_INNODB_TEMP_RSEG_CREATE_SETUP_NS,
+      mylite_stage_start);
+
     dberr_t err;
+    mylite_stage_start= mylite_embedded_startup_perf_start_ns();
     buf_block_t *rblock=
       trx_rseg_header_create(fil_system.temp_space, i, 0, mtr, &err);
+    mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_INNODB_TEMP_RSEG_CREATE_HEADER_NS,
+      mylite_stage_start);
+
     if (UNIV_UNLIKELY(!rblock))
     {
+      mylite_stage_start= mylite_embedded_startup_perf_start_ns();
       mtr->commit();
+      mylite_embedded_startup_perf_add_elapsed(
+        MYLITE_EMBEDDED_STARTUP_PERF_INNODB_TEMP_RSEG_CREATE_COMMIT_NS,
+        mylite_stage_start);
       return err;
     }
+    mylite_stage_start= mylite_embedded_startup_perf_start_ns();
     trx_sys.temp_rsegs[i].destroy();
     trx_sys.temp_rsegs[i].init(fil_system.temp_space,
                                rblock->page.id().page_no());
+    mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_INNODB_TEMP_RSEG_CREATE_MEMORY_NS,
+      mylite_stage_start);
+    mylite_embedded_startup_perf_count(
+      MYLITE_EMBEDDED_STARTUP_PERF_INNODB_TEMP_RSEG_CREATE_CREATED_COUNT);
+
+    mylite_stage_start= mylite_embedded_startup_perf_start_ns();
     mtr->commit();
+    mylite_embedded_startup_perf_add_elapsed(
+      MYLITE_EMBEDDED_STARTUP_PERF_INNODB_TEMP_RSEG_CREATE_COMMIT_NS,
+      mylite_stage_start);
   }
   return DB_SUCCESS;
 }

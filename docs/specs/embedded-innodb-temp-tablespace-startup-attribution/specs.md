@@ -157,7 +157,10 @@ startup attribution.
 The follow-up `../embedded-innodb-temp-tablespace-sparse-size/specs.md` slice
 addresses the measured file create/open child by sizing newly created temporary
 tablespace files sparsely while keeping InnoDB temp header initialization and
-temporary rollback-segment creation intact. Further startup optimization should
-target clean redo scan or temp rollback-segment creation with separate clean
-shutdown, crash recovery, read-only startup, ordinary embedded open, ownerless
-cross-process open, and runtime cleanup evidence.
+temporary rollback-segment creation intact. The follow-up
+`../embedded-innodb-temp-rseg-startup-attribution/specs.md` slice then splits
+the remaining temp rollback-segment bucket before any native transaction
+assignment change. Further startup optimization should target clean redo scan or
+temp rollback-segment creation with separate clean shutdown, crash recovery,
+read-only startup, ordinary embedded open, ownerless cross-process open, and
+runtime cleanup evidence.

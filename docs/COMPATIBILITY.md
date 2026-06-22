@@ -2059,6 +2059,16 @@ order. A reduced production probe reported ordinary warm-open temp
 temp `open_or_create` at `0.065 ms` with the same sparse/create/reuse counts;
 the remaining temp tablespace bucket was about `2.2-2.4 ms`, dominated by
 temporary rollback-segment creation rather than 12 MiB physical file sizing.
+A follow-up temp rollback-segment attribution slice splits
+`trx_temp_rseg_create()` into mini-transaction setup, rollback segment header
+creation, in-memory segment reset, and mini-transaction commit timing while
+recording the 128 segment creations per successful temporary tablespace startup.
+It deliberately does not reduce the segment count because native temp
+transaction assignment still round-robins over all `TRX_SYS_N_RSEGS` slots.
+The reduced production probe reported ordinary warm-open temp rseg creation at
+`2.091 ms`, with `2.007 ms` in header creation and `created_count=256` across
+two opens; ownerless reported `2.117 ms`, with `2.039 ms` in header creation and
+the same 256 created segments across two opens.
 A follow-up public API branch/main parity benchmark now builds
 `tools/mylite_public_open_close_bench` and measures only portable
 `mylite_open()` plus `mylite_close()` behavior over an InnoDB table. Against

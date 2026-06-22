@@ -1227,6 +1227,12 @@ enum embedded_startup_perf_stat_index {
     EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_FIL_OPEN_NS,
     EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_HEADER_INIT_NS,
     EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_RSEG_CREATE_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_TEMP_RSEG_CREATE_CALLS,
+    EMBEDDED_STARTUP_PERF_INNODB_TEMP_RSEG_CREATE_SETUP_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_TEMP_RSEG_CREATE_HEADER_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_TEMP_RSEG_CREATE_MEMORY_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_TEMP_RSEG_CREATE_COMMIT_NS,
+    EMBEDDED_STARTUP_PERF_INNODB_TEMP_RSEG_CREATE_CREATED_COUNT,
     EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_MASTER_TIMER_NS,
     EMBEDDED_STARTUP_PERF_STAT_COUNT
 };
@@ -10538,6 +10544,7 @@ static void emit_embedded_startup_perf_summary(const char *prefix) {
     uint64_t innodb_recovery_bootstrap_calls;
     uint64_t innodb_system_tables_calls;
     uint64_t innodb_temp_tablespace_calls;
+    uint64_t innodb_temp_rseg_create_calls;
 
     mylite_embedded_startup_perf_read(values, EMBEDDED_STARTUP_PERF_STAT_COUNT);
 
@@ -10554,6 +10561,7 @@ static void emit_embedded_startup_perf_summary(const char *prefix) {
     innodb_recovery_bootstrap_calls = values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_BOOTSTRAP_CALLS];
     innodb_system_tables_calls = values[EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_CALLS];
     innodb_temp_tablespace_calls = values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_CALLS];
+    innodb_temp_rseg_create_calls = values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_RSEG_CREATE_CALLS];
 
     emit_embedded_startup_perf_summary_ms(
         prefix,
@@ -10914,6 +10922,40 @@ static void emit_embedded_startup_perf_summary(const char *prefix) {
         values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_RSEG_CREATE_NS],
         innodb_temp_tablespace_calls
     );
+    printf(
+        "%s_startup_innodb_temp_rseg_create_calls=%" PRIu64 "\n",
+        prefix,
+        innodb_temp_rseg_create_calls
+    );
+    printf(
+        "%s_startup_innodb_temp_rseg_create_created_count=%" PRIu64 "\n",
+        prefix,
+        values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_RSEG_CREATE_CREATED_COUNT]
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_temp_rseg_create_setup",
+        values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_RSEG_CREATE_SETUP_NS],
+        innodb_temp_rseg_create_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_temp_rseg_create_header",
+        values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_RSEG_CREATE_HEADER_NS],
+        innodb_temp_rseg_create_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_temp_rseg_create_memory",
+        values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_RSEG_CREATE_MEMORY_NS],
+        innodb_temp_rseg_create_calls
+    );
+    emit_embedded_startup_perf_summary_ms(
+        prefix,
+        "innodb_temp_rseg_create_commit",
+        values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_RSEG_CREATE_COMMIT_NS],
+        innodb_temp_rseg_create_calls
+    );
 }
 
 static void emit_embedded_startup_perf_stats(const char *prefix) {
@@ -10931,6 +10973,7 @@ static void emit_embedded_startup_perf_stats(const char *prefix) {
     uint64_t innodb_recovery_bootstrap_calls;
     uint64_t innodb_system_tables_calls;
     uint64_t innodb_temp_tablespace_calls;
+    uint64_t innodb_temp_rseg_create_calls;
 
     mylite_embedded_startup_perf_read(values, EMBEDDED_STARTUP_PERF_STAT_COUNT);
 
@@ -10949,6 +10992,7 @@ static void emit_embedded_startup_perf_stats(const char *prefix) {
     innodb_recovery_bootstrap_calls = values[EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_BOOTSTRAP_CALLS];
     innodb_system_tables_calls = values[EMBEDDED_STARTUP_PERF_INNODB_SYSTEM_TABLES_CALLS];
     innodb_temp_tablespace_calls = values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_CALLS];
+    innodb_temp_rseg_create_calls = values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_RSEG_CREATE_CALLS];
 
     emit_embedded_startup_perf_value(prefix, "server_init_calls", server_init_calls);
     emit_embedded_startup_perf_ms(
@@ -11703,6 +11747,40 @@ static void emit_embedded_startup_perf_stats(const char *prefix) {
         "innodb_temp_tablespace_rseg_create",
         values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_TABLESPACE_RSEG_CREATE_NS],
         innodb_temp_tablespace_calls
+    );
+    emit_embedded_startup_perf_value(
+        prefix,
+        "innodb_temp_rseg_create_calls",
+        innodb_temp_rseg_create_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_temp_rseg_create_setup",
+        values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_RSEG_CREATE_SETUP_NS],
+        innodb_temp_rseg_create_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_temp_rseg_create_header",
+        values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_RSEG_CREATE_HEADER_NS],
+        innodb_temp_rseg_create_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_temp_rseg_create_memory",
+        values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_RSEG_CREATE_MEMORY_NS],
+        innodb_temp_rseg_create_calls
+    );
+    emit_embedded_startup_perf_ms(
+        prefix,
+        "innodb_temp_rseg_create_commit",
+        values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_RSEG_CREATE_COMMIT_NS],
+        innodb_temp_rseg_create_calls
+    );
+    emit_embedded_startup_perf_value(
+        prefix,
+        "innodb_temp_rseg_create_created_count",
+        values[EMBEDDED_STARTUP_PERF_INNODB_TEMP_RSEG_CREATE_CREATED_COUNT]
     );
     emit_embedded_startup_perf_ms(
         prefix,
