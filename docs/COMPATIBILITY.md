@@ -1484,8 +1484,14 @@ connection after WordPress bootstrap and closes it at process shutdown. The
 existing PHPUnit child-process lock-release patch also closes and reopens the
 keepalive around child execution. This keeps the embedded runtime active across
 short-lived WordPress mysqli objects while preserving ordinary `wpdb::close()`
-and `mysqli_close()` behavior for application-visible handles; the database and
-process-isolated shards keep the keepalive disabled.
+and `mysqli_close()` behavior for application-visible handles. Deferred
+process-isolated shards now use the same keepalive while leaving
+`MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD=0`, so `$wpdb` handles remain
+deferred but the harness-owned keepalive is reopened outside the reconnect
+guard after each child. Baseline-restored children still close the keepalive
+before copying the prepared database tree and reopen it only after the child
+exits. The database shard keeps keepalive disabled for explicit process-style
+profiling.
 The workflow now runs `tools/check-ci-production-builds`, also registered as
 `tools.ci-production-builds` under production CTest, so CI fails if a CMake
 timing path is moved back to developer presets, old developer build

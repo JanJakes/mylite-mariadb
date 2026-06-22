@@ -1005,6 +1005,8 @@ $staticTypeFilterMarker = 'MYLITE_WORDPRESS_STATIC_WPDB_TYPE_FILTER';
 $staticScanGuardMarker = 'MYLITE_WORDPRESS_STATIC_WPDB_SCAN_GUARD';
 $keepaliveMarker = 'MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE_LOCK_RELEASE';
 $keepaliveReconnectMarker = 'myliteWordPressReopenKeepaliveForChild();';
+$keepaliveReconnectAfterGuardMarker =
+    'MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE_RECONNECT_AFTER_CHILD_GUARD';
 $reconnectAfterChildMarker = '// MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD';
 $legacyReconnectGuardMarker = '// MYLITE_WORDPRESS_PHPUNIT_RECONNECT_GUARD';
 $childScriptJobMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_JOB_WRAPPER';
@@ -1028,6 +1030,8 @@ $hasStaticTypeFilterMarker = str_contains($source, $staticTypeFilterMarker);
 $hasStaticScanGuardMarker = str_contains($source, $staticScanGuardMarker);
 $hasKeepaliveMarker = str_contains($source, $keepaliveMarker);
 $hasKeepaliveReconnectMarker = str_contains($source, $keepaliveReconnectMarker);
+$hasKeepaliveReconnectAfterGuardMarker =
+    str_contains($source, $keepaliveReconnectAfterGuardMarker);
 $hasReconnectAfterChildMarker = str_contains($source, $reconnectAfterChildMarker);
 $hasChildScriptJobMarker = str_contains($source, $childScriptJobMarker);
 $hasChildScriptEnvMarker = str_contains($source, $childScriptEnvMarker);
@@ -1055,6 +1059,7 @@ if ($hasTimingMarker &&
     $hasStaticScanGuardMarker &&
     $hasKeepaliveMarker &&
     $hasKeepaliveReconnectMarker &&
+    $hasKeepaliveReconnectAfterGuardMarker &&
     $hasReconnectAfterChildMarker &&
     $hasChildScriptJobMarker &&
     $hasChildScriptEnvMarker &&
@@ -2425,6 +2430,72 @@ PATCH;
         exit(1);
     }
     $patched = $patchedWithKeepaliveReconnect;
+}
+
+if (!str_contains($patched, $keepaliveReconnectAfterGuardMarker)) {
+    $guardedReconnectWithNestedKeepalive = <<<'PATCH'
+        // MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD
+        if (\getenv('MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD') !== '0') {
+            foreach ($myliteWordPressClosedWpdbs as $myliteWordPressWpdb) {
+                $myliteWordPressWpdb->db_connect(false);
+            }
+            $myliteWordPressReopenKeepaliveForChild();
+        }
+        if (isset($myliteWordPressChildStats)) {
+PATCH;
+
+    $guardedReconnectAndIndependentKeepalive = <<<'PATCH'
+        // MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD
+        if (\getenv('MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD') !== '0') {
+            foreach ($myliteWordPressClosedWpdbs as $myliteWordPressWpdb) {
+                $myliteWordPressWpdb->db_connect(false);
+            }
+            $myliteWordPressReopenKeepaliveForChild();
+        }
+        // MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE_RECONNECT_AFTER_CHILD_GUARD
+        $myliteWordPressReopenKeepaliveForChild();
+        if (isset($myliteWordPressChildStats)) {
+PATCH;
+
+    $guardedReconnectWithoutNestedKeepalive = <<<'PATCH'
+        // MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD
+        if (\getenv('MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD') !== '0') {
+            foreach ($myliteWordPressClosedWpdbs as $myliteWordPressWpdb) {
+                $myliteWordPressWpdb->db_connect(false);
+            }
+        }
+        if (isset($myliteWordPressChildStats)) {
+PATCH;
+
+    $guardedReconnectWithoutNestedAndIndependentKeepalive = <<<'PATCH'
+        // MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD
+        if (\getenv('MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD') !== '0') {
+            foreach ($myliteWordPressClosedWpdbs as $myliteWordPressWpdb) {
+                $myliteWordPressWpdb->db_connect(false);
+            }
+        }
+        // MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE_RECONNECT_AFTER_CHILD_GUARD
+        $myliteWordPressReopenKeepaliveForChild();
+        if (isset($myliteWordPressChildStats)) {
+PATCH;
+
+    $patchedWithIndependentKeepalive = str_replace(
+        $guardedReconnectWithNestedKeepalive,
+        $guardedReconnectAndIndependentKeepalive,
+        $patched
+    );
+    if ($patchedWithIndependentKeepalive === $patched) {
+        $patchedWithIndependentKeepalive = str_replace(
+            $guardedReconnectWithoutNestedKeepalive,
+            $guardedReconnectWithoutNestedAndIndependentKeepalive,
+            $patched
+        );
+    }
+    if ($patchedWithIndependentKeepalive === $patched) {
+        fwrite(STDERR, "Could not add PHPUnit child process independent keepalive reconnect patch.\n");
+        exit(1);
+    }
+    $patched = $patchedWithIndependentKeepalive;
 }
 
 if (!str_contains($patched, $childProcessAverageMarker)) {
