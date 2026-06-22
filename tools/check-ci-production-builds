@@ -829,7 +829,7 @@ require_literal 'test "${WORDPRESS_SHARD_RESULT}" = "success"'
 require_literal "Embedded ownerless SQL weighted shards"
 require_literal "ctest --preset php-embedded-prod"
 require_literal "-R '^libmylite\\.ownerless-cross-process-sql\\.'"
-require_literal "--parallel 2"
+require_literal "--parallel 1"
 require_literal "build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe"
 require_step_order "Run embedded performance probe" "Run embedded non-ownerless tests"
 require_step_order "Run embedded large-row bulk performance probe" "Run embedded non-ownerless tests"

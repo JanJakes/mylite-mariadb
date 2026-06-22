@@ -241,12 +241,12 @@ jobs:
               printf '| --- | --- |\n'
               printf '| Preset | `php-embedded-prod` |\n'
               printf '| Selector | `^libmylite\\.ownerless-cross-process-sql\\.` |\n'
-              printf '| Parallelism | `--parallel 2` |\n'
+              printf '| Parallelism | `--parallel 1` |\n'
             } >> "${GITHUB_STEP_SUMMARY}"
           fi
-          ctest --preset php-embedded-prod \
-            -R '^libmylite\.ownerless-cross-process-sql\.' \
-            --parallel 2 \
+            ctest --preset php-embedded-prod \
+              -R '^libmylite\.ownerless-cross-process-sql\.' \
+            --parallel 1 \
             --output-on-failure
 
   wordpress-phpunit-setup:
