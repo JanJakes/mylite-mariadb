@@ -190,8 +190,33 @@ parallel CI job:
 - `cmake --build --preset format-check-prod`: passed.
 - `git diff --check`: passed.
 
-Pushed CI must provide the first full production timing for the runtime image
-artifact shape after the runtime-image job split.
+Pushed CI run `27972772648` on `b2ec5d7bd` passed and provided the first full
+production timing after the runtime-image job split:
+
+- main setup job: `1m34s`; parallel runtime-image job: `34s`;
+- measured setup critical path: `56s`, with the runtime-image phase totaling
+  `22s`;
+- critical shard: `non-isolated-canonical` at `52s`;
+- estimated WordPress workflow critical path from measured phases: `108s`,
+  down from `146s` on the first artifacted-image run and `140s` before image
+  artifacting;
+- shard Docker image-load sum: `277s` across 28 shards, replacing the earlier
+  per-shard Buildx runtime-image work;
+- runtime image artifact: `174742116` compressed bytes, `5s` pack, `2s`
+  upload;
+- runtime artifact download/extract sums: `112s` download, `20s` extract;
+- PHPUnit shell time stayed stable at `698.155s` summed across shards with
+  `88.950s` summed shell overhead;
+- performance probes stayed in the expected range: PHP process start
+  `28.421ms`, mysqli explicit embedded open `93.330ms`, explicit close
+  `27.120ms`, active runtime reconnect `2.044ms`, `SELECT 1` `1533.460`
+  ops/s, and autocommit insert `1200.570` ops/s.
+
+The split is therefore accepted as a CI critical-path improvement rather than
+an engine performance change. The remaining visible WordPress overhead is
+artifact download plus shard-side `docker load`, with the critical shard
+showing `4s` download, `1s` extract, and `9s` image load before its `38s`
+PHPUnit phase.
 
 ## Risks
 
