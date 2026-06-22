@@ -333,7 +333,14 @@ PHPUnit shard can be compared without scraping separate step logs. The split
 runtime artifact handoff also records pack, upload, per-shard download, and
 per-shard extract seconds plus runtime/database-baseline tarball byte sizes, so
 branch/main timing comparisons can distinguish test execution from artifact
-transfer overhead. CI now also uploads that timing summary as the
+transfer overhead. The runtime artifact is now staged from a slim shard
+payload instead of the full MariaDB/MyLite build trees: it keeps the
+production CMake caches and manifest-hashed runtime files, prunes WordPress
+Git object history from the shard copy, validates the manifest inside the
+staged root, and reports `wordpress_artifact_pack_runtime_root_bytes` beside
+the compressed tarball sizes. This changes CI artifact transport only; SQL,
+mysqli, native storage, recovery, and ownerless behavior are unchanged. CI now
+also uploads that timing summary as the
 `wordpress-phpunit-timing-summary` artifact, and the embedded performance probes
 persist their production output as the
 `embedded-performance-reports` artifact, so branch/main timing comparisons can

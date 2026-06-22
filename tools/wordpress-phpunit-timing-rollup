@@ -284,6 +284,7 @@ BEGIN {
   phase_metric["wordpress_artifact_upload_seconds"] = 1
   phase_metric["wordpress_artifact_download_seconds"] = 1
   phase_metric["wordpress_artifact_extract_seconds"] = 1
+  phase_metric["wordpress_artifact_pack_runtime_root_bytes"] = 1
   phase_metric["wordpress_artifact_pack_runtime_tar_bytes"] = 1
   phase_metric["wordpress_artifact_pack_db_baseline_tar_bytes"] = 1
   phase_metric["wordpress_artifact_extract_runtime_tar_bytes"] = 1
@@ -499,6 +500,7 @@ END {
   emit_sum("phase_metric", "wordpress_artifact_upload_seconds", "wordpress_artifact_upload_seconds")
   emit_sum("phase_metric", "wordpress_artifact_download_seconds", "wordpress_artifact_download_seconds")
   emit_sum("phase_metric", "wordpress_artifact_extract_seconds", "wordpress_artifact_extract_seconds")
+  emit_int_sum("phase_metric", "wordpress_artifact_pack_runtime_root_bytes", "wordpress_artifact_pack_runtime_root_bytes")
   emit_int_sum("phase_metric", "wordpress_artifact_pack_runtime_tar_bytes", "wordpress_artifact_pack_runtime_tar_bytes")
   emit_int_sum("phase_metric", "wordpress_artifact_pack_db_baseline_tar_bytes", "wordpress_artifact_pack_db_baseline_tar_bytes")
   emit_int_sum("phase_metric", "wordpress_artifact_extract_runtime_tar_bytes", "wordpress_artifact_extract_runtime_tar_bytes_sum")

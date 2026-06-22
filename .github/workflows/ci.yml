@@ -432,6 +432,7 @@ jobs:
         run: |
           set -euo pipefail
           pack_start="$(date +%s)"
+          runtime_root=build/wordpress-phpunit-runtime-root
           tools/require-cmake-build-type MinSizeRel build/wordpress-mariadb-embedded
           tools/require-cmake-release-build build/wordpress-php-embedded-prod
           test -d "${MYLITE_WORDPRESS_DB_BASELINE_DIR}"
@@ -457,22 +458,66 @@ jobs:
           rm -f \
             build/wordpress-phpunit-runtime.tar.gz \
             build/wordpress-phpunit-db-baseline.tar.gz
-          tar -czf build/wordpress-phpunit-runtime.tar.gz \
-            build/wordpress-develop \
-            build/wordpress-phpunit-tools \
-            build/wordpress-mariadb-embedded \
-            build/wordpress-php-embedded-prod \
+          rm -rf "${runtime_root}"
+          mkdir -p \
+            "${runtime_root}/build/wordpress-develop" \
+            "${runtime_root}/build/wordpress-mariadb-embedded/libmysqld" \
+            "${runtime_root}/build/wordpress-php-embedded-prod/packages/libmylite" \
+            "${runtime_root}/build/wordpress-php-embedded-prod/packages/php-ext-mylite" \
+            "${runtime_root}/build/wordpress-php-embedded-prod/packages/php-ext-mysqli-mylite" \
+            "${runtime_root}/build/wordpress-php-embedded-prod/php-conf.d"
+          tar \
+            -C build/wordpress-develop \
+            --exclude='./.git/objects' \
+            --exclude='./.git/logs' \
+            -cf - \
+            . \
+            | tar -C "${runtime_root}/build/wordpress-develop" -xf -
+          mkdir -p "${runtime_root}/build/wordpress-develop/.git/objects"
+          cp -a build/wordpress-phpunit-tools "${runtime_root}/build/"
+          cp -a \
+            build/wordpress-mariadb-embedded/CMakeCache.txt \
+            "${runtime_root}/build/wordpress-mariadb-embedded/CMakeCache.txt"
+          cp -a \
+            build/wordpress-mariadb-embedded/libmysqld/libmariadbd.a \
+            "${runtime_root}/build/wordpress-mariadb-embedded/libmysqld/"
+          cp -a \
+            build/wordpress-php-embedded-prod/CMakeCache.txt \
+            "${runtime_root}/build/wordpress-php-embedded-prod/CMakeCache.txt"
+          cp -a \
+            build/wordpress-php-embedded-prod/packages/libmylite/libmylite.a \
+            "${runtime_root}/build/wordpress-php-embedded-prod/packages/libmylite/"
+          cp -a \
+            build/wordpress-php-embedded-prod/packages/php-ext-mylite/mylite.so \
+            "${runtime_root}/build/wordpress-php-embedded-prod/packages/php-ext-mylite/"
+          cp -a \
+            build/wordpress-php-embedded-prod/packages/php-ext-mysqli-mylite/mysqli_mylite.so \
+            "${runtime_root}/build/wordpress-php-embedded-prod/packages/php-ext-mysqli-mylite/"
+          cp -a \
+            build/wordpress-php-embedded-prod/mylite-wordpress-php \
+            "${runtime_root}/build/wordpress-php-embedded-prod/"
+          cp -a \
+            build/wordpress-php-embedded-prod/php-conf.d/mylite.ini \
+            "${runtime_root}/build/wordpress-php-embedded-prod/php-conf.d/"
+          cp -a \
             build/wordpress-phpunit-runtime-manifest.txt \
-            build/wordpress-phpunit-runtime-manifest.sha256
+            build/wordpress-phpunit-runtime-manifest.sha256 \
+            "${runtime_root}/build/"
+          ( cd "${runtime_root}" && sha256sum -c build/wordpress-phpunit-runtime-manifest.sha256 )
+          tar -czf build/wordpress-phpunit-runtime.tar.gz \
+            -C "${runtime_root}" \
+            build
           tar -czf build/wordpress-phpunit-db-baseline.tar.gz \
             -C "$(dirname "${MYLITE_WORDPRESS_DB_BASELINE_DIR}")" \
             "$(basename "${MYLITE_WORDPRESS_DB_BASELINE_DIR}")"
           pack_end="$(date +%s)"
           pack_seconds="$((pack_end - pack_start))"
+          runtime_root_bytes="$(du -sb "${runtime_root}" | awk '{print $1}')"
           runtime_tar_bytes="$(wc -c < build/wordpress-phpunit-runtime.tar.gz | tr -d '[:space:]')"
           db_baseline_tar_bytes="$(wc -c < build/wordpress-phpunit-db-baseline.tar.gz | tr -d '[:space:]')"
           tools/wordpress-phpunit-append-timing --label artifact-pack \
             "wordpress_artifact_pack_seconds=${pack_seconds}" \
+            "wordpress_artifact_pack_runtime_root_bytes=${runtime_root_bytes}" \
             "wordpress_artifact_pack_runtime_tar_bytes=${runtime_tar_bytes}" \
             "wordpress_artifact_pack_db_baseline_tar_bytes=${db_baseline_tar_bytes}" \
             "wordpress_total_seconds=${pack_seconds}"
@@ -519,6 +564,7 @@ jobs:
             "${MYLITE_WORDPRESS_DB_BASELINE_DIR}" \
             build/wordpress-phpunit-runtime.tar.gz \
             build/wordpress-phpunit-db-baseline.tar.gz \
+            build/wordpress-phpunit-runtime-root \
             build/wordpress-develop \
             build/wordpress-phpunit-tools \
             build/wordpress-composer-cache \

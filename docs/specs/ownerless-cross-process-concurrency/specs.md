@@ -5409,7 +5409,13 @@ subsystems that this mode needs:
   `embedded-performance-reports` artifact, and the WordPress timing summary is
   uploaded as `wordpress-phpunit-timing-summary`, giving follow-up performance
   audits downloadable evidence without enabling heavyweight profilers in the
-  default timing run. The embedded ownerless SQL CI step now also prints the
+  default timing run. The WordPress runtime artifact now uses an explicit slim
+  staging root that preserves the production CMake caches and manifest-hashed
+  runtime files, prunes WordPress Git object history from the shard payload,
+  validates the manifest from inside the staged tree, and reports staged-root
+  byte size beside compressed tarball size so artifact transport overhead stays
+  visible independently of PHPUnit execution. The embedded ownerless SQL CI
+  step now also prints the
   direct `sql-case` count, emits per-case start and status/seconds log markers,
   and appends a case-index timing table to the GitHub step summary while preserving
   the failing case's exit status. This keeps long ownerless correctness

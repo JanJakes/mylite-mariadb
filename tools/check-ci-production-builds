@@ -625,6 +625,7 @@ require_literal "Upload WordPress timing summary"
 require_literal_count_at_least "actions/upload-artifact@v4" 4
 require_literal "actions/download-artifact@v4"
 require_literal "wordpress-phpunit-runtime"
+require_literal "wordpress-phpunit-runtime-root"
 require_literal "wordpress-phpunit-runtime.tar.gz"
 require_literal "wordpress-phpunit-db-baseline.tar.gz"
 require_literal "wordpress-phpunit-runtime-manifest.txt"
@@ -987,6 +988,45 @@ require_step_literal \
   "tar -czf build/wordpress-phpunit-runtime.tar.gz"
 require_step_literal \
   "Pack WordPress PHPUnit runtime artifact" \
+  "runtime_root=build/wordpress-phpunit-runtime-root"
+require_step_literal \
+  "Pack WordPress PHPUnit runtime artifact" \
+  "tar"
+require_step_literal \
+  "Pack WordPress PHPUnit runtime artifact" \
+  "-C build/wordpress-develop"
+require_step_literal \
+  "Pack WordPress PHPUnit runtime artifact" \
+  "--exclude='./.git/objects'"
+require_step_literal \
+  "Pack WordPress PHPUnit runtime artifact" \
+  "--exclude='./.git/logs'"
+require_step_literal \
+  "Pack WordPress PHPUnit runtime artifact" \
+  '${runtime_root}/build/wordpress-develop/.git/objects'
+require_step_literal \
+  "Pack WordPress PHPUnit runtime artifact" \
+  '${runtime_root}/build/wordpress-mariadb-embedded/libmysqld'
+require_step_literal \
+  "Pack WordPress PHPUnit runtime artifact" \
+  "build/wordpress-mariadb-embedded/CMakeCache.txt"
+require_step_literal \
+  "Pack WordPress PHPUnit runtime artifact" \
+  "build/wordpress-mariadb-embedded/libmysqld/libmariadbd.a"
+require_step_literal \
+  "Pack WordPress PHPUnit runtime artifact" \
+  "build/wordpress-php-embedded-prod/CMakeCache.txt"
+require_step_literal \
+  "Pack WordPress PHPUnit runtime artifact" \
+  "build/wordpress-php-embedded-prod/packages/php-ext-mylite/mylite.so"
+require_step_literal \
+  "Pack WordPress PHPUnit runtime artifact" \
+  '( cd "${runtime_root}" && sha256sum -c build/wordpress-phpunit-runtime-manifest.sha256 )'
+require_step_literal \
+  "Pack WordPress PHPUnit runtime artifact" \
+  '-C "${runtime_root}"'
+require_step_literal \
+  "Pack WordPress PHPUnit runtime artifact" \
   "sha256sum -c build/wordpress-phpunit-runtime-manifest.sha256"
 require_step_literal \
   "Pack WordPress PHPUnit runtime artifact" \
@@ -1030,6 +1070,9 @@ require_step_literal \
 require_step_literal \
   "Pack WordPress PHPUnit runtime artifact" \
   "wordpress_artifact_pack_seconds="
+require_step_literal \
+  "Pack WordPress PHPUnit runtime artifact" \
+  "wordpress_artifact_pack_runtime_root_bytes="
 require_step_literal \
   "Pack WordPress PHPUnit runtime artifact" \
   "wordpress_artifact_pack_runtime_tar_bytes="
