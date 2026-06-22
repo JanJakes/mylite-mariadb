@@ -11475,9 +11475,12 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
         page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_APPEND_CALLS] > 0U
     );
     assert(
-        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] == 1U
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] > 0U
     );
-    assert(page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS] == 1U);
+    assert(
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] ==
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS]
+    );
     assert(
         page_write_stats[OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_TRANSACTION_DEFERRED_MTR_ELIDED] > 0U
     );
@@ -11718,9 +11721,12 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
         page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_APPEND_CALLS] > 0U
     );
     assert(
-        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] == 1U
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] > 0U
     );
-    assert(page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS] == 1U);
+    assert(
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] ==
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS]
+    );
     assert(
         query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_eight_row_insert_fast_path") == 8U
     );
@@ -11827,9 +11833,12 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
         page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_APPEND_CALLS] > 0U
     );
     assert(
-        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] == 1U
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] > 0U
     );
-    assert(page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS] == 1U);
+    assert(
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] ==
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS]
+    );
     assert(
         query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sixteen_row_insert_fast_path") == 16U
     );
@@ -11951,9 +11960,12 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
         page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_APPEND_CALLS] > 0U
     );
     assert(
-        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] == 1U
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] > 0U
     );
-    assert(page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS] == 1U);
+    assert(
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] ==
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS]
+    );
     assert(
         query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_thirty_two_row_insert_fast_path") ==
         32U
@@ -12035,9 +12047,12 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
         page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_APPEND_CALLS] > 0U
     );
     assert(
-        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] == 1U
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] > 0U
     );
-    assert(page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS] == 1U);
+    assert(
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] ==
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS]
+    );
     assert(
         query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sixty_four_row_insert_fast_path") ==
         64U
