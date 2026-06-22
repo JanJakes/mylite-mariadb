@@ -6785,6 +6785,14 @@ subsystems that this mode needs:
   repeated lookup work for hot bulk pages while preserving page-write
   ownership, native undo/redo, page-version publication, page-log bytes,
   checkpoint ordering, rollback, recovery, and peer visibility behavior.
+  The ownerless MTR commit deep-attribution follow-up then splits the remaining
+  broad `mtr_t::commit()` buckets into redo write, freed-page processing,
+  commit-log, final resource cleanup, dirty flush-list insertion, latch
+  release, ownerless redo leave, ownerless publish, memo release, and no-dirty
+  loop rows in the production deep-stats probe. This is diagnostic
+  instrumentation only: it keeps native undo, redo, page-version WAL,
+  checkpoint ordering, lock lifetime, SQL behavior, and normal stats-off
+  execution unchanged while identifying the next safe write-path target.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.

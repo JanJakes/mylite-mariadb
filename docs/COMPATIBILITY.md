@@ -1253,6 +1253,16 @@ recovery semantics stay unchanged. New deep counters report capture-image cache
 hits and misses so production probes can show whether repeated bulk updates
 avoid the scan. This is a bounded lookup reduction, not a native undo/MTR
 elision or a completion claim for the remaining ownerless write-path gap.
+The ownerless MTR commit deep-attribution follow-up keeps the same diagnostic
+boundary but splits the broad `mtr_t::commit()` work behind
+`row_ins_clust_low_mtr_commit` and `trx_undo_report_mtr_commit` into redo
+write, freed-page processing, commit-log, final resource cleanup, dirty
+flush-list insertion, latch release, ownerless redo leave, ownerless publish,
+memo release, and no-dirty loop rows. The counters are enabled only by the
+deep-stats performance probe and do not change native undo, redo,
+page-version WAL, checkpoint ordering, lock lifetime, SQL behavior, or normal
+stats-off execution. This narrows the remaining native undo/MTR target without
+claiming a throughput fix.
 Profiled mysqli runs also split total query elapsed time into
 `query_verb_*` buckets for result queries, DML, DDL, connection state,
 transaction, lock, call, and other first-keyword classes so WordPress timing

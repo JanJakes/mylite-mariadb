@@ -3969,13 +3969,21 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
   const bool ownerless_perf= mtr->m_ownerless_hooks != 0 &&
       UNIV_UNLIKELY(ownerless_page_write_perf_enabled()) &&
       mtr->ownerless_hooks_enabled();
+  const bool mylite_deep_perf=
+      UNIV_UNLIKELY(mylite_ownerless_innodb_deep_perf_stats_enabled_fast());
   const uint64_t commit_start_ns= ownerless_perf ?
       ownerless_page_write_perf_now_ns() :
+      0;
+  const uint64_t mylite_deep_commit_start_ns= mylite_deep_perf ?
+      mylite_ownerless_innodb_deep_perf_now_ns() :
       0;
 
   if (ownerless_perf)
     ownerless_page_write_perf_add(
         OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_CALLS, 1);
+  if (mylite_deep_perf)
+    mylite_ownerless_innodb_deep_perf_count(
+        MYLITE_OWNERLESS_INNODB_DEEP_MTR_COMMIT_LOG_CALLS);
 
   if (mtr->m_made_dirty)
   {
@@ -3987,10 +3995,16 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
     if (ownerless_perf)
       ownerless_page_write_perf_add(
           OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_MADE_DIRTY_CALLS, 1);
+    if (mylite_deep_perf)
+      mylite_ownerless_innodb_deep_perf_count(
+          MYLITE_OWNERLESS_INNODB_DEEP_MTR_COMMIT_LOG_MADE_DIRTY_CALLS);
 
     auto it= mtr->m_memo.rbegin();
     uint64_t phase_start_ns= ownerless_perf ?
         ownerless_page_write_perf_now_ns() :
+        0;
+    uint64_t mylite_deep_phase_start_ns= mylite_deep_perf ?
+        mylite_ownerless_innodb_deep_perf_now_ns() :
         0;
 
     mysql_mutex_lock(&buf_pool.flush_list_mutex);
@@ -4036,22 +4050,40 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
     ownerless_page_write_perf_add_elapsed(
         OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_FLUSH_LIST_NS,
         phase_start_ns);
+    mylite_ownerless_innodb_deep_perf_add_elapsed(
+        MYLITE_OWNERLESS_INNODB_DEEP_MTR_COMMIT_LOG_FLUSH_LIST_NS,
+        mylite_deep_phase_start_ns);
 
     phase_start_ns= ownerless_perf ? ownerless_page_write_perf_now_ns() : 0;
+    mylite_deep_phase_start_ns= mylite_deep_perf ?
+        mylite_ownerless_innodb_deep_perf_now_ns() :
+        0;
     mtr->commit_log_release();
     ownerless_page_write_perf_add_elapsed(
         OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_RELEASE_NS, phase_start_ns);
+    mylite_ownerless_innodb_deep_perf_add_elapsed(
+        MYLITE_OWNERLESS_INNODB_DEEP_MTR_COMMIT_LOG_RELEASE_NS,
+        mylite_deep_phase_start_ns);
     if (mtr->m_ownerless_redo)
     {
       phase_start_ns= ownerless_perf ? ownerless_page_write_perf_now_ns() : 0;
+      mylite_deep_phase_start_ns= mylite_deep_perf ?
+          mylite_ownerless_innodb_deep_perf_now_ns() :
+          0;
       mtr->ownerless_redo_leave();
       ownerless_page_write_perf_add_elapsed(
           OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_REDO_LEAVE_NS,
           phase_start_ns);
+      mylite_ownerless_innodb_deep_perf_add_elapsed(
+          MYLITE_OWNERLESS_INNODB_DEEP_MTR_COMMIT_LOG_REDO_LEAVE_NS,
+          mylite_deep_phase_start_ns);
     }
     if (UNIV_UNLIKELY(ownerless_collect_modified_pages))
     {
       phase_start_ns= ownerless_perf ? ownerless_page_write_perf_now_ns() : 0;
+      mylite_deep_phase_start_ns= mylite_deep_perf ?
+          mylite_ownerless_innodb_deep_perf_now_ns() :
+          0;
       mtr->ownerless_history_proof_publish_pair();
       if (UNIV_LIKELY(!ownerless_modified_page_overflow))
         mtr->ownerless_page_writes_publish_list(
@@ -4061,35 +4093,62 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
       ownerless_page_write_perf_add_elapsed(
           OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_PUBLISH_NS,
           phase_start_ns);
+      mylite_ownerless_innodb_deep_perf_add_elapsed(
+          MYLITE_OWNERLESS_INNODB_DEEP_MTR_COMMIT_LOG_PUBLISH_NS,
+          mylite_deep_phase_start_ns);
     }
     phase_start_ns= ownerless_perf ? ownerless_page_write_perf_now_ns() : 0;
+    mylite_deep_phase_start_ns= mylite_deep_perf ?
+        mylite_ownerless_innodb_deep_perf_now_ns() :
+        0;
     mtr->release();
     ownerless_page_write_perf_add_elapsed(
         OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_RELEASE_MEMO_NS,
         phase_start_ns);
+    mylite_ownerless_innodb_deep_perf_add_elapsed(
+        MYLITE_OWNERLESS_INNODB_DEEP_MTR_COMMIT_LOG_RELEASE_MEMO_NS,
+        mylite_deep_phase_start_ns);
   }
   else
   {
     if (ownerless_perf)
       ownerless_page_write_perf_add(
           OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_NO_DIRTY_CALLS, 1);
+    if (mylite_deep_perf)
+      mylite_ownerless_innodb_deep_perf_count(
+          MYLITE_OWNERLESS_INNODB_DEEP_MTR_COMMIT_LOG_NO_DIRTY_CALLS);
 
     uint64_t phase_start_ns= ownerless_perf ?
         ownerless_page_write_perf_now_ns() :
         0;
+    uint64_t mylite_deep_phase_start_ns= mylite_deep_perf ?
+        mylite_ownerless_innodb_deep_perf_now_ns() :
+        0;
     mtr->commit_log_release();
     ownerless_page_write_perf_add_elapsed(
         OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_RELEASE_NS, phase_start_ns);
+    mylite_ownerless_innodb_deep_perf_add_elapsed(
+        MYLITE_OWNERLESS_INNODB_DEEP_MTR_COMMIT_LOG_RELEASE_NS,
+        mylite_deep_phase_start_ns);
     if (mtr->m_ownerless_redo)
     {
       phase_start_ns= ownerless_perf ? ownerless_page_write_perf_now_ns() : 0;
+      mylite_deep_phase_start_ns= mylite_deep_perf ?
+          mylite_ownerless_innodb_deep_perf_now_ns() :
+          0;
       mtr->ownerless_redo_leave();
       ownerless_page_write_perf_add_elapsed(
           OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_REDO_LEAVE_NS,
           phase_start_ns);
+      mylite_ownerless_innodb_deep_perf_add_elapsed(
+          MYLITE_OWNERLESS_INNODB_DEEP_MTR_COMMIT_LOG_REDO_LEAVE_NS,
+          mylite_deep_phase_start_ns);
     }
 
     phase_start_ns= ownerless_perf ? ownerless_page_write_perf_now_ns() : 0;
+    mylite_deep_phase_start_ns= mylite_deep_perf ?
+        mylite_ownerless_innodb_deep_perf_now_ns() :
+        0;
     const bool ownerless_hooks= mtr->ownerless_hooks_enabled();
     const bool ownerless_page_publish= ownerless_hooks && mtr->m_modifications;
     const bool ownerless_uses_transaction_release=
@@ -4240,6 +4299,9 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
     ownerless_page_write_perf_add_elapsed(
         OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_NO_DIRTY_LOOP_NS,
         phase_start_ns);
+    mylite_ownerless_innodb_deep_perf_add_elapsed(
+        MYLITE_OWNERLESS_INNODB_DEEP_MTR_COMMIT_LOG_NO_DIRTY_LOOP_NS,
+        mylite_deep_phase_start_ns);
   }
 
   if (modified != 0 && mtr->trx)
@@ -4254,12 +4316,23 @@ void mtr_t::commit_log(mtr_t *mtr, std::pair<lsn_t,lsn_t> lsns) noexcept
 
   ownerless_page_write_perf_add_elapsed(
       OWNERLESS_PAGE_WRITE_PERF_COMMIT_LOG_TOTAL_NS, commit_start_ns);
+  mylite_ownerless_innodb_deep_perf_add_elapsed(
+      MYLITE_OWNERLESS_INNODB_DEEP_MTR_COMMIT_LOG_TOTAL_NS,
+      mylite_deep_commit_start_ns);
 }
 
 /** Commit a mini-transaction. */
 void mtr_t::commit()
 {
   ut_ad(is_active());
+  const bool mylite_deep_perf=
+      UNIV_UNLIKELY(mylite_ownerless_innodb_deep_perf_stats_enabled_fast());
+  const uint64_t mylite_deep_commit_start_ns= mylite_deep_perf ?
+      mylite_ownerless_innodb_deep_perf_now_ns() :
+      0;
+  if (mylite_deep_perf)
+    mylite_ownerless_innodb_deep_perf_count(
+        MYLITE_OWNERLESS_INNODB_DEEP_MTR_COMMIT_CALLS);
 
   /* This is a dirty read, for debugging. */
   ut_ad(!m_modifications || !recv_no_log_write);
@@ -4273,18 +4346,42 @@ void mtr_t::commit()
       release_unlogged();
       goto func_exit;
     }
+    if (mylite_deep_perf)
+      mylite_ownerless_innodb_deep_perf_count(
+          MYLITE_OWNERLESS_INNODB_DEEP_MTR_COMMIT_LOGGED_CALLS);
 
     ut_ad(!srv_read_only_mode);
+    uint64_t mylite_deep_phase_start_ns= mylite_deep_perf ?
+        mylite_ownerless_innodb_deep_perf_now_ns() :
+        0;
     std::pair<lsn_t,lsn_t> lsns{do_write()};
+    mylite_ownerless_innodb_deep_perf_add_elapsed(
+        MYLITE_OWNERLESS_INNODB_DEEP_MTR_COMMIT_DO_WRITE_NS,
+        mylite_deep_phase_start_ns);
+    mylite_deep_phase_start_ns= mylite_deep_perf ?
+        mylite_ownerless_innodb_deep_perf_now_ns() :
+        0;
     process_freed_pages();
+    mylite_ownerless_innodb_deep_perf_add_elapsed(
+        MYLITE_OWNERLESS_INNODB_DEEP_MTR_COMMIT_PROCESS_FREED_PAGES_NS,
+        mylite_deep_phase_start_ns);
+    mylite_deep_phase_start_ns= mylite_deep_perf ?
+        mylite_ownerless_innodb_deep_perf_now_ns() :
+        0;
 #ifdef HAVE_PMEM
     commit_logger(this, lsns);
 #else
     commit_log<false>(this, lsns);
 #endif
+    mylite_ownerless_innodb_deep_perf_add_elapsed(
+        MYLITE_OWNERLESS_INNODB_DEEP_MTR_COMMIT_COMMIT_LOG_NS,
+        mylite_deep_phase_start_ns);
   }
   else
   {
+    if (mylite_deep_perf)
+      mylite_ownerless_innodb_deep_perf_count(
+          MYLITE_OWNERLESS_INNODB_DEEP_MTR_COMMIT_RELEASE_ONLY_CALLS);
     if (m_freed_pages)
     {
       ut_ad(!m_freed_pages->empty());
@@ -4300,7 +4397,16 @@ void mtr_t::commit()
   }
 
 func_exit:
+  const uint64_t mylite_deep_release_start_ns= mylite_deep_perf ?
+      mylite_ownerless_innodb_deep_perf_now_ns() :
+      0;
   release_resources();
+  mylite_ownerless_innodb_deep_perf_add_elapsed(
+      MYLITE_OWNERLESS_INNODB_DEEP_MTR_COMMIT_RELEASE_RESOURCES_NS,
+      mylite_deep_release_start_ns);
+  mylite_ownerless_innodb_deep_perf_add_elapsed(
+      MYLITE_OWNERLESS_INNODB_DEEP_MTR_COMMIT_TOTAL_NS,
+      mylite_deep_commit_start_ns);
 }
 
 void mtr_t::rollback_to_savepoint(ulint begin, ulint end)

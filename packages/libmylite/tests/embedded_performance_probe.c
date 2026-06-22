@@ -705,6 +705,24 @@ enum innodb_deep_perf_stat_index {
     INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_UPDATES,
     INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_CACHE_HITS,
     INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_CACHE_MISSES,
+    INNODB_DEEP_PERF_STAT_MTR_COMMIT_CALLS,
+    INNODB_DEEP_PERF_STAT_MTR_COMMIT_LOGGED_CALLS,
+    INNODB_DEEP_PERF_STAT_MTR_COMMIT_RELEASE_ONLY_CALLS,
+    INNODB_DEEP_PERF_STAT_MTR_COMMIT_TOTAL_NS,
+    INNODB_DEEP_PERF_STAT_MTR_COMMIT_DO_WRITE_NS,
+    INNODB_DEEP_PERF_STAT_MTR_COMMIT_PROCESS_FREED_PAGES_NS,
+    INNODB_DEEP_PERF_STAT_MTR_COMMIT_COMMIT_LOG_NS,
+    INNODB_DEEP_PERF_STAT_MTR_COMMIT_RELEASE_RESOURCES_NS,
+    INNODB_DEEP_PERF_STAT_MTR_COMMIT_LOG_CALLS,
+    INNODB_DEEP_PERF_STAT_MTR_COMMIT_LOG_TOTAL_NS,
+    INNODB_DEEP_PERF_STAT_MTR_COMMIT_LOG_MADE_DIRTY_CALLS,
+    INNODB_DEEP_PERF_STAT_MTR_COMMIT_LOG_NO_DIRTY_CALLS,
+    INNODB_DEEP_PERF_STAT_MTR_COMMIT_LOG_FLUSH_LIST_NS,
+    INNODB_DEEP_PERF_STAT_MTR_COMMIT_LOG_RELEASE_NS,
+    INNODB_DEEP_PERF_STAT_MTR_COMMIT_LOG_REDO_LEAVE_NS,
+    INNODB_DEEP_PERF_STAT_MTR_COMMIT_LOG_PUBLISH_NS,
+    INNODB_DEEP_PERF_STAT_MTR_COMMIT_LOG_RELEASE_MEMO_NS,
+    INNODB_DEEP_PERF_STAT_MTR_COMMIT_LOG_NO_DIRTY_LOOP_NS,
     INNODB_DEEP_PERF_STAT_COUNT
 };
 
@@ -4821,6 +4839,168 @@ static void emit_bulk_deep_count_phase_pair(
     );
 }
 
+static void emit_bulk_deep_mtr_commit_phase_summary(
+    const uint64_t *ordinary_deep,
+    const uint64_t *ownerless_deep,
+    const char *phase,
+    unsigned insert_rows,
+    unsigned insert_statements
+) {
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_MTR_COMMIT_TOTAL_NS,
+        phase,
+        "mtr_commit",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_MTR_COMMIT_DO_WRITE_NS,
+        phase,
+        "mtr_commit_do_write",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_MTR_COMMIT_PROCESS_FREED_PAGES_NS,
+        phase,
+        "mtr_commit_process_freed_pages",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_MTR_COMMIT_COMMIT_LOG_NS,
+        phase,
+        "mtr_commit_commit_log",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_MTR_COMMIT_RELEASE_RESOURCES_NS,
+        phase,
+        "mtr_commit_release_resources",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_MTR_COMMIT_LOG_TOTAL_NS,
+        phase,
+        "mtr_commit_log_total",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_MTR_COMMIT_LOG_FLUSH_LIST_NS,
+        phase,
+        "mtr_commit_log_flush_list",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_MTR_COMMIT_LOG_RELEASE_NS,
+        phase,
+        "mtr_commit_log_release",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_MTR_COMMIT_LOG_REDO_LEAVE_NS,
+        phase,
+        "mtr_commit_log_redo_leave",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_MTR_COMMIT_LOG_PUBLISH_NS,
+        phase,
+        "mtr_commit_log_publish",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_MTR_COMMIT_LOG_RELEASE_MEMO_NS,
+        phase,
+        "mtr_commit_log_release_memo",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_ms_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_MTR_COMMIT_LOG_NO_DIRTY_LOOP_NS,
+        phase,
+        "mtr_commit_log_no_dirty_loop",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_MTR_COMMIT_CALLS,
+        phase,
+        "mtr_commit_calls",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_MTR_COMMIT_LOGGED_CALLS,
+        phase,
+        "mtr_commit_logged_calls",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_MTR_COMMIT_RELEASE_ONLY_CALLS,
+        phase,
+        "mtr_commit_release_only_calls",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_MTR_COMMIT_LOG_MADE_DIRTY_CALLS,
+        phase,
+        "mtr_commit_log_made_dirty_calls",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_MTR_COMMIT_LOG_NO_DIRTY_CALLS,
+        phase,
+        "mtr_commit_log_no_dirty_calls",
+        insert_rows,
+        insert_statements
+    );
+}
+
 static void emit_bulk_deep_comparison_summary(
     const uint64_t *ordinary_deep,
     const uint64_t *ownerless_deep,
@@ -4921,6 +5101,13 @@ static void emit_bulk_deep_comparison_summary_for_phase(
         INNODB_DEEP_PERF_STAT_ROW_INS_CLUST_LOW_MTR_COMMIT_NS,
         phase,
         "row_ins_clust_low_mtr_commit",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_mtr_commit_phase_summary(
+        ordinary_deep,
+        ownerless_deep,
+        phase,
         insert_rows,
         insert_statements
     );
