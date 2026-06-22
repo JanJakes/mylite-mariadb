@@ -6154,6 +6154,13 @@ subsystems that this mode needs:
   current-read refresh bridge instead of carrying stale dirty pages across
   statement boundaries; explicit `COMMIT` keeps the transaction-scoped
   visible-fast proof and never enables append batching.
+  The explicit transaction proof is also extended to constrained single-table
+  `UPDATE ... SET ... WHERE ...` statements when the target table is not
+  involved in referential constraints and the statement has no joins, subquery,
+  savepoint, locking-read, DDL, or dictionary-refresh disqualifier. Focused SQL
+  coverage proves prepared simple updates can use fast COMMIT visibility and
+  the rollback-segment/undo history WAL proof, while a subquery update remains
+  on the conservative unproven path.
   The page-write publish summary slice then promoted existing detailed native
   page-write counters into CI-facing per-insert summary rows for publish
   calls, dirty-page scan work, deferred pages, lookup/allocation/copy/checksum/

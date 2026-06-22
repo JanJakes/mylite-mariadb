@@ -50,6 +50,9 @@ This does not let arbitrary explicit transactions skip the history flush:
 
 - direct/prepared explicit `INSERT ... VALUES` transactions get the marker only
   after the first-party transaction proof survives until `COMMIT`;
+- constrained single-table `UPDATE ... SET ... WHERE ...` transactions get the
+  marker only after the follow-up update proof classifier accepts the statement
+  and the first-party transaction proof survives until `COMMIT`;
 - savepoints, locking reads, non-visible-fast writes, DDL, dictionary
   conservative refresh, and foreign-key target inserts disqualify the marker;
 - the existing history proof still has to publish both active history pages and
@@ -62,15 +65,17 @@ In scope:
 
 - Proven ownerless explicit SQL transactions whose COMMIT already enters the
   visible-fast gate.
+- The follow-up constrained single-table update proof documented in
+  `../ownerless-explicit-update-history-proof/specs.md`.
 - The existing rollback-segment/undo history WAL proof and counters.
 - Focused SQL coverage for prepared explicit inserts and savepoint negative
   coverage.
 
 Out of scope:
 
-- Mixed DML, `INSERT ... SELECT`, `UPDATE`, `DELETE`, `REPLACE`, DDL,
-  foreign-key target inserts, savepoint-controlled transactions, and locking
-  reads.
+- Mixed DML, `INSERT ... SELECT`, broader `UPDATE` shapes, `DELETE`,
+  `REPLACE`, DDL, foreign-key target inserts, savepoint-controlled
+  transactions, and locking reads.
 - Replacing history proof page contents with a smaller proof representation.
 - Transaction-scoped append batching.
 - Broader native redo/checkpoint reconciliation and crash matrices.
@@ -127,6 +132,9 @@ Implementation:
 - `mariadb/storage/innobase/trx/trx0trx.cc` now makes the ownerless
   visible-fast statement marker the only history-proof eligibility boundary
   after read-only and dictionary-operation checks.
+- `packages/libmylite/src/database.cc` now lets constrained single-table
+  explicit-transaction updates carry that marker through the existing
+  transaction proof while rejecting subquery and referential-constraint shapes.
 - `packages/libmylite/tests/ownerless_cross_process_sql_test.c` now requires
   the explicit transaction undo-WAL selector to report zero ownerless
   write-history flush pages, zero exact fallback rounds, and positive

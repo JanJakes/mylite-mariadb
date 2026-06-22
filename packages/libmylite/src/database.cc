@@ -1508,6 +1508,13 @@ struct OwnerlessInsertForeignKeyCacheEntry {
     bool has_foreign_keys = true;
 };
 
+struct OwnerlessTableReferentialConstraintCacheEntry {
+    std::string schema_name;
+    std::string table_name;
+    std::uint64_t dictionary_generation = 0;
+    bool has_referential_constraints = true;
+};
+
 struct OwnerlessInsertAutoIncrementCacheEntry {
     std::string schema_name;
     std::string table_name;
@@ -1572,6 +1579,8 @@ struct mylite_db {
     std::vector<std::uint64_t> ownerless_page_write_trx_ids;
     std::vector<std::string> ownerless_temporary_table_names;
     std::vector<OwnerlessInsertForeignKeyCacheEntry> ownerless_insert_foreign_key_cache;
+    std::vector<OwnerlessTableReferentialConstraintCacheEntry>
+        ownerless_table_referential_constraint_cache;
     std::vector<OwnerlessInsertAutoIncrementCacheEntry> ownerless_insert_auto_increment_cache;
     unsigned ownerless_statement_lock_wait_timeout_ms = k_statement_lock_wait_timeout_ms;
     unsigned ownerless_active_page_visibility_statement_count = 0;
@@ -2120,7 +2129,7 @@ bool ownerless_observed_dictionary_generation_ready(const mylite_db &db, void *d
 int flush_ownerless_dictionary_cache(mylite_db &db);
 int refresh_ownerless_dictionary_cache_after_stale_engine_error(mylite_db &db);
 void initialize_ownerless_dictionary_generation(mylite_db &db);
-void clear_ownerless_insert_foreign_key_cache(mylite_db &db);
+void clear_ownerless_statement_metadata_cache(mylite_db &db);
 bool ownerless_dictionary_ddl_statement(const SqlPolicyTokens &tokens);
 bool ownerless_dictionary_ddl_needs_native_file_op_checkpoint(const SqlPolicyTokens &tokens);
 bool ownerless_stale_engine_error_allows_retry(
@@ -2132,6 +2141,7 @@ bool ownerless_temporary_table_ddl_statement(const SqlPolicyTokens &tokens);
 bool ownerless_table_identifier_token(std::string_view token);
 std::string ownerless_normalized_identifier(std::string_view token);
 bool ownerless_tracked_temporary_table_name(const mylite_db &db, std::string_view table_name);
+bool ownerless_table_reference_stop_token(std::string_view token);
 bool ownerless_table_reference_skip_token(std::string_view token);
 std::string_view ownerless_raw_identifier_token_at(
     const SqlPolicyTokens &tokens,
@@ -2917,6 +2927,10 @@ bool ownerless_transaction_commit_allows_visible_fast_path(
     const mylite_db &db,
     const SqlPolicyTokens &tokens
 );
+bool ownerless_update_statement_allows_visible_fast_path(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
 OwnerlessStatementFastPathPolicy ownerless_statement_fast_path_policy(
     mylite_db &db,
     std::string_view sql,
@@ -2945,8 +2959,31 @@ bool ownerless_insert_target_table(
     std::string *out_schema,
     std::string *out_table
 );
+bool ownerless_update_target_table(
+    const mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::string *out_schema,
+    std::string *out_table
+);
 bool ownerless_insert_statement_has_target_column_list(const SqlPolicyTokens &tokens);
 std::string ownerless_escape_metadata_literal(mylite_db &db, std::string_view value);
+bool ownerless_table_has_referential_constraints(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name
+);
+bool ownerless_cached_table_referential_constraint_state(
+    const mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    bool *out_has_referential_constraints
+);
+void ownerless_cache_table_referential_constraint_state(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    bool has_referential_constraints
+);
 bool ownerless_cached_insert_target_foreign_key_state(
     const mylite_db &db,
     std::string_view schema_name,
@@ -3847,7 +3884,7 @@ int mylite_step(mylite_stmt *stmt) {
                 clear_statement_ownerless_page_visibility(*stmt);
                 return dictionary_flush_result;
             }
-            clear_ownerless_insert_foreign_key_cache(*stmt->db);
+            clear_ownerless_statement_metadata_cache(*stmt->db);
             if (ownerless_runtime_has_external_page_version_pin(g_runtime)) {
                 stmt->db->ownerless_peer_dictionary_refresh_requires_conservative_write = true;
             }
@@ -5255,7 +5292,7 @@ ownerless_query_success:
             }
             return copy_error_message(*db, errmsg);
         }
-        clear_ownerless_insert_foreign_key_cache(*db);
+        clear_ownerless_statement_metadata_cache(*db);
         if (ownerless_runtime_has_external_page_version_pin(g_runtime)) {
             db->ownerless_peer_dictionary_refresh_requires_conservative_write = true;
         }
@@ -5794,6 +5831,58 @@ bool ownerless_transaction_commit_allows_visible_fast_path(
            !db.ownerless_peer_dictionary_refresh_requires_conservative_write;
 }
 
+bool ownerless_update_statement_allows_visible_fast_path(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    if (!token_equals(identifier_token_at(tokens, 0), "UPDATE")) {
+        return false;
+    }
+
+    std::size_t set_index = tokens.count;
+    for (std::size_t index = 1U; index < tokens.count; ++index) {
+        const std::string_view token = tokens.values[index];
+        if (token_equals(token, "SET")) {
+            set_index = index;
+            break;
+        }
+        if (token_equals(token, ",") || token_in(token, "JOIN", "FROM")) {
+            return false;
+        }
+        if (token_in(token, "LOW_PRIORITY", "IGNORE", "PARTITION")) {
+            return false;
+        }
+    }
+    bool has_where = false;
+    for (std::size_t index = set_index + 1U; index < tokens.count; ++index) {
+        if (token_equals(tokens.values[index], "WHERE")) {
+            has_where = true;
+            break;
+        }
+    }
+    if (set_index == tokens.count || !has_where) {
+        return false;
+    }
+
+    for (std::size_t index = set_index + 1U; index < tokens.count; ++index) {
+        const std::string_view token = tokens.values[index];
+        if (token_in(token, "SELECT", "WITH", "JOIN") ||
+            token_in(token, "FROM", "RETURNING", "ORDER") ||
+            token_in(token, "LIMIT", "PARTITION", "FOR")) {
+            return false;
+        }
+    }
+
+    std::string schema_name;
+    std::string table_name;
+    if (!ownerless_update_target_table(db, tokens, &schema_name, &table_name)) {
+        return false;
+    }
+    const bool has_referential_constraints =
+        ownerless_table_has_referential_constraints(db, schema_name, table_name);
+    return !has_referential_constraints;
+}
+
 OwnerlessStatementFastPathPolicy ownerless_statement_fast_path_policy(
     mylite_db &db,
     std::string_view sql,
@@ -5823,6 +5912,12 @@ OwnerlessStatementFastPathPolicy ownerless_statement_fast_path_policy(
             policy.deferred_page_publish_fast_path =
                 policy.append_batch_fast_path && single_owner_epoch;
         }
+        return policy;
+    }
+
+    if (ownerless_connection_is_in_explicit_transaction(db) &&
+        ownerless_update_statement_allows_visible_fast_path(db, tokens)) {
+        policy.visible_fast_path = true;
         return policy;
     }
 
@@ -5870,7 +5965,7 @@ bool ownerless_insert_target_table(
         return false;
     }
 
-    if (index + 2U < tokens.count && tokens.values[index + 1U] == "." &&
+    if (index + 2U < tokens.count && token_equals(tokens.values[index + 1U], ".") &&
         ownerless_table_identifier_token(tokens.values[index + 2U])) {
         *out_schema = ownerless_normalized_identifier(tokens.values[index]);
         *out_table = ownerless_normalized_identifier(tokens.values[index + 2U]);
@@ -5897,13 +5992,52 @@ bool ownerless_insert_statement_has_target_column_list(const SqlPolicyTokens &to
         return false;
     }
 
-    if (index + 2U < tokens.count && tokens.values[index + 1U] == "." &&
+    if (index + 2U < tokens.count && token_equals(tokens.values[index + 1U], ".") &&
         ownerless_table_identifier_token(tokens.values[index + 2U])) {
         index += 3U;
     } else {
         ++index;
     }
     return index < tokens.count && token_equals(tokens.values[index], "(");
+}
+
+bool ownerless_update_target_table(
+    const mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::string *out_schema,
+    std::string *out_table
+) {
+    if (out_schema == nullptr || out_table == nullptr ||
+        !token_equals(identifier_token_at(tokens, 0), "UPDATE")) {
+        return false;
+    }
+    out_schema->clear();
+    out_table->clear();
+
+    std::size_t index = 1U;
+    if (index >= tokens.count || !ownerless_table_identifier_token(tokens.values[index])) {
+        return false;
+    }
+    const std::string_view target = ownerless_raw_identifier_token_at(tokens, index);
+    if (ownerless_table_reference_skip_token(target) ||
+        ownerless_table_reference_stop_token(target)) {
+        return false;
+    }
+
+    std::size_t next_index = index + 1U;
+    if (index + 2U < tokens.count && token_equals(tokens.values[index + 1U], ".") &&
+        ownerless_table_identifier_token(tokens.values[index + 2U])) {
+        *out_schema = ownerless_normalized_identifier(tokens.values[index]);
+        *out_table = ownerless_normalized_identifier(tokens.values[index + 2U]);
+        next_index = index + 3U;
+    } else {
+        *out_schema = ownerless_normalized_identifier(db.current_schema);
+        *out_table = ownerless_normalized_identifier(tokens.values[index]);
+    }
+
+    return next_index < tokens.count && token_equals(tokens.values[next_index], "SET") &&
+           !out_schema->empty() && !out_table->empty() &&
+           !ownerless_tracked_temporary_table_name(db, *out_table);
 }
 
 std::string ownerless_escape_metadata_literal(mylite_db &db, std::string_view value) {
@@ -5916,6 +6050,103 @@ std::string ownerless_escape_metadata_literal(mylite_db &db, std::string_view va
     );
     escaped.resize(escaped_size);
     return escaped;
+}
+
+bool ownerless_table_has_referential_constraints(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name
+) {
+    if (schema_name.empty() || table_name.empty()) {
+        return true;
+    }
+
+    bool has_referential_constraints = true;
+    if (ownerless_cached_table_referential_constraint_state(
+            db,
+            schema_name,
+            table_name,
+            &has_referential_constraints
+        )) {
+        return has_referential_constraints;
+    }
+
+    const ErrorSnapshot snapshot = capture_error(db);
+    const std::string escaped_schema = ownerless_escape_metadata_literal(db, schema_name);
+    const std::string escaped_table = ownerless_escape_metadata_literal(db, table_name);
+    const std::string sql = "SELECT COUNT(*) FROM information_schema.referential_constraints "
+                            "WHERE (constraint_schema = '" +
+                            escaped_schema + "' AND table_name = '" + escaped_table +
+                            "') OR (unique_constraint_schema = '" + escaped_schema +
+                            "' AND referenced_table_name = '" + escaped_table + "')";
+
+    bool query_succeeded = false;
+    if (mysql_query(&db.mysql, sql.c_str()) == 0) {
+        MYSQL_RES *result = mysql_store_result(&db.mysql);
+        if (result != nullptr) {
+            MYSQL_ROW row = mysql_fetch_row(result);
+            has_referential_constraints =
+                row != nullptr && row[0] != nullptr && std::strtoull(row[0], nullptr, 10) != 0U;
+            query_succeeded = row != nullptr && row[0] != nullptr;
+            mysql_free_result(result);
+        }
+    }
+    restore_error(db, snapshot);
+    if (query_succeeded) {
+        ownerless_cache_table_referential_constraint_state(
+            db,
+            schema_name,
+            table_name,
+            has_referential_constraints
+        );
+    }
+    return query_succeeded ? has_referential_constraints : true;
+}
+
+bool ownerless_cached_table_referential_constraint_state(
+    const mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    bool *out_has_referential_constraints
+) {
+    if (out_has_referential_constraints == nullptr ||
+        db.ownerless_observed_dictionary_generation == 0U) {
+        return false;
+    }
+    for (const OwnerlessTableReferentialConstraintCacheEntry &entry :
+         db.ownerless_table_referential_constraint_cache) {
+        if (entry.dictionary_generation == db.ownerless_observed_dictionary_generation &&
+            entry.schema_name == schema_name && entry.table_name == table_name) {
+            *out_has_referential_constraints = entry.has_referential_constraints;
+            return true;
+        }
+    }
+    return false;
+}
+
+void ownerless_cache_table_referential_constraint_state(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    bool has_referential_constraints
+) {
+    if (db.ownerless_observed_dictionary_generation == 0U) {
+        return;
+    }
+    for (OwnerlessTableReferentialConstraintCacheEntry &entry :
+         db.ownerless_table_referential_constraint_cache) {
+        if (entry.dictionary_generation == db.ownerless_observed_dictionary_generation &&
+            entry.schema_name == schema_name && entry.table_name == table_name) {
+            entry.has_referential_constraints = has_referential_constraints;
+            return;
+        }
+    }
+    db.ownerless_table_referential_constraint_cache.push_back(
+        {std::string(schema_name),
+         std::string(table_name),
+         db.ownerless_observed_dictionary_generation,
+         has_referential_constraints}
+    );
 }
 
 bool ownerless_cached_insert_target_foreign_key_state(
@@ -13837,7 +14068,7 @@ int refresh_ownerless_dictionary_before_statement(mylite_db &db, bool allow_glob
                 db.ownerless_clean_pages_evicted_visible_generation = visible_generation;
             }
         }
-        clear_ownerless_insert_foreign_key_cache(db);
+        clear_ownerless_statement_metadata_cache(db);
         if (db.ownerless_observed_dictionary_generation_initialized) {
             db.ownerless_peer_dictionary_refresh_requires_conservative_write = true;
             db.ownerless_peer_dictionary_refresh_uses_native_visible_boundary = true;
@@ -13886,13 +14117,14 @@ int refresh_ownerless_dictionary_cache_after_stale_engine_error(mylite_db &db) {
     static_cast<void>(mylite_ownerless_innodb_refresh_to_latest_external_lsn());
     const int flush_result = flush_ownerless_dictionary_cache(db);
     if (flush_result == MYLITE_OK) {
-        clear_ownerless_insert_foreign_key_cache(db);
+        clear_ownerless_statement_metadata_cache(db);
     }
     return flush_result;
 }
 
-void clear_ownerless_insert_foreign_key_cache(mylite_db &db) {
+void clear_ownerless_statement_metadata_cache(mylite_db &db) {
     db.ownerless_insert_foreign_key_cache.clear();
+    db.ownerless_table_referential_constraint_cache.clear();
     db.ownerless_insert_auto_increment_cache.clear();
 }
 
@@ -14619,7 +14851,7 @@ int ownerless_begin_dictionary_ddl(
 
     db.ownerless_observed_dictionary_generation = generation;
     db.ownerless_observed_dictionary_generation_initialized = true;
-    clear_ownerless_insert_foreign_key_cache(db);
+    clear_ownerless_statement_metadata_cache(db);
     *out_ddl_started = true;
     static_cast<void>(mylite_ownerless_innodb_take_file_op_redo());
     pause_for_ownerless_test_fault("dictionary-after-begin");
@@ -14656,7 +14888,7 @@ int ownerless_finish_dictionary_ddl(mylite_db &db, bool ddl_started) {
         &generation
     );
     if (finish_result == MYLITE_OWNERLESS_DICTIONARY_STATE_OK) {
-        clear_ownerless_insert_foreign_key_cache(db);
+        clear_ownerless_statement_metadata_cache(db);
         db.ownerless_observed_dictionary_generation = generation;
         db.ownerless_observed_dictionary_generation_initialized = true;
         pause_for_ownerless_test_fault("dictionary-after-finish");
