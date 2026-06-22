@@ -135,6 +135,32 @@ Local verification on 2026-06-22:
 - `cmake --build --preset format-check-prod`: passed.
 - `git diff --check`: passed.
 
+Pushed CI run `27974637239` on
+`8d6f13986a69cd8d1126f4db2d6ef20b8d175c5a` passed and provided production
+timing for exact artifact downloads:
+
+- setup critical path: `54s`;
+- critical shard: `non-isolated-remaining-navigation` at `55s`;
+- estimated WordPress workflow critical path: `109s`;
+- critical-shard artifact download: `14s`, split into `4s` runtime-root
+  download and `10s` runtime-image download;
+- critical-shard artifact extract: `1s`;
+- critical-shard Docker image load: `9s`;
+- critical-shard PHPUnit total: `31s`;
+- aggregate artifact download: `205s`, split into `69s` runtime-root download
+  and `136s` runtime-image download across shards;
+- aggregate runtime image load: `246s` across shards;
+- runtime image artifact: `174742121` compressed bytes;
+- performance probes stayed stable: PHP process start `29.558ms`, mysqli
+  explicit embedded open `62.817ms`, explicit close `27.016ms`, active runtime
+  reconnect `2.017ms`, `SELECT 1` `1582.530` ops/s, and autocommit insert
+  `1222.290` ops/s.
+
+The exact-download change therefore fixed the prior attribution gap and kept
+the accepted runtime-image artifact shape near the earlier green `108s`
+critical path. The next transport optimization target is repeated shard
+runtime-image download plus `docker load`, not MyLite engine startup.
+
 ## Risks
 
 - Splitting one download action into two exact download actions may not reduce

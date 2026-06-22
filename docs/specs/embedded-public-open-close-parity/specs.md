@@ -97,6 +97,25 @@ The ownerless branch is therefore not slower than main for this public
 process-style open/close path. In the warmed samples it is about `0.41x` of
 main's warm open/close cost.
 
+A current-head refresh on 2026-06-22, after the WordPress PHPUnit CI
+performance slices, compared ownerless-concurrency
+`8d6f13986a69cd8d1126f4db2d6ef20b8d175c5a` with the same main ref. Main was
+rebuilt in `/tmp/mylite-main-perf-worktree` with a manual Release embedded
+configuration, then the same public benchmark source was compiled against
+main's `libmylite.a` and `libmariadbd.a`. Two alternating clean
+20-iteration samples reported:
+
+| Ref | Prepare ms | Warm open/close avg ms |
+| --- | ---: | ---: |
+| ownerless-concurrency `8d6f13986` | `565.594` | `131.458` |
+| origin/main `4760d512` | `1153.496` | `380.739` |
+| ownerless-concurrency `8d6f13986` | `496.718` | `125.558` |
+| origin/main `4760d512` | `829.580` | `370.065` |
+
+The current branch remains ahead of main on this public process-style
+open/close path; the warmed samples are about `0.33-0.36x` of main's warm
+open/close cost.
+
 A matching branch internal probe with 20 warm open/close iterations reported:
 
 - `mylite_perf_summary_ordinary_warm_open_close_ms_avg=138.025`;
@@ -107,6 +126,19 @@ A matching branch internal probe with 20 warm open/close iterations reported:
 - `shutdown_innodb_shutdown_total_ms_avg=23.071`;
 - `shutdown_innodb_logs_empty_sleep_ms_avg=1.077`;
 - `ordinary_active_runtime_reconnect_ms_avg=0.891`.
+
+The matching 2026-06-22 current-head internal probe reported:
+
+- `mylite_perf_summary_ordinary_warm_open_close_ms_avg=128.592`;
+- `open_total_ms_avg=102.490`;
+- `open_start_runtime_ms_avg=100.643`;
+- `close_total_ms_avg=26.098`;
+- `startup_storage_engine_init_innodb_ms_avg=53.269`;
+- `startup_innodb_srv_start_total_ms_avg=53.162`;
+- `startup_innodb_srv_start_recovery_bootstrap_ms_avg=30.385`;
+- `startup_innodb_srv_start_log_rebuild_ms_avg=0.561`;
+- `startup_innodb_srv_start_system_tables_ms_avg=16.141`;
+- `ordinary_active_runtime_reconnect_ms_avg=0.896`.
 
 The high-cost path is full embedded MariaDB startup/shutdown per process.
 Once the runtime is active inside a process, reconnect is sub-millisecond in
