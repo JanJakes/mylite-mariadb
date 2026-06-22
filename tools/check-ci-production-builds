@@ -399,6 +399,24 @@ reject_regex \
   '^[[:space:]]+non-isolated-media-comment\)' \
   "WordPress PHPUnit CI must split the old media-comment case arm"
 reject_regex \
+  'label:[[:space:]]*phpunit-non-isolated-media$' \
+  "WordPress PHPUnit CI must group the standalone media label"
+reject_regex \
+  'label:[[:space:]]*phpunit-non-isolated-content-settings-meta$' \
+  "WordPress PHPUnit CI must group the standalone content-settings-meta label"
+reject_regex \
+  'shard:[[:space:]]*non-isolated-media$' \
+  "WordPress PHPUnit CI must group the standalone media shard"
+reject_regex \
+  'shard:[[:space:]]*non-isolated-content-settings-meta$' \
+  "WordPress PHPUnit CI must group the standalone content-settings-meta shard"
+reject_regex \
+  '^[[:space:]]+non-isolated-media\)' \
+  "WordPress PHPUnit CI must group the standalone media case arm"
+reject_regex \
+  '^[[:space:]]+non-isolated-content-settings-meta\)' \
+  "WordPress PHPUnit CI must group the standalone content-settings-meta case arm"
+reject_regex \
   'label:[[:space:]]*phpunit-non-isolated-remaining-platform$' \
   "WordPress PHPUnit CI must split the old remaining-platform label"
 reject_regex \
@@ -678,12 +696,13 @@ require_literal "label: phpunit-non-isolated-theme"
 require_literal "label: phpunit-non-isolated-block-library"
 require_literal "label: phpunit-non-isolated-block-supports"
 require_literal "label: phpunit-non-isolated-block-template-binding"
-require_literal "label: phpunit-non-isolated-media"
+require_literal "label: phpunit-non-isolated-content-media-short"
+require_literal "phpunit-non-isolated-media"
 require_literal "label: phpunit-non-isolated-comment"
 require_literal "label: phpunit-non-isolated-xmlrpc"
 require_literal "label: phpunit-non-isolated-content-post-template"
 require_literal "label: phpunit-non-isolated-content-term-taxonomy"
-require_literal "label: phpunit-non-isolated-content-settings-meta"
+require_literal "phpunit-non-isolated-content-settings-meta"
 require_literal "label: phpunit-non-isolated-user-auth"
 require_literal "label: phpunit-non-isolated-remaining-short"
 require_literal "label: phpunit-non-isolated-remaining-platform-format-dependencies-embed"
@@ -709,12 +728,11 @@ require_literal "shard: non-isolated-theme"
 require_literal "shard: non-isolated-block-library"
 require_literal "shard: non-isolated-block-supports"
 require_literal "shard: non-isolated-block-template-binding"
-require_literal "shard: non-isolated-media"
+require_literal "shard: non-isolated-content-media-short"
 require_literal "shard: non-isolated-comment"
 require_literal "shard: non-isolated-xmlrpc"
 require_literal "shard: non-isolated-content-post-template"
 require_literal "shard: non-isolated-content-term-taxonomy"
-require_literal "shard: non-isolated-content-settings-meta"
 require_literal "shard: non-isolated-user-auth"
 require_literal "shard: non-isolated-remaining-short"
 require_literal "shard: non-isolated-remaining-platform-format-dependencies-embed"
@@ -737,12 +755,12 @@ require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_N
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_LIBRARY_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_SUPPORTS_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TEMPLATE_BINDING_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
-require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
+require_literal '"^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_COMMENT_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_XMLRPC_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_POST_TEMPLATE_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_TERM_TAXONOMY_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
-require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_SETTINGS_META_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
+require_literal '"^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_SETTINGS_META_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal "phpunit-non-isolated-remaining-platform-html-interactivity"
 require_literal "phpunit-non-isolated-remaining-platform-image"
 require_literal 'wordpress_phpunit_filter="^(?=(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_PLATFORM_FORMAT_DEPENDENCIES_EMBED_RE})(?:_|::|$))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
@@ -961,7 +979,16 @@ require_step_literal \
   'non-isolated-block-template-binding)'
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
-  'non-isolated-media)'
+  'non-isolated-content-media-short)'
+require_step_literal \
+  "Run WordPress PHPUnit shard (test only)" \
+  'phpunit-non-isolated-content-settings-meta'
+require_step_literal \
+  "Run WordPress PHPUnit shard (test only)" \
+  'phpunit-non-isolated-media'
+require_step_literal \
+  "Run WordPress PHPUnit shard (test only)" \
+  'record_wordpress_phpunit_group "${WORDPRESS_PHPUNIT_SHARD}" "${group_start}"'
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
   'non-isolated-comment)'
@@ -974,9 +1001,6 @@ require_step_literal \
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
   'non-isolated-content-term-taxonomy)'
-require_step_literal \
-  "Run WordPress PHPUnit shard (test only)" \
-  'non-isolated-content-settings-meta)'
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
   'non-isolated-user-auth)'
