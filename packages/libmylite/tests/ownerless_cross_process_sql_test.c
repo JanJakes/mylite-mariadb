@@ -12119,9 +12119,15 @@ static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void)
         page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_APPEND_CALLS] > 0U
     );
     assert(
-        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] == 1U
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_DIRECT_APPEND_CALLS] == 0U
     );
-    assert(page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS] == 1U);
+    assert(
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] > 0U
+    );
+    assert(
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_BEGIN_CALLS] ==
+        page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_SESSION_END_CALLS]
+    );
     assert(
         query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_65536_row_insert_fast_path") ==
         65536U

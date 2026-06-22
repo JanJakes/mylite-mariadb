@@ -1934,6 +1934,7 @@ extern "C" void mylite_ownerless_innodb_publish_dirty_pages_to_lsn(
   if (visible_lsn == 0 || !mylite_ownerless_innodb_lock_has_hooks())
     return;
 
+  ownerless_page_publish_batch_scope page_publish_batch(true);
   buf_flush_publish_ownerless_pages_to_lsn(static_cast<lsn_t>(visible_lsn));
 }
 
@@ -1948,6 +1949,7 @@ extern "C" void mylite_ownerless_innodb_publish_buffer_pool_pages_to_lsn(
 
   std::sort(pages.begin(), pages.end());
   pages.erase(std::unique(pages.begin(), pages.end()), pages.end());
+  ownerless_page_publish_batch_scope page_publish_batch(!pages.empty());
   for (uint64_t packed_page : pages)
   {
     const uint32_t space_id= static_cast<uint32_t>(packed_page >> 32);
