@@ -5259,7 +5259,13 @@ subsystems that this mode needs:
   statement reclaim uses a larger internal WAL budget while a runtime remains
   in its single-owner epoch and has no pending native file-operation checkpoint
   marker, so tight single-process write bursts rely on timer or close cleanup
-  below that budget without changing peer-seen or DDL-marker scheduling.
+  below that budget without changing peer-seen or DDL-marker scheduling. The
+  statement scheduler checks that single-owner foreground budget before taking
+  the active page-version pin snapshot when the existing marker predicate proves
+  no native file-operation checkpoint is pending, and the production insert
+  performance probe drains benchmark setup DDL through close/reopen before
+  timing ownerless insert loops so CI separates steady-state DML cost from
+  setup checkpoint cleanup.
   The same single-owner proof skips non-forced page-write, space-metadata, and
   explicit-transaction buffer-pool first-write refresh only while the owner
   generation still matches, no peer process is live, no peer-owned snapshot

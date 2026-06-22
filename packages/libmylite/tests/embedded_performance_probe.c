@@ -1442,7 +1442,15 @@ static double measure_prepared_point_select(
     const char *table_name,
     unsigned iterations
 );
+static void prepare_insert_table(mylite_db *db, const char *table_name);
 static double measure_transactional_insert(
+    mylite_db *db,
+    const char *table_name,
+    unsigned rows,
+    int reset_page_publish_stats,
+    insert_client_timing *timing
+);
+static double measure_transactional_insert_existing(
     mylite_db *db,
     const char *table_name,
     unsigned rows,
@@ -1456,7 +1464,23 @@ static double measure_autocommit_insert(
     int reset_page_publish_stats,
     insert_client_timing *timing
 );
+static double measure_autocommit_insert_existing(
+    mylite_db *db,
+    const char *table_name,
+    unsigned rows,
+    int reset_page_publish_stats,
+    insert_client_timing *timing
+);
 static double measure_bulk_autocommit_insert(
+    mylite_db *db,
+    const char *table_name,
+    unsigned rows,
+    unsigned rows_per_statement,
+    int reset_page_publish_stats,
+    bulk_insert_timing *timing,
+    const bulk_insert_first_stats *first_stats
+);
+static double measure_bulk_autocommit_insert_existing(
     mylite_db *db,
     const char *table_name,
     unsigned rows,
@@ -1986,6 +2010,12 @@ int main(void) {
     }
     ownerless_prepared_point_select_rate = operations_per_second(select_iterations, seconds);
 
+    prepare_insert_table(db, "mylite_perf_ownerless_insert");
+    prepare_insert_table(db, "mylite_perf_ownerless_autocommit");
+    prepare_insert_table(db, "mylite_perf_ownerless_autocommit_bulk");
+    close_database(db);
+    db = open_database(&paths, ownerless_flags, &config);
+
     if (page_publish_stats || append_stats) {
         mylite_ownerless_database_set_perf_stats_enabled(1);
         mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
@@ -2006,7 +2036,7 @@ int main(void) {
         mylite_ownerless_innodb_deep_set_perf_stats_enabled(1);
     }
 
-    seconds = measure_transactional_insert(
+    seconds = measure_transactional_insert_existing(
         db,
         "mylite_perf_ownerless_insert",
         insert_iterations,
@@ -2068,7 +2098,7 @@ int main(void) {
     rate = ownerless_insert_txn_rate;
     check_min_rate("MYLITE_PERF_MIN_OWNERLESS_INSERT_TXN_OPS", rate);
 
-    seconds = measure_autocommit_insert(
+    seconds = measure_autocommit_insert_existing(
         db,
         "mylite_perf_ownerless_autocommit",
         insert_iterations,
@@ -2129,7 +2159,7 @@ int main(void) {
     if (ownerless_insert_stats) {
         mylite_exec_result_perf_set_enabled(1);
     }
-    seconds = measure_bulk_autocommit_insert(
+    seconds = measure_bulk_autocommit_insert_existing(
         db,
         "mylite_perf_ownerless_autocommit_bulk",
         insert_iterations,
@@ -15206,6 +15236,20 @@ static double measure_prepared_point_select(
     return elapsed_seconds(start_ns, end_ns);
 }
 
+static void prepare_insert_table(mylite_db *db, const char *table_name) {
+    char sql[256];
+
+    (void)snprintf(sql, sizeof(sql), "DROP TABLE IF EXISTS app.%s", table_name);
+    exec_ok(db, sql);
+    (void)snprintf(
+        sql,
+        sizeof(sql),
+        "CREATE TABLE app.%s (id INT PRIMARY KEY, value VARCHAR(32) NOT NULL) ENGINE=InnoDB",
+        table_name
+    );
+    exec_ok(db, sql);
+}
+
 static double measure_bulk_autocommit_insert(
     mylite_db *db,
     const char *table_name,
@@ -15215,7 +15259,27 @@ static double measure_bulk_autocommit_insert(
     bulk_insert_timing *timing,
     const bulk_insert_first_stats *first_stats
 ) {
-    char ddl[256];
+    prepare_insert_table(db, table_name);
+    return measure_bulk_autocommit_insert_existing(
+        db,
+        table_name,
+        rows,
+        rows_per_statement,
+        reset_page_publish_stats,
+        timing,
+        first_stats
+    );
+}
+
+static double measure_bulk_autocommit_insert_existing(
+    mylite_db *db,
+    const char *table_name,
+    unsigned rows,
+    unsigned rows_per_statement,
+    int reset_page_publish_stats,
+    bulk_insert_timing *timing,
+    const bulk_insert_first_stats *first_stats
+) {
     char *sql;
     size_t table_name_len;
     size_t rows_in_buffer;
@@ -15249,15 +15313,6 @@ static double measure_bulk_autocommit_insert(
         exit(1);
     }
 
-    (void)snprintf(ddl, sizeof(ddl), "DROP TABLE IF EXISTS app.%s", table_name);
-    exec_ok(db, ddl);
-    (void)snprintf(
-        ddl,
-        sizeof(ddl),
-        "CREATE TABLE app.%s (id INT PRIMARY KEY, value VARCHAR(32) NOT NULL) ENGINE=InnoDB",
-        table_name
-    );
-    exec_ok(db, ddl);
     if (reset_page_publish_stats) {
         reset_ownerless_insert_stats();
     }
@@ -15318,6 +15373,23 @@ static double measure_transactional_insert(
     int reset_page_publish_stats,
     insert_client_timing *timing
 ) {
+    prepare_insert_table(db, table_name);
+    return measure_transactional_insert_existing(
+        db,
+        table_name,
+        rows,
+        reset_page_publish_stats,
+        timing
+    );
+}
+
+static double measure_transactional_insert_existing(
+    mylite_db *db,
+    const char *table_name,
+    unsigned rows,
+    int reset_page_publish_stats,
+    insert_client_timing *timing
+) {
     char sql[256];
     const char *tail = NULL;
     mylite_stmt *stmt = NULL;
@@ -15330,15 +15402,6 @@ static double measure_transactional_insert(
         memset(timing, 0, sizeof(*timing));
     }
 
-    (void)snprintf(sql, sizeof(sql), "DROP TABLE IF EXISTS app.%s", table_name);
-    exec_ok(db, sql);
-    (void)snprintf(
-        sql,
-        sizeof(sql),
-        "CREATE TABLE app.%s (id INT PRIMARY KEY, value VARCHAR(32) NOT NULL) ENGINE=InnoDB",
-        table_name
-    );
-    exec_ok(db, sql);
     (void)snprintf(sql, sizeof(sql), "INSERT INTO app.%s (id, value) VALUES (?, ?)", table_name);
     if (timing != NULL) {
         phase_start_ns = monotonic_ns();
@@ -15435,6 +15498,23 @@ static double measure_autocommit_insert(
     int reset_page_publish_stats,
     insert_client_timing *timing
 ) {
+    prepare_insert_table(db, table_name);
+    return measure_autocommit_insert_existing(
+        db,
+        table_name,
+        rows,
+        reset_page_publish_stats,
+        timing
+    );
+}
+
+static double measure_autocommit_insert_existing(
+    mylite_db *db,
+    const char *table_name,
+    unsigned rows,
+    int reset_page_publish_stats,
+    insert_client_timing *timing
+) {
     char sql[256];
     const char *tail = NULL;
     mylite_stmt *stmt = NULL;
@@ -15447,15 +15527,6 @@ static double measure_autocommit_insert(
         memset(timing, 0, sizeof(*timing));
     }
 
-    (void)snprintf(sql, sizeof(sql), "DROP TABLE IF EXISTS app.%s", table_name);
-    exec_ok(db, sql);
-    (void)snprintf(
-        sql,
-        sizeof(sql),
-        "CREATE TABLE app.%s (id INT PRIMARY KEY, value VARCHAR(32) NOT NULL) ENGINE=InnoDB",
-        table_name
-    );
-    exec_ok(db, sql);
     (void)snprintf(sql, sizeof(sql), "INSERT INTO app.%s (id, value) VALUES (?, ?)", table_name);
     if (timing != NULL) {
         phase_start_ns = monotonic_ns();

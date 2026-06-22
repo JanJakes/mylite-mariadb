@@ -1898,6 +1898,10 @@ bool ownerless_runtime_has_live_shared_readonly_peer(RuntimeState &runtime);
 bool clear_ownerless_native_file_op_checkpoint_without_page_log(RuntimeState &runtime);
 bool ownerless_autoinc_checkpoint_pending(RuntimeState &runtime);
 bool clear_ownerless_autoinc_checkpoint_pending(RuntimeState &runtime);
+bool ownerless_single_owner_foreground_reclaim_budget_skips(
+    RuntimeState &runtime,
+    std::uint64_t page_log_bytes
+);
 bool seed_ownerless_runtime_redo_state_checkpoint(
     RuntimeState &runtime,
     std::uint64_t latest_lsn,
@@ -10696,6 +10700,24 @@ bool ownerless_page_log_has_payload_records(RuntimeState &runtime) {
            wal_stat.st_size > static_cast<off_t>(k_empty_ownerless_page_log_size);
 }
 
+bool ownerless_single_owner_foreground_reclaim_budget_skips(
+    RuntimeState &runtime,
+    std::uint64_t page_log_bytes
+) {
+    if (!ownerless_runtime_in_single_owner_epoch_locked(runtime) ||
+        page_log_bytes >= MYLITE_OWNERLESS_SINGLE_OWNER_FOREGROUND_RECLAIM_MIN_BYTES) {
+        return false;
+    }
+
+    bool native_file_op_checkpoint_needed = true;
+    return runtime.concurrency_checkpoint_fd >= 0 &&
+           read_concurrency_native_file_op_checkpoint_needed(
+               runtime.concurrency_checkpoint_fd,
+               &native_file_op_checkpoint_needed
+           ) &&
+           !native_file_op_checkpoint_needed;
+}
+
 bool clear_ownerless_native_file_op_checkpoint_without_page_log(RuntimeState &runtime) {
     if (runtime.readonly_mode || runtime.concurrency_checkpoint_fd < 0 ||
         runtime.concurrency_shm_fd < 0 || runtime.concurrency_process_slot_generation == 0U ||
@@ -11095,23 +11117,17 @@ void maybe_reclaim_ownerless_page_log_after_statement(
     std::uint64_t page_log_bytes = 0;
     if (g_runtime.ref_count == 0U || !g_runtime.ownerless_rw_mode ||
         g_runtime.ownerless_active_explicit_transaction_count > 0U ||
-        !ownerless_statement_checkpoint_has_no_active_pins(g_runtime) ||
         !ownerless_page_log_payload_bytes(g_runtime, &page_log_bytes) ||
         page_log_bytes < MYLITE_OWNERLESS_PAGE_LOG_CHECKPOINT_MIN_BYTES) {
         return;
     }
 
-    if (ownerless_runtime_in_single_owner_epoch_locked(g_runtime) &&
-        page_log_bytes < MYLITE_OWNERLESS_SINGLE_OWNER_FOREGROUND_RECLAIM_MIN_BYTES) {
-        bool native_file_op_checkpoint_needed = true;
-        if (g_runtime.concurrency_checkpoint_fd >= 0 &&
-            read_concurrency_native_file_op_checkpoint_needed(
-                g_runtime.concurrency_checkpoint_fd,
-                &native_file_op_checkpoint_needed
-            ) &&
-            !native_file_op_checkpoint_needed) {
-            return;
-        }
+    if (ownerless_single_owner_foreground_reclaim_budget_skips(g_runtime, page_log_bytes)) {
+        return;
+    }
+
+    if (!ownerless_statement_checkpoint_has_no_active_pins(g_runtime)) {
+        return;
     }
 
     const auto now = std::chrono::steady_clock::now();

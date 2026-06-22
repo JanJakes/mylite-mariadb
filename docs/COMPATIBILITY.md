@@ -592,6 +592,23 @@ ordinary at `0.9836`, while the remaining non-empty-table statement reported
 gap at `435.56` ownerless ops/s versus `3420.87` ordinary ops/s (`0.1273`
 ratio), so row lists above 65536, native undo work, and single-row autocommit
 performance remain planned.
+The steady-state insert performance probe then separated benchmark setup DDL
+from measured ownerless insert loops: ownerless transactional, single-row
+autocommit, and row-list autocommit tables are now prepared before insert
+attribution, then the ownerless runtime is closed and reopened so final
+no-live cleanup can drain setup file-operation checkpoint markers outside the
+timed DML loop. The same slice moves the existing single-owner foreground
+reclaim budget rejection ahead of the active page-version pin snapshot when no
+native file-operation checkpoint marker is pending, avoiding a redundant
+eligibility check for below-budget single-owner write bursts. A reduced
+stats-enabled production sample over 200 inserts preserved `2.000`
+page-version records and `2.000` published native-support history-proof pages
+per ownerless single-row autocommit insert, moved
+`prepared_step_reclaim_ms` from the earlier `59.189 ms` sample to `42.645 ms`,
+and reported ownerless/ordinary row-list bulk throughput ratio `0.7765` after
+setup drain versus `0.4970` in the earlier same-shape sample. The remaining
+single-row gap stays in native history-proof/page-log publication, commit
+visibility, and native InnoDB row/commit work rather than setup DDL cleanup.
 Ownerless transaction page tracking now adds a lazy exact membership cache over
 the existing modified/dirty page vectors so repeated MTR and lock-hook page
 ownership checks do not linearly scan large per-transaction page lists. The
