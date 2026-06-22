@@ -45,16 +45,17 @@ WHERE ...` or `UPDATE table SET ... WHERE ...` shapes. It rejects:
 - subquery, `RETURNING`, `ORDER BY`, and `LIMIT` shapes,
 - tracked temporary tables, and
 - tables that participate in referential constraints either as child or
-  referenced parent tables.
+  referenced parent tables, and
+- target tables that have `UPDATE` triggers.
 
 Accepted `UPDATE` statements receive the same statement-local visible-fast
 marker that eligible inserts already use. Existing transaction proof code then
 allows the following `COMMIT` to use the fast visibility and history proof only
 if every write in the explicit transaction stayed proven and no savepoint,
 locking read, DDL, or conservative dictionary refresh disqualified it.
-Successful referential-constraint metadata lookups are cached per handle and
-observed dictionary generation, matching the existing insert metadata cache
-pattern so repeated updates of the same table do not re-query
+Successful referential-constraint and trigger metadata lookups are cached per
+handle and observed dictionary generation, matching the existing insert
+metadata cache pattern so repeated updates of the same table do not re-query
 `information_schema`.
 
 ## Scope And Non-Goals
@@ -63,15 +64,16 @@ In scope:
 
 - Direct and prepared simple single-table `UPDATE ... SET ... WHERE ...`
   statements inside explicit ownerless transactions.
+- Trigger-table rejection for constrained explicit update proofs.
 - Existing rollback-segment/undo history proof and page-version publication
   checks.
-- Focused SQL coverage for positive simple updates and a subquery-update
-  negative proof.
+- Focused SQL coverage for positive simple updates, a subquery-update negative
+  proof, and trigger-table conservative fallback.
 
 Out of scope:
 
-- `DELETE`, `REPLACE`, `INSERT ... SELECT`, DDL, locking reads, savepoints, and
-  foreign-key target or parent updates.
+- `DELETE`, `REPLACE`, `INSERT ... SELECT`, DDL, locking reads, savepoints,
+  trigger-bearing updates, and foreign-key target or parent updates.
 - Broader redo/checkpoint reconciliation and DDL/file-lifecycle recovery.
 - External MariaDB/RQG randomized DML stress.
 
@@ -104,7 +106,9 @@ dependency and has negligible binary-size impact.
   - verifies same-handle visibility, ownerless reopen, and forced `.shm`
     native reopen;
   - verifies an explicit transaction containing an update with a subquery stays
-    on the conservative unproven path.
+    on the conservative unproven path; and
+  - verifies an explicit transaction targeting an update-trigger table stays on
+    the conservative unproven path while preserving trigger side effects.
 - Run the focused selector and adjacent history/native-support selectors.
 - Run production build guards, format check, and whitespace checks.
 
@@ -112,7 +116,7 @@ dependency and has negligible binary-size impact.
 
 - Constrained explicit-transaction updates use the visible-fast COMMIT and
   history-proof path.
-- Subquery updates do not enter the proof.
+- Subquery updates and update-trigger target tables do not enter the proof.
 - Existing insert proof selectors continue to pass.
 - Docs and the compatibility matrix distinguish the new update proof from the
   remaining DML, redo/checkpoint, and external-stress gaps.
@@ -141,5 +145,7 @@ The slice is verified with:
   reject ambiguous valid SQL rather than accept an unproven shape.
 - The referential-constraint metadata query is fail-closed. A metadata lookup
   failure keeps the update on the conservative path.
+- Trigger metadata lookup is also fail-closed, keeping trigger-bearing or
+  unproven trigger-state tables on the conservative path.
 - This is not a broad DML proof; `DELETE`, `REPLACE`, `INSERT ... SELECT`, and
   foreign-key update matrices remain separate work.

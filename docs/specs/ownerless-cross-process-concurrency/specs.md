@@ -6161,6 +6161,13 @@ subsystems that this mode needs:
   coverage proves prepared simple updates can use fast COMMIT visibility and
   the rollback-segment/undo history WAL proof, while a subquery update remains
   on the conservative unproven path.
+  The same proof is extended to constrained single-table
+  `DELETE FROM ... WHERE ...` statements when the target table has no
+  referential constraints, no trigger for the delete operation, and no joins,
+  subquery, alias, modifier, `RETURNING`, `ORDER BY`, or `LIMIT` shape.
+  Focused SQL coverage proves prepared simple deletes can use fast COMMIT
+  visibility and the rollback-segment/undo history WAL proof, while subquery
+  deletes and trigger-bearing delete targets remain conservative.
   The page-write publish summary slice then promoted existing detailed native
   page-write counters into CI-facing per-insert summary rows for publish
   calls, dirty-page scan work, deferred pages, lookup/allocation/copy/checksum/

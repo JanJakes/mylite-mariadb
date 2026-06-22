@@ -813,6 +813,7 @@ static void test_ownerless_history_proof_publish_failure_flushes(void);
 static void test_ownerless_single_owner_native_support_page_wal_elision(void);
 static void test_ownerless_explicit_transaction_undo_wal_elision(void);
 static void test_ownerless_explicit_transaction_update_history_proof(void);
+static void test_ownerless_explicit_transaction_delete_history_proof(void);
 static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void);
 static void test_ownerless_default_checked_bulk_insert_skips_live_peer(void);
 static void test_ownerless_insert_fk_fast_path_cache_invalidation(void);
@@ -4051,6 +4052,10 @@ int main(int argc, char **argv) {
         test_ownerless_explicit_transaction_update_history_proof();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "explicit-transaction-delete-history-proof") == 0) {
+        test_ownerless_explicit_transaction_delete_history_proof();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "single-owner-multi-row-insert-visible-fast-path") == 0) {
         test_ownerless_single_owner_multi_row_insert_visible_fast_path();
         return 0;
@@ -5417,6 +5422,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_native_support_page_wal_elision),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_explicit_transaction_undo_wal_elision),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_explicit_transaction_update_history_proof),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_explicit_transaction_delete_history_proof),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_multi_row_insert_visible_fast_path),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_default_checked_bulk_insert_skips_live_peer),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_single_owner_foreground_reclaim_budget_defers_to_timer),
@@ -11968,6 +11974,47 @@ static void test_ownerless_explicit_transaction_update_history_proof(void) {
     assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_UNPROVEN_STATEMENT] > 0U);
     assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_PUBLISH_FAILED] == 0U);
 
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_explicit_update_triggered ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_explicit_update_audit ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_explicit_update_triggered VALUES (1, 10)");
+    exec_ok(
+        db,
+        "CREATE TRIGGER app.ownerless_explicit_update_trigger_au "
+        "AFTER UPDATE ON app.ownerless_explicit_update_triggered "
+        "FOR EACH ROW INSERT INTO app.ownerless_explicit_update_audit "
+        "VALUES (NEW.id, NEW.value)"
+    );
+    mylite_ownerless_innodb_set_commit_visibility_stats_enabled(1);
+    mylite_ownerless_innodb_reset_commit_visibility_stats();
+    exec_ok(db, "START TRANSACTION");
+    exec_ok(db, "UPDATE app.ownerless_explicit_update_triggered SET value = 11 WHERE id = 1");
+    exec_ok(db, "COMMIT");
+    mylite_ownerless_innodb_read_commit_visibility_stats(
+        commit_stats,
+        OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT
+    );
+    mylite_ownerless_innodb_set_commit_visibility_stats_enabled(0);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FAST] == 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH] > 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_UNPROVEN_STATEMENT] > 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_PUBLISH_FAILED] == 0U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_explicit_update_triggered") == 11U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_explicit_update_audit") == 1U);
+
     assert(mylite_close(db) == MYLITE_OK);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -11985,6 +12032,263 @@ static void test_ownerless_explicit_transaction_update_history_proof(void) {
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_explicit_update_proof") ==
         expected_sum
     );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_explicit_transaction_delete_history_proof(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-explicit-delete-proof.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    uint64_t page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT] = {0};
+    uint64_t page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
+    uint64_t commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT] = {0};
+    uint64_t deep_stats[OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT] = {0};
+    mylite_stmt *stmt = NULL;
+    const char *tail = NULL;
+    mylite_db *db;
+    const unsigned rows = 16U;
+    const unsigned deleted_rows = 8U;
+    unsigned expected_rows = rows - deleted_rows;
+    unsigned expected_sum = 10U * rows * (rows + 1U) / 2U;
+    char sql[256];
+
+    for (unsigned id = 1U; id <= deleted_rows; ++id) {
+        expected_sum -= id * 10U;
+    }
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_explicit_delete_proof ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "payload VARBINARY(4000) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_explicit_delete_filter ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_explicit_delete_filter VALUES (9)");
+    for (unsigned id = 1U; id <= rows; ++id) {
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "INSERT INTO app.ownerless_explicit_delete_proof "
+                "VALUES (%u, %u, REPEAT('d', 4000))",
+                id,
+                id * 10U
+            ) > 0
+        );
+        exec_ok(db, sql);
+    }
+
+    assert(
+        mylite_prepare(
+            db,
+            "DELETE FROM app.ownerless_explicit_delete_proof WHERE id = ?",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            &tail
+        ) == MYLITE_OK
+    );
+    assert(stmt != NULL);
+    assert(tail != NULL && *tail == '\0');
+    assert(mylite_bind_parameter_count(stmt) == 1U);
+
+    mylite_ownerless_innodb_set_page_publish_stats_enabled(1);
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
+    mylite_ownerless_innodb_set_commit_visibility_stats_enabled(1);
+    mylite_ownerless_innodb_deep_set_perf_stats_enabled(1);
+    mylite_ownerless_innodb_reset_page_publish_stats();
+    mylite_ownerless_page_log_reset_append_perf_stats();
+    mylite_ownerless_innodb_reset_commit_visibility_stats();
+    mylite_ownerless_innodb_deep_reset_perf_stats();
+
+    exec_ok(db, "START TRANSACTION");
+    for (unsigned id = 1U; id <= deleted_rows; ++id) {
+        assert(mylite_bind_uint64(stmt, 1U, id) == MYLITE_OK);
+        assert(mylite_step(stmt) == MYLITE_DONE);
+        assert(mylite_reset(stmt) == MYLITE_OK);
+        assert(mylite_clear_bindings(stmt) == MYLITE_OK);
+    }
+    exec_ok(db, "COMMIT");
+
+    mylite_ownerless_innodb_read_page_publish_stats(
+        page_stats,
+        OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT
+    );
+    mylite_ownerless_innodb_read_commit_visibility_stats(
+        commit_stats,
+        OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT
+    );
+    mylite_ownerless_page_log_read_append_perf_stats(
+        page_log_append_stats,
+        OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_COUNT
+    );
+    mylite_ownerless_innodb_deep_read_perf_stats(
+        deep_stats,
+        OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT
+    );
+    mylite_ownerless_innodb_set_page_publish_stats_enabled(0);
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(0);
+    mylite_ownerless_innodb_set_commit_visibility_stats_enabled(0);
+    mylite_ownerless_innodb_deep_set_perf_stats_enabled(0);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    stmt = NULL;
+
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_explicit_delete_proof") ==
+        expected_rows
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_explicit_delete_proof") ==
+        expected_sum
+    );
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FAST] > 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH] == 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_DEFERRED_PAGES] == 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_UNPROVEN_STATEMENT] == 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_PUBLISH_FAILED] == 0U);
+    assert(
+        deep_stats
+            [OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES] ==
+        0U
+    );
+    assert(
+        deep_stats
+            [OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_PAGES] ==
+        0U
+    );
+    assert(
+        deep_stats
+            [OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_FALLBACK_ROUNDS] ==
+        0U
+    );
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_CANDIDATES] > 0U);
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_PUBLISHED] > 0U);
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_FAILED] == 0U);
+    assert(
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_RSEG] ==
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_HISTORY_PROOF_RSEG_SAMPLES]
+    );
+    assert(
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO] ==
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_HISTORY_PROOF_UNDO_SAMPLES]
+    );
+    assert(
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_RSEG] >
+        0U
+    );
+    assert(
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO] >
+        0U
+    );
+    assert(page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_CALLS] > 0U);
+
+    mylite_ownerless_innodb_set_commit_visibility_stats_enabled(1);
+    mylite_ownerless_innodb_reset_commit_visibility_stats();
+    exec_ok(db, "START TRANSACTION");
+    exec_ok(
+        db,
+        "DELETE FROM app.ownerless_explicit_delete_proof "
+        "WHERE id IN (SELECT id FROM app.ownerless_explicit_delete_filter)"
+    );
+    exec_ok(db, "COMMIT");
+    mylite_ownerless_innodb_read_commit_visibility_stats(
+        commit_stats,
+        OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT
+    );
+    mylite_ownerless_innodb_set_commit_visibility_stats_enabled(0);
+    --expected_rows;
+    expected_sum -= 90U;
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FAST] == 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH] > 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_UNPROVEN_STATEMENT] > 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_PUBLISH_FAILED] == 0U);
+
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_explicit_delete_triggered ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_explicit_delete_audit ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_explicit_delete_triggered VALUES (1, 10), (2, 20)");
+    exec_ok(
+        db,
+        "CREATE TRIGGER app.ownerless_explicit_delete_trigger_ad "
+        "AFTER DELETE ON app.ownerless_explicit_delete_triggered "
+        "FOR EACH ROW INSERT INTO app.ownerless_explicit_delete_audit VALUES (OLD.id)"
+    );
+    mylite_ownerless_innodb_set_commit_visibility_stats_enabled(1);
+    mylite_ownerless_innodb_reset_commit_visibility_stats();
+    exec_ok(db, "START TRANSACTION");
+    exec_ok(db, "DELETE FROM app.ownerless_explicit_delete_triggered WHERE id = 1");
+    exec_ok(db, "COMMIT");
+    mylite_ownerless_innodb_read_commit_visibility_stats(
+        commit_stats,
+        OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT
+    );
+    mylite_ownerless_innodb_set_commit_visibility_stats_enabled(0);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FAST] == 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH] > 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_UNPROVEN_STATEMENT] > 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_PUBLISH_FAILED] == 0U);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_explicit_delete_triggered") == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_explicit_delete_audit") == 1U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_explicit_delete_proof") ==
+        expected_rows
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_explicit_delete_proof") ==
+        expected_sum
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_explicit_delete_triggered") == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_explicit_delete_audit") == 1U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_explicit_delete_proof") ==
+        expected_rows
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_explicit_delete_proof") ==
+        expected_sum
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_explicit_delete_triggered") == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_explicit_delete_audit") == 1U);
     assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);

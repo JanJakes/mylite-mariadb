@@ -1515,6 +1515,14 @@ struct OwnerlessTableReferentialConstraintCacheEntry {
     bool has_referential_constraints = true;
 };
 
+struct OwnerlessTableTriggerCacheEntry {
+    std::string schema_name;
+    std::string table_name;
+    std::string dml_operation;
+    std::uint64_t dictionary_generation = 0;
+    bool has_triggers = true;
+};
+
 struct OwnerlessInsertAutoIncrementCacheEntry {
     std::string schema_name;
     std::string table_name;
@@ -1581,6 +1589,7 @@ struct mylite_db {
     std::vector<OwnerlessInsertForeignKeyCacheEntry> ownerless_insert_foreign_key_cache;
     std::vector<OwnerlessTableReferentialConstraintCacheEntry>
         ownerless_table_referential_constraint_cache;
+    std::vector<OwnerlessTableTriggerCacheEntry> ownerless_table_trigger_cache;
     std::vector<OwnerlessInsertAutoIncrementCacheEntry> ownerless_insert_auto_increment_cache;
     unsigned ownerless_statement_lock_wait_timeout_ms = k_statement_lock_wait_timeout_ms;
     unsigned ownerless_active_page_visibility_statement_count = 0;
@@ -2931,6 +2940,10 @@ bool ownerless_update_statement_allows_visible_fast_path(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 );
+bool ownerless_delete_statement_allows_visible_fast_path(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
 OwnerlessStatementFastPathPolicy ownerless_statement_fast_path_policy(
     mylite_db &db,
     std::string_view sql,
@@ -2965,12 +2978,25 @@ bool ownerless_update_target_table(
     std::string *out_schema,
     std::string *out_table
 );
+bool ownerless_delete_target_table(
+    const mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::string *out_schema,
+    std::string *out_table,
+    std::size_t *out_where_index
+);
 bool ownerless_insert_statement_has_target_column_list(const SqlPolicyTokens &tokens);
 std::string ownerless_escape_metadata_literal(mylite_db &db, std::string_view value);
 bool ownerless_table_has_referential_constraints(
     mylite_db &db,
     std::string_view schema_name,
     std::string_view table_name
+);
+bool ownerless_table_has_explicit_dml_disqualifiers(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    std::string_view dml_operation
 );
 bool ownerless_cached_table_referential_constraint_state(
     const mylite_db &db,
@@ -2983,6 +3009,26 @@ void ownerless_cache_table_referential_constraint_state(
     std::string_view schema_name,
     std::string_view table_name,
     bool has_referential_constraints
+);
+bool ownerless_table_has_triggers(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    std::string_view dml_operation
+);
+bool ownerless_cached_table_trigger_state(
+    const mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    std::string_view dml_operation,
+    bool *out_has_triggers
+);
+void ownerless_cache_table_trigger_state(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    std::string_view dml_operation,
+    bool has_triggers
 );
 bool ownerless_cached_insert_target_foreign_key_state(
     const mylite_db &db,
@@ -5878,9 +5924,34 @@ bool ownerless_update_statement_allows_visible_fast_path(
     if (!ownerless_update_target_table(db, tokens, &schema_name, &table_name)) {
         return false;
     }
-    const bool has_referential_constraints =
-        ownerless_table_has_referential_constraints(db, schema_name, table_name);
-    return !has_referential_constraints;
+    return !ownerless_table_has_explicit_dml_disqualifiers(db, schema_name, table_name, "UPDATE");
+}
+
+bool ownerless_delete_statement_allows_visible_fast_path(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    if (!token_equals(identifier_token_at(tokens, 0), "DELETE")) {
+        return false;
+    }
+
+    std::string schema_name;
+    std::string table_name;
+    std::size_t where_index = tokens.count;
+    if (!ownerless_delete_target_table(db, tokens, &schema_name, &table_name, &where_index)) {
+        return false;
+    }
+
+    for (std::size_t index = where_index + 1U; index < tokens.count; ++index) {
+        const std::string_view token = tokens.values[index];
+        if (token_in(token, "SELECT", "WITH", "JOIN") ||
+            token_in(token, "FROM", "USING", "RETURNING") ||
+            token_in(token, "ORDER", "LIMIT", "PARTITION") || token_equals(token, "FOR")) {
+            return false;
+        }
+    }
+
+    return !ownerless_table_has_explicit_dml_disqualifiers(db, schema_name, table_name, "DELETE");
 }
 
 OwnerlessStatementFastPathPolicy ownerless_statement_fast_path_policy(
@@ -5915,10 +5986,12 @@ OwnerlessStatementFastPathPolicy ownerless_statement_fast_path_policy(
         return policy;
     }
 
-    if (ownerless_connection_is_in_explicit_transaction(db) &&
-        ownerless_update_statement_allows_visible_fast_path(db, tokens)) {
-        policy.visible_fast_path = true;
-        return policy;
+    if (ownerless_connection_is_in_explicit_transaction(db)) {
+        if (ownerless_update_statement_allows_visible_fast_path(db, tokens) ||
+            ownerless_delete_statement_allows_visible_fast_path(db, tokens)) {
+            policy.visible_fast_path = true;
+            return policy;
+        }
     }
 
     policy.visible_fast_path = ownerless_transaction_commit_allows_visible_fast_path(db, tokens);
@@ -6040,6 +6113,54 @@ bool ownerless_update_target_table(
            !ownerless_tracked_temporary_table_name(db, *out_table);
 }
 
+bool ownerless_delete_target_table(
+    const mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::string *out_schema,
+    std::string *out_table,
+    std::size_t *out_where_index
+) {
+    if (out_schema == nullptr || out_table == nullptr || out_where_index == nullptr ||
+        !token_equals(identifier_token_at(tokens, 0), "DELETE")) {
+        return false;
+    }
+    out_schema->clear();
+    out_table->clear();
+    *out_where_index = tokens.count;
+
+    if (tokens.count < 4U || !token_equals(tokens.values[1U], "FROM")) {
+        return false;
+    }
+    std::size_t index = 2U;
+    if (!ownerless_table_identifier_token(tokens.values[index])) {
+        return false;
+    }
+    const std::string_view target = ownerless_raw_identifier_token_at(tokens, index);
+    if (ownerless_table_reference_skip_token(target) ||
+        ownerless_table_reference_stop_token(target)) {
+        return false;
+    }
+
+    std::size_t next_index = index + 1U;
+    if (index + 2U < tokens.count && token_equals(tokens.values[index + 1U], ".") &&
+        ownerless_table_identifier_token(tokens.values[index + 2U])) {
+        *out_schema = ownerless_normalized_identifier(tokens.values[index]);
+        *out_table = ownerless_normalized_identifier(tokens.values[index + 2U]);
+        next_index = index + 3U;
+    } else {
+        *out_schema = ownerless_normalized_identifier(db.current_schema);
+        *out_table = ownerless_normalized_identifier(tokens.values[index]);
+    }
+
+    if (next_index >= tokens.count || !token_equals(tokens.values[next_index], "WHERE") ||
+        out_schema->empty() || out_table->empty() ||
+        ownerless_tracked_temporary_table_name(db, *out_table)) {
+        return false;
+    }
+    *out_where_index = next_index;
+    return true;
+}
+
 std::string ownerless_escape_metadata_literal(mylite_db &db, std::string_view value) {
     std::string escaped((value.size() * 2U) + 1U, '\0');
     const unsigned long escaped_size = mysql_real_escape_string(
@@ -6103,6 +6224,16 @@ bool ownerless_table_has_referential_constraints(
     return query_succeeded ? has_referential_constraints : true;
 }
 
+bool ownerless_table_has_explicit_dml_disqualifiers(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    std::string_view dml_operation
+) {
+    return ownerless_table_has_referential_constraints(db, schema_name, table_name) ||
+           ownerless_table_has_triggers(db, schema_name, table_name, dml_operation);
+}
+
 bool ownerless_cached_table_referential_constraint_state(
     const mylite_db &db,
     std::string_view schema_name,
@@ -6146,6 +6277,108 @@ void ownerless_cache_table_referential_constraint_state(
          std::string(table_name),
          db.ownerless_observed_dictionary_generation,
          has_referential_constraints}
+    );
+}
+
+bool ownerless_table_has_triggers(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    std::string_view dml_operation
+) {
+    if (schema_name.empty() || table_name.empty() || dml_operation.empty()) {
+        return true;
+    }
+
+    bool has_triggers = true;
+    if (ownerless_cached_table_trigger_state(
+            db,
+            schema_name,
+            table_name,
+            dml_operation,
+            &has_triggers
+        )) {
+        return has_triggers;
+    }
+
+    const ErrorSnapshot snapshot = capture_error(db);
+    const std::string escaped_schema = ownerless_escape_metadata_literal(db, schema_name);
+    const std::string escaped_table = ownerless_escape_metadata_literal(db, table_name);
+    const std::string escaped_operation = ownerless_escape_metadata_literal(db, dml_operation);
+    const std::string sql = "SELECT COUNT(*) FROM information_schema.triggers "
+                            "WHERE event_object_schema = '" +
+                            escaped_schema + "' AND event_object_table = '" + escaped_table +
+                            "' AND event_manipulation = '" + escaped_operation + "'";
+
+    bool query_succeeded = false;
+    if (mysql_query(&db.mysql, sql.c_str()) == 0) {
+        MYSQL_RES *result = mysql_store_result(&db.mysql);
+        if (result != nullptr) {
+            MYSQL_ROW row = mysql_fetch_row(result);
+            has_triggers =
+                row != nullptr && row[0] != nullptr && std::strtoull(row[0], nullptr, 10) != 0U;
+            query_succeeded = row != nullptr && row[0] != nullptr;
+            mysql_free_result(result);
+        }
+    }
+    restore_error(db, snapshot);
+    if (query_succeeded) {
+        ownerless_cache_table_trigger_state(
+            db,
+            schema_name,
+            table_name,
+            dml_operation,
+            has_triggers
+        );
+    }
+    return query_succeeded ? has_triggers : true;
+}
+
+bool ownerless_cached_table_trigger_state(
+    const mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    std::string_view dml_operation,
+    bool *out_has_triggers
+) {
+    if (out_has_triggers == nullptr || db.ownerless_observed_dictionary_generation == 0U) {
+        return false;
+    }
+    for (const OwnerlessTableTriggerCacheEntry &entry : db.ownerless_table_trigger_cache) {
+        if (entry.dictionary_generation == db.ownerless_observed_dictionary_generation &&
+            entry.schema_name == schema_name && entry.table_name == table_name &&
+            entry.dml_operation == dml_operation) {
+            *out_has_triggers = entry.has_triggers;
+            return true;
+        }
+    }
+    return false;
+}
+
+void ownerless_cache_table_trigger_state(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    std::string_view dml_operation,
+    bool has_triggers
+) {
+    if (db.ownerless_observed_dictionary_generation == 0U) {
+        return;
+    }
+    for (OwnerlessTableTriggerCacheEntry &entry : db.ownerless_table_trigger_cache) {
+        if (entry.dictionary_generation == db.ownerless_observed_dictionary_generation &&
+            entry.schema_name == schema_name && entry.table_name == table_name &&
+            entry.dml_operation == dml_operation) {
+            entry.has_triggers = has_triggers;
+            return;
+        }
+    }
+    db.ownerless_table_trigger_cache.push_back(
+        {std::string(schema_name),
+         std::string(table_name),
+         std::string(dml_operation),
+         db.ownerless_observed_dictionary_generation,
+         has_triggers}
     );
 }
 
@@ -14125,6 +14358,7 @@ int refresh_ownerless_dictionary_cache_after_stale_engine_error(mylite_db &db) {
 void clear_ownerless_statement_metadata_cache(mylite_db &db) {
     db.ownerless_insert_foreign_key_cache.clear();
     db.ownerless_table_referential_constraint_cache.clear();
+    db.ownerless_table_trigger_cache.clear();
     db.ownerless_insert_auto_increment_cache.clear();
 }
 
