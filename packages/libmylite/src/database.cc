@@ -456,17 +456,20 @@ class EmbeddedOpenPerfScope {
     std::uint64_t start_ns_;
 };
 
-extern "C" void mylite_embedded_open_perf_set_enabled(int enabled) {
+extern "C" MYLITE_API void mylite_embedded_open_perf_set_enabled(int enabled) {
     embedded_open_perf_stats_enabled.store(enabled != 0, std::memory_order_relaxed);
 }
 
-extern "C" void mylite_embedded_open_perf_reset(void) {
+extern "C" MYLITE_API void mylite_embedded_open_perf_reset(void) {
     for (std::size_t i = 0; i < EMBEDDED_OPEN_PERF_STAT_COUNT; ++i) {
         embedded_open_perf_stats[i].store(0, std::memory_order_relaxed);
     }
 }
 
-extern "C" void mylite_embedded_open_perf_read(std::uint64_t *out_values, std::size_t value_count) {
+extern "C" MYLITE_API void mylite_embedded_open_perf_read(
+    std::uint64_t *out_values,
+    std::size_t value_count
+) {
     if (out_values == nullptr || value_count == 0U) {
         return;
     }

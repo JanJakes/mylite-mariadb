@@ -47,6 +47,67 @@ enum php_mylite_mysqli_libmylite_exec_result_profile_index {
     PHP_MYLITE_MYSQLI_LIBMYLITE_EXEC_RESULT_PROFILE_COUNT
 };
 
+/* Keep this order in sync with EmbeddedOpenPerfStatIndex in libmylite database.cc. */
+enum php_mylite_mysqli_embedded_open_perf_profile_index {
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_OPEN_CALLS = 0,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_OPEN_TOTAL_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_OPEN_VALIDATE_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_OPEN_ALLOCATE_NORMALIZE_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_OPEN_RUNTIME_PATH_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_OPEN_PREPARE_DIRECTORY_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_OPEN_PLATFORM_PROBE_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_OPEN_STARTUP_LOCK_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_OPEN_START_RUNTIME_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_OPEN_CONNECT_RUNTIME_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_OPEN_SYSTEM_TABLES_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_OPEN_DICTIONARY_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_START_RUNTIME_CALLS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_START_RUNTIME_TOTAL_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_START_DATABASE_LOCK_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_START_CONCURRENCY_METADATA_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_START_SHARED_MEMORY_PREPARE_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_START_LAYOUT_ARGUMENTS_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_START_MAP_SHARED_MEMORY_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_START_OPEN_PAGE_LOG_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_START_OPEN_CHECKPOINT_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_START_PRE_HOOKS_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_START_REDO_EVIDENCE_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_START_BOOTSTRAP_LOCK_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_START_MYSQL_SERVER_INIT_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_START_POST_HOOKS_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_START_REDO_BACKUP_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_START_SCHEDULER_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_CONNECT_CALLS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_CONNECT_TOTAL_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_CONNECT_MYSQL_INIT_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_CONNECT_MYSQL_REAL_CONNECT_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_SYSTEM_TABLES_CALLS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_SYSTEM_TABLES_EXECUTIONS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_SYSTEM_TABLES_TOTAL_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_SYSTEM_TABLES_LOCK_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_SYSTEM_TABLES_STATEMENTS_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_CLOSE_CALLS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_CLOSE_TOTAL_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_CLOSE_ROLLBACK_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_CLOSE_CONNECTION_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_CLOSE_RELEASE_RUNTIME_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_RELEASE_RUNTIME_CALLS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_RELEASE_RUNTIME_TOTAL_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_RELEASE_STOP_SCHEDULER_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_RELEASE_STARTUP_LOCK_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_RELEASE_RECLAIM_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_RELEASE_REDO_CAPTURE_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_RELEASE_RESET_HOOKS_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_RELEASE_MYSQL_THREAD_END_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_RELEASE_MYSQL_SERVER_END_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_RELEASE_MYSQL_SHUTDOWN_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_RELEASE_REDO_RESTORE_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_RELEASE_UNMAP_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_RELEASE_CLEANUP_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_RELEASE_DATABASE_LOCK_NS,
+    PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_STAT_COUNT
+};
+
 typedef enum php_mylite_mysqli_profile_query_verb {
     PHP_MYLITE_MYSQLI_PROFILE_QUERY_VERB_OTHER = 0,
     PHP_MYLITE_MYSQLI_PROFILE_QUERY_VERB_SELECT,
@@ -71,6 +132,9 @@ typedef enum php_mylite_mysqli_profile_transaction_verb {
 void mylite_exec_result_perf_set_enabled(int enabled);
 void mylite_exec_result_perf_reset(void);
 void mylite_exec_result_perf_read(uint64_t *out_values, size_t value_count);
+void mylite_embedded_open_perf_set_enabled(int enabled);
+void mylite_embedded_open_perf_reset(void);
+void mylite_embedded_open_perf_read(uint64_t *out_values, size_t value_count);
 
 typedef struct php_mylite_mysqli_query_cache_entry {
     mylite_stmt *stmt;
@@ -292,6 +356,13 @@ static void php_mylite_mysqli_profile_print_transaction_verb(
 );
 static void php_mylite_mysqli_profile_print_query_shapes(void);
 static void php_mylite_mysqli_profile_print_average_millis(
+    const char *name,
+    uint64_t ns,
+    uint64_t count
+);
+static void php_mylite_mysqli_profile_print_embedded_open_perf(void);
+static void php_mylite_mysqli_profile_print_embedded_open_counter(const char *name, uint64_t value);
+static void php_mylite_mysqli_profile_print_embedded_open_average(
     const char *name,
     uint64_t ns,
     uint64_t count
@@ -2102,6 +2173,8 @@ PHP_MINIT_FUNCTION(mysqli_mylite) {
     php_mylite_mysqli_profile_enabled = php_mylite_mysqli_profile_env_enabled();
     mylite_exec_result_perf_reset();
     mylite_exec_result_perf_set_enabled(php_mylite_mysqli_profile_enabled ? 1 : 0);
+    mylite_embedded_open_perf_reset();
+    mylite_embedded_open_perf_set_enabled(php_mylite_mysqli_profile_enabled ? 1 : 0);
     php_mylite_mysqli_prepared_query_results_enabled =
         php_mylite_mysqli_prepared_query_results_env_enabled();
 
@@ -2145,6 +2218,8 @@ PHP_MSHUTDOWN_FUNCTION(mysqli_mylite) {
     php_mylite_mysqli_profile_print();
     mylite_exec_result_perf_set_enabled(0);
     mylite_exec_result_perf_reset();
+    mylite_embedded_open_perf_set_enabled(0);
+    mylite_embedded_open_perf_reset();
     return SUCCESS;
 }
 
@@ -2406,6 +2481,121 @@ static void php_mylite_mysqli_profile_print_average_millis(
                        ? php_mylite_mysqli_profile_output_file
                        : stderr;
     fprintf(output, "mylite_mysqli_profile_%s=%.3f\n", name, average);
+}
+
+static void php_mylite_mysqli_profile_print_embedded_open_counter(
+    const char *name,
+    uint64_t value
+) {
+    char key[128];
+    snprintf(key, sizeof(key), "embedded_open_%s", name);
+    php_mylite_mysqli_profile_print_counter(key, value);
+}
+
+static void php_mylite_mysqli_profile_print_embedded_open_average(
+    const char *name,
+    uint64_t ns,
+    uint64_t count
+) {
+    char key[128];
+    snprintf(key, sizeof(key), "embedded_open_%s_ms_avg", name);
+    php_mylite_mysqli_profile_print_average_millis(key, ns, count);
+}
+
+static void php_mylite_mysqli_profile_print_embedded_open_perf(void) {
+    uint64_t values[PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_STAT_COUNT] = {0};
+    uint64_t open_calls;
+    uint64_t start_calls;
+    uint64_t connect_calls;
+    uint64_t system_table_calls;
+    uint64_t close_calls;
+    uint64_t release_calls;
+
+    mylite_embedded_open_perf_set_enabled(0);
+    mylite_embedded_open_perf_read(values, PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_STAT_COUNT);
+
+    open_calls = values[PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_OPEN_CALLS];
+    start_calls = values[PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_START_RUNTIME_CALLS];
+    connect_calls = values[PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_CONNECT_CALLS];
+    system_table_calls = values[PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_SYSTEM_TABLES_CALLS];
+    close_calls = values[PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_CLOSE_CALLS];
+    release_calls = values[PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_RELEASE_RUNTIME_CALLS];
+
+    php_mylite_mysqli_profile_print_embedded_open_counter("open_calls", open_calls);
+    php_mylite_mysqli_profile_print_embedded_open_average(
+        "open_total",
+        values[PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_OPEN_TOTAL_NS],
+        open_calls
+    );
+    php_mylite_mysqli_profile_print_embedded_open_average(
+        "open_start_runtime",
+        values[PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_OPEN_START_RUNTIME_NS],
+        open_calls
+    );
+    php_mylite_mysqli_profile_print_embedded_open_average(
+        "open_connect_runtime",
+        values[PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_OPEN_CONNECT_RUNTIME_NS],
+        open_calls
+    );
+    php_mylite_mysqli_profile_print_embedded_open_average(
+        "open_system_tables",
+        values[PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_OPEN_SYSTEM_TABLES_NS],
+        open_calls
+    );
+
+    php_mylite_mysqli_profile_print_embedded_open_counter("start_runtime_calls", start_calls);
+    php_mylite_mysqli_profile_print_embedded_open_average(
+        "start_runtime_total",
+        values[PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_START_RUNTIME_TOTAL_NS],
+        start_calls
+    );
+    php_mylite_mysqli_profile_print_embedded_open_average(
+        "start_mysql_server_init",
+        values[PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_START_MYSQL_SERVER_INIT_NS],
+        start_calls
+    );
+
+    php_mylite_mysqli_profile_print_embedded_open_counter("connect_calls", connect_calls);
+    php_mylite_mysqli_profile_print_embedded_open_average(
+        "connect_mysql_real_connect",
+        values[PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_CONNECT_MYSQL_REAL_CONNECT_NS],
+        connect_calls
+    );
+
+    php_mylite_mysqli_profile_print_embedded_open_counter("system_table_calls", system_table_calls);
+    php_mylite_mysqli_profile_print_embedded_open_counter(
+        "system_table_executions",
+        values[PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_SYSTEM_TABLES_EXECUTIONS]
+    );
+    php_mylite_mysqli_profile_print_embedded_open_average(
+        "system_tables_total",
+        values[PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_SYSTEM_TABLES_TOTAL_NS],
+        system_table_calls
+    );
+
+    php_mylite_mysqli_profile_print_embedded_open_counter("close_calls", close_calls);
+    php_mylite_mysqli_profile_print_embedded_open_average(
+        "close_total",
+        values[PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_CLOSE_TOTAL_NS],
+        close_calls
+    );
+    php_mylite_mysqli_profile_print_embedded_open_average(
+        "close_release_runtime",
+        values[PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_CLOSE_RELEASE_RUNTIME_NS],
+        close_calls
+    );
+
+    php_mylite_mysqli_profile_print_embedded_open_counter("release_runtime_calls", release_calls);
+    php_mylite_mysqli_profile_print_embedded_open_average(
+        "release_runtime_total",
+        values[PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_RELEASE_RUNTIME_TOTAL_NS],
+        release_calls
+    );
+    php_mylite_mysqli_profile_print_embedded_open_average(
+        "release_mysql_shutdown",
+        values[PHP_MYLITE_MYSQLI_EMBEDDED_OPEN_PERF_RELEASE_MYSQL_SHUTDOWN_NS],
+        release_calls
+    );
 }
 
 static void php_mylite_mysqli_profile_print_query_verb(php_mylite_mysqli_profile_query_verb verb) {
@@ -2815,6 +3005,7 @@ static void php_mylite_mysqli_profile_print(void) {
         php_mylite_mysqli_profile.close_ns,
         php_mylite_mysqli_profile.close_calls
     );
+    php_mylite_mysqli_profile_print_embedded_open_perf();
     php_mylite_mysqli_profile_print_counter("query_calls", php_mylite_mysqli_profile.query_calls);
     php_mylite_mysqli_profile_print_counter(
         "query_successes",

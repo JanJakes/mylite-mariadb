@@ -57,6 +57,9 @@ cat > "${summary}" <<'SUMMARY'
 | perf-probe | wordpress_perf_summary_mysqli_process_explicit_profile_close_reopen_calls | 0 |
 | perf-probe | wordpress_perf_summary_mysqli_process_explicit_profile_close_ms_total | 43.439 |
 | perf-probe | wordpress_perf_summary_mysqli_process_explicit_profile_close_ms_avg | 43.439 |
+| perf-probe | wordpress_perf_summary_mysqli_process_explicit_profile_embedded_open_open_calls | 1 |
+| perf-probe | wordpress_perf_summary_mysqli_process_explicit_profile_embedded_open_open_start_runtime_ms_avg | 120.123 |
+| perf-probe | wordpress_perf_summary_mysqli_process_explicit_profile_embedded_open_release_mysql_shutdown_ms_avg | 32.456 |
 | perf-probe | wordpress_perf_summary_mysqli_process_implicit_profile_open_calls | 1 |
 | perf-probe | wordpress_perf_summary_mysqli_process_implicit_profile_open_ms_total | 149.807 |
 | perf-probe | wordpress_perf_summary_mysqli_process_implicit_profile_open_ms_avg | 149.807 |
@@ -66,6 +69,9 @@ cat > "${summary}" <<'SUMMARY'
 | perf-probe | wordpress_perf_summary_mysqli_process_implicit_profile_close_reopen_calls | 0 |
 | perf-probe | wordpress_perf_summary_mysqli_process_implicit_profile_close_ms_total | 50.108 |
 | perf-probe | wordpress_perf_summary_mysqli_process_implicit_profile_close_ms_avg | 50.108 |
+| perf-probe | wordpress_perf_summary_mysqli_process_implicit_profile_embedded_open_open_calls | 1 |
+| perf-probe | wordpress_perf_summary_mysqli_process_implicit_profile_embedded_open_open_start_runtime_ms_avg | 121.234 |
+| perf-probe | wordpress_perf_summary_mysqli_process_implicit_profile_embedded_open_release_mysql_shutdown_ms_avg | 34.567 |
 | perf-probe | wordpress_perf_summary_mysqli_active_runtime_reconnect_ms_avg | 2.034 |
 | perf-probe | wordpress_perf_summary_select1_ops_per_second | 1545.96 |
 | phpunit-db | wordpress_phpunit_shell_real_seconds | 7.522 |
@@ -217,6 +223,12 @@ require_row "| timing-rollup | wordpress_perf_mysqli_process_implicit_profile_cl
 require_row "| timing-rollup | wordpress_perf_mysqli_process_implicit_profile_close_reopen_calls | 0 |"
 require_row "| timing-rollup | wordpress_perf_mysqli_process_implicit_profile_close_ms_total | 50.108 |"
 require_row "| timing-rollup | wordpress_perf_mysqli_process_implicit_profile_close_ms_avg | 50.108 |"
+require_row "| timing-rollup | wordpress_perf_mysqli_process_explicit_profile_embedded_open_open_calls | 1 |"
+require_row "| timing-rollup | wordpress_perf_mysqli_process_explicit_profile_embedded_open_open_start_runtime_ms_avg | 120.123 |"
+require_row "| timing-rollup | wordpress_perf_mysqli_process_explicit_profile_embedded_open_release_mysql_shutdown_ms_avg | 32.456 |"
+require_row "| timing-rollup | wordpress_perf_mysqli_process_implicit_profile_embedded_open_open_calls | 1 |"
+require_row "| timing-rollup | wordpress_perf_mysqli_process_implicit_profile_embedded_open_open_start_runtime_ms_avg | 121.234 |"
+require_row "| timing-rollup | wordpress_perf_mysqli_process_implicit_profile_embedded_open_release_mysql_shutdown_ms_avg | 34.567 |"
 require_row "| timing-rollup | wordpress_perf_select1_ops_per_second | 1545.960 |"
 
 "${script_dir}/wordpress-phpunit-timing-rollup" --input "${summary}" --append

@@ -3505,7 +3505,26 @@ append_mysqli_process_profile_metrics() {
     close_object_free_calls \
     close_reopen_calls \
     close_ms_total \
-    close_ms_avg; do
+    close_ms_avg \
+    embedded_open_open_calls \
+    embedded_open_open_total_ms_avg \
+    embedded_open_open_start_runtime_ms_avg \
+    embedded_open_open_connect_runtime_ms_avg \
+    embedded_open_open_system_tables_ms_avg \
+    embedded_open_start_runtime_calls \
+    embedded_open_start_runtime_total_ms_avg \
+    embedded_open_start_mysql_server_init_ms_avg \
+    embedded_open_connect_calls \
+    embedded_open_connect_mysql_real_connect_ms_avg \
+    embedded_open_system_table_calls \
+    embedded_open_system_table_executions \
+    embedded_open_system_tables_total_ms_avg \
+    embedded_open_close_calls \
+    embedded_open_close_total_ms_avg \
+    embedded_open_close_release_runtime_ms_avg \
+    embedded_open_release_runtime_calls \
+    embedded_open_release_runtime_total_ms_avg \
+    embedded_open_release_mysql_shutdown_ms_avg; do
     append_mysqli_process_profile_metric "${shape}" "${output}" "${profile_key}"
   done
 }

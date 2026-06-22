@@ -233,6 +233,32 @@ function emit_child_bucket(bucket, prefix) {
   emit_ms_avg(bucket, "wordpress_phpunit_child_process_outer_minus_script_seconds", "wordpress_phpunit_child_process_count", prefix "_child_process_outer_minus_script_ms_avg")
 }
 
+function register_process_profile_key(key, kind) {
+  process_profile_key_count++
+  process_profile_keys[process_profile_key_count] = key
+  process_profile_key_kind[key] = kind
+  phase_metric["wordpress_perf_summary_mysqli_process_explicit_profile_" key] = 1
+  phase_metric["wordpress_perf_summary_mysqli_process_implicit_profile_" key] = 1
+}
+
+function emit_process_profile_key(shape, key, metric, output_metric) {
+  metric = "wordpress_perf_summary_mysqli_process_" shape "_profile_" key
+  output_metric = "wordpress_perf_mysqli_process_" shape "_profile_" key
+  if (process_profile_key_kind[key] == "int") {
+    emit_int_sum("phase_metric", metric, output_metric)
+  } else {
+    emit_sum("phase_metric", metric, output_metric)
+  }
+}
+
+function emit_process_profile_keys(i, key) {
+  for (i = 1; i <= process_profile_key_count; ++i) {
+    key = process_profile_keys[i]
+    emit_process_profile_key("explicit", key)
+    emit_process_profile_key("implicit", key)
+  }
+}
+
 function emit_bucket(bucket, prefix) {
   if (counts[bucket] <= 0) {
     return
@@ -319,6 +345,25 @@ BEGIN {
   phase_metric["wordpress_perf_summary_mysqli_process_implicit_profile_close_reopen_calls"] = 1
   phase_metric["wordpress_perf_summary_mysqli_process_implicit_profile_close_ms_total"] = 1
   phase_metric["wordpress_perf_summary_mysqli_process_implicit_profile_close_ms_avg"] = 1
+  register_process_profile_key("embedded_open_open_calls", "int")
+  register_process_profile_key("embedded_open_open_total_ms_avg", "num")
+  register_process_profile_key("embedded_open_open_start_runtime_ms_avg", "num")
+  register_process_profile_key("embedded_open_open_connect_runtime_ms_avg", "num")
+  register_process_profile_key("embedded_open_open_system_tables_ms_avg", "num")
+  register_process_profile_key("embedded_open_start_runtime_calls", "int")
+  register_process_profile_key("embedded_open_start_runtime_total_ms_avg", "num")
+  register_process_profile_key("embedded_open_start_mysql_server_init_ms_avg", "num")
+  register_process_profile_key("embedded_open_connect_calls", "int")
+  register_process_profile_key("embedded_open_connect_mysql_real_connect_ms_avg", "num")
+  register_process_profile_key("embedded_open_system_table_calls", "int")
+  register_process_profile_key("embedded_open_system_table_executions", "int")
+  register_process_profile_key("embedded_open_system_tables_total_ms_avg", "num")
+  register_process_profile_key("embedded_open_close_calls", "int")
+  register_process_profile_key("embedded_open_close_total_ms_avg", "num")
+  register_process_profile_key("embedded_open_close_release_runtime_ms_avg", "num")
+  register_process_profile_key("embedded_open_release_runtime_calls", "int")
+  register_process_profile_key("embedded_open_release_runtime_total_ms_avg", "num")
+  register_process_profile_key("embedded_open_release_mysql_shutdown_ms_avg", "num")
   phase_metric["wordpress_perf_summary_mysqli_inprocess_connect_close_ms_avg"] = 1
   phase_metric["wordpress_perf_summary_mysqli_active_runtime_reconnect_ms_avg"] = 1
   phase_metric["wordpress_perf_summary_select1_ops_per_second"] = 1
@@ -535,6 +580,7 @@ END {
   emit_int_sum("phase_metric", "wordpress_perf_summary_mysqli_process_implicit_profile_close_reopen_calls", "wordpress_perf_mysqli_process_implicit_profile_close_reopen_calls")
   emit_sum("phase_metric", "wordpress_perf_summary_mysqli_process_implicit_profile_close_ms_total", "wordpress_perf_mysqli_process_implicit_profile_close_ms_total")
   emit_sum("phase_metric", "wordpress_perf_summary_mysqli_process_implicit_profile_close_ms_avg", "wordpress_perf_mysqli_process_implicit_profile_close_ms_avg")
+  emit_process_profile_keys()
   emit_sum("phase_metric", "wordpress_perf_summary_mysqli_inprocess_connect_close_ms_avg", "wordpress_perf_mysqli_inprocess_connect_close_ms_avg")
   emit_sum("phase_metric", "wordpress_perf_summary_mysqli_active_runtime_reconnect_ms_avg", "wordpress_perf_mysqli_active_runtime_reconnect_ms_avg")
   emit_sum("phase_metric", "wordpress_perf_summary_select1_ops_per_second", "wordpress_perf_select1_ops_per_second")

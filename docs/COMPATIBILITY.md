@@ -796,10 +796,18 @@ samples leave the existing process timing loop unprofiled, but append
 `wordpress_perf_summary_mysqli_process_implicit_profile_*` rows for native
 open/close attribution so the next process-isolated PHPUnit optimization can
 target startup, close, or teardown with evidence.
+Those same opt-in process profile samples now include selected
+`embedded_open_*` subphase rows from the internal MyLite open/close counter
+table, including open/start-runtime, `mysql_server_init()`, embedded connect,
+close/release-runtime, and combined MariaDB shutdown averages. This keeps the
+WordPress timing artifact tied to the engine-level open/close attribution used
+by `mylite_embedded_performance_probe` without changing public API or runtime
+lifecycle semantics.
 The final WordPress timing rollup now preserves those explicit/implicit
-process connect/close rows and native open/close profile rows, not just the
-older combined connect/close alias, so the published timing artifact keeps the
-per-process PHPUnit cost model visible for branch/main comparisons.
+process connect/close rows, native open/close profile rows, and selected
+embedded open-phase profile rows, not just the older combined connect/close
+alias, so the published timing artifact keeps the per-process PHPUnit cost
+model visible for branch/main comparisons.
 WordPress PHPUnit CI now splits the former visible
 `non-isolated-query-canonical` timing tail into separate
 `non-isolated-query` and `non-isolated-canonical` shards while keeping the
