@@ -6168,6 +6168,14 @@ subsystems that this mode needs:
   Focused SQL coverage proves prepared simple deletes can use fast COMMIT
   visibility and the rollback-segment/undo history WAL proof, while subquery
   deletes and trigger-bearing delete targets remain conservative.
+  The proof is also extended to constrained single-table
+  `REPLACE ... VALUES` statements when the target table has no referential
+  constraints, no triggers, no auto-increment column, and no `REPLACE ...
+  SELECT`, modifier, explicit partition target, `RETURNING`, or joined shape.
+  Focused SQL coverage proves prepared simple replacements can use fast COMMIT
+  visibility and the rollback-segment/undo history WAL proof, while
+  `REPLACE ... SELECT`, trigger-bearing replacement targets, and
+  auto-increment replacement targets remain conservative.
   The page-write publish summary slice then promoted existing detailed native
   page-write counters into CI-facing per-insert summary rows for publish
   calls, dirty-page scan work, deferred pages, lookup/allocation/copy/checksum/
