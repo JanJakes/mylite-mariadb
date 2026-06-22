@@ -455,9 +455,10 @@ jobs:
             build/wordpress-phpunit-runtime-manifest.txt \
             > build/wordpress-phpunit-runtime-manifest.sha256
           sha256sum -c build/wordpress-phpunit-runtime-manifest.sha256
+          zstd --version
           rm -f \
-            build/wordpress-phpunit-runtime.tar.gz \
-            build/wordpress-phpunit-db-baseline.tar.gz
+            build/wordpress-phpunit-runtime.tar.zst \
+            build/wordpress-phpunit-db-baseline.tar.zst
           rm -rf "${runtime_root}"
           mkdir -p \
             "${runtime_root}/build/wordpress-develop" \
@@ -526,17 +527,17 @@ jobs:
             build/wordpress-phpunit-runtime-manifest.sha256 \
             "${runtime_root}/build/"
           ( cd "${runtime_root}" && sha256sum -c build/wordpress-phpunit-runtime-manifest.sha256 )
-          tar -czf build/wordpress-phpunit-runtime.tar.gz \
-            -C "${runtime_root}" \
-            build
-          tar -czf build/wordpress-phpunit-db-baseline.tar.gz \
-            -C "$(dirname "${MYLITE_WORDPRESS_DB_BASELINE_DIR}")" \
-            "$(basename "${MYLITE_WORDPRESS_DB_BASELINE_DIR}")"
+          tar -C "${runtime_root}" -cf - build \
+            | zstd -T0 -3 -o build/wordpress-phpunit-runtime.tar.zst
+          tar -C "$(dirname "${MYLITE_WORDPRESS_DB_BASELINE_DIR}")" \
+            -cf - \
+            "$(basename "${MYLITE_WORDPRESS_DB_BASELINE_DIR}")" \
+            | zstd -T0 -3 -o build/wordpress-phpunit-db-baseline.tar.zst
           pack_end="$(date +%s)"
           pack_seconds="$((pack_end - pack_start))"
           runtime_root_bytes="$(du -sb "${runtime_root}" | awk '{print $1}')"
-          runtime_tar_bytes="$(wc -c < build/wordpress-phpunit-runtime.tar.gz | tr -d '[:space:]')"
-          db_baseline_tar_bytes="$(wc -c < build/wordpress-phpunit-db-baseline.tar.gz | tr -d '[:space:]')"
+          runtime_tar_bytes="$(wc -c < build/wordpress-phpunit-runtime.tar.zst | tr -d '[:space:]')"
+          db_baseline_tar_bytes="$(wc -c < build/wordpress-phpunit-db-baseline.tar.zst | tr -d '[:space:]')"
           tools/wordpress-phpunit-append-timing --label artifact-pack \
             "wordpress_artifact_pack_seconds=${pack_seconds}" \
             "wordpress_artifact_pack_runtime_root_bytes=${runtime_root_bytes}" \
@@ -554,8 +555,8 @@ jobs:
         with:
           name: wordpress-phpunit-runtime
           path: |
-            build/wordpress-phpunit-runtime.tar.gz
-            build/wordpress-phpunit-db-baseline.tar.gz
+            build/wordpress-phpunit-runtime.tar.zst
+            build/wordpress-phpunit-db-baseline.tar.zst
           if-no-files-found: error
           compression-level: 0
 
@@ -584,8 +585,8 @@ jobs:
           du -sh \
             "${MYLITE_WORDPRESS_DB_DIR}" \
             "${MYLITE_WORDPRESS_DB_BASELINE_DIR}" \
-            build/wordpress-phpunit-runtime.tar.gz \
-            build/wordpress-phpunit-db-baseline.tar.gz \
+            build/wordpress-phpunit-runtime.tar.zst \
+            build/wordpress-phpunit-db-baseline.tar.zst \
             build/wordpress-phpunit-runtime-root \
             build/wordpress-develop \
             build/wordpress-phpunit-tools \
@@ -980,16 +981,17 @@ jobs:
             build/wordpress-php-embedded-prod \
             "${MYLITE_WORDPRESS_DB_DIR}" \
             "${MYLITE_WORDPRESS_DB_BASELINE_DIR}"
-          tar -xzf build/wordpress-phpunit-runtime-artifact/wordpress-phpunit-runtime.tar.gz
-          tar -xzf build/wordpress-phpunit-runtime-artifact/wordpress-phpunit-db-baseline.tar.gz \
-            -C "$(dirname "${MYLITE_WORDPRESS_DB_BASELINE_DIR}")"
+          zstd -dc build/wordpress-phpunit-runtime-artifact/wordpress-phpunit-runtime.tar.zst \
+            | tar -xf -
+          zstd -dc build/wordpress-phpunit-runtime-artifact/wordpress-phpunit-db-baseline.tar.zst \
+            | tar -xf - -C "$(dirname "${MYLITE_WORDPRESS_DB_BASELINE_DIR}")"
           sha256sum -c build/wordpress-phpunit-runtime-manifest.sha256
           grep -Fx "github_sha=${GITHUB_SHA}" build/wordpress-phpunit-runtime-manifest.txt
           grep -Fx "wordpress_ref=${MYLITE_WORDPRESS_REF}" build/wordpress-phpunit-runtime-manifest.txt
           extract_end="$(date +%s)"
           extract_seconds="$((extract_end - extract_start))"
-          runtime_tar_bytes="$(wc -c < build/wordpress-phpunit-runtime-artifact/wordpress-phpunit-runtime.tar.gz | tr -d '[:space:]')"
-          db_baseline_tar_bytes="$(wc -c < build/wordpress-phpunit-runtime-artifact/wordpress-phpunit-db-baseline.tar.gz | tr -d '[:space:]')"
+          runtime_tar_bytes="$(wc -c < build/wordpress-phpunit-runtime-artifact/wordpress-phpunit-runtime.tar.zst | tr -d '[:space:]')"
+          db_baseline_tar_bytes="$(wc -c < build/wordpress-phpunit-runtime-artifact/wordpress-phpunit-db-baseline.tar.zst | tr -d '[:space:]')"
           tools/wordpress-phpunit-append-timing --label artifact-extract-${{ matrix.shard }} \
             "wordpress_artifact_extract_seconds=${extract_seconds}" \
             "wordpress_artifact_extract_runtime_tar_bytes=${runtime_tar_bytes}" \

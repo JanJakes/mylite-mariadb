@@ -300,6 +300,9 @@ reject_regex \
   'MYLITE_WORDPRESS_PHPUNIT_ISOLATED_FILTER' \
   "WordPress PHPUnit CI must not keep the stale broad isolated-class filter"
 reject_regex \
+  'wordpress-phpunit-(runtime|db-baseline)\.tar\.gz' \
+  "WordPress PHPUnit runtime artifacts must use zstd transport"
+reject_regex \
   'label:[[:space:]]*phpunit-non-isolated-rest-content-controller' \
   "WordPress PHPUnit CI must split the old REST content-controller label"
 reject_regex \
@@ -692,8 +695,8 @@ require_literal_count_at_least "actions/upload-artifact@v4" 4
 require_literal "actions/download-artifact@v4"
 require_literal "wordpress-phpunit-runtime"
 require_literal "wordpress-phpunit-runtime-root"
-require_literal "wordpress-phpunit-runtime.tar.gz"
-require_literal "wordpress-phpunit-db-baseline.tar.gz"
+require_literal "wordpress-phpunit-runtime.tar.zst"
+require_literal "wordpress-phpunit-db-baseline.tar.zst"
 require_literal "wordpress-phpunit-runtime-manifest.txt"
 require_literal "wordpress-phpunit-runtime-manifest.sha256"
 require_literal "wordpress-phpunit-timing-summary-setup"
@@ -1063,7 +1066,7 @@ require_step_literal \
   'non-isolated-remaining-other)'
 require_step_literal \
   "Pack WordPress PHPUnit runtime artifact" \
-  "tar -czf build/wordpress-phpunit-runtime.tar.gz"
+  "zstd --version"
 require_step_literal \
   "Pack WordPress PHPUnit runtime artifact" \
   "runtime_root=build/wordpress-phpunit-runtime-root"
@@ -1126,7 +1129,10 @@ require_step_literal \
   '( cd "${runtime_root}" && sha256sum -c build/wordpress-phpunit-runtime-manifest.sha256 )'
 require_step_literal \
   "Pack WordPress PHPUnit runtime artifact" \
-  '-C "${runtime_root}"'
+  "tar -C \"\${runtime_root}\" -cf - build"
+require_step_literal \
+  "Pack WordPress PHPUnit runtime artifact" \
+  "zstd -T0 -3 -o build/wordpress-phpunit-runtime.tar.zst"
 require_step_literal \
   "Pack WordPress PHPUnit runtime artifact" \
   "sha256sum -c build/wordpress-phpunit-runtime-manifest.sha256"
@@ -1165,7 +1171,7 @@ require_step_order \
   "Record WordPress setup Docker image timing"
 require_step_literal \
   "Pack WordPress PHPUnit runtime artifact" \
-  "tar -czf build/wordpress-phpunit-db-baseline.tar.gz"
+  "zstd -T0 -3 -o build/wordpress-phpunit-db-baseline.tar.zst"
 require_step_literal \
   "Pack WordPress PHPUnit runtime artifact" \
   "tools/wordpress-phpunit-append-timing --label artifact-pack"
@@ -1216,10 +1222,13 @@ require_step_order \
   "Extract WordPress PHPUnit runtime artifact"
 require_step_literal \
   "Extract WordPress PHPUnit runtime artifact" \
-  "tar -xzf build/wordpress-phpunit-runtime-artifact/wordpress-phpunit-runtime.tar.gz"
+  "zstd -dc build/wordpress-phpunit-runtime-artifact/wordpress-phpunit-runtime.tar.zst"
 require_step_literal \
   "Extract WordPress PHPUnit runtime artifact" \
-  "tar -xzf build/wordpress-phpunit-runtime-artifact/wordpress-phpunit-db-baseline.tar.gz"
+  "zstd -dc build/wordpress-phpunit-runtime-artifact/wordpress-phpunit-db-baseline.tar.zst"
+require_step_literal \
+  "Extract WordPress PHPUnit runtime artifact" \
+  "tar -xf -"
 require_step_literal \
   "Extract WordPress PHPUnit runtime artifact" \
   "sha256sum -c build/wordpress-phpunit-runtime-manifest.sha256"
