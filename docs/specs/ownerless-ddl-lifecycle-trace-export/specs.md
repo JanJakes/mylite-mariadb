@@ -53,7 +53,9 @@ Add `tools/ownerless-ddl-lifecycle-trace`:
    count, id/value/generation sums, payload bytes, stable aggregate total,
    absence of the moved table name, per-round space-id changes, the final live
    dictionary space id, replacement-copy row values, copied secondary-index
-   metadata, copied CTAS column metadata, and old replacement metadata absence.
+   metadata, copied CTAS column metadata, old replacement metadata absence,
+   cross-schema rename `SPACE` identity, final moved-table value/index
+   metadata, and dropped-schema table absence.
 6. Generate `manifest.txt` with deterministic oracle values and
    replacement-copy expected sums.
 7. Register a CMake smoke test with `--rounds 3 --check`.
@@ -66,6 +68,10 @@ In scope:
 - SQL-level InnoDB dictionary space-id oracle coverage for same-name recreate
   inside the DDL lifecycle trace.
 - Replacement-copy DDL input and final oracles inside the DDL lifecycle trace.
+- Cross-schema InnoDB table rename input and final oracles inside the DDL
+  lifecycle trace.
+- Schema-drop input and final dropped-table absence oracles inside the DDL
+  lifecycle trace.
 - Bounded external-reader retry handling for ordinary MariaDB contention while
   the DDL lifecycle worker mutates the stable aggregate.
 - `ownerless-sql-trace-runner --check` compatibility.
@@ -134,15 +140,16 @@ test.
   table recorded by the worker.
 - The expected oracle validates replacement-copy rows, copied metadata, and old
   metadata absence.
+- The expected oracle validates cross-schema rename row values, index usability,
+  source-name absence, and retained `INNODB_SYS_TABLES.SPACE` identity.
+- The expected oracle validates dropped-schema table-space creation followed by
+  empty schema and dictionary state after schema recreation.
 - The trace runner accepts the generated trace plan with `--check`.
 
 ## Evidence
 
-The replacement-copy trace extension is currently verified by dependency-free
-generator, trace-runner, and CTest check-mode coverage. The Docker-backed
-MariaDB replay evidence below predates the replacement-copy extension and
-remains historical evidence for the DDL lifecycle trace family, not proof of
-the new replacement-copy oracles.
+The replacement-copy and cross-schema/schema-drop trace extensions are verified
+by dependency-free generator, trace-runner, and CTest check-mode coverage.
 
 The first focused Docker-backed MariaDB 11.8 replay of the updated
 `ddl-lifecycle` trace at scale 2 exposed raw-reader contention:
@@ -173,6 +180,30 @@ observed_final_space=41
 expected_final_space=41
 ownerless_ddl_lifecycle_trace_check=ok
 ownerless_ddl_lifecycle_space_trace_check=ok
+```
+
+After adding cross-schema rename and dropped-schema file-lifecycle oracles,
+focused Docker-backed MariaDB 11.8 replay of the updated trace passed at scale
+1:
+
+```text
+scale=1
+trace_count=1
+trace=ddl-lifecycle
+suite_run=ok
+external_mariadb_trace_smoke=ok
+```
+
+The cross-schema final oracle reported:
+
+```text
+observed_xschema_oracle_rows=4
+observed_cross_schema_space_matches=4
+observed_drop_schema_space_pairs=4
+observed_final_xschema_space=48
+expected_final_xschema_space=48
+ownerless_ddl_lifecycle_cross_schema_rename_check=ok
+ownerless_ddl_lifecycle_drop_schema_check=ok
 ```
 
 The full current 11-family deterministic Docker-backed MariaDB 11.8 replay at
