@@ -470,10 +470,28 @@ jobs:
             -C build/wordpress-develop \
             --exclude='./.git/objects' \
             --exclude='./.git/logs' \
+            --exclude='./.phpunit.result.cache' \
+            --exclude='./tests/e2e' \
+            --exclude='./tests/gutenberg' \
+            --exclude='./tests/performance' \
+            --exclude='./tests/phpstan' \
+            --exclude='./tests/qunit' \
+            --exclude='./tests/visual-regression' \
+            --exclude='./vendor' \
             -cf - \
             . \
             | tar -C "${runtime_root}/build/wordpress-develop" -xf -
           mkdir -p "${runtime_root}/build/wordpress-develop/.git/objects"
+          mkdir -p \
+            "${runtime_root}/build/wordpress-develop/vendor" \
+            "${runtime_root}/build/wordpress-develop/vendor/yoast"
+          cp -a \
+            build/wordpress-develop/vendor/autoload.php \
+            build/wordpress-develop/vendor/composer \
+            "${runtime_root}/build/wordpress-develop/vendor/"
+          cp -a \
+            build/wordpress-develop/vendor/yoast/phpunit-polyfills \
+            "${runtime_root}/build/wordpress-develop/vendor/yoast/"
           cp -a build/wordpress-phpunit-tools "${runtime_root}/build/"
           cp -a \
             build/wordpress-mariadb-embedded/CMakeCache.txt \

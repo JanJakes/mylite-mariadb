@@ -1003,7 +1003,25 @@ require_step_literal \
   "--exclude='./.git/logs'"
 require_step_literal \
   "Pack WordPress PHPUnit runtime artifact" \
+  "--exclude='./tests/e2e'"
+require_step_literal \
+  "Pack WordPress PHPUnit runtime artifact" \
+  "--exclude='./tests/qunit'"
+require_step_literal \
+  "Pack WordPress PHPUnit runtime artifact" \
+  "--exclude='./vendor'"
+require_step_literal \
+  "Pack WordPress PHPUnit runtime artifact" \
   '${runtime_root}/build/wordpress-develop/.git/objects'
+require_step_literal \
+  "Pack WordPress PHPUnit runtime artifact" \
+  "build/wordpress-develop/vendor/autoload.php"
+require_step_literal \
+  "Pack WordPress PHPUnit runtime artifact" \
+  "build/wordpress-develop/vendor/composer"
+require_step_literal \
+  "Pack WordPress PHPUnit runtime artifact" \
+  "build/wordpress-develop/vendor/yoast/phpunit-polyfills"
 require_step_literal \
   "Pack WordPress PHPUnit runtime artifact" \
   '${runtime_root}/build/wordpress-mariadb-embedded/libmysqld'

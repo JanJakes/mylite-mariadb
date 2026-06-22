@@ -5414,8 +5414,11 @@ subsystems that this mode needs:
   runtime files, prunes WordPress Git object history from the shard payload,
   validates the manifest from inside the staged tree, and reports staged-root
   byte size beside compressed tarball size so artifact transport overhead stays
-  visible independently of PHPUnit execution. The embedded ownerless SQL CI
-  step now also prints the
+  visible independently of PHPUnit execution. The follow-up source snapshot
+  keeps `src`, `tests/phpunit`, root metadata, Composer autoload metadata, and
+  Yoast PHPUnit polyfills while excluding non-PHPUnit test trees and root
+  Composer development dependencies from shard fanout. The embedded ownerless
+  SQL CI step now also prints the
   direct `sql-case` count, emits per-case start and status/seconds log markers,
   and appends a case-index timing table to the GitHub step summary while preserving
   the failing case's exit status. This keeps long ownerless correctness

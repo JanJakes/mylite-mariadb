@@ -157,7 +157,23 @@ runtime_root_bytes=225302563
 runtime_tar_bytes=82399922
 ```
 
-CI timing remains pending for the pushed workflow.
+Green CI run `27922096226` on `8309b285c` passed the full workflow. The
+WordPress timing rollup reported:
+
+```text
+wordpress_setup_total_seconds_sum=64.000
+wordpress_artifact_pack_runtime_root_bytes=220768494
+wordpress_artifact_pack_runtime_tar_bytes=82158143
+wordpress_artifact_extract_runtime_tar_bytes_sum=2546902433
+wordpress_artifact_download_seconds=80.000
+wordpress_artifact_extract_seconds=68.000
+wordpress_estimated_workflow_critical_path_seconds=132.000
+```
+
+The previous green run `27921463527` reported runtime tar bytes at
+`158858467`, extracted runtime tar bytes at `4924612477`, artifact download
+at `109.000s`, artifact extract at `94.000s`, and estimated workflow critical
+path at `137.000s`.
 
 ## Risks And Follow-Up
 
