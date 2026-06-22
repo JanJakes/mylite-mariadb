@@ -20,6 +20,9 @@ cat > "${summary}" <<'SUMMARY'
 | artifact-pack | wordpress_artifact_pack_runtime_root_bytes | 180 |
 | artifact-pack | wordpress_artifact_pack_runtime_tar_bytes | 100 |
 | artifact-pack | wordpress_artifact_pack_db_baseline_tar_bytes | 20 |
+| artifact-pack | wordpress_artifact_pack_runtime_image_tar_bytes | 300 |
+| artifact-pack | wordpress_runtime_docker_image_pack_seconds | 2 |
+| artifact-pack | wordpress_runtime_docker_image_tar_bytes | 300 |
 | artifact-pack | wordpress_total_seconds | 12 |
 | artifact-upload | wordpress_artifact_upload_seconds | 3 |
 | artifact-upload | wordpress_total_seconds | 3 |
@@ -30,6 +33,8 @@ cat > "${summary}" <<'SUMMARY'
 | artifact-extract-db | wordpress_artifact_extract_db_baseline_tar_bytes | 20 |
 | artifact-extract-db | wordpress_total_seconds | 5 |
 | docker-image-db | wordpress_docker_build_seconds | 28 |
+| docker-image-db | wordpress_docker_image_load_seconds | 28 |
+| docker-image-db | wordpress_docker_image_load_tar_bytes | 300 |
 | docker-image-db | wordpress_total_seconds | 28 |
 | build-php | mylite_mariadb_embedded_seconds | 406 |
 | build-php | mylite_php_configure_seconds | 2 |
@@ -85,12 +90,16 @@ cat > "${summary}" <<'SUMMARY'
 | artifact-extract-non-isolated-rest | wordpress_artifact_extract_seconds | 7 |
 | artifact-extract-non-isolated-rest | wordpress_total_seconds | 7 |
 | docker-image-non-isolated-rest | wordpress_docker_build_seconds | 30 |
+| docker-image-non-isolated-rest | wordpress_docker_image_load_seconds | 30 |
+| docker-image-non-isolated-rest | wordpress_docker_image_load_tar_bytes | 310 |
 | docker-image-non-isolated-rest | wordpress_total_seconds | 30 |
 | artifact-download-non-isolated-short | wordpress_artifact_download_seconds | 3 |
 | artifact-download-non-isolated-short | wordpress_total_seconds | 3 |
 | artifact-extract-non-isolated-short | wordpress_artifact_extract_seconds | 4 |
 | artifact-extract-non-isolated-short | wordpress_total_seconds | 4 |
 | docker-image-non-isolated-short | wordpress_docker_build_seconds | 20 |
+| docker-image-non-isolated-short | wordpress_docker_image_load_seconds | 20 |
+| docker-image-non-isolated-short | wordpress_docker_image_load_tar_bytes | 320 |
 | docker-image-non-isolated-short | wordpress_total_seconds | 20 |
 | group-phpunit-non-isolated-short | wordpress_phpunit_shell_real_seconds | 25 |
 | group-phpunit-non-isolated-short | wordpress_total_seconds | 26 |
@@ -194,9 +203,14 @@ require_row "| timing-rollup | wordpress_artifact_extract_seconds | 16.000 |"
 require_row "| timing-rollup | wordpress_artifact_pack_runtime_root_bytes | 180 |"
 require_row "| timing-rollup | wordpress_artifact_pack_runtime_tar_bytes | 100 |"
 require_row "| timing-rollup | wordpress_artifact_pack_db_baseline_tar_bytes | 20 |"
+require_row "| timing-rollup | wordpress_artifact_pack_runtime_image_tar_bytes | 300 |"
 require_row "| timing-rollup | wordpress_artifact_extract_runtime_tar_bytes_sum | 100 |"
 require_row "| timing-rollup | wordpress_artifact_extract_db_baseline_tar_bytes_sum | 20 |"
 require_row "| timing-rollup | wordpress_docker_build_seconds | 78.000 |"
+require_row "| timing-rollup | wordpress_runtime_docker_image_pack_seconds | 2.000 |"
+require_row "| timing-rollup | wordpress_runtime_docker_image_tar_bytes | 300 |"
+require_row "| timing-rollup | wordpress_docker_image_load_seconds | 78.000 |"
+require_row "| timing-rollup | wordpress_docker_image_load_tar_bytes_sum | 930 |"
 require_row "| timing-rollup | wordpress_perf_php_extension_process_overhead_ms_avg | 7.173 |"
 require_row "| timing-rollup | wordpress_perf_php_connect_process_ms_avg | 620.000 |"
 require_row "| timing-rollup | wordpress_perf_php_connect_process_explicit_close_ms_avg | 620.000 |"

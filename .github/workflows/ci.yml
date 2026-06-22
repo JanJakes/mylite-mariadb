@@ -351,6 +351,7 @@ jobs:
         with:
           context: ./tools
           file: ./tools/wordpress-phpunit-runtime.Dockerfile
+          load: true
           tags: mylite-wordpress-phpunit-runtime:php83
           cache-from: |
             type=gha,scope=wordpress-phpunit-runtime-php83
@@ -458,7 +459,8 @@ jobs:
           zstd --version
           rm -f \
             build/wordpress-phpunit-runtime.tar.zst \
-            build/wordpress-phpunit-db-baseline.tar.zst
+            build/wordpress-phpunit-db-baseline.tar.zst \
+            build/wordpress-phpunit-runtime-image.tar.zst
           rm -rf "${runtime_root}"
           mkdir -p \
             "${runtime_root}/build/wordpress-develop" \
@@ -533,16 +535,26 @@ jobs:
             -cf - \
             "$(basename "${MYLITE_WORDPRESS_DB_BASELINE_DIR}")" \
             | zstd -T0 -3 -o build/wordpress-phpunit-db-baseline.tar.zst
+          docker image inspect mylite-wordpress-phpunit-runtime:php83 >/dev/null
+          runtime_image_pack_start="$(date +%s)"
+          docker image save mylite-wordpress-phpunit-runtime:php83 \
+            | zstd -T0 -3 -o build/wordpress-phpunit-runtime-image.tar.zst
+          runtime_image_pack_end="$(date +%s)"
+          runtime_image_pack_seconds="$((runtime_image_pack_end - runtime_image_pack_start))"
           pack_end="$(date +%s)"
           pack_seconds="$((pack_end - pack_start))"
           runtime_root_bytes="$(du -sb "${runtime_root}" | awk '{print $1}')"
           runtime_tar_bytes="$(wc -c < build/wordpress-phpunit-runtime.tar.zst | tr -d '[:space:]')"
           db_baseline_tar_bytes="$(wc -c < build/wordpress-phpunit-db-baseline.tar.zst | tr -d '[:space:]')"
+          runtime_image_tar_bytes="$(wc -c < build/wordpress-phpunit-runtime-image.tar.zst | tr -d '[:space:]')"
           tools/wordpress-phpunit-append-timing --label artifact-pack \
             "wordpress_artifact_pack_seconds=${pack_seconds}" \
             "wordpress_artifact_pack_runtime_root_bytes=${runtime_root_bytes}" \
             "wordpress_artifact_pack_runtime_tar_bytes=${runtime_tar_bytes}" \
             "wordpress_artifact_pack_db_baseline_tar_bytes=${db_baseline_tar_bytes}" \
+            "wordpress_artifact_pack_runtime_image_tar_bytes=${runtime_image_tar_bytes}" \
+            "wordpress_runtime_docker_image_pack_seconds=${runtime_image_pack_seconds}" \
+            "wordpress_runtime_docker_image_tar_bytes=${runtime_image_tar_bytes}" \
             "wordpress_total_seconds=${pack_seconds}"
 
       - name: Mark WordPress PHPUnit runtime artifact upload start
@@ -557,6 +569,7 @@ jobs:
           path: |
             build/wordpress-phpunit-runtime.tar.zst
             build/wordpress-phpunit-db-baseline.tar.zst
+            build/wordpress-phpunit-runtime-image.tar.zst
           if-no-files-found: error
           compression-level: 0
 
@@ -587,6 +600,7 @@ jobs:
             "${MYLITE_WORDPRESS_DB_BASELINE_DIR}" \
             build/wordpress-phpunit-runtime.tar.zst \
             build/wordpress-phpunit-db-baseline.tar.zst \
+            build/wordpress-phpunit-runtime-image.tar.zst \
             build/wordpress-phpunit-runtime-root \
             build/wordpress-develop \
             build/wordpress-phpunit-tools \
@@ -998,36 +1012,32 @@ jobs:
             "wordpress_artifact_extract_db_baseline_tar_bytes=${db_baseline_tar_bytes}" \
             "wordpress_total_seconds=${extract_seconds}"
 
-      - name: Mark WordPress shard Docker image build start
+      - name: Mark WordPress shard Docker image load start
         run: |
           set -euo pipefail
-          date +%s > build/wordpress-docker-image-build-start.txt
+          date +%s > build/wordpress-docker-image-load-start.txt
 
-      - name: Set up WordPress shard Docker Buildx
-        uses: docker/setup-buildx-action@v4
+      - name: Load WordPress shard runtime Docker image
+        run: |
+          set -euo pipefail
+          zstd -dc build/wordpress-phpunit-runtime-artifact/wordpress-phpunit-runtime-image.tar.zst \
+            | docker load
+          docker image inspect mylite-wordpress-phpunit-runtime:php83 >/dev/null
+          docker image tag mylite-wordpress-phpunit-runtime:php83 mylite-wordpress-phpunit:php83
+          docker image inspect mylite-wordpress-phpunit:php83 >/dev/null
 
-      - name: Build WordPress shard runtime Docker image
-        uses: docker/build-push-action@v7
-        env:
-          DOCKER_BUILD_RECORD_UPLOAD: "false"
-        with:
-          context: ./tools
-          file: ./tools/wordpress-phpunit-runtime.Dockerfile
-          load: true
-          tags: mylite-wordpress-phpunit:php83
-          cache-from: |
-            type=gha,scope=wordpress-phpunit-runtime-php83
-            type=gha,scope=wordpress-phpunit-php83
-
-      - name: Record WordPress shard Docker image timing
+      - name: Record WordPress shard Docker image load timing
         if: always()
         run: |
           set -euo pipefail
-          docker_start="$(cat build/wordpress-docker-image-build-start.txt)"
+          docker_start="$(cat build/wordpress-docker-image-load-start.txt)"
           docker_end="$(date +%s)"
           docker_seconds="$((docker_end - docker_start))"
+          runtime_image_tar_bytes="$(wc -c < build/wordpress-phpunit-runtime-artifact/wordpress-phpunit-runtime-image.tar.zst | tr -d '[:space:]')"
           tools/wordpress-phpunit-append-timing --label docker-image-${{ matrix.shard }} \
             "wordpress_docker_build_seconds=${docker_seconds}" \
+            "wordpress_docker_image_load_seconds=${docker_seconds}" \
+            "wordpress_docker_image_load_tar_bytes=${runtime_image_tar_bytes}" \
             "wordpress_total_seconds=${docker_seconds}"
 
       - name: Verify WordPress MariaDB embedded production build type

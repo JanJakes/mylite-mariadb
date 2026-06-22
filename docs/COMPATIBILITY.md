@@ -2773,6 +2773,14 @@ The timing rollup reported setup at `70s`, a `12s` runtime Docker cache seed,
 total shard Docker setup at `737s`, and estimated WordPress critical path at
 `138s`, improving over the previous green run's `76s` setup, `815s` Docker
 setup sum, and `146s` estimated critical path.
+The runtime-image artifact follow-up keeps that same production WordPress
+PHPUnit surface, but setup now saves the loaded
+`mylite-wordpress-phpunit-runtime:php83` image into the existing runtime
+artifact and shards `docker load` that image before retagging it to the
+harness default `mylite-wordpress-phpunit:php83`. The timing rollup keeps the
+`docker-image-<shard>` critical-path phase comparable while adding explicit
+runtime image pack and load metrics. This changes CI timing architecture only;
+SQL, mysqli, native storage, recovery, and ownerless behavior are unchanged.
 The follow-up remaining-platform fanout keeps that same production surface
 while replacing `phpunit-non-isolated-remaining-platform` with
 HTML/interactivity, image, and merged format/dependencies/embed shards. The
