@@ -391,7 +391,10 @@ Roles:
   make the native data file authoritative. When no-live reclaim advances the
   durable checkpoint-visible LSN, the still-existing volatile redo state is
   reseeded from that checkpoint so readers do not observe `.shm` metadata
-  behind `.ckpt` before a later `.shm` rebuild.
+  behind `.ckpt` before a later `.shm` rebuild. Focused no-live cutover coverage
+  now binds a reclaimed bulk-insert visible LSN to native InnoDB checkpoint
+  coverage, removes both `.wal` and `.shm`, and verifies ordinary native reopen
+  without page-version WAL overlay.
   Transactions that already performed local writes or locking reads avoid
   global refresh, and clean-page refresh skips locally dirty buffer pages.
   DML/DDL, recovery, checkpointing, and tablespace replay still use the
@@ -2515,7 +2518,10 @@ Tasks:
    pauses a closing writer after native checkpoint proof, lets a peer commit a
    newer update, then verifies the older closer does not truncate past the newer
    complete page-version records and both updates survive ownerless and native
-   exclusive reopen.
+   exclusive reopen. The no-live native checkpoint cutover selector also deletes
+   checkpointed page-version WAL after bulk DML reclaim and verifies ordinary
+   native reopen plus `mylite_ownerless_innodb_checkpoint_covers_lsn()` for the
+   reclaimed visible LSN.
 
 Exit criteria:
 

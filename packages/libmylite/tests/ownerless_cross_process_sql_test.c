@@ -178,6 +178,7 @@ extern uint32_t my_crc32c(uint32_t crc, const void *buf, size_t len);
 extern uint64_t mylite_ownerless_innodb_current_lsn(void);
 extern uint64_t mylite_ownerless_innodb_checkpoint_lsn(void);
 extern int mylite_ownerless_innodb_make_checkpoint(void);
+extern int mylite_ownerless_innodb_checkpoint_covers_lsn(uint64_t lsn);
 extern int mylite_ownerless_innodb_take_file_op_redo(void);
 extern void mylite_ownerless_innodb_refresh_buffer_pool_pages(uint64_t visible_lsn);
 extern void mylite_ownerless_database_set_perf_stats_enabled(int enabled);
@@ -777,6 +778,7 @@ static void test_ownerless_create_or_replace_like_tablespace_replay_keeps_copied
 static void test_ownerless_purge_preserves_cross_process_snapshot(void);
 static void test_ownerless_native_checkpoint_evidence(void);
 static void test_ownerless_native_checkpoint_reclaims_page_log(void);
+static void test_ownerless_no_live_native_checkpoint_cutover_proves_bulk_pages(void);
 static void test_ownerless_checkpoint_lsn_record_recovers_from_torn_latest_slot(void);
 static void test_ownerless_checkpoint_lsn_noop_update_keeps_generation(void);
 static void test_ownerless_checkpoint_generation_cache_hits_single_owner(void);
@@ -3932,6 +3934,10 @@ int main(int argc, char **argv) {
         test_ownerless_native_checkpoint_reclaims_page_log();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "no-live-native-checkpoint-cutover-proof") == 0) {
+        test_ownerless_no_live_native_checkpoint_cutover_proves_bulk_pages();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "native-file-op-marker-drain") == 0) {
         test_ownerless_native_file_op_marker_clears_without_page_log();
         test_ownerless_native_file_op_marker_recovers_from_torn_clear_record();
@@ -5128,6 +5134,7 @@ int main(int argc, char **argv) {
             "prepared-committed-read|tableless-select-fast-path|"
             "local-write-first-read|isolation|"
             "shared-readonly|checkpoint-evidence|checkpoint-lsn-noop-elision|native-reclaim|"
+            "no-live-native-checkpoint-cutover-proof|"
             "native-file-op-marker-drain|native-dml-file-op-marker-drain|"
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
             "native-file-modify-redo-observation|"
@@ -5323,6 +5330,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_shared_readonly_process_reads_committed_external_update),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_native_checkpoint_evidence),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_native_checkpoint_reclaims_page_log),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_no_live_native_checkpoint_cutover_proves_bulk_pages),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_checkpoint_lsn_record_recovers_from_torn_latest_slot),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_checkpoint_lsn_noop_update_keeps_generation),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_checkpoint_generation_cache_hits_single_owner),
@@ -11341,6 +11349,84 @@ static void exec_ownerless_simple_multi_row_insert(
     }
     exec_ok(db, sql);
     free(sql);
+}
+
+static void test_ownerless_no_live_native_checkpoint_cutover_proves_bulk_pages(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-no-live-native-cutover.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    uint64_t checkpoint_visible_before;
+    uint64_t checkpoint_visible_after;
+    uint64_t volatile_visible_after;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_no_live_native_cutover ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value VARCHAR(32) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_no_live_native_cutover VALUES (1000, 'seed')");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_concurrency_wal_checkpointed_eventually(database_path);
+    checkpoint_visible_before = read_concurrency_checkpoint_visible_lsn(database_path);
+    assert(checkpoint_visible_before > 0U);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_no_live_native_cutover") == 1U);
+    exec_ownerless_simple_multi_row_insert(db, "ownerless_no_live_native_cutover", 64U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_no_live_native_cutover") == 65U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_no_live_native_cutover") == 3080U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_no_live_native_cutover "
+            "WHERE value = 'mylite-perf'"
+        ) == 64U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_concurrency_wal_checkpointed_eventually(database_path);
+    checkpoint_visible_after = read_concurrency_checkpoint_visible_lsn(database_path);
+    volatile_visible_after = read_concurrency_redo_visible_lsn(database_path);
+    assert(checkpoint_visible_after > checkpoint_visible_before);
+    assert(volatile_visible_after >= checkpoint_visible_after);
+
+    remove_concurrency_wal(database_path);
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(
+        mylite_ownerless_innodb_checkpoint_covers_lsn(checkpoint_visible_after) ==
+        MYLITE_TEST_OWNERLESS_INNODB_LOCK_OK
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_no_live_native_cutover") == 65U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_no_live_native_cutover") == 3080U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_no_live_native_cutover "
+            "WHERE value = 'mylite-perf'"
+        ) == 64U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_no_live_native_cutover WHERE id = 1000"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
 }
 
 static void test_ownerless_single_owner_multi_row_insert_visible_fast_path(void) {

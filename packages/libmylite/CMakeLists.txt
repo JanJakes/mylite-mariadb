@@ -318,6 +318,10 @@ if(BUILD_TESTING)
       COMMAND mylite_ownerless_cross_process_sql_test single-owner-multi-row-insert-visible-fast-path
     )
     add_test(
+      NAME libmylite.ownerless-no-live-native-checkpoint-cutover-proof
+      COMMAND mylite_ownerless_cross_process_sql_test no-live-native-checkpoint-cutover-proof
+    )
+    add_test(
       NAME libmylite.ownerless-insert-fk-fast-path-cache
       COMMAND mylite_ownerless_cross_process_sql_test insert-fk-fast-path-cache
     )
@@ -623,6 +627,10 @@ if(BUILD_TESTING)
       TIMEOUT 90
     )
     set_tests_properties(libmylite.ownerless-single-owner-multi-row-insert-visible-fast-path PROPERTIES
+      LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
+      TIMEOUT 90
+    )
+    set_tests_properties(libmylite.ownerless-no-live-native-checkpoint-cutover-proof PROPERTIES
       LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
       TIMEOUT 90
     )
