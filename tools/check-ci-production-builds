@@ -726,24 +726,18 @@ require_literal "label: phpunit-non-isolated-rest-short"
 require_literal "label: phpunit-non-isolated-rest-content-support"
 require_literal "label: phpunit-non-isolated-rest-controller-tests-rest-other"
 require_literal "label: phpunit-non-isolated-rest-controller-wp-short"
-require_literal "phpunit-non-isolated-rest-controller-wp-test"
-require_literal "phpunit-non-isolated-rest-controller-wp-rest"
 require_literal "label: phpunit-non-isolated-rest-other"
 require_literal "label: phpunit-non-isolated-query-filter"
 require_literal "label: phpunit-non-isolated-query-core"
 require_literal "label: phpunit-non-isolated-canonical"
 require_literal "label: phpunit-non-isolated-theme"
 require_literal "label: phpunit-non-isolated-block-library-supports-short"
-require_literal "phpunit-non-isolated-block-library"
-require_literal "phpunit-non-isolated-block-supports"
 require_literal "label: phpunit-non-isolated-block-template-binding"
 require_literal "label: phpunit-non-isolated-content-media-short"
-require_literal "phpunit-non-isolated-media"
 require_literal "label: phpunit-non-isolated-comment"
 require_literal "label: phpunit-non-isolated-xmlrpc"
 require_literal "label: phpunit-non-isolated-content-post-template"
 require_literal "label: phpunit-non-isolated-content-term-taxonomy"
-require_literal "phpunit-non-isolated-content-settings-meta"
 require_literal "label: phpunit-non-isolated-user-auth"
 require_literal "label: phpunit-non-isolated-remaining-short"
 require_literal "label: phpunit-non-isolated-remaining-platform-format-dependencies-embed"
@@ -778,11 +772,10 @@ require_literal "shard: non-isolated-remaining-platform-format-dependencies-embe
 require_literal "shard: non-isolated-remaining-admin-site"
 require_literal "shard: non-isolated-remaining-navigation"
 require_literal "shard: non-isolated-remaining-other"
+require_literal "combine_wordpress_phpunit_filters"
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_PRIMARY_POSTS_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_PRIMARY_OTHER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
-require_literal "phpunit-non-isolated-rest-content-history"
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_SUPPORT_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
-require_literal "phpunit-non-isolated-rest-controller-tests-rest-font-icon"
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_TESTS_REST_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_TESTS_REST_FONT_ICON_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_CONTROLLER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal '"^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_WP_TEST_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_CONTROLLER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal '"^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}))(?=.*Controller)(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTROLLER_WP_REST_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_CONTENT_CONTROLLER_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
@@ -800,12 +793,8 @@ require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_N
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_POST_TEMPLATE_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_TERM_TAXONOMY_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal '"^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_SETTINGS_META_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
-require_literal "phpunit-non-isolated-remaining-platform-html-interactivity"
-require_literal "phpunit-non-isolated-remaining-platform-image"
 require_literal 'wordpress_phpunit_filter="^(?=(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_PLATFORM_FORMAT_DEPENDENCIES_EMBED_RE})(?:_|::|$))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
 require_literal 'wordpress_phpunit_filter="^(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_ADMIN_SITE_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
-require_literal "phpunit-non-isolated-remaining-ai-connectors"
-require_literal "phpunit-non-isolated-remaining-runtime-io"
 require_literal "record_wordpress_phpunit_group"
 require_literal 'group-phpunit-${shard}'
 require_literal 'wordpress_phpunit_filter="^(?!${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_PLATFORM_RE}(?:_|::|$))(?=.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_NAVIGATION_RE}))(?!.*(?:${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REST_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_QUERY_THEME_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_BLOCK_TOKEN_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_MEDIA_COMMENT_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_CONTENT_DATA_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_USER_AUTH_RE}|${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_REMAINING_ADMIN_SITE_RE}))${MYLITE_WORDPRESS_PHPUNIT_NON_ISOLATED_FILTER#^}"'
@@ -994,10 +983,7 @@ require_step_literal \
   'non-isolated-rest-controller-wp-short)'
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
-  'phpunit-non-isolated-rest-controller-wp-test'
-require_step_literal \
-  "Run WordPress PHPUnit shard (test only)" \
-  'phpunit-non-isolated-rest-controller-wp-rest'
+  'combine_wordpress_phpunit_filters'
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
   'non-isolated-query-filter)'
@@ -1015,25 +1001,49 @@ require_step_literal \
   'non-isolated-block-library-supports-short)'
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
-  'phpunit-non-isolated-block-library'
-require_step_literal \
-  "Run WordPress PHPUnit shard (test only)" \
-  'phpunit-non-isolated-block-supports'
-require_step_literal \
-  "Run WordPress PHPUnit shard (test only)" \
   'non-isolated-block-template-binding)'
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
   'non-isolated-content-media-short)'
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
+  'record_wordpress_phpunit_group "${WORDPRESS_PHPUNIT_SHARD}" "${group_start}"'
+forbid_step_literal \
+  "Run WordPress PHPUnit shard (test only)" \
+  'phpunit-non-isolated-rest-content-history'
+forbid_step_literal \
+  "Run WordPress PHPUnit shard (test only)" \
+  'phpunit-non-isolated-rest-controller-tests-rest-font-icon'
+forbid_step_literal \
+  "Run WordPress PHPUnit shard (test only)" \
+  'phpunit-non-isolated-rest-controller-wp-test'
+forbid_step_literal \
+  "Run WordPress PHPUnit shard (test only)" \
+  'phpunit-non-isolated-rest-controller-wp-rest'
+forbid_step_literal \
+  "Run WordPress PHPUnit shard (test only)" \
+  'phpunit-non-isolated-block-library'
+forbid_step_literal \
+  "Run WordPress PHPUnit shard (test only)" \
+  'phpunit-non-isolated-block-supports'
+forbid_step_literal \
+  "Run WordPress PHPUnit shard (test only)" \
   'phpunit-non-isolated-content-settings-meta'
-require_step_literal \
+forbid_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
   'phpunit-non-isolated-media'
-require_step_literal \
+forbid_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
-  'record_wordpress_phpunit_group "${WORDPRESS_PHPUNIT_SHARD}" "${group_start}"'
+  'phpunit-non-isolated-remaining-platform-html-interactivity'
+forbid_step_literal \
+  "Run WordPress PHPUnit shard (test only)" \
+  'phpunit-non-isolated-remaining-platform-image'
+forbid_step_literal \
+  "Run WordPress PHPUnit shard (test only)" \
+  'phpunit-non-isolated-remaining-ai-connectors'
+forbid_step_literal \
+  "Run WordPress PHPUnit shard (test only)" \
+  'phpunit-non-isolated-remaining-runtime-io'
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
   'non-isolated-comment)'
