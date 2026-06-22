@@ -26,6 +26,8 @@ CMake/Ninja/GCC/bison build environment it does not use.
   `MYLITE_WORDPRESS_CMAKE_BUILD_TYPE=Release`,
   `build/wordpress-php-embedded-prod`, and
   `build/wordpress-mariadb-embedded`.
+- The shard `phpunit` phase runs with dependency installation skipped. Composer
+  is needed by setup dependency phases, but not by test-only shard execution.
 - `tools/wordpress-phpunit-mysqli-mylite` accepts
   `MYLITE_WORDPRESS_SKIP_DOCKER_BUILD=1`; CI can prebuild or preload the
   Docker image and keep the harness test phase unchanged.
@@ -46,6 +48,8 @@ Keep `tools/wordpress-phpunit.Dockerfile` as the setup image. Add
 - the final image starts from `php:8.3-cli-bookworm`, installs only runtime
   package dependencies needed by PHP, `gd`, `zip`, and the shard harness, and
   copies the built PHP extensions plus their `conf.d` entries;
+- the final runtime image intentionally omits Composer, because setup installs
+  WordPress/PHPUnit dependencies before packing the shard artifact;
 - shards load the runtime Dockerfile as `mylite-wordpress-phpunit:php83`, the
   same tag the harness already runs;
 - the setup job seeds a separate
@@ -89,12 +93,12 @@ page-version behavior changes.
 ## Build, Size, License, And Dependency Impact
 
 The runtime image does not introduce a new external dependency; it is another
-Dockerfile built from the same `php:8.3-cli-bookworm` and `composer:2` bases
-already used by the setup image. The expected performance effect is lower
-per-shard Docker image build/load time by excluding the C/CMake build
-toolchain from the final test-only image. The setup job pays a new runtime
-cache seed step, and CI timing remains the authority for whether the reduced
-per-shard Docker time offsets that setup cost.
+Dockerfile built from the same `php:8.3-cli-bookworm` base already used by the
+setup image. The expected performance effect is lower per-shard Docker
+image build/load time by excluding the C/CMake build toolchain and Composer
+from the final test-only image. The setup job pays a new runtime cache seed
+step, and CI timing remains the authority for whether the reduced per-shard
+Docker time offsets that setup cost.
 
 ## Test And Verification Plan
 
@@ -120,6 +124,7 @@ per-shard Docker time offsets that setup cost.
   `mylite-wordpress-phpunit:php83` before running the unchanged test-only
   harness.
 - The production audit rejects stale shard builds that use the setup Dockerfile.
+- The production audit rejects Composer in the shard runtime Dockerfile.
 - The timing rollup reports `wordpress_runtime_docker_cache_seconds` so the
   setup-side cost of this optimization is visible beside shard Docker timings.
 
@@ -169,6 +174,20 @@ stock PHP process start, `21.367ms` PHP process start with extensions loaded,
 `3208.580` `SELECT 1` ops/s, `3024.050` transactional insert ops/s,
 `2766.380` point-select ops/s, `1979.890` prepared autocommit insert ops/s,
 and `1947.930` direct autocommit insert ops/s.
+
+Follow-up local verification on 2026-06-22 removed Composer from the runtime
+Dockerfile because shard jobs run with dependency installation skipped. The
+runtime image rebuilt from cache as
+`mylite-wordpress-phpunit-runtime-nocomposer:php83` at `561438707` bytes,
+down from the prior documented `565003838` bytes. A staged WordPress PHPUnit
+smoke using that image and the slim runtime artifact passed:
+
+```text
+tools/wordpress-phpunit-mysqli-mylite --filter '^Tests_Basic::test_package_json$'
+# passed, 1 test / 1 assertion
+wordpress_phpunit_reported_seconds=1.034
+wordpress_phpunit_shell_real_seconds=10.705
+```
 
 ## Risks
 

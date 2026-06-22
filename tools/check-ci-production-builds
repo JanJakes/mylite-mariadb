@@ -28,6 +28,16 @@ require_file_literal() {
   fi
 }
 
+forbid_file_literal() {
+  local file="$1"
+  local needle="$2"
+
+  if grep -Fq -- "${needle}" "${file}"; then
+    echo "Forbidden production-build marker in ${file}: ${needle}" >&2
+    failed=1
+  fi
+}
+
 require_literal_count_at_least() {
   local needle="$1"
   local minimum="$2"
@@ -545,6 +555,8 @@ require_file_literal "${wordpress_runtime_dockerfile}" "FROM php:8.3-cli-bookwor
 require_file_literal "${wordpress_runtime_dockerfile}" "FROM php:8.3-cli-bookworm"
 require_file_literal "${wordpress_runtime_dockerfile}" "docker-php-ext-install"
 require_file_literal "${wordpress_runtime_dockerfile}" "COPY --from=php-ext-builder /usr/local/lib/php/extensions/"
+forbid_file_literal "${wordpress_runtime_dockerfile}" "FROM composer:"
+forbid_file_literal "${wordpress_runtime_dockerfile}" "COPY --from=composer"
 require_file_literal "${wordpress_harness}" 'if [ "${MYLITE_WORDPRESS_PHASE}" != "phpunit" ]; then'
 require_file_literal "${wordpress_harness}" "prepared MyLite WordPress baseline database directory"
 require_file_literal "${wordpress_timing_append}" "Usage: wordpress-phpunit-append-timing"

@@ -1071,10 +1071,11 @@ but adds a test-only `tools/wordpress-phpunit-runtime.Dockerfile` for shard
 jobs. Setup seeds a distinct `wordpress-phpunit-runtime-php83` Buildx cache,
 while shards load the runtime image under the existing harness tag
 `mylite-wordpress-phpunit:php83`. The final runtime image drops the C/CMake
-build toolchain from shard jobs while preserving PHP `gd`/`zip` and the same
-Release MyLite plus MinSizeRel MariaDB artifacts. The timing rollup reports
-`wordpress_runtime_docker_cache_seconds` so the setup-side cache seed is
-visible when comparing the first CI run against prior shard Docker timings.
+build toolchain and Composer from shard jobs while preserving PHP `gd`/`zip`
+and the same Release MyLite plus MinSizeRel MariaDB artifacts. The timing
+rollup reports `wordpress_runtime_docker_cache_seconds` so the setup-side cache
+seed is visible when comparing the first CI run against prior shard Docker
+timings.
 Green CI run `27916382040` on `70fe4caf3` showed the runtime-image shape was
 a net wall-clock improvement in its first production sample. Setup action time
 fell from `76s` to `70s` even with the new `12s` runtime Docker cache seed,

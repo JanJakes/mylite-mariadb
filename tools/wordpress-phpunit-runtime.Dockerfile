@@ -1,4 +1,3 @@
-FROM composer:2 AS composer
 FROM php:8.3-cli-bookworm AS php-ext-builder
 
 RUN apt-get update \
@@ -43,4 +42,3 @@ RUN apt-get update \
 COPY --from=php-ext-builder /usr/local/lib/php/extensions/ /usr/local/lib/php/extensions/
 COPY --from=php-ext-builder /usr/local/etc/php/conf.d/docker-php-ext-gd.ini /usr/local/etc/php/conf.d/
 COPY --from=php-ext-builder /usr/local/etc/php/conf.d/docker-php-ext-zip.ini /usr/local/etc/php/conf.d/
-COPY --from=composer /usr/bin/composer /usr/local/bin/composer
