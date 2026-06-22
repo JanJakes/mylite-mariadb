@@ -297,11 +297,16 @@ Successful explicit transaction rollback after local writes is now covered as
 a separate outcome: it leaves both native file-op markers clear, consumes the
 process-local ownerless InnoDB file-op redo flag so stale evidence cannot leak
 into later statements, and preserves the pre-transaction row after forced
-`.shm` rebuild plus ordinary native reopen. This is bounded durable marker
-coverage for checkpointed representative DML commit and successful rollback
-shapes, not a claim that every possible DML-origin `FILE_MODIFY`,
-deadlock/crash, killed-transaction, savepoint, or concurrent-writer explicit
-transaction path has been exhaustively classified.
+`.shm` rebuild plus ordinary native reopen. Deadlock victims after local
+explicit-transaction writes now use the same discard rule after MyLite's
+internal deadlock rollback; focused two-process SQL coverage proves the victim
+process clears its process-local file-op redo latch while the winning
+transaction can still commit, and a later no-live ownerless close after both
+children are reaped drains durable marker evidence. This is bounded durable
+marker coverage for checkpointed representative DML commit, successful
+rollback, and deadlock-victim rollback shapes, not a claim that every possible
+DML-origin `FILE_MODIFY`, crash, killed-transaction, savepoint, or
+concurrent-writer explicit transaction path has been exhaustively classified.
 Ownerless AUTO_INCREMENT publishes now also mark a shared registry
 native-checkpoint pending bit when they raise a table high watermark. The
 final no-live ownerless close path drains that bit through the existing native

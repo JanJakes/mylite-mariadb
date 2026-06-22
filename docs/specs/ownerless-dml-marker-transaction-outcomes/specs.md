@@ -51,8 +51,10 @@ In scope:
 
 Out of scope:
 
-- Rollback crash windows, killed sessions, deadlock victim cleanup, savepoint
-  matrices, or concurrent-writer transaction outcome coverage.
+- Rollback crash windows, killed sessions, savepoint matrices, or broader
+  concurrent-writer transaction outcome coverage.
+- Deadlock victim cleanup is handled by the
+  `ownerless-dml-marker-deadlock-outcome` follow-up.
 - Parsing native redo payloads to distinguish DML-origin `FILE_MODIFY` from
   other file-operation classes.
 - Immediate checkpointing, group commit changes, or broader redo/checkpoint
@@ -167,5 +169,6 @@ test. It adds no dependencies and does not change the embedded MariaDB profile.
 - The file-op redo flag remains type-agnostic; the test uses the same
   checkpointed file-per-table `UPDATE` shape as the commit marker tests for
   source-backed `FILE_MODIFY` evidence.
-- Deadlock, killed transaction, savepoint, and concurrent-writer matrices
-  remain planned.
+- Deadlock victim cleanup is covered by the
+  `ownerless-dml-marker-deadlock-outcome` follow-up; killed transaction,
+  savepoint, and broader concurrent-writer matrices remain planned.

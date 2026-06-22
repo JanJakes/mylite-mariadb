@@ -4628,9 +4628,15 @@ Tasks:
    separate outcome: it leaves both native file-op markers clear, consumes the
    process-local ownerless InnoDB file-op redo flag, and preserves the
    pre-transaction row after forced `.shm` rebuild plus ordinary native reopen.
+   Deadlock victims after local explicit-transaction writes now reuse that
+   discard rule after MyLite's internal deadlock rollback; focused two-process
+   SQL coverage proves the victim process clears its process-local file-op redo
+   latch while the winning transaction can still commit and a later no-live
+   ownerless close after both children are reaped drains durable marker
+   evidence.
    That closes the focused checkpointed representative DML commit marker and
-   successful rollback classification gaps, not the broader DML-origin
-   `FILE_MODIFY`, deadlock/crash, killed-transaction, savepoint, or
+   rollback/deadlock classification gaps, not the broader DML-origin
+   `FILE_MODIFY`, crash, killed-transaction, savepoint, or
    concurrent-writer explicit-transaction matrices.
    The no-argument
    aggregate harness remains

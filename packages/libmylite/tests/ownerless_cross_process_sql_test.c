@@ -737,6 +737,7 @@ static void test_two_processes_update_same_innodb_row(void);
 static void test_two_processes_update_different_innodb_tables(void);
 static void test_ownerless_concurrent_transaction_commits(void);
 static void test_two_processes_deadlock_on_innodb_rows(void);
+static void test_ownerless_explicit_dml_deadlock_discards_file_op_marker(void);
 static void test_ownerless_gap_lock_blocks_insert(void);
 static void test_ownerless_savepoint_rollback_is_peer_visible_after_commit(void);
 static void test_ownerless_serializable_read_blocks_peer_update(void);
@@ -1129,12 +1130,18 @@ static void commit_race_update_row_after_signal(
     unsigned delta,
     child_pipes pipes
 );
+static void run_ownerless_table_pair_deadlock(
+    open_database_paths paths,
+    const char *database_path,
+    int assert_deadlock_file_op_discard
+);
 static void update_table_pair_after_signal(
     open_database_paths paths,
     const char *first_table,
     const char *second_table,
     unsigned increment,
-    child_pipes pipes
+    child_pipes pipes,
+    int assert_deadlock_file_op_discard
 );
 static void hold_gap_lock_until_released(open_database_paths paths, child_pipes pipes);
 static void insert_gap_row_expect_lock_timeout(open_database_paths paths);
@@ -2218,6 +2225,12 @@ static void assert_total_value_is_one_of(
 #endif
 static void assert_table_total_value_is_one_of(
     open_database_paths paths,
+    unsigned long long first_expected,
+    unsigned long long second_expected
+);
+static void assert_table_total_value_is_one_of_with_flags(
+    open_database_paths paths,
+    unsigned flags,
     unsigned long long first_expected,
     unsigned long long second_expected
 );
@@ -3984,6 +3997,10 @@ int main(int argc, char **argv) {
         test_ownerless_explicit_dml_rollback_discards_file_op_marker();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "native-explicit-dml-deadlock-file-op-marker-discard") == 0) {
+        test_ownerless_explicit_dml_deadlock_discards_file_op_marker();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "native-multi-peer-explicit-dml-file-op-marker-drain") == 0) {
         test_ownerless_multi_peer_explicit_dml_marker_drain();
         return 0;
@@ -5178,6 +5195,7 @@ int main(int argc, char **argv) {
             "native-file-op-marker-drain|native-dml-file-op-marker-drain|"
             "native-single-owner-explicit-dml-file-op-marker-drain|"
             "native-explicit-dml-rollback-file-op-marker-discard|"
+            "native-explicit-dml-deadlock-file-op-marker-discard|"
             "native-multi-peer-explicit-dml-file-op-marker-drain|"
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
             "native-file-modify-redo-observation|"
@@ -5743,6 +5761,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
         test_ownerless_native_file_op_marker_drains_after_single_owner_explicit_transaction_dml
     ),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_explicit_dml_rollback_discards_file_op_marker),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_explicit_dml_deadlock_discards_file_op_marker),
     {
         .name = "test_ownerless_native_dml_marker_drains_after_multi_peer_explicit_transaction_dml",
         .run = test_ownerless_multi_peer_explicit_dml_marker_drain,
@@ -6482,6 +6501,58 @@ static void test_two_processes_deadlock_on_innodb_rows(void) {
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(root, "ownerless-deadlock.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    run_ownerless_table_pair_deadlock(paths, database_path, 0);
+    assert_table_total_value_is_one_of(paths, 302U, 304U);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_explicit_dml_deadlock_discards_file_op_marker(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-deadlock-dml-marker.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    run_ownerless_table_pair_deadlock(paths, database_path, 1);
+    assert_table_total_value_is_one_of_with_flags(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        302U,
+        304U
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_table_total_value_is_one_of(paths, 302U, 304U);
+
+    remove_concurrency_shm(database_path);
+    assert_table_total_value_is_one_of_with_flags(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        302U,
+        304U
+    );
+    assert_table_total_value_is_one_of(paths, 302U, 304U);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void run_ownerless_table_pair_deadlock(
+    open_database_paths paths,
+    const char *database_path,
+    int assert_deadlock_file_op_discard
+) {
     int first_ready_pipe[2];
     int second_ready_pipe[2];
     int first_release_pipe[2];
@@ -6491,8 +6562,6 @@ static void test_two_processes_deadlock_on_innodb_rows(void) {
     int first_result;
     int second_result;
 
-    assert(mkdir(runtime_root, 0700) == 0);
-    initialize_database(paths);
     assert(pipe(first_ready_pipe) == 0);
     assert(pipe(second_ready_pipe) == 0);
     assert(pipe(first_release_pipe) == 0);
@@ -6515,7 +6584,8 @@ static void test_two_processes_deadlock_on_innodb_rows(void) {
             (child_pipes){
                 .ready_write_fd = first_ready_pipe[1],
                 .release_read_fd = first_release_pipe[0],
-            }
+            },
+            assert_deadlock_file_op_discard
         );
     }
 
@@ -6536,7 +6606,8 @@ static void test_two_processes_deadlock_on_innodb_rows(void) {
             (child_pipes){
                 .ready_write_fd = second_ready_pipe[1],
                 .release_read_fd = second_release_pipe[0],
-            }
+            },
+            assert_deadlock_file_op_discard
         );
     }
 
@@ -6567,12 +6638,6 @@ static void test_two_processes_deadlock_on_innodb_rows(void) {
         (first_result == MYLITE_TEST_CHILD_DEADLOCK && second_result == MYLITE_TEST_CHILD_OK)
     );
     assert(wait_for_concurrency_ownerless_write_waiting_count(database_path, 0U, 5000U) == 0U);
-    assert_table_total_value_is_one_of(paths, 302U, 304U);
-
-    free(database_path);
-    free(runtime_root);
-    remove_tree(root);
-    free(root);
 }
 
 static void test_ownerless_gap_lock_blocks_insert(void) {
@@ -52360,7 +52425,8 @@ static void update_table_pair_after_signal(
     const char *first_table,
     const char *second_table,
     unsigned increment,
-    child_pipes pipes
+    child_pipes pipes,
+    int assert_deadlock_file_op_discard
 ) {
     mylite_db *db;
     unsigned mariadb_errno = 0U;
@@ -52381,6 +52447,10 @@ static void update_table_pair_after_signal(
         _exit(MYLITE_TEST_CHILD_OPEN_FAILED);
     }
     exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
+    if (assert_deadlock_file_op_discard) {
+        assert(mylite_ownerless_innodb_make_checkpoint() == MYLITE_TEST_OWNERLESS_INNODB_LOCK_OK);
+        (void)mylite_ownerless_innodb_take_file_op_redo();
+    }
     exec_ok(db, "START TRANSACTION");
     assert(
         snprintf(
@@ -52401,6 +52471,10 @@ static void update_table_pair_after_signal(
         ) > 0
     );
     exec_ok(db, first_update);
+    if (assert_deadlock_file_op_discard) {
+        assert(mylite_ownerless_innodb_take_file_op_redo());
+        mylite_ownerless_innodb_note_file_op_redo();
+    }
     signal_pipe(pipes.ready_write_fd);
     wait_for_pipe(pipes.release_read_fd);
 
@@ -52413,7 +52487,13 @@ static void update_table_pair_after_signal(
         _exit(MYLITE_TEST_CHILD_OK);
     }
     if (mariadb_errno == MYLITE_TEST_DEADLOCK_ERRNO) {
+        if (assert_deadlock_file_op_discard) {
+            assert(!mylite_ownerless_innodb_take_file_op_redo());
+        }
         exec_ok(db, "ROLLBACK");
+        if (assert_deadlock_file_op_discard) {
+            assert(!mylite_ownerless_innodb_take_file_op_redo());
+        }
         (void)mylite_close(db);
         _exit(MYLITE_TEST_CHILD_DEADLOCK);
     }
@@ -78044,7 +78124,21 @@ static void assert_table_total_value_is_one_of(
     unsigned long long first_expected,
     unsigned long long second_expected
 ) {
-    mylite_db *db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert_table_total_value_is_one_of_with_flags(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        first_expected,
+        second_expected
+    );
+}
+
+static void assert_table_total_value_is_one_of_with_flags(
+    open_database_paths paths,
+    unsigned flags,
+    unsigned long long first_expected,
+    unsigned long long second_expected
+) {
+    mylite_db *db = open_database(paths, flags);
     query_result result = {0U};
     char *errmsg = NULL;
 

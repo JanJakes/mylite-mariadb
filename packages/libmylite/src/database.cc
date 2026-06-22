@@ -7835,8 +7835,16 @@ void rollback_active_transaction_after_deadlock(mylite_db &db) {
         return;
     }
 
+    const bool transaction_rollback_had_local_write =
+        db.ownerless_rw_open && db.ownerless_transaction_has_local_write;
     const ErrorSnapshot snapshot = capture_error(db);
-    static_cast<void>(rollback_active_transaction(db));
+    const int rollback_result = rollback_active_transaction(db);
+    if (rollback_result == MYLITE_OK) {
+        discard_ownerless_native_file_op_redo_after_rolled_back_write(
+            db,
+            transaction_rollback_had_local_write
+        );
+    }
     restore_error(db, snapshot);
 }
 
