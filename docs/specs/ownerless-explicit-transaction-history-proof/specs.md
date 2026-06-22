@@ -83,14 +83,17 @@ In scope:
   `../ownerless-explicit-replace-history-proof/specs.md`.
 - The follow-up mixed-DML proof documented in
   `../ownerless-explicit-mixed-dml-history-proof/specs.md`.
+- The follow-up ordered/limited update/delete proof documented in
+  `../ownerless-explicit-order-limit-history-proof/specs.md`.
 - The existing rollback-segment/undo history WAL proof and counters.
 - Focused SQL coverage for prepared explicit inserts and savepoint negative
   coverage.
 
 Out of scope:
 
-- `INSERT ... SELECT`, `REPLACE ... SELECT`, broader `UPDATE` shapes, broader
-  `DELETE`/`REPLACE` shapes, DDL, foreign-key target inserts,
+- `INSERT ... SELECT`, `REPLACE ... SELECT`, broader `UPDATE` shapes beyond
+  ordered/limited single-table forms, broader `DELETE`/`REPLACE` shapes beyond
+  ordered/limited single-table deletes, DDL, foreign-key target inserts,
   savepoint-controlled transactions, and locking reads.
 - Replacing history proof page contents with a smaller proof representation.
 - Transaction-scoped append batching.
@@ -163,6 +166,10 @@ Implementation:
   mixed explicit transaction composed of prepared insert, update, delete, and
   replace statements carries the same marker through COMMIT, while a mixed
   transaction with one unproven subquery update remains conservative.
+- `packages/libmylite/src/database.cc` now accepts constrained single-table
+  ordered/limited update and delete statements while retaining the existing
+  subquery, join, trigger, referential-constraint, partition, and no-`WHERE`
+  exclusions.
 - `packages/libmylite/tests/ownerless_cross_process_sql_test.c` now requires
   the explicit transaction undo-WAL selector to report zero ownerless
   write-history flush pages, zero exact fallback rounds, and positive

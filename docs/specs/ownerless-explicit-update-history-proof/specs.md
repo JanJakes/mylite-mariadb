@@ -42,7 +42,7 @@ WHERE ...` or `UPDATE table SET ... WHERE ...` shapes. It rejects:
 - multi-table and joined updates,
 - modifier/table-partition shapes,
 - `UPDATE` statements without `WHERE`,
-- subquery, `RETURNING`, `ORDER BY`, and `LIMIT` shapes,
+- subquery and `RETURNING` shapes,
 - tracked temporary tables, and
 - tables that participate in referential constraints either as child or
   referenced parent tables, and
@@ -63,17 +63,20 @@ metadata cache pattern so repeated updates of the same table do not re-query
 In scope:
 
 - Direct and prepared simple single-table `UPDATE ... SET ... WHERE ...`
-  statements inside explicit ownerless transactions.
+  statements inside explicit ownerless transactions, including the follow-up
+  ordered/limited shape documented in
+  `../ownerless-explicit-order-limit-history-proof/specs.md`.
 - Trigger-table rejection for constrained explicit update proofs.
 - Existing rollback-segment/undo history proof and page-version publication
   checks.
 - Focused SQL coverage for positive simple updates, a subquery-update negative
-  proof, and trigger-table conservative fallback.
+  proof, ordered/limited update proof, and trigger-table conservative fallback.
 
 Out of scope:
 
-- `DELETE`, `REPLACE`, `INSERT ... SELECT`, DDL, locking reads, savepoints,
-  trigger-bearing updates, and foreign-key target or parent updates.
+- `DELETE`, `REPLACE`, `INSERT ... SELECT`, joined or subquery update shapes,
+  DDL, locking reads, savepoints, trigger-bearing updates, and foreign-key
+  target or parent updates.
 - Broader redo/checkpoint reconciliation and DDL/file-lifecycle recovery.
 - External MariaDB/RQG randomized DML stress.
 
@@ -147,5 +150,5 @@ The slice is verified with:
   failure keeps the update on the conservative path.
 - Trigger metadata lookup is also fail-closed, keeping trigger-bearing or
   unproven trigger-state tables on the conservative path.
-- This is not a broad DML proof; `DELETE`, `REPLACE`, `INSERT ... SELECT`, and
-  foreign-key update matrices remain separate work.
+- This is not a broad DML proof; `DELETE`, `REPLACE`, `INSERT ... SELECT`,
+  joined/subquery update and foreign-key update matrices remain separate work.

@@ -6164,10 +6164,16 @@ subsystems that this mode needs:
   The same proof is extended to constrained single-table
   `DELETE FROM ... WHERE ...` statements when the target table has no
   referential constraints, no trigger for the delete operation, and no joins,
-  subquery, alias, modifier, `RETURNING`, `ORDER BY`, or `LIMIT` shape.
+  subquery, alias, modifier, `RETURNING`, or partition shape.
   Focused SQL coverage proves prepared simple deletes can use fast COMMIT
   visibility and the rollback-segment/undo history WAL proof, while subquery
   deletes and trigger-bearing delete targets remain conservative.
+  The update/delete proof now also accepts constrained single-table
+  `ORDER BY`/`LIMIT` variants with a `WHERE` clause, while preserving the
+  existing subquery, join, alias, trigger, referential-constraint, partition,
+  and no-`WHERE` exclusions. Focused SQL coverage proves prepared
+  ordered/limited update and delete statements can share the fast COMMIT
+  visibility and rollback-segment/undo history WAL proof.
   The proof is also extended to constrained single-table
   `REPLACE ... VALUES` statements when the target table has no referential
   constraints, no triggers, no auto-increment column, and no `REPLACE ...

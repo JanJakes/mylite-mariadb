@@ -330,6 +330,10 @@ if(BUILD_TESTING)
       COMMAND mylite_ownerless_cross_process_sql_test explicit-transaction-mixed-dml-history-proof
     )
     add_test(
+      NAME libmylite.ownerless-explicit-transaction-order-limit-history-proof
+      COMMAND mylite_ownerless_cross_process_sql_test explicit-transaction-order-limit-history-proof
+    )
+    add_test(
       NAME libmylite.ownerless-single-owner-multi-row-insert-visible-fast-path
       COMMAND mylite_ownerless_cross_process_sql_test single-owner-multi-row-insert-visible-fast-path
     )
@@ -655,6 +659,10 @@ if(BUILD_TESTING)
       TIMEOUT 90
     )
     set_tests_properties(libmylite.ownerless-explicit-transaction-mixed-dml-history-proof PROPERTIES
+      LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
+      TIMEOUT 90
+    )
+    set_tests_properties(libmylite.ownerless-explicit-transaction-order-limit-history-proof PROPERTIES
       LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
       TIMEOUT 90
     )

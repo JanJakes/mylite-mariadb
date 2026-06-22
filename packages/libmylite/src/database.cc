@@ -5949,8 +5949,7 @@ bool ownerless_update_statement_allows_visible_fast_path(
     for (std::size_t index = set_index + 1U; index < tokens.count; ++index) {
         const std::string_view token = tokens.values[index];
         if (token_in(token, "SELECT", "WITH", "JOIN") ||
-            token_in(token, "FROM", "RETURNING", "ORDER") ||
-            token_in(token, "LIMIT", "PARTITION", "FOR")) {
+            token_in(token, "FROM", "RETURNING", "PARTITION") || token_equals(token, "FOR")) {
             return false;
         }
     }
@@ -5981,8 +5980,8 @@ bool ownerless_delete_statement_allows_visible_fast_path(
     for (std::size_t index = where_index + 1U; index < tokens.count; ++index) {
         const std::string_view token = tokens.values[index];
         if (token_in(token, "SELECT", "WITH", "JOIN") ||
-            token_in(token, "FROM", "USING", "RETURNING") ||
-            token_in(token, "ORDER", "LIMIT", "PARTITION") || token_equals(token, "FOR")) {
+            token_in(token, "FROM", "USING", "RETURNING") || token_equals(token, "PARTITION") ||
+            token_equals(token, "FOR")) {
             return false;
         }
     }

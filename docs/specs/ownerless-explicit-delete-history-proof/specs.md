@@ -45,7 +45,7 @@ transactions. It rejects:
 - multi-table and joined deletes,
 - table aliases,
 - `DELETE` statements without `WHERE`,
-- subquery, `RETURNING`, `ORDER BY`, and `LIMIT` shapes,
+- subquery and `RETURNING` shapes,
 - tracked temporary tables,
 - target tables that participate in referential constraints either as child or
   referenced parent tables, and
@@ -72,18 +72,22 @@ fail-closed.
 In scope:
 
 - Direct and prepared simple single-table `DELETE FROM ... WHERE ...`
-  statements inside explicit ownerless transactions.
+  statements inside explicit ownerless transactions, including the follow-up
+  ordered/limited shape documented in
+  `../ownerless-explicit-order-limit-history-proof/specs.md`.
 - Trigger-table rejection for constrained explicit update/delete proofs.
 - Existing rollback-segment/undo history proof and page-version publication
   checks.
 - Focused SQL coverage for positive simple deletes, a subquery-delete negative
-  proof, and update/delete trigger-table conservative fallback.
+  proof, ordered/limited delete proof, and update/delete trigger-table
+  conservative fallback.
 
 Out of scope:
 
 - `REPLACE`, `INSERT ... SELECT`, broader `UPDATE` shapes, joined/multi-table
-  `DELETE`, table-alias deletes, delete-all/no-`WHERE` optimization, DDL,
-  locking reads, savepoints, and foreign-key target or parent DML.
+  `DELETE`, table-alias deletes, delete-all/no-`WHERE` optimization, subquery
+  deletes, DDL, locking reads, savepoints, and foreign-key target or parent
+  DML.
 - Broader native redo/checkpoint reconciliation and DDL/file-lifecycle recovery.
 - External MariaDB/RQG randomized DML stress.
 
@@ -159,4 +163,5 @@ The slice is verified with:
 - Trigger and referential-constraint metadata queries are fail-closed. A
   metadata lookup failure keeps the statement on the conservative path.
 - This is not a broad DML proof; `REPLACE`, `INSERT ... SELECT`, broad update
-  and delete shapes, and foreign-key DML matrices remain separate work.
+  and delete shapes beyond ordered/limited single-table forms, and foreign-key
+  DML matrices remain separate work.
