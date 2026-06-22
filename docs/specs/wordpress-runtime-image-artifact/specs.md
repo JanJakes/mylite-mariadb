@@ -67,10 +67,10 @@ Keep the setup image and the runtime image distinct:
   `build/wordpress-phpunit-runtime-image.tar.zst`;
 - the runtime-image job uploads `wordpress-phpunit-runtime-image`, separate
   from the setup job's `wordpress-phpunit-runtime` artifact;
-- each shard has both setup jobs in `needs`, downloads both artifacts with one
-  merged `wordpress-phpunit-runtime*` artifact action, extracts only the
-  runtime root and database baseline, then loads the Docker image tarball with
-  `docker load`;
+- each shard has both setup jobs in `needs`, downloads the
+  `wordpress-phpunit-runtime` and `wordpress-phpunit-runtime-image` artifacts
+  by exact artifact name, extracts only the runtime root and database baseline,
+  then loads the Docker image tarball with `docker load`;
 - after loading, the shard retags
   `mylite-wordpress-phpunit-runtime:php83` to the harness default
   `mylite-wordpress-phpunit:php83`;
@@ -147,12 +147,13 @@ workflow critical path. CI timing must compare:
   `mylite-wordpress-phpunit-runtime:php83`.
 - The uploaded WordPress runtime-image artifact includes
   `wordpress-phpunit-runtime-image.tar.zst`.
-- Shards download the runtime root and runtime-image artifacts through one
-  merged artifact action, load that image artifact, retag it to
-  `mylite-wordpress-phpunit:php83`, and run the existing test-only harness with
-  `MYLITE_WORDPRESS_SKIP_DOCKER_BUILD=1`.
-- The timing rollup reports runtime-image build/pack/upload, shard image-load,
-  and parallel setup critical-path metrics.
+- Shards download the runtime root and runtime-image artifacts by exact
+  artifact name, load that image artifact, retag it to
+  `mylite-wordpress-phpunit:php83`, and run the existing test-only harness
+  with `MYLITE_WORDPRESS_SKIP_DOCKER_BUILD=1`.
+- The timing rollup reports runtime-image build/pack/upload, shard
+  runtime-root download, shard runtime-image download, shard image-load, and
+  parallel setup critical-path metrics.
 - The production audit rejects stale per-shard Buildx runtime-image builds.
 
 ## Verification Results

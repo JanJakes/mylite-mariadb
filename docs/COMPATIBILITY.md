@@ -367,11 +367,12 @@ Those phases append compact timing rows into
 `build/wordpress-phpunit-reports/timing-summary.md`, and CI publishes that
 Markdown table to the GitHub step summary so setup, build, probe, and each
 PHPUnit shard can be compared without scraping separate step logs. The split
-runtime artifact handoff also records pack, upload, per-shard download, and
-per-shard extract seconds plus runtime/database-baseline tarball byte sizes, so
-branch/main timing comparisons can distinguish test execution from artifact
-transfer overhead. The runtime artifact is now staged from a slim shard
-payload instead of the full MariaDB/MyLite build trees: it keeps the
+runtime artifact handoff also records pack, upload, per-shard root download,
+per-shard runtime-image download, and per-shard extract seconds plus
+runtime/database-baseline/runtime-image tarball byte sizes, so branch/main
+timing comparisons can distinguish test execution from artifact transfer
+overhead. The runtime artifact is now staged from a slim shard payload instead
+of the full MariaDB/MyLite build trees: it keeps the
 production CMake caches and manifest-hashed runtime files, prunes WordPress
 Git object history from the shard copy, validates the manifest inside the
 staged root, and reports `wordpress_artifact_pack_runtime_root_bytes` beside
@@ -2777,13 +2778,14 @@ The runtime-image artifact follow-up keeps that same production WordPress
 PHPUnit surface, but a parallel runtime-image job now saves the loaded
 `mylite-wordpress-phpunit-runtime:php83` image into a separate
 `wordpress-phpunit-runtime-image` artifact. Shards download the runtime root
-and runtime-image artifacts through one merged artifact action, then
-`docker load` the image before retagging it to the harness default
+and runtime-image artifacts by exact artifact name, then `docker load` the
+image before retagging it to the harness default
 `mylite-wordpress-phpunit:php83`. The timing rollup keeps the
 `docker-image-<shard>` critical-path phase comparable while adding explicit
-runtime-image build, pack, upload, load, and parallel setup critical-path
-metrics. This changes CI timing architecture only; SQL, mysqli, native
-storage, recovery, and ownerless behavior are unchanged.
+runtime-image build, pack, upload, root-download, image-download, load, and
+parallel setup critical-path metrics. This changes CI timing architecture
+only; SQL, mysqli, native storage, recovery, and ownerless behavior are
+unchanged.
 The follow-up remaining-platform fanout keeps that same production surface
 while replacing `phpunit-non-isolated-remaining-platform` with
 HTML/interactivity, image, and merged format/dependencies/embed shards. The

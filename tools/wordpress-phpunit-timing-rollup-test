@@ -30,8 +30,15 @@ cat > "${summary}" <<'SUMMARY'
 | runtime-docker-image-pack | wordpress_total_seconds | 2 |
 | runtime-docker-image-upload | wordpress_runtime_docker_image_upload_seconds | 1 |
 | runtime-docker-image-upload | wordpress_total_seconds | 1 |
-| artifact-download-db | wordpress_artifact_download_seconds | 4 |
-| artifact-download-db | wordpress_total_seconds | 4 |
+| artifact-runtime-download-db | wordpress_artifact_download_seconds | 1 |
+| artifact-runtime-download-db | wordpress_runtime_artifact_download_seconds | 1 |
+| artifact-runtime-download-db | wordpress_artifact_download_runtime_tar_bytes | 100 |
+| artifact-runtime-download-db | wordpress_artifact_download_db_baseline_tar_bytes | 20 |
+| artifact-runtime-download-db | wordpress_total_seconds | 1 |
+| artifact-image-download-db | wordpress_artifact_download_seconds | 3 |
+| artifact-image-download-db | wordpress_runtime_image_artifact_download_seconds | 3 |
+| artifact-image-download-db | wordpress_artifact_download_runtime_image_tar_bytes | 300 |
+| artifact-image-download-db | wordpress_total_seconds | 3 |
 | artifact-extract-db | wordpress_artifact_extract_seconds | 5 |
 | artifact-extract-db | wordpress_artifact_extract_runtime_tar_bytes | 100 |
 | artifact-extract-db | wordpress_artifact_extract_db_baseline_tar_bytes | 20 |
@@ -89,16 +96,30 @@ cat > "${summary}" <<'SUMMARY'
 | phpunit-db | wordpress_phpunit_seconds | 7 |
 | phpunit-db | wordpress_container_seconds | 9 |
 | phpunit-db | wordpress_total_seconds | 10 |
-| artifact-download-non-isolated-rest | wordpress_artifact_download_seconds | 6 |
-| artifact-download-non-isolated-rest | wordpress_total_seconds | 6 |
+| artifact-runtime-download-non-isolated-rest | wordpress_artifact_download_seconds | 2 |
+| artifact-runtime-download-non-isolated-rest | wordpress_runtime_artifact_download_seconds | 2 |
+| artifact-runtime-download-non-isolated-rest | wordpress_artifact_download_runtime_tar_bytes | 110 |
+| artifact-runtime-download-non-isolated-rest | wordpress_artifact_download_db_baseline_tar_bytes | 21 |
+| artifact-runtime-download-non-isolated-rest | wordpress_total_seconds | 2 |
+| artifact-image-download-non-isolated-rest | wordpress_artifact_download_seconds | 4 |
+| artifact-image-download-non-isolated-rest | wordpress_runtime_image_artifact_download_seconds | 4 |
+| artifact-image-download-non-isolated-rest | wordpress_artifact_download_runtime_image_tar_bytes | 310 |
+| artifact-image-download-non-isolated-rest | wordpress_total_seconds | 4 |
 | artifact-extract-non-isolated-rest | wordpress_artifact_extract_seconds | 7 |
 | artifact-extract-non-isolated-rest | wordpress_total_seconds | 7 |
 | docker-image-non-isolated-rest | wordpress_docker_build_seconds | 30 |
 | docker-image-non-isolated-rest | wordpress_docker_image_load_seconds | 30 |
 | docker-image-non-isolated-rest | wordpress_docker_image_load_tar_bytes | 310 |
 | docker-image-non-isolated-rest | wordpress_total_seconds | 30 |
-| artifact-download-non-isolated-short | wordpress_artifact_download_seconds | 3 |
-| artifact-download-non-isolated-short | wordpress_total_seconds | 3 |
+| artifact-runtime-download-non-isolated-short | wordpress_artifact_download_seconds | 1 |
+| artifact-runtime-download-non-isolated-short | wordpress_runtime_artifact_download_seconds | 1 |
+| artifact-runtime-download-non-isolated-short | wordpress_artifact_download_runtime_tar_bytes | 120 |
+| artifact-runtime-download-non-isolated-short | wordpress_artifact_download_db_baseline_tar_bytes | 22 |
+| artifact-runtime-download-non-isolated-short | wordpress_total_seconds | 1 |
+| artifact-image-download-non-isolated-short | wordpress_artifact_download_seconds | 2 |
+| artifact-image-download-non-isolated-short | wordpress_runtime_image_artifact_download_seconds | 2 |
+| artifact-image-download-non-isolated-short | wordpress_artifact_download_runtime_image_tar_bytes | 320 |
+| artifact-image-download-non-isolated-short | wordpress_total_seconds | 2 |
 | artifact-extract-non-isolated-short | wordpress_artifact_extract_seconds | 4 |
 | artifact-extract-non-isolated-short | wordpress_total_seconds | 4 |
 | docker-image-non-isolated-short | wordpress_docker_build_seconds | 20 |
@@ -180,7 +201,7 @@ require_row "| timing-rollup | wordpress_phpunit_isolated_child_process_outer_mi
 require_row "| timing-rollup | wordpress_phpunit_non_isolated_shell_real_seconds_sum | 190.469 |"
 require_row "| timing-rollup | wordpress_build_mariadb_embedded_seconds | 406.000 |"
 require_row "| timing-rollup | wordpress_build_total_seconds | 424.000 |"
-require_row "| timing-rollup | wordpress_timed_phase_count | 20 |"
+require_row "| timing-rollup | wordpress_timed_phase_count | 23 |"
 require_row "| timing-rollup | wordpress_timed_phase_total_seconds_sum | 788.000 |"
 require_row "| timing-rollup | wordpress_setup_phase_count | 4 |"
 require_row "| timing-rollup | wordpress_setup_total_seconds_sum | 468.000 |"
@@ -190,6 +211,8 @@ require_row "| timing-rollup | wordpress_shard_phase_count | 3 |"
 require_row "| timing-rollup | wordpress_shard_critical_path_label | non-isolated-rest |"
 require_row "| timing-rollup | wordpress_shard_critical_path_seconds_max | 213.000 |"
 require_row "| timing-rollup | wordpress_shard_critical_path_artifact_download_seconds | 6.000 |"
+require_row "| timing-rollup | wordpress_shard_critical_path_runtime_artifact_download_seconds | 2.000 |"
+require_row "| timing-rollup | wordpress_shard_critical_path_runtime_image_artifact_download_seconds | 4.000 |"
 require_row "| timing-rollup | wordpress_shard_critical_path_artifact_extract_seconds | 7.000 |"
 require_row "| timing-rollup | wordpress_shard_critical_path_docker_image_seconds | 30.000 |"
 require_row "| timing-rollup | wordpress_shard_critical_path_phpunit_total_seconds | 170.000 |"
@@ -206,6 +229,11 @@ require_row "| timing-rollup | wordpress_phpunit_total_seconds_max | 170.000 |"
 require_row "| timing-rollup | wordpress_artifact_pack_seconds | 12.000 |"
 require_row "| timing-rollup | wordpress_artifact_upload_seconds | 3.000 |"
 require_row "| timing-rollup | wordpress_artifact_download_seconds | 13.000 |"
+require_row "| timing-rollup | wordpress_runtime_artifact_download_seconds | 4.000 |"
+require_row "| timing-rollup | wordpress_runtime_image_artifact_download_seconds | 9.000 |"
+require_row "| timing-rollup | wordpress_artifact_download_runtime_tar_bytes_sum | 330 |"
+require_row "| timing-rollup | wordpress_artifact_download_db_baseline_tar_bytes_sum | 63 |"
+require_row "| timing-rollup | wordpress_artifact_download_runtime_image_tar_bytes_sum | 930 |"
 require_row "| timing-rollup | wordpress_artifact_extract_seconds | 16.000 |"
 require_row "| timing-rollup | wordpress_artifact_pack_runtime_root_bytes | 180 |"
 require_row "| timing-rollup | wordpress_artifact_pack_runtime_tar_bytes | 100 |"

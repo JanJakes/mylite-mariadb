@@ -1031,28 +1031,66 @@ jobs:
           free -h
           docker version
 
-      - name: Mark WordPress PHPUnit runtime artifacts download start
+      - name: Mark WordPress PHPUnit runtime root artifact download start
         run: |
           set -euo pipefail
           mkdir -p build/wordpress-phpunit-reports
-          date +%s > build/wordpress-phpunit-runtime-download-start.txt
+          date +%s > build/wordpress-phpunit-runtime-root-download-start.txt
 
-      - name: Download WordPress PHPUnit runtime artifacts
+      - name: Download WordPress PHPUnit runtime root artifact
         uses: actions/download-artifact@v4
         with:
-          pattern: wordpress-phpunit-runtime*
+          name: wordpress-phpunit-runtime
           path: build/wordpress-phpunit-runtime-artifact
-          merge-multiple: true
 
-      - name: Record WordPress PHPUnit runtime artifacts download timing
+      - name: Record WordPress PHPUnit runtime root artifact download timing
         if: always()
         run: |
           set -euo pipefail
-          download_start="$(cat build/wordpress-phpunit-runtime-download-start.txt)"
+          download_start="$(cat build/wordpress-phpunit-runtime-root-download-start.txt)"
           download_end="$(date +%s)"
           download_seconds="$((download_end - download_start))"
-          tools/wordpress-phpunit-append-timing --label artifact-download-${{ matrix.shard }} \
+          runtime_tar_bytes=0
+          db_baseline_tar_bytes=0
+          if [ -f build/wordpress-phpunit-runtime-artifact/wordpress-phpunit-runtime.tar.zst ]; then
+            runtime_tar_bytes="$(wc -c < build/wordpress-phpunit-runtime-artifact/wordpress-phpunit-runtime.tar.zst | tr -d '[:space:]')"
+          fi
+          if [ -f build/wordpress-phpunit-runtime-artifact/wordpress-phpunit-db-baseline.tar.zst ]; then
+            db_baseline_tar_bytes="$(wc -c < build/wordpress-phpunit-runtime-artifact/wordpress-phpunit-db-baseline.tar.zst | tr -d '[:space:]')"
+          fi
+          tools/wordpress-phpunit-append-timing --label artifact-runtime-download-${{ matrix.shard }} \
             "wordpress_artifact_download_seconds=${download_seconds}" \
+            "wordpress_runtime_artifact_download_seconds=${download_seconds}" \
+            "wordpress_artifact_download_runtime_tar_bytes=${runtime_tar_bytes}" \
+            "wordpress_artifact_download_db_baseline_tar_bytes=${db_baseline_tar_bytes}" \
+            "wordpress_total_seconds=${download_seconds}"
+
+      - name: Mark WordPress PHPUnit runtime image artifact download start
+        run: |
+          set -euo pipefail
+          date +%s > build/wordpress-phpunit-runtime-image-download-start.txt
+
+      - name: Download WordPress PHPUnit runtime image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: wordpress-phpunit-runtime-image
+          path: build/wordpress-phpunit-runtime-artifact
+
+      - name: Record WordPress PHPUnit runtime image artifact download timing
+        if: always()
+        run: |
+          set -euo pipefail
+          download_start="$(cat build/wordpress-phpunit-runtime-image-download-start.txt)"
+          download_end="$(date +%s)"
+          download_seconds="$((download_end - download_start))"
+          runtime_image_tar_bytes=0
+          if [ -f build/wordpress-phpunit-runtime-artifact/wordpress-phpunit-runtime-image.tar.zst ]; then
+            runtime_image_tar_bytes="$(wc -c < build/wordpress-phpunit-runtime-artifact/wordpress-phpunit-runtime-image.tar.zst | tr -d '[:space:]')"
+          fi
+          tools/wordpress-phpunit-append-timing --label artifact-image-download-${{ matrix.shard }} \
+            "wordpress_artifact_download_seconds=${download_seconds}" \
+            "wordpress_runtime_image_artifact_download_seconds=${download_seconds}" \
+            "wordpress_artifact_download_runtime_image_tar_bytes=${runtime_image_tar_bytes}" \
             "wordpress_total_seconds=${download_seconds}"
 
       - name: Extract WordPress PHPUnit runtime artifact

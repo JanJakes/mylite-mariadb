@@ -127,7 +127,13 @@ function add_shard_phase(row_label, value, shard, phase) {
   if (!is_number(value)) {
     return
   }
-  if (row_label ~ /^artifact-download-/) {
+  if (row_label ~ /^artifact-runtime-download-/) {
+    shard = substr(row_label, length("artifact-runtime-download-") + 1)
+    phase = "artifact_runtime_download"
+  } else if (row_label ~ /^artifact-image-download-/) {
+    shard = substr(row_label, length("artifact-image-download-") + 1)
+    phase = "artifact_image_download"
+  } else if (row_label ~ /^artifact-download-/) {
     shard = substr(row_label, length("artifact-download-") + 1)
     phase = "artifact_download"
   } else if (row_label ~ /^artifact-extract-/) {
@@ -157,10 +163,20 @@ function add_shard_phase(row_label, value, shard, phase) {
   shard_phase_seen[shard SUBSEP phase] = 1
 }
 
-function shard_is_matrix_job(shard) {
-  return shard_has_phase(shard, "artifact_download") ||
-    shard_has_phase(shard, "artifact_extract") ||
-    shard_has_phase(shard, "docker_image")
+function shard_is_matrix_job(shard, matched) {
+  matched = shard_has_phase(shard, "artifact_download")
+  matched = matched || shard_has_phase(shard, "artifact_runtime_download")
+  matched = matched || shard_has_phase(shard, "artifact_image_download")
+  matched = matched || shard_has_phase(shard, "artifact_extract")
+  matched = matched || shard_has_phase(shard, "docker_image")
+  return matched
+}
+
+function shard_artifact_download_seconds(shard, total) {
+  total = shard_phase_value(shard, "artifact_download")
+  total += shard_phase_value(shard, "artifact_runtime_download")
+  total += shard_phase_value(shard, "artifact_image_download")
+  return total
 }
 
 function add_shard_phpunit_shell(row_label, value, shard) {
@@ -314,6 +330,11 @@ BEGIN {
   phase_metric["wordpress_artifact_pack_seconds"] = 1
   phase_metric["wordpress_artifact_upload_seconds"] = 1
   phase_metric["wordpress_artifact_download_seconds"] = 1
+  phase_metric["wordpress_runtime_artifact_download_seconds"] = 1
+  phase_metric["wordpress_runtime_image_artifact_download_seconds"] = 1
+  phase_metric["wordpress_artifact_download_runtime_tar_bytes"] = 1
+  phase_metric["wordpress_artifact_download_db_baseline_tar_bytes"] = 1
+  phase_metric["wordpress_artifact_download_runtime_image_tar_bytes"] = 1
   phase_metric["wordpress_artifact_extract_seconds"] = 1
   phase_metric["wordpress_artifact_pack_runtime_root_bytes"] = 1
   phase_metric["wordpress_artifact_pack_runtime_tar_bytes"] = 1
@@ -401,7 +422,7 @@ BEGIN {
     if (row_label ~ /^runtime-docker-image-/) {
       count_once("runtime_image_setup", row_label)
       add_sum("runtime_image_setup", metric, value)
-    } else if (row_label !~ /^(artifact-download|artifact-extract|docker-image|phpunit|group-phpunit)-/) {
+    } else if (row_label !~ /^(artifact-download|artifact-runtime-download|artifact-image-download|artifact-extract|docker-image|phpunit|group-phpunit)-/) {
       count_once("setup_phase", row_label)
       add_sum("setup_phase", metric, value)
     }
@@ -518,7 +539,9 @@ END {
     row_int("wordpress_shard_phase_count", matrix_shard_count)
     row("wordpress_shard_critical_path_label", shard_max_label)
     row_num("wordpress_shard_critical_path_seconds_max", shard_max_seconds)
-    row_num("wordpress_shard_critical_path_artifact_download_seconds", shard_phase_value(shard_max_label, "artifact_download"))
+    row_num("wordpress_shard_critical_path_artifact_download_seconds", shard_artifact_download_seconds(shard_max_label))
+    row_num("wordpress_shard_critical_path_runtime_artifact_download_seconds", shard_phase_value(shard_max_label, "artifact_runtime_download"))
+    row_num("wordpress_shard_critical_path_runtime_image_artifact_download_seconds", shard_phase_value(shard_max_label, "artifact_image_download"))
     row_num("wordpress_shard_critical_path_artifact_extract_seconds", shard_phase_value(shard_max_label, "artifact_extract"))
     row_num("wordpress_shard_critical_path_docker_image_seconds", shard_phase_value(shard_max_label, "docker_image"))
     row_num("wordpress_shard_critical_path_phpunit_total_seconds", shard_phase_value(shard_max_label, "phpunit_total"))
@@ -567,6 +590,11 @@ END {
   emit_sum("phase_metric", "wordpress_artifact_pack_seconds", "wordpress_artifact_pack_seconds")
   emit_sum("phase_metric", "wordpress_artifact_upload_seconds", "wordpress_artifact_upload_seconds")
   emit_sum("phase_metric", "wordpress_artifact_download_seconds", "wordpress_artifact_download_seconds")
+  emit_sum("phase_metric", "wordpress_runtime_artifact_download_seconds", "wordpress_runtime_artifact_download_seconds")
+  emit_sum("phase_metric", "wordpress_runtime_image_artifact_download_seconds", "wordpress_runtime_image_artifact_download_seconds")
+  emit_int_sum("phase_metric", "wordpress_artifact_download_runtime_tar_bytes", "wordpress_artifact_download_runtime_tar_bytes_sum")
+  emit_int_sum("phase_metric", "wordpress_artifact_download_db_baseline_tar_bytes", "wordpress_artifact_download_db_baseline_tar_bytes_sum")
+  emit_int_sum("phase_metric", "wordpress_artifact_download_runtime_image_tar_bytes", "wordpress_artifact_download_runtime_image_tar_bytes_sum")
   emit_sum("phase_metric", "wordpress_artifact_extract_seconds", "wordpress_artifact_extract_seconds")
   emit_int_sum("phase_metric", "wordpress_artifact_pack_runtime_root_bytes", "wordpress_artifact_pack_runtime_root_bytes")
   emit_int_sum("phase_metric", "wordpress_artifact_pack_runtime_tar_bytes", "wordpress_artifact_pack_runtime_tar_bytes")
