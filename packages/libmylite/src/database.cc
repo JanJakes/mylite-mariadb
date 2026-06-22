@@ -860,8 +860,23 @@ constexpr off_t k_concurrency_checkpoint_native_file_op_records_offset = static_
     k_concurrency_checkpoint_lsn_records_offset +
     (k_concurrency_checkpoint_lsn_record_count * k_concurrency_checkpoint_lsn_record_size)
 );
-constexpr off_t k_concurrency_checkpoint_file_end = static_cast<off_t>(
+constexpr std::array<unsigned char, 8> k_concurrency_checkpoint_native_dml_file_op_record_magic = {
+    'M',
+    'Y',
+    'L',
+    'C',
+    'D',
+    'M',
+    'L',
+    '1',
+};
+constexpr off_t k_concurrency_checkpoint_native_dml_file_op_records_offset = static_cast<off_t>(
     k_concurrency_checkpoint_native_file_op_records_offset +
+    (k_concurrency_checkpoint_native_file_op_record_count *
+     k_concurrency_checkpoint_native_file_op_record_size)
+);
+constexpr off_t k_concurrency_checkpoint_file_end = static_cast<off_t>(
+    k_concurrency_checkpoint_native_dml_file_op_records_offset +
     (k_concurrency_checkpoint_native_file_op_record_count *
      k_concurrency_checkpoint_native_file_op_record_size)
 );
@@ -1126,6 +1141,13 @@ static_assert(
     k_concurrency_checkpoint_native_file_op_record_checksum_offset + sizeof(std::uint32_t) <=
         k_concurrency_checkpoint_native_file_op_record_size,
     "checkpoint native file-op record checksum exceeds record"
+);
+static_assert(
+    k_concurrency_checkpoint_native_dml_file_op_records_offset ==
+        k_concurrency_checkpoint_native_file_op_records_offset +
+            (k_concurrency_checkpoint_native_file_op_record_count *
+             k_concurrency_checkpoint_native_file_op_record_size),
+    "checkpoint native DML file-op records must follow native file-op records"
 );
 static_assert(
     k_concurrency_redo_state_refcount_offset + sizeof(std::uint32_t) <=
@@ -1443,6 +1465,8 @@ struct RuntimeState {
     std::atomic<bool> ownerless_runtime_has_local_write{false};
     bool ownerless_native_file_op_checkpoint_cache_valid = false;
     bool ownerless_native_file_op_checkpoint_needed_cached = false;
+    bool ownerless_native_dml_file_op_checkpoint_cache_valid = false;
+    bool ownerless_native_dml_file_op_checkpoint_needed_cached = false;
     std::atomic<std::uint64_t> ownerless_page_log_known_end_offset{0};
     bool ownerless_runtime_started_with_page_version_wal = false;
     std::atomic<bool> ownerless_runtime_consumed_page_version_wal{false};
@@ -1927,6 +1951,9 @@ bool clear_ownerless_autoinc_checkpoint_pending(RuntimeState &runtime);
 void set_ownerless_native_file_op_checkpoint_cache(RuntimeState &runtime, bool needed);
 void invalidate_ownerless_native_file_op_checkpoint_cache(RuntimeState &runtime);
 bool read_ownerless_native_file_op_checkpoint_needed(RuntimeState &runtime, bool *out_needed);
+void set_ownerless_native_dml_file_op_checkpoint_cache(RuntimeState &runtime, bool needed);
+void invalidate_ownerless_native_dml_file_op_checkpoint_cache(RuntimeState &runtime);
+bool read_ownerless_native_dml_file_op_checkpoint_needed(RuntimeState &runtime, bool *out_needed);
 bool ownerless_single_owner_foreground_reclaim_budget_skips(
     RuntimeState &runtime,
     std::uint64_t page_log_bytes
@@ -2622,28 +2649,48 @@ bool parse_concurrency_checkpoint_lsn_record(
     bool *out_empty
 );
 off_t concurrency_checkpoint_lsn_record_offset(std::size_t index);
-bool read_concurrency_native_file_op_checkpoint_records(
+bool read_concurrency_native_file_op_checkpoint_records_at(
     int checkpoint_fd,
+    off_t records_offset,
+    const std::array<unsigned char, 8> &magic,
     OwnerlessCheckpointNativeFileOpRecord *out_record,
     bool *out_has_record,
     bool *out_saw_nonempty_record
 );
 void build_concurrency_native_file_op_checkpoint_record(
     std::array<unsigned char, k_concurrency_checkpoint_native_file_op_record_size> &record,
+    const std::array<unsigned char, 8> &magic,
     std::uint64_t generation,
     bool needed
 );
 bool parse_concurrency_native_file_op_checkpoint_record(
     const std::array<unsigned char, k_concurrency_checkpoint_native_file_op_record_size> &record,
+    const std::array<unsigned char, 8> &magic,
     OwnerlessCheckpointNativeFileOpRecord *out_record,
     bool *out_empty
 );
-off_t concurrency_native_file_op_checkpoint_record_offset(std::size_t index);
 bool write_concurrency_native_file_op_checkpoint_locked(int checkpoint_fd, bool needed);
+bool write_concurrency_native_file_op_checkpoint_locked_at(
+    int checkpoint_fd,
+    off_t records_offset,
+    const std::array<unsigned char, 8> &magic,
+    bool write_legacy_needed,
+    bool needed
+);
 bool read_concurrency_native_file_op_checkpoint_legacy_needed(int checkpoint_fd, bool *out_needed);
+bool read_concurrency_native_file_op_checkpoint_needed_at(
+    int checkpoint_fd,
+    off_t records_offset,
+    const std::array<unsigned char, 8> &magic,
+    bool read_legacy_needed,
+    bool *out_needed
+);
 bool mark_concurrency_native_file_op_checkpoint_needed(int checkpoint_fd);
+bool mark_concurrency_native_dml_file_op_checkpoint_needed(int checkpoint_fd);
 bool read_concurrency_native_file_op_checkpoint_needed(int checkpoint_fd, bool *out_needed);
+bool read_concurrency_native_dml_file_op_checkpoint_needed(int checkpoint_fd, bool *out_needed);
 bool clear_concurrency_native_file_op_checkpoint_needed(int checkpoint_fd);
+bool clear_concurrency_native_dml_file_op_checkpoint_needed(int checkpoint_fd);
 bool acquire_fd_write_lock(int fd, off_t start, off_t length);
 bool acquire_fd_range_lock(int fd, off_t start, off_t length, short lock_type, unsigned timeout_ms);
 void release_fd_lock(int fd, off_t start, off_t length);
@@ -10536,15 +10583,21 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
         return;
     }
     bool native_file_op_checkpoint_marker_needed = false;
+    bool native_dml_file_op_checkpoint_marker_needed = false;
     bool autoinc_checkpoint_needed = false;
     if (no_live_peers) {
         static_cast<void>(read_ownerless_native_file_op_checkpoint_needed(
             runtime,
             &native_file_op_checkpoint_marker_needed
         ));
+        static_cast<void>(read_ownerless_native_dml_file_op_checkpoint_needed(
+            runtime,
+            &native_dml_file_op_checkpoint_marker_needed
+        ));
         autoinc_checkpoint_needed = ownerless_autoinc_checkpoint_pending(runtime);
-        const bool force_native_checkpoint =
-            native_file_op_checkpoint_marker_needed || autoinc_checkpoint_needed;
+        const bool force_native_checkpoint = native_file_op_checkpoint_marker_needed ||
+                                             native_dml_file_op_checkpoint_marker_needed ||
+                                             autoinc_checkpoint_needed;
         const bool retained_page_log_records =
             ownerless_page_log_has_uncheckpointed_records(runtime);
         static_cast<void>(advance_ownerless_no_live_page_visible_lsn_for_reclaim(
@@ -10601,9 +10654,10 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
     const bool skip_external_refresh =
         no_live_peers &&
         ((single_owner_epoch && !consumed_page_version_wal) || reader_only_page_version_consumer);
-    const bool native_checkpoint_marker_needed =
+    const bool proof_relaxing_native_checkpoint_marker_needed =
         native_file_op_checkpoint_marker_needed || autoinc_checkpoint_needed;
-    const bool require_native_page_lsn_proof = !no_live_peers || !native_checkpoint_marker_needed;
+    const bool require_native_page_lsn_proof =
+        !no_live_peers || !proof_relaxing_native_checkpoint_marker_needed;
     /*
      * A runtime that only read peer page-version WAL does not own the native
      * dirty-page handoff. A newer native page LSN is therefore not proof that
@@ -10641,6 +10695,14 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
             clear_concurrency_native_file_op_checkpoint_needed(runtime.concurrency_checkpoint_fd);
         if (marker_cleared) {
             set_ownerless_native_file_op_checkpoint_cache(runtime, false);
+        }
+    }
+    if (native_dml_file_op_checkpoint_marker_needed) {
+        const int checkpoint_fd = runtime.concurrency_checkpoint_fd;
+        const bool marker_cleared =
+            clear_concurrency_native_dml_file_op_checkpoint_needed(checkpoint_fd);
+        if (marker_cleared) {
+            set_ownerless_native_dml_file_op_checkpoint_cache(runtime, false);
         }
     }
     if (autoinc_checkpoint_needed) {
@@ -10851,6 +10913,35 @@ bool read_ownerless_native_file_op_checkpoint_needed(RuntimeState &runtime, bool
     return true;
 }
 
+void set_ownerless_native_dml_file_op_checkpoint_cache(RuntimeState &runtime, bool needed) {
+    runtime.ownerless_native_dml_file_op_checkpoint_cache_valid = true;
+    runtime.ownerless_native_dml_file_op_checkpoint_needed_cached = needed;
+}
+
+void invalidate_ownerless_native_dml_file_op_checkpoint_cache(RuntimeState &runtime) {
+    runtime.ownerless_native_dml_file_op_checkpoint_cache_valid = false;
+    runtime.ownerless_native_dml_file_op_checkpoint_needed_cached = true;
+}
+
+bool read_ownerless_native_dml_file_op_checkpoint_needed(RuntimeState &runtime, bool *out_needed) {
+    if (out_needed == nullptr) {
+        return false;
+    }
+    *out_needed = true;
+    bool needed = true;
+    if (runtime.concurrency_checkpoint_fd < 0 ||
+        !read_concurrency_native_dml_file_op_checkpoint_needed(
+            runtime.concurrency_checkpoint_fd,
+            &needed
+        )) {
+        invalidate_ownerless_native_dml_file_op_checkpoint_cache(runtime);
+        return false;
+    }
+    set_ownerless_native_dml_file_op_checkpoint_cache(runtime, needed);
+    *out_needed = needed;
+    return true;
+}
+
 bool ownerless_single_owner_foreground_reclaim_budget_skips(
     RuntimeState &runtime,
     std::uint64_t page_log_bytes
@@ -10892,6 +10983,23 @@ bool ownerless_single_owner_foreground_reclaim_budget_skips(
         );
         return false;
     }
+    bool native_dml_file_op_checkpoint_needed = true;
+    if (runtime.ownerless_native_dml_file_op_checkpoint_cache_valid) {
+        native_dml_file_op_checkpoint_needed =
+            runtime.ownerless_native_dml_file_op_checkpoint_needed_cached;
+    } else if (!read_ownerless_native_dml_file_op_checkpoint_needed(
+                   runtime,
+                   &native_dml_file_op_checkpoint_needed
+               )) {
+        return false;
+    }
+    if (native_dml_file_op_checkpoint_needed) {
+        ownerless_database_perf_add(
+            OWNERLESS_DATABASE_PERF_FOREGROUND_RECLAIM_BUDGET_SKIP_BLOCKED_MARKER,
+            1U
+        );
+        return false;
+    }
 
     ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_FOREGROUND_RECLAIM_BUDGET_SKIP_ALLOWED, 1U);
     return true;
@@ -10905,12 +11013,18 @@ bool clear_ownerless_native_file_op_checkpoint_without_page_log(RuntimeState &ru
     }
 
     bool native_file_op_checkpoint_needed = false;
+    bool native_dml_file_op_checkpoint_needed = false;
     const bool autoinc_checkpoint_needed = ownerless_autoinc_checkpoint_pending(runtime);
     if (!read_ownerless_native_file_op_checkpoint_needed(
             runtime,
             &native_file_op_checkpoint_needed
         ) ||
-        (!native_file_op_checkpoint_needed && !autoinc_checkpoint_needed)) {
+        !read_ownerless_native_dml_file_op_checkpoint_needed(
+            runtime,
+            &native_dml_file_op_checkpoint_needed
+        ) ||
+        (!native_file_op_checkpoint_needed && !native_dml_file_op_checkpoint_needed &&
+         !autoinc_checkpoint_needed)) {
         return false;
     }
 
@@ -10923,6 +11037,15 @@ bool clear_ownerless_native_file_op_checkpoint_without_page_log(RuntimeState &ru
             clear_concurrency_native_file_op_checkpoint_needed(runtime.concurrency_checkpoint_fd);
         if (marker_cleared) {
             set_ownerless_native_file_op_checkpoint_cache(runtime, false);
+        }
+        cleared = marker_cleared && cleared;
+    }
+    if (native_dml_file_op_checkpoint_needed) {
+        const int checkpoint_fd = runtime.concurrency_checkpoint_fd;
+        const bool marker_cleared =
+            clear_concurrency_native_dml_file_op_checkpoint_needed(checkpoint_fd);
+        if (marker_cleared) {
+            set_ownerless_native_dml_file_op_checkpoint_cache(runtime, false);
         }
         cleared = marker_cleared && cleared;
     }
@@ -11361,13 +11484,9 @@ void mark_ownerless_native_file_op_checkpoint_after_successful_write(
 ) {
     const bool autocommit_write =
         !statement_started_in_explicit_transaction && sql_statement_requires_write(tokens);
-    bool single_owner_transaction_end = transaction_end_had_local_write;
-    if (single_owner_transaction_end) {
-        const std::lock_guard<std::mutex> guard(g_runtime.mutex);
-        single_owner_transaction_end = ownerless_runtime_in_single_owner_epoch_locked(g_runtime);
-    }
+    const bool transaction_end_write = transaction_end_had_local_write;
     if (!db.ownerless_rw_open || db.readonly_open || ownerless_dictionary_ddl_statement(tokens) ||
-        (!autocommit_write && !single_owner_transaction_end)) {
+        (!autocommit_write && !transaction_end_write)) {
         return;
     }
     if (mylite_ownerless_innodb_take_file_op_redo() == 0) {
@@ -11379,10 +11498,10 @@ void mark_ownerless_native_file_op_checkpoint_after_successful_write(
         const std::lock_guard<std::mutex> guard(g_runtime.mutex);
         if (g_runtime.ref_count != 0U && g_runtime.ownerless_rw_mode &&
             g_runtime.concurrency_checkpoint_fd >= 0) {
-            marker_written = mark_concurrency_native_file_op_checkpoint_needed(
+            marker_written = mark_concurrency_native_dml_file_op_checkpoint_needed(
                 g_runtime.concurrency_checkpoint_fd
             );
-            set_ownerless_native_file_op_checkpoint_cache(g_runtime, true);
+            set_ownerless_native_dml_file_op_checkpoint_cache(g_runtime, true);
         }
     }
     if (!marker_written) {
@@ -19361,8 +19480,10 @@ bool read_concurrency_checkpoint_legacy_lsn(
     return true;
 }
 
-bool read_concurrency_native_file_op_checkpoint_records(
+bool read_concurrency_native_file_op_checkpoint_records_at(
     int checkpoint_fd,
+    off_t records_offset,
+    const std::array<unsigned char, 8> &magic,
     OwnerlessCheckpointNativeFileOpRecord *out_record,
     bool *out_has_record,
     bool *out_saw_nonempty_record
@@ -19386,7 +19507,8 @@ bool read_concurrency_native_file_op_checkpoint_records(
                 checkpoint_fd,
                 bytes.data(),
                 bytes.size(),
-                concurrency_native_file_op_checkpoint_record_offset(index)
+                records_offset +
+                    static_cast<off_t>(index * k_concurrency_checkpoint_native_file_op_record_size)
             );
         } while (bytes_read < 0 && errno == EINTR);
         if (bytes_read == 0) {
@@ -19399,7 +19521,12 @@ bool read_concurrency_native_file_op_checkpoint_records(
 
         OwnerlessCheckpointNativeFileOpRecord record = {};
         bool empty_record = false;
-        if (!parse_concurrency_native_file_op_checkpoint_record(bytes, &record, &empty_record)) {
+        if (!parse_concurrency_native_file_op_checkpoint_record(
+                bytes,
+                magic,
+                &record,
+                &empty_record
+            )) {
             *out_saw_nonempty_record = true;
             continue;
         }
@@ -19423,14 +19550,15 @@ bool read_concurrency_native_file_op_checkpoint_records(
 
 void build_concurrency_native_file_op_checkpoint_record(
     std::array<unsigned char, k_concurrency_checkpoint_native_file_op_record_size> &record,
+    const std::array<unsigned char, 8> &magic,
     std::uint64_t generation,
     bool needed
 ) {
     record.fill(0U);
     std::memcpy(
         record.data() + k_concurrency_checkpoint_native_file_op_record_magic_offset,
-        k_concurrency_checkpoint_native_file_op_record_magic.data(),
-        k_concurrency_checkpoint_native_file_op_record_magic.size()
+        magic.data(),
+        magic.size()
     );
     store_le32(
         record.data(),
@@ -19456,6 +19584,7 @@ void build_concurrency_native_file_op_checkpoint_record(
 
 bool parse_concurrency_native_file_op_checkpoint_record(
     const std::array<unsigned char, k_concurrency_checkpoint_native_file_op_record_size> &record,
+    const std::array<unsigned char, 8> &magic,
     OwnerlessCheckpointNativeFileOpRecord *out_record,
     bool *out_empty
 ) {
@@ -19471,8 +19600,8 @@ bool parse_concurrency_native_file_op_checkpoint_record(
 
     if (std::memcmp(
             record.data() + k_concurrency_checkpoint_native_file_op_record_magic_offset,
-            k_concurrency_checkpoint_native_file_op_record_magic.data(),
-            k_concurrency_checkpoint_native_file_op_record_magic.size()
+            magic.data(),
+            magic.size()
         ) != 0 ||
         load_le32(record.data(), k_concurrency_checkpoint_native_file_op_record_format_offset) !=
             k_concurrency_checkpoint_native_file_op_record_format ||
@@ -19499,19 +19628,30 @@ bool parse_concurrency_native_file_op_checkpoint_record(
     return true;
 }
 
-off_t concurrency_native_file_op_checkpoint_record_offset(std::size_t index) {
-    return static_cast<off_t>(
-        k_concurrency_checkpoint_native_file_op_records_offset +
-        static_cast<off_t>(index * k_concurrency_checkpoint_native_file_op_record_size)
+bool write_concurrency_native_file_op_checkpoint_locked(int checkpoint_fd, bool needed) {
+    return write_concurrency_native_file_op_checkpoint_locked_at(
+        checkpoint_fd,
+        k_concurrency_checkpoint_native_file_op_records_offset,
+        k_concurrency_checkpoint_native_file_op_record_magic,
+        true,
+        needed
     );
 }
 
-bool write_concurrency_native_file_op_checkpoint_locked(int checkpoint_fd, bool needed) {
+bool write_concurrency_native_file_op_checkpoint_locked_at(
+    int checkpoint_fd,
+    off_t records_offset,
+    const std::array<unsigned char, 8> &magic,
+    bool write_legacy_needed,
+    bool needed
+) {
     OwnerlessCheckpointNativeFileOpRecord current_record = {};
     bool has_current_record = false;
     bool saw_nonempty_record = false;
-    if (!read_concurrency_native_file_op_checkpoint_records(
+    if (!read_concurrency_native_file_op_checkpoint_records_at(
             checkpoint_fd,
+            records_offset,
+            magic,
             &current_record,
             &has_current_record,
             &saw_nonempty_record
@@ -19527,22 +19667,25 @@ bool write_concurrency_native_file_op_checkpoint_locked(int checkpoint_fd, bool 
     );
 
     std::array<unsigned char, k_concurrency_checkpoint_native_file_op_record_size> record = {};
-    build_concurrency_native_file_op_checkpoint_record(record, next_generation, needed);
+    build_concurrency_native_file_op_checkpoint_record(record, magic, next_generation, needed);
     std::array<unsigned char, sizeof(std::uint64_t)> legacy_payload = {};
     store_le64(legacy_payload.data(), 0U, needed ? 1U : 0U);
-    return write_exact_at(
-               checkpoint_fd,
-               record.data(),
-               record.size(),
-               concurrency_native_file_op_checkpoint_record_offset(record_index)
-           ) &&
-           write_exact_at(
-               checkpoint_fd,
-               legacy_payload.data(),
-               legacy_payload.size(),
-               static_cast<off_t>(k_concurrency_checkpoint_native_file_op_needed_offset)
-           ) &&
-           ::fsync(checkpoint_fd) == 0;
+    bool ok = write_exact_at(
+        checkpoint_fd,
+        record.data(),
+        record.size(),
+        records_offset +
+            static_cast<off_t>(record_index * k_concurrency_checkpoint_native_file_op_record_size)
+    );
+    if (ok && write_legacy_needed) {
+        ok = write_exact_at(
+            checkpoint_fd,
+            legacy_payload.data(),
+            legacy_payload.size(),
+            static_cast<off_t>(k_concurrency_checkpoint_native_file_op_needed_offset)
+        );
+    }
+    return ok && ::fsync(checkpoint_fd) == 0;
 }
 
 bool read_concurrency_native_file_op_checkpoint_legacy_needed(int checkpoint_fd, bool *out_needed) {
@@ -19595,6 +19738,22 @@ bool mark_concurrency_native_file_op_checkpoint_needed(int checkpoint_fd) {
 }
 
 bool read_concurrency_native_file_op_checkpoint_needed(int checkpoint_fd, bool *out_needed) {
+    return read_concurrency_native_file_op_checkpoint_needed_at(
+        checkpoint_fd,
+        k_concurrency_checkpoint_native_file_op_records_offset,
+        k_concurrency_checkpoint_native_file_op_record_magic,
+        true,
+        out_needed
+    );
+}
+
+bool read_concurrency_native_file_op_checkpoint_needed_at(
+    int checkpoint_fd,
+    off_t records_offset,
+    const std::array<unsigned char, 8> &magic,
+    bool read_legacy_needed,
+    bool *out_needed
+) {
     if (checkpoint_fd < 0 || out_needed == nullptr) {
         return false;
     }
@@ -19609,8 +19768,10 @@ bool read_concurrency_native_file_op_checkpoint_needed(int checkpoint_fd, bool *
     OwnerlessCheckpointNativeFileOpRecord record = {};
     bool has_record = false;
     bool saw_nonempty_record = false;
-    bool ok = read_concurrency_native_file_op_checkpoint_records(
+    bool ok = read_concurrency_native_file_op_checkpoint_records_at(
         checkpoint_fd,
+        records_offset,
+        magic,
         &record,
         &has_record,
         &saw_nonempty_record
@@ -19619,8 +19780,10 @@ bool read_concurrency_native_file_op_checkpoint_needed(int checkpoint_fd, bool *
         *out_needed = record.needed;
     } else if (ok && saw_nonempty_record) {
         *out_needed = true;
-    } else if (ok) {
+    } else if (ok && read_legacy_needed) {
         ok = read_concurrency_native_file_op_checkpoint_legacy_needed(checkpoint_fd, out_needed);
+    } else if (ok) {
+        *out_needed = false;
     }
 
     release_fd_lock(
@@ -19629,6 +19792,16 @@ bool read_concurrency_native_file_op_checkpoint_needed(int checkpoint_fd, bool *
         k_concurrency_checkpoint_lock_length
     );
     return ok;
+}
+
+bool read_concurrency_native_dml_file_op_checkpoint_needed(int checkpoint_fd, bool *out_needed) {
+    return read_concurrency_native_file_op_checkpoint_needed_at(
+        checkpoint_fd,
+        k_concurrency_checkpoint_native_dml_file_op_records_offset,
+        k_concurrency_checkpoint_native_dml_file_op_record_magic,
+        false,
+        out_needed
+    );
 }
 
 bool clear_concurrency_native_file_op_checkpoint_needed(int checkpoint_fd) {
@@ -19644,6 +19817,60 @@ bool clear_concurrency_native_file_op_checkpoint_needed(int checkpoint_fd) {
     }
 
     const bool ok = write_concurrency_native_file_op_checkpoint_locked(checkpoint_fd, false);
+    release_fd_lock(
+        checkpoint_fd,
+        k_concurrency_checkpoint_lock_start,
+        k_concurrency_checkpoint_lock_length
+    );
+    return ok;
+}
+
+bool mark_concurrency_native_dml_file_op_checkpoint_needed(int checkpoint_fd) {
+    if (checkpoint_fd < 0) {
+        return false;
+    }
+    if (!acquire_fd_write_lock(
+            checkpoint_fd,
+            k_concurrency_checkpoint_lock_start,
+            k_concurrency_checkpoint_lock_length
+        )) {
+        return false;
+    }
+
+    const bool ok = write_concurrency_native_file_op_checkpoint_locked_at(
+        checkpoint_fd,
+        k_concurrency_checkpoint_native_dml_file_op_records_offset,
+        k_concurrency_checkpoint_native_dml_file_op_record_magic,
+        false,
+        true
+    );
+    release_fd_lock(
+        checkpoint_fd,
+        k_concurrency_checkpoint_lock_start,
+        k_concurrency_checkpoint_lock_length
+    );
+    return ok;
+}
+
+bool clear_concurrency_native_dml_file_op_checkpoint_needed(int checkpoint_fd) {
+    if (checkpoint_fd < 0) {
+        return false;
+    }
+    if (!acquire_fd_write_lock(
+            checkpoint_fd,
+            k_concurrency_checkpoint_lock_start,
+            k_concurrency_checkpoint_lock_length
+        )) {
+        return false;
+    }
+
+    const bool ok = write_concurrency_native_file_op_checkpoint_locked_at(
+        checkpoint_fd,
+        k_concurrency_checkpoint_native_dml_file_op_records_offset,
+        k_concurrency_checkpoint_native_dml_file_op_record_magic,
+        false,
+        false
+    );
     release_fd_lock(
         checkpoint_fd,
         k_concurrency_checkpoint_lock_start,
@@ -20401,17 +20628,23 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
             }
             stage_start_ns = embedded_open_perf_start_ns();
             bool native_file_op_checkpoint_needed = false;
+            bool native_dml_file_op_checkpoint_needed = false;
             if (!db.readonly_open) {
                 static_cast<void>(read_ownerless_native_file_op_checkpoint_needed(
                     g_runtime,
                     &native_file_op_checkpoint_needed
+                ));
+                static_cast<void>(read_ownerless_native_dml_file_op_checkpoint_needed(
+                    g_runtime,
+                    &native_dml_file_op_checkpoint_needed
                 ));
             }
             const bool ownerless_redo_header_backup_available =
                 !db.readonly_open && ownerless_redo_header_backup_is_valid(db.database_path);
             innodb_ownerless_uncheckpointed_file_recovery_needed =
                 ownerless_runtime_open || ordinary_native_page_log_reads ||
-                native_file_op_checkpoint_needed || ownerless_redo_header_backup_available;
+                native_file_op_checkpoint_needed || native_dml_file_op_checkpoint_needed ||
+                ownerless_redo_header_backup_available;
             mylite_ownerless_innodb_set_checkpoint_suppression(
                 ownerless_runtime_open && !db.readonly_open ? 1 : 0
             );
@@ -20423,7 +20656,8 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
             );
 #  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
             if (!ownerless_runtime_open && !ordinary_native_page_log_reads &&
-                !native_file_op_checkpoint_needed && ownerless_redo_header_backup_available) {
+                !native_file_op_checkpoint_needed && !native_dml_file_op_checkpoint_needed &&
+                ownerless_redo_header_backup_available) {
                 pause_for_ownerless_test_fault("redo-header-backup-recovery-armed");
             }
 #  endif
@@ -21030,6 +21264,8 @@ void clear_runtime_state(RuntimeState &runtime) {
     runtime.ownerless_runtime_has_local_write.store(false, std::memory_order_relaxed);
     runtime.ownerless_native_file_op_checkpoint_cache_valid = false;
     runtime.ownerless_native_file_op_checkpoint_needed_cached = false;
+    runtime.ownerless_native_dml_file_op_checkpoint_cache_valid = false;
+    runtime.ownerless_native_dml_file_op_checkpoint_needed_cached = false;
     runtime.ownerless_page_log_known_end_offset.store(0U, std::memory_order_relaxed);
     runtime.ownerless_runtime_started_with_page_version_wal = false;
     runtime.ownerless_runtime_consumed_page_version_wal.store(false, std::memory_order_relaxed);

@@ -11,6 +11,11 @@ consume that evidence outside dictionary DDL. That left the DML-origin
 `FILE_MODIFY` class as observation evidence rather than durable marker
 coverage.
 
+Current marker semantics are extended by
+`docs/specs/ownerless-dml-marker-proof-split/specs.md`: DML-origin file-op
+evidence now persists a DML-specific checkpoint-needed marker instead of the
+proof-relaxing dictionary DDL marker.
+
 ## Source Findings
 
 - Base: MariaDB `mariadb-11.8.6`
@@ -36,8 +41,9 @@ In scope:
 
 - After a successful autocommit non-DDL ownerless write statement, consume the
   existing InnoDB file-op redo flag.
-- When the flag is set, persist the existing native file-op checkpoint-needed
-  marker in `mylite-concurrency.ckpt`.
+- When the flag is set, persist durable checkpoint-needed evidence in
+  `mylite-concurrency.ckpt`; the current implementation uses the DML-specific
+  marker from `ownerless-dml-marker-proof-split`.
 - Restore the flag if marker persistence is unavailable, matching the
   dictionary-finish fallback.
 - Add focused SQL coverage for a checkpointed ownerless autocommit `UPDATE`
@@ -50,10 +56,10 @@ Out of scope:
 - Parsing native redo payload types or distinguishing `FILE_MODIFY` from other
   file-operation redo in the marker.
 - Immediate native checkpointing after every DML-origin `FILE_MODIFY`.
-- Single-owner explicit-transaction DML-origin marker coverage, which is
-  handled separately by
-  `docs/specs/ownerless-explicit-transaction-dml-file-op-marker/specs.md`;
-  multi-peer explicit DML remains separate follow-up work.
+- Explicit-transaction DML-origin marker coverage, which is handled separately
+  by `docs/specs/ownerless-explicit-transaction-dml-file-op-marker/specs.md`
+  and extended to the DML-specific marker by
+  `docs/specs/ownerless-dml-marker-proof-split/specs.md`.
 - New checkpoint scheduling policy, background checkpoint workers, or broad
   redo/checkpoint reconciliation.
 - SQL-level table-lock fault injection or external MariaDB/RQG stress.
@@ -65,10 +71,11 @@ post-write helper after dictionary DDL cleanup. The helper returns unless the
 handle is ownerless read/write, the statement began outside an explicit
 transaction, the statement is a successful non-DDL write, and
 `mylite_ownerless_innodb_take_file_op_redo()` reports native file-operation
-redo. When those conditions hold, it writes the existing native file-op
-checkpoint-needed marker under the runtime mutex. If the runtime or checkpoint
-file is unavailable, the helper re-notes the flag so a later ownerless
-statement path can still observe the evidence.
+redo. The original slice wrote the existing native file-op checkpoint-needed
+marker under the runtime mutex; the current proof split writes the DML-specific
+marker so ordinary DML does not relax no-live user-page proof. If the runtime
+or checkpoint file is unavailable, the helper re-notes the flag so a later
+ownerless statement path can still observe the evidence.
 
 Dictionary DDL keeps its existing pre-finish and post-DDL marker/checkpoint
 paths. This slice deliberately does not add immediate checkpoint work to the
@@ -84,10 +91,12 @@ no-live close drains it. SQL results and MariaDB diagnostics are unchanged.
 
 ## Directory And Lifecycle Impact
 
-The slice writes only the existing native file-op marker records in
-`concurrency/mylite-concurrency.ckpt`. No new files are introduced. The marker
-still drains through the existing native checkpoint path and is rebuild-safe
-because `.shm` remains volatile coordination state, not durable truth.
+The original slice wrote only the existing native file-op marker records in
+`concurrency/mylite-concurrency.ckpt`. The current proof split appends
+DML-specific marker records in the same checkpoint file. No new files are
+introduced. The marker still drains through the existing native checkpoint path
+and is rebuild-safe because `.shm` remains volatile coordination state, not
+durable truth.
 
 ## Native Storage Impact
 
@@ -145,7 +154,7 @@ It adds no dependencies and does not change the embedded MariaDB profile.
 ## Acceptance Criteria
 
 - A checkpointed ownerless autocommit `UPDATE` on a file-per-table InnoDB table
-  sets the native file-op checkpoint-needed marker before handle close.
+  sets durable DML file-op checkpoint-needed evidence before handle close.
 - Final no-live ownerless close clears the marker only after native checkpoint
   proof succeeds.
 - Data remains readable after forced `.shm` rebuild and ordinary native reopen.
@@ -158,9 +167,8 @@ It adds no dependencies and does not change the embedded MariaDB profile.
 - The marker is type-agnostic; the `FILE_MODIFY` conclusion depends on the
   source-backed checkpointed DML setup.
 - This slice does not prove every possible DML shape that can emit
-  `FILE_MODIFY`; single-owner explicit-transaction DML commit coverage is
-  handled by
-  `docs/specs/ownerless-explicit-transaction-dml-file-op-marker/specs.md`,
-  while multi-peer explicit DML remains follow-up work.
+  `FILE_MODIFY`; explicit-transaction DML commit coverage is handled by
+  `docs/specs/ownerless-explicit-transaction-dml-file-op-marker/specs.md` and
+  the DML marker proof split.
 - Broader native redo/checkpoint reconciliation, DDL/file-lifecycle recovery,
   and external MariaDB/RQG stress remain planned.

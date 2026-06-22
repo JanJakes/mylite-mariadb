@@ -4612,22 +4612,21 @@ Tasks:
    file-per-table InnoDB table, and observes the flag set again. That proves
    ordinary post-checkpoint DML can reach MariaDB's `FILE_MODIFY` redo path,
    while durable marker coverage for every DML-origin `FILE_MODIFY` case
-   remains unclaimed. A bounded DML marker follow-up now consumes the same
-   native file-op redo flag after successful autocommit non-DDL ownerless
-   writes and persists the existing checkpoint-needed marker when checkpointed
-   DML emits file-operation redo. Focused SQL coverage forces a checkpoint,
-   updates a file-per-table InnoDB table, observes the marker before close,
-   drains it on final no-live close, and verifies ownerless plus ordinary
-   native reopen after forced `.shm` rebuild. A bounded single-owner
-   explicit-transaction follow-up now computes transaction-end-with-local-write
-   before clearing the connection's transaction state, consumes the same native
-   file-op redo flag on successful `COMMIT` only when the process registry
-   proves no peer joined since this handle registered, and proves the marker is
-   clear before `COMMIT`, set after `COMMIT`, drained on final no-live close,
-   and rebuild-safe across ownerless plus ordinary native reopen. That closes
-   the focused checkpointed autocommit-DML and single-owner
-   explicit-transaction commit marker gaps, not the broader DML-origin
-   `FILE_MODIFY` matrix or multi-peer explicit-transaction DML marker path.
+   remains unclaimed. Bounded DML marker follow-ups now consume the same native
+   file-op redo flag after successful autocommit non-DDL ownerless writes and
+   successful explicit transaction end after local writes, and persist a
+   DML-specific checkpoint-needed marker when checkpointed DML emits
+   file-operation redo. That marker forces native checkpoint drain but does not
+   relax no-live user-page LSN/payload proof; the existing native file-op marker
+   remains the proof-relaxing dictionary DDL/file-lifecycle marker. Focused SQL
+   coverage forces a checkpoint, updates file-per-table InnoDB tables through
+   autocommit, single-owner explicit-transaction, and idle-peer explicit
+   transaction shapes, observes the DML marker before close or before final
+   peer release as appropriate, drains it on final no-live close, and verifies
+   ownerless plus ordinary native reopen after forced `.shm` rebuild. That
+   closes the focused checkpointed representative DML commit marker gaps, not
+   the broader DML-origin `FILE_MODIFY`, rollback/deadlock/crash, or
+   concurrent-writer explicit-transaction matrices.
    The no-argument
    aggregate harness remains
    available for manual runs, while CTest registers the normal ownerless SQL
