@@ -703,6 +703,8 @@ enum innodb_deep_perf_stat_index {
     INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_NS,
     INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_INSERTS,
     INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_UPDATES,
+    INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_CACHE_HITS,
+    INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_CACHE_MISSES,
     INNODB_DEEP_PERF_STAT_COUNT
 };
 
@@ -5387,6 +5389,24 @@ static void emit_bulk_deep_comparison_summary_for_phase(
         INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_UPDATES,
         phase,
         "ownerless_page_write_capture_image_updates",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_CACHE_HITS,
+        phase,
+        "ownerless_page_write_capture_image_cache_hits",
+        insert_rows,
+        insert_statements
+    );
+    emit_bulk_deep_count_phase_pair(
+        ordinary_deep,
+        ownerless_deep,
+        INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_CACHE_MISSES,
+        phase,
+        "ownerless_page_write_capture_image_cache_misses",
         insert_rows,
         insert_statements
     );
@@ -14548,6 +14568,16 @@ static void emit_innodb_deep_perf_stats(const char *prefix) {
         prefix,
         "ownerless_page_write_capture_image_updates",
         values[INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_UPDATES]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "ownerless_page_write_capture_image_cache_hits",
+        values[INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_CACHE_HITS]
+    );
+    emit_innodb_deep_perf_value(
+        prefix,
+        "ownerless_page_write_capture_image_cache_misses",
+        values[INNODB_DEEP_PERF_STAT_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_CACHE_MISSES]
     );
     emit_innodb_deep_perf_ms(
         prefix,

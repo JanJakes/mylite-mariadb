@@ -519,9 +519,11 @@ trx_init(
 	trx->mylite_ownerless_modified_page_last_hit = 0;
 	trx->mylite_ownerless_dirty_page_last_hit = 0;
 	trx->mylite_ownerless_native_support_page_write_last_hit = 0;
+	trx->mylite_ownerless_page_image_last_hit_index = 0;
 	trx->mylite_ownerless_modified_page_last_hit_valid = false;
 	trx->mylite_ownerless_dirty_page_last_hit_valid = false;
 	trx->mylite_ownerless_native_support_page_write_last_hit_valid = false;
+	trx->mylite_ownerless_page_image_last_hit_valid = false;
 	trx->mylite_ownerless_page_write_waited_before_preread = false;
 	trx->mylite_ownerless_page_refreshed_after_wait = false;
 
@@ -613,6 +615,8 @@ trx_t::mylite_ownerless_page_images_for_write() noexcept
     mylite_ownerless_page_images=
       UT_NEW_NOKEY(mylite_ownerless_page_image_vector());
     ut_a(mylite_ownerless_page_images != nullptr);
+    mylite_ownerless_page_image_last_hit_index= 0;
+    mylite_ownerless_page_image_last_hit_valid= false;
   }
   return *mylite_ownerless_page_images;
 }
@@ -1010,9 +1014,11 @@ void trx_t::free() noexcept
   mylite_ownerless_modified_page_last_hit= 0;
   mylite_ownerless_dirty_page_last_hit= 0;
   mylite_ownerless_native_support_page_write_last_hit= 0;
+  mylite_ownerless_page_image_last_hit_index= 0;
   mylite_ownerless_modified_page_last_hit_valid= false;
   mylite_ownerless_dirty_page_last_hit_valid= false;
   mylite_ownerless_native_support_page_write_last_hit_valid= false;
+  mylite_ownerless_page_image_last_hit_valid= false;
   mylite_ownerless_page_write_waited_before_preread= false;
   mylite_ownerless_page_refreshed_after_wait= false;
   mylite_ownerless_modified_pages_clear();
@@ -1613,9 +1619,11 @@ trx_start_low(
 	trx->mylite_ownerless_modified_page_last_hit = 0;
 	trx->mylite_ownerless_dirty_page_last_hit = 0;
 	trx->mylite_ownerless_native_support_page_write_last_hit = 0;
+	trx->mylite_ownerless_page_image_last_hit_index = 0;
 	trx->mylite_ownerless_modified_page_last_hit_valid = false;
 	trx->mylite_ownerless_dirty_page_last_hit_valid = false;
 	trx->mylite_ownerless_native_support_page_write_last_hit_valid = false;
+	trx->mylite_ownerless_page_image_last_hit_valid = false;
 
 	/* Check whether it is an AUTOCOMMIT SELECT */
         if (const THD* thd = trx->mysql_thd) {

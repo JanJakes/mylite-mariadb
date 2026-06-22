@@ -6775,6 +6775,16 @@ subsystems that this mode needs:
   native-support hit, transaction-owned/dirty skip, and page-image capture
   rows. This targets the remaining non-empty-table `trx_undo_report_mtr_commit`
   attribution gap without claiming a throughput fix or undo elision.
+  The ownerless page-image last-hit cache follow-up is the first bounded
+  optimization from that attribution. Transaction-deferred page-image capture
+  now remembers the last positive vector index and reuses it only after
+  validating that the index is still in range and still names the same packed
+  page. Invalid, stale, and different-page cache states use the existing
+  `std::find_if()` scan, and inserts or fallback hits refresh the cache.
+  Deep probe rows now report capture-image cache hits and misses. This reduces
+  repeated lookup work for hot bulk pages while preserving page-write
+  ownership, native undo/redo, page-version publication, page-log bytes,
+  checkpoint ordering, rollback, recovery, and peer visibility behavior.
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.

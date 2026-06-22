@@ -3703,31 +3703,61 @@ void mtr_t::ownerless_page_write_capture_dirty_transaction_page(
 
   trx_t::mylite_ownerless_page_image_vector &images=
       ownerless_trx->mylite_ownerless_page_images_for_write();
-  auto it= std::find_if(
-      images.begin(), images.end(),
-      [packed_page](const trx_t::mylite_ownerless_page_image &image) {
-        return image.packed_page == packed_page;
-      });
-  if (it == images.end())
+  trx_t::mylite_ownerless_page_image *image= nullptr;
+  if (ownerless_trx->mylite_ownerless_page_image_last_hit_valid &&
+      ownerless_trx->mylite_ownerless_page_image_last_hit_index < images.size())
   {
-    trx_t::mylite_ownerless_page_image image;
-    image.packed_page= packed_page;
-    image.page_lsn= page_lsn;
-    image.page_size= static_cast<uint32_t>(bpage.physical_size());
-    image.compressed= bpage.zip.data != nullptr;
-    image.page.assign(source, source + image.page_size);
-    images.push_back(std::move(image));
+    trx_t::mylite_ownerless_page_image &cached_image=
+        images[ownerless_trx->mylite_ownerless_page_image_last_hit_index];
+    if (cached_image.packed_page == packed_page)
+    {
+      image= &cached_image;
+      mylite_ownerless_innodb_deep_perf_count(
+          MYLITE_OWNERLESS_INNODB_DEEP_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_CACHE_HITS);
+    }
+  }
+
+  if (image == nullptr)
+  {
+    mylite_ownerless_innodb_deep_perf_count(
+        MYLITE_OWNERLESS_INNODB_DEEP_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_CACHE_MISSES);
+    auto it= std::find_if(
+        images.begin(), images.end(),
+        [packed_page](const trx_t::mylite_ownerless_page_image &candidate) {
+          return candidate.packed_page == packed_page;
+        });
+    if (it != images.end())
+    {
+      ownerless_trx->mylite_ownerless_page_image_last_hit_index=
+          static_cast<size_t>(it - images.begin());
+      ownerless_trx->mylite_ownerless_page_image_last_hit_valid= true;
+      image= &*it;
+    }
+  }
+
+  if (image == nullptr)
+  {
+    trx_t::mylite_ownerless_page_image new_image;
+    new_image.packed_page= packed_page;
+    new_image.page_lsn= page_lsn;
+    new_image.page_size= static_cast<uint32_t>(bpage.physical_size());
+    new_image.compressed= bpage.zip.data != nullptr;
+    new_image.page.assign(source, source + new_image.page_size);
+    images.push_back(std::move(new_image));
+    ownerless_trx->mylite_ownerless_page_image_last_hit_index=
+        images.size() - 1;
+    ownerless_trx->mylite_ownerless_page_image_last_hit_valid= true;
     mylite_ownerless_innodb_deep_perf_count(
         MYLITE_OWNERLESS_INNODB_DEEP_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_INSERTS);
     return;
   }
 
-  if (page_lsn < it->page_lsn)
+  if (page_lsn < image->page_lsn)
     return;
-  it->page_lsn= page_lsn;
-  it->page_size= static_cast<uint32_t>(bpage.physical_size());
-  it->compressed= bpage.zip.data != nullptr;
-  it->page.assign(source, source + it->page_size);
+  image->page_lsn= page_lsn;
+  image->page_size= static_cast<uint32_t>(bpage.physical_size());
+  image->compressed= bpage.zip.data != nullptr;
+  image->page.assign(source, source + image->page_size);
   mylite_ownerless_innodb_deep_perf_count(
       MYLITE_OWNERLESS_INNODB_DEEP_OWNERLESS_PAGE_WRITE_CAPTURE_IMAGE_UPDATES);
 }

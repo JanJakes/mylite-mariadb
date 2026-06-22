@@ -677,12 +677,16 @@ public:
   mutable uint64_t mylite_ownerless_dirty_page_last_hit;
   /** Last exact positive native-support page-write membership lookup. */
   mutable uint64_t mylite_ownerless_native_support_page_write_last_hit;
+  /** Last positive transaction page-image vector lookup. */
+  mutable size_t mylite_ownerless_page_image_last_hit_index;
   /** Whether the modified-page last-hit cache is valid. */
   mutable bool mylite_ownerless_modified_page_last_hit_valid;
   /** Whether the dirty-page last-hit cache is valid. */
   mutable bool mylite_ownerless_dirty_page_last_hit_valid;
   /** Whether the native-support page-write last-hit cache is valid. */
   mutable bool mylite_ownerless_native_support_page_write_last_hit_valid;
+  /** Whether the page-image last-hit cache is valid. */
+  mutable bool mylite_ownerless_page_image_last_hit_valid;
   /** Whether an ownerless MTR page-write image was not published. */
   bool mylite_ownerless_page_write_publish_failed;
   /** Whether an ownerless MTR page-write image was published. */
@@ -798,8 +802,10 @@ public:
       mylite_ownerless_page_images->clear();
     mylite_ownerless_modified_page_last_hit= 0;
     mylite_ownerless_dirty_page_last_hit= 0;
+    mylite_ownerless_page_image_last_hit_index= 0;
     mylite_ownerless_modified_page_last_hit_valid= false;
     mylite_ownerless_dirty_page_last_hit_valid= false;
+    mylite_ownerless_page_image_last_hit_valid= false;
     mylite_ownerless_native_support_page_write_pages_clear();
   }
   /** Whether ownerless page-write acquisition waited before a preread imported

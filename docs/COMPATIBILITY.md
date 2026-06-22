@@ -1244,6 +1244,15 @@ page-write enter/acquire, native-support hit, transaction-owned/dirty skip, and
 page-image capture rows so the remaining `trx_undo_report_mtr_commit` cost can
 be assigned without changing normal stats-off production behavior. This is
 diagnostic evidence, not a throughput fix or a non-empty-table undo elision.
+The ownerless page-image last-hit cache then reuses a validated transaction
+page-image vector index when repeated ownerless mini-transactions capture the
+same packed page. Stale, invalid, or different-page cache state falls back to
+the existing vector scan, while page-write ownership, native undo/redo,
+page-version publication, page-log format, checkpoint ordering, rollback, and
+recovery semantics stay unchanged. New deep counters report capture-image cache
+hits and misses so production probes can show whether repeated bulk updates
+avoid the scan. This is a bounded lookup reduction, not a native undo/MTR
+elision or a completion claim for the remaining ownerless write-path gap.
 Profiled mysqli runs also split total query elapsed time into
 `query_verb_*` buckets for result queries, DML, DDL, connection state,
 transaction, lock, call, and other first-keyword classes so WordPress timing
