@@ -212,6 +212,7 @@ static void test_nonempty_directory_without_metadata_fails(void);
 static void test_invalid_metadata_fails(void);
 static void test_incomplete_layout_fails(void);
 static void test_ownerless_open_initializes_concurrency_metadata(void);
+static void test_ownerless_repeated_fresh_innodb_bootstrap(void);
 static void test_ownerless_final_close_truncates_clean_redo_tail(void);
 static void test_ownerless_metadata_only_final_close_truncates_redo_tail(void);
 static void test_invalid_concurrency_metadata_fails(void);
@@ -392,6 +393,7 @@ static void run_baseline_tests(void) {
 static void run_ownerless_directory_tests(void) {
     test_shared_readonly_open_reads_existing_database();
     test_ownerless_open_initializes_concurrency_metadata();
+    test_ownerless_repeated_fresh_innodb_bootstrap();
     test_ownerless_final_close_truncates_clean_redo_tail();
     test_ownerless_metadata_only_final_close_truncates_redo_tail();
     test_invalid_concurrency_metadata_fails();
@@ -1041,6 +1043,66 @@ static void test_ownerless_open_initializes_concurrency_metadata(void) {
     free(metadata_path);
     free(database_path);
     free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_repeated_fresh_innodb_bootstrap(void) {
+    char *root = make_temp_root();
+    char *first_runtime_root = path_join(root, "runtime-first");
+    char *second_runtime_root = path_join(root, "runtime-second");
+    char *first_database_path = path_join(root, "ownerless-bootstrap-first.mylite");
+    char *second_database_path = path_join(root, "ownerless-bootstrap-second.mylite");
+    mylite_open_config first_config = open_config(first_runtime_root);
+    mylite_open_config second_config = open_config(second_runtime_root);
+    mylite_db *db = NULL;
+
+    assert(mkdir(first_runtime_root, 0700) == 0);
+    assert(mkdir(second_runtime_root, 0700) == 0);
+
+    assert(
+        mylite_open(
+            first_database_path,
+            &db,
+            MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE | MYLITE_OPEN_OWNERLESS_RW,
+            &first_config
+        ) == MYLITE_OK
+    );
+    exec_ok(db, "CREATE DATABASE app");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_bootstrap_first ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_ownerless_closed_database_layout(first_database_path);
+    assert(is_directory_empty(first_runtime_root));
+
+    db = NULL;
+    assert(
+        mylite_open(
+            second_database_path,
+            &db,
+            MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE | MYLITE_OPEN_OWNERLESS_RW,
+            &second_config
+        ) == MYLITE_OK
+    );
+    exec_ok(db, "CREATE DATABASE app");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_bootstrap_second ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_ownerless_closed_database_layout(second_database_path);
+    assert(is_directory_empty(second_runtime_root));
+
+    free(second_database_path);
+    free(first_database_path);
+    free(second_runtime_root);
+    free(first_runtime_root);
     remove_tree(root);
     free(root);
 }

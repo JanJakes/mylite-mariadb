@@ -2649,6 +2649,8 @@ ATTRIBUTE_NOINLINE bool mtr_t::ownerless_page_write_enter(
 {
   if (UNIV_LIKELY(!ownerless_hooks_enabled()))
     return false;
+  if (ownerless_page_write_in_startup_or_recovery())
+    return false;
 
   mylite_ownerless_innodb_deep_perf_count(
       MYLITE_OWNERLESS_INNODB_DEEP_OWNERLESS_PAGE_WRITE_ENTER_CALLS);

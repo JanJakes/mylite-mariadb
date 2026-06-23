@@ -2009,9 +2009,13 @@ Tasks:
    `space_id=0` system-tablespace pages so dictionary flushes after local or
    peer DDL can reload unflushed dictionary records from the page-version WAL;
    startup and recovery keep this hook disabled while redo/log initialization
-   is still in progress. Non-forced page-version write refresh uses the same
-   monotonic rule and does not overwrite a same-LSN or newer clean local page
-   with a retained page-version image. Peer dictionary-generation refresh runs
+   is still in progress. The page-write entry hook also returns before
+   ownerless lock acquisition, refresh, boundary publication, or page-write
+   perf accounting during startup/recovery, so pre-start ownerless lifecycle
+   hooks cannot affect native doublewrite or system-tablespace bootstrap
+   writes. Non-forced page-version write refresh uses the same monotonic rule
+   and does not overwrite a same-LSN or newer clean local page with a retained
+   page-version image. Peer dictionary-generation refresh runs
    before page-version read eligibility is chosen. It refreshes page-0
    space-header flags using a max-sized page read so compressed row-format
    rebuilds can update the native `fil_space_t` page size, then keeps the
