@@ -341,6 +341,29 @@ enum database_perf_stat_index {
     DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_MARKER_FILE_READS,
     DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_BLOCKED_MARKER,
     DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_BLOCKED_MARKER_READ,
+    DATABASE_PERF_STAT_TEXT_EXEC_CALLS,
+    DATABASE_PERF_STAT_TEXT_EXEC_TOTAL_NS,
+    DATABASE_PERF_STAT_TEXT_EXEC_POLICY_NS,
+    DATABASE_PERF_STAT_TEXT_EXEC_PRESSURE_NS,
+    DATABASE_PERF_STAT_TEXT_EXEC_RUNTIME_STATEMENT_NS,
+    DATABASE_PERF_STAT_TEXT_EXEC_TEMPORARY_TABLE_NS,
+    DATABASE_PERF_STAT_TEXT_EXEC_STATEMENT_LOCK_NS,
+    DATABASE_PERF_STAT_TEXT_EXEC_REFRESH_NS,
+    DATABASE_PERF_STAT_TEXT_EXEC_DICTIONARY_BEGIN_NS,
+    DATABASE_PERF_STAT_TEXT_EXEC_SNAPSHOT_PIN_NS,
+    DATABASE_PERF_STAT_TEXT_EXEC_FAST_PATH_POLICY_NS,
+    DATABASE_PERF_STAT_TEXT_EXEC_MYSQL_QUERY_NS,
+    DATABASE_PERF_STAT_TEXT_EXEC_POST_OPEN_CLEAN_PAGES_NS,
+    DATABASE_PERF_STAT_TEXT_EXEC_POST_STATE_NS,
+    DATABASE_PERF_STAT_TEXT_EXEC_DICTIONARY_FINISH_NS,
+    DATABASE_PERF_STAT_TEXT_EXEC_NATIVE_FILE_MARKER_NS,
+    DATABASE_PERF_STAT_TEXT_EXEC_PAGE_WRITE_RELEASE_NS,
+    DATABASE_PERF_STAT_TEXT_EXEC_DICTIONARY_FLUSH_NS,
+    DATABASE_PERF_STAT_TEXT_EXEC_HANDLE_STATUS_NS,
+    DATABASE_PERF_STAT_TEXT_EXEC_PAGE_VISIBILITY_RELEASE_NS,
+    DATABASE_PERF_STAT_TEXT_EXEC_STATEMENT_LOCK_RELEASE_NS,
+    DATABASE_PERF_STAT_TEXT_EXEC_RECLAIM_NS,
+    DATABASE_PERF_STAT_TEXT_EXEC_FINAL_NATIVE_FILE_MARKER_NS,
     DATABASE_PERF_STAT_COUNT
 };
 
@@ -10237,6 +10260,117 @@ static void emit_database_perf_stats(const char *prefix) {
         "%s_prepared_step_native_close_ms=%.3f\n",
         prefix,
         (double)values[DATABASE_PERF_STAT_PREPARED_STEP_NATIVE_CLOSE_NS] / 1000000.0
+    );
+    printf("%s_text_exec_calls=%" PRIu64 "\n", prefix, values[DATABASE_PERF_STAT_TEXT_EXEC_CALLS]);
+    printf(
+        "%s_text_exec_total_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TEXT_EXEC_TOTAL_NS] / 1000000.0
+    );
+    printf(
+        "%s_text_exec_policy_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TEXT_EXEC_POLICY_NS] / 1000000.0
+    );
+    printf(
+        "%s_text_exec_pressure_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TEXT_EXEC_PRESSURE_NS] / 1000000.0
+    );
+    printf(
+        "%s_text_exec_runtime_statement_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TEXT_EXEC_RUNTIME_STATEMENT_NS] / 1000000.0
+    );
+    printf(
+        "%s_text_exec_temporary_table_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TEXT_EXEC_TEMPORARY_TABLE_NS] / 1000000.0
+    );
+    printf(
+        "%s_text_exec_statement_lock_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TEXT_EXEC_STATEMENT_LOCK_NS] / 1000000.0
+    );
+    printf(
+        "%s_text_exec_refresh_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TEXT_EXEC_REFRESH_NS] / 1000000.0
+    );
+    printf(
+        "%s_text_exec_dictionary_begin_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TEXT_EXEC_DICTIONARY_BEGIN_NS] / 1000000.0
+    );
+    printf(
+        "%s_text_exec_snapshot_pin_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TEXT_EXEC_SNAPSHOT_PIN_NS] / 1000000.0
+    );
+    printf(
+        "%s_text_exec_fast_path_policy_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TEXT_EXEC_FAST_PATH_POLICY_NS] / 1000000.0
+    );
+    printf(
+        "%s_text_exec_mysql_query_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TEXT_EXEC_MYSQL_QUERY_NS] / 1000000.0
+    );
+    printf(
+        "%s_text_exec_post_open_clean_pages_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TEXT_EXEC_POST_OPEN_CLEAN_PAGES_NS] / 1000000.0
+    );
+    printf(
+        "%s_text_exec_post_state_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TEXT_EXEC_POST_STATE_NS] / 1000000.0
+    );
+    printf(
+        "%s_text_exec_dictionary_finish_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TEXT_EXEC_DICTIONARY_FINISH_NS] / 1000000.0
+    );
+    printf(
+        "%s_text_exec_native_file_marker_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TEXT_EXEC_NATIVE_FILE_MARKER_NS] / 1000000.0
+    );
+    printf(
+        "%s_text_exec_page_write_release_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TEXT_EXEC_PAGE_WRITE_RELEASE_NS] / 1000000.0
+    );
+    printf(
+        "%s_text_exec_dictionary_flush_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TEXT_EXEC_DICTIONARY_FLUSH_NS] / 1000000.0
+    );
+    printf(
+        "%s_text_exec_handle_status_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TEXT_EXEC_HANDLE_STATUS_NS] / 1000000.0
+    );
+    printf(
+        "%s_text_exec_page_visibility_release_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TEXT_EXEC_PAGE_VISIBILITY_RELEASE_NS] / 1000000.0
+    );
+    printf(
+        "%s_text_exec_statement_lock_release_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TEXT_EXEC_STATEMENT_LOCK_RELEASE_NS] / 1000000.0
+    );
+    printf(
+        "%s_text_exec_reclaim_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TEXT_EXEC_RECLAIM_NS] / 1000000.0
+    );
+    printf(
+        "%s_text_exec_final_native_file_marker_ms=%.3f\n",
+        prefix,
+        (double)values[DATABASE_PERF_STAT_TEXT_EXEC_FINAL_NATIVE_FILE_MARKER_NS] / 1000000.0
     );
     printf(
         "%s_prepared_reset_calls=%" PRIu64 "\n",

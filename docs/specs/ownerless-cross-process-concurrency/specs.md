@@ -5329,15 +5329,16 @@ subsystems that this mode needs:
   remains open and idle,
   without waiting for another SQL statement or close-time cleanup. Foreground
   statement reclaim uses a larger internal WAL budget while a runtime remains
-  in its single-owner epoch and has no pending native file-operation checkpoint
-  marker, so tight single-process write bursts rely on timer or close cleanup
-  below that budget without changing peer-seen or DDL-marker scheduling. The
+  in its single-owner epoch, so tight single-process write bursts rely on timer
+  or close cleanup below that budget without changing peer-seen scheduling or
+  native marker durability. Pending native file-operation checkpoint markers no
+  longer force synchronous foreground reclaim below that budget; they remain
+  durable and are still drained by timer, no-live, or close-time reclaim. The
   statement scheduler checks that single-owner foreground budget before taking
-  the active page-version pin snapshot when the existing marker predicate proves
-  no native file-operation checkpoint is pending, and the production insert
-  performance probe drains benchmark setup DDL through close/reopen before
-  timing ownerless insert loops so CI separates steady-state DML cost from
-  setup checkpoint cleanup.
+  the active page-version pin snapshot, and the production insert performance
+  probe drains benchmark setup DDL through close/reopen before timing ownerless
+  insert loops so CI separates steady-state DML cost from setup checkpoint
+  cleanup.
   The same single-owner proof skips non-forced page-write, space-metadata, and
   explicit-transaction buffer-pool first-write refresh only while the owner
   generation still matches, no peer process is live, no peer-owned snapshot
@@ -6664,6 +6665,21 @@ subsystems that this mode needs:
   status-update, and exec-call summaries. That keeps CI evidence from hiding a
   multi-millisecond statement interval outside the already-reported page-log,
   page-write, commit-visibility, SQL-handler, and InnoDB-handler buckets.
+  The text-execution attribution follow-up splits ownerless `mylite_exec()`
+  timing across policy checks, pressure checks, statement locks, external-page
+  refresh, dictionary DDL state, native `mysql_query()`, post-state updates,
+  page-write release, checkpoint/visibility release, and statement-end reclaim.
+  A production 100-row-per-statement append-attribution sample showed
+  statement-end reclaim consuming `63.820 ms` across ten ownerless bulk
+  statements while native `mysql_query()` consumed `22.396 ms`, proving the
+  missing interval was foreground reclaim rather than MariaDB row execution.
+  The same slice lets below-budget single-owner writes defer pending native
+  marker reclaim to timer/no-live/close cleanup; a stats-off production sample
+  moved ownerless row-list bulk throughput from about `11049.40 rows/s`
+  (`0.1149` ratio) before the change to `44485.00 rows/s` (`0.4063` ratio)
+  after the change, with a final verification run at `39648.94 rows/s`
+  (`0.4131` ratio) and append attribution showing statement-end reclaim down
+  to `0.022 ms` across ten ownerless bulk statements.
   The redo written/leave fusion slice then narrows a measured ownerless
   mini-transaction hot path by letting top-level production redo ranges complete
   the reserved range and publish the latest LSN through one shared redo-state

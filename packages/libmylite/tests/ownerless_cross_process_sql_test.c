@@ -14612,12 +14612,26 @@ static void test_ownerless_single_owner_foreground_reclaim_budget_defers_to_time
     );
     assert(
         database_stats
+            [OWNERLESS_TEST_DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_ALLOWED] > 0U
+    );
+    assert(
+        database_stats
             [OWNERLESS_TEST_DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_MARKER_CACHE_HITS] >
         0U
     );
     assert(
         database_stats
             [OWNERLESS_TEST_DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_MARKER_FILE_READS] ==
+        0U
+    );
+    assert(
+        database_stats
+            [OWNERLESS_TEST_DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_BLOCKED_MARKER] ==
+        0U
+    );
+    assert(
+        database_stats
+            [OWNERLESS_TEST_DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_BLOCKED_MARKER_READ] ==
         0U
     );
     assert(

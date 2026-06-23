@@ -631,10 +631,23 @@ autocommit, and row-list autocommit tables are now prepared before insert
 attribution, then the ownerless runtime is closed and reopened so final
 no-live cleanup can drain setup file-operation checkpoint markers outside the
 timed DML loop. The same slice moves the existing single-owner foreground
-reclaim budget rejection ahead of the active page-version pin snapshot when no
-native file-operation checkpoint marker is pending, avoiding a redundant
-eligibility check for below-budget single-owner write bursts. A reduced
-stats-enabled production sample over 200 inserts preserved `2.000`
+reclaim budget rejection ahead of the active page-version pin snapshot,
+avoiding a redundant eligibility check for below-budget single-owner write
+bursts. A follow-up text-execution attribution slice proved that
+statement-end reclaim, not MariaDB row execution, was dominating reduced
+ownerless row-list bulk samples: the pre-change append-attribution run spent
+`63.820 ms` in `mylite_exec()` reclaim across ten 100-row ownerless statements
+versus `22.396 ms` in native `mysql_query()`. Below-budget single-owner writes
+now keep pending native file-operation checkpoint markers durable while
+deferring their reclaim to timer/no-live/close cleanup; the focused
+foreground-budget test asserts positive allowed skips and zero marker-blocked
+skips. Stats-off production samples moved ownerless row-list bulk throughput
+from about `11049.40 rows/s` (`0.1149` ratio) before the change to
+`44485.00 rows/s` (`0.4063` ratio) and `39648.94 rows/s` (`0.4131` ratio) in
+post-change runs, while append attribution reported statement-end reclaim down
+to `0.022 ms` across ten ownerless bulk statements. An earlier reduced
+stats-enabled production sample over 200
+inserts preserved `2.000`
 page-version records and `2.000` published native-support history-proof pages
 per ownerless single-row autocommit insert, moved
 `prepared_step_reclaim_ms` from the earlier `59.189 ms` sample to `42.645 ms`,
@@ -2890,7 +2903,7 @@ their original WAL boundary.
 | Prepared statements | 🟡&nbsp;Partial | Reusable MariaDB prepared statements are exposed through `mylite_prepare()`, `mylite_step()`, `mylite_reset()`, and `mylite_finalize()` with 1-based parameter binding; ownerless prepared plain reads recover once from the tested stale InnoDB dictionary-cache `1932` case, while prepared writes, DDL, locking reads, and explicit transactions do not use that retry path |
 | Binary-safe values | 🟡&nbsp;Partial | Prepared text/blob bindings and column accessors use explicit byte counts; `mylite_exec_result()` and the default mysqli result-query path copy result values with explicit byte lengths; embedded NUL blob values are covered |
 | Diagnostics | 🟡&nbsp;Partial | Open handles expose stable MyLite result codes, MariaDB errno, SQLSTATE, and message text; the default embedded profile keeps common MariaDB messages but may use compact generic text for uncommon inherited server errors |
-| Ownerless pressure diagnostics | 🟡&nbsp;Partial | `mylite_ownerless_pressure_status()` reports the active page-version snapshot pin count, oldest pinned read LSN, raw ownerless page-version WAL bytes, configured soft limit, and whether the configured write throttle is currently reached for live ownerless handles; ordinary non-ownerless handles report zero ownerless pressure, thresholded ownerless write/DDL/transaction-end statement-boundary checkpoint scheduling is covered when no peer process is live; live-idle coverage proves native-support checkpoint proof WAL is retained while a peer remains live and then checkpointed after that peer closes, while active-pin/live-writer coverage retains user page-version WAL; single-owner foreground statement reclaim uses a larger internal WAL budget when no native file-operation marker is pending while timer and close reclaim keep the normal threshold, and timer-driven checkpoint scheduling is covered when an idle open writer observes retained WAL after a shared read-only snapshot pin releases without another SQL statement or close |
+| Ownerless pressure diagnostics | 🟡&nbsp;Partial | `mylite_ownerless_pressure_status()` reports the active page-version snapshot pin count, oldest pinned read LSN, raw ownerless page-version WAL bytes, configured soft limit, and whether the configured write throttle is currently reached for live ownerless handles; ordinary non-ownerless handles report zero ownerless pressure, thresholded ownerless write/DDL/transaction-end statement-boundary checkpoint scheduling is covered when no peer process is live; live-idle coverage proves native-support checkpoint proof WAL is retained while a peer remains live and then checkpointed after that peer closes, while active-pin/live-writer coverage retains user page-version WAL; single-owner foreground statement reclaim uses a larger internal WAL budget below which pending native file-operation checkpoint markers remain durable but no longer force synchronous statement-end reclaim, while timer and close reclaim keep the normal threshold, and timer-driven checkpoint scheduling is covered when an idle open writer observes retained WAL after a shared read-only snapshot pin releases without another SQL statement or close |
 | Warnings | 🟡&nbsp;Partial | MariaDB warning counts and indexed warning lookup expose level, code, and message text after statement execution |
 | Affected rows and insert ids | 🟡&nbsp;Partial | Successful direct execution exposes affected rows for non-result statements and the last insert id |
 | Raw `MYSQL *` as primary API | ➖&nbsp;Out&nbsp;of&nbsp;scope | Available only through a deliberate compatibility adapter |

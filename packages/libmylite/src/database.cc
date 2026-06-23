@@ -225,6 +225,29 @@ enum OwnerlessDatabasePerfStatIndex : std::size_t {
     OWNERLESS_DATABASE_PERF_FOREGROUND_RECLAIM_BUDGET_SKIP_MARKER_FILE_READS,
     OWNERLESS_DATABASE_PERF_FOREGROUND_RECLAIM_BUDGET_SKIP_BLOCKED_MARKER,
     OWNERLESS_DATABASE_PERF_FOREGROUND_RECLAIM_BUDGET_SKIP_BLOCKED_MARKER_READ,
+    OWNERLESS_DATABASE_PERF_TEXT_EXEC_CALLS,
+    OWNERLESS_DATABASE_PERF_TEXT_EXEC_TOTAL_NS,
+    OWNERLESS_DATABASE_PERF_TEXT_EXEC_POLICY_NS,
+    OWNERLESS_DATABASE_PERF_TEXT_EXEC_PRESSURE_NS,
+    OWNERLESS_DATABASE_PERF_TEXT_EXEC_RUNTIME_STATEMENT_NS,
+    OWNERLESS_DATABASE_PERF_TEXT_EXEC_TEMPORARY_TABLE_NS,
+    OWNERLESS_DATABASE_PERF_TEXT_EXEC_STATEMENT_LOCK_NS,
+    OWNERLESS_DATABASE_PERF_TEXT_EXEC_REFRESH_NS,
+    OWNERLESS_DATABASE_PERF_TEXT_EXEC_DICTIONARY_BEGIN_NS,
+    OWNERLESS_DATABASE_PERF_TEXT_EXEC_SNAPSHOT_PIN_NS,
+    OWNERLESS_DATABASE_PERF_TEXT_EXEC_FAST_PATH_POLICY_NS,
+    OWNERLESS_DATABASE_PERF_TEXT_EXEC_MYSQL_QUERY_NS,
+    OWNERLESS_DATABASE_PERF_TEXT_EXEC_POST_OPEN_CLEAN_PAGES_NS,
+    OWNERLESS_DATABASE_PERF_TEXT_EXEC_POST_STATE_NS,
+    OWNERLESS_DATABASE_PERF_TEXT_EXEC_DICTIONARY_FINISH_NS,
+    OWNERLESS_DATABASE_PERF_TEXT_EXEC_NATIVE_FILE_MARKER_NS,
+    OWNERLESS_DATABASE_PERF_TEXT_EXEC_PAGE_WRITE_RELEASE_NS,
+    OWNERLESS_DATABASE_PERF_TEXT_EXEC_DICTIONARY_FLUSH_NS,
+    OWNERLESS_DATABASE_PERF_TEXT_EXEC_HANDLE_STATUS_NS,
+    OWNERLESS_DATABASE_PERF_TEXT_EXEC_PAGE_VISIBILITY_RELEASE_NS,
+    OWNERLESS_DATABASE_PERF_TEXT_EXEC_STATEMENT_LOCK_RELEASE_NS,
+    OWNERLESS_DATABASE_PERF_TEXT_EXEC_RECLAIM_NS,
+    OWNERLESS_DATABASE_PERF_TEXT_EXEC_FINAL_NATIVE_FILE_MARKER_NS,
     OWNERLESS_DATABASE_PERF_STAT_COUNT
 };
 
@@ -5090,17 +5113,51 @@ int exec_result_impl(
     }
 
     const OwnerlessPageVisibilityScope page_visibility_scope;
+    OwnerlessDatabasePerfScope ownerless_text_exec_perf_scope(
+        OWNERLESS_DATABASE_PERF_TEXT_EXEC_TOTAL_NS
+    );
+    ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_TEXT_EXEC_CALLS, 1U);
+    std::uint64_t ownerless_stage_start =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     const SqlPolicyTokens policy_tokens = collect_sql_policy_tokens(sql);
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_TEXT_EXEC_POLICY_NS,
+        ownerless_stage_start
+    );
+    ownerless_stage_start =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     const int pressure_result = enforce_ownerless_page_log_limit_policy(*db, policy_tokens);
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_TEXT_EXEC_PRESSURE_NS,
+        ownerless_stage_start
+    );
     if (pressure_result != MYLITE_OK) {
         return copy_error_message(*db, errmsg);
     }
+    ownerless_stage_start =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     ScopedOwnerlessRuntimeStatement runtime_statement(*db);
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_TEXT_EXEC_RUNTIME_STATEMENT_NS,
+        ownerless_stage_start
+    );
+    ownerless_stage_start =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     const bool statement_uses_temporary_table =
         ownerless_statement_uses_temporary_table(*db, policy_tokens);
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_TEXT_EXEC_TEMPORARY_TABLE_NS,
+        ownerless_stage_start
+    );
     OwnerlessStatementLocks statement_locks;
+    ownerless_stage_start =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     const int statement_lock_result =
         acquire_ownerless_statement_locks(*db, policy_tokens, statement_locks);
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_TEXT_EXEC_STATEMENT_LOCK_NS,
+        ownerless_stage_start
+    );
     if (statement_lock_result != MYLITE_OK) {
         return copy_error_message(*db, errmsg);
     }
@@ -5115,6 +5172,8 @@ int exec_result_impl(
     const bool tableless_ownerless_plain_read =
         statement_is_tableless_ownerless_plain_read(policy_tokens);
     bool page_version_reads_enabled = false;
+    ownerless_stage_start =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     const int refresh_result = refresh_ownerless_external_pages_before_statement(
         *db,
         allow_page_version_reads,
@@ -5123,6 +5182,10 @@ int exec_result_impl(
              allow_current_read_refresh),
         ownerless_dictionary_ddl_statement(policy_tokens),
         &page_version_reads_enabled
+    );
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_TEXT_EXEC_REFRESH_NS,
+        ownerless_stage_start
     );
     if (refresh_result != MYLITE_OK) {
         if (page_version_reads_enabled) {
@@ -5134,8 +5197,14 @@ int exec_result_impl(
         return copy_error_message(*db, errmsg);
     }
     bool dictionary_ddl_started = false;
+    ownerless_stage_start =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     const int dictionary_ddl_result =
         ownerless_begin_dictionary_ddl(*db, policy_tokens, &dictionary_ddl_started);
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_TEXT_EXEC_DICTIONARY_BEGIN_NS,
+        ownerless_stage_start
+    );
     if (dictionary_ddl_result != MYLITE_OK) {
         if (page_version_reads_enabled) {
             release_ownerless_completed_statement_page_visibility(
@@ -5147,10 +5216,16 @@ int exec_result_impl(
     }
     OwnerlessStatementDictionaryDdlScope dictionary_ddl_scope(dictionary_ddl_started);
     bool consistent_snapshot_start_pin_registered = false;
+    ownerless_stage_start =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     const int consistent_snapshot_pin_result = ensure_ownerless_consistent_snapshot_start_pin(
         *db,
         policy_tokens,
         &consistent_snapshot_start_pin_registered
+    );
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_TEXT_EXEC_SNAPSHOT_PIN_NS,
+        ownerless_stage_start
     );
     if (consistent_snapshot_pin_result != MYLITE_OK) {
         const int dictionary_finish_result =
@@ -5181,8 +5256,14 @@ int exec_result_impl(
     OwnerlessStatementNativeLifecycleRefreshScope native_lifecycle_refresh(
         dictionary_ddl_started || db->ownerless_peer_dictionary_refresh_requires_conservative_write
     );
+    ownerless_stage_start =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     const OwnerlessStatementFastPathPolicy fast_path_policy =
         ownerless_statement_fast_path_policy(*db, sql, policy_tokens);
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_TEXT_EXEC_FAST_PATH_POLICY_NS,
+        ownerless_stage_start
+    );
     update_ownerless_explicit_transaction_visible_fast_proof_before_sql(
         *db,
         policy_tokens,
@@ -5199,7 +5280,13 @@ int exec_result_impl(
         )
     );
     std::uint64_t stage_start_ns = exec_result_perf_start_ns();
+    ownerless_stage_start =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     if (mysql_query(&db->mysql, sql) != 0) {
+        ownerless_database_perf_add_elapsed(
+            OWNERLESS_DATABASE_PERF_TEXT_EXEC_MYSQL_QUERY_NS,
+            ownerless_stage_start
+        );
         exec_result_perf_add_elapsed(EXEC_RESULT_PERF_MYSQL_QUERY_NS, stage_start_ns);
         exec_result_perf_add(EXEC_RESULT_PERF_MYSQL_QUERY_ERRORS, 1U);
         set_mariadb_error(*db);
@@ -5216,10 +5303,21 @@ int exec_result_impl(
             refresh_ownerless_dictionary_cache_after_stale_engine_error(*db) == MYLITE_OK) {
             set_ok(*db);
             stage_start_ns = exec_result_perf_start_ns();
+            ownerless_stage_start =
+                ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns()
+                                                            : 0U;
             if (mysql_query(&db->mysql, sql) == 0) {
+                ownerless_database_perf_add_elapsed(
+                    OWNERLESS_DATABASE_PERF_TEXT_EXEC_MYSQL_QUERY_NS,
+                    ownerless_stage_start
+                );
                 exec_result_perf_add_elapsed(EXEC_RESULT_PERF_MYSQL_QUERY_NS, stage_start_ns);
                 goto ownerless_query_success;
             }
+            ownerless_database_perf_add_elapsed(
+                OWNERLESS_DATABASE_PERF_TEXT_EXEC_MYSQL_QUERY_NS,
+                ownerless_stage_start
+            );
             exec_result_perf_add_elapsed(EXEC_RESULT_PERF_MYSQL_QUERY_NS, stage_start_ns);
             exec_result_perf_add(EXEC_RESULT_PERF_MYSQL_QUERY_ERRORS, 1U);
             set_mariadb_error(*db);
@@ -5249,9 +5347,19 @@ int exec_result_impl(
         rollback_active_transaction_after_deadlock(*db);
         return copy_error_message(*db, errmsg);
     }
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_TEXT_EXEC_MYSQL_QUERY_NS,
+        ownerless_stage_start
+    );
     exec_result_perf_add_elapsed(EXEC_RESULT_PERF_MYSQL_QUERY_NS, stage_start_ns);
 ownerless_query_success:
+    ownerless_stage_start =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     refresh_ownerless_pending_post_open_clean_pages(*db);
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_TEXT_EXEC_POST_OPEN_CLEAN_PAGES_NS,
+        ownerless_stage_start
+    );
     stage_start_ns = exec_result_perf_start_ns();
     const my_ulonglong affected_rows = mysql_affected_rows(&db->mysql);
     const unsigned long long insert_id =
@@ -5288,6 +5396,8 @@ ownerless_query_success:
     update_current_schema_after_successful_sql(*db, policy_tokens);
     exec_result_perf_add_elapsed(EXEC_RESULT_PERF_CURRENT_SCHEMA_NS, stage_start_ns);
     stage_start_ns = exec_result_perf_start_ns();
+    ownerless_stage_start =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     update_ownerless_statement_lock_timeout_after_successful_sql(*db, policy_tokens);
     update_ownerless_temporary_table_state_after_successful_sql(*db, policy_tokens);
     const bool transaction_end_had_local_write =
@@ -5298,6 +5408,10 @@ ownerless_query_success:
         ownerless_transaction_rollback_has_local_write(*db, policy_tokens);
     const int transaction_state_result =
         update_ownerless_transaction_state_after_successful_sql(*db, policy_tokens);
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_TEXT_EXEC_POST_STATE_NS,
+        ownerless_stage_start
+    );
     exec_result_perf_add_elapsed(EXEC_RESULT_PERF_STATUS_UPDATE_NS, stage_start_ns);
     if (transaction_state_result != MYLITE_OK) {
         if (page_version_reads_enabled) {
@@ -5308,8 +5422,14 @@ ownerless_query_success:
         }
         return copy_error_message(*db, errmsg);
     }
+    ownerless_stage_start =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     const int dictionary_finish_result =
         ownerless_finish_dictionary_ddl(*db, dictionary_ddl_started);
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_TEXT_EXEC_DICTIONARY_FINISH_NS,
+        ownerless_stage_start
+    );
     if (dictionary_finish_result != MYLITE_OK) {
         set_error(*db, dictionary_finish_result, "ownerless dictionary change could not finish");
         if (page_version_reads_enabled) {
@@ -5320,6 +5440,8 @@ ownerless_query_success:
         }
         return copy_error_message(*db, errmsg);
     }
+    ownerless_stage_start =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     if (dictionary_ddl_started) {
         mark_ownerless_native_file_op_checkpoint_after_dictionary_ddl(*db, policy_tokens);
     } else if (!transaction_end_had_local_write) {
@@ -5330,10 +5452,20 @@ ownerless_query_success:
             transaction_commit_had_local_write
         );
     }
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_TEXT_EXEC_NATIVE_FILE_MARKER_NS,
+        ownerless_stage_start
+    );
     if (!statement_started_in_explicit_transaction ||
         sql_ends_explicit_transaction(policy_tokens) ||
         !db->ownerless_transaction_has_local_write) {
+        ownerless_stage_start =
+            ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
         const int page_write_release_result = release_ownerless_page_write_trx_ids(*db);
+        ownerless_database_perf_add_elapsed(
+            OWNERLESS_DATABASE_PERF_TEXT_EXEC_PAGE_WRITE_RELEASE_NS,
+            ownerless_stage_start
+        );
         if (page_write_release_result != MYLITE_OK) {
             set_error(
                 *db,
@@ -5350,7 +5482,13 @@ ownerless_query_success:
         }
     }
     if (dictionary_ddl_started) {
+        ownerless_stage_start =
+            ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
         const int dictionary_flush_result = flush_ownerless_dictionary_cache(*db);
+        ownerless_database_perf_add_elapsed(
+            OWNERLESS_DATABASE_PERF_TEXT_EXEC_DICTIONARY_FLUSH_NS,
+            ownerless_stage_start
+        );
         if (dictionary_flush_result != MYLITE_OK) {
             if (page_version_reads_enabled) {
                 release_ownerless_completed_statement_page_visibility(
@@ -5366,6 +5504,8 @@ ownerless_query_success:
         }
     }
     stage_start_ns = exec_result_perf_start_ns();
+    ownerless_stage_start =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     advance_ownerless_handle_read_lsn_after_autocommit_write(
         *db,
         policy_tokens,
@@ -5378,16 +5518,40 @@ ownerless_query_success:
                   std::min<my_ulonglong>(affected_rows, static_cast<my_ulonglong>(LLONG_MAX))
               );
     db->last_insert_id = insert_id;
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_TEXT_EXEC_HANDLE_STATUS_NS,
+        ownerless_stage_start
+    );
     exec_result_perf_add_elapsed(EXEC_RESULT_PERF_STATUS_UPDATE_NS, stage_start_ns);
     if (page_version_reads_enabled) {
+        ownerless_stage_start =
+            ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
         release_ownerless_completed_statement_page_visibility(
             *db,
             !statement_started_in_explicit_transaction,
             false
         );
+        ownerless_database_perf_add_elapsed(
+            OWNERLESS_DATABASE_PERF_TEXT_EXEC_PAGE_VISIBILITY_RELEASE_NS,
+            ownerless_stage_start
+        );
     }
+    ownerless_stage_start =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     statement_locks.release();
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_TEXT_EXEC_STATEMENT_LOCK_RELEASE_NS,
+        ownerless_stage_start
+    );
+    ownerless_stage_start =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     maybe_reclaim_ownerless_page_log_after_statement(*db, policy_tokens);
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_TEXT_EXEC_RECLAIM_NS,
+        ownerless_stage_start
+    );
+    ownerless_stage_start =
+        ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
     if (!dictionary_ddl_started && transaction_commit_had_local_write) {
         mark_ownerless_native_file_op_checkpoint_after_successful_write(
             *db,
@@ -5401,6 +5565,10 @@ ownerless_query_success:
             transaction_rollback_had_local_write
         );
     }
+    ownerless_database_perf_add_elapsed(
+        OWNERLESS_DATABASE_PERF_TEXT_EXEC_FINAL_NATIVE_FILE_MARKER_NS,
+        ownerless_stage_start
+    );
     return MYLITE_OK;
 #endif
 }
@@ -11672,13 +11840,6 @@ bool ownerless_single_owner_foreground_reclaim_budget_skips(
             return false;
         }
     }
-    if (native_file_op_checkpoint_needed) {
-        ownerless_database_perf_add(
-            OWNERLESS_DATABASE_PERF_FOREGROUND_RECLAIM_BUDGET_SKIP_BLOCKED_MARKER,
-            1U
-        );
-        return false;
-    }
     bool native_dml_file_op_checkpoint_needed = true;
     if (runtime.ownerless_native_dml_file_op_checkpoint_cache_valid) {
         native_dml_file_op_checkpoint_needed =
@@ -11689,14 +11850,13 @@ bool ownerless_single_owner_foreground_reclaim_budget_skips(
                )) {
         return false;
     }
-    if (native_dml_file_op_checkpoint_needed) {
-        ownerless_database_perf_add(
-            OWNERLESS_DATABASE_PERF_FOREGROUND_RECLAIM_BUDGET_SKIP_BLOCKED_MARKER,
-            1U
-        );
-        return false;
-    }
-
+    /*
+     * Pending native markers stay durable. Below the single-owner foreground
+     * budget, deferring reclaim only moves checkpoint work to the timer/close
+     * path; it does not clear markers or truncate WAL.
+     */
+    (void)native_file_op_checkpoint_needed;
+    (void)native_dml_file_op_checkpoint_needed;
     ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_FOREGROUND_RECLAIM_BUDGET_SKIP_ALLOWED, 1U);
     return true;
 }
