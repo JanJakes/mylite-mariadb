@@ -5513,7 +5513,10 @@ subsystems that this mode needs:
   runtime files, prunes WordPress Git object history from the shard payload,
   validates the manifest from inside the staged tree, and reports staged-root
   byte size beside compressed tarball size so artifact transport overhead stays
-  visible independently of PHPUnit execution. The follow-up source snapshot
+  visible independently of PHPUnit execution. Shard jobs materialize the PHP
+  runtime Docker image from the warmed BuildKit cache instead of downloading and
+  `docker load`-ing a separate compressed image artifact, while still timing
+  that image setup before the PHPUnit test-only step. The follow-up source snapshot
   keeps `src`, `tests/phpunit`, the writable REST fixture directory under
   `tests/qunit/fixtures`, root metadata, Composer autoload metadata, and Yoast
   PHPUnit polyfills while excluding non-PHPUnit test trees and root Composer

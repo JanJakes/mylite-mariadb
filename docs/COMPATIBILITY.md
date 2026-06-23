@@ -373,11 +373,14 @@ Those phases append compact timing rows into
 Markdown table to the GitHub step summary so setup, build, probe, and each
 PHPUnit shard can be compared without scraping separate step logs. The split
 runtime artifact handoff also records pack, upload, per-shard root download,
-per-shard runtime-image download, and per-shard extract seconds plus
-runtime/database-baseline/runtime-image tarball byte sizes, so branch/main
-timing comparisons can distinguish test execution from artifact transfer
-overhead. The runtime artifact is now staged from a slim shard payload instead
-of the full MariaDB/MyLite build trees: it keeps the
+per-shard extract, and per-shard cache-backed Docker image materialization
+seconds plus runtime/database-baseline tarball byte sizes, so branch/main timing
+comparisons can distinguish test execution from artifact transfer and runtime
+image setup overhead. Shard jobs no longer fan out a compressed runtime-image
+artifact through `actions/download-artifact` and `docker load`; they build the
+same runtime Dockerfile from the warmed BuildKit cache and time that step
+before the PHPUnit test-only phase. The runtime artifact is now staged from a
+slim shard payload instead of the full MariaDB/MyLite build trees: it keeps the
 production CMake caches and manifest-hashed runtime files, prunes WordPress
 Git object history from the shard copy, validates the manifest inside the
 staged root, and reports `wordpress_artifact_pack_runtime_root_bytes` beside

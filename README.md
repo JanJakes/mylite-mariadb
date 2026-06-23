@@ -156,7 +156,10 @@ timing job also requires the transient WordPress MyLite test database directory
 outside the repository worktree so test-database I/O is not silently timed on
 the build artifact path. Each WordPress timing phase also appends its compact
 metrics to `build/wordpress-phpunit-reports/timing-summary.md`, and CI publishes
-that file to the GitHub step summary after the split PHPUnit steps finish.
+that file to the GitHub step summary after the split PHPUnit steps finish. The
+WordPress shard jobs materialize their PHP runtime image from the BuildKit
+cache instead of downloading a separate image artifact, while keeping that
+per-shard image setup timed separately from the PHPUnit test-only step.
 The `tools/check-ci-production-builds` audit is also run directly by CI and by
 the production CTest preset, so workflow changes that reintroduce developer
 presets or remove timing guards fail before producing comparable-looking

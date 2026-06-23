@@ -351,6 +351,15 @@ reject_regex \
   'wordpress-phpunit-(runtime|db-baseline)\.tar\.gz' \
   "WordPress PHPUnit runtime artifacts must use zstd transport"
 reject_regex \
+  'wordpress-phpunit-runtime-image\.tar\.zst' \
+  "WordPress PHPUnit shard jobs must materialize the runtime image from BuildKit cache, not a fanout image artifact"
+reject_regex \
+  'Download WordPress PHPUnit runtime image artifact' \
+  "WordPress PHPUnit shard jobs must not download a separate runtime image artifact"
+reject_regex \
+  'Load WordPress shard runtime Docker image' \
+  "WordPress PHPUnit shard jobs must not docker-load a separate runtime image artifact"
+reject_regex \
   'label:[[:space:]]*phpunit-non-isolated-rest-content-controller' \
   "WordPress PHPUnit CI must split the old REST content-controller label"
 reject_regex \
@@ -575,6 +584,12 @@ require_step_literal \
 require_step_literal \
   "Build WordPress runtime Docker image" \
   "load: true"
+require_step_literal \
+  "Build WordPress shard runtime Docker image" \
+  'DOCKER_BUILD_RECORD_UPLOAD: "false"'
+require_step_literal \
+  "Build WordPress shard runtime Docker image" \
+  "load: true"
 require_literal "path: build/mariadb-embedded"
 require_literal "path: build/wordpress-mariadb-embedded"
 require_literal "\${{ runner.os }}-mariadb-embedded-\${{ hashFiles('mariadb/**', 'cmake/mariadb-embedded-baseline.cmake', 'tools/mariadb-embedded-build') }}"
@@ -714,14 +729,11 @@ require_literal "Mark WordPress runtime Docker image build start"
 require_literal "Set up WordPress runtime Docker Buildx"
 require_literal "Build WordPress runtime Docker image"
 require_literal "Record WordPress runtime Docker image timing"
-require_literal "Pack WordPress runtime Docker image artifact"
-require_literal "Mark WordPress runtime Docker image artifact upload start"
-require_literal "Upload WordPress runtime Docker image artifact"
-require_literal "Record WordPress runtime Docker image artifact upload timing"
 require_literal "Upload WordPress runtime Docker image timing summary"
-require_literal "Mark WordPress shard Docker image load start"
-require_literal "Load WordPress shard runtime Docker image"
-require_literal "Record WordPress shard Docker image load timing"
+require_literal "Mark WordPress shard Docker image build start"
+require_literal "Set up WordPress shard Docker Buildx"
+require_literal "Build WordPress shard runtime Docker image"
+require_literal "Record WordPress shard Docker image timing"
 require_literal "docker/setup-buildx-action@v4"
 require_literal "docker/build-push-action@v7"
 require_literal "cache-from: type=gha,scope=wordpress-phpunit-php83"
@@ -736,9 +748,10 @@ require_step_literal "Build WordPress setup Docker image" "file: ./tools/wordpre
 require_step_literal "Build WordPress setup Docker image" "cache-to: type=gha,mode=max,scope=wordpress-phpunit-php83"
 require_step_literal "Build WordPress runtime Docker image" "file: ./tools/wordpress-phpunit-runtime.Dockerfile"
 require_step_literal "Build WordPress runtime Docker image" "cache-to: type=gha,mode=max,scope=wordpress-phpunit-runtime-php83"
-reject_regex \
-  'Set up WordPress shard Docker Buildx|Build WordPress shard runtime Docker image' \
-  "WordPress shard jobs must load the setup-produced runtime image artifact instead of rebuilding it"
+require_step_literal "Build WordPress shard runtime Docker image" "file: ./tools/wordpress-phpunit-runtime.Dockerfile"
+require_step_literal "Build WordPress shard runtime Docker image" "tags: mylite-wordpress-phpunit:php83"
+require_step_literal "Build WordPress shard runtime Docker image" "type=gha,scope=wordpress-phpunit-runtime-php83"
+require_step_literal "Build WordPress shard runtime Docker image" "type=gha,scope=wordpress-phpunit-php83"
 require_literal "Fetch WordPress PHPUnit sources"
 require_literal "Build MyLite PHP extensions for WordPress PHPUnit"
 require_literal "Run embedded large-row bulk performance probe"
@@ -763,7 +776,6 @@ require_literal "- wordpress-phpunit-shard"
 require_literal "Pack WordPress PHPUnit runtime artifact"
 require_literal "Upload WordPress PHPUnit runtime artifact"
 require_literal "Download WordPress PHPUnit runtime root artifact"
-require_literal "Download WordPress PHPUnit runtime image artifact"
 require_literal "Extract WordPress PHPUnit runtime artifact"
 require_literal "Run WordPress PHPUnit shard (test only)"
 require_literal "Show WordPress shard timing summary"
@@ -779,7 +791,6 @@ require_literal "wordpress-phpunit-runtime-image"
 require_literal "wordpress-phpunit-runtime-root"
 require_literal "wordpress-phpunit-runtime.tar.zst"
 require_literal "wordpress-phpunit-db-baseline.tar.zst"
-require_literal "wordpress-phpunit-runtime-image.tar.zst"
 require_literal "wordpress-phpunit-runtime-manifest.txt"
 require_literal "wordpress-phpunit-runtime-manifest.sha256"
 require_literal "wordpress-phpunit-timing-summary-setup"
@@ -787,10 +798,9 @@ require_literal "wordpress-phpunit-timing-summary-runtime-image"
 require_literal "wordpress-phpunit-timing-summary-\${{ matrix.shard }}"
 require_literal "pattern: wordpress-phpunit-timing-summary-*"
 require_literal "name: wordpress-phpunit-runtime"
-require_literal "name: wordpress-phpunit-runtime-image"
 reject_regex \
   'pattern: wordpress-phpunit-runtime\*' \
-  "WordPress shard jobs must use exact runtime artifact downloads so CI timing can isolate root/image transfer cost"
+  "WordPress shard jobs must use exact runtime root artifact downloads so CI timing can isolate root transfer cost"
 require_literal "compression-level: 0"
 require_literal "MYLITE_WORDPRESS_PHASE: fetch"
 require_literal "MYLITE_WORDPRESS_PHASE: build-php"
@@ -1316,50 +1326,8 @@ require_step_order \
 require_step_order \
   "Build WordPress runtime Docker image" \
   "Record WordPress runtime Docker image timing"
-require_step_literal \
-  "Pack WordPress runtime Docker image artifact" \
-  "docker image save mylite-wordpress-phpunit-runtime:php83"
-require_step_literal \
-  "Pack WordPress runtime Docker image artifact" \
-  "zstd -T0 -3 -o build/wordpress-phpunit-runtime-image.tar.zst"
-require_step_literal \
-  "Pack WordPress runtime Docker image artifact" \
-  "tools/wordpress-phpunit-append-timing --label runtime-docker-image-pack"
-require_step_literal \
-  "Pack WordPress runtime Docker image artifact" \
-  "wordpress_runtime_docker_image_pack_seconds="
-require_step_literal \
-  "Pack WordPress runtime Docker image artifact" \
-  "wordpress_runtime_docker_image_tar_bytes="
 require_step_order \
   "Record WordPress runtime Docker image timing" \
-  "Pack WordPress runtime Docker image artifact"
-require_step_literal \
-  "Mark WordPress runtime Docker image artifact upload start" \
-  "wordpress-runtime-docker-image-upload-start.txt"
-require_step_literal \
-  "Upload WordPress runtime Docker image artifact" \
-  "name: wordpress-phpunit-runtime-image"
-require_step_literal \
-  "Upload WordPress runtime Docker image artifact" \
-  "build/wordpress-phpunit-runtime-image.tar.zst"
-require_step_literal \
-  "Record WordPress runtime Docker image artifact upload timing" \
-  "tools/wordpress-phpunit-append-timing --label runtime-docker-image-upload"
-require_step_literal \
-  "Record WordPress runtime Docker image artifact upload timing" \
-  "wordpress_runtime_docker_image_upload_seconds="
-require_step_order \
-  "Pack WordPress runtime Docker image artifact" \
-  "Mark WordPress runtime Docker image artifact upload start"
-require_step_order \
-  "Mark WordPress runtime Docker image artifact upload start" \
-  "Upload WordPress runtime Docker image artifact"
-require_step_order \
-  "Upload WordPress runtime Docker image artifact" \
-  "Record WordPress runtime Docker image artifact upload timing"
-require_step_order \
-  "Record WordPress runtime Docker image artifact upload timing" \
   "Upload WordPress runtime Docker image timing summary"
 require_step_literal \
   "Record WordPress PHPUnit runtime artifact upload timing" \
@@ -1394,38 +1362,14 @@ require_step_literal \
 require_step_literal \
   "Record WordPress PHPUnit runtime root artifact download timing" \
   "wordpress_artifact_download_runtime_tar_bytes="
-require_step_literal \
-  "Mark WordPress PHPUnit runtime image artifact download start" \
-  "wordpress-phpunit-runtime-image-download-start.txt"
 require_step_order \
   "Mark WordPress PHPUnit runtime root artifact download start" \
   "Download WordPress PHPUnit runtime root artifact"
-require_step_literal \
-  "Download WordPress PHPUnit runtime image artifact" \
-  "name: wordpress-phpunit-runtime-image"
-require_step_literal \
-  "Record WordPress PHPUnit runtime image artifact download timing" \
-  'tools/wordpress-phpunit-append-timing --label artifact-image-download-${{ matrix.shard }}'
-require_step_literal \
-  "Record WordPress PHPUnit runtime image artifact download timing" \
-  "wordpress_runtime_image_artifact_download_seconds="
-require_step_literal \
-  "Record WordPress PHPUnit runtime image artifact download timing" \
-  "wordpress_artifact_download_runtime_image_tar_bytes="
 require_step_order \
   "Download WordPress PHPUnit runtime root artifact" \
   "Record WordPress PHPUnit runtime root artifact download timing"
 require_step_order \
   "Record WordPress PHPUnit runtime root artifact download timing" \
-  "Mark WordPress PHPUnit runtime image artifact download start"
-require_step_order \
-  "Mark WordPress PHPUnit runtime image artifact download start" \
-  "Download WordPress PHPUnit runtime image artifact"
-require_step_order \
-  "Download WordPress PHPUnit runtime image artifact" \
-  "Record WordPress PHPUnit runtime image artifact download timing"
-require_step_order \
-  "Record WordPress PHPUnit runtime image artifact download timing" \
   "Extract WordPress PHPUnit runtime artifact"
 require_step_literal \
   "Extract WordPress PHPUnit runtime artifact" \
@@ -1452,41 +1396,41 @@ require_step_literal \
   "Extract WordPress PHPUnit runtime artifact" \
   "wordpress_artifact_extract_runtime_tar_bytes="
 require_step_literal \
-  "Mark WordPress shard Docker image load start" \
-  "wordpress-docker-image-load-start.txt"
+  "Mark WordPress shard Docker image build start" \
+  "wordpress-docker-image-build-start.txt"
 require_step_literal \
-  "Load WordPress shard runtime Docker image" \
-  "zstd -dc build/wordpress-phpunit-runtime-artifact/wordpress-phpunit-runtime-image.tar.zst"
+  "Build WordPress shard runtime Docker image" \
+  "file: ./tools/wordpress-phpunit-runtime.Dockerfile"
 require_step_literal \
-  "Load WordPress shard runtime Docker image" \
-  "docker load"
+  "Build WordPress shard runtime Docker image" \
+  "load: true"
 require_step_literal \
-  "Load WordPress shard runtime Docker image" \
-  "docker image inspect mylite-wordpress-phpunit-runtime:php83"
+  "Build WordPress shard runtime Docker image" \
+  "tags: mylite-wordpress-phpunit:php83"
 require_step_literal \
-  "Load WordPress shard runtime Docker image" \
-  "docker image tag mylite-wordpress-phpunit-runtime:php83 mylite-wordpress-phpunit:php83"
+  "Build WordPress shard runtime Docker image" \
+  "type=gha,scope=wordpress-phpunit-runtime-php83"
 require_step_literal \
-  "Record WordPress shard Docker image load timing" \
+  "Record WordPress shard Docker image timing" \
   'tools/wordpress-phpunit-append-timing --label docker-image-${{ matrix.shard }}'
 require_step_literal \
-  "Record WordPress shard Docker image load timing" \
+  "Record WordPress shard Docker image timing" \
   "wordpress_docker_build_seconds="
 require_step_literal \
-  "Record WordPress shard Docker image load timing" \
-  "wordpress_docker_image_load_seconds="
-require_step_literal \
-  "Record WordPress shard Docker image load timing" \
-  "wordpress_docker_image_load_tar_bytes="
+  "Record WordPress shard Docker image timing" \
+  "docker image inspect mylite-wordpress-phpunit:php83"
 require_step_order \
-  "Extract WordPress PHPUnit runtime artifact" \
-  "Mark WordPress shard Docker image load start"
+  "Mark WordPress shard Docker image build start" \
+  "Set up WordPress shard Docker Buildx"
 require_step_order \
-  "Mark WordPress shard Docker image load start" \
-  "Load WordPress shard runtime Docker image"
+  "Set up WordPress shard Docker Buildx" \
+  "Build WordPress shard runtime Docker image"
 require_step_order \
-  "Load WordPress shard runtime Docker image" \
-  "Record WordPress shard Docker image load timing"
+  "Build WordPress shard runtime Docker image" \
+  "Record WordPress shard Docker image timing"
+require_step_order \
+  "Record WordPress shard Docker image timing" \
+  "Mark WordPress PHPUnit runtime root artifact download start"
 require_step_literal \
   "Upload WordPress PHPUnit runtime artifact" \
   "name: wordpress-phpunit-runtime"
