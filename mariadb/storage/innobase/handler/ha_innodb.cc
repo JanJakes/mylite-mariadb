@@ -16671,6 +16671,8 @@ ha_innobase::external_lock(
 		if (not_autocommit) {
 			mylite_ownerless_innodb_lock_release_transaction_page_write_gates(
 				trx);
+			mylite_ownerless_innodb_lock_release_transaction_clean_page_writes(
+				trx);
 		}
 
 		if (!not_autocommit) {

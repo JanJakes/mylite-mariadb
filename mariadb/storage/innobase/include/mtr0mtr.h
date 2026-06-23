@@ -346,7 +346,7 @@ public:
     const buf_block_t *block= static_cast<const buf_block_t*>(slot.object);
     if (!ownerless_page_write_should_prepare(block->page))
       return;
-    ownerless_page_write_enter(*block);
+    ownerless_page_write_enter(*block, true, true);
   }
 
   /** Upgrade U locks on a block to X
@@ -422,7 +422,7 @@ public:
       if (UNIV_UNLIKELY(ownerless_hooks_enabled()) &&
           (type & (MTR_MEMO_PAGE_X_FIX | MTR_MEMO_PAGE_SX_FIX)) &&
           ownerless_page_write_should_prepare(block->page))
-        ownerless_page_write_enter(*block);
+        ownerless_page_write_enter(*block, true, true);
     }
     else if (block->page.id().space() >= SRV_TMP_SPACE_ID)
     {
@@ -435,7 +435,7 @@ public:
       bool ownerless_transaction_release_holds_page= false;
       if (UNIV_UNLIKELY(ownerless_hooks))
         ownerless_transaction_release_holds_page=
-            ownerless_page_write_enter(*block, false);
+            ownerless_page_write_enter(*block);
       m_modifications= true;
       if (UNIV_UNLIKELY(ownerless_transaction_release_holds_page))
         ownerless_page_write_note_dirty_transaction_page(block->page, true);
@@ -743,7 +743,8 @@ private:
   /** Acquire ownerless physical-page write serialization for a modified page.
   @return whether transaction release should publish this page at commit */
   bool ownerless_page_write_enter(
-      const buf_block_t &block, bool allow_refresh= true) noexcept;
+      const buf_block_t &block, bool allow_refresh= true,
+      bool prepare_only= false) noexcept;
 
   /** @return transaction that should own ownerless page-write locks. */
   trx_t *ownerless_page_write_trx() const noexcept;

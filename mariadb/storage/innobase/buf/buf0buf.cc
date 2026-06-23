@@ -105,6 +105,37 @@ static bool mylite_ownerless_trx_modified_page(
 	return false;
 }
 
+static bool mylite_ownerless_page_write_transaction_gate(
+	uint64_t packed_page) noexcept
+{
+	const uint32_t space_id= static_cast<uint32_t>(packed_page >> 32);
+	const uint32_t page_no= static_cast<uint32_t>(packed_page);
+	return (space_id == MYLITE_OWNERLESS_INNODB_TRANSACTION_WRITE_SPACE_ID &&
+		page_no == MYLITE_OWNERLESS_INNODB_TRANSACTION_WRITE_PAGE_NO) ||
+	       (space_id < SRV_TMP_SPACE_ID &&
+		page_no == MYLITE_OWNERLESS_INNODB_SPACE_TRANSACTION_WRITE_PAGE_NO);
+}
+
+static bool mylite_ownerless_trx_has_page_write_gate(
+	const trx_t* trx) noexcept
+{
+	if (trx == nullptr) {
+		return false;
+	}
+
+	const trx_t::mylite_ownerless_page_vector *pages=
+		trx->mylite_ownerless_modified_pages_for_read();
+	if (pages == nullptr) {
+		return false;
+	}
+	for (uint64_t packed_page : *pages) {
+		if (mylite_ownerless_page_write_transaction_gate(packed_page)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 static bool mylite_ownerless_retained_user_page(
 	const page_id_t page_id, const byte *page) noexcept
 {
@@ -216,6 +247,19 @@ static bool mylite_ownerless_trx_explicit_sql_writer(
 	       trx->mysql_thd->lex->sql_command != SQLCOM_SELECT;
 }
 
+static bool mylite_ownerless_trx_sql_statement_context(
+	const trx_t* trx) noexcept
+{
+	THD* thd= trx != nullptr ? trx->mysql_thd : nullptr;
+	if (thd == nullptr) {
+		thd= current_thd;
+	}
+	if (thd == nullptr || thd->lex == nullptr) {
+		return false;
+	}
+	return !mylite_ownerless_trx_sql_is_plain_select(trx);
+}
+
 static mylite_ownerless_buf_preread_page_write_lock_state
 mylite_ownerless_buf_preread_page_write_lock(
 	trx_t* trx, const page_id_t page_id, rw_lock_type_t rw_latch) noexcept
@@ -238,7 +282,11 @@ mylite_ownerless_buf_preread_page_write_lock(
 
 	const bool explicit_sql_writer=
 		mylite_ownerless_trx_explicit_sql_writer(trx);
-	if (explicit_sql_writer) {
+	const bool sql_statement_context=
+		mylite_ownerless_trx_sql_statement_context(trx);
+	bool has_page_write_gate=
+		mylite_ownerless_trx_has_page_write_gate(trx);
+	if (explicit_sql_writer && !has_page_write_gate) {
 		for (;;) {
 			uint32_t gate_acquire_flags= 0;
 			const int result=
@@ -252,6 +300,7 @@ mylite_ownerless_buf_preread_page_write_lock(
 					trx->mylite_ownerless_page_write_waited_before_preread=
 						true;
 				}
+				has_page_write_gate= true;
 				break;
 			}
 			if (result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE) {
@@ -286,8 +335,13 @@ mylite_ownerless_buf_preread_page_write_lock(
 
 	for (;;) {
 		uint32_t acquire_flags= 0;
+		const bool nonblocking_preread=
+			!sql_statement_context ||
+			(explicit_sql_writer && has_page_write_gate);
 		const unsigned timeout_ms=
-			mylite_ownerless_trx_lock_wait_timeout_ms(trx);
+			nonblocking_preread
+				? 0U
+				: mylite_ownerless_trx_lock_wait_timeout_ms(trx);
 		const int result=
 			mylite_ownerless_innodb_lock_acquire_page_write_untracked(
 				trx, page_id.space(), page_id.page_no(), timeout_ms,
@@ -320,6 +374,9 @@ mylite_ownerless_buf_preread_page_write_lock(
 		if (result != MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT
 		    && result != MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK) {
 			ut_error;
+		}
+		if (nonblocking_preread) {
+			return state;
 		}
 		if (result == MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT &&
 		    mylite_ownerless_trx_timeout_aborts_statement(trx)) {

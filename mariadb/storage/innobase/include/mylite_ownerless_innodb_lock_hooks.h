@@ -396,6 +396,8 @@ int mylite_ownerless_innodb_lock_release_page_write(
 void mylite_ownerless_innodb_lock_release_transaction_page_writes(struct trx_t *trx);
 void mylite_ownerless_innodb_lock_release_transaction_page_write_gates(
     struct trx_t *trx);
+void mylite_ownerless_innodb_lock_release_transaction_clean_page_writes(
+    struct trx_t *trx);
 int mylite_ownerless_innodb_lock_publish_record_wait(
     const struct ib_lock_t *wait_lock,
     const struct ib_lock_t *blocker_lock);

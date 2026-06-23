@@ -407,6 +407,8 @@ bool transaction_has_page_write_entry(const trx_t *trx, uint64_t packed_page);
 void note_transaction_page_write_gate(trx_t *trx, uint64_t gate_page);
 void note_transaction_page_write_page(trx_t *trx, uint64_t packed_page);
 bool packed_page_write_transaction_gate(uint64_t packed_page);
+bool transaction_should_keep_statement_page_write(const trx_t *trx,
+                                                 uint64_t packed_page);
 bool transaction_should_track_page_write(trx_t *trx,
                                          uint32_t space_id,
                                          uint32_t page_no);
@@ -1497,6 +1499,41 @@ mylite_ownerless_innodb_lock_release_transaction_page_write_gates(trx_t *trx)
   }
   pages->erase(std::remove_if(pages->begin(), pages->end(),
                               packed_page_write_transaction_gate),
+               pages->end());
+  trx->mylite_ownerless_rebuild_modified_page_set();
+}
+
+extern "C" void
+mylite_ownerless_innodb_lock_release_transaction_clean_page_writes(trx_t *trx)
+{
+  if (trx == nullptr)
+    return;
+  if (!ownerless_lock_hooks_enabled())
+    return;
+
+  trx_t::mylite_ownerless_page_vector *pages=
+      trx->mylite_ownerless_modified_pages;
+  if (pages == nullptr)
+    return;
+
+  for (uint64_t packed_page : *pages)
+  {
+    if (transaction_should_keep_statement_page_write(trx, packed_page))
+      continue;
+    const uint32_t space_id= static_cast<uint32_t>(packed_page >> 32);
+    const uint32_t page_no= static_cast<uint32_t>(packed_page);
+    const int result= mylite_ownerless_innodb_lock_release_page_write(
+        trx, space_id, page_no);
+    if (result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
+        result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+      handle_hook_result("release clean page write", result);
+  }
+  pages->erase(std::remove_if(
+                   pages->begin(), pages->end(),
+                   [trx](uint64_t packed_page) {
+                     return !transaction_should_keep_statement_page_write(
+                         trx, packed_page);
+                   }),
                pages->end());
   trx->mylite_ownerless_rebuild_modified_page_set();
 }
@@ -4094,7 +4131,6 @@ uint64_t page_write_transaction_gate_for_space(const trx_t *trx,
 
   const trx_t::mylite_ownerless_page_vector *pages=
       trx->mylite_ownerless_modified_pages_for_read();
-  bool has_other_space_gate= false;
   if (pages != nullptr)
     for (uint64_t packed_page : *pages)
     {
@@ -4104,11 +4140,7 @@ uint64_t page_write_transaction_gate_for_space(const trx_t *trx,
         return global_gate;
       if (packed_page == space_gate)
         return space_gate;
-      has_other_space_gate= true;
     }
-
-  if (has_other_space_gate)
-    return global_gate;
 
   return space_gate;
 }
@@ -4158,6 +4190,31 @@ bool packed_page_write_transaction_gate(uint64_t packed_page)
           page_no == MYLITE_OWNERLESS_INNODB_TRANSACTION_WRITE_PAGE_NO) ||
          (space_id < SRV_TMP_SPACE_ID &&
           page_no == MYLITE_OWNERLESS_INNODB_SPACE_TRANSACTION_WRITE_PAGE_NO);
+}
+
+bool transaction_has_page_write_image(const trx_t *trx, uint64_t packed_page)
+{
+  if (trx == nullptr || trx->mylite_ownerless_page_images == nullptr)
+    return false;
+
+  const trx_t::mylite_ownerless_page_image_vector *images=
+      trx->mylite_ownerless_page_images;
+  return std::find_if(images->begin(), images->end(),
+                      [packed_page](
+                          const trx_t::mylite_ownerless_page_image &image) {
+                        return image.packed_page == packed_page;
+                      }) != images->end();
+}
+
+bool transaction_should_keep_statement_page_write(const trx_t *trx,
+                                                  uint64_t packed_page)
+{
+  if (packed_page_write_transaction_gate(packed_page))
+    return true;
+  if (trx == nullptr)
+    return false;
+  return trx->mylite_ownerless_dirty_page_contains(packed_page) ||
+         transaction_has_page_write_image(trx, packed_page);
 }
 
 bool transaction_sql_is_plain_select(const trx_t *trx)

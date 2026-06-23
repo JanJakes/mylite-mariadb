@@ -16893,6 +16893,9 @@ int ownerless_innodb_lock_acquire_page_write_hook(
         0U,
         nullptr
     );
+    if (registry_result == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_TIMEOUT && timeout_ms == 0U) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT;
+    }
     if (registry_result == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_TIMEOUT &&
         hook->lock_registry != nullptr && hook->lock_registry_size != 0U) {
         registry_result =

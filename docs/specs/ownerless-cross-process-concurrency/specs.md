@@ -1990,7 +1990,15 @@ Tasks:
    The per-space transaction page-write gate remains statement-scoped:
    explicit transactions release gate markers at statement end so unrelated
    writers in the same tablespace are not serialized for the transaction
-   lifetime. Real dirty page-write ownership remains transaction-scoped until
+   lifetime. Explicit non-autocommit preread and prepare paths do not add
+   more transaction gates after a statement already holds one, and their
+   additional clean page-write probes are untracked and nonblocking; a conflict
+   returns without publishing shared-registry waiters and skips only the clean
+   preread refresh, while a later real dirty path still acquires tracked
+   page-write ownership and refreshes before marking the page dirty.
+   Statement-end cleanup also releases transaction-deferred page-write records
+   that never became dirty pages and never captured transaction page images.
+   Real dirty page-write ownership remains transaction-scoped until
    commit or rollback after page-level ownerless acquisition records the
    modified page, so incomplete later callbacks cannot allow another explicit
    writer to interleave with a stale process-local page image for that page.
@@ -2142,12 +2150,15 @@ Tasks:
    commit serialization path has no safe SQL error return once native commit is
    in progress. Explicit transaction handler write locks take a
    transaction-level page-write gate before the table is counted in the
-   statement; the first table uses a tablespace-scoped gate to preserve
-   independent-table writer concurrency, and later tables in the same statement
-   use a global gate until the physical-page bridge can merge concurrent page
-   images more finely. Explicit transaction statement-end cleanup releases
-   those gate markers, while real dirty page-write locks stay held until commit
-   or rollback after page-level acquisition records the modified pages.
+   statement; ordinary statements keep those gates per tablespace so independent
+   table writers are not promoted to a global physical-page wait only because a
+   clean preread or metadata path touched another tablespace. Explicit
+   transaction preread/prepare paths that already have a statement gate use
+   untracked zero-timeout page-write probes for additional clean pages; conflict
+   returns do not publish shared-registry waiters. Statement-end cleanup
+   releases both gate markers and clean page-write records that never became
+   dirty or image-backed. Real dirty page-write locks stay held until commit or
+   rollback after page-level acquisition records the modified pages.
 4. Implement passive checkpoint of safe page versions into tablespace files.
    The page-version log primitive can now compact away records at or below a
    safe commit LSN, retain newer records at new offsets, and report those
