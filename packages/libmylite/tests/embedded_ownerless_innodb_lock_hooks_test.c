@@ -133,6 +133,7 @@ static int before_record_wait_hook(
 static int clear_wait_hook(uint64_t trx_id, void *context);
 static int redo_enter_hook(uint64_t *out_latest_lsn, void *context);
 static int redo_observe_hook(uint64_t *out_latest_lsn, void *context);
+static int redo_observe_visible_hook(uint64_t *out_visible_lsn, void *context);
 static int redo_reserve_hook(
     uint64_t current_lsn,
     uint64_t length,
@@ -594,6 +595,7 @@ static void install_page_hooks(page_visibility_state *state) {
         clear_wait_hook,
         redo_enter_hook,
         redo_observe_hook,
+        redo_observe_visible_hook,
         redo_reserve_hook,
         redo_written_hook,
         redo_leave_hook,
@@ -850,6 +852,14 @@ static int redo_observe_hook(uint64_t *out_latest_lsn, void *context) {
     state->observed_lsn = state->written_lsn;
     ++state->observe_count;
     *out_latest_lsn = state->observed_lsn;
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
+static int redo_observe_visible_hook(uint64_t *out_visible_lsn, void *context) {
+    page_visibility_state *state = (page_visibility_state *)context;
+
+    assert(out_visible_lsn != NULL);
+    *out_visible_lsn = state->written_lsn;
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
 }
 

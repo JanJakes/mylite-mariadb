@@ -10,12 +10,18 @@
 #include <atomic>
 
 extern std::atomic<bool> mylite_ownerless_innodb_lock_hooks_enabled;
+extern std::atomic<bool> mylite_ownerless_innodb_lock_hooks_ever_enabled;
 extern std::atomic<bool> mylite_ownerless_innodb_autoinc_hooks_enabled;
 extern std::atomic<bool> mylite_ownerless_innodb_test_faults_enabled;
 
 static inline int mylite_ownerless_innodb_lock_hooks_enabled_fast(void)
 {
     return mylite_ownerless_innodb_lock_hooks_enabled.load(std::memory_order_relaxed) ? 1 : 0;
+}
+
+static inline int mylite_ownerless_innodb_lock_hooks_ever_enabled_fast(void)
+{
+    return mylite_ownerless_innodb_lock_hooks_ever_enabled.load(std::memory_order_relaxed) ? 1 : 0;
 }
 
 static inline int mylite_ownerless_innodb_autoinc_hooks_enabled_fast(void)
@@ -163,6 +169,9 @@ typedef int (*mylite_ownerless_innodb_redo_enter_callback)(
 typedef int (*mylite_ownerless_innodb_redo_observe_callback)(
     uint64_t *out_latest_lsn,
     void *context);
+typedef int (*mylite_ownerless_innodb_redo_observe_visible_callback)(
+    uint64_t *out_visible_lsn,
+    void *context);
 typedef int (*mylite_ownerless_innodb_redo_reserve_callback)(
     uint64_t current_lsn,
     uint64_t length,
@@ -275,6 +284,7 @@ void mylite_ownerless_innodb_lock_set_hooks(
     mylite_ownerless_innodb_lock_clear_wait_callback clear_wait_hook,
     mylite_ownerless_innodb_redo_enter_callback redo_enter_hook,
     mylite_ownerless_innodb_redo_observe_callback redo_observe_hook,
+    mylite_ownerless_innodb_redo_observe_visible_callback redo_observe_visible_hook,
     mylite_ownerless_innodb_redo_reserve_callback redo_reserve_hook,
     mylite_ownerless_innodb_redo_written_callback redo_written_hook,
     mylite_ownerless_innodb_redo_leave_callback redo_leave_hook,
@@ -407,6 +417,10 @@ int mylite_ownerless_innodb_set_statement_visible_fast_path(int enabled);
 int mylite_ownerless_innodb_statement_visible_fast_path(void);
 int mylite_ownerless_innodb_set_statement_deferred_page_publish(int enabled);
 int mylite_ownerless_innodb_statement_deferred_page_publish(void);
+int mylite_ownerless_innodb_set_pages_visible_force(int enabled);
+int mylite_ownerless_innodb_pages_visible_force(void);
+int mylite_ownerless_innodb_set_page_write_refresh_bypass(int enabled);
+int mylite_ownerless_innodb_page_write_refresh_bypass(void);
 int mylite_ownerless_innodb_set_statement_plain_read(int enabled);
 int mylite_ownerless_innodb_statement_plain_read(void);
 int mylite_ownerless_innodb_set_statement_plain_read_preserve_local_pages(int enabled);
@@ -505,6 +519,7 @@ int mylite_ownerless_innodb_checkpoint_covers_lsn(uint64_t lsn);
 int mylite_ownerless_innodb_redo_is_active(void);
 int mylite_ownerless_innodb_redo_enter(uint64_t *out_latest_lsn);
 int mylite_ownerless_innodb_redo_observe(uint64_t *out_latest_lsn);
+int mylite_ownerless_innodb_redo_observe_visible(uint64_t *out_visible_lsn);
 int mylite_ownerless_innodb_redo_reserve(
     uint64_t current_lsn,
     uint64_t length,

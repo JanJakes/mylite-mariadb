@@ -368,8 +368,9 @@ void trx_rseg_t::destroy()
 {
   latch.destroy();
 
-  /* Ownerless mode suppresses local purge; durable history remains on disk. */
-  if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks()))
+  /* Ownerless hook callbacks are reset before rollback segments are destroyed,
+  but ownerless commits may still have suppressed local purge descriptors. */
+  if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_hooks_ever_enabled_fast()))
   {
     for (trx_undo_t *next, *undo= UT_LIST_GET_FIRST(undo_list); undo;
          undo= next)

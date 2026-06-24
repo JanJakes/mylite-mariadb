@@ -78,7 +78,10 @@ unchanged until the active pin releases.
 In scope:
 
 - Internal native-page read helper for ownerless tablespace replay paths.
-- Page-publish-time boundary synthesis for active page-version pins.
+- Page-publish-time boundary synthesis for peer-owned active page-version
+  pins. Current-owner direct-read pins remain reclaim-scheduling evidence but
+  do not require the hot page-WAL boundary scan path because native InnoDB MVCC
+  covers same-runtime readers; stale owner-generation pins remain conservative.
 - SQL coverage proving a live repeatable-read snapshot causes an old native
   boundary record to be retained while a peer writer commits.
 - Boundary-synthesis pruning for no-active-pin publication and native-support

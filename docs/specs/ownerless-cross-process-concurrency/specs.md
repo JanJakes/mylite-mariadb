@@ -382,19 +382,26 @@ Roles:
   created file-per-table tablespace existed at an older reader snapshot; the
   same window suppresses external space-allocation refresh so local post-create
   allocation pages are not refreshed from retained external state.
-  Non-DDL no-live DML reclaim
-  also scans checkpointable user tablespace page-version records before
-  truncation and retains the WAL unless the native tablespace page on disk has
-  a `FIL_PAGE_LSN` newer than the record page LSN, or the same `FIL_PAGE_LSN`
-  plus a byte-for-byte match with the retained payload. Live-peer reclaim keeps
-  checkpointable user data/index page records in WAL until no-live reclaim can
-  make the native data file authoritative. When no-live reclaim advances the
-  durable checkpoint-visible LSN, the still-existing volatile redo state is
-  reseeded from that checkpoint so readers do not observe `.shm` metadata
-  behind `.ckpt` before a later `.shm` rebuild. Focused no-live cutover coverage
-  now binds a reclaimed bulk-insert visible LSN to native InnoDB checkpoint
-  coverage, removes both `.wal` and `.shm`, and verifies ordinary native reopen
-  without page-version WAL overlay.
+  Non-DDL no-live DML reclaim also scans checkpointable user tablespace
+  page-version records before truncation and retains the WAL unless the native
+  tablespace page on disk has a `FIL_PAGE_LSN` newer than the record page LSN,
+  or the same `FIL_PAGE_LSN` plus a byte-for-byte match with the retained
+  payload. When a DML-specific native checkpoint marker is pending with retained
+  page-version records and no dictionary file-op or autoincrement marker, MyLite
+  drains the marker for autocommit and single-owner explicit writers whose local
+  close can prove the checkpoint boundary. Peer-explicit or no-local closers
+  keep the DML marker and page-version WAL as durable rebuild evidence instead
+  of truncating committed DML WAL on no-live close; broader native
+  redo/checkpoint reconciliation must replace that conservative retention before
+  those markers can be drained. Live-peer reclaim keeps checkpointable user
+  data/index page records in WAL until no-live reclaim can make the native data
+  file authoritative. When no-live reclaim advances the durable
+  checkpoint-visible LSN, the still-existing volatile redo state is reseeded
+  from that checkpoint so readers do not observe `.shm` metadata behind `.ckpt`
+  before a later `.shm` rebuild. Focused no-live cutover coverage now binds a
+  reclaimed bulk-insert visible LSN to native InnoDB checkpoint coverage,
+  removes both `.wal` and `.shm`, and verifies ordinary native reopen without
+  page-version WAL overlay.
   Transactions that already performed local writes or locking reads avoid
   global refresh, and clean-page refresh skips locally dirty buffer pages.
   DML/DDL, recovery, checkpointing, and tablespace replay still use the
@@ -2283,6 +2290,31 @@ Tasks:
    also asserts that committed page-version WAL records exist or have been
    checkpointed, that the durable page-visible checkpoint advances, and that a
    forced `.shm` rebuild seeds redo-visible state from that durable checkpoint.
+   The commit-race harness now separates directory open/start serialization
+   from the update and commit race, then treats combined ownerless InnoDB-lock
+   and page-write waiters as accounted-for workers before releasing the commit
+   pipe. This avoids artificial parent-side deadlocks while preserving the
+   same committed-delta and reopen oracles; shutdown cleanup records whether
+   ownerless hooks were installed during the InnoDB lifetime so ownerless
+   `TRX_UNDO_TO_PURGE` descriptors are still cleaned after callback reset
+   while active/prepared leftovers remain assertions.
+   The deterministic row-deadlock helper now takes the first row lock with
+   `SELECT ... FOR UPDATE` before its ready barrier and performs both DML
+   updates after releasing both children together, preserving the one-winner
+   and one-victim invariant while accepting MariaDB 1213 or 1205 victim
+   outcomes under ownerless scheduling. The explicit-DML marker discard path
+   verifies 1213 victims are clean after MyLite's internal deadlock rollback
+   and 1205 victims are clean after the explicit test rollback, matching
+   MariaDB's lock-wait-timeout transaction lifetime. Deadlock and rollback
+   handoff now publish the current post-undo page image as the page-visible
+   boundary before releasing ownerless page-write locks for local SQL
+   rollback/deadlock handoff, but recovered rollback during ownerless native
+   startup is not published as ownerless-visible while a peer transaction can
+   still be live.
+   Waited record/page-write/current-read refreshes consume the visible boundary
+   rather than raw latest redo, and startup visible-boundary page imports bypass
+   the ownerless page-write protocol so open-time refresh cannot wait on a live
+   writer's transaction-scoped page-write locks.
    Cross-process group commit remains an optimization candidate rather than
    claimed behavior.
 4. Reconcile InnoDB redo with MyLite page-version visibility.
@@ -4652,18 +4684,25 @@ Tasks:
    coverage forces a checkpoint, updates file-per-table InnoDB tables through
    autocommit, single-owner explicit-transaction, and idle-peer explicit
    transaction commit shapes, observes the DML marker before close or before
-   final peer release as appropriate, drains it on final no-live close, and
-   verifies ownerless plus ordinary native reopen after forced `.shm` rebuild.
+   final peer release as appropriate, drains the autocommit and single-owner
+   explicit DML markers on close, retains the peer-observed explicit DML marker
+   and page-version WAL as forced-rebuild evidence until broader native
+   redo/checkpoint proof exists, and verifies ownerless plus ordinary native
+   reopen after forced `.shm` rebuild. Ordinary native opens that use retained
+   ownerless WAL retire the startup page-version visibility before later native
+   write or locking-read statements so stale retained page images cannot shadow
+   ordinary writes.
    Successful explicit transaction rollback after local writes is covered as a
    separate outcome: it leaves both native file-op markers clear, consumes the
    process-local ownerless InnoDB file-op redo flag, and preserves the
    pre-transaction row after forced `.shm` rebuild plus ordinary native reopen.
    Deadlock victims after local explicit-transaction writes now reuse that
-   discard rule after MyLite's internal deadlock rollback; focused two-process
-   SQL coverage proves the victim process clears its process-local file-op redo
-   latch while the winning transaction can still commit and a later no-live
-   ownerless close after both children are reaped drains durable marker
-   evidence.
+   discard rule after MyLite's internal deadlock rollback, while accepted 1205
+   timeout victims prove the same discard after explicit rollback; focused
+   two-process SQL coverage proves the victim process clears its process-local
+   file-op redo latch while the winning transaction can still commit and a
+   later no-live ownerless close after both children are reaped retains
+   committed DML marker/WAL evidence for forced rebuild.
    That closes the focused checkpointed representative DML commit marker and
    rollback/deadlock classification gaps, not the broader DML-origin
    `FILE_MODIFY`, crash, killed-transaction, savepoint, or
@@ -5346,8 +5385,25 @@ subsystems that this mode needs:
   owner-local direct-read pins do not disable that single-owner refresh skip,
   but they do block foreground/timer checkpoint scheduling while their oldest
   read LSN is below the current visible boundary because the shared handle pin
-  can remain open after a successful direct read. The skip is still bypassed
-  for process-generation changes and older handle-pin advancement, which are
+  can remain open after a successful direct read. Current-owner direct-read
+  pins do not force the hot synthesized snapshot-boundary WAL scan path during
+  same-runtime single-owner writes; stale-generation and peer-owned pins still
+  do, because they cannot rely on this process's current native InnoDB MVCC
+  state. The local-native current-read gate remains conservative once the
+  runtime has consumed page-version WAL, because that path cannot yet prove all
+  consumed pages are durably native-visible. Page-version reads can still avoid
+  repeated WAL scans in the narrower single-owner case: when the runtime proves
+  one active statement, no active ownerless native write state, and no active
+  ownerless transactions, the shared page index is trusted for absent
+  materializable page images. Full native-support page images publish index
+  entries; proof-only native-support metadata is never a readable page image.
+  Direct indexed hits can skip appended-tail validation in the same
+  single-owner one-statement epoch, including during the local visible-fast
+  writer; absent-index proof remains disabled while active ownerless native
+  write state is present. Retained snapshots, peer-present readers, startup-WAL
+  readers, index scan-required states, and same-process multi-statement work
+  keep the conservative WAL scan proof. The skip is still bypassed for
+  process-generation changes and older handle-pin advancement, which are
   mandatory clean-page refresh boundaries rather than routine steady-state
   refresh checks. A no-live final close by a
   runtime that only consumed the current visible page-version WAL leaves that
@@ -5828,11 +5884,19 @@ subsystems that this mode needs:
   counted as blocked from blind native-support elision by the active
   history-proof gate. A future optimization must replace or compress that proof
   evidence rather than simply eliding these page images. A bounded follow-up
-  now keeps those proof images durable in the page-version WAL but skips live
-  shared page-index publication for native-support pages after append. WAL scan
-  remains authoritative on live index miss, and `.shm` replay still indexes the
-  records during rebuild. This removes only live cache churn; it does not reduce
-  the remaining page-version WAL append count. Its first reduced stats-enabled
+  kept proof-only native-support metadata durable in the page-version WAL while
+  skipping live shared page-index publication for records that have no page
+  payload. A later read-path performance slice re-indexed full native-support
+  page images so single-owner readers can trust absent index entries for
+  materializable pages without treating proof-only metadata as readable page
+  images. Direct indexed hits also skip appended-tail validation in the
+  single-owner one-statement epoch, including the local visible-fast writer,
+  while the narrower single-owner absent-index case can avoid repeated WAL scans
+  only when active ownerless native write state is absent. Peer/startup WAL
+  readers keep the conservative tail-validation path. This removes repeated
+  live WAL scans for index-proven hits and, when safe, absent pages in the
+  single-owner path; it does not reduce the remaining page-version WAL append
+  count. Its first reduced stats-enabled
   production sample reported `2.010` skipped native-support live-index publishes
   per autocommit insert and `0.002 ms/insert` in page-publish index time while
   page-log append remained `0.054 ms/insert`; the companion stats-off
@@ -6447,7 +6511,7 @@ subsystems that this mode needs:
   identity, page LSN, commit LSN, native-support metadata, and retention
   ordering, but writes no page payload and forbids page-image reads from those
   records. Replay and checkpoint retained-record callbacks skip them for the
-  same reason the live page-index path already skips native-support pages.
+  same reason the live page-index path skips proof-only native-support records.
   The append-batch fault-guard slice then narrowed unsafe-hook checks to
   actual configured ownerless fault names. Hook builds still enable fault
   infrastructure globally, but visible-fast correctness selectors and
@@ -6628,7 +6692,7 @@ subsystems that this mode needs:
   and unsafe fallback selectors without changing production code: rollback-
   segment proof publication must match published native-support
   `FIL_PAGE_TYPE_SYS`, undo proof publication must match published
-  `FIL_PAGE_UNDO_LOG`, published native-support records must be counted as
+  `FIL_PAGE_UNDO_LOG`, proof-only native-support records must be counted as
   skipped from live page-index publication, and forced native-support publish
   failure must take positive native history flush pages with zero accepted
   proof samples. A reduced stats-enabled production probe over 100 ownerless

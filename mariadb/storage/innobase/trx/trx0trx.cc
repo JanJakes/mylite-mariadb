@@ -38,6 +38,7 @@ Created 3/26/1996 Heikki Tuuri
 #include "dict0dict.h"
 #include "lock0lock.h"
 #include "log0log.h"
+#include "log0recv.h"
 #include "mylite_embedded_startup_perf.h"
 #include "mylite_ownerless_innodb_deep_perf.h"
 #include "mylite_ownerless_innodb_lock_hooks.h"
@@ -2305,6 +2306,7 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
   /* We already detached from rseg in write_serialisation_history() */
   ut_ad(!rsegs.m_redo.undo);
   read_view.close();
+  const bool ownerless_recovered_rollback= in_rollback && is_recovered;
 
   if (is_autocommit_non_locking())
   {
@@ -2447,10 +2449,60 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
       dict_operation || ownerless_sql_command_requires_dirty_page_bridge(this);
     const bool ownerless_commit_needs_recovery_lsn=
       lock.was_chosen_as_deadlock_victim || ownerless_commit_lsn == 0;
-    if (ownerless_commit_needs_recovery_lsn && !in_rollback)
+    if (ownerless_commit_needs_recovery_lsn &&
+        (!in_rollback || ownerless_commit_lsn == 0))
       ownerless_commit_lsn= log_get_lsn();
     uint64_t ownerless_stage_start= 0;
-    if (!in_rollback)
+    const bool ownerless_startup_or_recovery=
+      ownerless_recovered_rollback || recv_recovery_is_on() || !srv_was_started;
+    if (in_rollback && !ownerless_startup_or_recovery)
+    {
+      ownerless_commit_visibility_count_if_enabled(
+          ownerless_visibility_stats_enabled,
+          ownerless_commit_visibility_flush);
+      if (ownerless_commit_needs_recovery_lsn)
+        ownerless_commit_visibility_count_if_enabled(
+            ownerless_visibility_stats_enabled,
+            ownerless_commit_visibility_flush_recovery_lsn);
+      ownerless_stage_start=
+        ownerless_visibility_start != 0 ? ownerless_commit_visibility_now_ns() : 0;
+      ownerless_commit_lsn= static_cast<lsn_t>(
+          mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
+              this, ownerless_commit_lsn));
+      ownerless_commit_visibility_add_elapsed(
+          ownerless_commit_visibility_publish_transaction_pages_ns,
+          ownerless_stage_start);
+      ownerless_stage_start=
+        ownerless_visibility_start != 0 ? ownerless_commit_visibility_now_ns() : 0;
+      uint64_t ownerless_exact_flush_pages= 0;
+      uint64_t ownerless_fallback_rounds= 0;
+      const uint64_t ownerless_transaction_flush_pages=
+        mylite_ownerless_innodb_flush_transaction_pages_for_page_writes(
+            this, ownerless_commit_lsn, &ownerless_exact_flush_pages,
+            &ownerless_fallback_rounds);
+      mylite_ownerless_innodb_deep_perf_add(
+        MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES,
+        ownerless_transaction_flush_pages);
+      mylite_ownerless_innodb_deep_perf_add(
+        MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_PAGES,
+        ownerless_exact_flush_pages);
+      mylite_ownerless_innodb_deep_perf_add(
+        MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_FALLBACK_ROUNDS,
+        ownerless_fallback_rounds);
+      ownerless_commit_visibility_add_elapsed(
+          ownerless_commit_visibility_flush_dirty_pages_ns,
+          ownerless_stage_start);
+      ownerless_stage_start=
+        ownerless_visibility_start != 0 ? ownerless_commit_visibility_now_ns() : 0;
+      const int ownerless_previous_force_visible=
+        mylite_ownerless_innodb_set_pages_visible_force(1);
+      mylite_ownerless_innodb_publish_pages_visible_lsn(ownerless_commit_lsn);
+      mylite_ownerless_innodb_set_pages_visible_force(
+          ownerless_previous_force_visible);
+      ownerless_commit_visibility_add_elapsed(
+          ownerless_commit_visibility_publish_visible_ns, ownerless_stage_start);
+    }
+    else if (!in_rollback)
     {
       ownerless_stage_start=
         ownerless_visibility_start != 0 ? ownerless_commit_visibility_now_ns() : 0;

@@ -2649,6 +2649,8 @@ ATTRIBUTE_NOINLINE bool mtr_t::ownerless_page_write_enter(
 {
   if (UNIV_LIKELY(!ownerless_hooks_enabled()))
     return false;
+  if (mylite_ownerless_innodb_page_write_refresh_bypass() != 0)
+    return false;
   if (ownerless_page_write_in_startup_or_recovery())
     return false;
 
@@ -3062,6 +3064,8 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_space_write_enter(
 {
   if (UNIV_LIKELY(!ownerless_hooks_enabled()) || space == nullptr ||
       space->id >= SRV_TMP_SPACE_ID || space->is_temporary())
+    return;
+  if (mylite_ownerless_innodb_page_write_refresh_bypass() != 0)
     return;
 
   trx_t *ownerless_trx= ownerless_page_write_trx();
@@ -3928,6 +3932,8 @@ bool mtr_t::ownerless_page_write_forget_mtr_page(
 bool mtr_t::ownerless_page_write_uses_transaction_release() const noexcept
 {
   if (UNIV_LIKELY(!ownerless_hooks_enabled()))
+    return false;
+  if (mylite_ownerless_innodb_page_write_refresh_bypass() != 0)
     return false;
 
   if (ownerless_page_write_in_startup_or_recovery())

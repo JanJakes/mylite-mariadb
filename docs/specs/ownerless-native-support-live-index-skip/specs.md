@@ -4,10 +4,10 @@
 
 Ownerless autocommit inserts still publish about three page-version records per
 single-row insert. The remaining records are useful durability and recovery
-evidence, but native-support proof pages do not need to update the live shared
-page index after they have been appended to the page-version WAL. Updating the
-live index for those proof pages adds shared-memory churn to the hot write path
-without making the WAL record more durable.
+evidence, but proof-only native-support records do not contain materializable
+page payloads and must not be treated as live page-index images. Full
+native-support page images can be indexed like other materializable page
+versions; proof-only records stay in the WAL for durability and recovery proof.
 
 ## Source Findings
 
@@ -23,39 +23,44 @@ without making the WAL record more durable.
   `ownerless_page_write_can_elide_native_support_page()` already elides support
   pages only when they are not required as active history proof.
 - `packages/libmylite/src/database.cc`
-  `ownerless_innodb_page_publish_hook()` appends the page image to
-  `mylite-concurrency.wal` and then publishes the record offset into the live
-  shared page index.
+  `ownerless_innodb_page_publish_hook()` appends materializable page images to
+  `mylite-concurrency.wal` and publishes their record offsets into the live
+  shared page index. Proof-only native-support records are appended without a
+  live page-index image entry.
 - `packages/libmylite/src/database.cc`
   `ownerless_innodb_page_read_locked()` treats the page index as a cache. Index
   miss, stale, or scan-required states fall back to scanning the WAL under the
   page-log read lock. Its negative cache is bounded by the page-log snapshot end
   offset, so later appended records extend the scan range.
 - `packages/libmylite/src/database.cc` `replay_concurrency_page_index()` rebuilds
-  the shared page index by replaying all page-version WAL records, including
-  native-support records.
+  the shared page index by replaying materializable page-version WAL records,
+  including full native-support page images; proof-only records are skipped by
+  page-log replay.
 
 ## Design
 
 Keep native-support proof records in the ownerless page-version WAL. After a
-successful append and the existing `page-publish-after-append` fault hook, skip
-the live `mylite_ownerless_page_index_publish()` call when the published page
-image is an InnoDB native-support page.
+successful proof-only append, skip the live
+`mylite_ownerless_page_index_publish()` call because the record has no page
+payload. Full native-support page images still publish their live page-index
+entry so single-owner readers can treat index absence as an absence proof for
+materializable page versions.
 
 This preserves:
 
 - history-proof durability, because the WAL record is still appended before the
   hook returns success;
-- crash recovery and `.shm` rebuild, because replay still indexes every WAL
-  record;
+- crash recovery and `.shm` rebuild, because replay still indexes every
+  materializable WAL record and still skips proof-only metadata;
 - live reads, because the page index is a cache and a miss falls back to WAL
   scan;
 - native snapshot-boundary behavior, because native-support pages already skip
   synthesized active-reader boundary probes.
 
-Add a private database performance counter for skipped native-support live-index
-publishes and expose it in the production embedded performance probe. The
-counter is intentionally process-local diagnostic state, not a public C API.
+Add a private database performance counter for skipped proof-only
+native-support live-index publishes and expose it in the production embedded
+performance probe. The counter is intentionally process-local diagnostic state,
+not a public C API.
 
 ## Scope And Non-Goals
 
@@ -76,9 +81,9 @@ Out of scope:
 ## Compatibility Impact
 
 No SQL, C API, PHP API, wire-protocol, directory-layout, or storage-engine file
-format behavior changes. Page-version reads can still find native-support proof
-records by WAL scan, and rebuilds still repopulate the shared page index from
-the WAL.
+format behavior changes. Page-version reads skip proof-only native-support
+records as non-images, while full native-support page images remain readable by
+index or WAL scan.
 
 ## Directory And Lifecycle Impact
 
@@ -88,13 +93,13 @@ No new files are introduced. Existing `mylite-concurrency.wal` durability and
 ## Native Storage Impact
 
 Native InnoDB pages and redo/checkpoint state are unchanged. The slice removes
-only a live shared-memory cache update for native-support proof records after
-their WAL append succeeds.
+only a live shared-memory cache update for proof-only native-support records
+after their WAL append succeeds.
 
 ## Build And Performance Impact
 
 The expected performance effect is bounded: it removes live page-index
-publication for native-support proof pages, not the WAL append itself. The
+publication for proof-only native-support records, not the WAL append itself. The
 production probe reports
 `mylite_perf_summary_ownerless_autocommit_page_publish_index_skipped_native_support_per_insert`
 so future CI timing can distinguish skipped index work from remaining WAL and
@@ -106,7 +111,8 @@ commit-path cost.
   cross-process SQL test.
 - Run the focused native-support page WAL elision SQL selector. It verifies
   native-support records are still published, the live-index skip counter covers
-  those records, normal reopen works, and forced `.shm` rebuild preserves data.
+  proof-only records, normal reopen works, and forced `.shm` rebuild preserves
+  data.
 - Run focused history-proof and ownerless visibility selectors.
 - Run a reduced stats-enabled production performance probe and verify the new
   raw and summary keys appear with native-support skips.
@@ -115,9 +121,9 @@ commit-path cost.
 
 ## Acceptance Criteria
 
-- Native-support proof pages are still appended to the WAL.
-- Native-support proof pages no longer update the live page index on the commit
-  hot path.
+- Native-support proof-only records are still appended to the WAL.
+- Native-support proof-only records no longer update the live page index on the
+  commit hot path.
 - Page-version WAL scan and replay continue to recover committed data after
   forced shared-memory rebuild.
 - Production probe output exposes the skipped live-index count.
@@ -132,7 +138,7 @@ Local verification on 2026-06-17 used production artifacts from
   passed.
 - `mylite_ownerless_cross_process_sql_test
   single-owner-native-support-page-wal-elision` passed and asserted the skipped
-  live-index counter covers the published native-support proof pages.
+  live-index counter covers the published proof-only native-support records.
 - Focused adjacent selectors passed:
   `single-owner-history-wal-proof`, `prepared-committed-read`, and
   `active-pin-reclaim-boundary`.
@@ -169,6 +175,6 @@ Local verification on 2026-06-17 used production artifacts from
   still pay for native-support WAL append and InnoDB commit work until broader
   redo/checkpoint/native-history proof can safely reduce the remaining page
   publication volume.
-- Live readers that need a skipped native-support record may perform a WAL scan
-  instead of an indexed read. Native-support proof reads are not the dominant
-  read workload, and replay restores index entries after `.shm` rebuild.
+- Live readers that need a skipped proof-only native-support record do not get a
+  page image from that record; full native-support page images are indexed and
+  remain readable by index or WAL scan.

@@ -254,6 +254,8 @@ enum OwnerlessDatabasePerfStatIndex : std::size_t {
 static std::atomic<bool> ownerless_database_perf_stats_enabled{false};
 static std::atomic<std::uint64_t> ownerless_database_perf_stats[OWNERLESS_DATABASE_PERF_STAT_COUNT];
 static std::mutex ownerless_page_log_negative_cache_mutex;
+static thread_local bool ownerless_page_read_trust_index = false;
+static thread_local bool ownerless_page_read_trust_direct_hits = false;
 
 static bool ownerless_database_perf_stats_are_enabled() {
     return ownerless_database_perf_stats_enabled.load(std::memory_order_relaxed);
@@ -1404,6 +1406,13 @@ struct OwnerlessNativePageCheckpointProofContext {
     bool blocked = false;
 };
 
+struct OwnerlessPageLogLineageProbeContext {
+    RuntimeState *runtime = nullptr;
+    bool saw_checkpointable_user_record = false;
+    bool saw_external_snapshot_lineage_record = false;
+    bool blocked = false;
+};
+
 struct OwnerlessPageVisibilityScope {
     ~OwnerlessPageVisibilityScope() {
         mylite_ownerless_innodb_clear_external_page_visibility();
@@ -1493,9 +1502,12 @@ struct RuntimeState {
     bool ownerless_native_dml_file_op_checkpoint_needed_cached = false;
     std::atomic<std::uint64_t> ownerless_page_log_known_end_offset{0};
     bool ownerless_runtime_started_with_page_version_wal = false;
+    std::atomic<bool> ownerless_runtime_has_peer_explicit_transaction_write{false};
     std::atomic<bool> ownerless_runtime_consumed_page_version_wal{false};
     std::atomic<bool> ownerless_runtime_consumed_current_page_version_wal{false};
     std::atomic<bool> ownerless_runtime_consumed_external_snapshot_page_version_wal{false};
+    std::atomic<bool> ownerless_runtime_starting{false};
+    std::atomic<bool> ownerless_pages_visible_suppressed{false};
     unsigned ownerless_active_statement_count = 0;
     unsigned ownerless_active_explicit_transaction_count = 0;
 #endif
@@ -1986,6 +1998,7 @@ bool ownerless_page_log_checkpoint_due(RuntimeState &runtime);
 bool ownerless_runtime_in_single_owner_epoch_locked(RuntimeState &runtime);
 bool ownerless_page_log_has_uncheckpointed_records(RuntimeState &runtime);
 bool ownerless_page_log_has_payload_records(RuntimeState &runtime);
+bool ownerless_page_log_user_records_are_external_snapshot_lineage(RuntimeState &runtime);
 bool ownerless_runtime_has_live_shared_readonly_peer(RuntimeState &runtime);
 bool clear_ownerless_native_file_op_checkpoint_without_page_log(RuntimeState &runtime);
 bool ownerless_autoinc_checkpoint_pending(RuntimeState &runtime);
@@ -2094,6 +2107,14 @@ int collect_ownerless_native_page_checkpoint_record(
     std::uint64_t record_offset,
     void *context
 );
+int collect_ownerless_page_log_lineage_probe_record(
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t page_lsn,
+    std::uint64_t commit_lsn,
+    std::uint64_t record_offset,
+    void *context
+);
 bool publish_ownerless_snapshot_boundary_if_needed(
     OwnerlessInnoDBLockHookContext *hook,
     std::uint32_t space_id,
@@ -2102,6 +2123,7 @@ bool publish_ownerless_snapshot_boundary_if_needed(
     std::uint32_t page_size
 );
 bool ownerless_runtime_has_no_live_peers(RuntimeState &runtime);
+bool ownerless_runtime_has_live_peer(RuntimeState &runtime);
 bool ownerless_runtime_has_no_live_explicit_transactions(RuntimeState &runtime);
 bool ownerless_runtime_live_reclaim_has_no_native_write_state(RuntimeState &runtime);
 int snapshot_ownerless_page_version_pins(
@@ -2237,6 +2259,7 @@ void release_ownerless_completed_statement_page_visibility(
     bool release_handle_pin = true
 );
 void reset_ownerless_application_read_refresh_state(mylite_db &db);
+void retire_ownerless_native_startup_refresh(mylite_db &db);
 void refresh_ownerless_pending_post_open_clean_pages(mylite_db &db);
 int ensure_ownerless_transaction_page_version_pin(mylite_db &db, std::uint64_t read_lsn);
 void release_ownerless_transaction_page_version_pin(mylite_db &db);
@@ -2472,6 +2495,7 @@ int ownerless_innodb_autoinc_publish_hook(
 );
 int ownerless_innodb_redo_enter_hook(std::uint64_t *out_latest_lsn, void *ctx);
 int ownerless_innodb_redo_observe_hook(std::uint64_t *out_latest_lsn, void *ctx);
+int ownerless_innodb_redo_observe_visible_hook(std::uint64_t *out_visible_lsn, void *ctx);
 int ownerless_innodb_redo_reserve_hook(
     std::uint64_t current_lsn,
     std::uint64_t length,
@@ -3509,6 +3533,10 @@ int mylite_step(mylite_stmt *stmt) {
     set_ok(*stmt->db);
     if (!stmt->executed) {
         if (!stmt->db->ownerless_rw_open) {
+            const bool native_statement_retires_startup_refresh =
+                stmt->ownerless_policy_tokens_valid &&
+                (sql_statement_requires_write(stmt->ownerless_policy_tokens) ||
+                 sql_statement_uses_locking_read(stmt->ownerless_policy_tokens));
             const int bind_result = bind_parameters(*stmt);
             if (bind_result != MYLITE_OK) {
                 return bind_result;
@@ -3517,9 +3545,14 @@ int mylite_step(mylite_stmt *stmt) {
             if (initial_result_setup != MYLITE_OK) {
                 return initial_result_setup;
             }
-            refresh_ownerless_pending_post_open_clean_pages(*stmt->db);
+            if (native_statement_retires_startup_refresh) {
+                retire_ownerless_native_startup_refresh(*stmt->db);
+            } else {
+                refresh_ownerless_pending_post_open_clean_pages(*stmt->db);
+            }
             OwnerlessStatementPlainReadScope native_startup_plain_read(
-                stmt->db->ownerless_native_startup_refresh_lsn != 0U
+                stmt->db->ownerless_native_startup_refresh_lsn != 0U &&
+                !native_statement_retires_startup_refresh
             );
             if (mysql_stmt_execute(stmt->stmt) != 0) {
                 set_mariadb_statement_error(*stmt);
@@ -5030,9 +5063,18 @@ int exec_result_impl(
         return copy_error_message(*db, errmsg);
     }
     if (!db->ownerless_rw_open) {
-        refresh_ownerless_pending_post_open_clean_pages(*db);
+        const SqlPolicyTokens native_policy_tokens = collect_sql_policy_tokens(sql);
+        const bool native_statement_retires_startup_refresh =
+            sql_statement_requires_write(native_policy_tokens) ||
+            sql_statement_uses_locking_read(native_policy_tokens);
+        if (native_statement_retires_startup_refresh) {
+            retire_ownerless_native_startup_refresh(*db);
+        } else {
+            refresh_ownerless_pending_post_open_clean_pages(*db);
+        }
         OwnerlessStatementPlainReadScope native_startup_plain_read(
-            db->ownerless_native_startup_refresh_lsn != 0U
+            db->ownerless_native_startup_refresh_lsn != 0U &&
+            !native_statement_retires_startup_refresh
         );
         const NativeControlStatement native_control_statement =
             classify_native_control_statement(sql);
@@ -5304,8 +5346,7 @@ int exec_result_impl(
             set_ok(*db);
             stage_start_ns = exec_result_perf_start_ns();
             ownerless_stage_start =
-                ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns()
-                                                            : 0U;
+                ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
             if (mysql_query(&db->mysql, sql) == 0) {
                 ownerless_database_perf_add_elapsed(
                     OWNERLESS_DATABASE_PERF_TEXT_EXEC_MYSQL_QUERY_NS,
@@ -5648,16 +5689,13 @@ int prepare_impl(
 
     std::unique_ptr<mylite_stmt> statement(new mylite_stmt());
     statement->db = db;
-    if (db->ownerless_rw_open) {
-        statement->ownerless_sql_text = std::make_unique<std::string>(sql, resolved_len);
-        statement->ownerless_policy_tokens =
-            collect_sql_policy_tokens(*statement->ownerless_sql_text);
-        statement->ownerless_policy_tokens_valid = true;
-    }
-    if (statement->ownerless_policy_tokens_valid && ownerless_prepared_write_defers_native_prepare(
-                                                        sql_view,
-                                                        statement->ownerless_policy_tokens
-                                                    )) {
+    statement->ownerless_sql_text = std::make_unique<std::string>(sql, resolved_len);
+    statement->ownerless_policy_tokens = collect_sql_policy_tokens(*statement->ownerless_sql_text);
+    statement->ownerless_policy_tokens_valid = true;
+    if (db->ownerless_rw_open && ownerless_prepared_write_defers_native_prepare(
+                                     sql_view,
+                                     statement->ownerless_policy_tokens
+                                 )) {
         std::size_t parameter_count = 0;
         if (!count_sql_parameter_markers(sql_view, &parameter_count)) {
             set_error(*db, MYLITE_ERROR, "prepared statement has too many parameter markers");
@@ -11430,12 +11468,28 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
         )) {
         return;
     }
-    if (visible_lsn == 0U) {
+    const bool no_live_peers = ownerless_runtime_has_no_live_peers(runtime);
+    if (no_live_peers && runtime.ownerless_innodb_lock_hook.redo_state != nullptr &&
+        runtime.ownerless_innodb_lock_hook.redo_state_size >=
+            k_concurrency_redo_state_segment_size) {
+        mylite_ownerless_redo_state_snapshot redo_snapshot = {};
+        if (mylite_ownerless_redo_state_read_snapshot(
+                runtime.ownerless_innodb_lock_hook.redo_state,
+                runtime.ownerless_innodb_lock_hook.redo_state_size,
+                &redo_snapshot
+            ) == MYLITE_OWNERLESS_REDO_STATE_OK) {
+            latest_lsn = std::max(latest_lsn, redo_snapshot.latest_lsn);
+            visible_lsn = std::max(visible_lsn, redo_snapshot.visible_lsn);
+            visible_lsn = std::max(visible_lsn, redo_snapshot.durable_lsn);
+        }
+    }
+    if (visible_lsn == 0U && latest_lsn == 0U) {
         static_cast<void>(clear_ownerless_native_file_op_checkpoint_without_page_log(runtime));
         return;
     }
-
-    const bool no_live_peers = ownerless_runtime_has_no_live_peers(runtime);
+    if (visible_lsn == 0U && !no_live_peers) {
+        return;
+    }
     if (!no_live_peers && ownerless_runtime_has_live_shared_readonly_peer(runtime)) {
         return;
     }
@@ -11443,6 +11497,24 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
         runtime.ownerless_runtime_consumed_current_page_version_wal.load(std::memory_order_relaxed);
     const bool runtime_has_local_write =
         runtime.ownerless_runtime_has_local_write.load(std::memory_order_relaxed);
+    const bool runtime_has_peer_explicit_transaction_write =
+        runtime.ownerless_runtime_has_peer_explicit_transaction_write.load(
+            std::memory_order_relaxed
+        );
+    if (!no_live_peers && runtime_has_local_write && !runtime_has_peer_explicit_transaction_write &&
+        !runtime.ownerless_runtime_started_with_page_version_wal) {
+        bool live_native_dml_marker_needed = false;
+        if (read_ownerless_native_dml_file_op_checkpoint_needed(
+                runtime,
+                &live_native_dml_marker_needed
+            ) &&
+            live_native_dml_marker_needed &&
+            clear_concurrency_native_dml_file_op_checkpoint_needed(
+                runtime.concurrency_checkpoint_fd
+            )) {
+            set_ownerless_native_dml_file_op_checkpoint_cache(runtime, false);
+        }
+    }
     if (!no_live_peers && runtime_has_local_write && !consumed_current_page_version_wal) {
         return;
     }
@@ -11461,9 +11533,24 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
         autoinc_checkpoint_needed = ownerless_autoinc_checkpoint_pending(runtime);
         const bool force_native_checkpoint = native_file_op_checkpoint_marker_needed ||
                                              native_dml_file_op_checkpoint_marker_needed ||
-                                             autoinc_checkpoint_needed;
+                                             autoinc_checkpoint_needed || visible_lsn == 0U;
         const bool retained_page_log_records =
             ownerless_page_log_has_uncheckpointed_records(runtime);
+        if ((runtime_has_peer_explicit_transaction_write || !runtime_has_local_write) &&
+            native_dml_file_op_checkpoint_marker_needed && retained_page_log_records &&
+            !native_file_op_checkpoint_marker_needed && !autoinc_checkpoint_needed &&
+            !ownerless_page_log_user_records_are_external_snapshot_lineage(runtime)) {
+            return;
+        }
+        const bool boundary_advance_needed = visible_lsn == 0U || retained_page_log_records ||
+                                             native_file_op_checkpoint_marker_needed ||
+                                             autoinc_checkpoint_needed;
+        if (visible_lsn != 0U && latest_lsn > visible_lsn && !boundary_advance_needed) {
+            if (!native_dml_file_op_checkpoint_marker_needed) {
+                return;
+            }
+            latest_lsn = visible_lsn;
+        }
         static_cast<void>(advance_ownerless_no_live_page_visible_lsn_for_reclaim(
             runtime,
             latest_lsn,
@@ -11726,7 +11813,7 @@ bool ownerless_page_log_has_uncheckpointed_records(RuntimeState &runtime) {
 
     struct stat wal_stat = {};
     return ::fstat(runtime.concurrency_wal_fd, &wal_stat) == 0 &&
-           wal_stat.st_size > static_cast<off_t>(k_concurrency_recovery_header_size);
+           wal_stat.st_size > static_cast<off_t>(k_empty_ownerless_page_log_size);
 }
 
 bool ownerless_page_log_has_payload_records(RuntimeState &runtime) {
@@ -11747,6 +11834,26 @@ bool ownerless_page_log_has_payload_records(RuntimeState &runtime) {
         &has_readable_records
     );
     return result != MYLITE_OWNERLESS_PAGE_LOG_OK || has_readable_records != 0;
+}
+
+bool ownerless_page_log_user_records_are_external_snapshot_lineage(RuntimeState &runtime) {
+    if (runtime.concurrency_wal_fd < 0) {
+        return false;
+    }
+    if (!ownerless_page_log_has_uncheckpointed_records(runtime)) {
+        return true;
+    }
+
+    OwnerlessPageLogLineageProbeContext probe = {};
+    probe.runtime = &runtime;
+    const int replay_result = mylite_ownerless_page_log_replay_at(
+        runtime.concurrency_wal_fd,
+        k_concurrency_recovery_header_size,
+        collect_ownerless_page_log_lineage_probe_record,
+        &probe
+    );
+    return replay_result == MYLITE_OWNERLESS_PAGE_LOG_OK && !probe.blocked &&
+           (!probe.saw_checkpointable_user_record || probe.saw_external_snapshot_lineage_record);
 }
 
 void set_ownerless_native_file_op_checkpoint_cache(RuntimeState &runtime, bool needed) {
@@ -12348,7 +12455,6 @@ void mark_ownerless_native_file_op_checkpoint_after_successful_write(
     if (mylite_ownerless_innodb_take_file_op_redo() == 0) {
         return;
     }
-
     bool marker_written = false;
     {
         const std::lock_guard<std::mutex> guard(g_runtime.mutex);
@@ -12419,7 +12525,9 @@ bool advance_ownerless_no_live_page_visible_lsn_for_reclaim(
             }
             mylite_ownerless_innodb_publish_buffer_pool_pages_to_lsn(checkpoint_lsn);
             mylite_ownerless_innodb_flush_dirty_pages_to_lsn(checkpoint_lsn);
+            runtime.ownerless_pages_visible_suppressed.store(true, std::memory_order_relaxed);
             static_cast<void>(mylite_ownerless_innodb_make_checkpoint());
+            runtime.ownerless_pages_visible_suppressed.store(false, std::memory_order_relaxed);
             std::uint64_t refreshed_latest_lsn = 0;
             std::uint64_t refreshed_visible_lsn = 0;
             if (read_concurrency_checkpoint_lsn(
@@ -13058,6 +13166,58 @@ int collect_ownerless_native_page_checkpoint_record(
     return MYLITE_OWNERLESS_PAGE_LOG_OK;
 }
 
+int collect_ownerless_page_log_lineage_probe_record(
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t page_lsn,
+    std::uint64_t commit_lsn,
+    std::uint64_t record_offset,
+    void *context
+) {
+    (void)commit_lsn;
+    auto *probe = static_cast<OwnerlessPageLogLineageProbeContext *>(context);
+    if (probe == nullptr || probe->runtime == nullptr) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if (probe->blocked || page_lsn == 0U || space_id == 0U || page_no < 3U) {
+        return MYLITE_OWNERLESS_PAGE_LOG_OK;
+    }
+
+    std::uint32_t metadata_flags = 0U;
+    const int metadata_result = mylite_ownerless_page_log_record_metadata_flags_at(
+        probe->runtime->concurrency_wal_fd,
+        record_offset,
+        &metadata_flags
+    );
+    if (metadata_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        probe->blocked = true;
+        return MYLITE_OWNERLESS_PAGE_LOG_OK;
+    }
+    if ((metadata_flags & MYLITE_OWNERLESS_PAGE_LOG_RECORD_SNAPSHOT_BOUNDARY) != 0U ||
+        (metadata_flags & MYLITE_OWNERLESS_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE) != 0U) {
+        return MYLITE_OWNERLESS_PAGE_LOG_OK;
+    }
+    if (ownerless_page_log_record_is_native_support_state(
+            *probe->runtime,
+            space_id,
+            page_no,
+            page_lsn,
+            commit_lsn,
+            record_offset
+        )) {
+        return MYLITE_OWNERLESS_PAGE_LOG_OK;
+    }
+
+    probe->saw_checkpointable_user_record = true;
+    if ((metadata_flags & MYLITE_OWNERLESS_PAGE_LOG_RECORD_EXTERNAL_SNAPSHOT_LINEAGE) != 0U) {
+        probe->saw_external_snapshot_lineage_record = true;
+        return MYLITE_OWNERLESS_PAGE_LOG_OK;
+    }
+
+    probe->blocked = true;
+    return MYLITE_OWNERLESS_PAGE_LOG_OK;
+}
+
 bool ownerless_runtime_has_no_live_peers(RuntimeState &runtime) {
     std::uint64_t active_count = 0;
     if (read_concurrency_process_active_count(runtime.concurrency_shm_fd, &active_count) !=
@@ -13073,6 +13233,22 @@ bool ownerless_runtime_has_no_live_peers(RuntimeState &runtime) {
         return false;
     }
     return live_count == 1U;
+}
+
+bool ownerless_runtime_has_live_peer(RuntimeState &runtime) {
+    std::uint64_t active_count = 0;
+    if (read_concurrency_process_active_count(runtime.concurrency_shm_fd, &active_count) !=
+        MYLITE_OK) {
+        return false;
+    }
+    if (active_count > 1U) {
+        return true;
+    }
+
+    std::uint64_t live_count = 0;
+    return read_concurrency_process_live_count(runtime.concurrency_shm_fd, &live_count) ==
+               MYLITE_OK &&
+           live_count > 1U;
 }
 
 bool ownerless_runtime_has_live_shared_readonly_peer(RuntimeState &runtime) {
@@ -13910,6 +14086,7 @@ int install_ownerless_innodb_lock_hooks(RuntimeState &runtime) {
         ownerless_innodb_lock_clear_wait_hook,
         ownerless_innodb_redo_enter_hook,
         ownerless_innodb_redo_observe_hook,
+        ownerless_innodb_redo_observe_visible_hook,
         ownerless_innodb_redo_reserve_hook,
         ownerless_innodb_redo_written_hook,
         ownerless_innodb_redo_leave_hook,
@@ -14052,6 +14229,8 @@ int refresh_ownerless_external_pages_before_statement(
     const std::uint64_t observation_token = db.ownerless_page_observation_token;
     mylite_ownerless_innodb_set_external_page_observation_token(observation_token);
     mylite_ownerless_innodb_clear_external_page_visibility();
+    ownerless_page_read_trust_index = false;
+    ownerless_page_read_trust_direct_hits = false;
     if (!allow_page_version_reads) {
         release_ownerless_handle_page_version_pin(db);
     }
@@ -14086,6 +14265,7 @@ int refresh_ownerless_external_pages_before_statement(
     bool no_live_explicit_transactions = false;
     bool no_other_live_explicit_transactions = false;
     bool no_other_active_transactions = false;
+    bool no_other_active_statements = false;
     bool single_owner_epoch = false;
     bool runtime_started_with_page_version_wal = false;
     bool runtime_consumed_page_version_wal = false;
@@ -14163,6 +14343,7 @@ int refresh_ownerless_external_pages_before_statement(
             single_owner_epoch || !ownerless_trx_registry_has_other_active_transactions(
                                       &g_runtime.ownerless_innodb_lock_hook
                                   );
+        no_other_active_statements = g_runtime.ownerless_active_statement_count <= 1U;
         if (!single_owner_epoch) {
             no_live_explicit_transactions =
                 ownerless_runtime_has_no_live_explicit_transactions(g_runtime);
@@ -14182,6 +14363,7 @@ int refresh_ownerless_external_pages_before_statement(
     std::uint64_t page_version_read_lsn = allow_page_version_reads ? visible_lsn : 0U;
     const bool explicit_transaction = ownerless_connection_is_in_explicit_transaction(db);
     bool external_page_version_pin_retains_visible_boundary = false;
+    bool no_external_page_version_pins = false;
     if (allow_page_version_reads && !explicit_transaction && !single_owner_epoch &&
         page_pin_registry != nullptr && owner_id != 0U && owner_generation != 0U) {
         refresh_stage_start = refresh_perf_start();
@@ -14209,6 +14391,10 @@ int refresh_ownerless_external_pages_before_statement(
             owner_count_result == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK &&
             active_pin_count > owner_active_pin_count && oldest_pin_lsn != 0U &&
             oldest_pin_lsn <= visible_lsn;
+        no_external_page_version_pins =
+            snapshot_result == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK &&
+            owner_count_result == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK &&
+            active_pin_count == owner_active_pin_count;
         refresh_perf_add_elapsed(
             OWNERLESS_DATABASE_PERF_REFRESH_PIN_SNAPSHOT_NS,
             refresh_stage_start
@@ -14216,8 +14402,12 @@ int refresh_ownerless_external_pages_before_statement(
     }
     const bool ownerless_native_write_state_active =
         active_trx_count != 0U || active_redo_reservation_count != 0U;
+    const bool live_idle_peer_current_read = no_external_page_version_pins &&
+                                             no_live_explicit_transactions &&
+                                             no_other_live_explicit_transactions;
     if (allow_page_version_reads && !explicit_transaction &&
-        (single_owner_epoch || external_page_version_pin_retains_visible_boundary) &&
+        (single_owner_epoch || external_page_version_pin_retains_visible_boundary ||
+         live_idle_peer_current_read) &&
         no_other_active_transactions && active_trx_count == 0U &&
         active_redo_reservation_count == 0U && latest_lsn > visible_lsn) {
         page_version_read_lsn = live_read_lsn;
@@ -14295,6 +14485,17 @@ int refresh_ownerless_external_pages_before_statement(
         !runtime_consumed_page_version_wal && !ownerless_native_write_state_active &&
         no_other_active_transactions && !external_page_version_pin_retains_visible_boundary;
     const bool page_version_reads_enabled = allow_page_version_reads && !local_native_current_read;
+    // With one active statement in a single-owner epoch, no peer can append
+    // page-version WAL between the shared index lookup and page read. Direct
+    // hits are safe to trust even during the local writer; absent-entry proof
+    // stays narrower because active local write state can still change whether
+    // a page first appears in the index.
+    const bool single_owner_statement_trusts_page_index =
+        page_version_reads_enabled && !explicit_transaction && single_owner_epoch &&
+        no_other_active_statements && no_other_active_transactions;
+    ownerless_page_read_trust_direct_hits = single_owner_statement_trusts_page_index;
+    ownerless_page_read_trust_index =
+        single_owner_statement_trusts_page_index && !ownerless_native_write_state_active;
     if (local_native_current_read) {
         refresh_perf_add(OWNERLESS_DATABASE_PERF_REFRESH_LOCAL_NATIVE_CURRENT_READ);
     }
@@ -14313,7 +14514,7 @@ int refresh_ownerless_external_pages_before_statement(
         page_version_read_lsn == live_read_lsn && !ownerless_native_write_state_active &&
         no_other_active_transactions &&
         ((no_live_explicit_transactions && no_other_live_explicit_transactions) ||
-         external_page_version_pin_retains_visible_boundary);
+         external_page_version_pin_retains_visible_boundary || live_idle_peer_current_read);
     const bool retained_page_version_read =
         page_version_reads_enabled &&
         ((db.ownerless_page_version_read_lsn != 0U &&
@@ -15663,6 +15864,13 @@ int update_ownerless_transaction_state_after_successful_sql(
     if (ownerless_connection_is_in_explicit_transaction(db)) {
         if (statement_writes) {
             db.ownerless_transaction_has_local_write = true;
+            if (db.ownerless_rw_open && !db.readonly_open &&
+                ownerless_runtime_has_live_peer(g_runtime)) {
+                g_runtime.ownerless_runtime_has_peer_explicit_transaction_write.store(
+                    true,
+                    std::memory_order_relaxed
+                );
+            }
         }
         if (statement_uses_locking_read) {
             db.ownerless_transaction_has_locking_read = true;
@@ -15910,6 +16118,8 @@ void release_ownerless_completed_statement_page_visibility(
         release_ownerless_handle_page_version_pin(db);
     }
     mylite_ownerless_innodb_clear_external_page_visibility();
+    ownerless_page_read_trust_index = false;
+    ownerless_page_read_trust_direct_hits = false;
     if (close_current_read_view) {
         mylite_ownerless_innodb_close_current_read_view();
     }
@@ -15934,6 +16144,21 @@ void reset_ownerless_application_read_refresh_state(mylite_db &db) {
     db.ownerless_clean_pages_evicted_lsn = 0;
     db.ownerless_clean_pages_evicted_generation = 0;
     db.ownerless_clean_pages_evicted_visible_generation = 0;
+}
+
+void retire_ownerless_native_startup_refresh(mylite_db &db) {
+    if (db.ownerless_native_startup_refresh_lsn == 0U &&
+        db.ownerless_pending_post_open_clean_page_refresh_lsn == 0U) {
+        return;
+    }
+
+    db.ownerless_native_startup_refresh_lsn = 0;
+    db.ownerless_pending_post_open_clean_page_refresh_lsn = 0;
+    db.ownerless_pending_post_open_clean_page_refresh_visible_boundary = false;
+    db.ownerless_pending_post_open_clean_page_refresh_current_boundary = false;
+    db.ownerless_local_native_read_lsn = 0;
+    mylite_ownerless_innodb_clear_external_page_visibility();
+    mylite_ownerless_innodb_evict_clean_external_pages();
 }
 
 void refresh_ownerless_pending_post_open_clean_pages(mylite_db &db) {
@@ -17687,6 +17912,34 @@ int ownerless_innodb_redo_observe_hook(std::uint64_t *out_latest_lsn, void *ctx)
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
 }
 
+int ownerless_innodb_redo_observe_visible_hook(std::uint64_t *out_visible_lsn, void *ctx) {
+    OwnerlessDatabasePerfScope perf_scope(OWNERLESS_DATABASE_PERF_REDO_OBSERVE_NS);
+    ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_REDO_OBSERVE_CALLS, 1U);
+    if (ctx == nullptr || out_visible_lsn == nullptr) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
+
+    auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
+    if (!hook->page_versioning_enabled) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+    }
+    if (hook->redo_state == nullptr ||
+        hook->redo_state_size < k_concurrency_redo_state_segment_size) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
+
+    mylite_ownerless_redo_state_snapshot snapshot = {};
+    if (mylite_ownerless_redo_state_read_snapshot(
+            hook->redo_state,
+            hook->redo_state_size,
+            &snapshot
+        ) != MYLITE_OWNERLESS_REDO_STATE_OK) {
+        return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    }
+    *out_visible_lsn = snapshot.visible_lsn;
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
 int ownerless_innodb_redo_reserve_hook(
     std::uint64_t current_lsn,
     std::uint64_t length,
@@ -17941,6 +18194,10 @@ void ownerless_innodb_pages_visible_hook(std::uint64_t visible_lsn, void *ctx) {
     if (ctx == nullptr || visible_lsn == 0U) {
         return;
     }
+    if (g_runtime.ownerless_runtime_starting.load(std::memory_order_relaxed) ||
+        g_runtime.ownerless_pages_visible_suppressed.load(std::memory_order_relaxed)) {
+        return;
+    }
 
     auto *hook = static_cast<OwnerlessInnoDBLockHookContext *>(ctx);
     if (!hook->page_versioning_enabled) {
@@ -17950,12 +18207,15 @@ void ownerless_innodb_pages_visible_hook(std::uint64_t visible_lsn, void *ctx) {
         hook->redo_state_size < k_concurrency_redo_state_segment_size) {
         return;
     }
-    const bool other_trx = ownerless_trx_registry_has_other_active_transactions(hook);
-    const bool other_explicit = ownerless_process_registry_has_other_live_explicit_transactions(
-        hook->process_registry,
-        hook->process_registry_size,
-        hook->owner_id
-    );
+    const bool force_visible = mylite_ownerless_innodb_pages_visible_force() != 0;
+    const bool other_trx =
+        !force_visible && ownerless_trx_registry_has_other_active_transactions(hook);
+    const bool other_explicit =
+        !force_visible && ownerless_process_registry_has_other_live_explicit_transactions(
+                              hook->process_registry,
+                              hook->process_registry_size,
+                              hook->owner_id
+                          );
     if (other_trx || other_explicit) {
         return;
     }
@@ -18021,6 +18281,7 @@ bool ownerless_checkpoint_update_allows_deferred_latest_coalescing(
     return !durable && latest_lsn != 0U && visible_lsn == 0U &&
            ownerless_statement_defers_page_log_append_batch &&
            ownerless_statement_allows_deferred_latest_checkpoint_coalescing &&
+           !ownerless_runtime_has_external_page_version_pin(g_runtime) &&
            !ownerless_test_fault_is_configured();
 }
 
@@ -18401,6 +18662,133 @@ int ownerless_innodb_history_proof_publish_pair_hook(
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
 }
 
+enum class OwnerlessBoundaryPageVersionState {
+    Missing,
+    Exists,
+    Unknown,
+};
+
+OwnerlessBoundaryPageVersionState ownerless_page_log_boundary_page_version_state(
+    OwnerlessInnoDBLockHookContext *hook,
+    std::uint32_t space_id,
+    std::uint32_t page_no,
+    std::uint64_t max_commit_lsn,
+    std::uint32_t page_capacity
+) {
+    if (hook == nullptr || hook->page_index == nullptr || hook->page_index_size == 0U ||
+        hook->page_log_fd < 0 || hook->page_log_offset == 0U || hook->owner_id == 0U ||
+        hook->owner_generation == 0U || max_commit_lsn == 0U || page_capacity == 0U) {
+        return OwnerlessBoundaryPageVersionState::Unknown;
+    }
+
+    std::uint64_t record_offset = 0;
+    std::uint64_t page_lsn = 0;
+    std::uint64_t commit_lsn = 0;
+    std::uint64_t index_generation = 0;
+    const int index_result = mylite_ownerless_page_index_find_with_generation(
+        hook->page_index,
+        hook->page_index_size,
+        hook->owner_id,
+        hook->owner_generation,
+        space_id,
+        page_no,
+        max_commit_lsn,
+        &record_offset,
+        &page_lsn,
+        &commit_lsn,
+        &index_generation
+    );
+    if (index_result == MYLITE_OWNERLESS_PAGE_INDEX_OK) {
+        return OwnerlessBoundaryPageVersionState::Exists;
+    }
+    if (index_result == MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND) {
+        return OwnerlessBoundaryPageVersionState::Missing;
+    }
+    if (index_result != MYLITE_OWNERLESS_PAGE_INDEX_SCAN_REQUIRED) {
+        return OwnerlessBoundaryPageVersionState::Unknown;
+    }
+
+    if (mylite_ownerless_page_log_begin_read(hook->page_log_fd) != MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        return OwnerlessBoundaryPageVersionState::Unknown;
+    }
+
+    std::uint64_t snapshot_end_offset = 0;
+    std::uint64_t log_generation = 0;
+    const int snapshot_result = mylite_ownerless_page_log_snapshot_under_read_lock_at(
+        hook->page_log_fd,
+        hook->page_log_offset,
+        &snapshot_end_offset,
+        &log_generation
+    );
+    if (snapshot_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        mylite_ownerless_page_log_end_read(hook->page_log_fd);
+        return OwnerlessBoundaryPageVersionState::Unknown;
+    }
+
+    std::uint64_t scan_start_offset = 0;
+    const bool negative_cache_hit = ownerless_page_log_negative_cache_absence_lookup(
+        hook,
+        space_id,
+        page_no,
+        max_commit_lsn,
+        index_generation,
+        log_generation,
+        snapshot_end_offset,
+        &scan_start_offset
+    );
+    if (negative_cache_hit) {
+        mylite_ownerless_page_log_end_read(hook->page_log_fd);
+        return OwnerlessBoundaryPageVersionState::Missing;
+    }
+
+    std::unique_ptr<unsigned char[]> page(new (std::nothrow) unsigned char[page_capacity]);
+    if (page == nullptr) {
+        mylite_ownerless_page_log_end_read(hook->page_log_fd);
+        return OwnerlessBoundaryPageVersionState::Unknown;
+    }
+
+    std::uint32_t page_size = 0;
+    std::uint64_t found_page_lsn = 0;
+    std::uint64_t found_commit_lsn = 0;
+    std::uint32_t record_flags = 0U;
+    int saw_page_record = 0;
+    const int scan_result =
+        mylite_ownerless_page_log_find_latest_in_snapshot_from_under_read_lock_at_with_flags(
+            hook->page_log_fd,
+            hook->page_log_offset,
+            scan_start_offset,
+            snapshot_end_offset,
+            space_id,
+            page_no,
+            max_commit_lsn,
+            page.get(),
+            page_capacity,
+            &page_size,
+            &found_page_lsn,
+            &found_commit_lsn,
+            &record_flags,
+            &saw_page_record
+        );
+    mylite_ownerless_page_log_end_read(hook->page_log_fd);
+
+    if (scan_result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        return OwnerlessBoundaryPageVersionState::Exists;
+    }
+    if (scan_result == MYLITE_OWNERLESS_PAGE_LOG_NOT_FOUND) {
+        ownerless_page_log_negative_cache_store(
+            hook,
+            space_id,
+            page_no,
+            max_commit_lsn,
+            index_generation,
+            log_generation,
+            snapshot_end_offset
+        );
+        return OwnerlessBoundaryPageVersionState::Missing;
+    }
+    return OwnerlessBoundaryPageVersionState::Unknown;
+}
+
 bool publish_ownerless_snapshot_boundary_if_needed(
     OwnerlessInnoDBLockHookContext *hook,
     std::uint32_t space_id,
@@ -18444,41 +18832,33 @@ bool publish_ownerless_snapshot_boundary_if_needed(
     const bool external_snapshot_pin_active =
         owner_pin_count_result == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK &&
         active_pin_count > owner_active_pin_count;
-    if (external_snapshot_pin_active) {
-        g_runtime.ownerless_runtime_consumed_external_snapshot_page_version_wal.store(
-            true,
-            std::memory_order_relaxed
-        );
+    if (!external_snapshot_pin_active) {
+        return false;
     }
+    g_runtime.ownerless_runtime_consumed_external_snapshot_page_version_wal.store(
+        true,
+        std::memory_order_relaxed
+    );
     if (mylite_ownerless_innodb_statement_suppress_native_lifecycle_refresh() != 0) {
         return external_snapshot_pin_active;
     }
     ownerless_page_log_append_batch_release_for_snapshot(hook);
 
-    std::unique_ptr<unsigned char[]> page(new (std::nothrow) unsigned char[page_size]);
-    if (page == nullptr) {
+    const OwnerlessBoundaryPageVersionState existing_state =
+        ownerless_page_log_boundary_page_version_state(
+            hook,
+            space_id,
+            page_no,
+            oldest_pin_lsn,
+            page_size
+        );
+    if (existing_state == OwnerlessBoundaryPageVersionState::Exists ||
+        existing_state == OwnerlessBoundaryPageVersionState::Unknown) {
         return external_snapshot_pin_active;
     }
 
-    std::uint32_t existing_page_size = 0;
-    std::uint64_t existing_page_lsn = 0;
-    std::uint64_t existing_commit_lsn = 0;
-    const int existing_result = mylite_ownerless_page_log_find_latest_at(
-        hook->page_log_fd,
-        hook->page_log_offset,
-        space_id,
-        page_no,
-        oldest_pin_lsn,
-        page.get(),
-        page_size,
-        &existing_page_size,
-        &existing_page_lsn,
-        &existing_commit_lsn
-    );
-    if (existing_result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
-        return external_snapshot_pin_active;
-    }
-    if (existing_result != MYLITE_OWNERLESS_PAGE_LOG_NOT_FOUND) {
+    std::unique_ptr<unsigned char[]> page(new (std::nothrow) unsigned char[page_size]);
+    if (page == nullptr) {
         return external_snapshot_pin_active;
     }
 
@@ -18732,8 +19112,15 @@ int ownerless_innodb_page_publish_hook(
     if (append_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
         return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
     }
+    if (external_snapshot_lineage_active) {
+        const bool previous_coalescing =
+            ownerless_statement_allows_deferred_latest_checkpoint_coalescing;
+        ownerless_statement_allows_deferred_latest_checkpoint_coalescing = false;
+        ownerless_persist_redo_checkpoint(hook, visible_lsn, 0U, false);
+        ownerless_statement_allows_deferred_latest_checkpoint_coalescing = previous_coalescing;
+    }
     pause_for_ownerless_test_fault("page-publish-after-append");
-    if (native_support_page) {
+    if (proof_only_publish) {
         ownerless_database_perf_add(
             OWNERLESS_DATABASE_PERF_PAGE_PUBLISH_INDEX_SKIPPED_NATIVE_SUPPORT,
             1U
@@ -19057,6 +19444,15 @@ int ownerless_innodb_page_read_locked(
         );
         if (read_result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
             if (*out_page_lsn == index_page_lsn && *out_commit_lsn == index_commit_lsn) {
+                if (ownerless_page_read_trust_direct_hits) {
+                    ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_PAGE_READ_INDEX_HITS, 1U);
+                    const std::uint32_t visible_record_flags =
+                        ownerless_innodb_page_version_flags(page_log_flags);
+                    if (out_record_flags != nullptr) {
+                        *out_record_flags = visible_record_flags;
+                    }
+                    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+                }
                 // The page index is a cache updated after the WAL append; scan
                 // the appended tail before trusting a direct indexed hit.
                 std::uint64_t page_log_snapshot_end_offset = 0;
@@ -19089,6 +19485,34 @@ int ownerless_innodb_page_read_locked(
                     return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
                 }
                 if (page_log_snapshot_end_offset > tail_scan_offset) {
+                    std::uint64_t tail_scan_start_offset = tail_scan_offset;
+                    const bool tail_negative_cache_hit =
+                        ownerless_page_log_negative_cache_absence_lookup(
+                            hook,
+                            space_id,
+                            page_no,
+                            max_commit_lsn,
+                            index_generation,
+                            page_log_generation,
+                            page_log_snapshot_end_offset,
+                            &tail_scan_start_offset
+                        );
+                    if (tail_negative_cache_hit) {
+                        ownerless_database_perf_add(
+                            OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_NEGATIVE_CACHE_HITS,
+                            1U
+                        );
+                        ownerless_database_perf_add(
+                            OWNERLESS_DATABASE_PERF_PAGE_READ_INDEX_HITS,
+                            1U
+                        );
+                        const std::uint32_t visible_record_flags =
+                            ownerless_innodb_page_version_flags(page_log_flags);
+                        if (out_record_flags != nullptr) {
+                            *out_record_flags = visible_record_flags;
+                        }
+                        return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+                    }
                     unsigned char *tail_page_buffer =
                         new (std::nothrow) unsigned char[page_capacity];
                     std::unique_ptr<unsigned char[]> tail_page(tail_page_buffer);
@@ -19110,12 +19534,13 @@ int ownerless_innodb_page_read_locked(
                     std::uint64_t tail_page_lsn = 0;
                     std::uint64_t tail_commit_lsn = 0;
                     std::uint32_t tail_page_log_flags = 0U;
+                    std::uint64_t tail_record_offset = 0;
                     int saw_tail_page_record = 0;
                     const int tail_result =
-                        mylite_ownerless_page_log_find_latest_in_snapshot_from_under_read_lock_at_with_flags(
+                        mylite_ownerless_page_log_find_latest_in_snapshot_from_under_read_lock_at_with_flags_and_offset(
                             hook->page_log_fd,
                             hook->page_log_offset,
-                            tail_scan_offset,
+                            tail_scan_start_offset,
                             page_log_snapshot_end_offset,
                             space_id,
                             page_no,
@@ -19126,6 +19551,7 @@ int ownerless_innodb_page_read_locked(
                             &tail_page_lsn,
                             &tail_commit_lsn,
                             &tail_page_log_flags,
+                            &tail_record_offset,
                             &saw_tail_page_record
                         );
                     ownerless_database_perf_add_elapsed(
@@ -19146,9 +19572,24 @@ int ownerless_innodb_page_read_locked(
                             *out_page_lsn = tail_page_lsn;
                             *out_commit_lsn = tail_commit_lsn;
                             page_log_flags = tail_page_log_flags;
+                            if (tail_record_offset != 0U) {
+                                static_cast<void>(mylite_ownerless_page_index_publish(
+                                    hook->page_index,
+                                    hook->page_index_size,
+                                    hook->owner_id,
+                                    hook->owner_generation,
+                                    space_id,
+                                    page_no,
+                                    tail_commit_lsn,
+                                    tail_page_lsn,
+                                    tail_record_offset
+                                ));
+                            }
                         }
+                        const std::uint32_t visible_record_flags =
+                            ownerless_innodb_page_version_flags(page_log_flags);
                         if (out_record_flags != nullptr) {
-                            *out_record_flags = ownerless_innodb_page_version_flags(page_log_flags);
+                            *out_record_flags = visible_record_flags;
                         }
                         return MYLITE_OWNERLESS_INNODB_LOCK_OK;
                     }
@@ -19170,10 +19611,25 @@ int ownerless_innodb_page_read_locked(
                         OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_MISSES,
                         1U
                     );
+                    ownerless_page_log_negative_cache_store(
+                        hook,
+                        space_id,
+                        page_no,
+                        max_commit_lsn,
+                        index_generation,
+                        page_log_generation,
+                        page_log_snapshot_end_offset
+                    );
+                    ownerless_database_perf_add(
+                        OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_NEGATIVE_CACHE_STORES,
+                        1U
+                    );
                 }
                 ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_PAGE_READ_INDEX_HITS, 1U);
+                const std::uint32_t visible_record_flags =
+                    ownerless_innodb_page_version_flags(page_log_flags);
                 if (out_record_flags != nullptr) {
-                    *out_record_flags = ownerless_innodb_page_version_flags(page_log_flags);
+                    *out_record_flags = visible_record_flags;
                 }
                 return MYLITE_OWNERLESS_INNODB_LOCK_OK;
             }
@@ -19186,6 +19642,9 @@ int ownerless_innodb_page_read_locked(
         }
     } else if (index_result == MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND) {
         ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_PAGE_READ_INDEX_MISSES, 1U);
+        if (ownerless_page_read_trust_index) {
+            return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+        }
     } else if (index_result == MYLITE_OWNERLESS_PAGE_INDEX_SCAN_REQUIRED) {
         ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_PAGE_READ_INDEX_SCAN_REQUIRED, 1U);
     } else {
@@ -19197,7 +19656,8 @@ int ownerless_innodb_page_read_locked(
     std::uint64_t page_log_snapshot_end_offset = 0;
     std::uint64_t page_log_generation = 0;
     std::uint64_t page_log_scan_start_offset = 0;
-    if (index_result == MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND) {
+    if (index_result == MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND ||
+        index_result == MYLITE_OWNERLESS_PAGE_INDEX_SCAN_REQUIRED) {
         const int snapshot_result = mylite_ownerless_page_log_snapshot_under_read_lock_at(
             hook->page_log_fd,
             hook->page_log_offset,
@@ -19273,15 +19733,16 @@ int ownerless_innodb_page_read_locked(
     );
     if (result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
         ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_FOUND, 1U);
+        const std::uint32_t visible_record_flags =
+            ownerless_innodb_page_version_flags(page_log_flags);
         if (out_record_flags != nullptr) {
-            *out_record_flags = ownerless_innodb_page_version_flags(page_log_flags);
+            *out_record_flags = visible_record_flags;
         }
         return MYLITE_OWNERLESS_INNODB_LOCK_OK;
     }
     if (result == MYLITE_OWNERLESS_PAGE_LOG_NOT_FOUND) {
         ownerless_database_perf_add(OWNERLESS_DATABASE_PERF_PAGE_READ_WAL_SCAN_MISSES, 1U);
-        if (index_result == MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND && page_log_snapshot_available &&
-            saw_page_record == 0) {
+        if (page_log_snapshot_available) {
             ownerless_page_log_negative_cache_store(
                 hook,
                 space_id,
@@ -21619,11 +22080,15 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
         }
 
         stage_start_ns = embedded_open_perf_start_ns();
+        if (innodb_ownerless_hooks_needed) {
+            g_runtime.ownerless_runtime_starting.store(true, std::memory_order_relaxed);
+        }
         const int init_result = mysql_server_init(
             static_cast<int>(g_runtime.argv.size()),
             g_runtime.argv.data(),
             groups
         );
+        g_runtime.ownerless_runtime_starting.store(false, std::memory_order_relaxed);
         embedded_open_perf_add_elapsed(
             EMBEDDED_OPEN_PERF_START_MYSQL_SERVER_INIT_NS,
             stage_start_ns
@@ -21709,6 +22174,25 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
                 return hook_result;
             }
             advance_ownerless_local_trx_horizon(g_runtime);
+            std::uint64_t startup_latest_lsn = 0;
+            std::uint64_t startup_visible_lsn = 0;
+            const bool startup_visible_boundary_missing = ownerless_runtime_open &&
+                                                          !db.readonly_open &&
+                                                          read_concurrency_checkpoint_lsn(
+                                                              g_runtime.concurrency_checkpoint_fd,
+                                                              &startup_latest_lsn,
+                                                              &startup_visible_lsn
+                                                          ) &&
+                                                          startup_visible_lsn == 0U;
+            if (startup_visible_boundary_missing &&
+                ownerless_runtime_has_no_live_peers(g_runtime)) {
+                stage_start_ns = embedded_open_perf_start_ns();
+                reclaim_ownerless_page_log_after_native_checkpoint(g_runtime);
+                embedded_open_perf_add_elapsed(
+                    EMBEDDED_OPEN_PERF_START_POST_HOOKS_NS,
+                    stage_start_ns
+                );
+            }
             if (ordinary_native_page_log_reads || ordinary_native_checkpoint_refresh) {
                 std::uint64_t latest_lsn = 0;
                 std::uint64_t visible_lsn = 0;
@@ -21739,7 +22223,7 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
                     db.ownerless_native_startup_refresh_lsn = visible_lsn;
                     mylite_ownerless_innodb_enable_external_page_visibility(visible_lsn);
                     if (ownerless_runtime_open) {
-                        mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_no_skip(
+                        mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_visible_boundary_no_skip(
                             visible_lsn
                         );
                     } else {
@@ -22137,6 +22621,10 @@ void clear_runtime_state(RuntimeState &runtime) {
 #if MYLITE_WITH_MARIADB_EMBEDDED
     runtime.ownerless_checkpoint_scheduler_stop = false;
     runtime.ownerless_runtime_has_local_write.store(false, std::memory_order_relaxed);
+    runtime.ownerless_runtime_has_peer_explicit_transaction_write.store(
+        false,
+        std::memory_order_relaxed
+    );
     runtime.ownerless_native_file_op_checkpoint_cache_valid = false;
     runtime.ownerless_native_file_op_checkpoint_needed_cached = false;
     runtime.ownerless_native_dml_file_op_checkpoint_cache_valid = false;
@@ -22152,6 +22640,8 @@ void clear_runtime_state(RuntimeState &runtime) {
         false,
         std::memory_order_relaxed
     );
+    runtime.ownerless_runtime_starting.store(false, std::memory_order_relaxed);
+    runtime.ownerless_pages_visible_suppressed.store(false, std::memory_order_relaxed);
     runtime.ownerless_active_statement_count = 0;
     runtime.ownerless_active_explicit_transaction_count = 0;
     runtime.ownerless_last_statement_reclaim_attempt = {};

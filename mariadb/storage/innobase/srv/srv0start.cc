@@ -75,6 +75,7 @@ Created 2/16/1996 Heikki Tuuri
 #include "dict0stats_bg.h"
 #include "que0que.h"
 #include "lock0lock.h"
+#include "mylite_ownerless_innodb_lock_hooks.h"
 #include "trx0roll.h"
 #include "trx0purge.h"
 #include "lock0lock.h"
@@ -1496,6 +1497,9 @@ dberr_t srv_start(bool create_new_db)
 
 	srv_shutdown_state = SRV_SHUTDOWN_NONE;
 	log_group_commit_locks_reset();
+	mylite_ownerless_innodb_lock_hooks_ever_enabled.store(
+		mylite_ownerless_innodb_lock_has_hooks() != 0,
+		std::memory_order_release);
 
 	if (srv_force_recovery) {
 		ib::info() << "!!! innodb_force_recovery is set to "

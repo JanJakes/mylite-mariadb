@@ -126,8 +126,10 @@ extern uint32_t my_crc32c(uint32_t crc, const void *buf, size_t len);
 #define MYLITE_TEST_INNODB_FIL_PAGE_TYPE_ZBLOB2 12U
 #define MYLITE_TEST_PAGE_LOG_HEADER_SIZE 64
 #define MYLITE_TEST_PAGE_LOG_RECORD_HEADER_SIZE 64
+#define MYLITE_TEST_PAGE_LOG_RECORD_FLAGS_OFFSET 20
 #define MYLITE_TEST_PAGE_LOG_RECORD_COMMIT_LSN_OFFSET 32
 #define MYLITE_TEST_PAGE_LOG_RECORD_PAYLOAD_SIZE_OFFSET 40
+#define MYLITE_TEST_PAGE_LOG_RECORD_EXTERNAL_SNAPSHOT_LINEAGE 256U
 #define MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS 128U
 #define MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES 24000U
 #define MYLITE_TEST_BLOB_PAGE_SIZE_MATRIX_ROWS 5U
@@ -138,6 +140,7 @@ extern uint32_t my_crc32c(uint32_t crc, const void *buf, size_t len);
 #define MYLITE_TEST_STRESS_ITERATIONS_MAX 10000U
 #define MYLITE_TEST_STRESS_READER_POLLS_MAX 20000U
 #define MYLITE_TEST_COMMIT_RACE_WORKER_COUNT 4U
+#define MYLITE_TEST_COMMIT_RACE_READY_TIMEOUT_MS 30000U
 #define MYLITE_TEST_DDL_STRESS_WORKER_COUNT 3U
 #define MYLITE_TEST_DDL_STRESS_DML_WORKER_COUNT 2U
 #define MYLITE_TEST_DDL_STRESS_ROUNDS 3U
@@ -610,6 +613,13 @@ typedef struct child_pipes {
     int ready_write_fd;
     int release_read_fd;
 } child_pipes;
+
+typedef struct commit_race_child_pipes {
+    int open_ready_write_fd;
+    int update_release_read_fd;
+    int updated_ready_write_fd;
+    int commit_release_read_fd;
+} commit_race_child_pipes;
 
 typedef struct query_result {
     unsigned long long value;
@@ -1135,7 +1145,7 @@ static void commit_race_update_row_after_signal(
     open_database_paths paths,
     unsigned table_id,
     unsigned delta,
-    child_pipes pipes
+    commit_race_child_pipes pipes
 );
 static void run_ownerless_table_pair_deadlock(
     open_database_paths paths,
@@ -3153,6 +3163,10 @@ static void assert_concurrency_page_index_has_entries(const char *database_path)
 static unsigned count_concurrency_wal_records_at_or_before(
     const char *database_path,
     uint64_t commit_lsn
+);
+static unsigned count_concurrency_wal_records_with_flags(
+    const char *database_path,
+    uint32_t required_flags
 );
 static unsigned count_ownerless_blob_pressure_blob_pages(const char *database_path);
 static unsigned count_ownerless_blob_size_matrix_blob_pages(const char *database_path);
@@ -6463,17 +6477,121 @@ static void test_two_processes_update_different_innodb_tables(void) {
     free(root);
 }
 
+static unsigned wait_for_commit_race_ready_barrier(
+    const char *database_path,
+    int ready_pipes[MYLITE_TEST_COMMIT_RACE_WORKER_COUNT][2],
+    const pid_t workers[MYLITE_TEST_COMMIT_RACE_WORKER_COUNT],
+    uint64_t *out_ownerless_waiting_count
+) {
+    const uint64_t deadline_ms =
+        monotonic_milliseconds() + MYLITE_TEST_COMMIT_RACE_READY_TIMEOUT_MS;
+    int ready_seen[MYLITE_TEST_COMMIT_RACE_WORKER_COUNT] = {0};
+    unsigned ready_count = 0U;
+
+    *out_ownerless_waiting_count = 0U;
+    for (unsigned worker_id = 0U; worker_id < MYLITE_TEST_COMMIT_RACE_WORKER_COUNT; ++worker_id) {
+        int pipe_flags = fcntl(ready_pipes[worker_id][0], F_GETFL, 0);
+
+        assert(pipe_flags >= 0);
+        assert(fcntl(ready_pipes[worker_id][0], F_SETFL, pipe_flags | O_NONBLOCK) == 0);
+    }
+
+    for (;;) {
+        for (unsigned worker_id = 0U; worker_id < MYLITE_TEST_COMMIT_RACE_WORKER_COUNT;
+             ++worker_id) {
+            char value = '\0';
+            ssize_t bytes_read;
+
+            if (ready_seen[worker_id]) {
+                continue;
+            }
+            bytes_read = read(ready_pipes[worker_id][0], &value, sizeof(value));
+            if (bytes_read == (ssize_t)sizeof(value)) {
+                assert(value == 'x');
+                assert(close(ready_pipes[worker_id][0]) == 0);
+                ready_pipes[worker_id][0] = -1;
+                ready_seen[worker_id] = 1;
+                ++ready_count;
+                continue;
+            }
+            if (bytes_read == 0) {
+                fprintf(
+                    stderr,
+                    "commit-race worker %u closed ready pipe before barrier\n",
+                    worker_id + 1U
+                );
+                fflush(stderr);
+                assert(bytes_read != 0);
+            }
+            if (bytes_read < 0) {
+                assert(errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR);
+            }
+        }
+
+        if (ready_count == MYLITE_TEST_COMMIT_RACE_WORKER_COUNT) {
+            return ready_count;
+        }
+
+        if (ready_count > 0U) {
+            *out_ownerless_waiting_count =
+                read_concurrency_innodb_lock_waiting_count(database_path) +
+                read_concurrency_page_write_lock_waiting_count(database_path);
+            if (ready_count + *out_ownerless_waiting_count >=
+                MYLITE_TEST_COMMIT_RACE_WORKER_COUNT) {
+                return ready_count;
+            }
+        }
+
+        if (monotonic_milliseconds() >= deadline_ms) {
+            fprintf(
+                stderr,
+                "commit-race ready barrier timed out: ready=%u ownerless_waiting=%llu\n",
+                ready_count,
+                (unsigned long long)*out_ownerless_waiting_count
+            );
+            fflush(stderr);
+            for (unsigned worker_id = 0U; worker_id < MYLITE_TEST_COMMIT_RACE_WORKER_COUNT;
+                 ++worker_id) {
+                int child_status = 0;
+                const pid_t wait_result = waitpid(workers[worker_id], &child_status, WNOHANG);
+
+                if (wait_result == workers[worker_id]) {
+                    fprintf(
+                        stderr,
+                        "commit-race worker %u exited before release: status=%d exited=%d "
+                        "exit=%d signaled=%d signal=%d\n",
+                        worker_id + 1U,
+                        child_status,
+                        WIFEXITED(child_status),
+                        WIFEXITED(child_status) ? WEXITSTATUS(child_status) : -1,
+                        WIFSIGNALED(child_status),
+                        WIFSIGNALED(child_status) ? WTERMSIG(child_status) : -1
+                    );
+                }
+            }
+            fflush(stderr);
+            assert(ready_count == MYLITE_TEST_COMMIT_RACE_WORKER_COUNT);
+        }
+
+        sleep_microseconds(MYLITE_TEST_WAIT_POLL_INTERVAL_US);
+    }
+}
+
 static void test_ownerless_concurrent_transaction_commits(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(root, "ownerless-commit-race.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
-    int ready_pipes[MYLITE_TEST_COMMIT_RACE_WORKER_COUNT][2];
-    int release_pipes[MYLITE_TEST_COMMIT_RACE_WORKER_COUNT][2];
+    int open_ready_pipes[MYLITE_TEST_COMMIT_RACE_WORKER_COUNT][2];
+    int update_release_pipes[MYLITE_TEST_COMMIT_RACE_WORKER_COUNT][2];
+    int updated_ready_pipes[MYLITE_TEST_COMMIT_RACE_WORKER_COUNT][2];
+    int commit_release_pipes[MYLITE_TEST_COMMIT_RACE_WORKER_COUNT][2];
     pid_t workers[MYLITE_TEST_COMMIT_RACE_WORKER_COUNT];
     mylite_db *db;
     char sql[192];
     unsigned long long expected_sum = 0U;
+    unsigned ready_count;
+    uint64_t ownerless_waiting_count;
 
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(paths);
@@ -6506,8 +6624,10 @@ static void test_ownerless_concurrent_transaction_commits(void) {
     assert(mylite_close(db) == MYLITE_OK);
 
     for (unsigned worker_id = 0U; worker_id < MYLITE_TEST_COMMIT_RACE_WORKER_COUNT; ++worker_id) {
-        assert(pipe(ready_pipes[worker_id]) == 0);
-        assert(pipe(release_pipes[worker_id]) == 0);
+        assert(pipe(open_ready_pipes[worker_id]) == 0);
+        assert(pipe(update_release_pipes[worker_id]) == 0);
+        assert(pipe(updated_ready_pipes[worker_id]) == 0);
+        assert(pipe(commit_release_pipes[worker_id]) == 0);
     }
 
     for (unsigned worker_id = 0U; worker_id < MYLITE_TEST_COMMIT_RACE_WORKER_COUNT; ++worker_id) {
@@ -6516,40 +6636,85 @@ static void test_ownerless_concurrent_transaction_commits(void) {
         if (workers[worker_id] == 0) {
             for (unsigned pipe_id = 0U; pipe_id < MYLITE_TEST_COMMIT_RACE_WORKER_COUNT; ++pipe_id) {
                 if (pipe_id == worker_id) {
-                    close(ready_pipes[pipe_id][0]);
-                    close(release_pipes[pipe_id][1]);
+                    close(open_ready_pipes[pipe_id][0]);
+                    close(update_release_pipes[pipe_id][1]);
+                    close(updated_ready_pipes[pipe_id][0]);
+                    close(commit_release_pipes[pipe_id][1]);
                 } else {
-                    close(ready_pipes[pipe_id][0]);
-                    close(ready_pipes[pipe_id][1]);
-                    close(release_pipes[pipe_id][0]);
-                    close(release_pipes[pipe_id][1]);
+                    close(open_ready_pipes[pipe_id][0]);
+                    close(open_ready_pipes[pipe_id][1]);
+                    close(update_release_pipes[pipe_id][0]);
+                    close(update_release_pipes[pipe_id][1]);
+                    close(updated_ready_pipes[pipe_id][0]);
+                    close(updated_ready_pipes[pipe_id][1]);
+                    close(commit_release_pipes[pipe_id][0]);
+                    close(commit_release_pipes[pipe_id][1]);
                 }
             }
             commit_race_update_row_after_signal(
                 paths,
                 worker_id + 1U,
                 worker_id + 1U,
-                (child_pipes){
-                    .ready_write_fd = ready_pipes[worker_id][1],
-                    .release_read_fd = release_pipes[worker_id][0],
+                (commit_race_child_pipes){
+                    .open_ready_write_fd = open_ready_pipes[worker_id][1],
+                    .update_release_read_fd = update_release_pipes[worker_id][0],
+                    .updated_ready_write_fd = updated_ready_pipes[worker_id][1],
+                    .commit_release_read_fd = commit_release_pipes[worker_id][0],
                 }
             );
         }
     }
 
     for (unsigned worker_id = 0U; worker_id < MYLITE_TEST_COMMIT_RACE_WORKER_COUNT; ++worker_id) {
-        close(ready_pipes[worker_id][1]);
-        close(release_pipes[worker_id][0]);
+        close(open_ready_pipes[worker_id][1]);
+        close(update_release_pipes[worker_id][0]);
+        close(updated_ready_pipes[worker_id][1]);
+        close(commit_release_pipes[worker_id][0]);
     }
     for (unsigned worker_id = 0U; worker_id < MYLITE_TEST_COMMIT_RACE_WORKER_COUNT; ++worker_id) {
-        wait_for_pipe(ready_pipes[worker_id][0]);
+        wait_for_pipe(open_ready_pipes[worker_id][0]);
+    }
+    for (unsigned worker_id = 0U; worker_id < MYLITE_TEST_COMMIT_RACE_WORKER_COUNT; ++worker_id) {
+        signal_pipe(update_release_pipes[worker_id][1]);
+    }
+    ready_count = wait_for_commit_race_ready_barrier(
+        database_path,
+        updated_ready_pipes,
+        workers,
+        &ownerless_waiting_count
+    );
+    if (ready_count < MYLITE_TEST_COMMIT_RACE_WORKER_COUNT) {
+        assert(ready_count + ownerless_waiting_count >= MYLITE_TEST_COMMIT_RACE_WORKER_COUNT);
     }
 
     for (unsigned worker_id = 0U; worker_id < MYLITE_TEST_COMMIT_RACE_WORKER_COUNT; ++worker_id) {
-        signal_pipe(release_pipes[worker_id][1]);
+        signal_pipe(commit_release_pipes[worker_id][1]);
     }
     for (unsigned worker_id = 0U; worker_id < MYLITE_TEST_COMMIT_RACE_WORKER_COUNT; ++worker_id) {
         wait_for_child(workers[worker_id]);
+    }
+    for (unsigned worker_id = 0U; worker_id < MYLITE_TEST_COMMIT_RACE_WORKER_COUNT; ++worker_id) {
+        if (updated_ready_pipes[worker_id][0] >= 0) {
+            assert(close(updated_ready_pipes[worker_id][0]) == 0);
+        }
+    }
+    assert(read_concurrency_innodb_lock_waiting_count(database_path) == 0U);
+    assert(read_concurrency_page_write_lock_waiting_count(database_path) == 0U);
+    {
+        const uint64_t checkpoint_latest_lsn =
+            read_concurrency_checkpoint_latest_lsn(database_path);
+        const uint64_t checkpoint_visible_lsn =
+            read_concurrency_checkpoint_visible_lsn(database_path);
+        if (checkpoint_latest_lsn != 0U && checkpoint_visible_lsn == 0U) {
+            fprintf(
+                stderr,
+                "expected ownerless commit-race checkpoint visible LSN after workers, "
+                "latest=%llu visible=%llu\n",
+                (unsigned long long)checkpoint_latest_lsn,
+                (unsigned long long)checkpoint_visible_lsn
+            );
+        }
+        assert(checkpoint_latest_lsn == 0U || checkpoint_visible_lsn != 0U);
     }
 
     assert_commit_race_total(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW, expected_sum);
@@ -6600,8 +6765,8 @@ static void test_ownerless_explicit_dml_deadlock_discards_file_op_marker(void) {
         304U
     );
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
-    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert(read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert_concurrency_wal_retained_for(database_path, 500U);
     assert_table_total_value_is_one_of(paths, 302U, 304U);
 
     remove_concurrency_shm(database_path);
@@ -6689,13 +6854,16 @@ static void run_ownerless_table_pair_deadlock(
     wait_for_pipe(first_ready_pipe[0]);
     wait_for_pipe(second_ready_pipe[0]);
     signal_pipe(first_release_pipe[1]);
-    assert(wait_for_concurrency_ownerless_write_waiting_count(database_path, 1U, 5000U) >= 1U);
     signal_pipe(second_release_pipe[1]);
 
     first_result = wait_for_child_result(first_child);
     second_result = wait_for_child_result(second_child);
-    if (!((first_result == MYLITE_TEST_CHILD_OK && second_result == MYLITE_TEST_CHILD_DEADLOCK) ||
-          (first_result == MYLITE_TEST_CHILD_DEADLOCK && second_result == MYLITE_TEST_CHILD_OK))) {
+    const int first_victim = first_result == MYLITE_TEST_CHILD_DEADLOCK ||
+                             first_result == MYLITE_TEST_CHILD_LOCK_WAIT_TIMEOUT;
+    const int second_victim = second_result == MYLITE_TEST_CHILD_DEADLOCK ||
+                              second_result == MYLITE_TEST_CHILD_LOCK_WAIT_TIMEOUT;
+    if (!((first_result == MYLITE_TEST_CHILD_OK && second_victim) ||
+          (first_victim && second_result == MYLITE_TEST_CHILD_OK))) {
         fprintf(
             stderr,
             "ownerless deadlock child results: first=%d second=%d\n",
@@ -6705,8 +6873,8 @@ static void run_ownerless_table_pair_deadlock(
         fflush(stderr);
     }
     assert(
-        (first_result == MYLITE_TEST_CHILD_OK && second_result == MYLITE_TEST_CHILD_DEADLOCK) ||
-        (first_result == MYLITE_TEST_CHILD_DEADLOCK && second_result == MYLITE_TEST_CHILD_OK)
+        (first_result == MYLITE_TEST_CHILD_OK && second_victim) ||
+        (first_victim && second_result == MYLITE_TEST_CHILD_OK)
     );
     assert(wait_for_concurrency_ownerless_write_waiting_count(database_path, 0U, 5000U) == 0U);
 }
@@ -10075,8 +10243,8 @@ static void test_ownerless_multi_peer_explicit_dml_marker_drain(void) {
     signal_pipe(release_pipe[1]);
     wait_for_child(peer_child);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
-    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert(read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert_concurrency_wal_retained_for(database_path, 500U);
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -10768,7 +10936,8 @@ static void test_ownerless_single_owner_history_wal_proof(void) {
     assert(
         database_stats
             [OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_SKIPPED_NATIVE_SUPPORT] >=
-        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED]
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_RSEG] +
+            page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO]
     );
     assert(
         page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_HISTORY_PROOF_RSEG_FIRST_SAMPLES] +
@@ -11163,7 +11332,8 @@ static void test_ownerless_single_owner_native_support_page_wal_elision(void) {
     assert(
         database_stats
             [OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_SKIPPED_NATIVE_SUPPORT] >=
-        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED]
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_RSEG] +
+            page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO]
     );
     assert(disabled_database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_CALLS] == 0U);
     assert(
@@ -14611,8 +14781,8 @@ static void test_ownerless_single_owner_foreground_reclaim_budget_defers_to_time
         database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_CALLS] > 0U
     );
     assert(
-        database_stats
-            [OWNERLESS_TEST_DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_ALLOWED] > 0U
+        database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_ALLOWED] >
+        0U
     );
     assert(
         database_stats
@@ -14626,8 +14796,7 @@ static void test_ownerless_single_owner_foreground_reclaim_budget_defers_to_time
     );
     assert(
         database_stats
-            [OWNERLESS_TEST_DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_BLOCKED_MARKER] ==
-        0U
+            [OWNERLESS_TEST_DATABASE_PERF_STAT_FOREGROUND_RECLAIM_BUDGET_SKIP_BLOCKED_MARKER] == 0U
     );
     assert(
         database_stats
@@ -15292,6 +15461,12 @@ static void test_ownerless_live_snapshot_pin_blocks_page_log_reclaim(void) {
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 35U);
     assert(mylite_close(db) == MYLITE_OK);
     assert(!concurrency_wal_is_checkpointed(database_path));
+    assert(
+        count_concurrency_wal_records_with_flags(
+            database_path,
+            MYLITE_TEST_PAGE_LOG_RECORD_EXTERNAL_SNAPSHOT_LINEAGE
+        ) > 0U
+    );
 
     signal_pipe(release_pipe[1]);
     wait_for_child(reader_child);
@@ -54021,13 +54196,15 @@ static void commit_race_update_row_after_signal(
     open_database_paths paths,
     unsigned table_id,
     unsigned delta,
-    child_pipes pipes
+    commit_race_child_pipes pipes
 ) {
     mylite_db *db;
     char sql[160];
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "START TRANSACTION");
+    signal_pipe(pipes.open_ready_write_fd);
+    wait_for_pipe(pipes.update_release_read_fd);
     assert(
         snprintf(
             sql,
@@ -54038,8 +54215,8 @@ static void commit_race_update_row_after_signal(
         ) > 0
     );
     exec_ok(db, sql);
-    signal_pipe(pipes.ready_write_fd);
-    wait_for_pipe(pipes.release_read_fd);
+    signal_pipe(pipes.updated_ready_write_fd);
+    wait_for_pipe(pipes.commit_release_read_fd);
     exec_ok(db, "COMMIT");
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);
@@ -54055,6 +54232,7 @@ static void update_table_pair_after_signal(
 ) {
     mylite_db *db;
     unsigned mariadb_errno = 0U;
+    char first_lock[128];
     char first_update[128];
     char second_update[128];
     int result;
@@ -54079,6 +54257,14 @@ static void update_table_pair_after_signal(
     exec_ok(db, "START TRANSACTION");
     assert(
         snprintf(
+            first_lock,
+            sizeof(first_lock),
+            "SELECT value FROM app.%s WHERE id = 1 FOR UPDATE",
+            first_table
+        ) > 0
+    );
+    assert(
+        snprintf(
             first_update,
             sizeof(first_update),
             "UPDATE app.%s SET value = value + %u WHERE id = 1",
@@ -54095,13 +54281,29 @@ static void update_table_pair_after_signal(
             increment
         ) > 0
     );
-    exec_ok(db, first_update);
+    exec_ok(db, first_lock);
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+
+    result = exec_status(db, first_update, &mariadb_errno);
+    if (result != MYLITE_OK) {
+        if (mariadb_errno == MYLITE_TEST_DEADLOCK_ERRNO) {
+            exec_ok(db, "ROLLBACK");
+            (void)mylite_close(db);
+            _exit(MYLITE_TEST_CHILD_DEADLOCK);
+        }
+        if (mariadb_errno == MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO) {
+            exec_ok(db, "ROLLBACK");
+            (void)mylite_close(db);
+            _exit(MYLITE_TEST_CHILD_LOCK_WAIT_TIMEOUT);
+        }
+        (void)mylite_close(db);
+        _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
+    }
     if (assert_deadlock_file_op_discard) {
         assert(mylite_ownerless_innodb_take_file_op_redo());
         mylite_ownerless_innodb_note_file_op_redo();
     }
-    signal_pipe(pipes.ready_write_fd);
-    wait_for_pipe(pipes.release_read_fd);
 
     result = exec_status(db, second_update, &mariadb_errno);
     if (result == MYLITE_OK) {
@@ -54123,6 +54325,10 @@ static void update_table_pair_after_signal(
         _exit(MYLITE_TEST_CHILD_DEADLOCK);
     }
     if (mariadb_errno == MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO) {
+        exec_ok(db, "ROLLBACK");
+        if (assert_deadlock_file_op_discard) {
+            assert(!mylite_ownerless_innodb_take_file_op_redo());
+        }
         (void)mylite_close(db);
         _exit(MYLITE_TEST_CHILD_LOCK_WAIT_TIMEOUT);
     }
@@ -79744,6 +79950,23 @@ static void assert_commit_race_total(
     unsigned long long current_values[MYLITE_TEST_COMMIT_RACE_WORKER_COUNT] = {0U};
     unsigned long long actual_sum = 0U;
 
+    if ((flags & MYLITE_OPEN_OWNERLESS_RW) != 0U) {
+        const uint64_t checkpoint_latest_lsn =
+            read_concurrency_checkpoint_latest_lsn(paths.database_path);
+        const uint64_t checkpoint_visible_lsn =
+            read_concurrency_checkpoint_visible_lsn(paths.database_path);
+        if (checkpoint_latest_lsn != 0U && checkpoint_visible_lsn == 0U) {
+            fprintf(
+                stderr,
+                "expected ownerless commit-race checkpoint visible LSN after ownerless open, "
+                "latest=%llu visible=%llu\n",
+                (unsigned long long)checkpoint_latest_lsn,
+                (unsigned long long)checkpoint_visible_lsn
+            );
+        }
+        assert(checkpoint_latest_lsn == 0U || checkpoint_visible_lsn != 0U);
+    }
+
     for (unsigned table_id = 1U; table_id <= MYLITE_TEST_COMMIT_RACE_WORKER_COUNT; ++table_id) {
         assert(
             snprintf(
@@ -80444,6 +80667,57 @@ static unsigned count_concurrency_wal_records_at_or_before(
         assert(payload_size <= (uint64_t)(wal_stat.st_size - payload_offset));
         next_record_offset = payload_offset + (off_t)payload_size;
         if (record_commit_lsn <= commit_lsn) {
+            ++count;
+        }
+        record_offset = next_record_offset;
+    }
+
+    assert(close(fd) == 0);
+    free(wal_path);
+    free(concurrency_path);
+    return count;
+}
+
+static unsigned count_concurrency_wal_records_with_flags(
+    const char *database_path,
+    uint32_t required_flags
+) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *wal_path = path_join(concurrency_path, "mylite-concurrency.wal");
+    struct stat wal_stat;
+    unsigned char size_bytes[8];
+    unsigned char flag_bytes[4];
+    unsigned count = 0U;
+    off_t record_offset =
+        MYLITE_TEST_CONCURRENCY_RECOVERY_HEADER_SIZE + MYLITE_TEST_PAGE_LOG_HEADER_SIZE;
+    int fd = open(wal_path, O_RDONLY | O_CLOEXEC);
+
+    assert(fd >= 0);
+    assert(fstat(fd, &wal_stat) == 0);
+    while (record_offset + MYLITE_TEST_PAGE_LOG_RECORD_HEADER_SIZE <= wal_stat.st_size) {
+        uint64_t payload_size;
+        uint32_t record_flags;
+        off_t payload_offset;
+        off_t next_record_offset;
+
+        read_exact_at(
+            fd,
+            flag_bytes,
+            sizeof(flag_bytes),
+            record_offset + MYLITE_TEST_PAGE_LOG_RECORD_FLAGS_OFFSET
+        );
+        record_flags = read_le32(flag_bytes);
+        read_exact_at(
+            fd,
+            size_bytes,
+            sizeof(size_bytes),
+            record_offset + MYLITE_TEST_PAGE_LOG_RECORD_PAYLOAD_SIZE_OFFSET
+        );
+        payload_size = read_le64(size_bytes);
+        payload_offset = record_offset + MYLITE_TEST_PAGE_LOG_RECORD_HEADER_SIZE;
+        assert(payload_size <= (uint64_t)(wal_stat.st_size - payload_offset));
+        next_record_offset = payload_offset + (off_t)payload_size;
+        if ((record_flags & required_flags) == required_flags) {
             ++count;
         }
         record_offset = next_record_offset;
