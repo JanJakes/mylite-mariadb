@@ -16,6 +16,12 @@ crashed writer must leave `concurrency/mylite-concurrency.ckpt` marked as
 needing a native file-operation checkpoint before a live peer is released and
 before no-live recovery can drain the marker.
 
+Supersession note: the later
+`docs/specs/ownerless-live-drop-recovery/specs.md` slice upgrades the focused
+`DROP TABLE app.ownerless_drop_crash` selector from marker-only/no-live
+recovery to live-peer dictionary recovery. This spec remains historical
+evidence for the native file-op marker boundary.
+
 ## Source Findings
 
 - MariaDB base: `mariadb-11.8.6`
@@ -44,9 +50,9 @@ In scope:
 - Reuse the existing `DROP TABLE app.ownerless_drop_crash` crash scenario.
 - Assert the native file-op checkpoint marker is set after killing the writer
   at `dictionary-before-finish`, while another ownerless peer is still live.
-- Preserve the existing recovery checks: live-peer cleanup returns busy,
-  no-live recovery keeps the table absent, forced `.shm` rebuild keeps the
-  table absent, and ordinary native reopen sees the same absence.
+- Preserve the original marker-only recovery checks. The later live-drop slice
+  supersedes the live-peer busy expectation while preserving no-live table
+  absence, forced `.shm` rebuild, and ordinary native reopen checks.
 
 Out of scope:
 
@@ -76,9 +82,11 @@ hook build. Broader DDL/file-lifecycle recovery remains partial.
 
 ## DDL Metadata Routing Impact
 
-The dictionary-generation protocol is unchanged. The killed writer still leaves
-recovery-sensitive dictionary state that blocks cleanup while a live peer
-exists; no-live reopen remains responsible for rebuilding and draining it.
+The original marker-only slice left the dictionary-generation protocol
+unchanged: the killed writer still left recovery-sensitive dictionary state
+that blocked cleanup while a live peer existed, and no-live reopen remained
+responsible for rebuilding and draining it. The later live-drop slice
+supersedes that cleanup policy for the focused single-table path.
 
 ## Directory And Lifecycle Impact
 
@@ -123,8 +131,9 @@ enabled.
 - A writer killed at `dictionary-before-finish` after `DROP TABLE` leaves
   `read_concurrency_native_file_op_checkpoint_needed(database_path)` true
   before the live peer is released.
-- Live-peer cleanup remains busy while recovery-sensitive dictionary state is
-  present.
+- In the original marker-only slice, live-peer cleanup remains busy while
+  recovery-sensitive dictionary state is present. The later live-drop slice
+  supersedes this expectation for focused `DROP TABLE schema.table`.
 - No-live ownerless recovery keeps `app.ownerless_drop_crash` absent.
 - Forced `.shm` rebuild and ordinary native reopen keep the table absent.
 - The older `dictionary-drop-crash` selector remains available.

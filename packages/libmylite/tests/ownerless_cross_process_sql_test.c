@@ -54527,7 +54527,6 @@ static void run_crashed_drop_dictionary_ddl_recovers_absent_table(int assert_fil
     int peer_release_pipe[2];
     pid_t writer_child;
     pid_t peer_child;
-    pid_t probe_child;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -54592,12 +54591,20 @@ static void run_crashed_drop_dictionary_ddl_recovers_absent_table(int assert_fil
         assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
     }
 
-    probe_child = fork();
-    assert(probe_child >= 0);
-    if (probe_child == 0) {
-        assert_ownerless_open_returns_busy(paths);
-    }
-    wait_for_child(probe_child);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_drop_crash'"
+        ) == 0U
+    );
+    assert(exec_status(db, "SELECT COUNT(*) FROM app.ownerless_drop_crash", NULL) != MYLITE_OK);
+    assert(!path_exists(frm_path));
+    assert(!path_exists(ibd_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     signal_pipe(peer_release_pipe[1]);
     wait_for_child(peer_child);
@@ -54615,6 +54622,7 @@ static void run_crashed_drop_dictionary_ddl_recovers_absent_table(int assert_fil
     assert(!path_exists(frm_path));
     assert(!path_exists(ibd_path));
     assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
