@@ -4736,6 +4736,11 @@ Tasks:
    rollback, leaves both file-op markers clear after the later `COMMIT`, and
    preserves the pre-savepoint row through forced `.shm` rebuild plus ordinary
    native reopen.
+   The killed-session follow-up proves the same post-savepoint rollback path
+   after a successful later `COMMIT` and `_exit(0)` before `mylite_close()`:
+   while the writer is still a zombie, both file-op markers remain clear,
+   recovery close checkpoints retained non-marker WAL, and the next
+   ownerless/native reopen still sees the pre-savepoint row.
    Deadlock victims after local explicit-transaction writes now reuse that
    discard rule after MyLite's internal deadlock rollback, while accepted 1205
    timeout victims prove the same discard after explicit rollback; focused

@@ -116,6 +116,8 @@ focused SQL test. No dependency or embedded MariaDB profile change is needed.
   forced `.shm` rebuild.
 - Existing full rollback, deadlock, single-owner commit, and multi-peer commit
   DML marker coverage continues to pass.
+- A follow-up killed-session selector proves the same marker discard after a
+  successful later `COMMIT` followed by `_exit(0)` before `mylite_close()`.
 
 ## Risks
 
@@ -123,4 +125,4 @@ focused SQL test. No dependency or embedded MariaDB profile change is needed.
   It does not track internal MariaDB statement savepoints, which remain native
   implementation details and do not become user transaction outcomes.
 - Savepoint marker classification is still bounded evidence, not exhaustive
-  crash or concurrent-writer savepoint matrix coverage.
+  mid-rollback crash or concurrent-writer savepoint matrix coverage.
