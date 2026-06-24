@@ -2080,8 +2080,9 @@ Tasks:
    checks, rename-away plus new original-name created dual file-per-table
    final state with page-0 space-id identity checks, cross-schema renamed
    file-per-table final state, truncated file-per-table post-truncate state,
-   copy-style force-rebuilt and compressed row-format-rebuilt file-per-table
-   final states, multi-pair rename-swap final state, and multi-table
+   copy-style force-rebuilt, primary-key-rebuilt, and compressed
+   row-format-rebuilt file-per-table final states, multi-pair rename-swap
+   final state, and multi-table
    dropped-schema absence through ownerless/native reopen before and after
    forced `.shm` rebuild.
    Broader DML/DDL and reconstruction of missing DDL-created tablespaces still
@@ -2363,8 +2364,8 @@ Tasks:
    stale-reader `.shm` rebuilds
    checkpoint retained reader-boundary WAL before segment rebuild, with focused
    dropped, same-schema and cross-schema same-statement multi-dropped,
-   renamed, truncated, force-rebuilt and compressed row-format-rebuilt
-   file-per-table, same-schema and
+   renamed, truncated, force-rebuilt, primary-key-rebuilt, and compressed
+   row-format-rebuilt file-per-table, same-schema and
    cross-schema multi-rename swap, and multi-table schema-drop SQL coverage.
    Native InnoDB redo/checkpoint reconciliation is still incomplete:
    MyLite now reclaims retained page-version records on non-read-only runtime
@@ -5315,8 +5316,8 @@ segment rebuild with focused dropped, same-schema and cross-schema
 same-statement multi-dropped, ordinary-created, LIKE-copy, CTAS-created with
 post-create DML, recreated, rename-away plus new original-name create,
 `CREATE OR REPLACE TABLE` replacement including LIKE and CTAS replacements,
-renamed, truncated, force-rebuilt, and compressed row-format-rebuilt
-file-per-table SQL coverage, multi-rename swap coverage, plus
+renamed, truncated, force-rebuilt, primary-key-rebuilt, and compressed
+row-format-rebuilt file-per-table SQL coverage, multi-rename swap coverage, plus
 multi-table schema-drop absence, and
 local post-DDL insert coverage that keeps visible write fast paths disabled
 while an external page-version pin is active after dictionary DDL and

@@ -2184,6 +2184,7 @@ int enforce_ownerless_page_log_limit_policy(mylite_db &db, const SqlPolicyTokens
 int refresh_ownerless_dictionary_before_statement(mylite_db &db, bool allow_global_refresh);
 bool ownerless_observed_dictionary_generation_ready(const mylite_db &db, void *dictionary_state);
 int flush_ownerless_dictionary_cache(mylite_db &db);
+void cleanup_ownerless_dictionary_cache_after_failed_ddl(mylite_db &db, bool ddl_started);
 int refresh_ownerless_dictionary_cache_after_stale_engine_error(mylite_db &db);
 void initialize_ownerless_dictionary_generation(mylite_db &db);
 void clear_ownerless_statement_metadata_cache(mylite_db &db);
@@ -3847,6 +3848,10 @@ int mylite_step(mylite_stmt *stmt) {
                     clear_statement_ownerless_page_visibility(*stmt);
                     return dictionary_finish_result;
                 }
+                cleanup_ownerless_dictionary_cache_after_failed_ddl(
+                    *stmt->db,
+                    dictionary_ddl_started
+                );
                 if (consistent_snapshot_start_pin_registered) {
                     release_ownerless_transaction_page_version_pin(*stmt->db);
                 }
@@ -3889,6 +3894,10 @@ int mylite_step(mylite_stmt *stmt) {
                     clear_statement_ownerless_page_visibility(*stmt);
                     return dictionary_finish_result;
                 }
+                cleanup_ownerless_dictionary_cache_after_failed_ddl(
+                    *stmt->db,
+                    dictionary_ddl_started
+                );
                 if (consistent_snapshot_start_pin_registered) {
                     release_ownerless_transaction_page_version_pin(*stmt->db);
                 }
@@ -3940,6 +3949,10 @@ int mylite_step(mylite_stmt *stmt) {
                     clear_statement_ownerless_page_visibility(*stmt);
                     return dictionary_finish_result;
                 }
+                cleanup_ownerless_dictionary_cache_after_failed_ddl(
+                    *stmt->db,
+                    dictionary_ddl_started
+                );
                 if (consistent_snapshot_start_pin_registered) {
                     release_ownerless_transaction_page_version_pin(*stmt->db);
                 }
@@ -5404,6 +5417,9 @@ int exec_result_impl(
                 dictionary_finish_result,
                 "ownerless dictionary change could not finish after failed statement"
             );
+        }
+        if (dictionary_finish_result == MYLITE_OK) {
+            cleanup_ownerless_dictionary_cache_after_failed_ddl(*db, dictionary_ddl_started);
         }
         if (consistent_snapshot_start_pin_registered) {
             release_ownerless_transaction_page_version_pin(*db);
@@ -14323,9 +14339,9 @@ int refresh_ownerless_external_pages_before_statement(
     mylite_ownerless_innodb_clear_external_page_visibility();
     ownerless_page_read_trust_index = false;
     ownerless_page_read_trust_direct_hits = false;
+    const bool rollback_native_read_fence = db.ownerless_rollback_native_read_fence;
     if (db.ownerless_rollback_native_read_fence) {
         allow_page_version_reads = false;
-        allow_global_refresh = false;
         release_ownerless_handle_page_version_pin(db);
         mylite_ownerless_innodb_close_current_read_view();
     }
@@ -14339,6 +14355,9 @@ int refresh_ownerless_external_pages_before_statement(
     refresh_perf_add_elapsed(OWNERLESS_DATABASE_PERF_REFRESH_DICTIONARY_NS, refresh_stage_start);
     if (dictionary_result != MYLITE_OK) {
         return dictionary_result;
+    }
+    if (rollback_native_read_fence) {
+        allow_global_refresh = false;
     }
     if (allow_page_version_reads &&
         db.ownerless_peer_dictionary_refresh_requires_conservative_write) {
@@ -14974,6 +14993,26 @@ int flush_ownerless_dictionary_cache(mylite_db &db) {
     }
     mylite_ownerless_innodb_evict_dictionary_cache();
     return MYLITE_OK;
+}
+
+void cleanup_ownerless_dictionary_cache_after_failed_ddl(mylite_db &db, bool ddl_started) {
+    if (!ddl_started) {
+        return;
+    }
+
+    const ErrorSnapshot snapshot = capture_error(db);
+    if (flush_ownerless_dictionary_cache(db) == MYLITE_OK) {
+        release_ownerless_handle_page_version_pin(db);
+        mylite_ownerless_innodb_close_current_read_view();
+        mylite_ownerless_innodb_clear_external_page_observations();
+        db.ownerless_page_version_read_lsn = 0;
+        db.ownerless_local_native_read_lsn = 0;
+        db.ownerless_pending_post_open_clean_page_refresh_lsn = 0;
+        db.ownerless_pending_post_open_clean_page_refresh_visible_boundary = false;
+        db.ownerless_pending_post_open_clean_page_refresh_current_boundary = false;
+        clear_ownerless_statement_metadata_cache(db);
+    }
+    restore_error(db, snapshot);
 }
 
 int refresh_ownerless_dictionary_cache_after_stale_engine_error(mylite_db &db) {
