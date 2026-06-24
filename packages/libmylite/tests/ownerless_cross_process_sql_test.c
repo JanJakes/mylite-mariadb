@@ -45967,7 +45967,6 @@ static void run_crashed_create_like_dictionary_ddl_recovers_table(int assert_fil
     int peer_release_pipe[2];
     pid_t writer_child;
     pid_t peer_child;
-    pid_t probe_child;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -46041,16 +46040,6 @@ static void run_crashed_create_like_dictionary_ddl_recovers_table(int assert_fil
         assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
     }
 
-    probe_child = fork();
-    assert(probe_child >= 0);
-    if (probe_child == 0) {
-        assert_ownerless_open_returns_busy(paths);
-    }
-    wait_for_child(probe_child);
-
-    signal_pipe(peer_release_pipe[1]);
-    wait_for_child(peer_child);
-
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(path_exists(copy_frm_path));
     assert(path_exists(copy_ibd_path));
@@ -46093,6 +46082,32 @@ static void run_crashed_create_like_dictionary_ddl_recovers_table(int assert_fil
         ) == 2U
     );
     assert(mylite_close(db) == MYLITE_OK);
+
+    if (assert_file_op_marker) {
+        assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    }
+
+    signal_pipe(peer_release_pipe[1]);
+    wait_for_child(peer_child);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_create_like_crash_copy") == 2U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_create_like_crash_copy") == 30U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_create_like_crash_copy "
+            "FORCE INDEX (ownerless_create_like_crash_value_idx) "
+            "WHERE value >= 20"
+        ) == 2U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    if (assert_file_op_marker) {
+        assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    }
 
     assert_ownerless_create_like_crash_ddl_state(
         paths,

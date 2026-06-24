@@ -17,6 +17,7 @@ extern "C" {
 
 #define MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE 0U
 #define MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE 1U
+#define MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE_LIKE 2U
 
 typedef int (*mylite_ownerless_dictionary_state_alive_callback)(uint64_t pid, void *ctx);
 

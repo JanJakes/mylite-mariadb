@@ -14191,6 +14191,48 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
             &generation
         ) == MYLITE_OWNERLESS_DICTIONARY_STATE_ERROR
     );
+
+    assert(
+        mylite_ownerless_dictionary_state_begin_ddl(
+            state,
+            sizeof(state),
+            3U,
+            30U,
+            UINT64_MAX,
+            MYLITE_TEST_WAIT_TIMEOUT_MS,
+            &generation
+        ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+    );
+    assert(
+        mylite_ownerless_dictionary_state_mark_recoverable(
+            state,
+            sizeof(state),
+            3U,
+            30U,
+            MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE_LIKE
+        ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+    );
+    assert(
+        mylite_ownerless_dictionary_state_recover_dead_owner(
+            state,
+            sizeof(state),
+            3U,
+            30U,
+            MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE,
+            &generation
+        ) == MYLITE_OWNERLESS_DICTIONARY_STATE_ERROR
+    );
+    assert(
+        mylite_ownerless_dictionary_state_recover_dead_owner(
+            state,
+            sizeof(state),
+            3U,
+            30U,
+            MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE_LIKE,
+            &generation
+        ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+    );
+    assert(generation == 6U);
 }
 
 static void test_redo_state_tracks_lsn_and_owner_lifecycle(void) {

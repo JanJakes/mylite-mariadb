@@ -2195,6 +2195,7 @@ bool ownerless_dictionary_ddl_statement(const SqlPolicyTokens &tokens);
 bool ownerless_dictionary_ddl_needs_native_file_op_checkpoint(const SqlPolicyTokens &tokens);
 std::uint32_t ownerless_dictionary_recovery_kind_for_statement(const SqlPolicyTokens &tokens);
 bool ownerless_plain_create_table_recovery_statement(const SqlPolicyTokens &tokens);
+bool ownerless_create_table_like_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_stale_engine_error_allows_retry(
     const mylite_db &db,
     const SqlPolicyTokens &tokens,
@@ -15154,6 +15155,9 @@ std::uint32_t ownerless_dictionary_recovery_kind_for_statement(const SqlPolicyTo
     if (ownerless_plain_create_table_recovery_statement(tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE;
     }
+    if (ownerless_create_table_like_recovery_statement(tokens)) {
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE_LIKE;
+    }
     return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE;
 }
 
@@ -15190,6 +15194,50 @@ bool ownerless_plain_create_table_recovery_statement(const SqlPolicyTokens &toke
         }
     }
     return true;
+}
+
+bool ownerless_create_table_like_recovery_statement(const SqlPolicyTokens &tokens) {
+    if (!token_equals(identifier_token_at(tokens, 0), "CREATE")) {
+        return false;
+    }
+
+    bool table_keyword_seen = false;
+    for (std::size_t index = 1U; !identifier_token_at(tokens, index).empty(); ++index) {
+        const std::string_view token = identifier_token_at(tokens, index);
+        if (token_in(token, "OR", "REPLACE", "TEMPORARY", "SELECT")) {
+            return false;
+        }
+        if (token_in(token, "DATABASE", "EVENT", "FUNCTION", "INDEX") ||
+            token_in(token, "PROCEDURE", "SCHEMA", "SEQUENCE", "SERVER") ||
+            token_in(token, "TRIGGER", "USER", "VIEW")) {
+            return false;
+        }
+        if (token_equals(token, "TABLE")) {
+            table_keyword_seen = true;
+        }
+    }
+    if (!table_keyword_seen) {
+        return false;
+    }
+
+    table_keyword_seen = false;
+    for (std::size_t index = 1U; index < tokens.count; ++index) {
+        const std::string_view token = tokens.values[index];
+        if (token_equals(token, "TABLE")) {
+            table_keyword_seen = true;
+            continue;
+        }
+        if (!table_keyword_seen) {
+            continue;
+        }
+        if (token_equals(token, "(")) {
+            return false;
+        }
+        if (token_equals(token, "LIKE")) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool ownerless_table_identifier_token(std::string_view token) {
@@ -20614,15 +20662,24 @@ bool ownerless_process_recover_dead_dictionary_owner(
         return false;
     }
 
-    std::uint64_t generation = 0;
-    return mylite_ownerless_dictionary_state_recover_dead_owner(
-               cleanup.dictionary_state,
-               cleanup.dictionary_state_size,
-               owner_id,
-               owner_generation,
-               MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE,
-               &generation
-           ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK;
+    constexpr std::array<std::uint32_t, 2> recovery_kinds = {
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE,
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE_LIKE,
+    };
+    for (const std::uint32_t recovery_kind : recovery_kinds) {
+        std::uint64_t generation = 0;
+        if (mylite_ownerless_dictionary_state_recover_dead_owner(
+                cleanup.dictionary_state,
+                cleanup.dictionary_state_size,
+                owner_id,
+                owner_generation,
+                recovery_kind,
+                &generation
+            ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK) {
+            return true;
+        }
+    }
+    return false;
 }
 
 int mylite_result_from_process_registry_result(int registry_result) {
