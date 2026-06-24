@@ -396,6 +396,11 @@ Roles:
   WAL. Generic dictionary/file-op and autoincrement markers keep their stricter
   policy. Live-peer reclaim keeps checkpointable user data/index page records
   in WAL until no-live reclaim can make the native data file authoritative.
+  Focused Linux coverage now also commits post-checkpoint file-per-table DML in
+  a child process that exits with `_exit(0)` before `mylite_close()`, verifies
+  the durable DML marker/WAL while that child is still an unreaped zombie, and
+  proves the next ownerless opener preserves the committed row before no-live
+  native proof drains the marker/WAL.
   When no-live reclaim advances the durable
   checkpoint-visible LSN, the still-existing volatile redo state is reseeded
   from that checkpoint so readers do not observe `.shm` metadata behind `.ckpt`
@@ -1666,7 +1671,11 @@ Tasks:
    verifies that a no-live-process reopen rebuilds volatile shared state and
    sees only committed rows. A focused Linux SQL regression also leaves an
    exited committed writer unreaped as a zombie and verifies the dead owner slot
-   can be reclaimed before the parent calls `waitpid()`. Durable
+   can be reclaimed before the parent calls `waitpid()`. A later focused
+   variant forces that zombie writer through the post-checkpoint file-per-table
+   DML marker path, proving the next ownerless opener can recover the committed
+   row image and drain DML marker/WAL evidence before the parent reaps the
+   child. Durable
    rollback/recovery records are still needed before product writers can recover
    a crashed owner while other processes continue running.
 
