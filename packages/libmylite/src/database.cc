@@ -2197,6 +2197,7 @@ std::uint32_t ownerless_dictionary_recovery_kind_for_statement(const SqlPolicyTo
 bool ownerless_plain_create_table_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_create_table_like_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_create_table_select_recovery_statement(const SqlPolicyTokens &tokens);
+bool ownerless_create_or_replace_table_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_stale_engine_error_allows_retry(
     const mylite_db &db,
     const SqlPolicyTokens &tokens,
@@ -15162,6 +15163,9 @@ std::uint32_t ownerless_dictionary_recovery_kind_for_statement(const SqlPolicyTo
     if (ownerless_create_table_select_recovery_statement(tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE_SELECT;
     }
+    if (ownerless_create_or_replace_table_recovery_statement(tokens)) {
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_OR_REPLACE_TABLE;
+    }
     return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE;
 }
 
@@ -15286,6 +15290,32 @@ bool ownerless_create_table_select_recovery_statement(const SqlPolicyTokens &tok
         }
     }
     return false;
+}
+
+bool ownerless_create_or_replace_table_recovery_statement(const SqlPolicyTokens &tokens) {
+    if (!token_equals(identifier_token_at(tokens, 0), "CREATE") ||
+        !token_equals(identifier_token_at(tokens, 1), "OR") ||
+        !token_equals(identifier_token_at(tokens, 2), "REPLACE")) {
+        return false;
+    }
+
+    bool table_keyword_seen = false;
+    for (std::size_t index = 3U; !identifier_token_at(tokens, index).empty(); ++index) {
+        const std::string_view token = identifier_token_at(tokens, index);
+        if (token_in(token, "TEMPORARY", "LIKE", "SELECT")) {
+            return false;
+        }
+        if (token_equals(token, "TABLE")) {
+            table_keyword_seen = true;
+            continue;
+        }
+        if (!table_keyword_seen && (token_in(token, "DATABASE", "EVENT", "FUNCTION", "INDEX") ||
+                                    token_in(token, "PROCEDURE", "SCHEMA", "SEQUENCE", "SERVER") ||
+                                    token_in(token, "TRIGGER", "USER", "VIEW"))) {
+            return false;
+        }
+    }
+    return table_keyword_seen;
 }
 
 bool ownerless_table_identifier_token(std::string_view token) {
@@ -20710,10 +20740,11 @@ bool ownerless_process_recover_dead_dictionary_owner(
         return false;
     }
 
-    constexpr std::array<std::uint32_t, 3> recovery_kinds = {
+    constexpr std::array<std::uint32_t, 4> recovery_kinds = {
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE_LIKE,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE_SELECT,
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_OR_REPLACE_TABLE,
     };
     for (const std::uint32_t recovery_kind : recovery_kinds) {
         std::uint64_t generation = 0;

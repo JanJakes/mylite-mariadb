@@ -4714,9 +4714,12 @@ Tasks:
    to provide the same live-peer recovery for the copied empty destination
    table and secondary-index metadata. Focused no-definition-list CTAS
    prefinish crash coverage uses a separate recoverable dictionary marker to
-   provide live-peer recovery for the populated destination table. Replacement,
-   rename, truncate, drop, rebuild, schema, view, trigger, and foreign-key
-   multi-DDL live-peer recovery remain planned. Final no-live close
+   provide live-peer recovery for the populated destination table. Ordinary
+   `CREATE OR REPLACE TABLE` prefinish crash coverage uses a separate
+   recoverable dictionary marker to provide live-peer recovery for the native
+   replacement table. Replacement-copy, rename, truncate, drop, rebuild,
+   schema, view, trigger, and foreign-key multi-DDL live-peer recovery remain
+   planned. Final no-live close
    forces native checkpoint
    proof for retained page-version WAL
    after active pins release, restores the 12 KiB redo startup prefix if
@@ -5209,10 +5212,11 @@ Minimum suites before support can be claimed:
     native file-op marker drains only after final no-live close,
   - after representative `CREATE OR REPLACE TABLE` native old-table
     replacement but before ownerless dictionary finish; hook coverage proves
-    live-peer cleanup remains busy until no-live recovery and recovered
+    live-peer cleanup can finish the dead dictionary generation, recovered
     replacement native files, old-column/index absence, new-column/index
     metadata, empty replacement rowset, post-recovery writes, ownerless/native
-    reopen, and forced `.shm` rebuild remain correct,
+    reopen, and forced `.shm` rebuild remain correct, and the native file-op
+    marker drains only after final no-live close,
   - after representative `CREATE OR REPLACE TABLE ... LIKE` and
     `CREATE OR REPLACE TABLE ... AS SELECT` replacement-copy completion but
     before ownerless dictionary finish; hook coverage proves live-peer cleanup
