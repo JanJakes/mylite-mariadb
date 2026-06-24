@@ -1107,6 +1107,7 @@ static void test_crashed_charset_convert_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(void);
 static void test_crashed_row_format_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table(void);
+static void test_crashed_compressed_row_format_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_compressed_key_block_1_dictionary_ddl_recovers_rebuilt_table(void);
 static void test_crashed_compressed_key_block_2_dictionary_ddl_recovers_rebuilt_table(void);
 static void test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_table(void);
@@ -4999,6 +5000,13 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 &&
+        strcmp(argv[1], "dictionary-compressed-row-format-file-op-marker-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_compressed_row_format_dictionary_ddl_marks_file_op_checkpoint();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-compressed-row-format-key-block-1-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_compressed_key_block_1_dictionary_ddl_recovers_rebuilt_table();
@@ -5453,6 +5461,7 @@ int main(int argc, char **argv) {
             "dictionary-charset-convert-crash|"
             "dictionary-row-format-crash|dictionary-row-format-file-op-marker-crash|"
             "dictionary-compressed-row-format-crash|"
+            "dictionary-compressed-row-format-file-op-marker-crash|"
             "dictionary-compressed-row-format-key-block-1-crash|"
             "dictionary-compressed-row-format-key-block-2-crash|"
             "dictionary-compressed-row-format-key-block-crash|"
@@ -52787,7 +52796,9 @@ static void test_crashed_row_format_dictionary_ddl_marks_file_op_checkpoint(void
     run_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(1);
 }
 
-static void test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table(void) {
+static void run_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table(
+    int assert_marker
+) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
     char *database_path =
@@ -52881,6 +52892,9 @@ static void test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_t
     wait_for_pipe(writer_ready_pipe[0]);
     assert(kill(writer_child, SIGKILL) == 0);
     wait_for_signaled_child(writer_child, SIGKILL);
+    if (assert_marker) {
+        assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    }
 
     probe_child = fork();
     assert(probe_child >= 0);
@@ -52960,6 +52974,14 @@ static void test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_t
     free(runtime_root);
     remove_tree(root);
     free(root);
+}
+
+static void test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table(void) {
+    run_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table(0);
+}
+
+static void test_crashed_compressed_row_format_dictionary_ddl_marks_file_op_checkpoint(void) {
+    run_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table(1);
 }
 
 static void run_crashed_compressed_key_block_dictionary_ddl_case(

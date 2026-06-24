@@ -4692,7 +4692,9 @@ Tasks:
    truncate/recreate, `DROP TABLE` `FILE_DELETE`, and replacement-copy
    `CREATE OR REPLACE TABLE ... LIKE`/`CREATE OR REPLACE TABLE ... AS SELECT`
    marker coverage plus representative `ALTER TABLE ... FORCE` and
-   `ALTER TABLE ... ROW_FORMAT=DYNAMIC` rebuild marker coverage; final
+   `ALTER TABLE ... ROW_FORMAT=DYNAMIC` rebuild marker coverage, plus
+   compressed `ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8` rebuild marker coverage
+   at the same prefinish crash boundary; final
    no-live close forces native checkpoint
    proof for retained page-version WAL
    after active pins release, restores the 12 KiB redo startup prefix if
