@@ -1289,9 +1289,8 @@ static bool ownerless_page_write_history_proof_pair_handled(
   if (trx->mylite_ownerless_history_proof_rseg_page_no != page_no &&
       trx->mylite_ownerless_history_proof_undo_page_no != page_no)
     return false;
-  return trx->mylite_ownerless_page_write_publish_failed ||
-         (trx->mylite_ownerless_history_proof_rseg_published &&
-          trx->mylite_ownerless_history_proof_undo_published);
+  return trx->mylite_ownerless_history_proof_rseg_published &&
+         trx->mylite_ownerless_history_proof_undo_published;
 }
 
 static bool ownerless_page_write_requires_lock(const buf_page_t &page)
@@ -3359,6 +3358,19 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
       std::memory_order_relaxed);
   trx_t *ownerless_trx= ownerless_page_write_trx();
   const page_id_t id{bpage.id()};
+  if (ownerless_page_write_uses_transaction_release() &&
+      ownerless_page_write_publishes_with_transaction(bpage))
+  {
+    /*
+    A caller that reaches this leaf while a SQL transaction owns the user page
+    must not export the mtr image as a visible page version.  The transaction
+    COMMIT path owns the visibility boundary; ROLLBACK discards captured
+    images.
+    */
+    ownerless_page_write_note_dirty_transaction_page(bpage, true);
+    ownerless_page_write_capture_dirty_transaction_page(bpage, true);
+    return;
+  }
   if (ownerless_page_write_history_proof_pair_handled(
           ownerless_trx, id.space(), id.page_no()))
     return;

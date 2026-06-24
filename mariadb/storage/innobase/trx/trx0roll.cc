@@ -120,6 +120,17 @@ dberr_t trx_t::rollback_low(const undo_no_t *savept) noexcept
 
   error_state= DB_SUCCESS;
 
+  if (savept == nullptr &&
+      UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks()) && id != 0 &&
+      !read_only)
+  {
+    /*
+    Full rollback must publish only post-undo page images. Images captured while
+    the transaction was still applying user DML are not a rollback proof.
+    */
+    mylite_ownerless_page_images_clear();
+  }
+
   if (has_logged())
   {
     ut_ad(rsegs.m_redo.rseg || rsegs.m_noredo.rseg);
@@ -159,6 +170,19 @@ dberr_t trx_t::rollback_low(const undo_no_t *savept) noexcept
       }
       else if (!apply_online_log)
         apply_online_log= j->first->is_native_online_ddl();
+    }
+    if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks()) && id != 0 &&
+        !read_only)
+    {
+      /*
+      ROLLBACK TO SAVEPOINT rewrites pages through native undo without ending
+      the transaction. Any transaction-deferred images captured before the
+      savepoint are no longer a proof for the later COMMIT boundary. Do not
+      flush user pages here: the transaction can still roll back in full, and a
+      savepoint boundary is not a committed durable page image.
+      */
+      mylite_ownerless_page_write_publish_failed= true;
+      mylite_ownerless_page_images_clear();
     }
     MONITOR_INC(MONITOR_TRX_ROLLBACK_SAVEPOINT);
   }

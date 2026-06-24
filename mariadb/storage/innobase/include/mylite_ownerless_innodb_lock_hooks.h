@@ -215,6 +215,11 @@ typedef int (*mylite_ownerless_innodb_page_publish_callback)(
     uint32_t page_size,
     uint32_t publish_flags,
     void *context);
+typedef int (*mylite_ownerless_innodb_page_write_active_callback)(
+    uint32_t space_id,
+    uint32_t page_no,
+    int *out_active,
+    void *context);
 typedef int (*mylite_ownerless_innodb_history_proof_publish_pair_callback)(
     uint32_t space_id,
     uint32_t rseg_page_no,
@@ -291,6 +296,7 @@ void mylite_ownerless_innodb_lock_set_hooks(
     mylite_ownerless_innodb_pages_visible_callback pages_visible_hook,
     mylite_ownerless_innodb_page_publish_callback page_publish_hook,
     mylite_ownerless_innodb_page_read_callback page_read_hook,
+    mylite_ownerless_innodb_page_write_active_callback page_write_active_hook,
     mylite_ownerless_innodb_skip_external_page_refresh_callback skip_external_page_refresh_hook,
     void *context);
 void mylite_ownerless_innodb_lock_set_page_publish_batch_hooks(
@@ -469,6 +475,8 @@ void mylite_ownerless_innodb_refresh_buffer_pool_pages_native_visible_boundary(
     uint64_t visible_lsn);
 void mylite_ownerless_innodb_refresh_buffer_pool_pages_force_preserve(
     uint64_t visible_lsn);
+void mylite_ownerless_innodb_refresh_transaction_pages_from_native(
+    struct trx_t *trx);
 int mylite_ownerless_innodb_refresh_page_for_read(
     uint32_t space_id,
     uint32_t page_no,
@@ -556,6 +564,10 @@ int mylite_ownerless_innodb_publish_page_version_with_flags(
     const void *page,
     uint32_t page_size,
     uint32_t publish_flags);
+int mylite_ownerless_innodb_page_write_active(
+    uint32_t space_id,
+    uint32_t page_no,
+    int *out_active);
 int mylite_ownerless_innodb_publish_history_proof_pair(
     uint32_t space_id,
     uint32_t rseg_page_no,

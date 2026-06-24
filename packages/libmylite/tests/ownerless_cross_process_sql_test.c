@@ -2300,6 +2300,22 @@ static void ownerless_checksum_stress_retry_pause(
     unsigned attempt
 );
 static void ownerless_random_tx_stress_rows(unsigned worker_id, unsigned round, unsigned rows[3]);
+static void ownerless_random_tx_stress_capture_rows(
+    mylite_db *db,
+    const unsigned rows[3],
+    unsigned long long values[3],
+    unsigned long long versions[3]
+);
+static void assert_ownerless_random_tx_stress_rows_unchanged_after_rollback(
+    mylite_db *db,
+    unsigned worker_id,
+    unsigned round,
+    unsigned attempt,
+    const char *context,
+    const unsigned rows[3],
+    const unsigned long long before_values[3],
+    const unsigned long long before_versions[3]
+);
 static unsigned long long ownerless_random_tx_stress_delta(
     unsigned worker_id,
     unsigned round,
@@ -2310,8 +2326,10 @@ static int ownerless_random_tx_stress_exec_retryable(
     const char *sql,
     unsigned worker_id,
     unsigned round,
-    unsigned attempt
+    unsigned attempt,
+    unsigned phase
 );
+static int ownerless_random_tx_stress_trace_retries(void);
 static void ownerless_random_tx_stress_retry_pause(
     unsigned worker_id,
     unsigned round,
@@ -55692,9 +55710,14 @@ static void run_ownerless_random_tx_stress_worker(
                 ownerless_random_tx_stress_rolls_back_transaction(worker_id, round);
             const int rollback_savepoint =
                 ownerless_random_tx_stress_rolls_back_savepoint(worker_id, round);
+            unsigned long long before_values[3];
+            unsigned long long before_versions[3];
 
             ownerless_random_tx_stress_rows(worker_id, round, rows);
+            assert(query_unsigned(db, "SELECT @@in_transaction") == 0U);
+            ownerless_random_tx_stress_capture_rows(db, rows, before_values, before_versions);
             exec_ok(db, "START TRANSACTION");
+            assert(query_unsigned(db, "SELECT @@in_transaction") == 1U);
             assert(
                 snprintf(
                     sql,
@@ -55706,8 +55729,25 @@ static void run_ownerless_random_tx_stress_worker(
                     rows[0]
                 ) > 0
             );
-            if (!ownerless_random_tx_stress_exec_retryable(db, sql, worker_id, round, attempt)) {
+            if (!ownerless_random_tx_stress_exec_retryable(
+                    db,
+                    sql,
+                    worker_id,
+                    round,
+                    attempt,
+                    0U
+                )) {
                 exec_ok(db, "ROLLBACK");
+                assert_ownerless_random_tx_stress_rows_unchanged_after_rollback(
+                    db,
+                    worker_id,
+                    round,
+                    attempt,
+                    "retry-phase-0",
+                    rows,
+                    before_values,
+                    before_versions
+                );
                 ownerless_random_tx_stress_retry_pause(worker_id, round, attempt);
                 continue;
             }
@@ -55724,8 +55764,25 @@ static void run_ownerless_random_tx_stress_worker(
                     rows[1]
                 ) > 0
             );
-            if (!ownerless_random_tx_stress_exec_retryable(db, sql, worker_id, round, attempt)) {
+            if (!ownerless_random_tx_stress_exec_retryable(
+                    db,
+                    sql,
+                    worker_id,
+                    round,
+                    attempt,
+                    1U
+                )) {
                 exec_ok(db, "ROLLBACK");
+                assert_ownerless_random_tx_stress_rows_unchanged_after_rollback(
+                    db,
+                    worker_id,
+                    round,
+                    attempt,
+                    "retry-phase-1",
+                    rows,
+                    before_values,
+                    before_versions
+                );
                 ownerless_random_tx_stress_retry_pause(worker_id, round, attempt);
                 continue;
             }
@@ -55745,8 +55802,25 @@ static void run_ownerless_random_tx_stress_worker(
                     rows[2]
                 ) > 0
             );
-            if (!ownerless_random_tx_stress_exec_retryable(db, sql, worker_id, round, attempt)) {
+            if (!ownerless_random_tx_stress_exec_retryable(
+                    db,
+                    sql,
+                    worker_id,
+                    round,
+                    attempt,
+                    2U
+                )) {
                 exec_ok(db, "ROLLBACK");
+                assert_ownerless_random_tx_stress_rows_unchanged_after_rollback(
+                    db,
+                    worker_id,
+                    round,
+                    attempt,
+                    "retry-phase-2",
+                    rows,
+                    before_values,
+                    before_versions
+                );
                 ownerless_random_tx_stress_retry_pause(worker_id, round, attempt);
                 continue;
             }
@@ -55757,7 +55831,38 @@ static void run_ownerless_random_tx_stress_worker(
                     MYLITE_TEST_RANDOM_TX_STRESS_ROW_COUNT
                 );
             }
-            exec_ok(db, rollback_transaction ? "ROLLBACK" : "COMMIT");
+            const char *transaction_end_sql = rollback_transaction ? "ROLLBACK" : "COMMIT";
+
+            assert(query_unsigned(db, "SELECT @@in_transaction") == 1U);
+            exec_ok(db, transaction_end_sql);
+            if (rollback_transaction) {
+                assert_ownerless_random_tx_stress_rows_unchanged_after_rollback(
+                    db,
+                    worker_id,
+                    round,
+                    attempt,
+                    "final",
+                    rows,
+                    before_values,
+                    before_versions
+                );
+            }
+            if (ownerless_random_tx_stress_trace_retries()) {
+                fprintf(
+                    stderr,
+                    "ownerless random tx stress round end: worker=%u round=%u "
+                    "attempt=%u end=%s rows=%u,%u,%u rollback_savepoint=%d\n",
+                    worker_id,
+                    round,
+                    attempt,
+                    transaction_end_sql,
+                    rows[0],
+                    rows[1],
+                    rows[2],
+                    rollback_savepoint
+                );
+                fflush(stderr);
+            }
             round_finished = 1;
             break;
         }
@@ -56381,6 +56486,105 @@ static void ownerless_random_tx_stress_rows(unsigned worker_id, unsigned round, 
     }
 }
 
+static void ownerless_random_tx_stress_capture_rows(
+    mylite_db *db,
+    const unsigned rows[3],
+    unsigned long long values[3],
+    unsigned long long versions[3]
+) {
+    char sql[128];
+
+    assert(db != NULL);
+    assert(rows != NULL);
+    assert(values != NULL);
+    assert(versions != NULL);
+
+    for (unsigned index = 0U; index < 3U; ++index) {
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "SELECT value FROM app.ownerless_random_tx_stress WHERE id = %u",
+                rows[index]
+            ) > 0
+        );
+        values[index] = query_unsigned(db, sql);
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "SELECT version FROM app.ownerless_random_tx_stress WHERE id = %u",
+                rows[index]
+            ) > 0
+        );
+        versions[index] = query_unsigned(db, sql);
+    }
+}
+
+static void assert_ownerless_random_tx_stress_rows_unchanged_after_rollback(
+    mylite_db *db,
+    unsigned worker_id,
+    unsigned round,
+    unsigned attempt,
+    const char *context,
+    const unsigned rows[3],
+    const unsigned long long before_values[3],
+    const unsigned long long before_versions[3]
+) {
+    unsigned long long after_values[3];
+    unsigned long long after_versions[3];
+    char sql[160];
+
+    assert(context != NULL);
+    ownerless_random_tx_stress_capture_rows(db, rows, after_values, after_versions);
+    for (unsigned index = 0U; index < 3U; ++index) {
+        if (after_values[index] != before_values[index] ||
+            after_versions[index] != before_versions[index]) {
+            unsigned long long current_value;
+            unsigned long long current_version;
+
+            assert(
+                snprintf(
+                    sql,
+                    sizeof(sql),
+                    "SELECT value FROM app.ownerless_random_tx_stress WHERE id = %u FOR UPDATE",
+                    rows[index]
+                ) > 0
+            );
+            current_value = query_unsigned(db, sql);
+            assert(
+                snprintf(
+                    sql,
+                    sizeof(sql),
+                    "SELECT version FROM app.ownerless_random_tx_stress WHERE id = %u FOR UPDATE",
+                    rows[index]
+                ) > 0
+            );
+            current_version = query_unsigned(db, sql);
+            fprintf(
+                stderr,
+                "ownerless random tx stress rollback leak: worker=%u round=%u "
+                "attempt=%u context=%s row=%u value=%llu/%llu version=%llu/%llu "
+                "current=%llu/%llu\n",
+                worker_id,
+                round,
+                attempt,
+                context,
+                rows[index],
+                after_values[index],
+                before_values[index],
+                after_versions[index],
+                before_versions[index],
+                current_value,
+                current_version
+            );
+            fflush(stderr);
+        }
+        assert(after_values[index] == before_values[index]);
+        assert(after_versions[index] == before_versions[index]);
+    }
+}
+
 static unsigned long long ownerless_random_tx_stress_delta(
     unsigned worker_id,
     unsigned round,
@@ -56394,7 +56598,8 @@ static int ownerless_random_tx_stress_exec_retryable(
     const char *sql,
     unsigned worker_id,
     unsigned round,
-    unsigned attempt
+    unsigned attempt,
+    unsigned phase
 ) {
     unsigned mariadb_errno = 0U;
     const int result = exec_status(db, sql, &mariadb_errno);
@@ -56404,16 +56609,31 @@ static int ownerless_random_tx_stress_exec_retryable(
     }
     if (mariadb_errno == MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO ||
         mariadb_errno == MYLITE_TEST_DEADLOCK_ERRNO) {
+        if (ownerless_random_tx_stress_trace_retries()) {
+            fprintf(
+                stderr,
+                "ownerless random tx stress retryable error: worker=%u round=%u "
+                "attempt=%u phase=%u mariadb_errno=%u sql=%s\n",
+                worker_id,
+                round,
+                attempt,
+                phase,
+                mariadb_errno,
+                sql
+            );
+            fflush(stderr);
+        }
         return 0;
     }
 
     fprintf(
         stderr,
         "ownerless random tx stress unexpected error: worker=%u round=%u attempt=%u "
-        "sql=%s errcode=%d mariadb_errno=%u\n",
+        "phase=%u sql=%s errcode=%d mariadb_errno=%u\n",
         worker_id,
         round,
         attempt,
+        phase,
         sql,
         mylite_errcode(db),
         mariadb_errno
@@ -56421,6 +56641,19 @@ static int ownerless_random_tx_stress_exec_retryable(
     fflush(stderr);
     assert(0);
     return 0;
+}
+
+static int ownerless_random_tx_stress_trace_retries(void) {
+    static int initialized = 0;
+    static int enabled = 0;
+
+    if (!initialized) {
+        const char *value = getenv("MYLITE_OWNERLESS_RANDOM_TX_STRESS_TRACE_RETRIES");
+
+        enabled = value != NULL && strcmp(value, "0") != 0 && value[0] != '\0';
+        initialized = 1;
+    }
+    return enabled;
 }
 
 static void ownerless_random_tx_stress_retry_pause(

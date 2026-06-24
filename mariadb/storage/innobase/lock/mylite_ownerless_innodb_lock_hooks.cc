@@ -156,6 +156,8 @@ std::atomic<mylite_ownerless_innodb_page_publish_batch_callback>
     page_publish_batch_end_callback{nullptr};
 std::atomic<mylite_ownerless_innodb_page_read_callback>
     page_read_callback{nullptr};
+std::atomic<mylite_ownerless_innodb_page_write_active_callback>
+    page_write_active_callback{nullptr};
 std::atomic<mylite_ownerless_innodb_skip_external_page_refresh_callback>
     skip_external_page_refresh_callback{nullptr};
 std::atomic<mylite_ownerless_innodb_autoinc_read_callback>
@@ -414,6 +416,7 @@ void note_transaction_page_write_page(trx_t *trx, uint64_t packed_page);
 bool packed_page_write_transaction_gate(uint64_t packed_page);
 bool transaction_should_keep_statement_page_write(const trx_t *trx,
                                                  uint64_t packed_page);
+bool transaction_keeps_page_writes_to_end(const trx_t *trx);
 bool transaction_should_track_page_write(trx_t *trx,
                                          uint32_t space_id,
                                          uint32_t page_no);
@@ -453,6 +456,7 @@ extern "C" void mylite_ownerless_innodb_lock_set_hooks(
     mylite_ownerless_innodb_pages_visible_callback pages_visible_hook,
     mylite_ownerless_innodb_page_publish_callback page_publish_hook,
     mylite_ownerless_innodb_page_read_callback page_read_hook,
+    mylite_ownerless_innodb_page_write_active_callback page_write_active_hook,
     mylite_ownerless_innodb_skip_external_page_refresh_callback skip_external_page_refresh_hook,
     void *context)
 {
@@ -468,6 +472,7 @@ extern "C" void mylite_ownerless_innodb_lock_set_hooks(
       redo_reserve_hook == nullptr || redo_written_hook == nullptr ||
       redo_leave_hook == nullptr || pages_visible_hook == nullptr ||
       page_publish_hook == nullptr || page_read_hook == nullptr ||
+      page_write_active_hook == nullptr ||
       skip_external_page_refresh_hook == nullptr ||
       context == nullptr)
   {
@@ -478,6 +483,8 @@ extern "C" void mylite_ownerless_innodb_lock_set_hooks(
   callback_context.store(context, std::memory_order_release);
   skip_external_page_refresh_callback.store(
       skip_external_page_refresh_hook, std::memory_order_release);
+  page_write_active_callback.store(page_write_active_hook,
+                                   std::memory_order_release);
   page_read_callback.store(page_read_hook, std::memory_order_release);
   page_publish_callback.store(page_publish_hook, std::memory_order_release);
   pages_visible_callback.store(pages_visible_hook, std::memory_order_release);
@@ -575,6 +582,7 @@ extern "C" void mylite_ownerless_innodb_lock_reset_hooks(void)
   page_publish_batch_begin_callback.store(nullptr, std::memory_order_release);
   page_publish_batch_end_callback.store(nullptr, std::memory_order_release);
   page_read_callback.store(nullptr, std::memory_order_release);
+  page_write_active_callback.store(nullptr, std::memory_order_release);
   skip_external_page_refresh_callback.store(nullptr, std::memory_order_release);
   mylite_ownerless_innodb_autoinc_reset_hooks();
   page_visible_lsn= 0;
@@ -1466,6 +1474,29 @@ extern "C" int mylite_ownerless_innodb_lock_release_page_write(
               context);
 }
 
+extern "C" int mylite_ownerless_innodb_page_write_active(
+    uint32_t space_id,
+    uint32_t page_no,
+    int *out_active)
+{
+  if (out_active != nullptr)
+    *out_active= 0;
+  if (out_active == nullptr)
+    return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+  if (space_id >= SRV_TMP_SPACE_ID)
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+  if (!ownerless_lock_hooks_enabled())
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+
+  mylite_ownerless_innodb_page_write_active_callback hook=
+      page_write_active_callback.load(std::memory_order_acquire);
+  void *context= callback_context.load(std::memory_order_acquire);
+  if (hook == nullptr || context == nullptr)
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+
+  return hook(space_id, page_no, out_active, context);
+}
+
 extern "C" void mylite_ownerless_innodb_lock_release_transaction_page_writes(
     trx_t *trx)
 {
@@ -1490,6 +1521,8 @@ mylite_ownerless_innodb_lock_release_transaction_page_write_gates(trx_t *trx)
   if (trx == nullptr)
     return;
   if (!ownerless_lock_hooks_enabled())
+    return;
+  if (transaction_keeps_page_writes_to_end(trx))
     return;
 
   trx_t::mylite_ownerless_page_vector *pages=
@@ -1847,6 +1880,37 @@ static lsn_t ownerless_flush_wait_lsn(uint64_t flush_lsn)
   return lsn >= LSN_MAX - 1 ? LSN_MAX - 1 : lsn + 1;
 }
 
+static bool transaction_page_image_matches_buffer(
+    const trx_t::mylite_ownerless_page_image &image)
+{
+  const uint32_t space_id= static_cast<uint32_t>(image.packed_page >> 32);
+  const uint32_t page_no= static_cast<uint32_t>(image.packed_page);
+  bool matches= false;
+
+  mtr_t mtr(nullptr);
+  mtr.start();
+  dberr_t err= DB_SUCCESS;
+  if (buf_block_t *block= buf_page_get_gen(
+          page_id_t(space_id, page_no), 0, RW_S_LATCH, nullptr,
+          BUF_GET_IF_IN_POOL, &mtr, &err))
+  {
+    const buf_page_t &bpage= block->page;
+    const byte *source= bpage.zip.data ? bpage.zip.data : bpage.frame;
+    const bool compressed= bpage.zip.data != nullptr;
+    if (source != nullptr && bpage.in_file() &&
+        compressed == image.compressed &&
+        bpage.physical_size() == image.page_size)
+    {
+      const lsn_t page_lsn= mach_read_from_8(source + FIL_PAGE_LSN);
+      matches= page_lsn == image.page_lsn &&
+               memcmp(source, image.page.data(), image.page_size) == 0;
+    }
+  }
+  mtr.commit();
+
+  return matches;
+}
+
 extern "C" uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
     trx_t *trx, uint64_t visible_lsn)
 {
@@ -1861,7 +1925,7 @@ extern "C" uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
   std::vector<uint64_t> dirty_pages;
   collect_transaction_dirty_page_write_pages(trx, dirty_pages);
   trx_t::mylite_ownerless_page_image_vector *images=
-      trx->in_rollback ? nullptr : trx->mylite_ownerless_page_images;
+      trx->mylite_ownerless_page_images;
   if (pages.empty() && (images == nullptr || images->empty()))
     return visible_lsn;
 
@@ -1875,6 +1939,8 @@ extern "C" uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
     {
       if (image.page_lsn == 0 || image.page_size == 0 ||
           image.page.size() != image.page_size)
+        continue;
+      if (!transaction_page_image_matches_buffer(image))
         continue;
 
       const uint32_t space_id= static_cast<uint32_t>(image.packed_page >> 32);
@@ -1906,6 +1972,7 @@ extern "C" uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
       {
         mylite_ownerless_innodb_deep_perf_count(
             MYLITE_OWNERLESS_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_IMAGE_PUBLISHED);
+        trx->mylite_ownerless_page_write_published_page= true;
         if (publish_lsn > maximum_observed_lsn)
           maximum_observed_lsn= publish_lsn;
         successful_image_pages.push_back(image.packed_page);
@@ -1919,6 +1986,8 @@ extern "C" uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
                                              successful_image_pages.end()),
                                  successful_image_pages.end());
   }
+  if (trx->in_rollback)
+    return maximum_observed_lsn;
   for (uint64_t packed_page : pages)
   {
     if (!successful_image_pages.empty() &&
@@ -1933,12 +2002,13 @@ extern "C" uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
         MYLITE_OWNERLESS_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_BUFFER_ATTEMPTS);
     const lsn_t observed_lsn= buf_flush_publish_ownerless_page_to_lsn(
         space_id, page_no, static_cast<lsn_t>(visible_lsn), false,
-        &published_pages);
+        &published_pages, false);
     if (published_pages != 0)
     {
       mylite_ownerless_innodb_deep_perf_add(
           MYLITE_OWNERLESS_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_BUFFER_PUBLISHED,
           published_pages);
+      trx->mylite_ownerless_page_write_published_page= true;
       successful_image_pages.push_back(packed_page);
     }
     if (observed_lsn > maximum_observed_lsn)
@@ -1949,12 +2019,13 @@ extern "C" uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
       mylite_ownerless_innodb_deep_perf_count(
           MYLITE_OWNERLESS_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_BUFFER_RETRY_ATTEMPTS);
       const lsn_t second_observed_lsn= buf_flush_publish_ownerless_page_to_lsn(
-          space_id, page_no, observed_lsn, false, &published_pages);
+          space_id, page_no, observed_lsn, false, &published_pages, false);
       if (published_pages != 0)
       {
         mylite_ownerless_innodb_deep_perf_add(
             MYLITE_OWNERLESS_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_BUFFER_RETRY_PUBLISHED,
             published_pages);
+        trx->mylite_ownerless_page_write_published_page= true;
         successful_image_pages.push_back(packed_page);
       }
       if (second_observed_lsn > maximum_observed_lsn)
@@ -1977,6 +2048,14 @@ extern "C" uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
                                                 packed_page);
                     });
   }
+  const bool history_proof_published=
+      !trx->mylite_ownerless_history_proof_active ||
+      (trx->mylite_ownerless_history_proof_rseg_published &&
+       trx->mylite_ownerless_history_proof_undo_published);
+  if (trx->mylite_ownerless_page_write_deferred_pages_published &&
+      history_proof_published &&
+      trx->mylite_ownerless_page_write_published_page)
+    trx->mylite_ownerless_page_write_publish_failed= false;
 
   return maximum_observed_lsn;
 }
@@ -2326,6 +2405,39 @@ extern "C" void mylite_ownerless_innodb_refresh_buffer_pool_pages_force_preserve
   page_visible_lsn= visible_lsn;
   refresh_buffer_pool_pages(true, false);
   page_visible_lsn= previous_visible_lsn;
+}
+
+extern "C" void
+mylite_ownerless_innodb_refresh_transaction_pages_from_native(trx_t *trx)
+{
+  if (!mylite_ownerless_innodb_lock_has_hooks() || trx == nullptr)
+    return;
+  if (recv_recovery_is_on() || !srv_was_started)
+    return;
+
+  std::vector<uint64_t> pages;
+  collect_transaction_page_write_pages(trx, pages, true);
+  if (pages.empty())
+    return;
+
+  const uint64_t previous_visible_lsn= page_visible_lsn;
+  const bool previous_current= page_visible_lsn_is_current;
+  const bool previous_retained= page_visible_lsn_is_retained;
+  page_visible_lsn= 0;
+  page_visible_lsn_is_current= false;
+  page_visible_lsn_is_retained= false;
+
+  for (uint64_t packed_page : pages)
+  {
+    const uint32_t space_id= static_cast<uint32_t>(packed_page >> 32);
+    const uint32_t page_no= static_cast<uint32_t>(packed_page);
+    refresh_buffer_pool_page(space_id, page_no, false, true, true, false,
+                             true, false, true);
+  }
+
+  page_visible_lsn= previous_visible_lsn;
+  page_visible_lsn_is_current= previous_current;
+  page_visible_lsn_is_retained= previous_retained;
 }
 
 extern "C" int mylite_ownerless_innodb_refresh_page_for_read(
@@ -3769,14 +3881,18 @@ int refresh_page_for_write(const buf_block_t &block,
       const bool retained_current_snapshot_boundary=
           retained_user_page && page_visible_lsn_is_current &&
           page_version_snapshot_boundary;
+      const bool current_read_would_regress_physical_page=
+          page_visible_lsn_is_current && page_version_lsn < local_lsn;
       const bool visible_boundary_allowed=
           allow_visible_boundary && !page_version_retained_observed &&
           !retained_current_snapshot_boundary &&
+          !current_read_would_regress_physical_page &&
           page_version_commit_lsn != 0 &&
           page_version_commit_lsn <= page_visible_lsn;
       const bool boundary_newer_than_local=
           allow_boundary_newer && !page_version_retained_observed &&
           !retained_current_snapshot_boundary &&
+          !current_read_would_regress_physical_page &&
           page_version_commit_lsn > local_lsn;
       const bool observed_same_lsn_boundary=
           (page_version_already_observed ||
@@ -3865,6 +3981,8 @@ int refresh_page_for_write(const buf_block_t &block,
         disk_page_lsn == local_lsn && disk_page_is_visible &&
         !retained_user_page &&
         memcmp(external_page, local_page, page_size) != 0;
+    const bool current_read_disk_boundary_would_regress=
+        page_visible_lsn_is_current && disk_page_lsn < local_lsn;
     if (disk_page_newer_and_visible)
       advance_external_lsn(disk_page_lsn);
     if (buf_page_is_corrupted(true, external_page, space->flags) !=
@@ -3877,7 +3995,8 @@ int refresh_page_for_write(const buf_block_t &block,
 
     bool should_store_negative_cache= false;
     if (disk_page_newer_and_visible || disk_page_same_lsn_different_image ||
-        disk_visible_boundary_allowed)
+        (disk_visible_boundary_allowed &&
+         !current_read_disk_boundary_would_regress))
     {
       memcpy(local_page, external_page, page_size);
       ownerless_page_write_refresh_count(
@@ -4279,6 +4398,17 @@ bool transaction_should_keep_statement_page_write(const trx_t *trx,
     return false;
   return trx->mylite_ownerless_dirty_page_contains(packed_page) ||
          transaction_has_page_write_image(trx, packed_page);
+}
+
+bool transaction_keeps_page_writes_to_end(const trx_t *trx)
+{
+  if (trx == nullptr)
+    return false;
+  if (trx->mysql_thd == nullptr)
+    return !trx->auto_commit;
+  return !trx->auto_commit ||
+         (trx->mysql_thd->variables.option_bits &
+          (OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN)) != 0;
 }
 
 bool transaction_sql_is_plain_select(const trx_t *trx)

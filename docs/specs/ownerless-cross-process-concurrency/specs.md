@@ -2410,6 +2410,12 @@ Tasks:
    local writes take the global ownerless write statement lock and refresh
    current shared native state before executing, so independent process-local
    InnoDB support-page images cannot hide a peer's concurrent commit evidence.
+   Full rollback remains conservative after native undo: it releases native and
+   ownerless locks but does not publish transaction-tracked user page images,
+   flush transaction page-write pages, or force-advance the page-visible LSN as
+   a committed boundary. The `ownerless-random-tx-rollback-handoff` slice adds a
+   one-round random transaction stress guard for full-rollback and retry-attempt
+   leakage.
    If that global statement byte is held by a peer writer that is waiting on
    this transaction's shared InnoDB or page-write lock, the transaction end can
    proceed after the shared registry proves the blocker relationship, allowing
@@ -4298,7 +4304,9 @@ Tasks:
    partitions, savepoint rollback, full transaction rollback, bounded rollback
    and retry for MariaDB lock-wait/deadlock errors, a live aggregate reader, final
    sum/version/weighted-sum oracles, and forced `.shm` rebuild plus native
-   exclusive reopen checks. The `ownerless-random-tx-trace-export` slice adds
+   exclusive reopen checks. A focused three-round registered guard now keeps the
+   rollback/retry handoff failure visible in the normal production ownerless SQL
+   CTest set. The `ownerless-random-tx-trace-export` slice adds
    `tools/ownerless-random-tx-trace`, which emits schema, per-worker SQL, an
    expected aggregate oracle, and a manifest for external MariaDB/RQG-style
    runners using the same deterministic random transaction schedule when
@@ -7027,6 +7035,25 @@ subsystems that this mode needs:
   Focused gating coverage proves active live writers, including idle explicit
   transactions between statements, and active snapshot pins keep WAL retained
   before close.
+  The random transaction rollback handoff slice closes the highest-risk
+  remaining transaction-boundary hole for shared-table ownerless stress:
+  explicit transactions retain page-write ownership until transaction end,
+  active page-write pages are skipped by background publication, COMMIT
+  publishes only validated transaction page images plus rollback-segment/undo
+  history proof, and full ROLLBACK refreshes tracked transaction pages from
+  native storage instead of publishing rollback images or advancing visible
+  LSN. SQL-layer rollback with local writes clears page-version read state and
+  installs a native-read fence, while reader-only no-live close retains peer
+  WAL appended after that runtime opened so later startup/rebuild can
+  materialize the native boundary. Focused production coverage includes the
+  explicit transaction history-proof selectors, uncommitted-peer-hidden,
+  registered three-round random rollback handoff CTest, adjacent savepoint,
+  deadlock, and commit-race commands, 100 traced and 50 untraced direct
+  three-round random stress loops, reduced transaction stress, six-round random
+  stress, and one default random stress pass. This is transaction rollback and
+  handoff evidence only; broader redo/checkpoint reconciliation, arbitrary DDL
+  file-lifecycle recovery, active-reader pressure policy breadth, SQL-level
+  table-lock fault injection, and external MariaDB/RQG stress remain open.
 - The feature may force ownerless mode to be InnoDB-only for a long time.
 - Bugs are likely to be corruption bugs, not simple query failures.
 - Network filesystems should remain unsupported unless a later design proves

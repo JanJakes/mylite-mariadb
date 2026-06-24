@@ -353,6 +353,16 @@ if(BUILD_TESTING)
       NAME libmylite.ownerless-single-owner-foreground-reclaim-peer-history
       COMMAND mylite_ownerless_cross_process_sql_test single-owner-foreground-reclaim-peer-history
     )
+    add_test(
+      NAME libmylite.ownerless-random-transaction-rollback-handoff
+      COMMAND
+        ${CMAKE_COMMAND}
+        -E
+        env
+        MYLITE_OWNERLESS_RANDOM_TX_STRESS_ROUNDS=3
+        $<TARGET_FILE:mylite_ownerless_cross_process_sql_test>
+        random-tx-stress
+    )
     if(MYLITE_ENABLE_OWNERLESS_STRESS_TESTS)
       add_test(
         NAME libmylite.ownerless-cross-process-stress
@@ -685,6 +695,10 @@ if(BUILD_TESTING)
     set_tests_properties(libmylite.ownerless-single-owner-foreground-reclaim-peer-history PROPERTIES
       LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
       TIMEOUT 90
+    )
+    set_tests_properties(libmylite.ownerless-random-transaction-rollback-handoff PROPERTIES
+      LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
+      TIMEOUT 120
     )
     if(MYLITE_ENABLE_OWNERLESS_STRESS_TESTS)
       set_tests_properties(libmylite.ownerless-cross-process-stress PROPERTIES

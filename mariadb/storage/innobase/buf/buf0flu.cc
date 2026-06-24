@@ -77,6 +77,8 @@ static std::atomic<uint64_t> buf_flush_ownerless_identity_slots
 static fil_node_t *buf_flush_ownerless_find_file_node_for_page(
     fil_space_t &space, uint32_t *page_no);
 static bool buf_flush_ownerless_can_publish_dirty_page(const byte *page);
+static bool buf_flush_ownerless_page_write_active(
+    uint32_t space_id, uint32_t page_no) noexcept;
 static void buf_flush_ownerless_count_flushed_page_type(
     uint16_t page_type) noexcept;
 static void buf_flush_ownerless_count_flushed_page_identity(
@@ -3319,7 +3321,9 @@ void buf_flush_publish_ownerless_pages_to_lsn(lsn_t visible_lsn) noexcept
       const lsn_t page_lsn=
         mach_read_from_8(my_assume_aligned<8>(FIL_PAGE_LSN + page));
       if (page_lsn != 0 && page_lsn <= visible_lsn &&
-          buf_flush_ownerless_can_publish_dirty_page(page))
+          buf_flush_ownerless_can_publish_dirty_page(page) &&
+          !buf_flush_ownerless_page_write_active(
+              bpage->id().space(), bpage->id().page_no()))
       {
         ownerless_page_version version;
         version.space_id= bpage->id().space();
@@ -3388,6 +3392,15 @@ static bool buf_flush_ownerless_can_publish_dirty_page(const byte *page)
   default:
     return false;
   }
+}
+
+static bool buf_flush_ownerless_page_write_active(
+    uint32_t space_id, uint32_t page_no) noexcept
+{
+  int active= 0;
+  const int result= mylite_ownerless_innodb_page_write_active(
+      space_id, page_no, &active);
+  return result != MYLITE_OWNERLESS_INNODB_LOCK_OK || active != 0;
 }
 
 extern "C" void mylite_ownerless_innodb_deep_reset_flush_identity_stats(void)
@@ -3572,7 +3585,8 @@ static void buf_flush_ownerless_count_flushed_page_identity(
 
 lsn_t buf_flush_publish_ownerless_page_to_lsn(
     uint32_t space_id, uint32_t page_no, lsn_t visible_lsn,
-    bool native_support_only, uint64_t *published_pages) noexcept
+    bool native_support_only, uint64_t *published_pages,
+    bool skip_active_page_write) noexcept
 {
   if (visible_lsn == 0 || recv_recovery_is_on())
     return 0;
@@ -3630,6 +3644,8 @@ lsn_t buf_flush_publish_ownerless_page_to_lsn(
     const lsn_t page_lsn= mach_read_from_8(page + FIL_PAGE_LSN);
     if (read_space_id == space_id && read_page_no == page_no &&
         page_lsn != 0 &&
+        (!skip_active_page_write ||
+         !buf_flush_ownerless_page_write_active(space_id, page_no)) &&
         (!native_support_only ||
          buf_flush_ownerless_can_publish_dirty_page(page)))
     {

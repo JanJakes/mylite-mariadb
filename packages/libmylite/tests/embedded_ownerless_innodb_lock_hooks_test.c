@@ -186,6 +186,12 @@ static int page_read_hook(
     uint32_t *out_record_flags,
     void *context
 );
+static int page_write_active_hook(
+    uint32_t space_id,
+    uint32_t page_no,
+    int *out_active,
+    void *context
+);
 static int skip_external_page_refresh_hook(void *context);
 
 int main(void) {
@@ -602,6 +608,7 @@ static void install_page_hooks(page_visibility_state *state) {
         pages_visible_hook,
         page_publish_hook,
         page_read_hook,
+        page_write_active_hook,
         skip_external_page_refresh_hook,
         state
     );
@@ -1027,6 +1034,20 @@ static int page_read_hook(
     *out_page_lsn = max_commit_lsn;
     *out_commit_lsn = max_commit_lsn;
     *out_record_flags = 0U;
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
+static int page_write_active_hook(
+    uint32_t space_id,
+    uint32_t page_no,
+    int *out_active,
+    void *context
+) {
+    (void)space_id;
+    (void)page_no;
+    (void)context;
+    assert(out_active != NULL);
+    *out_active = 0;
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
 }
 

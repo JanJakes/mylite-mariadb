@@ -787,6 +787,14 @@ public:
     mylite_ownerless_native_support_page_write_last_hit= 0;
     mylite_ownerless_native_support_page_write_last_hit_valid= false;
   }
+  /** Clear transaction-deferred page images if allocated. */
+  void mylite_ownerless_page_images_clear() noexcept
+  {
+    if (mylite_ownerless_page_images != nullptr)
+      mylite_ownerless_page_images->clear();
+    mylite_ownerless_page_image_last_hit_index= 0;
+    mylite_ownerless_page_image_last_hit_valid= false;
+  }
   /** Clear tracked ownerless modified pages if the vector was allocated. */
   void mylite_ownerless_modified_pages_clear() noexcept
   {
@@ -798,14 +806,11 @@ public:
       mylite_ownerless_modified_page_set->clear();
     if (mylite_ownerless_dirty_page_set != nullptr)
       mylite_ownerless_dirty_page_set->clear();
-    if (mylite_ownerless_page_images != nullptr)
-      mylite_ownerless_page_images->clear();
+    mylite_ownerless_page_images_clear();
     mylite_ownerless_modified_page_last_hit= 0;
     mylite_ownerless_dirty_page_last_hit= 0;
-    mylite_ownerless_page_image_last_hit_index= 0;
     mylite_ownerless_modified_page_last_hit_valid= false;
     mylite_ownerless_dirty_page_last_hit_valid= false;
-    mylite_ownerless_page_image_last_hit_valid= false;
     mylite_ownerless_native_support_page_write_pages_clear();
   }
   /** Whether ownerless page-write acquisition waited before a preread imported
