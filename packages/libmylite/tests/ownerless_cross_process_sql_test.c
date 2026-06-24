@@ -809,6 +809,7 @@ static void test_ownerless_native_file_op_marker_drains_after_single_owner_expli
     void
 );
 static void test_ownerless_explicit_dml_rollback_discards_file_op_marker(void);
+static void test_ownerless_explicit_dml_savepoint_discards_file_op_marker(void);
 static void test_ownerless_multi_peer_explicit_dml_marker_drain(void);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void test_ownerless_file_modify_redo_observed_after_checkpointed_dml(void);
@@ -4066,6 +4067,10 @@ int main(int argc, char **argv) {
         test_ownerless_explicit_dml_rollback_discards_file_op_marker();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "native-explicit-dml-savepoint-file-op-marker-discard") == 0) {
+        test_ownerless_explicit_dml_savepoint_discards_file_op_marker();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "native-explicit-dml-deadlock-file-op-marker-discard") == 0) {
         test_ownerless_explicit_dml_deadlock_discards_file_op_marker();
         return 0;
@@ -5300,6 +5305,7 @@ int main(int argc, char **argv) {
             "native-killed-uncommitted-dml-file-op-marker-recovery|"
             "native-single-owner-explicit-dml-file-op-marker-drain|"
             "native-explicit-dml-rollback-file-op-marker-discard|"
+            "native-explicit-dml-savepoint-file-op-marker-discard|"
             "native-explicit-dml-deadlock-file-op-marker-discard|"
             "native-multi-peer-explicit-dml-file-op-marker-drain|"
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
@@ -5881,6 +5887,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
         test_ownerless_native_file_op_marker_drains_after_single_owner_explicit_transaction_dml
     ),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_explicit_dml_rollback_discards_file_op_marker),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_explicit_dml_savepoint_discards_file_op_marker),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_explicit_dml_deadlock_discards_file_op_marker),
     {
         .name = "test_ownerless_native_dml_marker_drains_after_multi_peer_explicit_transaction_dml",
@@ -10431,6 +10438,120 @@ static void test_ownerless_explicit_dml_rollback_discards_file_op_marker(void) {
     );
     assert(
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_explicit_dml_rollback_marker") ==
+        12U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_explicit_dml_savepoint_discards_file_op_marker(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-explicit-dml-savepoint-marker.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_explicit_dml_savepoint_marker ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "payload VARBINARY(256) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_explicit_dml_savepoint_marker VALUES "
+        "(1, 10, REPEAT('a', 256))"
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_explicit_dml_savepoint_marker") ==
+        10U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(mylite_ownerless_innodb_make_checkpoint() == MYLITE_TEST_OWNERLESS_INNODB_LOCK_OK);
+    (void)mylite_ownerless_innodb_take_file_op_redo();
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+
+    exec_ok(db, "START TRANSACTION");
+    exec_ok(db, "SAVEPOINT ownerless_dml_marker_start");
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_explicit_dml_savepoint_marker "
+        "SET value = 11, payload = REPEAT('b', 256) "
+        "WHERE id = 1"
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(mylite_ownerless_innodb_take_file_op_redo());
+    mylite_ownerless_innodb_note_file_op_redo();
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_explicit_dml_savepoint_marker") ==
+        11U
+    );
+
+    exec_ok(db, "ROLLBACK TO SAVEPOINT ownerless_dml_marker_start");
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(!mylite_ownerless_innodb_take_file_op_redo());
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_explicit_dml_savepoint_marker") ==
+        10U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.ownerless_explicit_dml_savepoint_marker"
+        ) == (unsigned)'a'
+    );
+
+    exec_ok(db, "COMMIT");
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_explicit_dml_savepoint_marker") ==
+        10U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.ownerless_explicit_dml_savepoint_marker"
+        ) == (unsigned)'a'
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_explicit_dml_savepoint_marker "
+        "SET value = 12 "
+        "WHERE id = 1"
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_explicit_dml_savepoint_marker") ==
         12U
     );
     assert(mylite_close(db) == MYLITE_OK);

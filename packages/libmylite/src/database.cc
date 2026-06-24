@@ -1562,6 +1562,11 @@ struct OwnerlessInsertAutoIncrementCacheEntry {
     bool has_auto_increment = true;
 };
 
+struct OwnerlessSavepointWriteState {
+    std::string name;
+    bool had_local_write = false;
+};
+
 enum class OwnerlessTransactionIsolation {
     ReadUncommitted,
     ReadCommitted,
@@ -1624,6 +1629,7 @@ struct mylite_db {
         ownerless_table_referential_constraint_cache;
     std::vector<OwnerlessTableTriggerCacheEntry> ownerless_table_trigger_cache;
     std::vector<OwnerlessInsertAutoIncrementCacheEntry> ownerless_insert_auto_increment_cache;
+    std::vector<OwnerlessSavepointWriteState> ownerless_transaction_savepoints;
     unsigned ownerless_statement_lock_wait_timeout_ms = k_statement_lock_wait_timeout_ms;
     unsigned ownerless_active_page_visibility_statement_count = 0;
     OwnerlessTransactionIsolation ownerless_session_transaction_isolation =
@@ -2222,6 +2228,12 @@ int ownerless_dictionary_result_from_state_result(int state_result);
 bool ownerless_connection_is_in_explicit_transaction(const mylite_db &db);
 bool ownerless_transaction_has_local_write_or_locking_read(const mylite_db &db);
 bool ownerless_connection_allows_global_refresh(const mylite_db &db, bool allow_page_version_reads);
+void reset_ownerless_transaction_savepoints(mylite_db &db);
+std::string ownerless_savepoint_name_from_statement(const SqlPolicyTokens &tokens);
+void update_ownerless_savepoint_state_after_successful_sql(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
 bool statement_allows_ownerless_page_version_reads(const SqlPolicyTokens &tokens);
 bool statement_is_tableless_ownerless_plain_read(const SqlPolicyTokens &tokens);
 bool ownerless_select_statement_has_table_reference(const SqlPolicyTokens &tokens);
@@ -8769,6 +8781,7 @@ int rollback_active_transaction(mylite_db &db) {
         set_ownerless_explicit_transaction_active(db, false);
         db.ownerless_transaction_has_local_write = false;
         db.ownerless_transaction_has_locking_read = false;
+        reset_ownerless_transaction_savepoints(db);
         reset_ownerless_transaction_visible_fast_proof(db);
         db.ownerless_transaction_snapshot_visible_lsn = 0;
         db.ownerless_transaction_snapshot_visibility_pinned = false;
@@ -15811,6 +15824,113 @@ bool ownerless_transaction_has_local_write_or_locking_read(const mylite_db &db) 
            !db.ownerless_page_write_trx_ids.empty();
 }
 
+void reset_ownerless_transaction_savepoints(mylite_db &db) {
+    db.ownerless_transaction_savepoints.clear();
+}
+
+std::string ownerless_savepoint_name_from_statement(const SqlPolicyTokens &tokens) {
+    const std::string_view first = identifier_token_at(tokens, 0);
+    if (token_equals(first, "SAVEPOINT")) {
+        return ownerless_normalized_identifier(identifier_token_at(tokens, 1));
+    }
+    if (token_equals(first, "RELEASE") &&
+        token_equals(identifier_token_at(tokens, 1), "SAVEPOINT")) {
+        return ownerless_normalized_identifier(identifier_token_at(tokens, 2));
+    }
+    if (!token_equals(first, "ROLLBACK")) {
+        return {};
+    }
+
+    for (std::size_t index = 1U;; ++index) {
+        const std::string_view token = identifier_token_at(tokens, index);
+        if (token.empty()) {
+            return {};
+        }
+        if (!token_equals(token, "TO")) {
+            continue;
+        }
+        std::size_t name_index = index + 1U;
+        if (token_equals(identifier_token_at(tokens, name_index), "SAVEPOINT")) {
+            ++name_index;
+        }
+        return ownerless_normalized_identifier(identifier_token_at(tokens, name_index));
+    }
+}
+
+void update_ownerless_savepoint_state_after_successful_sql(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    if (!ownerless_connection_is_in_explicit_transaction(db)) {
+        return;
+    }
+
+    const std::string_view first = identifier_token_at(tokens, 0);
+    if (token_equals(first, "SAVEPOINT")) {
+        const std::string name = ownerless_savepoint_name_from_statement(tokens);
+        if (name.empty()) {
+            return;
+        }
+        for (auto it = db.ownerless_transaction_savepoints.begin();
+             it != db.ownerless_transaction_savepoints.end();
+             ++it) {
+            if (it->name == name) {
+                db.ownerless_transaction_savepoints.erase(it);
+                break;
+            }
+        }
+        db.ownerless_transaction_savepoints.push_back(
+            {name, db.ownerless_transaction_has_local_write}
+        );
+        return;
+    }
+
+    if (token_equals(first, "ROLLBACK")) {
+        const std::string name = ownerless_savepoint_name_from_statement(tokens);
+        if (name.empty()) {
+            return;
+        }
+        for (std::size_t index = db.ownerless_transaction_savepoints.size(); index > 0U; --index) {
+            if (db.ownerless_transaction_savepoints[index - 1U].name != name) {
+                continue;
+            }
+            const bool restored_local_write =
+                db.ownerless_transaction_savepoints[index - 1U].had_local_write;
+            const bool rolled_back_local_write =
+                db.ownerless_transaction_has_local_write && !restored_local_write;
+            db.ownerless_transaction_savepoints.erase(
+                db.ownerless_transaction_savepoints.begin() + static_cast<std::ptrdiff_t>(index),
+                db.ownerless_transaction_savepoints.end()
+            );
+            db.ownerless_transaction_has_local_write = restored_local_write;
+            discard_ownerless_native_file_op_redo_after_rolled_back_write(
+                db,
+                rolled_back_local_write
+            );
+            return;
+        }
+        return;
+    }
+
+    if (token_equals(first, "RELEASE")) {
+        const std::string name = ownerless_savepoint_name_from_statement(tokens);
+        if (name.empty()) {
+            return;
+        }
+        for (std::size_t index = db.ownerless_transaction_savepoints.size(); index > 0U; --index) {
+            if (db.ownerless_transaction_savepoints[index - 1U].name != name) {
+                continue;
+            }
+            db.ownerless_transaction_savepoints.erase(
+                db.ownerless_transaction_savepoints.begin() +
+                    static_cast<std::ptrdiff_t>(index - 1U),
+                db.ownerless_transaction_savepoints.end()
+            );
+            return;
+        }
+    }
+}
+
 void reset_ownerless_transaction_visible_fast_proof(mylite_db &db) {
     db.ownerless_transaction_visible_fast_commit_candidate = false;
     db.ownerless_transaction_visible_fast_commit_disqualified = false;
@@ -15918,6 +16038,7 @@ int update_ownerless_transaction_state_after_successful_sql(
         set_ownerless_explicit_transaction_active(db, true);
         db.ownerless_transaction_has_local_write = false;
         db.ownerless_transaction_has_locking_read = false;
+        reset_ownerless_transaction_savepoints(db);
         reset_ownerless_transaction_visible_fast_proof(db);
         db.ownerless_transaction_snapshot_visible_lsn =
             consistent_snapshot && db.ownerless_transaction_snapshot_pin_registered
@@ -15942,12 +16063,14 @@ int update_ownerless_transaction_state_after_successful_sql(
         db.ownerless_active_transaction_isolation = db.ownerless_session_transaction_isolation;
         db.ownerless_transaction_has_local_write = false;
         db.ownerless_transaction_has_locking_read = false;
+        reset_ownerless_transaction_savepoints(db);
         reset_ownerless_transaction_visible_fast_proof(db);
         db.ownerless_transaction_snapshot_visible_lsn = 0;
         db.ownerless_transaction_snapshot_visibility_pinned = false;
         return MYLITE_OK;
     }
     if (ownerless_connection_is_in_explicit_transaction(db)) {
+        update_ownerless_savepoint_state_after_successful_sql(db, tokens);
         if (statement_writes) {
             db.ownerless_transaction_has_local_write = true;
             if (db.ownerless_rw_open && !db.readonly_open &&
@@ -15968,6 +16091,7 @@ int update_ownerless_transaction_state_after_successful_sql(
         set_ownerless_explicit_transaction_active(db, false);
         db.ownerless_transaction_has_local_write = false;
         db.ownerless_transaction_has_locking_read = false;
+        reset_ownerless_transaction_savepoints(db);
         reset_ownerless_transaction_visible_fast_proof(db);
         db.ownerless_transaction_snapshot_visible_lsn = 0;
         db.ownerless_transaction_snapshot_visibility_pinned = false;

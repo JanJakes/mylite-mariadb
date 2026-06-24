@@ -187,21 +187,24 @@ profile.
 - The successful `COMMIT` sets durable DML file-op checkpoint-needed evidence.
 - The successful rollback follow-up proves rolled-back explicit DML leaves that
   committed-DML marker clear and clears stale process-local file-op evidence.
+- The savepoint follow-up proves DML rolled back by `ROLLBACK TO SAVEPOINT`
+  before any earlier local write survives does not publish committed-DML marker
+  evidence at the later `COMMIT`.
 - Final no-live ownerless close clears the marker only after native checkpoint
   proof succeeds.
 - Committed data remains readable after forced `.shm` rebuild and ordinary
   native reopen.
 - Autocommit DML marker behavior remains covered.
 - Docs describe this as bounded explicit transaction commit marker coverage,
-  with broader DML-origin, deadlock/crash, killed-transaction, savepoint, and
+  with broader DML-origin, crash, killed-transaction, killed-session savepoint, and
   concurrent-writer matrices still planned.
 
 ## Risks
 
 - The marker is type-agnostic, so the `FILE_MODIFY` conclusion depends on the
   source-backed checkpointed file-per-table DML setup.
-- Deadlock, killed explicit-transaction, and crash windows remain unproven by
-  this slice.
+- Deadlock and savepoint rollback outcomes are covered by follow-up slices;
+  killed explicit-transaction and crash windows remain unproven by this slice.
 - Multi-peer explicit DML marker coverage is bounded to the idle-peer proof
   split case; concurrent-writer and crash outcomes remain unproven.
 - Broader native redo/checkpoint reconciliation, DDL/file-lifecycle recovery,

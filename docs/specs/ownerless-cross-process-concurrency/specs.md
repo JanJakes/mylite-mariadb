@@ -4730,6 +4730,12 @@ Tasks:
    separate outcome: it leaves both native file-op markers clear, consumes the
    process-local ownerless InnoDB file-op redo flag, and preserves the
    pre-transaction row after forced `.shm` rebuild plus ordinary native reopen.
+   `ROLLBACK TO SAVEPOINT` after checkpointed local DML now restores
+   MyLite's handle-local write-state from the savepoint boundary, consumes
+   process-local file-op redo when no earlier local write survives the
+   rollback, leaves both file-op markers clear after the later `COMMIT`, and
+   preserves the pre-savepoint row through forced `.shm` rebuild plus ordinary
+   native reopen.
    Deadlock victims after local explicit-transaction writes now reuse that
    discard rule after MyLite's internal deadlock rollback, while accepted 1205
    timeout victims prove the same discard after explicit rollback; focused
@@ -4738,8 +4744,8 @@ Tasks:
    later no-live ownerless close after both children are reaped drains
    committed DML marker/WAL evidence after native checkpoint proof.
    That closes the focused checkpointed representative DML commit marker and
-   rollback/deadlock classification gaps, not the broader DML-origin
-   `FILE_MODIFY`, crash, killed-transaction, savepoint, or
+   rollback/deadlock/savepoint classification gaps, not the broader DML-origin
+   `FILE_MODIFY`, crash, killed-transaction, or
    concurrent-writer explicit-transaction matrices.
    The no-argument
    aggregate harness remains
