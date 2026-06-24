@@ -41985,7 +41985,6 @@ static void test_crashed_rename_dictionary_ddl_blocks_peer_cleanup_until_reopen_
     int peer_release_pipe[2];
     pid_t writer_child;
     pid_t peer_child;
-    pid_t probe_child;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -42040,16 +42039,6 @@ static void test_crashed_rename_dictionary_ddl_blocks_peer_cleanup_until_reopen_
     wait_for_signaled_child(writer_child, SIGKILL);
     assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
-    probe_child = fork();
-    assert(probe_child >= 0);
-    if (probe_child == 0) {
-        assert_ownerless_open_returns_busy(paths);
-    }
-    wait_for_child(probe_child);
-
-    signal_pipe(peer_release_pipe[1]);
-    wait_for_child(peer_child);
-
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
         query_unsigned(
@@ -42068,6 +42057,16 @@ static void test_crashed_rename_dictionary_ddl_blocks_peer_cleanup_until_reopen_
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_rename_crash_target") == 10U);
     exec_ok(db, "INSERT INTO app.ownerless_rename_crash_target VALUES (2, 20)");
     assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    signal_pipe(peer_release_pipe[1]);
+    wait_for_child(peer_child);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_rename_crash_target") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_rename_crash_target") == 30U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);

@@ -4722,9 +4722,12 @@ Tasks:
    provide live-peer recovery for the copied replacement metadata.
    Replacement-copy `CREATE OR REPLACE TABLE ... AS SELECT` prefinish crash
    coverage now uses a separate recoverable dictionary marker to provide
-   live-peer recovery for the populated replacement rows. Rename, truncate,
-   drop, rebuild, schema, view, trigger, and foreign-key multi-DDL live-peer
-   recovery remain planned.
+   live-peer recovery for the populated replacement rows. Single-pair
+   same-schema `RENAME TABLE` prefinish crash coverage now uses a separate
+   recoverable dictionary marker to provide live-peer recovery for the native
+   file-move boundary while leaving cross-schema and multi-pair rename on the
+   no-live path. Truncate, drop, rebuild, schema, view, trigger, and
+   foreign-key multi-DDL live-peer recovery remain planned.
    Final no-live close
    forces native checkpoint
    proof for retained page-version WAL
@@ -7139,9 +7142,9 @@ subsystems that this mode needs:
   1. Broaden native redo/checkpoint reconciliation and live-peer
      DDL/file-lifecycle recovery beyond the now-covered plain/table-copy
      `CREATE TABLE`, focused CTAS, ordinary replacement, and replacement-copy
-     LIKE/CTAS prefinish boundaries, especially crash recovery for rebuilt,
-     renamed, truncated, and dropped file-per-table tablespaces while peers
-     remain live.
+     LIKE/CTAS plus single-pair same-schema rename prefinish boundaries,
+     especially crash recovery for cross-schema or multi-pair rename, rebuilt,
+     truncated, and dropped file-per-table tablespaces while peers remain live.
   2. Close remaining transaction crash windows, especially kills inside
      rollback/savepoint rollback and concurrent-writer savepoint schedules
      that combine native undo, ownerless page-write ownership, and
