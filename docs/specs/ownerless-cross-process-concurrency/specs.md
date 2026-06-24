@@ -401,6 +401,11 @@ Roles:
   the durable DML marker/WAL while that child is still an unreaped zombie, and
   proves the next ownerless opener preserves the committed row before no-live
   native proof drains the marker/WAL.
+  A paired killed-uncommitted explicit transaction case forces the same
+  post-checkpoint file-per-table DML path before `COMMIT`, kills the writer,
+  requires both native file-operation markers to remain clear, and proves
+  no-live ownerless recovery plus forced `.shm` rebuild keep the
+  pre-transaction row authoritative.
   When no-live reclaim advances the durable
   checkpoint-visible LSN, the still-existing volatile redo state is reseeded
   from that checkpoint so readers do not observe `.shm` metadata behind `.ckpt`
@@ -1675,7 +1680,10 @@ Tasks:
    variant forces that zombie writer through the post-checkpoint file-per-table
    DML marker path, proving the next ownerless opener can recover the committed
    row image and drain DML marker/WAL evidence before the parent reaps the
-   child. Durable
+   child. A paired killed-uncommitted variant forces the same file-per-table
+   DML path inside an explicit transaction before `COMMIT`, then proves no-live
+   recovery drops the interrupted row image and does not persist native
+   file-operation marker state. Durable
    rollback/recovery records are still needed before product writers can recover
    a crashed owner while other processes continue running.
 

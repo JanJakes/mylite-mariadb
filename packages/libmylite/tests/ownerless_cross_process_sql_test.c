@@ -804,6 +804,7 @@ static void test_ownerless_native_file_op_marker_recovers_from_torn_clear_record
 static void test_ownerless_native_file_op_marker_drains_after_real_sql_ddl(void);
 static void test_ownerless_native_file_op_marker_drains_after_checkpointed_dml(void);
 static void test_ownerless_killed_dml_file_op_marker_recovery(void);
+static void test_ownerless_killed_uncommitted_dml_file_op_marker_recovery(void);
 static void test_ownerless_native_file_op_marker_drains_after_single_owner_explicit_transaction_dml(
     void
 );
@@ -1128,6 +1129,7 @@ static void update_first_row_until_released(open_database_paths paths, child_pip
 static void update_first_row_without_commit_until_killed(open_database_paths paths, int ready_fd);
 static void update_first_row_and_exit(open_database_paths paths, int ready_fd);
 static void update_killed_dml_marker_row_and_exit(open_database_paths paths, int ready_fd);
+static void update_uncommitted_dml_marker_row_until_killed(open_database_paths paths, int ready_fd);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void lock_first_row_for_update_until_released(open_database_paths paths, child_pipes pipes);
 static void update_first_row_until_trx_register_fault(open_database_paths paths, int ready_fd);
@@ -4033,6 +4035,11 @@ int main(int argc, char **argv) {
         return 0;
     }
     if (argc == 2 &&
+        strcmp(argv[1], "native-killed-uncommitted-dml-file-op-marker-recovery") == 0) {
+        test_ownerless_killed_uncommitted_dml_file_op_marker_recovery();
+        return 0;
+    }
+    if (argc == 2 &&
         strcmp(argv[1], "native-single-owner-explicit-dml-file-op-marker-drain") == 0) {
         test_ownerless_native_file_op_marker_drains_after_single_owner_explicit_transaction_dml();
         return 0;
@@ -5272,6 +5279,7 @@ int main(int argc, char **argv) {
             "no-live-native-checkpoint-cutover-proof|"
             "native-file-op-marker-drain|native-dml-file-op-marker-drain|"
             "native-killed-dml-file-op-marker-recovery|"
+            "native-killed-uncommitted-dml-file-op-marker-recovery|"
             "native-single-owner-explicit-dml-file-op-marker-drain|"
             "native-explicit-dml-rollback-file-op-marker-discard|"
             "native-explicit-dml-deadlock-file-op-marker-discard|"
@@ -5850,6 +5858,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_native_file_op_marker_drains_after_real_sql_ddl),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_native_file_op_marker_drains_after_checkpointed_dml),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_killed_dml_file_op_marker_recovery),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_killed_uncommitted_dml_file_op_marker_recovery),
     OWNERLESS_SQL_TEST_CASE(
         test_ownerless_native_file_op_marker_drains_after_single_owner_explicit_transaction_dml
     ),
@@ -10064,6 +10073,142 @@ static void test_ownerless_killed_dml_file_op_marker_recovery(void) {
             "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
             "FROM app.ownerless_killed_dml_file_op_marker"
         ) == (unsigned)'b'
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+#endif
+}
+
+static void test_ownerless_killed_uncommitted_dml_file_op_marker_recovery(void) {
+#if defined(__linux__)
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-killed-uncommitted-dml-file-op-marker.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int writer_ready_pipe[2];
+    pid_t writer_child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_killed_uncommitted_dml_file_op_marker ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "payload VARBINARY(256) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_killed_uncommitted_dml_file_op_marker VALUES "
+        "(1, 10, REPEAT('a', 256))"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_killed_uncommitted_dml_file_op_marker"
+        ) == 10U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(mylite_ownerless_innodb_make_checkpoint() == MYLITE_TEST_OWNERLESS_INNODB_LOCK_OK);
+    (void)mylite_ownerless_innodb_take_file_op_redo();
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    assert(pipe(writer_ready_pipe) == 0);
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(writer_ready_pipe[0]);
+        update_uncommitted_dml_marker_row_until_killed(paths, writer_ready_pipe[1]);
+    }
+
+    close(writer_ready_pipe[1]);
+    wait_for_pipe(writer_ready_pipe[0]);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(kill(writer_child, SIGKILL) == 0);
+    wait_for_signaled_child(writer_child, SIGKILL);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_killed_uncommitted_dml_file_op_marker"
+        ) == 10U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.ownerless_killed_uncommitted_dml_file_op_marker"
+        ) == (unsigned)'a'
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert_concurrency_wal_checkpointed_eventually(database_path);
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_killed_uncommitted_dml_file_op_marker"
+        ) == 10U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.ownerless_killed_uncommitted_dml_file_op_marker"
+        ) == (unsigned)'a'
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_killed_uncommitted_dml_file_op_marker"
+        ) == 10U
+    );
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_killed_uncommitted_dml_file_op_marker "
+        "SET value = 12 "
+        "WHERE id = 1"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_killed_uncommitted_dml_file_op_marker"
+        ) == 12U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.ownerless_killed_uncommitted_dml_file_op_marker"
+        ) == (unsigned)'a'
     );
     assert(mylite_close(db) == MYLITE_OK);
 
@@ -54130,6 +54275,28 @@ static void update_killed_dml_marker_row_and_exit(open_database_paths paths, int
     assert(read_concurrency_native_dml_file_op_checkpoint_needed(paths.database_path));
     signal_pipe(ready_fd);
     _exit(0);
+}
+
+static void update_uncommitted_dml_marker_row_until_killed(
+    open_database_paths paths,
+    int ready_fd
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "START TRANSACTION");
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_killed_uncommitted_dml_file_op_marker "
+        "SET value = 11, payload = REPEAT('b', 256) "
+        "WHERE id = 1"
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(paths.database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(paths.database_path));
+    signal_pipe(ready_fd);
+    for (;;) {
+        pause();
+    }
 }
 
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
