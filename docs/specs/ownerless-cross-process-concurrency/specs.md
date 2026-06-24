@@ -2414,7 +2414,7 @@ Tasks:
    ownerless locks but does not publish transaction-tracked user page images,
    flush transaction page-write pages, or force-advance the page-visible LSN as
    a committed boundary. The `ownerless-random-tx-rollback-handoff` slice adds a
-   one-round random transaction stress guard for full-rollback and retry-attempt
+   three-round random transaction stress guard for full-rollback and retry-attempt
    leakage.
    If that global statement byte is held by a peer writer that is waiting on
    this transaction's shared InnoDB or page-write lock, the transaction end can
