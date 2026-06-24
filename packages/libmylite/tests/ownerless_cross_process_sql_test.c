@@ -53382,7 +53382,6 @@ static void run_crashed_force_rebuild_dictionary_ddl_recovers_rebuilt_table(int 
     int peer_release_pipe[2];
     pid_t writer_child;
     pid_t peer_child;
-    pid_t probe_child;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -53478,12 +53477,52 @@ static void run_crashed_force_rebuild_dictionary_ddl_recovers_rebuilt_table(int 
         assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
     }
 
-    probe_child = fork();
-    assert(probe_child >= 0);
-    if (probe_child == 0) {
-        assert_ownerless_open_returns_busy(paths);
-    }
-    wait_for_child(probe_child);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(path_exists(frm_path));
+    assert(path_exists(ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME = 'app/ownerless_force_rebuild_crash_base' "
+            "AND TABLE_ID > 0 "
+            "AND SPACE > 0"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_force_rebuild_crash_base' "
+            "AND index_name = 'ownerless_force_rebuild_crash_value_idx' "
+            "AND column_name = 'value'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_force_rebuild_crash_base") == 3U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_force_rebuild_crash_base") == 60U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(note) FROM app.ownerless_force_rebuild_crash_base") == 600U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_force_rebuild_crash_base "
+            "FORCE INDEX (ownerless_force_rebuild_crash_value_idx) "
+            "WHERE value >= 20"
+        ) == 5U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.ownerless_force_rebuild_crash_base"
+        ) == 294U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     signal_pipe(peer_release_pipe[1]);
     wait_for_child(peer_child);
@@ -53538,6 +53577,7 @@ static void run_crashed_force_rebuild_dictionary_ddl_recovers_rebuilt_table(int 
         "(4, 40, 400, REPEAT('d', 256))"
     );
     assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     assert_ownerless_force_rebuild_crash_state(
         paths,

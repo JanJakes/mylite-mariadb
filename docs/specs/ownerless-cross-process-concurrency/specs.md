@@ -4731,8 +4731,12 @@ Tasks:
    live-peer recovery for the native truncate/recreate boundary. Focused
    `DROP TABLE schema.table` prefinish crash coverage now uses a separate
    recoverable dictionary marker to provide live-peer recovery for the native
-   file-removal boundary. Multi-table and cross-schema drop, rebuild, schema,
-   view, trigger, and foreign-key multi-DDL live-peer recovery remain planned.
+   file-removal boundary. Focused `ALTER TABLE schema.table FORCE,
+   ALGORITHM=COPY, LOCK=EXCLUSIVE` prefinish crash coverage now uses a
+   separate recoverable dictionary marker to provide live-peer recovery for
+   the native copy-style rebuild boundary. Multi-table and cross-schema drop,
+   row-format rebuild, schema, view, trigger, and foreign-key multi-DDL
+   live-peer recovery remain planned.
    Final no-live close
    forces native checkpoint
    proof for retained page-version WAL
@@ -7148,11 +7152,11 @@ subsystems that this mode needs:
      DDL/file-lifecycle recovery beyond the now-covered plain/table-copy
      `CREATE TABLE`, focused CTAS, ordinary replacement, and replacement-copy
      LIKE/CTAS plus single-pair same-schema rename, focused truncate, and
-     focused drop
+     focused drop plus focused force rebuild
      prefinish boundaries,
      especially crash recovery for cross-schema or multi-pair rename, rebuilt,
-     broader truncated, and multi-table/cross-schema dropped file-per-table
-     tablespaces while peers remain live.
+     row-format-rebuilt, broader truncated, and multi-table/cross-schema
+     dropped file-per-table tablespaces while peers remain live.
   2. Close remaining transaction crash windows, especially kills inside
      rollback/savepoint rollback and concurrent-writer savepoint schedules
      that combine native undo, ownerless page-write ownership, and

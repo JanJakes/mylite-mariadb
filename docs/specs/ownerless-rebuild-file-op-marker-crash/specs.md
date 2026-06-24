@@ -17,6 +17,12 @@ killed writer must leave `concurrency/mylite-concurrency.ckpt` marked as
 needing a native file-operation checkpoint while another ownerless peer is
 still live and before no-live recovery can drain the marker.
 
+Supersession note: the later
+`docs/specs/ownerless-live-force-rebuild-recovery/specs.md` slice upgrades the
+focused force-rebuild selector from marker-only/no-live recovery to live-peer
+dictionary recovery. The row-format selector in this spec remains on the
+original no-live recovery path until a separate live row-format slice lands.
+
 ## Source Findings
 
 - MariaDB base: `mariadb-11.8.6`
@@ -92,10 +98,12 @@ recovery remains partial.
 
 ## DDL Metadata Routing Impact
 
-The dictionary-generation protocol is unchanged. The killed writer still
-leaves recovery-sensitive rebuild dictionary state that blocks cleanup while a
-live peer exists; no-live reopen remains responsible for rebuilding and
-draining it.
+The original marker-only slice left the dictionary-generation protocol
+unchanged: the killed writer still left recovery-sensitive rebuild dictionary
+state that blocked cleanup while a live peer existed, and no-live reopen
+remained responsible for rebuilding and draining it. The later
+live-force-rebuild slice supersedes that cleanup policy for the focused
+force-rebuild path; row-format rebuild remains on the original no-live path.
 
 ## Directory And Lifecycle Impact
 
@@ -175,8 +183,11 @@ enabled.
   row-format rebuild leave
   `read_concurrency_native_file_op_checkpoint_needed(database_path)` true
   before the live peer is released.
-- Live-peer cleanup remains busy while recovery-sensitive dictionary state is
-  present.
+- In the original marker-only slice, live-peer cleanup remains busy while
+  recovery-sensitive dictionary state is present. The later
+  live-force-rebuild slice supersedes this expectation for focused
+  `ALTER TABLE ... FORCE, ALGORITHM=COPY, LOCK=EXCLUSIVE`; row-format rebuild
+  remains conservative.
 - No-live ownerless recovery keeps the rebuilt table definitions and native
   files.
 - Force rebuild preserves table rows, secondary-index metadata, and later

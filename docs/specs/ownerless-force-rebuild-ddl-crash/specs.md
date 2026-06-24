@@ -10,6 +10,12 @@ but before MyLite publishes ownerless dictionary finish.
 This slice adds focused crash-boundary evidence for that native rebuild/file
 lifecycle path.
 
+Supersession note: the later
+`docs/specs/ownerless-live-force-rebuild-recovery/specs.md` slice upgrades the
+same focused `ALTER TABLE ... FORCE, ALGORITHM=COPY, LOCK=EXCLUSIVE` selector
+from no-live-only recovery to live-peer dictionary recovery. This spec remains
+historical evidence for the force-rebuild crash boundary.
+
 ## Source Findings
 
 Base: MariaDB 11.8 LTS import `mariadb-11.8.6`
@@ -53,9 +59,11 @@ Add one unsafe-hook selector:
   under the existing `dictionary-before-finish` hook,
 - kill the writer at the hook after native MariaDB/InnoDB DDL has completed but
   before ownerless dictionary finish,
-- prove an ownerless opener returns `MYLITE_BUSY` while the live peer remains,
-- release the peer and reopen ownerless read/write to rebuild volatile
-  coordination,
+- originally prove an ownerless opener returns `MYLITE_BUSY` while the live
+  peer remains; the later live-force-rebuild slice supersedes that expectation
+  for this exact statement by allowing live-peer dictionary recovery,
+- release the peer and reopen ownerless read/write to drain the native marker
+  and rebuild volatile coordination,
 - verify the recovered table has InnoDB table/space metadata, the secondary
   index is usable through `FORCE INDEX`, copied row payloads remain intact, and
   post-recovery writes succeed,
@@ -68,7 +76,9 @@ In scope:
 
 - crash-at-dictionary-before-finish coverage for a completed
   `ALTER TABLE ... FORCE, ALGORITHM=COPY` rebuild,
-- live-peer cleanup-busy behavior and no-live rebuild,
+- original live-peer cleanup-busy behavior and no-live rebuild; the later
+  live-force-rebuild slice supersedes the busy expectation for this focused
+  statement shape,
 - ownerless/native reopen of recovered table, InnoDB space metadata, secondary
   index metadata, copied payloads, and post-recovery writes.
 
@@ -118,7 +128,9 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selector reaches the dictionary fault hook and does not hang.
-- A live peer prevents cleanup until no-live recovery.
+- In the original slice, a live peer prevents cleanup until no-live recovery;
+  the later live-force-rebuild slice supersedes this for the exact focused
+  statement shape.
 - Recovered InnoDB table/space metadata is present.
 - The secondary index is visible and usable after recovery.
 - Copied payload bytes and aggregate row values survive recovery.
