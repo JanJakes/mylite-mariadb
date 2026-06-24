@@ -57,7 +57,8 @@ In scope:
 
 Out of scope:
 
-- Adding marker assertions for every compressed key-block variant.
+- Page compression, encryption, external directories, partitioned tables, and
+  general tablespace variants.
 - Changing MariaDB redo, InnoDB tablespace, MyLite WAL, or checkpoint formats.
 - Supporting unsupported compression/encryption/page-compression options.
 - External MariaDB/RQG DDL stress.
@@ -115,8 +116,8 @@ new CTest is registered only when unsafe ownerless test hooks are enabled.
 
 ## Risks And Follow-Up
 
-- This is focused `KEY_BLOCK_SIZE=8` marker evidence. The broader compressed
-  key-block marker matrix remains a follow-up if the completion gate needs
-  every key-block value at the marker boundary.
+- This is focused `KEY_BLOCK_SIZE=8` marker evidence. The deterministic
+  `KEY_BLOCK_SIZE=1`/`2`/`4`/`16` marker boundary is covered separately in
+  `docs/specs/ownerless-compressed-key-block-file-op-marker-crash/specs.md`.
 - Broader native redo/checkpoint reconciliation and DDL/file-lifecycle recovery
   remain partial.

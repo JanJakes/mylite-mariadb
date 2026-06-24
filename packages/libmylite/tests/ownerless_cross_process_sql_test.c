@@ -1110,9 +1110,13 @@ static void test_crashed_row_format_dictionary_ddl_marks_file_op_checkpoint(void
 static void test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table(void);
 static void test_crashed_compressed_row_format_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_compressed_key_block_1_dictionary_ddl_recovers_rebuilt_table(void);
+static void test_crashed_compressed_key_block_1_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_compressed_key_block_2_dictionary_ddl_recovers_rebuilt_table(void);
+static void test_crashed_compressed_key_block_2_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_table(void);
+static void test_crashed_compressed_key_block_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_compressed_key_block_16_dictionary_ddl_recovers_rebuilt_table(void);
+static void test_crashed_compressed_key_block_16_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_table_comment_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_truncate_dictionary_ddl_recovers_empty_table(void);
 static void test_crashed_truncate_dictionary_ddl_marks_file_op_checkpoint(void);
@@ -5018,9 +5022,23 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 &&
+        strcmp(argv[1], "dictionary-compressed-row-format-key-block-1-file-op-marker-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_compressed_key_block_1_dictionary_ddl_marks_file_op_checkpoint();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-compressed-row-format-key-block-2-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_compressed_key_block_2_dictionary_ddl_recovers_rebuilt_table();
+#endif
+        return 0;
+    }
+    if (argc == 2 &&
+        strcmp(argv[1], "dictionary-compressed-row-format-key-block-2-file-op-marker-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_compressed_key_block_2_dictionary_ddl_marks_file_op_checkpoint();
 #endif
         return 0;
     }
@@ -5030,9 +5048,24 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 &&
+        strcmp(argv[1], "dictionary-compressed-row-format-key-block-file-op-marker-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_compressed_key_block_dictionary_ddl_marks_file_op_checkpoint();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-compressed-row-format-key-block-16-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_compressed_key_block_16_dictionary_ddl_recovers_rebuilt_table();
+#endif
+        return 0;
+    }
+    if (argc == 2 &&
+        strcmp(argv[1], "dictionary-compressed-row-format-key-block-16-file-op-marker-crash") ==
+            0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_compressed_key_block_16_dictionary_ddl_marks_file_op_checkpoint();
 #endif
         return 0;
     }
@@ -5469,9 +5502,13 @@ int main(int argc, char **argv) {
             "dictionary-compressed-row-format-crash|"
             "dictionary-compressed-row-format-file-op-marker-crash|"
             "dictionary-compressed-row-format-key-block-1-crash|"
+            "dictionary-compressed-row-format-key-block-1-file-op-marker-crash|"
             "dictionary-compressed-row-format-key-block-2-crash|"
+            "dictionary-compressed-row-format-key-block-2-file-op-marker-crash|"
             "dictionary-compressed-row-format-key-block-crash|"
+            "dictionary-compressed-row-format-key-block-file-op-marker-crash|"
             "dictionary-compressed-row-format-key-block-16-crash|"
+            "dictionary-compressed-row-format-key-block-16-file-op-marker-crash|"
             "dictionary-table-comment-crash|"
             "dictionary-truncate-crash|"
             "dictionary-truncate-file-op-marker-crash|"
@@ -53126,7 +53163,8 @@ static void run_crashed_compressed_key_block_dictionary_ddl_case(
     const char *database_name,
     const char *table_name,
     unsigned key_block_size,
-    void (*fault_fn)(open_database_paths paths, int ready_fd)
+    void (*fault_fn)(open_database_paths paths, int ready_fd),
+    int assert_marker
 ) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -53225,6 +53263,9 @@ static void run_crashed_compressed_key_block_dictionary_ddl_case(
     wait_for_pipe(writer_ready_pipe[0]);
     assert(kill(writer_child, SIGKILL) == 0);
     wait_for_signaled_child(writer_child, SIGKILL);
+    if (assert_marker) {
+        assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    }
 
     probe_child = fork();
     assert(probe_child >= 0);
@@ -53322,7 +53363,18 @@ static void test_crashed_compressed_key_block_1_dictionary_ddl_recovers_rebuilt_
         "ownerless-dictionary-compressed-row-format-key-block-1-crash.mylite",
         "ownerless_compressed_row_format_kb1",
         1U,
-        compressed_row_format_key_block_1_until_dictionary_finish_fault
+        compressed_row_format_key_block_1_until_dictionary_finish_fault,
+        0
+    );
+}
+
+static void test_crashed_compressed_key_block_1_dictionary_ddl_marks_file_op_checkpoint(void) {
+    run_crashed_compressed_key_block_dictionary_ddl_case(
+        "ownerless-dictionary-compressed-row-format-key-block-1-marker-crash.mylite",
+        "ownerless_compressed_row_format_kb1",
+        1U,
+        compressed_row_format_key_block_1_until_dictionary_finish_fault,
+        1
     );
 }
 
@@ -53331,7 +53383,18 @@ static void test_crashed_compressed_key_block_2_dictionary_ddl_recovers_rebuilt_
         "ownerless-dictionary-compressed-row-format-key-block-2-crash.mylite",
         "ownerless_compressed_row_format_kb2",
         2U,
-        compressed_row_format_key_block_2_until_dictionary_finish_fault
+        compressed_row_format_key_block_2_until_dictionary_finish_fault,
+        0
+    );
+}
+
+static void test_crashed_compressed_key_block_2_dictionary_ddl_marks_file_op_checkpoint(void) {
+    run_crashed_compressed_key_block_dictionary_ddl_case(
+        "ownerless-dictionary-compressed-row-format-key-block-2-marker-crash.mylite",
+        "ownerless_compressed_row_format_kb2",
+        2U,
+        compressed_row_format_key_block_2_until_dictionary_finish_fault,
+        1
     );
 }
 
@@ -53340,7 +53403,18 @@ static void test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_ta
         "ownerless-dictionary-compressed-row-format-key-block-crash.mylite",
         "ownerless_compressed_row_format_kb4",
         4U,
-        compressed_row_format_key_block_until_dictionary_finish_fault
+        compressed_row_format_key_block_until_dictionary_finish_fault,
+        0
+    );
+}
+
+static void test_crashed_compressed_key_block_dictionary_ddl_marks_file_op_checkpoint(void) {
+    run_crashed_compressed_key_block_dictionary_ddl_case(
+        "ownerless-dictionary-compressed-row-format-key-block-marker-crash.mylite",
+        "ownerless_compressed_row_format_kb4",
+        4U,
+        compressed_row_format_key_block_until_dictionary_finish_fault,
+        1
     );
 }
 
@@ -53349,7 +53423,18 @@ static void test_crashed_compressed_key_block_16_dictionary_ddl_recovers_rebuilt
         "ownerless-dictionary-compressed-row-format-key-block-16-crash.mylite",
         "ownerless_compressed_row_format_kb16",
         16U,
-        compressed_row_format_key_block_16_until_dictionary_finish_fault
+        compressed_row_format_key_block_16_until_dictionary_finish_fault,
+        0
+    );
+}
+
+static void test_crashed_compressed_key_block_16_dictionary_ddl_marks_file_op_checkpoint(void) {
+    run_crashed_compressed_key_block_dictionary_ddl_case(
+        "ownerless-dictionary-compressed-row-format-key-block-16-marker-crash.mylite",
+        "ownerless_compressed_row_format_kb16",
+        16U,
+        compressed_row_format_key_block_16_until_dictionary_finish_fault,
+        1
     );
 }
 
