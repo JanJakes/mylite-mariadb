@@ -343,7 +343,8 @@ bool valid_recovery_kind(std::uint32_t recovery_kind) {
            recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_OR_REPLACE_TABLE ||
            recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_OR_REPLACE_TABLE_LIKE ||
            recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_OR_REPLACE_TABLE_SELECT ||
-           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_RENAME_TABLE;
+           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_RENAME_TABLE ||
+           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_TRUNCATE_TABLE;
 }
 
 void clear_recoverable_state(unsigned char *state) {

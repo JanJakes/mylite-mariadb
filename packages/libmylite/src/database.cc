@@ -2201,6 +2201,7 @@ bool ownerless_create_or_replace_table_recovery_statement(const SqlPolicyTokens 
 bool ownerless_create_or_replace_table_like_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_create_or_replace_table_select_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_single_schema_rename_table_recovery_statement(const SqlPolicyTokens &tokens);
+bool ownerless_truncate_table_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_stale_engine_error_allows_retry(
     const mylite_db &db,
     const SqlPolicyTokens &tokens,
@@ -15178,6 +15179,9 @@ std::uint32_t ownerless_dictionary_recovery_kind_for_statement(const SqlPolicyTo
     if (ownerless_single_schema_rename_table_recovery_statement(tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_RENAME_TABLE;
     }
+    if (ownerless_truncate_table_recovery_statement(tokens)) {
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_TRUNCATE_TABLE;
+    }
     return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE;
 }
 
@@ -15443,6 +15447,24 @@ bool ownerless_single_schema_rename_table_recovery_statement(const SqlPolicyToke
         return false;
     }
     for (std::size_t index = 9U; index < tokens.count; ++index) {
+        if (!token_equals(tokens.values[index], ";")) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool ownerless_truncate_table_recovery_statement(const SqlPolicyTokens &tokens) {
+    if (tokens.count < 5U || !token_equals(tokens.values[0], "TRUNCATE") ||
+        !token_equals(tokens.values[1], "TABLE")) {
+        return false;
+    }
+    if (!ownerless_table_identifier_token(tokens.values[2]) ||
+        !token_equals(tokens.values[3], ".") ||
+        !ownerless_table_identifier_token(tokens.values[4])) {
+        return false;
+    }
+    for (std::size_t index = 5U; index < tokens.count; ++index) {
         if (!token_equals(tokens.values[index], ";")) {
             return false;
         }
@@ -20769,7 +20791,30 @@ bool ownerless_process_owner_state_requires_recovery(
         return true;
     }
 
+    bool recovered_dictionary_owner = false;
     std::uint32_t active_count = 0;
+    /*
+      A recoverable prefinish DDL marker proves the owner reached the
+      post-MariaDB-success cleanup window; consume it before treating stale
+      owner transaction or lock records as no-live-only recovery state.
+    */
+    const int dictionary_count_result = mylite_ownerless_dictionary_state_owner_active_count(
+        cleanup.dictionary_state,
+        cleanup.dictionary_state_size,
+        owner_id,
+        &active_count
+    );
+    if (dictionary_count_result != MYLITE_OWNERLESS_DICTIONARY_STATE_OK) {
+        return true;
+    }
+    if (active_count > 0U) {
+        recovered_dictionary_owner =
+            ownerless_process_recover_dead_dictionary_owner(cleanup, owner_id, owner_generation);
+        if (!recovered_dictionary_owner) {
+            return true;
+        }
+    }
+
     const int trx_count_result = mylite_ownerless_trx_registry_owner_active_count(
         cleanup.trx_registry,
         cleanup.trx_registry_size,
@@ -20778,7 +20823,8 @@ bool ownerless_process_owner_state_requires_recovery(
         cleanup.latch_owner_generation,
         &active_count
     );
-    if (trx_count_result != MYLITE_OWNERLESS_TRX_REGISTRY_OK || active_count > 0U) {
+    if (trx_count_result != MYLITE_OWNERLESS_TRX_REGISTRY_OK ||
+        (active_count > 0U && !recovered_dictionary_owner)) {
         return true;
     }
     /*
@@ -20795,7 +20841,8 @@ bool ownerless_process_owner_state_requires_recovery(
         cleanup.latch_owner_generation,
         &active_count
     );
-    if (innodb_count_result != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK || active_count > 0U) {
+    if (innodb_count_result != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK ||
+        (active_count > 0U && !recovered_dictionary_owner)) {
         return true;
     }
     const int page_write_count_result = mylite_ownerless_innodb_lock_registry_owner_active_count(
@@ -20806,7 +20853,8 @@ bool ownerless_process_owner_state_requires_recovery(
         cleanup.latch_owner_generation,
         &active_count
     );
-    if (page_write_count_result != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK || active_count > 0U) {
+    if (page_write_count_result != MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK ||
+        (active_count > 0U && !recovered_dictionary_owner)) {
         return true;
     }
     if (cleanup.redo_state != nullptr &&
@@ -20817,7 +20865,7 @@ bool ownerless_process_owner_state_requires_recovery(
                 owner_id,
                 &active_count
             ) != MYLITE_OWNERLESS_REDO_STATE_OK ||
-            active_count > 0U) {
+            (active_count > 0U && !recovered_dictionary_owner)) {
             return true;
         }
         mylite_ownerless_redo_state_snapshot snapshot = {};
@@ -20829,26 +20877,13 @@ bool ownerless_process_owner_state_requires_recovery(
             return true;
         }
         if (snapshot.latch_state == MYLITE_OWNERLESS_LATCH_STATE_LOCKED &&
-            snapshot.latch_owner_id == owner_id) {
+            snapshot.latch_owner_id == owner_id && !recovered_dictionary_owner) {
             return true;
         }
         if (snapshot.progress_latch_state == MYLITE_OWNERLESS_LATCH_STATE_LOCKED &&
-            snapshot.progress_latch_owner_id == owner_id) {
+            snapshot.progress_latch_owner_id == owner_id && !recovered_dictionary_owner) {
             return true;
         }
-    }
-    const int dictionary_count_result = mylite_ownerless_dictionary_state_owner_active_count(
-        cleanup.dictionary_state,
-        cleanup.dictionary_state_size,
-        owner_id,
-        &active_count
-    );
-    if (dictionary_count_result != MYLITE_OWNERLESS_DICTIONARY_STATE_OK) {
-        return true;
-    }
-    if (active_count > 0U &&
-        !ownerless_process_recover_dead_dictionary_owner(cleanup, owner_id, owner_generation)) {
-        return true;
     }
     return false;
 }
@@ -20872,7 +20907,7 @@ bool ownerless_process_recover_dead_dictionary_owner(
         return false;
     }
 
-    constexpr std::array<std::uint32_t, 7> recovery_kinds = {
+    constexpr std::array<std::uint32_t, 8> recovery_kinds = {
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE_LIKE,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE_SELECT,
@@ -20880,6 +20915,7 @@ bool ownerless_process_recover_dead_dictionary_owner(
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_OR_REPLACE_TABLE_LIKE,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_OR_REPLACE_TABLE_SELECT,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_RENAME_TABLE,
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_TRUNCATE_TABLE,
     };
     for (const std::uint32_t recovery_kind : recovery_kinds) {
         std::uint64_t generation = 0;
