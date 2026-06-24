@@ -4738,6 +4738,12 @@ Tasks:
    rollback, leaves both file-op markers clear after the later `COMMIT`, and
    preserves the pre-savepoint row through forced `.shm` rebuild plus ordinary
    native reopen.
+   The retained-earlier-write branch is covered separately: when a
+   checkpointed write before the savepoint survives rollback of a later
+   checkpointed write, the process-local file-op redo flag remains set through
+   `ROLLBACK TO`, the later `COMMIT` publishes the DML-specific marker, no-live
+   close drains it after native checkpoint proof, and ownerless/native reopen
+   sees only the surviving pre-savepoint row image.
    The killed-session follow-up proves the same post-savepoint rollback path
    after a successful later `COMMIT` and `_exit(0)` before `mylite_close()`:
    while the writer is still a zombie, both file-op markers remain clear,
