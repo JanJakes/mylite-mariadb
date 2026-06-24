@@ -712,11 +712,6 @@ static void crash_dictionary_writer_with_live_peer(
     open_database_paths paths,
     ownerless_fault_writer_fn writer_fn
 );
-static void crash_dictionary_writer_with_live_peer_and_file_op_marker(
-    open_database_paths paths,
-    ownerless_fault_writer_fn writer_fn,
-    const char *database_path
-);
 #endif
 
 static const ownerless_compressed_blob_key_block_case ownerless_compressed_blob_key_block_cases[] =
@@ -46914,6 +46909,11 @@ static void run_crashed_create_or_replace_ctas_dictionary_ddl(int assert_marker)
     char *table_frm_path = path_join(app_path, "ownerless_create_replace_ctas_crash.frm");
     char *table_ibd_path = path_join(app_path, "ownerless_create_replace_ctas_crash.ibd");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int writer_ready_pipe[2];
+    int peer_ready_pipe[2];
+    int peer_release_pipe[2];
+    pid_t writer_child;
+    pid_t peer_child;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -46967,17 +46967,45 @@ static void run_crashed_create_or_replace_ctas_dictionary_ddl(int assert_marker)
     );
     assert(mylite_close(db) == MYLITE_OK);
 
+    assert(pipe(writer_ready_pipe) == 0);
+    assert(pipe(peer_ready_pipe) == 0);
+    assert(pipe(peer_release_pipe) == 0);
+
+    peer_child = fork();
+    assert(peer_child >= 0);
+    if (peer_child == 0) {
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        close(writer_ready_pipe[0]);
+        close(writer_ready_pipe[1]);
+        hold_ownerless_open_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = peer_ready_pipe[1],
+                .release_read_fd = peer_release_pipe[0],
+            }
+        );
+    }
+
+    close(peer_ready_pipe[1]);
+    close(peer_release_pipe[0]);
+    wait_for_pipe(peer_ready_pipe[0]);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(writer_ready_pipe[0]);
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        create_or_replace_ctas_until_dictionary_finish_fault(paths, writer_ready_pipe[1]);
+    }
+
+    close(writer_ready_pipe[1]);
+    wait_for_pipe(writer_ready_pipe[0]);
+    assert(kill(writer_child, SIGKILL) == 0);
+    wait_for_signaled_child(writer_child, SIGKILL);
     if (assert_marker) {
-        crash_dictionary_writer_with_live_peer_and_file_op_marker(
-            paths,
-            create_or_replace_ctas_until_dictionary_finish_fault,
-            database_path
-        );
-    } else {
-        crash_dictionary_writer_with_live_peer(
-            paths,
-            create_or_replace_ctas_until_dictionary_finish_fault
-        );
+        assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
     }
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -47039,6 +47067,33 @@ static void run_crashed_create_or_replace_ctas_dictionary_ddl(int assert_marker)
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_create_replace_ctas_crash") == 390U
     );
     assert(mylite_close(db) == MYLITE_OK);
+
+    if (assert_marker) {
+        assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    }
+
+    signal_pipe(peer_release_pipe[1]);
+    wait_for_child(peer_child);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_create_replace_ctas_crash") == 3U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_create_replace_ctas_crash") == 390U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_create_replace_ctas_crash "
+            "WHERE copied_note IN ('beta', 'gamma', 'delta')"
+        ) == 3U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    if (assert_marker) {
+        assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    }
 
     assert_ownerless_create_or_replace_ctas_crash_ddl_state(
         paths,
@@ -50157,14 +50212,6 @@ static void crash_dictionary_writer_with_live_peer(
     ownerless_fault_writer_fn writer_fn
 ) {
     crash_ownerless_writer_with_live_peer(paths, writer_fn);
-}
-
-static void crash_dictionary_writer_with_live_peer_and_file_op_marker(
-    open_database_paths paths,
-    ownerless_fault_writer_fn writer_fn,
-    const char *database_path
-) {
-    crash_ownerless_writer_with_live_peer_maybe_file_op_marker(paths, writer_fn, database_path);
 }
 
 static void test_crashed_trigger_replace_dictionary_ddl_recovers_replaced_trigger(void) {

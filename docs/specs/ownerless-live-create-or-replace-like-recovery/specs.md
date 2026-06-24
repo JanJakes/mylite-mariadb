@@ -163,8 +163,8 @@ tests/docs.
 
 ## Risks And Follow-Up
 
-- Populated replacement CTAS requires separate live recovery because it must
-  prove both copied metadata and copied rows.
+- Populated replacement CTAS recovery is covered separately by
+  `ownerless-live-create-or-replace-ctas-recovery`.
 - Parenthesized `(LIKE source)` syntax remains unclaimed until a focused
   classifier and test are added.
 - Broader DDL/file-lifecycle recovery and external randomized stress remain
