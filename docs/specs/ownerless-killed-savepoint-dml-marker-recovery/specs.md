@@ -99,5 +99,6 @@ dependency or embedded MariaDB profile change is expected.
 ## Risks
 
 - This is a focused killed-session proof for the no-earlier-write savepoint
-  boundary. Killed processes in the middle of the rollback, before rollback,
-  or amid concurrent writers remain separate matrices.
+  boundary after successful savepoint rollback and commit. A later slice covers
+  killing before the savepoint rollback; killed processes in the middle of the
+  rollback or amid concurrent writers remain separate matrices.

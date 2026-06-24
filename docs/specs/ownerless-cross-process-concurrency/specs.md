@@ -7082,6 +7082,14 @@ subsystems that this mode needs:
   handoff evidence only; broader redo/checkpoint reconciliation, arbitrary DDL
   file-lifecycle recovery, active-reader pressure crash/oracle breadth, and
   external MariaDB/RQG stress remain open.
+  The killed-before-savepoint-rollback follow-up adds a focused
+  killed-session proof for an explicit transaction that writes one
+  file-per-table row before a savepoint, writes another row after it, and is
+  killed before rollback or commit. No-live ownerless recovery, forced `.shm`
+  rebuild, and ordinary native reopen preserve the pre-transaction rows while
+  both native file-operation markers remain clear. This narrows the savepoint
+  crash matrix, but does not claim a kill inside InnoDB savepoint rollback or
+  concurrent-writer savepoint schedules.
 
   The current completion order is:
 
@@ -7089,9 +7097,10 @@ subsystems that this mode needs:
      DDL/file-lifecycle recovery, especially crash recovery for DDL-created,
      rebuilt, renamed, truncated, and dropped file-per-table tablespaces while
      peers remain live.
-  2. Close remaining transaction crash windows, especially mid-rollback and
-     concurrent-writer savepoint schedules that combine native undo, ownerless
-     page-write ownership, and file-operation marker cleanup.
+  2. Close remaining transaction crash windows, especially kills inside
+     rollback/savepoint rollback and concurrent-writer savepoint schedules
+     that combine native undo, ownerless page-write ownership, and
+     file-operation marker cleanup.
   3. Extend active-reader pressure evidence from retained-WAL policy to crash
      and external-oracle breadth for the high-risk DML/DDL classes already
      covered by bounded pressure policy tests.

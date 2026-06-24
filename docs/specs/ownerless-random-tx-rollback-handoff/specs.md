@@ -141,6 +141,7 @@ image.
   immediate rollback-page publication rather than ordinary lock release plus
   visible-boundary refresh, adjacent commit-race or lock-wait tests should catch
   it.
-- Full rollback crash windows, killed sessions with savepoints, broader DDL
+- Full rollback crash windows, savepoint rollback crash windows, broader DDL
   recovery, and long external MariaDB/RQG stress remain separate completion
-  items.
+  items. Killed-before-savepoint-rollback recovery is covered by a later
+  focused DML marker slice.
