@@ -11,6 +11,11 @@ dictionary finish.
 This slice adds focused crash-boundary evidence for that supported native
 table-option rebuild path.
 
+Supersession note: the later
+`docs/specs/ownerless-live-row-format-rebuild-recovery/specs.md` slice upgrades
+the focused crash selector from live-peer busy/no-live recovery to live-peer
+dictionary recovery plus final no-live marker drain.
+
 ## Source Findings
 
 Base: MariaDB 11.8 LTS import `mariadb-11.8.6`
@@ -53,9 +58,12 @@ Add one unsafe-hook selector:
   existing `dictionary-before-finish` hook,
 - kill the writer at the hook after native MariaDB/InnoDB DDL completes but
   before ownerless dictionary finish,
-- prove an ownerless opener returns `MYLITE_BUSY` while the live peer remains,
-- release the peer and reopen ownerless read/write to rebuild volatile
-  coordination,
+- prove an ownerless opener succeeds while the live peer remains and observes
+  recovered dynamic row-format metadata and retained rows,
+- prove the native file-operation marker remains set while the live peer
+  remains,
+- release the peer and reopen ownerless read/write to drain the marker and
+  verify post-recovery writes,
 - verify recovered metadata exposes `INNODB_SYS_TABLES.ROW_FORMAT = 'Dynamic'`
   and `information_schema.tables.row_format = 'Dynamic'`,
 - verify retained rows and payload lengths, then insert another row,
@@ -68,7 +76,7 @@ In scope:
 
 - crash-at-dictionary-before-finish coverage for a completed
   `ROW_FORMAT=COMPACT` to `ROW_FORMAT=DYNAMIC` rebuild,
-- live-peer cleanup-busy behavior and no-live rebuild,
+- live-peer dictionary recovery, marker retention, and no-live marker drain,
 - ownerless/native reopen of recovered row-format metadata, retained rows, and
   post-recovery writes.
 
@@ -97,8 +105,9 @@ rebuild, and ordinary native exclusive reopen lifecycle.
 ## Native Storage Impact
 
 The covered DDL uses MariaDB/InnoDB's native row-format ALTER machinery. MyLite
-does not reinterpret the rebuilt table contents; it proves no-live ownerless
-recovery rebuilds volatile coordination around the completed native rebuild.
+does not reinterpret the rebuilt table contents; it proves ownerless recovery
+can publish dictionary state around the completed native rebuild while a peer
+remains live, then drain the native marker at final no-live close.
 
 ## Public API, Build, Size, And Dependencies
 
@@ -117,7 +126,9 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selector reaches the dictionary fault hook and does not hang.
-- A live peer prevents cleanup until no-live recovery.
+- Live-peer dictionary recovery succeeds for the focused dynamic row-format
+  rebuild.
+- The native file-operation marker remains set until final no-live close.
 - Recovered metadata shows `ROW_FORMAT = 'Dynamic'` through InnoDB and SQL
   information schema.
 - Retained row payloads and aggregate values survive recovery.
