@@ -800,6 +800,7 @@ static void test_ownerless_rename_create_tablespace_replay_keeps_both_spaces(voi
 static void test_ownerless_truncated_tablespace_replay_keeps_recreated_space(void);
 static void test_ownerless_schema_drop_tablespace_replay_keeps_absent_schema(void);
 static void test_ownerless_force_rebuild_tablespace_replay_keeps_rebuilt_space(void);
+static void test_ownerless_compressed_row_format_tablespace_replay_keeps_compressed_space(void);
 static void test_ownerless_multi_rename_tablespace_replay_keeps_swapped_spaces(void);
 static void test_ownerless_cross_schema_multi_rename_tablespace_replay_keeps_swapped_spaces(void);
 static void test_ownerless_created_tablespace_replay_keeps_created_space(void);
@@ -2233,6 +2234,11 @@ static void assert_ownerless_schema_drop_tablespace_replay_state(
     const char *database_path
 );
 static void assert_ownerless_force_rebuild_tablespace_replay_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_compressed_row_format_tablespace_replay_state(
     open_database_paths paths,
     unsigned flags,
     const char *database_path
@@ -4251,6 +4257,10 @@ int main(int argc, char **argv) {
         test_ownerless_force_rebuild_tablespace_replay_keeps_rebuilt_space();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "compressed-row-format-tablespace-replay") == 0) {
+        test_ownerless_compressed_row_format_tablespace_replay_keeps_compressed_space();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "multi-rename-tablespace-replay") == 0) {
         test_ownerless_multi_rename_tablespace_replay_keeps_swapped_spaces();
         return 0;
@@ -5421,7 +5431,8 @@ int main(int argc, char **argv) {
             "cross-schema-multi-drop-tablespace-replay|renamed-tablespace-replay|"
             "rename-create-tablespace-replay|truncated-tablespace-replay|"
             "schema-drop-tablespace-replay|"
-            "force-rebuild-tablespace-replay|multi-rename-tablespace-replay|"
+            "force-rebuild-tablespace-replay|compressed-row-format-tablespace-replay|"
+            "multi-rename-tablespace-replay|"
             "cross-schema-multi-rename-tablespace-replay|"
             "created-tablespace-replay|ctas-post-create-dml|"
             "recreated-tablespace-replay|create-or-replace-tablespace-replay|"
@@ -5658,6 +5669,9 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_truncated_tablespace_replay_keeps_recreated_space),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_schema_drop_tablespace_replay_keeps_absent_schema),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_force_rebuild_tablespace_replay_keeps_rebuilt_space),
+    OWNERLESS_SQL_TEST_CASE(
+        test_ownerless_compressed_row_format_tablespace_replay_keeps_compressed_space
+    ),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_multi_rename_tablespace_replay_keeps_swapped_spaces),
     OWNERLESS_SQL_TEST_CASE(
         test_ownerless_cross_schema_multi_rename_tablespace_replay_keeps_swapped_spaces
@@ -21359,6 +21373,178 @@ static void test_ownerless_force_rebuild_tablespace_replay_keeps_rebuilt_space(v
         database_path
     );
     assert_ownerless_force_rebuild_tablespace_replay_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+
+    free(ibd_path);
+    free(frm_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_compressed_row_format_tablespace_replay_keeps_compressed_space(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-compressed-row-format-tablespace-replay.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    char *datadir_path;
+    char *app_path;
+    char *frm_path;
+    char *ibd_path;
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t reader_child;
+    uint32_t initial_space_id;
+    uint32_t compressed_space_id;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    datadir_path = path_join(database_path, "datadir");
+    app_path = path_join(datadir_path, "app");
+    frm_path = path_join(app_path, "ownerless_compressed_replay.frm");
+    ibd_path = path_join(app_path, "ownerless_compressed_replay.ibd");
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_compressed_replay ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "payload LONGBLOB NOT NULL"
+        ") ENGINE=InnoDB ROW_FORMAT=DYNAMIC"
+    );
+    insert_ownerless_compressed_blob_key_block_row(
+        db,
+        "ownerless_compressed_replay",
+        1U,
+        (unsigned char)'a'
+    );
+    insert_ownerless_compressed_blob_key_block_row(
+        db,
+        "ownerless_compressed_replay",
+        2U,
+        (unsigned char)'a'
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME = 'app/ownerless_compressed_replay' "
+            "AND ROW_FORMAT = 'Dynamic'"
+        ) == 1U
+    );
+    initial_space_id = (uint32_t)query_unsigned(
+        db,
+        "SELECT SPACE FROM information_schema.INNODB_SYS_TABLES "
+        "WHERE NAME = 'app/ownerless_compressed_replay'"
+    );
+    assert(initial_space_id != 0U);
+    assert(read_innodb_page_zero_space_id(ibd_path) == initial_space_id);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+    reader_child = fork();
+    assert(reader_child >= 0);
+    if (reader_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        hold_repeatable_read_snapshot_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    update_ownerless_compressed_blob_key_block_row(
+        db,
+        "ownerless_compressed_replay",
+        1U,
+        (unsigned char)'b'
+    );
+    update_ownerless_compressed_blob_key_block_row(
+        db,
+        "ownerless_compressed_replay",
+        2U,
+        (unsigned char)'b'
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_compressed_replay") == 4U);
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_compressed_replay "
+        "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME = 'app/ownerless_compressed_replay' "
+            "AND ROW_FORMAT = 'Compressed'"
+        ) == 1U
+    );
+    insert_ownerless_compressed_blob_key_block_row(
+        db,
+        "ownerless_compressed_replay",
+        3U,
+        (unsigned char)'c'
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_compressed_replay") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_compressed_replay") == 5U);
+    compressed_space_id = (uint32_t)query_unsigned(
+        db,
+        "SELECT SPACE FROM information_schema.INNODB_SYS_TABLES "
+        "WHERE NAME = 'app/ownerless_compressed_replay'"
+    );
+    assert(compressed_space_id != 0U);
+    assert(read_innodb_page_zero_space_id(ibd_path) == compressed_space_id);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!concurrency_wal_is_checkpointed(database_path));
+    assert(count_concurrency_wal_records_at_or_before(database_path, UINT64_MAX) > 0U);
+    assert_ownerless_compressed_row_format_key_block_zblob_state(
+        database_path,
+        "ownerless_compressed_replay",
+        8U
+    );
+
+    assert(kill(reader_child, SIGKILL) == 0);
+    wait_for_signaled_child(reader_child, SIGKILL);
+    assert(close(release_pipe[1]) == 0);
+
+    assert_ownerless_compressed_row_format_tablespace_replay_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_compressed_row_format_tablespace_replay_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_compressed_row_format_tablespace_replay_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_compressed_row_format_tablespace_replay_state(
         paths,
         MYLITE_OPEN_READWRITE,
         database_path
@@ -67039,6 +67225,75 @@ static void assert_ownerless_force_rebuild_tablespace_replay_state(
     assert(path_exists(frm_path));
     assert(path_exists(ibd_path));
     assert(mylite_close(db) == MYLITE_OK);
+    assert_concurrency_wal_checkpointed(database_path);
+
+    free(ibd_path);
+    free(frm_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_compressed_row_format_tablespace_replay_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *frm_path = path_join(app_path, "ownerless_compressed_replay.frm");
+    char *ibd_path = path_join(app_path, "ownerless_compressed_replay.ibd");
+    mylite_db *db = open_database(paths, flags);
+    uint32_t compressed_space_id;
+
+    if ((flags & MYLITE_OPEN_OWNERLESS_RW) != 0U) {
+        assert_concurrency_wal_checkpointed(database_path);
+    }
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME = 'app/ownerless_compressed_replay' "
+            "AND ROW_FORMAT = 'Compressed'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_compressed_replay' "
+            "AND row_format = 'Compressed'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_compressed_replay") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_compressed_replay") == 5U);
+    assert(
+        query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_compressed_replay") ==
+        3U * MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.ownerless_compressed_replay"
+        ) == (2U * (unsigned)'b') + (unsigned)'c'
+    );
+    compressed_space_id = (uint32_t)query_unsigned(
+        db,
+        "SELECT SPACE FROM information_schema.INNODB_SYS_TABLES "
+        "WHERE NAME = 'app/ownerless_compressed_replay'"
+    );
+    assert(compressed_space_id != 0U);
+    assert(path_exists(frm_path));
+    assert(path_exists(ibd_path));
+    assert(read_innodb_page_zero_space_id(ibd_path) == compressed_space_id);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_ownerless_compressed_row_format_key_block_zblob_state(
+        database_path,
+        "ownerless_compressed_replay",
+        8U
+    );
     assert_concurrency_wal_checkpointed(database_path);
 
     free(ibd_path);
