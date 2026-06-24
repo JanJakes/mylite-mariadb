@@ -4737,9 +4737,13 @@ Tasks:
    the native copy-style rebuild boundary. Focused `ALTER TABLE schema.table
    ROW_FORMAT=DYNAMIC` prefinish crash coverage now uses a separate
    recoverable dictionary marker to provide live-peer recovery for the native
-   dynamic row-format copy rebuild boundary. Multi-table and cross-schema drop,
-   compressed/key-block row-format rebuild, schema, view, trigger, and
-   foreign-key multi-DDL live-peer recovery remain planned.
+   dynamic row-format copy rebuild boundary. Focused `ALTER TABLE
+   schema.table ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8` prefinish crash
+   coverage now uses a separate recoverable dictionary marker to provide
+   live-peer recovery for the native compressed copy rebuild boundary.
+   Multi-table and cross-schema drop, compressed key-block `1`, `2`, `4`, and
+   `16` row-format rebuild, schema, view, trigger, and foreign-key multi-DDL
+   live-peer recovery remain planned.
    Final no-live close
    forces native checkpoint
    proof for retained page-version WAL
@@ -7155,12 +7159,12 @@ subsystems that this mode needs:
      DDL/file-lifecycle recovery beyond the now-covered plain/table-copy
      `CREATE TABLE`, focused CTAS, ordinary replacement, and replacement-copy
      LIKE/CTAS plus single-pair same-schema rename, focused truncate, and
-     focused drop plus focused force rebuild and dynamic row-format rebuild
-     prefinish boundaries,
+     focused drop plus focused force rebuild, dynamic row-format rebuild, and
+     focused compressed key-block `8` row-format rebuild prefinish boundaries,
      especially crash recovery for cross-schema or multi-pair rename, rebuilt,
-     compressed/key-block row-format-rebuilt, broader truncated, and
-     multi-table/cross-schema dropped file-per-table tablespaces while peers
-     remain live.
+     remaining compressed key-block `1`, `2`, `4`, and `16` row-format-rebuilt,
+     broader truncated, and multi-table/cross-schema dropped file-per-table
+     tablespaces while peers remain live.
   2. Close remaining transaction crash windows, especially kills inside
      rollback/savepoint rollback and concurrent-writer savepoint schedules
      that combine native undo, ownerless page-write ownership, and

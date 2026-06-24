@@ -1,14 +1,19 @@
 # Ownerless Compressed Row-Format File-Op Marker Crash
 
+Update: `ownerless-live-compressed-row-format-rebuild-recovery` builds on this
+marker proof and upgrades the exact `KEY_BLOCK_SIZE=8` crash selector from
+live-peer-busy/no-live cleanup to live-peer dictionary recovery with final
+no-live marker drain.
+
 ## Problem Statement
 
 Ownerless compressed row-format crash coverage already kills a writer after
 MariaDB/InnoDB completes `ALTER TABLE ... ROW_FORMAT=COMPRESSED
 KEY_BLOCK_SIZE=8` but before MyLite publishes ownerless dictionary finish, then
-proves no-live recovery preserves the rebuilt compressed table. The remaining
-durable-boundary gap is narrower: the killed writer should leave the native
-file-operation checkpoint-needed marker set while another ownerless peer is
-still live, before no-live recovery can checkpoint and clear it.
+proves recovery preserves the rebuilt compressed table. This marker slice
+proved the narrower durable-boundary requirement: the killed writer leaves the
+native file-operation checkpoint-needed marker set while another ownerless peer
+is still live, before final no-live recovery can checkpoint and clear it.
 
 ## Source Findings
 
@@ -38,13 +43,13 @@ The new hook-only selector,
 `ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8` crash shape and asserts
 `read_concurrency_native_file_op_checkpoint_needed(database_path)` immediately
 after the killed writer reaches `dictionary-before-finish`, while the live peer
-still prevents cleanup.
+still defers final marker drain.
 
 After the marker assertion, the selector preserves the existing recovery
-checks: live-peer cleanup remains busy, no-live ownerless reopen observes the
-compressed metadata and retained BLOB rows, post-recovery writes succeed, and
-ownerless/native reopen before and after forced `.shm` rebuild preserve the
-compressed state.
+checks: live-peer dictionary recovery observes the compressed metadata and
+retained BLOB rows, the marker remains set until the peer is released,
+post-recovery writes succeed, and ownerless/native reopen before and after
+forced `.shm` rebuild preserve the compressed state.
 
 ## Scope And Non-Goals
 
@@ -109,10 +114,11 @@ new CTest is registered only when unsafe ownerless test hooks are enabled.
 - The focused selector reaches the `dictionary-before-finish` hook and kills
   the writer without hanging.
 - The native file-op checkpoint marker is set before the live peer is released.
-- Live-peer cleanup remains busy until no-live recovery.
-- No-live recovery preserves compressed row-format metadata, retained BLOB
-  rows, post-recovery writes, ownerless/native reopen, and forced `.shm`
-  rebuild behavior.
+- Live-peer dictionary recovery succeeds while the marker remains set.
+- Final no-live close drains the marker after the live peer is released.
+- Recovery preserves compressed row-format metadata, retained BLOB rows,
+  post-recovery writes, ownerless/native reopen, and forced `.shm` rebuild
+  behavior.
 
 ## Risks And Follow-Up
 

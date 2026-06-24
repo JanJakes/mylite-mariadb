@@ -1,5 +1,10 @@
 # Ownerless Compressed Key-Block File-Op Marker Crash
 
+Update: `ownerless-live-compressed-row-format-rebuild-recovery` upgrades the
+representative `KEY_BLOCK_SIZE=8` compressed rebuild boundary to live-peer
+dictionary recovery. This spec remains the marker/no-live recovery record for
+the focused `KEY_BLOCK_SIZE=1`, `2`, `4`, and `16` variants.
+
 ## Problem
 
 Ownerless compressed row-format crash coverage already proves no-live recovery
@@ -29,9 +34,10 @@ variants that already have recovery oracles.
   file-operation checkpoint-needed record before the
   `dictionary-before-finish` test hook can interrupt dictionary finish.
 - `packages/libmylite/tests/ownerless_cross_process_sql_test.c` already has a
-  parameterized compressed key-block crash runner with live-peer cleanup-busy,
-  no-live recovery, compressed metadata, prepared BLOB row, ZBLOB page
-  evidence, ownerless/native reopen, and forced `.shm` rebuild oracles.
+  parameterized compressed key-block crash runner with live-peer cleanup-busy
+  for the `1`, `2`, `4`, and `16` variants, no-live recovery, compressed
+  metadata, prepared BLOB row, ZBLOB page evidence, ownerless/native reopen,
+  and forced `.shm` rebuild oracles.
 
 ## Design
 
@@ -49,6 +55,11 @@ after the killed writer is reaped and before the live peer is released:
 Each selector then continues through the existing recovery oracle so the marker
 assertion is tied to a recovered compressed table that remains readable and
 writable through ownerless and ordinary native reopen.
+
+The later live compressed row-format recovery slice upgrades the separate
+representative `KEY_BLOCK_SIZE=8` selector; this slice intentionally leaves
+`1`, `2`, `4`, and `16` on the conservative no-live path until those page-size
+variants receive their own live-recovery evidence.
 
 ## Scope And Non-Goals
 
@@ -106,7 +117,8 @@ selectors, CTest entries, and docs.
   writer without hanging.
 - The native file-operation checkpoint-needed marker is durable before the
   live peer is released.
-- Live-peer cleanup remains busy until final no-live recovery.
+- Live-peer cleanup remains busy for the `1`, `2`, `4`, and `16` variants until
+  final no-live recovery.
 - No-live recovery preserves compressed metadata, prepared BLOB rows, ZBLOB
   page evidence at the requested key-block size, post-recovery writes,
   ownerless/native reopen, and forced `.shm` rebuild behavior.
@@ -114,6 +126,8 @@ selectors, CTest entries, and docs.
 ## Risks
 
 - This closes marker evidence for the deterministic compressed key-block values
-  already covered by recovery tests. It is not a full storage-option matrix.
+  already covered by recovery tests. It is not a full storage-option matrix,
+  and it does not claim live-peer recovery for the `1`, `2`, `4`, or `16`
+  page-size variants.
 - Broader native redo/checkpoint reconciliation, unsupported storage options,
   and external randomized DDL stress remain planned.
