@@ -653,6 +653,23 @@ typedef struct ownerless_compressed_blob_key_block_case {
     unsigned key_block_size;
 } ownerless_compressed_blob_key_block_case;
 
+typedef struct ownerless_pressure_compressed_key_block_case {
+    const char *table_name;
+    unsigned key_block_size;
+} ownerless_pressure_compressed_key_block_case;
+
+static const ownerless_pressure_compressed_key_block_case
+    k_ownerless_pressure_compressed_key_block_cases[] = {
+        {"ownerless_pressure_compressed_row_format_kb1", 1U},
+        {"ownerless_pressure_compressed_row_format_kb2", 2U},
+        {"ownerless_pressure_compressed_row_format_kb4", 4U},
+        {"ownerless_pressure_compressed_row_format_variant", 8U},
+        {"ownerless_pressure_compressed_row_format_kb16", 16U},
+};
+static const size_t k_ownerless_pressure_compressed_key_block_case_count =
+    sizeof(k_ownerless_pressure_compressed_key_block_cases) /
+    sizeof(k_ownerless_pressure_compressed_key_block_cases[0]);
+
 typedef struct checkpoint_lsn_record {
     int valid;
     uint64_t generation;
@@ -2132,6 +2149,24 @@ static unsigned long long query_ownerless_compressed_blob_key_block_matrix_sum(
     const char *expression
 );
 static void assert_ownerless_zblob_pages(const char *database_path);
+static void create_ownerless_pressure_compressed_key_block_table(
+    mylite_db *db,
+    const char *table_name
+);
+static void expect_ownerless_pressure_compressed_key_block_alter_busy(
+    mylite_db *db,
+    const ownerless_pressure_compressed_key_block_case *test_case
+);
+static void assert_ownerless_pressure_compressed_key_block_blocked_state(
+    mylite_db *db,
+    const char *table_name
+);
+static void alter_ownerless_pressure_compressed_key_block_table(
+    mylite_db *db,
+    const ownerless_pressure_compressed_key_block_case *test_case
+);
+static void assert_ownerless_pressure_compressed_key_block_final_state(mylite_db *db);
+static void assert_ownerless_pressure_compressed_key_block_zblob_state(const char *database_path);
 static void assert_ownerless_pressure_write_policy_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_blob_page_pressure_state(
     open_database_paths paths,
@@ -16494,6 +16529,137 @@ static void test_ownerless_active_reader_pressure_limit_blocks_writes(void) {
     free(root);
 }
 
+static void create_ownerless_pressure_compressed_key_block_table(
+    mylite_db *db,
+    const char *table_name
+) {
+    char sql[512];
+
+    assert(
+        snprintf(
+            sql,
+            sizeof(sql),
+            "CREATE TABLE app.%s ("
+            "id INT NOT NULL PRIMARY KEY, "
+            "value INT NOT NULL, "
+            "payload LONGBLOB NOT NULL"
+            ") ENGINE=InnoDB ROW_FORMAT=DYNAMIC",
+            table_name
+        ) > 0
+    );
+    exec_ok(db, sql);
+    insert_ownerless_compressed_blob_key_block_row(db, table_name, 1U, (unsigned char)'a');
+    insert_ownerless_compressed_blob_key_block_row(db, table_name, 2U, (unsigned char)'a');
+}
+
+static void expect_ownerless_pressure_compressed_key_block_alter_busy(
+    mylite_db *db,
+    const ownerless_pressure_compressed_key_block_case *test_case
+) {
+    char sql[512];
+
+    assert(
+        snprintf(
+            sql,
+            sizeof(sql),
+            "ALTER TABLE app.%s ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=%u",
+            test_case->table_name,
+            test_case->key_block_size
+        ) > 0
+    );
+    expect_exec_busy(db, sql, "pressure limit");
+}
+
+static void assert_ownerless_pressure_compressed_key_block_blocked_state(
+    mylite_db *db,
+    const char *table_name
+) {
+    char sql[512];
+
+    assert(
+        snprintf(
+            sql,
+            sizeof(sql),
+            "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME = 'app/%s' "
+            "AND ROW_FORMAT = 'Dynamic'",
+            table_name
+        ) > 0
+    );
+    assert(query_unsigned(db, sql) == 1U);
+    assert(
+        snprintf(
+            sql,
+            sizeof(sql),
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = '%s' "
+            "AND row_format = 'Dynamic'",
+            table_name
+        ) > 0
+    );
+    assert(query_unsigned(db, sql) == 1U);
+    assert(snprintf(sql, sizeof(sql), "SELECT COUNT(*) FROM app.%s", table_name) > 0);
+    assert(query_unsigned(db, sql) == 2U);
+    assert(snprintf(sql, sizeof(sql), "SELECT SUM(value) FROM app.%s", table_name) > 0);
+    assert(query_unsigned(db, sql) == 2U);
+    assert(snprintf(sql, sizeof(sql), "SELECT SUM(LENGTH(payload)) FROM app.%s", table_name) > 0);
+    assert(query_unsigned(db, sql) == 2U * MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES);
+    assert(
+        snprintf(
+            sql,
+            sizeof(sql),
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.%s",
+            table_name
+        ) > 0
+    );
+    assert(query_unsigned(db, sql) == 2U * (unsigned)'a');
+}
+
+static void alter_ownerless_pressure_compressed_key_block_table(
+    mylite_db *db,
+    const ownerless_pressure_compressed_key_block_case *test_case
+) {
+    char sql[512];
+
+    assert(
+        snprintf(
+            sql,
+            sizeof(sql),
+            "ALTER TABLE app.%s ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=%u",
+            test_case->table_name,
+            test_case->key_block_size
+        ) > 0
+    );
+    exec_ok(db, sql);
+    insert_ownerless_compressed_blob_key_block_row(
+        db,
+        test_case->table_name,
+        3U,
+        (unsigned char)'c'
+    );
+}
+
+static void assert_ownerless_pressure_compressed_key_block_final_state(mylite_db *db) {
+    for (size_t index = 0U; index < k_ownerless_pressure_compressed_key_block_case_count; ++index) {
+        assert_ownerless_compressed_row_format_key_block_sql_state(
+            db,
+            k_ownerless_pressure_compressed_key_block_cases[index].table_name
+        );
+    }
+}
+
+static void assert_ownerless_pressure_compressed_key_block_zblob_state(const char *database_path) {
+    for (size_t index = 0U; index < k_ownerless_pressure_compressed_key_block_case_count; ++index) {
+        assert_ownerless_compressed_row_format_key_block_zblob_state(
+            database_path,
+            k_ownerless_pressure_compressed_key_block_cases[index].table_name,
+            k_ownerless_pressure_compressed_key_block_cases[index].key_block_size
+        );
+    }
+}
+
 static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -16899,26 +17065,12 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         "INSERT INTO app.ownerless_pressure_row_format_variant "
         "VALUES (1, 10, REPEAT('a', 1000)), (2, 20, REPEAT('b', 1000))"
     );
-    exec_ok(
-        db,
-        "CREATE TABLE app.ownerless_pressure_compressed_row_format_variant ("
-        "id INT NOT NULL PRIMARY KEY, "
-        "value INT NOT NULL, "
-        "payload LONGBLOB NOT NULL"
-        ") ENGINE=InnoDB ROW_FORMAT=DYNAMIC"
-    );
-    insert_ownerless_compressed_blob_key_block_row(
-        db,
-        "ownerless_pressure_compressed_row_format_variant",
-        1U,
-        (unsigned char)'a'
-    );
-    insert_ownerless_compressed_blob_key_block_row(
-        db,
-        "ownerless_pressure_compressed_row_format_variant",
-        2U,
-        (unsigned char)'a'
-    );
+    for (size_t index = 0U; index < k_ownerless_pressure_compressed_key_block_case_count; ++index) {
+        create_ownerless_pressure_compressed_key_block_table(
+            db,
+            k_ownerless_pressure_compressed_key_block_cases[index].table_name
+        );
+    }
     exec_ok(
         db,
         "CREATE TABLE app.ownerless_pressure_generated_variant ("
@@ -17213,12 +17365,12 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         "ALTER TABLE app.ownerless_pressure_row_format_variant ROW_FORMAT=DYNAMIC",
         "pressure limit"
     );
-    expect_exec_busy(
-        db,
-        "ALTER TABLE app.ownerless_pressure_compressed_row_format_variant "
-        "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8",
-        "pressure limit"
-    );
+    for (size_t index = 0U; index < k_ownerless_pressure_compressed_key_block_case_count; ++index) {
+        expect_ownerless_pressure_compressed_key_block_alter_busy(
+            db,
+            &k_ownerless_pressure_compressed_key_block_cases[index]
+        );
+    }
     expect_exec_busy(
         db,
         "ALTER TABLE app.ownerless_pressure_generated_variant "
@@ -17801,42 +17953,12 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
             "SELECT SUM(LENGTH(payload)) FROM app.ownerless_pressure_row_format_variant"
         ) == 2000U
     );
-    assert(
-        query_unsigned(
+    for (size_t index = 0U; index < k_ownerless_pressure_compressed_key_block_case_count; ++index) {
+        assert_ownerless_pressure_compressed_key_block_blocked_state(
             db,
-            "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
-            "WHERE NAME = 'app/ownerless_pressure_compressed_row_format_variant' "
-            "AND ROW_FORMAT = 'Dynamic'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_compressed_row_format_variant' "
-            "AND row_format = 'Dynamic'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM app.ownerless_pressure_compressed_row_format_variant"
-        ) == 2U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT SUM(value) FROM app.ownerless_pressure_compressed_row_format_variant"
-        ) == 2U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT SUM(LENGTH(payload)) "
-            "FROM app.ownerless_pressure_compressed_row_format_variant"
-        ) == 2U * MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES
-    );
+            k_ownerless_pressure_compressed_key_block_cases[index].table_name
+        );
+    }
     assert(
         query_unsigned(
             db,
@@ -18314,17 +18436,12 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         "INSERT INTO app.ownerless_pressure_row_format_variant "
         "VALUES (3, 30, REPEAT('c', 1000))"
     );
-    exec_ok(
-        db,
-        "ALTER TABLE app.ownerless_pressure_compressed_row_format_variant "
-        "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8"
-    );
-    insert_ownerless_compressed_blob_key_block_row(
-        db,
-        "ownerless_pressure_compressed_row_format_variant",
-        3U,
-        (unsigned char)'c'
-    );
+    for (size_t index = 0U; index < k_ownerless_pressure_compressed_key_block_case_count; ++index) {
+        alter_ownerless_pressure_compressed_key_block_table(
+            db,
+            &k_ownerless_pressure_compressed_key_block_cases[index]
+        );
+    }
     exec_ok(
         db,
         "ALTER TABLE app.ownerless_pressure_generated_variant "
@@ -18761,10 +18878,7 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
             "SELECT SUM(LENGTH(payload)) FROM app.ownerless_pressure_row_format_variant"
         ) == 3000U
     );
-    assert_ownerless_compressed_row_format_key_block_sql_state(
-        db,
-        "ownerless_pressure_compressed_row_format_variant"
-    );
+    assert_ownerless_pressure_compressed_key_block_final_state(db);
     assert(
         query_unsigned(
             db,
@@ -18907,11 +19021,7 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
         ) == 0U
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert_ownerless_compressed_row_format_key_block_zblob_state(
-        database_path,
-        "ownerless_pressure_compressed_row_format_variant",
-        8U
-    );
+    assert_ownerless_pressure_compressed_key_block_zblob_state(database_path);
     assert(concurrency_wal_is_checkpointed(database_path));
 
     assert_ownerless_pressure_write_policy_state(
@@ -65870,10 +65980,7 @@ static void assert_ownerless_pressure_write_policy_state(
             "SELECT SUM(LENGTH(payload)) FROM app.ownerless_pressure_row_format_variant"
         ) == 3000U
     );
-    assert_ownerless_compressed_row_format_key_block_sql_state(
-        db,
-        "ownerless_pressure_compressed_row_format_variant"
-    );
+    assert_ownerless_pressure_compressed_key_block_final_state(db);
     assert(
         query_unsigned(
             db,
@@ -66181,11 +66288,7 @@ static void assert_ownerless_pressure_write_policy_state(
         ) == 0U
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert_ownerless_compressed_row_format_key_block_zblob_state(
-        paths.database_path,
-        "ownerless_pressure_compressed_row_format_variant",
-        8U
-    );
+    assert_ownerless_pressure_compressed_key_block_zblob_state(paths.database_path);
 }
 
 static void assert_ownerless_blob_page_pressure_state(

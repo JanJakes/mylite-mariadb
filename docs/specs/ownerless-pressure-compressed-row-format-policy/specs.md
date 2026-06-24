@@ -9,8 +9,12 @@ still lacked a compressed `ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE` ALTER, leaving
 a small gap between compressed DDL correctness evidence and WAL-pressure
 throttling evidence.
 
-This slice extends the existing `active-reader-pressure-write-policy` selector
-with one representative compressed key-block rebuild at `KEY_BLOCK_SIZE=8`.
+This slice extended the existing `active-reader-pressure-write-policy`
+selector with one representative compressed key-block rebuild at
+`KEY_BLOCK_SIZE=8`. The follow-up
+`ownerless-pressure-compressed-key-block-matrix` slice now broadens the same
+pressure evidence to the MariaDB-accepted `KEY_BLOCK_SIZE=1`, `2`, `4`, `8`,
+and `16` set.
 
 ## Source Findings
 
@@ -40,19 +44,20 @@ Reuse the retained-WAL setup in
 `test_ownerless_active_reader_pressure_limit_blocks_write_classes()`:
 
 1. Create `app.ownerless_pressure_compressed_row_format_variant` as
-   `ROW_FORMAT=DYNAMIC`.
-2. Insert two prepared `LONGBLOB` rows using the existing deterministic
-   compressed BLOB payload helper.
+   `ROW_FORMAT=DYNAMIC`; the follow-up matrix creates companion `kb1`, `kb2`,
+   `kb4`, and `kb16` tables with the same starting state.
+2. Insert two prepared `LONGBLOB` rows into each table using the existing
+   deterministic compressed BLOB payload helper.
 3. Hold a repeatable-read snapshot in a peer ownerless process and retain
    page-version WAL at the configured soft limit.
-4. Assert
-   `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8` returns
-   `MYLITE_BUSY` with the pressure-limit diagnostic.
-5. Verify the blocked statement leaves InnoDB/table row-format metadata at
+4. Assert each
+   `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=<n>` in the covered
+   key-block set returns `MYLITE_BUSY` with the pressure-limit diagnostic.
+5. Verify each blocked statement leaves InnoDB/table row-format metadata at
    `Dynamic` and leaves row, value, and payload aggregates unchanged.
-6. Release the reader, run the same ALTER successfully, insert a third
-   prepared BLOB row, and verify compressed metadata, final aggregates, and
-   native `ZBLOB`/`ZBLOB2` page evidence.
+6. Release the reader, run the same ALTERs successfully, insert a third
+   prepared BLOB row into each rebuilt table, and verify compressed metadata,
+   final aggregates, and native `ZBLOB`/`ZBLOB2` page evidence.
 7. Reuse the final pressure-policy reopen helper so ownerless/native reopen
    before and after forced `.shm` rebuild prove the compressed final state.
 
@@ -60,15 +65,17 @@ Reuse the retained-WAL setup in
 
 In scope:
 
-- One representative compressed table-copy rebuild pressure-policy case:
-  `ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8`.
+- Compressed table-copy rebuild pressure-policy cases at
+  `ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=1`, `2`, `4`, `8`, and `16`, with the
+  original `KEY_BLOCK_SIZE=8` representative retained as the stable table name.
 - Blocked-state metadata and aggregate assertions.
 - Post-release success, prepared BLOB write, compressed metadata, native
   compressed-page evidence, ownerless/native reopen, and forced `.shm` rebuild.
 
 Out of scope:
 
-- Exhaustive `KEY_BLOCK_SIZE=1`/`2`/`4`/`8`/`16` pressure-policy matrix.
+- Exhaustive compressed storage-option cross products beyond the bounded
+  `KEY_BLOCK_SIZE=1`/`2`/`4`/`8`/`16` pressure-policy matrix.
 - Page compression, encryption, table `TABLESPACE`, partition, external
   directory, or `DISCARD/IMPORT TABLESPACE` variants.
 - Production SQL classifier changes unless the focused selector exposes a
@@ -77,10 +84,10 @@ Out of scope:
 
 ## Compatibility Impact
 
-No SQL behavior is newly enabled. The slice adds evidence that a MariaDB-valid
-compressed row-format table rebuild is throttled before native InnoDB metadata
-or file state changes while retained page-version WAL is at the configured
-ownerless pressure limit.
+No SQL behavior is newly enabled. The slice adds evidence that MariaDB-valid
+compressed row-format table rebuilds in the bounded key-block matrix are
+throttled before native InnoDB metadata or file state changes while retained
+page-version WAL is at the configured ownerless pressure limit.
 
 ## Directory And Lifecycle Impact
 
@@ -114,18 +121,19 @@ changes. The diff is test and documentation coverage only.
 
 ## Acceptance Criteria
 
-- The compressed ALTER returns `MYLITE_BUSY` while an active reader pins
+- Each compressed ALTER returns `MYLITE_BUSY` while an active reader pins
   retained WAL at the configured ownerless pressure limit.
-- The blocked ALTER leaves the table in `Dynamic` row format with unchanged
+- The blocked ALTERs leave their tables in `Dynamic` row format with unchanged
   rows and payload bytes.
-- After reader release, the same ALTER succeeds and final state shows
+- After reader release, the same ALTERs succeed and final state shows
   compressed metadata, retained/prepared payload rows, native compressed BLOB
-  pages, ownerless/native reopen, and forced `.shm` rebuild.
+  pages for each covered key-block size, ownerless/native reopen, and forced
+  `.shm` rebuild.
 
 ## Risks And Follow-Up
 
-- This is representative deterministic pressure coverage, not an exhaustive
-  compressed storage-option matrix.
+- This is a bounded key-block pressure matrix, not an exhaustive compressed
+  storage-option matrix.
 - Broader DDL/file-lifecycle recovery, native redo/checkpoint reconciliation,
   SQL table-lock callback fault injection, and external MariaDB/RQG stress
   remain separate ownerless concurrency gaps.

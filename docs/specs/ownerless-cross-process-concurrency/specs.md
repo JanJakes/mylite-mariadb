@@ -4925,9 +4925,9 @@ Tasks:
    `ALTER COLUMN ... SET/DROP DEFAULT`,
    CHECK and FOREIGN KEY constraint add/drop pressure variants,
    storage/rebuild pressure variants for charset conversion, `FORCE`, ordinary
-   row-format ALTER, and compressed `ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8`
-   ALTER, `ALTER TABLE ... AUTO_INCREMENT` high-watermark pressure
-   coverage, generated-column ALTER and generated-column secondary
+   row-format ALTER, and compressed `ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=1`,
+   `2`, `4`, `8`, and `16` ALTERs, `ALTER TABLE ... AUTO_INCREMENT`
+   high-watermark pressure coverage, generated-column ALTER and generated-column secondary
    index add/drop pressure variants, generated-column FK add/drop pressure
    variants,
    schema/table-copy/replacement/replacement-copy/view/trigger dictionary
