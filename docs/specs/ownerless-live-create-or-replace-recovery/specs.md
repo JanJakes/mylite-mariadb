@@ -163,8 +163,10 @@ tests/docs.
 
 ## Risks And Follow-Up
 
-- Replacement-copy forms require additional source-table and populated-row
-  reasoning before live recovery can be safely enabled.
+- Replacement-copy LIKE recovery is covered by
+  `ownerless-live-create-or-replace-like-recovery`; populated CTAS replacement
+  still requires additional source-table and row-population reasoning before
+  live recovery can be safely enabled.
 - The after-drop absence boundary must remain no-live until absence recovery is
   designed separately.
 - Broader DDL/file-lifecycle recovery and external randomized stress remain
