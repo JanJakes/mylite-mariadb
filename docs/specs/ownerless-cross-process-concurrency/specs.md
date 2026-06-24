@@ -7153,6 +7153,14 @@ subsystems that this mode needs:
   crash matrix, but does not claim a kill inside InnoDB savepoint rollback or
   concurrent-writer savepoint schedules.
 
+  Ownerless DDL stress now treats pre-execution MyLite statement-lock
+  `MYLITE_BUSY` as bounded retryable harness contention while keeping native
+  lock-timeout, deadlock, metadata, and storage errors fatal. A focused
+  short-timeout stress selector forces immediate ownerless statement-lock
+  misses to exercise that retry path. This stabilizes evidence collection for
+  the existing DDL/DML stress workload; it does not change product retry
+  semantics or close the broader DDL/file-lifecycle recovery matrix.
+
   The current completion order is:
 
   1. Broaden native redo/checkpoint reconciliation and live-peer

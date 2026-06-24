@@ -146,6 +146,12 @@ extern uint32_t my_crc32c(uint32_t crc, const void *buf, size_t len);
 #define MYLITE_TEST_DDL_STRESS_ROUNDS 3U
 #define MYLITE_TEST_DDL_STRESS_ROUNDS_MAX 200U
 #define MYLITE_TEST_DDL_STRESS_DML_UPDATES_PER_ROUND 8U
+#define MYLITE_TEST_DDL_STRESS_LOCK_WAIT_TIMEOUT_SECONDS 30U
+#define MYLITE_TEST_DDL_STRESS_LOCK_WAIT_TIMEOUT_SECONDS_MAX 120U
+#define MYLITE_TEST_DDL_STRESS_RETRY_TIMEOUT_MS 180000ULL
+#define MYLITE_TEST_DDL_STRESS_FORCED_STATEMENT_LOCK_HOLD_US 500000U
+#define MYLITE_TEST_DDL_STRESS_DICTIONARY_STATEMENT_LOCK_START 4
+#define MYLITE_TEST_DDL_STRESS_DICTIONARY_STATEMENT_LOCK_LENGTH 1
 #define MYLITE_TEST_TEMP_STRESS_WORKER_COUNT 4U
 #define MYLITE_TEST_TEMP_STRESS_ROUNDS 12U
 #define MYLITE_TEST_TEMP_STRESS_ROUNDS_MAX 2000U
@@ -2327,6 +2333,9 @@ static void assert_ownerless_stress_total(open_database_paths paths, unsigned lo
 static unsigned ownerless_stress_iterations(void);
 static unsigned ownerless_stress_reader_polls(void);
 static unsigned ownerless_ddl_stress_rounds(void);
+static unsigned ownerless_ddl_stress_lock_wait_timeout_seconds(void);
+static int ownerless_ddl_stress_hold_dictionary_statement_lock(const char *database_path);
+static void ownerless_ddl_stress_release_dictionary_statement_lock(int lock_fd);
 static unsigned ownerless_temp_stress_rounds(void);
 static unsigned ownerless_tx_stress_rounds(void);
 static unsigned ownerless_checksum_stress_rounds(void);
@@ -2358,6 +2367,23 @@ static void ownerless_checksum_stress_retry_pause(
     unsigned round,
     unsigned attempt
 );
+static int ownerless_ddl_stress_statement_lock_retryable(mylite_db *db, unsigned mariadb_errno);
+static int ownerless_ddl_stress_exec_retryable(
+    mylite_db *db,
+    const char *sql,
+    unsigned worker_id,
+    unsigned round,
+    unsigned attempt,
+    const char *phase
+);
+static void ownerless_ddl_stress_exec_ok(
+    mylite_db *db,
+    const char *sql,
+    unsigned worker_id,
+    unsigned round,
+    const char *phase
+);
+static void ownerless_ddl_stress_retry_pause(unsigned worker_id, unsigned round, unsigned attempt);
 static void ownerless_random_tx_stress_rows(unsigned worker_id, unsigned round, unsigned rows[3]);
 static void ownerless_random_tx_stress_capture_rows(
     mylite_db *db,
@@ -7952,9 +7978,11 @@ static void test_ownerless_concurrent_ddl_stress(void) {
     int release_pipe[child_count][2];
     pid_t children[child_count];
     const unsigned ddl_rounds = ownerless_ddl_stress_rounds();
+    const unsigned lock_wait_timeout = ownerless_ddl_stress_lock_wait_timeout_seconds();
     const unsigned dml_iterations = ddl_rounds * MYLITE_TEST_DDL_STRESS_DML_UPDATES_PER_ROUND;
     const unsigned long long expected_total =
         30U + (MYLITE_TEST_DDL_STRESS_DML_WORKER_COUNT * dml_iterations);
+    int forced_statement_lock_fd = -1;
 
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(paths);
@@ -8018,8 +8046,17 @@ static void test_ownerless_concurrent_ddl_stress(void) {
         close(release_pipe[index][0]);
         wait_for_pipe(ready_pipe[index][0]);
     }
+    if (lock_wait_timeout == 0U) {
+        forced_statement_lock_fd =
+            ownerless_ddl_stress_hold_dictionary_statement_lock(database_path);
+    }
     for (unsigned index = 0U; index < child_count; ++index) {
         signal_pipe(release_pipe[index][1]);
+    }
+    if (forced_statement_lock_fd >= 0) {
+        sleep_microseconds(MYLITE_TEST_DDL_STRESS_FORCED_STATEMENT_LOCK_HOLD_US);
+        ownerless_ddl_stress_release_dictionary_statement_lock(forced_statement_lock_fd);
+        forced_statement_lock_fd = -1;
     }
     wait_for_children("ownerless-ddl-stress", children, child_count);
 
@@ -56729,11 +56766,21 @@ static void run_ownerless_ddl_stress_worker(
     char table_name[64];
     char renamed_name[72];
     char sql[512];
+    char lock_timeout_sql[64];
     const unsigned ddl_rounds = ownerless_ddl_stress_rounds();
+    const unsigned lock_wait_timeout = ownerless_ddl_stress_lock_wait_timeout_seconds();
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
-    exec_ok(db, "SET SESSION lock_wait_timeout = 30");
+    assert(
+        snprintf(
+            lock_timeout_sql,
+            sizeof(lock_timeout_sql),
+            "SET SESSION lock_wait_timeout = %u",
+            lock_wait_timeout
+        ) > 0
+    );
+    exec_ok(db, lock_timeout_sql);
     signal_pipe(pipes.ready_write_fd);
     wait_for_pipe(pipes.release_read_fd);
 
@@ -56769,7 +56816,7 @@ static void run_ownerless_ddl_stress_worker(
                 table_name
             ) > 0
         );
-        exec_ok(db, sql);
+        ownerless_ddl_stress_exec_ok(db, sql, worker_id, round, "create-table");
         assert(
             snprintf(
                 sql,
@@ -56782,7 +56829,7 @@ static void run_ownerless_ddl_stress_worker(
                 (worker_id * 1000U) + (round * 10U) + 3U
             ) > 0
         );
-        exec_ok(db, sql);
+        ownerless_ddl_stress_exec_ok(db, sql, worker_id, round, "insert-rows");
         assert(
             snprintf(
                 sql,
@@ -56792,7 +56839,7 @@ static void run_ownerless_ddl_stress_worker(
                 note
             ) > 0
         );
-        exec_ok(db, sql);
+        ownerless_ddl_stress_exec_ok(db, sql, worker_id, round, "alter-add-column");
         assert(
             snprintf(
                 sql,
@@ -56801,12 +56848,12 @@ static void run_ownerless_ddl_stress_worker(
                 table_name
             ) > 0
         );
-        exec_ok(db, sql);
+        ownerless_ddl_stress_exec_ok(db, sql, worker_id, round, "alter-add-index");
         assert(
             snprintf(sql, sizeof(sql), "RENAME TABLE app.%s TO app.%s", table_name, renamed_name) >
             0
         );
-        exec_ok(db, sql);
+        ownerless_ddl_stress_exec_ok(db, sql, worker_id, round, "rename-table");
         assert(
             snprintf(
                 sql,
@@ -56818,11 +56865,11 @@ static void run_ownerless_ddl_stress_worker(
         );
         assert(query_unsigned(db, sql) == 3U);
         assert(snprintf(sql, sizeof(sql), "TRUNCATE TABLE app.%s", renamed_name) > 0);
-        exec_ok(db, sql);
+        ownerless_ddl_stress_exec_ok(db, sql, worker_id, round, "truncate-table");
         assert(snprintf(sql, sizeof(sql), "SELECT COUNT(*) FROM app.%s", renamed_name) > 0);
         assert(query_unsigned(db, sql) == 0U);
         assert(snprintf(sql, sizeof(sql), "DROP TABLE app.%s", renamed_name) > 0);
-        exec_ok(db, sql);
+        ownerless_ddl_stress_exec_ok(db, sql, worker_id, round, "drop-table");
     }
 
     assert(mylite_close(db) == MYLITE_OK);
@@ -56837,9 +56884,11 @@ static void run_ownerless_ddl_stress_dml_worker(
     mylite_db *db;
     char update_sql[128];
     char select_sql[128];
+    char lock_timeout_sql[64];
     const unsigned ddl_rounds = ownerless_ddl_stress_rounds();
     const unsigned iterations = ddl_rounds * MYLITE_TEST_DDL_STRESS_DML_UPDATES_PER_ROUND;
     const unsigned long long initial_value = row_id == 1U ? 10U : 20U;
+    const unsigned lock_wait_timeout = ownerless_ddl_stress_lock_wait_timeout_seconds();
 
     assert(
         snprintf(
@@ -56860,12 +56909,20 @@ static void run_ownerless_ddl_stress_dml_worker(
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
-    exec_ok(db, "SET SESSION lock_wait_timeout = 30");
+    assert(
+        snprintf(
+            lock_timeout_sql,
+            sizeof(lock_timeout_sql),
+            "SET SESSION lock_wait_timeout = %u",
+            lock_wait_timeout
+        ) > 0
+    );
+    exec_ok(db, lock_timeout_sql);
     signal_pipe(pipes.ready_write_fd);
     wait_for_pipe(pipes.release_read_fd);
 
     for (unsigned iteration = 0U; iteration < iterations; ++iteration) {
-        exec_ok(db, update_sql);
+        ownerless_ddl_stress_exec_ok(db, update_sql, row_id, iteration, "dml-update");
         if (iteration % 4U == 0U || iteration + 1U == iterations) {
             const unsigned long long expected = initial_value + iteration + 1U;
             const unsigned long long observed = query_unsigned(db, select_sql);
@@ -56892,15 +56949,25 @@ static void run_ownerless_ddl_stress_dml_worker(
 
 static void run_ownerless_ddl_stress_reader(open_database_paths paths, child_pipes pipes) {
     mylite_db *db;
+    char lock_timeout_sql[64];
     unsigned long long previous_total = 30U;
     const unsigned ddl_rounds = ownerless_ddl_stress_rounds();
     const unsigned dml_iterations = ddl_rounds * MYLITE_TEST_DDL_STRESS_DML_UPDATES_PER_ROUND;
     const unsigned long long max_total =
         30U + (MYLITE_TEST_DDL_STRESS_DML_WORKER_COUNT * dml_iterations);
+    const unsigned lock_wait_timeout = ownerless_ddl_stress_lock_wait_timeout_seconds();
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
-    exec_ok(db, "SET SESSION lock_wait_timeout = 30");
+    assert(
+        snprintf(
+            lock_timeout_sql,
+            sizeof(lock_timeout_sql),
+            "SET SESSION lock_wait_timeout = %u",
+            lock_wait_timeout
+        ) > 0
+    );
+    exec_ok(db, lock_timeout_sql);
     signal_pipe(pipes.ready_write_fd);
     wait_for_pipe(pipes.release_read_fd);
 
@@ -57897,6 +57964,63 @@ static unsigned ownerless_ddl_stress_rounds(void) {
     );
 }
 
+static unsigned ownerless_ddl_stress_lock_wait_timeout_seconds(void) {
+    const char *value = getenv("MYLITE_OWNERLESS_DDL_STRESS_LOCK_WAIT_TIMEOUT");
+    char *end = NULL;
+    unsigned long parsed;
+
+    if (value == NULL || value[0] == '\0') {
+        return MYLITE_TEST_DDL_STRESS_LOCK_WAIT_TIMEOUT_SECONDS;
+    }
+
+    errno = 0;
+    parsed = strtoul(value, &end, 10);
+    if (errno != 0 || end == value || *end != '\0' ||
+        parsed > MYLITE_TEST_DDL_STRESS_LOCK_WAIT_TIMEOUT_SECONDS_MAX) {
+        fprintf(
+            stderr,
+            "invalid MYLITE_OWNERLESS_DDL_STRESS_LOCK_WAIT_TIMEOUT=%s; expected 0..%u\n",
+            value,
+            MYLITE_TEST_DDL_STRESS_LOCK_WAIT_TIMEOUT_SECONDS_MAX
+        );
+        fflush(stderr);
+        assert(0);
+    }
+    return (unsigned)parsed;
+}
+
+static int ownerless_ddl_stress_hold_dictionary_statement_lock(const char *database_path) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *statement_lock_path = path_join(concurrency_path, "mylite-statements.lock");
+    struct flock lock = {
+        .l_type = F_WRLCK,
+        .l_whence = SEEK_SET,
+        .l_start = MYLITE_TEST_DDL_STRESS_DICTIONARY_STATEMENT_LOCK_START,
+        .l_len = MYLITE_TEST_DDL_STRESS_DICTIONARY_STATEMENT_LOCK_LENGTH,
+    };
+    int lock_fd;
+
+    lock_fd = open(statement_lock_path, O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+    assert(lock_fd >= 0);
+    assert(fcntl(lock_fd, F_SETLK, &lock) == 0);
+    free(statement_lock_path);
+    free(concurrency_path);
+    return lock_fd;
+}
+
+static void ownerless_ddl_stress_release_dictionary_statement_lock(int lock_fd) {
+    struct flock lock = {
+        .l_type = F_UNLCK,
+        .l_whence = SEEK_SET,
+        .l_start = MYLITE_TEST_DDL_STRESS_DICTIONARY_STATEMENT_LOCK_START,
+        .l_len = MYLITE_TEST_DDL_STRESS_DICTIONARY_STATEMENT_LOCK_LENGTH,
+    };
+
+    assert(lock_fd >= 0);
+    assert(fcntl(lock_fd, F_SETLK, &lock) == 0);
+    assert(close(lock_fd) == 0);
+}
+
 static unsigned ownerless_temp_stress_rounds(void) {
     return ownerless_unsigned_env(
         "MYLITE_OWNERLESS_TEMP_STRESS_ROUNDS",
@@ -58066,6 +58190,87 @@ static void ownerless_checksum_stress_retry_pause(
     unsigned attempt
 ) {
     const unsigned delay = 1000U * (1U + ((worker_id * 19U + round * 11U + attempt * 5U) % 20U));
+
+    sleep_microseconds(delay);
+}
+
+static int ownerless_ddl_stress_statement_lock_retryable(mylite_db *db, unsigned mariadb_errno) {
+    return mylite_errcode(db) == MYLITE_BUSY && mariadb_errno == 0U;
+}
+
+static int ownerless_ddl_stress_exec_retryable(
+    mylite_db *db,
+    const char *sql,
+    unsigned worker_id,
+    unsigned round,
+    unsigned attempt,
+    const char *phase
+) {
+    unsigned mariadb_errno = 0U;
+    const int result = exec_status(db, sql, &mariadb_errno);
+
+    if (result == MYLITE_OK) {
+        return 1;
+    }
+    if (ownerless_ddl_stress_statement_lock_retryable(db, mariadb_errno)) {
+        return 0;
+    }
+
+    fprintf(
+        stderr,
+        "ownerless ddl stress unexpected error: worker=%u round=%u attempt=%u "
+        "phase=%s sql=%s errcode=%d mariadb_errno=%u message=%s\n",
+        worker_id,
+        round,
+        attempt,
+        phase,
+        sql,
+        mylite_errcode(db),
+        mariadb_errno,
+        mylite_errmsg(db) != NULL ? mylite_errmsg(db) : "(null)"
+    );
+    fflush(stderr);
+    assert(0);
+    return 0;
+}
+
+static void ownerless_ddl_stress_exec_ok(
+    mylite_db *db,
+    const char *sql,
+    unsigned worker_id,
+    unsigned round,
+    const char *phase
+) {
+    const uint64_t deadline_ms = monotonic_milliseconds() + MYLITE_TEST_DDL_STRESS_RETRY_TIMEOUT_MS;
+
+    for (unsigned attempt = 1U;; ++attempt) {
+        if (ownerless_ddl_stress_exec_retryable(db, sql, worker_id, round, attempt, phase)) {
+            return;
+        }
+        if (monotonic_milliseconds() >= deadline_ms) {
+            fprintf(
+                stderr,
+                "ownerless ddl stress exhausted statement-lock retries: worker=%u "
+                "round=%u attempt=%u phase=%s sql=%s errcode=%d mariadb_errno=%u "
+                "message=%s\n",
+                worker_id,
+                round,
+                attempt,
+                phase,
+                sql,
+                mylite_errcode(db),
+                mylite_mariadb_errno(db),
+                mylite_errmsg(db) != NULL ? mylite_errmsg(db) : "(null)"
+            );
+            fflush(stderr);
+            assert(0);
+        }
+        ownerless_ddl_stress_retry_pause(worker_id, round, attempt);
+    }
+}
+
+static void ownerless_ddl_stress_retry_pause(unsigned worker_id, unsigned round, unsigned attempt) {
+    const unsigned delay = 1000U * (1U + ((worker_id * 23U + round * 7U + attempt * 3U) % 20U));
 
     sleep_microseconds(delay);
 }

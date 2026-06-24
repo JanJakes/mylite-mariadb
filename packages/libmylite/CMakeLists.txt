@@ -395,6 +395,17 @@ if(BUILD_TESTING)
         COMMAND mylite_ownerless_cross_process_sql_test ddl-stress
       )
       add_test(
+        NAME libmylite.ownerless-cross-process-ddl-stress-statement-lock-retry
+        COMMAND
+          ${CMAKE_COMMAND}
+          -E
+          env
+          MYLITE_OWNERLESS_DDL_STRESS_ROUNDS=2
+          MYLITE_OWNERLESS_DDL_STRESS_LOCK_WAIT_TIMEOUT=0
+          $<TARGET_FILE:mylite_ownerless_cross_process_sql_test>
+          ddl-stress
+      )
+      add_test(
         NAME libmylite.ownerless-cross-process-temporary-stress
         COMMAND mylite_ownerless_cross_process_sql_test temp-stress
       )
@@ -781,6 +792,10 @@ if(BUILD_TESTING)
       )
       set_tests_properties(libmylite.ownerless-cross-process-ddl-stress PROPERTIES
         ENVIRONMENT "MYLITE_OWNERLESS_DDL_STRESS_ROUNDS=8"
+        LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-stress"
+        TIMEOUT 900
+      )
+      set_tests_properties(libmylite.ownerless-cross-process-ddl-stress-statement-lock-retry PROPERTIES
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-stress"
         TIMEOUT 900
       )
