@@ -141,12 +141,11 @@ product.
 - If a DML-specific native checkpoint marker is pending with retained
   page-version records, while no dictionary file-op or autoincrement marker is
   pending, no-live reclaim drains the marker for autocommit and single-owner
-  explicit writers whose local close can prove the checkpoint boundary. For
-  peer-explicit or no-local closers it leaves the marker and WAL in place. This
-  is conservative: it preserves forced-`.shm` rebuild evidence until broader
-  native redo/checkpoint reconciliation can prove that native files alone are
-  authoritative for that DML boundary, without pinning the common local-writer
-  path.
+  explicit writers whose local close can prove the checkpoint boundary. This
+  slice originally left peer-explicit or no-local marker/WAL evidence in place
+  as a conservative rebuild proof; the follow-up
+  `ownerless-dml-native-checkpoint-proof` slice replaces that retention after
+  final peer exit with no-live native checkpoint and per-page native proof.
 - Ordinary native text and prepared statements retire startup page-version
   visibility before write-class statements or locking reads. Ordinary reads can
   still consume retained ownerless WAL for startup recovery, but a later native
@@ -227,9 +226,9 @@ tests.
 - Ownerless and ordinary reopen checks still prove the committed deltas and
   recovery anchors.
 - DML marker selectors prove autocommit and single-owner explicit markers drain,
-  peer-observed explicit marker/WAL evidence stays retained for forced `.shm`
-  rebuild, and ordinary native writes after such a startup read back their own
-  updates.
+  peer-observed explicit marker/WAL evidence remains retained while a peer is
+  live, and ordinary native writes after retained-WAL startup read back their
+  own updates.
 - Docs and compatibility notes describe the fixed instability and any remaining
   risk honestly.
 
@@ -240,6 +239,6 @@ tests.
   transaction-lifecycle investigation.
 - Repeated runs are needed because the original timeout/assertion was
   timing-sensitive.
-- Retaining peer-explicit or no-local DML-only marker/WAL evidence is a
-  correctness tradeoff that can increase retained page-log work until a later
-  slice proves native redo/checkpoint reconciliation for these DML boundaries.
+- The follow-up native checkpoint proof removes the peer-explicit no-live
+  retention for proven DML-only records. Broader DML-origin `FILE_MODIFY`
+  shapes still need separate crash and randomized coverage.

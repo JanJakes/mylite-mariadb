@@ -6765,8 +6765,8 @@ static void test_ownerless_explicit_dml_deadlock_discards_file_op_marker(void) {
         304U
     );
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
-    assert(read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
-    assert_concurrency_wal_retained_for(database_path, 500U);
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert_concurrency_wal_checkpointed_eventually(database_path);
     assert_table_total_value_is_one_of(paths, 302U, 304U);
 
     remove_concurrency_shm(database_path);
@@ -10243,8 +10243,8 @@ static void test_ownerless_multi_peer_explicit_dml_marker_drain(void) {
     signal_pipe(release_pipe[1]);
     wait_for_child(peer_child);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
-    assert(read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
-    assert_concurrency_wal_retained_for(database_path, 500U);
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert_concurrency_wal_checkpointed_eventually(database_path);
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);

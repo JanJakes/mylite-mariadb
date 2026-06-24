@@ -389,13 +389,14 @@ Roles:
   payload. When a DML-specific native checkpoint marker is pending with retained
   page-version records and no dictionary file-op or autoincrement marker, MyLite
   drains the marker for autocommit and single-owner explicit writers whose local
-  close can prove the checkpoint boundary. Peer-explicit or no-local closers
-  keep the DML marker and page-version WAL as durable rebuild evidence instead
-  of truncating committed DML WAL on no-live close; broader native
-  redo/checkpoint reconciliation must replace that conservative retention before
-  those markers can be drained. Live-peer reclaim keeps checkpointable user
-  data/index page records in WAL until no-live reclaim can make the native data
-  file authoritative. When no-live reclaim advances the durable
+  close can prove the checkpoint boundary. Peer-explicit DML evidence is still
+  retained while a peer is live, but final no-live close now forces native
+  checkpoint coverage and reuses the per-page native image/absence/discard
+  proof before clearing the DML-only marker and checkpointing the page-version
+  WAL. Generic dictionary/file-op and autoincrement markers keep their stricter
+  policy. Live-peer reclaim keeps checkpointable user data/index page records
+  in WAL until no-live reclaim can make the native data file authoritative.
+  When no-live reclaim advances the durable
   checkpoint-visible LSN, the still-existing volatile redo state is reseeded
   from that checkpoint so readers do not observe `.shm` metadata behind `.ckpt`
   before a later `.shm` rebuild. Focused no-live cutover coverage now binds a
@@ -4685,13 +4686,13 @@ Tasks:
    autocommit, single-owner explicit-transaction, and idle-peer explicit
    transaction commit shapes, observes the DML marker before close or before
    final peer release as appropriate, drains the autocommit and single-owner
-   explicit DML markers on close, retains the peer-observed explicit DML marker
-   and page-version WAL as forced-rebuild evidence until broader native
-   redo/checkpoint proof exists, and verifies ownerless plus ordinary native
-   reopen after forced `.shm` rebuild. Ordinary native opens that use retained
-   ownerless WAL retire the startup page-version visibility before later native
-   write or locking-read statements so stale retained page images cannot shadow
-   ordinary writes.
+   explicit DML markers on close, retains peer-observed explicit DML marker/WAL
+   evidence while the peer is live, then drains it after final peer exit when
+   no-live native checkpoint and page-image proof succeeds, and verifies
+   ownerless plus ordinary native reopen after forced `.shm` rebuild. Ordinary
+   native opens that use retained ownerless WAL retire the startup page-version
+   visibility before later native write or locking-read statements so stale
+   retained page images cannot shadow ordinary writes.
    Successful explicit transaction rollback after local writes is covered as a
    separate outcome: it leaves both native file-op markers clear, consumes the
    process-local ownerless InnoDB file-op redo flag, and preserves the
@@ -4701,8 +4702,8 @@ Tasks:
    timeout victims prove the same discard after explicit rollback; focused
    two-process SQL coverage proves the victim process clears its process-local
    file-op redo latch while the winning transaction can still commit and a
-   later no-live ownerless close after both children are reaped retains
-   committed DML marker/WAL evidence for forced rebuild.
+   later no-live ownerless close after both children are reaped drains
+   committed DML marker/WAL evidence after native checkpoint proof.
    That closes the focused checkpointed representative DML commit marker and
    rollback/deadlock classification gaps, not the broader DML-origin
    `FILE_MODIFY`, crash, killed-transaction, savepoint, or

@@ -1406,13 +1406,6 @@ struct OwnerlessNativePageCheckpointProofContext {
     bool blocked = false;
 };
 
-struct OwnerlessPageLogLineageProbeContext {
-    RuntimeState *runtime = nullptr;
-    bool saw_checkpointable_user_record = false;
-    bool saw_external_snapshot_lineage_record = false;
-    bool blocked = false;
-};
-
 struct OwnerlessPageVisibilityScope {
     ~OwnerlessPageVisibilityScope() {
         mylite_ownerless_innodb_clear_external_page_visibility();
@@ -1998,7 +1991,6 @@ bool ownerless_page_log_checkpoint_due(RuntimeState &runtime);
 bool ownerless_runtime_in_single_owner_epoch_locked(RuntimeState &runtime);
 bool ownerless_page_log_has_uncheckpointed_records(RuntimeState &runtime);
 bool ownerless_page_log_has_payload_records(RuntimeState &runtime);
-bool ownerless_page_log_user_records_are_external_snapshot_lineage(RuntimeState &runtime);
 bool ownerless_runtime_has_live_shared_readonly_peer(RuntimeState &runtime);
 bool clear_ownerless_native_file_op_checkpoint_without_page_log(RuntimeState &runtime);
 bool ownerless_autoinc_checkpoint_pending(RuntimeState &runtime);
@@ -2100,14 +2092,6 @@ bool ownerless_file_per_table_page_is_discarded(
 );
 bool ownerless_file_per_table_space_is_absent(RuntimeState &runtime, std::uint32_t space_id);
 int collect_ownerless_native_page_checkpoint_record(
-    std::uint32_t space_id,
-    std::uint32_t page_no,
-    std::uint64_t page_lsn,
-    std::uint64_t commit_lsn,
-    std::uint64_t record_offset,
-    void *context
-);
-int collect_ownerless_page_log_lineage_probe_record(
     std::uint32_t space_id,
     std::uint32_t page_no,
     std::uint64_t page_lsn,
@@ -11536,12 +11520,6 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
                                              autoinc_checkpoint_needed || visible_lsn == 0U;
         const bool retained_page_log_records =
             ownerless_page_log_has_uncheckpointed_records(runtime);
-        if ((runtime_has_peer_explicit_transaction_write || !runtime_has_local_write) &&
-            native_dml_file_op_checkpoint_marker_needed && retained_page_log_records &&
-            !native_file_op_checkpoint_marker_needed && !autoinc_checkpoint_needed &&
-            !ownerless_page_log_user_records_are_external_snapshot_lineage(runtime)) {
-            return;
-        }
         const bool boundary_advance_needed = visible_lsn == 0U || retained_page_log_records ||
                                              native_file_op_checkpoint_marker_needed ||
                                              autoinc_checkpoint_needed;
@@ -11834,26 +11812,6 @@ bool ownerless_page_log_has_payload_records(RuntimeState &runtime) {
         &has_readable_records
     );
     return result != MYLITE_OWNERLESS_PAGE_LOG_OK || has_readable_records != 0;
-}
-
-bool ownerless_page_log_user_records_are_external_snapshot_lineage(RuntimeState &runtime) {
-    if (runtime.concurrency_wal_fd < 0) {
-        return false;
-    }
-    if (!ownerless_page_log_has_uncheckpointed_records(runtime)) {
-        return true;
-    }
-
-    OwnerlessPageLogLineageProbeContext probe = {};
-    probe.runtime = &runtime;
-    const int replay_result = mylite_ownerless_page_log_replay_at(
-        runtime.concurrency_wal_fd,
-        k_concurrency_recovery_header_size,
-        collect_ownerless_page_log_lineage_probe_record,
-        &probe
-    );
-    return replay_result == MYLITE_OWNERLESS_PAGE_LOG_OK && !probe.blocked &&
-           (!probe.saw_checkpointable_user_record || probe.saw_external_snapshot_lineage_record);
 }
 
 void set_ownerless_native_file_op_checkpoint_cache(RuntimeState &runtime, bool needed) {
@@ -13163,58 +13121,6 @@ int collect_ownerless_native_page_checkpoint_record(
     OwnerlessNativePageCheckpointRecord
         record{space_id, page_no, page_lsn, commit_lsn, record_offset, external_snapshot_lineage};
     proof->records.push_back(record);
-    return MYLITE_OWNERLESS_PAGE_LOG_OK;
-}
-
-int collect_ownerless_page_log_lineage_probe_record(
-    std::uint32_t space_id,
-    std::uint32_t page_no,
-    std::uint64_t page_lsn,
-    std::uint64_t commit_lsn,
-    std::uint64_t record_offset,
-    void *context
-) {
-    (void)commit_lsn;
-    auto *probe = static_cast<OwnerlessPageLogLineageProbeContext *>(context);
-    if (probe == nullptr || probe->runtime == nullptr) {
-        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
-    }
-    if (probe->blocked || page_lsn == 0U || space_id == 0U || page_no < 3U) {
-        return MYLITE_OWNERLESS_PAGE_LOG_OK;
-    }
-
-    std::uint32_t metadata_flags = 0U;
-    const int metadata_result = mylite_ownerless_page_log_record_metadata_flags_at(
-        probe->runtime->concurrency_wal_fd,
-        record_offset,
-        &metadata_flags
-    );
-    if (metadata_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
-        probe->blocked = true;
-        return MYLITE_OWNERLESS_PAGE_LOG_OK;
-    }
-    if ((metadata_flags & MYLITE_OWNERLESS_PAGE_LOG_RECORD_SNAPSHOT_BOUNDARY) != 0U ||
-        (metadata_flags & MYLITE_OWNERLESS_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE) != 0U) {
-        return MYLITE_OWNERLESS_PAGE_LOG_OK;
-    }
-    if (ownerless_page_log_record_is_native_support_state(
-            *probe->runtime,
-            space_id,
-            page_no,
-            page_lsn,
-            commit_lsn,
-            record_offset
-        )) {
-        return MYLITE_OWNERLESS_PAGE_LOG_OK;
-    }
-
-    probe->saw_checkpointable_user_record = true;
-    if ((metadata_flags & MYLITE_OWNERLESS_PAGE_LOG_RECORD_EXTERNAL_SNAPSHOT_LINEAGE) != 0U) {
-        probe->saw_external_snapshot_lineage_record = true;
-        return MYLITE_OWNERLESS_PAGE_LOG_OK;
-    }
-
-    probe->blocked = true;
     return MYLITE_OWNERLESS_PAGE_LOG_OK;
 }
 
