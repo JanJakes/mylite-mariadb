@@ -7067,8 +7067,36 @@ subsystems that this mode needs:
   three-round random stress loops, reduced transaction stress, six-round random
   stress, and one default random stress pass. This is transaction rollback and
   handoff evidence only; broader redo/checkpoint reconciliation, arbitrary DDL
-  file-lifecycle recovery, active-reader pressure policy breadth, SQL-level
-  table-lock fault injection, and external MariaDB/RQG stress remain open.
+  file-lifecycle recovery, active-reader pressure crash/oracle breadth, and
+  external MariaDB/RQG stress remain open.
+
+  The current completion order is:
+
+  1. Broaden native redo/checkpoint reconciliation and live-peer
+     DDL/file-lifecycle recovery, especially crash recovery for DDL-created,
+     rebuilt, renamed, truncated, and dropped file-per-table tablespaces while
+     peers remain live.
+  2. Close remaining transaction crash windows, especially mid-rollback and
+     concurrent-writer savepoint schedules that combine native undo, ownerless
+     page-write ownership, and file-operation marker cleanup.
+  3. Extend active-reader pressure evidence from retained-WAL policy to crash
+     and external-oracle breadth for the high-risk DML/DDL classes already
+     covered by bounded pressure policy tests.
+  4. Continue deterministic external MariaDB seed/replay expansion and graduate
+     to longer randomized MariaDB/RQG-style runs once the bounded recovery
+     gates above stop producing new correctness issues.
+  5. Keep production performance parity visible while those correctness slices
+     land, with startup, native engine, ownerless write-path, and PHPUnit
+     timing tracked in CI as separate build and test phases.
+
+  SQL-level local table-wait fault injection is no longer listed as a primary
+  completion gate for supported ownerless SQL: ownerless `LOCK TABLES` and
+  SQL locked-table mode remain explicitly unsupported, representative blocked
+  DDL shapes are negative-proofed as stopping before the local
+  `table-lock-wait` callback, and the reachable supported SQL path is covered
+  through the external native table-wait registry plus killed-waiter cleanup.
+  Positive SQL reachability for the local table-wait callback remains
+  unclaimed research, not a supported-surface completion criterion.
 - The feature may force ownerless mode to be InnoDB-only for a long time.
 - Bugs are likely to be corruption bugs, not simple query failures.
 - Network filesystems should remain unsupported unless a later design proves
