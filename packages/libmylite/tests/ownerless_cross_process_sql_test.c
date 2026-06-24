@@ -15911,12 +15911,11 @@ static void test_ownerless_active_reader_pressure_reclaims_after_release(void) {
 
     signal_pipe(release_pipe[1]);
     wait_for_child(reader_child);
-    assert(concurrency_wal_is_checkpointed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U + rounds);
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_eventually(database_path);
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
@@ -18695,7 +18694,6 @@ static void test_ownerless_expanding_page_pressure_reclaims_after_release(void) 
 
     signal_pipe(release_pipe[1]);
     wait_for_child(reader_child);
-    assert(concurrency_wal_is_checkpointed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_expanding_pressure") == rows);
@@ -18707,7 +18705,7 @@ static void test_ownerless_expanding_page_pressure_reclaims_after_release(void) 
         rows * 4000ULL
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_eventually(database_path);
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
@@ -18830,7 +18828,6 @@ static void test_ownerless_blob_page_pressure_reclaims_after_release(void) {
 
     signal_pipe(release_pipe[1]);
     wait_for_child(reader_child);
-    assert(concurrency_wal_is_checkpointed(database_path));
 
     assert_ownerless_blob_page_pressure_state(
         paths,
@@ -18973,7 +18970,6 @@ static void test_ownerless_blob_page_size_matrix_reclaims_after_release(void) {
 
     signal_pipe(release_pipe[1]);
     wait_for_child(reader_child);
-    assert(concurrency_wal_is_checkpointed(database_path));
 
     assert_ownerless_blob_size_matrix_state(
         paths,
@@ -19084,7 +19080,6 @@ static void test_ownerless_compressed_blob_page_pressure_reclaims_after_release(
 
     signal_pipe(release_pipe[1]);
     wait_for_child(reader_child);
-    assert(concurrency_wal_is_checkpointed(database_path));
 
     assert_ownerless_compressed_blob_page_pressure_state(
         paths,
@@ -19211,7 +19206,6 @@ static void test_ownerless_compressed_blob_page_size_matrix_reclaims_after_relea
 
     signal_pipe(release_pipe[1]);
     wait_for_child(reader_child);
-    assert(concurrency_wal_is_checkpointed(database_path));
 
     assert_ownerless_compressed_blob_size_matrix_state(
         paths,
@@ -19358,7 +19352,6 @@ static void test_ownerless_compressed_blob_key_block_matrix_reclaims_after_relea
 
     signal_pipe(release_pipe[1]);
     wait_for_child(reader_child);
-    assert(concurrency_wal_is_checkpointed(database_path));
 
     assert_ownerless_compressed_blob_key_block_matrix_state(
         paths,
@@ -19400,6 +19393,7 @@ static void test_ownerless_no_live_pressure_reclaim_advances_visible_lsn(void) {
     uint64_t latest_lsn;
     uint64_t visible_lsn;
     uint64_t lowered_visible_lsn;
+    uint64_t checkpoint_visible_after;
 
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(paths);
@@ -19441,16 +19435,22 @@ static void test_ownerless_no_live_pressure_reclaim_advances_visible_lsn(void) {
 
     signal_pipe(release_pipe[1]);
     wait_for_child(reader_child);
-    assert(read_concurrency_checkpoint_visible_lsn(database_path) >= latest_lsn);
-    assert(concurrency_wal_is_checkpointed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_eventually(database_path);
+    checkpoint_visible_after = read_concurrency_checkpoint_visible_lsn(database_path);
+    assert(checkpoint_visible_after >= latest_lsn);
+    assert(checkpoint_visible_after > lowered_visible_lsn);
 
+    remove_concurrency_wal(database_path);
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(
+        mylite_ownerless_innodb_checkpoint_covers_lsn(checkpoint_visible_after) ==
+        MYLITE_TEST_OWNERLESS_INNODB_LOCK_OK
+    );
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));

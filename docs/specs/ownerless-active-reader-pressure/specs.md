@@ -53,6 +53,9 @@ The active-reader pressure policy remains conservative:
 - no background checkpoint worker is introduced,
 - no hard size cap aborts user SQL,
 - close-time reclaim runs when an ownerless non-read-only runtime closes,
+- reader-only runtimes that opened before peer writes may retain peer-appended
+  WAL until a later ownerless no-live opener starts from that retained
+  boundary,
 - active pins allow reclaim only when every snapshot-sensitive page advanced
   after the relevant pin has a retained boundary image,
 - multi-pin reclaim preserves newer checkpointed snapshot-page records because
@@ -74,7 +77,7 @@ same test in the normal ownerless SQL run. The test:
    not checkpointed while the pin is active, and at least one WAL record remains
    available.
 5. Releases the reader, verifies the reader still sees the original aggregate,
-   then verifies close-time reclamation checkpoints the WAL.
+   then verifies a post-release ownerless no-live opener checkpoints the WAL.
 6. Reopens through ownerless and native exclusive modes, including forced
    `.shm` rebuild, to verify final data and checkpoint state.
 
@@ -91,8 +94,9 @@ In scope:
   active page-version pin.
 - Bounded same-row SQL pressure coverage while a repeatable-read snapshot pin is
   active.
-- Verification that retained WAL is reclaimed after the reader releases and
-  final data survives ownerless/native reopen plus forced `.shm` rebuild.
+- Verification that retained WAL is reclaimed by a post-release ownerless
+  no-live opener after the reader releases and final data survives
+  ownerless/native reopen plus forced `.shm` rebuild.
 
 Out of scope:
 

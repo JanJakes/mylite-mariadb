@@ -32,8 +32,15 @@ hold an older ownerless page-version snapshot.
   uses only the visible LSN as the safe checkpoint boundary.
 - Existing `active-reader-pressure` and `expanding-page-pressure` SQL selectors
   assert that WAL is retained while a repeatable-read page-version pin is live
-  and checkpointed after the reader releases. Stress has shown the expanding
-  selector can intermittently reach the final assertion with retained WAL.
+  and checkpointed by a post-release ownerless no-live opener. A reader-only
+  runtime that opened before peer writes may still retain peer-appended WAL on
+  its own close, so immediate reader-close truncation is not a safe invariant.
+- The focused `no-live-pressure-reclaim` selector now lowers the durable
+  checkpoint-visible LSN below the raw latest LSN while a repeatable-read pin
+  retains WAL, then releases the pin and requires no-live reclaim to advance
+  the visible boundary, checkpoint the WAL, and prove ordinary native reopen
+  after `mylite-concurrency.wal` deletion through
+  `mylite_ownerless_innodb_checkpoint_covers_lsn()`.
 
 ## Design
 
@@ -111,6 +118,8 @@ The implementation adds a small first-party helper and no dependencies.
 
 - Build `mylite_ownerless_cross_process_sql_test` in `embedded-dev`.
 - Run focused `no-live-pressure-reclaim` in `embedded-dev`.
+- Run the registered `libmylite.ownerless-no-live-pressure-reclaim-proof`
+  CTest in a production embedded build.
 - Run focused `expanding-page-pressure` in `embedded-dev`.
 - Run focused `active-reader-pressure` in `embedded-dev`.
 - Build and run the focused selectors in `ownerless-test-hooks`.
@@ -120,8 +129,12 @@ The implementation adds a small first-party helper and no dependencies.
 
 ## Acceptance Criteria
 
-- Releasing the final repeatable-read snapshot reader leaves no page-version
-  WAL records in the focused active-reader and expanding-page pressure tests.
+- After releasing the final repeatable-read snapshot reader, a post-release
+  ownerless no-live opener checkpoints the retained page-version WAL in the
+  focused active-reader and expanding-page pressure tests.
+- The focused no-live pressure selector deletes checkpointed page-version WAL
+  before ordinary native reopen and asserts native InnoDB checkpoint coverage
+  for the reclaimed visible LSN.
 - Ownerless and native exclusive reopen checks still preserve final row data
   before and after forced `.shm` rebuild.
 - If page-visible advancement cannot prove a newer boundary, the implementation

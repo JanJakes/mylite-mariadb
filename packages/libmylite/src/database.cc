@@ -11592,7 +11592,13 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
     bool native_file_op_checkpoint_marker_needed = false;
     bool native_dml_file_op_checkpoint_marker_needed = false;
     bool autoinc_checkpoint_needed = false;
+    std::uint64_t page_log_end_before_no_live_advance = 0;
     if (no_live_peers) {
+        std::uint64_t page_log_bytes_before_no_live_advance = 0;
+        if (ownerless_page_log_payload_bytes(runtime, &page_log_bytes_before_no_live_advance)) {
+            page_log_end_before_no_live_advance =
+                runtime.ownerless_page_log_known_end_offset.load(std::memory_order_acquire);
+        }
         static_cast<void>(read_ownerless_native_file_op_checkpoint_needed(
             runtime,
             &native_file_op_checkpoint_marker_needed
@@ -11669,10 +11675,14 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
     const bool page_log_size_observed = ownerless_page_log_payload_bytes(runtime, &page_log_bytes);
     const std::uint64_t current_page_log_end_offset =
         runtime.ownerless_page_log_known_end_offset.load(std::memory_order_acquire);
+    const std::uint64_t consumed_page_log_end_offset =
+        no_live_peers && page_log_end_before_no_live_advance != 0U
+            ? page_log_end_before_no_live_advance
+            : current_page_log_end_offset;
     const bool consumed_records_appended_after_open =
         page_log_size_observed && page_log_bytes != 0U &&
         runtime.ownerless_page_log_start_end_offset != 0U &&
-        current_page_log_end_offset > runtime.ownerless_page_log_start_end_offset;
+        consumed_page_log_end_offset > runtime.ownerless_page_log_start_end_offset;
     if (no_live_peers && consumed_page_version_wal && consumed_records_appended_after_open &&
         !runtime_has_local_write && ownerless_page_log_has_uncheckpointed_records(runtime)) {
         return;

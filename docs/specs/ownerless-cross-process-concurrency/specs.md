@@ -2489,7 +2489,11 @@ Tasks:
    throttle-reached state through `mylite_ownerless_pressure_status()`.
    The `ownerless-no-live-pressure-reclaim-advance` slice adds deterministic
    SQL coverage for no-live close-time reclaim when the durable raw latest LSN
-   is newer than the page-visible LSN while page-version WAL is retained.
+   is newer than the page-visible LSN while page-version WAL is retained. The
+   selector now also deletes the checkpointed page-version WAL before ordinary
+   native reopen and asserts `mylite_ownerless_innodb_checkpoint_covers_lsn()`
+   for the reclaimed visible LSN, proving that this pressure-specific advance
+   does not depend on retained WAL after no-live reclamation.
    The `ownerless-statement-checkpoint-scheduling` slice adds thresholded
    ownerless write/DDL/transaction-end statement-boundary scheduling for the
    no-live native reclaim path when no peer process is open. The
