@@ -333,8 +333,12 @@ handoff; rollback no longer publishes or flushes transaction page images as a
 committed ownerless visibility boundary. Reader-only no-live close retains
 peer page-version WAL appended after that runtime opened, so a later
 startup/rebuild path, not the stale reader, materializes the committed native
-boundary. Deadlock victims after local explicit-transaction writes now use the
-same discard rule after MyLite's internal deadlock rollback; focused
+boundary; focused live snapshot reader-close coverage, including the
+synthesized native-boundary variant, now verifies that retention after the pin
+releases, then verifies a fresh ownerless opener reads the committed rows and
+checkpoints the retained WAL. Deadlock victims after
+local explicit-transaction writes now use the same discard rule after MyLite's
+internal deadlock rollback; focused
 two-process SQL coverage proves the victim process clears its process-local
 file-op redo latch while the winning transaction can still commit; accepted
 1205 timeout victims prove the same discard after explicit rollback, matching

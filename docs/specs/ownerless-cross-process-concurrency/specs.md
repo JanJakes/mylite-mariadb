@@ -7073,7 +7073,11 @@ subsystems that this mode needs:
   LSN. SQL-layer rollback with local writes clears page-version read state and
   installs a native-read fence, while reader-only no-live close retains peer
   WAL appended after that runtime opened so later startup/rebuild can
-  materialize the native boundary. Focused production coverage includes the
+  materialize the native boundary. Focused live snapshot reader-close coverage,
+  including the synthesized native-boundary variant, now proves that a stale
+  reader close retains the peer WAL after its pin releases, then a fresh
+  ownerless opener reads the committed rows and checkpoints the retained WAL.
+  Focused production coverage includes the
   explicit transaction history-proof selectors, uncommitted-peer-hidden,
   registered three-round random rollback handoff CTest, adjacent savepoint,
   deadlock, and commit-race commands, 100 traced and 50 untraced direct

@@ -124,8 +124,10 @@ when the page LSN proves it is visible to the oldest active snapshot.
   target LSN.
 - Add ownerless SQL coverage that starts from a checkpointed WAL, holds a
   repeatable-read snapshot, commits a peer update, verifies a WAL record at or
-  before the snapshot LSN now exists, then releases the reader and verifies
-  normal reclaim plus forced `.shm` rebuild preserve the committed data.
+  before the snapshot LSN now exists, then releases the reader, verifies the
+  stale reader-only close retains the boundary WAL, and verifies a fresh
+  ownerless opener checkpoints it while preserving the committed data through
+  forced `.shm` rebuild.
 - Run embedded and hook ownerless primitive/cross-process SQL coverage, ownerless
   stress, `format-check`, and `git diff --check`.
 
@@ -135,9 +137,9 @@ when the page LSN proves it is visible to the oldest active snapshot.
 - A writer committing while an older snapshot is active synthesizes at least one
   boundary record at or before the snapshot LSN.
 - The active reader keeps seeing its old snapshot.
-- Once the reader exits, normal close-time reclamation removes the retained
-  boundary records and the final committed state survives reopen and forced
-  shared-memory rebuild.
+- Once the reader exits, the stale reader-only close retains the boundary
+  records, then a fresh ownerless opener checkpoints them and the final
+  committed state survives reopen and forced shared-memory rebuild.
 
 ## Risks
 

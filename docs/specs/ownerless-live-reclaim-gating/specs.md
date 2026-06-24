@@ -109,6 +109,19 @@ Primitive tests cover same-process, cross-process, owner-cleanup, and
 slot-exhaustion behavior. Ownerless SQL tests cover live idle-peer reclamation,
 live active-writer reclamation blocking, live snapshot-pin blocking, and an
 unsafe-hook pause after consistent-snapshot pre-pinning but before SQL execution.
+The live idle-peer SQL case keeps the stricter retained-WAL check in production
+builds; hook builds compile a smaller checkpoint threshold, so that case accepts
+either retained WAL or an already checkpointed WAL while still verifying the
+same committed rows.
+The live snapshot-pin SQL cases also now prove that a reader-only runtime which
+consumed peer WAL appended after open retains that WAL on no-live close after
+its pin releases, including the synthesized native-boundary variant; a later
+fresh ownerless opener materializes the committed boundary and checkpoints the
+WAL.
+The live-writer SQL case asserts WAL retention while a peer explicit
+transaction is still waiting to commit, then releases that writer before
+closing the parent runtime so the harness does not create an application-level
+close/release cycle; the next safe opener still observes both committed rows.
 
 ## Why Prefix Checkpointing Cannot Use Oldest Pinned LSN
 
