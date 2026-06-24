@@ -6310,6 +6310,7 @@ static void test_page_log_skips_proof_only_native_support_records(void) {
     uint32_t record_flags = 0;
     uint64_t stats[PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
     page_log_retained_records replay_records = {0};
+    page_log_retained_records proof_replay_records = {0};
     page_log_checkpoint_index_context checkpoint_context = {0};
     int is_native_support = 0;
 
@@ -6421,6 +6422,17 @@ static void test_page_log_skips_proof_only_native_support_records(void) {
     );
     assert(replay_records.count == 1U);
     assert(replay_records.records[0].record_offset == base_record_offset);
+    assert(
+        mylite_ownerless_page_log_replay_at_including_proof_only(
+            fd,
+            0U,
+            capture_page_log_record_for_index_replace,
+            &proof_replay_records
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(proof_replay_records.count == 2U);
+    assert(proof_replay_records.records[0].record_offset == base_record_offset);
+    assert(proof_replay_records.records[1].record_offset == proof_record_offset);
 
     assert(
         mylite_ownerless_page_log_checkpoint(

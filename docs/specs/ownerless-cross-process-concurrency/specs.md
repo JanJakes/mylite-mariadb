@@ -329,7 +329,11 @@ Roles:
   undo-header proof records durable but stores them as page-log metadata with
   zero payload bytes. Page-image reads, latest scans, replay, and checkpoint
   retained-record callbacks skip those records so a `.shm` page-version index
-  rebuild never points at unreadable proof metadata.
+  rebuild never points at unreadable proof metadata. No-live native reclaim
+  uses a dedicated proof-including scan for those records, forces the owning
+  native tablespace to flush through the proof page LSN, and keeps the DML
+  marker/WAL until disk page-LSN proof shows the rollback-segment and undo
+  history obligations are native-durable.
   Same-runtime reads covered by the handle's local-native autocommit write
   boundary do not publish a page-version pin or enable the file-read overlay
   while the runtime remains in a continuous single-owner epoch and has not

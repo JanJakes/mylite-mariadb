@@ -699,7 +699,8 @@ int replay_in_snapshot(
     off_t log_offset,
     off_t snapshot_end_offset,
     mylite_ownerless_page_log_replay_callback callback,
-    void *context
+    void *context,
+    bool include_proof_only
 );
 int read_record_at_locked(
     int fd,
@@ -3030,7 +3031,44 @@ int mylite_ownerless_page_log_replay_at(
         static_cast<off_t>(log_offset),
         static_cast<off_t>(snapshot_end_offset),
         callback,
-        context
+        context,
+        false
+    );
+    release_log_lock(fd, k_checkpoint_lock_start);
+    return replay_result;
+}
+
+int mylite_ownerless_page_log_replay_at_including_proof_only(
+    int fd,
+    std::uint64_t log_offset,
+    mylite_ownerless_page_log_replay_callback callback,
+    void *context
+) {
+    if (fd < 0 || callback == nullptr) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if (log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    std::uint64_t snapshot_end_offset = 0;
+    const int snapshot_result =
+        mylite_ownerless_page_log_snapshot_at(fd, log_offset, &snapshot_end_offset);
+    if (snapshot_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        return snapshot_result;
+    }
+    if (snapshot_end_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    if (!acquire_checkpoint_read_lock(fd)) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
+    const int replay_result = replay_in_snapshot(
+        fd,
+        static_cast<off_t>(log_offset),
+        static_cast<off_t>(snapshot_end_offset),
+        callback,
+        context,
+        true
     );
     release_log_lock(fd, k_checkpoint_lock_start);
     return replay_result;
@@ -4160,7 +4198,8 @@ int replay_in_snapshot(
     off_t log_offset,
     off_t snapshot_end_offset,
     mylite_ownerless_page_log_replay_callback callback,
-    void *context
+    void *context,
+    bool include_proof_only
 ) {
     struct stat file_stat = {};
     off_t records_offset = 0;
@@ -4213,7 +4252,7 @@ int replay_in_snapshot(
             return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
         }
 
-        if (!record_is_proof_only(record)) {
+        if (include_proof_only || !record_is_proof_only(record)) {
             const int callback_result = callback(
                 record.space_id,
                 record.page_no,

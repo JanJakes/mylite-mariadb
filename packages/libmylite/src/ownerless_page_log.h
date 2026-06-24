@@ -495,6 +495,12 @@ int mylite_ownerless_page_log_replay_at(
     mylite_ownerless_page_log_replay_callback callback,
     void *context
 );
+int mylite_ownerless_page_log_replay_at_including_proof_only(
+    int fd,
+    uint64_t log_offset,
+    mylite_ownerless_page_log_replay_callback callback,
+    void *context
+);
 int mylite_ownerless_page_log_checkpoint(
     int fd,
     uint64_t safe_commit_lsn,

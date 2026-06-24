@@ -1397,6 +1397,7 @@ struct OwnerlessNativePageCheckpointRecord {
     std::uint64_t commit_lsn = 0;
     std::uint64_t record_offset = 0;
     bool external_snapshot_lineage_record = false;
+    bool proof_only_native_support_record = false;
 };
 
 struct OwnerlessNativePageCheckpointProofContext {
@@ -12605,7 +12606,7 @@ bool ownerless_page_log_has_native_page_lsn_proof(
     OwnerlessNativePageCheckpointProofContext proof = {};
     proof.runtime = &runtime;
     proof.visible_lsn = visible_lsn;
-    const int replay_result = mylite_ownerless_page_log_replay_at(
+    const int replay_result = mylite_ownerless_page_log_replay_at_including_proof_only(
         runtime.concurrency_wal_fd,
         k_concurrency_recovery_header_size,
         collect_ownerless_native_page_checkpoint_record,
@@ -12634,6 +12635,19 @@ bool ownerless_page_log_has_native_page_lsn_proof(
     }
 
     for (const OwnerlessNativePageCheckpointRecord &record : latest_records) {
+        if (!record.proof_only_native_support_record) {
+            continue;
+        }
+        const std::uint64_t flush_lsn =
+            record.page_lsn < std::numeric_limits<std::uint64_t>::max() - 1U
+                ? record.page_lsn + 1U
+                : std::numeric_limits<std::uint64_t>::max() - 1U;
+        static_cast<void>(
+            mylite_ownerless_innodb_flush_space_dirty_pages_to_lsn(record.space_id, flush_lsn)
+        );
+    }
+
+    for (const OwnerlessNativePageCheckpointRecord &record : latest_records) {
         if (!verify_ownerless_native_page_checkpoint_latest_record(
                 runtime,
                 record,
@@ -12657,7 +12671,7 @@ bool ownerless_live_peer_page_log_reclaim_safe(RuntimeState &runtime, std::uint6
     OwnerlessNativePageCheckpointProofContext proof = {};
     proof.runtime = &runtime;
     proof.visible_lsn = visible_lsn;
-    const int replay_result = mylite_ownerless_page_log_replay_at(
+    const int replay_result = mylite_ownerless_page_log_replay_at_including_proof_only(
         runtime.concurrency_wal_fd,
         k_concurrency_recovery_header_size,
         collect_ownerless_native_page_checkpoint_record,
@@ -12993,8 +13007,16 @@ bool ownerless_native_page_checkpoint_record_is_better(
     const OwnerlessNativePageCheckpointRecord &candidate,
     const OwnerlessNativePageCheckpointRecord &current
 ) {
-    return candidate.commit_lsn > current.commit_lsn ||
-           (candidate.commit_lsn == current.commit_lsn && candidate.page_lsn > current.page_lsn);
+    if (candidate.commit_lsn != current.commit_lsn) {
+        return candidate.commit_lsn > current.commit_lsn;
+    }
+    if (candidate.page_lsn != current.page_lsn) {
+        return candidate.page_lsn > current.page_lsn;
+    }
+    if (candidate.proof_only_native_support_record != current.proof_only_native_support_record) {
+        return !candidate.proof_only_native_support_record;
+    }
+    return candidate.record_offset > current.record_offset;
 }
 
 bool verify_ownerless_native_page_checkpoint_latest_record(
@@ -13007,6 +13029,9 @@ bool verify_ownerless_native_page_checkpoint_latest_record(
     const int disk_lsn_result =
         mylite_ownerless_innodb_disk_page_lsn(record.space_id, record.page_no, &disk_page_lsn);
     if (disk_lsn_result == MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+        if (record.proof_only_native_support_record) {
+            return disk_page_lsn >= record.page_lsn;
+        }
         if (disk_page_lsn == record.page_lsn) {
             std::vector<unsigned char> page(k_ownerless_native_page_proof_capacity);
             std::uint32_t page_size = 0;
@@ -13105,7 +13130,27 @@ int collect_ownerless_native_page_checkpoint_record(
     }
     const bool external_snapshot_lineage =
         (metadata_flags & MYLITE_OWNERLESS_PAGE_LOG_RECORD_EXTERNAL_SNAPSHOT_LINEAGE) != 0U;
-    if ((metadata_flags & MYLITE_OWNERLESS_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE) != 0U) {
+    const bool proof_only = (metadata_flags & MYLITE_OWNERLESS_PAGE_LOG_RECORD_PROOF_ONLY) != 0U;
+    const bool native_support_state =
+        (metadata_flags & MYLITE_OWNERLESS_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE) != 0U;
+    if (proof_only) {
+        if (!native_support_state) {
+            proof->blocked = true;
+            return MYLITE_OWNERLESS_PAGE_LOG_OK;
+        }
+        OwnerlessNativePageCheckpointRecord record{
+            space_id,
+            page_no,
+            page_lsn,
+            commit_lsn,
+            record_offset,
+            external_snapshot_lineage,
+            true
+        };
+        proof->records.push_back(record);
+        return MYLITE_OWNERLESS_PAGE_LOG_OK;
+    }
+    if (native_support_state) {
         return MYLITE_OWNERLESS_PAGE_LOG_OK;
     }
     if (ownerless_page_log_record_is_native_support_state(
