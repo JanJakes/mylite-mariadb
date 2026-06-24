@@ -4699,8 +4699,15 @@ Tasks:
    at the same prefinish crash boundary, now extended to the existing
    compressed key-block `1`/`2`/`4`/`16` crash variants so every focused
    compressed key-block crash selector proves the native file-op marker while
-   the live peer still prevents final drain; final
-   no-live close forces native checkpoint
+   the live peer still prevents final drain. Plain non-temporary `CREATE TABLE`
+   prefinish crash coverage now publishes a
+   per-owner recoverable dictionary marker after the durable file-op marker, so
+   dead-owner cleanup can finish that created-table dictionary generation while
+   another peer remains live and leave native file-op marker drain to the
+   existing no-live checkpoint path; table-copy create forms, CTAS,
+   replacement, rename, truncate, drop, rebuild, schema, view, trigger, and
+   foreign-key multi-DDL live-peer recovery remain planned. Final no-live close
+   forces native checkpoint
    proof for retained page-version WAL
    after active pins release, restores the 12 KiB redo startup prefix if
    embedded teardown leaves `ib_logfile0` without startup-checkpoint evidence,
@@ -5119,6 +5126,11 @@ Minimum suites before support can be claimed:
     before appending a page-version WAL record,
   - after redo bytes are marked written but before latest-checkpoint publish,
   - after volatile page-visible publish but before durable checkpoint,
+  - after plain non-temporary `CREATE TABLE` native file-per-table creation
+    reaches ownerless dictionary prefinish; hook coverage proves a live peer
+    can clean up the dead creator, finish the marked dictionary generation, see
+    the created `.frm`/`.ibd`, insert rows, and keep the native file-op marker
+    durable until the final no-live checkpoint drain,
   - after standalone secondary-index creation/removal, secondary-index rename,
     and secondary-index ignored/not-ignored metadata changes but before
     ownerless dictionary finish; hook coverage proves live-peer cleanup remains
@@ -7098,9 +7110,10 @@ subsystems that this mode needs:
   The current completion order is:
 
   1. Broaden native redo/checkpoint reconciliation and live-peer
-     DDL/file-lifecycle recovery, especially crash recovery for DDL-created,
-     rebuilt, renamed, truncated, and dropped file-per-table tablespaces while
-     peers remain live.
+     DDL/file-lifecycle recovery beyond the now-covered plain
+     non-temporary `CREATE TABLE` prefinish boundary, especially crash recovery
+     for table-copy created, rebuilt, renamed, truncated, and dropped
+     file-per-table tablespaces while peers remain live.
   2. Close remaining transaction crash windows, especially kills inside
      rollback/savepoint rollback and concurrent-writer savepoint schedules
      that combine native undo, ownerless page-write ownership, and

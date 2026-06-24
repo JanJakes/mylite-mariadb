@@ -1021,7 +1021,7 @@ static void test_crashed_trx_registration_blocks_peer_cleanup_until_reopen_rebui
 static void test_crashed_record_lock_before_grant_blocks_peer_cleanup_until_reopen_rebuilds(void);
 static void test_crashed_record_lock_grant_blocks_peer_cleanup_until_reopen_rebuilds(void);
 static void test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state(void);
-static void test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds(void);
+static void test_crashed_create_table_dictionary_ddl_recovers_with_live_peer(void);
 static void test_crashed_dictionary_ddl_finish_allows_peer_cleanup(void);
 static void test_crashed_rename_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds(void);
 static void test_crashed_cross_schema_rename_dictionary_ddl_recovers_moved_table(void);
@@ -4503,6 +4503,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-create-table-live-recovery") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_create_table_dictionary_ddl_recovers_with_live_peer();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-rename-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_rename_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds();
@@ -5221,7 +5227,7 @@ int main(int argc, char **argv) {
             test_crashed_record_lock_before_grant_blocks_peer_cleanup_until_reopen_rebuilds,
             test_crashed_record_lock_grant_blocks_peer_cleanup_until_reopen_rebuilds,
             test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state,
-            test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds,
+            test_crashed_create_table_dictionary_ddl_recovers_with_live_peer,
             test_crashed_dictionary_ddl_finish_allows_peer_cleanup,
             test_crashed_rename_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds,
             test_crashed_cross_schema_rename_dictionary_ddl_recovers_moved_table,
@@ -5854,7 +5860,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_crashed_record_lock_grant_blocks_peer_cleanup_until_reopen_rebuilds
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state),
-    OWNERLESS_SQL_TEST_CASE(test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_create_table_dictionary_ddl_recovers_with_live_peer),
     OWNERLESS_SQL_TEST_CASE(test_crashed_dictionary_ddl_finish_allows_peer_cleanup),
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_rename_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds
@@ -41787,17 +41793,20 @@ static void test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state(void) {
     free(root);
 }
 
-static void test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds(void) {
+static void test_crashed_create_table_dictionary_ddl_recovers_with_live_peer(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(root, "ownerless-dictionary-ddl-crash.mylite");
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *table_frm_path = path_join(app_path, "ownerless_ddl_crash.frm");
+    char *table_ibd_path = path_join(app_path, "ownerless_ddl_crash.ibd");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     int writer_ready_pipe[2];
     int peer_ready_pipe[2];
     int peer_release_pipe[2];
     pid_t writer_child;
     pid_t peer_child;
-    pid_t probe_child;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -41839,13 +41848,25 @@ static void test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuild
     wait_for_pipe(writer_ready_pipe[0]);
     assert(kill(writer_child, SIGKILL) == 0);
     wait_for_signaled_child(writer_child, SIGKILL);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
-    probe_child = fork();
-    assert(probe_child >= 0);
-    if (probe_child == 0) {
-        assert_ownerless_open_returns_busy(paths);
-    }
-    wait_for_child(probe_child);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(path_exists(table_frm_path));
+    assert(path_exists(table_ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' AND table_name = 'ownerless_ddl_crash' "
+            "AND table_type = 'BASE TABLE'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_ddl_crash") == 0U);
+    exec_ok(db, "INSERT INTO app.ownerless_ddl_crash VALUES (1, 10)");
+    exec_ok(db, "COMMIT");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_ddl_crash") == 10U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     signal_pipe(peer_release_pipe[1]);
     wait_for_child(peer_child);
@@ -41858,8 +41879,9 @@ static void test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuild
             "WHERE table_schema = 'app' AND table_name = 'ownerless_ddl_crash'"
         ) == 1U
     );
-    exec_ok(db, "INSERT INTO app.ownerless_ddl_crash VALUES (1, 10)");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_ddl_crash") == 10U);
     assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -41869,6 +41891,10 @@ static void test_crashed_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuild
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_ddl_crash") == 10U);
     assert(mylite_close(db) == MYLITE_OK);
 
+    free(table_ibd_path);
+    free(table_frm_path);
+    free(app_path);
+    free(datadir_path);
     free(database_path);
     free(runtime_root);
     remove_tree(root);

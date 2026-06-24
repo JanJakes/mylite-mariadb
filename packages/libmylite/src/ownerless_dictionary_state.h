@@ -15,6 +15,9 @@ extern "C" {
 
 #define MYLITE_OWNERLESS_DICTIONARY_STATE_SIZE 64U
 
+#define MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE 0U
+#define MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE 1U
+
 typedef int (*mylite_ownerless_dictionary_state_alive_callback)(uint64_t pid, void *ctx);
 
 typedef struct mylite_ownerless_dictionary_state_snapshot {
@@ -39,6 +42,21 @@ int mylite_ownerless_dictionary_state_finish_ddl(
     size_t mapping_size,
     uint32_t owner_id,
     uint64_t owner_generation,
+    uint64_t *out_generation
+);
+int mylite_ownerless_dictionary_state_mark_recoverable(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t owner_id,
+    uint64_t owner_generation,
+    uint32_t recovery_kind
+);
+int mylite_ownerless_dictionary_state_recover_dead_owner(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t owner_id,
+    uint64_t owner_generation,
+    uint32_t recovery_kind,
     uint64_t *out_generation
 );
 int mylite_ownerless_dictionary_state_wait_ready(

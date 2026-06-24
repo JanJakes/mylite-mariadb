@@ -283,6 +283,15 @@ boundaries plus representative `ALTER TABLE ... FORCE` and
 `ALTER TABLE ... ROW_FORMAT=DYNAMIC` rebuild boundaries, so a killed writer
 cannot lose the durable checkpoint-needed boundary before no-live recovery for
 those classes.
+Plain non-temporary InnoDB `CREATE TABLE` now also records a per-owner
+recoverable dictionary prefinish marker after the durable file-op marker is
+written. Focused hook coverage kills the creator at
+`dictionary-before-finish` while another ownerless peer remains live, proves a
+new live ownerless opener finishes that dead dictionary generation and observes
+the created `.frm`/`.ibd`, and verifies the native file-op marker stays
+durable until the existing no-live checkpoint drain runs. Table-copy create
+forms, CTAS, replacement, rename, truncate, drop, rebuild, schema, view,
+trigger, and foreign-key multi-DDL live-peer recovery remain partial/planned.
 Focused hook coverage also now forces a native checkpoint, clears the
 ownerless file-op redo flag, updates a file-per-table InnoDB table, and
 observes the flag set again, proving ordinary post-checkpoint DML reaches
