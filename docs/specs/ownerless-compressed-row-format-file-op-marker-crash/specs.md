@@ -4,6 +4,8 @@ Update: `ownerless-live-compressed-row-format-rebuild-recovery` builds on this
 marker proof and upgrades the exact `KEY_BLOCK_SIZE=8` crash selector from
 live-peer-busy/no-live cleanup to live-peer dictionary recovery with final
 no-live marker drain.
+`ownerless-live-compressed-key-block-rebuild-recovery` applies the same
+live-peer recovery pattern to key-block sizes `1`, `2`, `4`, and `16`.
 
 ## Problem Statement
 
@@ -124,6 +126,8 @@ new CTest is registered only when unsafe ownerless test hooks are enabled.
 
 - This is focused `KEY_BLOCK_SIZE=8` marker evidence. The deterministic
   `KEY_BLOCK_SIZE=1`/`2`/`4`/`16` marker boundary is covered separately in
-  `docs/specs/ownerless-compressed-key-block-file-op-marker-crash/specs.md`.
+  `docs/specs/ownerless-compressed-key-block-file-op-marker-crash/specs.md`
+  and live recovery for those variants is covered by
+  `docs/specs/ownerless-live-compressed-key-block-rebuild-recovery/specs.md`.
 - Broader native redo/checkpoint reconciliation and DDL/file-lifecycle recovery
   remain partial.

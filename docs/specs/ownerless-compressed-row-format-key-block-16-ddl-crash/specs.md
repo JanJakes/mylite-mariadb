@@ -1,5 +1,10 @@
 # Ownerless Compressed Row-Format 16K Key-Block DDL Crash
 
+Update: `ownerless-live-compressed-key-block-rebuild-recovery` supersedes this
+slice's original no-live-only cleanup expectation. The focused 16 KiB selector
+now proves live-peer dictionary recovery, live marker retention, and final
+no-live marker drain.
+
 ## Problem
 
 Ownerless compressed row-format DDL refresh now proves
@@ -37,9 +42,9 @@ In scope:
   `ROW_FORMAT=DYNAMIC` with deterministic prepared `LONGBLOB` rows.
 - Kill the writer at `dictionary-before-finish` after it executes
   `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=16`.
-- Verify live-peer cleanup remains busy, no-live ownerless recovery observes
-  the completed compressed rebuild, and post-recovery prepared BLOB writes
-  succeed.
+- Verify live-peer dictionary recovery observes the completed compressed
+  rebuild while the native file-operation marker remains set, and final
+  no-live recovery supports post-recovery prepared BLOB writes.
 - Verify ownerless/native reopen before and after forced `.shm` rebuild plus
   native 16 KiB ZBLOB page evidence.
 
@@ -58,11 +63,12 @@ parameterized helper:
    prepared BLOB rows.
 2. Keep a live ownerless peer open while a writer executes the 16 KiB
    compressed rebuild under `dictionary-before-finish`.
-3. Kill the writer at the hook and verify another ownerless open returns
-   `MYLITE_BUSY` while the live peer remains.
-4. Release the peer, reopen ownerless read/write to rebuild volatile
-   coordination, verify compressed metadata and retained rows, then insert a
-   third prepared BLOB row.
+3. Kill the writer at the hook and verify another ownerless open can finish
+   the dead dictionary generation while the live peer remains.
+4. Verify the native file-operation marker remains set after the live opener
+   closes, release the peer, reopen ownerless read/write to drain the marker,
+   verify compressed metadata and retained rows, then insert a third prepared
+   BLOB row.
 5. Verify the final state through ownerless and native reopen before and after
    forced `.shm` rebuild, including 16 KiB ZBLOB page evidence.
 
@@ -75,8 +81,8 @@ coverage for an already-supported compressed InnoDB table-option rebuild.
 
 No directory layout changes. Durable state remains in the MyLite database
 directory; the selector exercises native file-per-table rebuild recovery,
-ownerless live-peer cleanup gating, no-live rebuild, and forced shared-memory
-rebuild.
+ownerless live-peer dictionary recovery, final no-live marker drain, and forced
+shared-memory rebuild.
 
 ## Native Storage Impact
 
@@ -105,7 +111,10 @@ No production binary-size impact beyond focused hook test code and docs.
 
 - The 16 KiB focused selector reaches the dictionary fault hook and does not
   hang.
-- Live-peer cleanup remains busy until the live peer exits.
+- A live ownerless opener finishes the dead dictionary generation while another
+  peer remains live.
+- The native file-operation marker remains set until final no-live close drains
+  it.
 - Recovered metadata shows `ROW_FORMAT = 'Compressed'`.
 - Retained prepared BLOB rows and post-recovery writes survive ownerless/native
   reopen before and after forced `.shm` rebuild.

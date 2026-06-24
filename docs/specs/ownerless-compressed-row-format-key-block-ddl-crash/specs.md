@@ -1,5 +1,10 @@
 # Ownerless Compressed Row-Format Key-Block DDL Crash
 
+Update: `ownerless-live-compressed-key-block-rebuild-recovery` supersedes this
+slice's original no-live-only cleanup expectation. The `KEY_BLOCK_SIZE=4` and
+`16` crash selectors now prove live-peer dictionary recovery, live marker
+retention, and final no-live marker drain.
+
 ## Problem Statement
 
 Ownerless compressed row-format key-block coverage proves an already-open peer
@@ -52,16 +57,18 @@ Add two unsafe-hook selectors:
   `ROW_FORMAT=DYNAMIC`,
 - insert deterministic prepared `LONGBLOB` rows large enough to produce native
   compressed external-value pages after rebuild,
-- start a live ownerless peer so crashed-writer cleanup remains busy,
+- start a live ownerless peer so final native marker drain is deferred,
 - start a writer that executes
   `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=4` or
   `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=16`
   under the existing `dictionary-before-finish` hook,
 - kill the writer at the hook after native MariaDB/InnoDB DDL completes but
   before ownerless dictionary finish,
-- prove an ownerless opener returns `MYLITE_BUSY` while the live peer remains,
-- release the peer and reopen ownerless read/write to rebuild volatile
-  coordination,
+- prove a new ownerless read/write opener can finish the dead writer's
+  dictionary generation while the live peer remains,
+- verify the native file-operation marker remains set after the live opener
+  closes,
+- release the peer and reopen ownerless read/write to drain the native marker,
 - verify recovered metadata exposes `INNODB_SYS_TABLES.ROW_FORMAT =
   'Compressed'` and `information_schema.tables.row_format = 'Compressed'`,
 - verify retained prepared BLOB rows and aggregate values, then insert another
@@ -78,7 +85,8 @@ In scope:
 - crash-at-dictionary-before-finish coverage for completed
   `ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=4` and
   `ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=16` rebuilds,
-- live-peer cleanup-busy behavior and no-live rebuild,
+- live-peer dictionary recovery, marker retention, and final no-live marker
+  drain,
 - ownerless/native reopen of recovered compressed row-format metadata, retained
   prepared BLOB rows, 4 KiB plus 16 KiB ZBLOB page evidence, and post-recovery
   writes.
@@ -111,9 +119,9 @@ rebuild, and ordinary native exclusive reopen lifecycle.
 
 The covered DDL uses MariaDB/InnoDB's native compressed row-format
 `KEY_BLOCK_SIZE=4` and `KEY_BLOCK_SIZE=16` ALTER machinery. MyLite does not
-reinterpret compressed native table pages; it proves no-live ownerless recovery
-rebuilds volatile coordination around the completed native rebuild and
-preserves native ZBLOB page evidence.
+reinterpret compressed native table pages; it proves ownerless recovery around
+the completed native rebuild, including live-peer dictionary recovery, final
+no-live marker drain, and preserved native ZBLOB page evidence.
 
 ## Public API, Build, Size, And Dependencies
 
@@ -134,7 +142,10 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selector reaches the dictionary fault hook and does not hang.
-- A live peer prevents cleanup until no-live recovery.
+- A live ownerless opener finishes the dead dictionary generation while another
+  peer remains live.
+- The native file-operation marker remains set until final no-live close drains
+  it.
 - Recovered metadata shows `ROW_FORMAT = 'Compressed'` through InnoDB and SQL
   information schema.
 - Retained prepared BLOB rows and aggregate values survive recovery.

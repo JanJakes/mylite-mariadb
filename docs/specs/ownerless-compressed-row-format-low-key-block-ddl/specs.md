@@ -1,5 +1,10 @@
 # Ownerless Compressed Row-Format Low Key-Block DDL
 
+Update: `ownerless-live-compressed-key-block-rebuild-recovery` supersedes this
+slice's original no-live-only cleanup expectation. The `KEY_BLOCK_SIZE=1` and
+`2` crash selectors now prove live-peer dictionary recovery, live marker
+retention, and final no-live marker drain.
+
 ## Problem Statement
 
 Ownerless compressed row-format DDL coverage already proves the default 8 KiB
@@ -64,7 +69,8 @@ Extend the existing unsafe hook crash harness with two direct selectors:
 
 Each selector kills the writer at `dictionary-before-finish` after native
 MariaDB/InnoDB compressed rebuild completion and before MyLite ownerless
-dictionary publication, then reuses the existing no-live recovery assertions.
+dictionary publication, then proves live-peer dictionary recovery, marker
+retention until final no-live close, and the existing final-state assertions.
 
 ## Scope And Non-Goals
 
@@ -97,9 +103,9 @@ and ownerless/native reopen.
 
 No directory layout changes are introduced. Durable table and compressed BLOB
 page state remains in the MyLite database directory. The tests exercise
-existing file-per-table native storage, ownerless live-peer cleanup-busy
-behavior, no-live coordination rebuild, forced `.shm` rebuild, and native
-exclusive reopen.
+existing file-per-table native storage, ownerless process cleanup, live-peer
+dictionary recovery, final no-live marker drain, forced `.shm` rebuild, and
+native exclusive reopen.
 
 ## Native Storage Impact
 
@@ -136,7 +142,10 @@ changes. The diff is focused on test coverage and documentation.
 - Existing rows remain readable after each rebuild.
 - The already-open peer can insert a prepared BLOB row after each rebuild.
 - The hook selectors reach `dictionary-before-finish` and do not hang.
-- A live peer prevents cleanup until no-live recovery.
+- A live ownerless opener finishes the dead dictionary generation while another
+  peer remains live.
+- The native file-operation marker remains set until final no-live close drains
+  it.
 - Recovered metadata, retained rows, post-recovery writes, and native 1 KiB
   plus 2 KiB ZBLOB page evidence survive ownerless/native reopen before and
   after forced `.shm` rebuild.

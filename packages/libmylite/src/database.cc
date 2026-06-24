@@ -2205,7 +2205,7 @@ bool ownerless_truncate_table_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_drop_table_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_alter_table_force_rebuild_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_alter_table_row_format_dynamic_recovery_statement(const SqlPolicyTokens &tokens);
-bool ownerless_alter_table_compressed_row_format_key_block_8_recovery_statement(
+std::uint32_t ownerless_alter_table_compressed_row_format_key_block_recovery_kind(
     const SqlPolicyTokens &tokens
 );
 bool ownerless_stale_engine_error_allows_retry(
@@ -15197,8 +15197,10 @@ std::uint32_t ownerless_dictionary_recovery_kind_for_statement(const SqlPolicyTo
     if (ownerless_alter_table_row_format_dynamic_recovery_statement(tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_ROW_FORMAT_DYNAMIC;
     }
-    if (ownerless_alter_table_compressed_row_format_key_block_8_recovery_statement(tokens)) {
-        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_COMPRESSED_ROW_FORMAT_KEY_BLOCK_8;
+    const std::uint32_t compressed_key_block_recovery_kind =
+        ownerless_alter_table_compressed_row_format_key_block_recovery_kind(tokens);
+    if (compressed_key_block_recovery_kind != MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE) {
+        return compressed_key_block_recovery_kind;
     }
     return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE;
 }
@@ -15551,28 +15553,42 @@ bool ownerless_alter_table_row_format_dynamic_recovery_statement(const SqlPolicy
     return true;
 }
 
-bool ownerless_alter_table_compressed_row_format_key_block_8_recovery_statement(
+std::uint32_t ownerless_alter_table_compressed_row_format_key_block_recovery_kind(
     const SqlPolicyTokens &tokens
 ) {
     if (tokens.count < 11U || !token_equals(tokens.values[0], "ALTER") ||
         !token_equals(tokens.values[1], "TABLE")) {
-        return false;
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE;
     }
     if (!ownerless_table_identifier_token(tokens.values[2]) ||
         !token_equals(tokens.values[3], ".") ||
         !ownerless_table_identifier_token(tokens.values[4]) ||
         !token_equals(tokens.values[5], "ROW_FORMAT") || !token_equals(tokens.values[6], "=") ||
         !token_equals(tokens.values[7], "COMPRESSED") ||
-        !token_equals(tokens.values[8], "KEY_BLOCK_SIZE") || !token_equals(tokens.values[9], "=") ||
-        !token_equals(tokens.values[10], "8")) {
-        return false;
+        !token_equals(tokens.values[8], "KEY_BLOCK_SIZE") || !token_equals(tokens.values[9], "=")) {
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE;
     }
     for (std::size_t index = 11U; index < tokens.count; ++index) {
         if (!token_equals(tokens.values[index], ";")) {
-            return false;
+            return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE;
         }
     }
-    return true;
+    if (token_equals(tokens.values[10], "1")) {
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_COMPRESSED_ROW_FORMAT_KEY_BLOCK_1;
+    }
+    if (token_equals(tokens.values[10], "2")) {
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_COMPRESSED_ROW_FORMAT_KEY_BLOCK_2;
+    }
+    if (token_equals(tokens.values[10], "4")) {
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_COMPRESSED_ROW_FORMAT_KEY_BLOCK_4;
+    }
+    if (token_equals(tokens.values[10], "8")) {
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_COMPRESSED_ROW_FORMAT_KEY_BLOCK_8;
+    }
+    if (token_equals(tokens.values[10], "16")) {
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_COMPRESSED_ROW_FORMAT_KEY_BLOCK_16;
+    }
+    return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE;
 }
 
 bool ownerless_table_identifier_token(std::string_view token) {
@@ -21010,7 +21026,7 @@ bool ownerless_process_recover_dead_dictionary_owner(
         return false;
     }
 
-    constexpr std::array<std::uint32_t, 12> recovery_kinds = {
+    constexpr std::array<std::uint32_t, 16> recovery_kinds = {
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE_LIKE,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE_SELECT,
@@ -21023,6 +21039,10 @@ bool ownerless_process_recover_dead_dictionary_owner(
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_FORCE_REBUILD,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_ROW_FORMAT_DYNAMIC,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_COMPRESSED_ROW_FORMAT_KEY_BLOCK_8,
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_COMPRESSED_ROW_FORMAT_KEY_BLOCK_1,
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_COMPRESSED_ROW_FORMAT_KEY_BLOCK_2,
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_COMPRESSED_ROW_FORMAT_KEY_BLOCK_4,
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_COMPRESSED_ROW_FORMAT_KEY_BLOCK_16,
     };
     for (const std::uint32_t recovery_kind : recovery_kinds) {
         std::uint64_t generation = 0;

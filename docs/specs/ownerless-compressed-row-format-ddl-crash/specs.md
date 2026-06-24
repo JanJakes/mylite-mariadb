@@ -4,6 +4,8 @@ Update: `ownerless-live-compressed-row-format-rebuild-recovery` supersedes the
 original no-live-only cleanup expectation for this exact `KEY_BLOCK_SIZE=8`
 boundary. The focused crash selector now proves live-peer dictionary recovery,
 live marker retention, and final no-live marker drain.
+`ownerless-live-compressed-key-block-rebuild-recovery` applies the same proof
+to key-block sizes `1`, `2`, `4`, and `16`.
 
 ## Problem Statement
 
@@ -146,6 +148,6 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 - This is deterministic `KEY_BLOCK_SIZE=8` compressed row-format crash
   coverage, not the full compressed storage-option matrix.
-- `KEY_BLOCK_SIZE=1`, `2`, `4`, and `16` live-peer recovery remain separate
-  candidate slices because they have separate page-size evidence.
+- `KEY_BLOCK_SIZE=1`, `2`, `4`, and `16` live-peer recovery is covered by
+  `ownerless-live-compressed-key-block-rebuild-recovery`.
 - Full external MariaDB/RQG long-running stress remains planned.

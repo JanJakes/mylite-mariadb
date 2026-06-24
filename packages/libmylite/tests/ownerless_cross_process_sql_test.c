@@ -54141,7 +54141,6 @@ static void run_crashed_compressed_key_block_dictionary_ddl_case(
     int peer_release_pipe[2];
     pid_t writer_child;
     pid_t peer_child;
-    pid_t probe_child;
     mylite_db *db;
     char sql[512];
 
@@ -54233,12 +54232,48 @@ static void run_crashed_compressed_key_block_dictionary_ddl_case(
         assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
     }
 
-    probe_child = fork();
-    assert(probe_child >= 0);
-    if (probe_child == 0) {
-        assert_ownerless_open_returns_busy(paths);
-    }
-    wait_for_child(probe_child);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        snprintf(
+            sql,
+            sizeof(sql),
+            "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME = 'app/%s' "
+            "AND ROW_FORMAT = 'Compressed'",
+            table_name
+        ) > 0
+    );
+    assert(query_unsigned(db, sql) == 1U);
+    assert(
+        snprintf(
+            sql,
+            sizeof(sql),
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = '%s' "
+            "AND row_format = 'Compressed'",
+            table_name
+        ) > 0
+    );
+    assert(query_unsigned(db, sql) == 1U);
+    assert(snprintf(sql, sizeof(sql), "SELECT COUNT(*) FROM app.%s", table_name) > 0);
+    assert(query_unsigned(db, sql) == 2U);
+    assert(snprintf(sql, sizeof(sql), "SELECT SUM(value) FROM app.%s", table_name) > 0);
+    assert(query_unsigned(db, sql) == 2U);
+    assert(snprintf(sql, sizeof(sql), "SELECT SUM(LENGTH(payload)) FROM app.%s", table_name) > 0);
+    assert(query_unsigned(db, sql) == 2U * MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES);
+    assert(
+        snprintf(
+            sql,
+            sizeof(sql),
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.%s",
+            table_name
+        ) > 0
+    );
+    assert(query_unsigned(db, sql) == 2U * (unsigned)'a');
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     signal_pipe(peer_release_pipe[1]);
     wait_for_child(peer_child);
@@ -54291,6 +54326,7 @@ static void run_crashed_compressed_key_block_dictionary_ddl_case(
     assert(snprintf(sql, sizeof(sql), "SELECT SUM(LENGTH(payload)) FROM app.%s", table_name) > 0);
     assert(query_unsigned(db, sql) == 3U * MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES);
     assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     assert_ownerless_compressed_row_format_key_block_single_ddl_state(
         paths,

@@ -4740,10 +4740,10 @@ Tasks:
    dynamic row-format copy rebuild boundary. Focused `ALTER TABLE
    schema.table ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8` prefinish crash
    coverage now uses a separate recoverable dictionary marker to provide
-   live-peer recovery for the native compressed copy rebuild boundary.
-   Multi-table and cross-schema drop, compressed key-block `1`, `2`, `4`, and
-   `16` row-format rebuild, schema, view, trigger, and foreign-key multi-DDL
-   live-peer recovery remain planned.
+   live-peer recovery for the native compressed copy rebuild boundary, and the
+   same live-peer recovery now covers key-block sizes `1`, `2`, `4`, and `16`.
+   Multi-table and cross-schema drop, broader ALTER rebuild, schema, view,
+   trigger, and foreign-key multi-DDL live-peer recovery remain planned.
    Final no-live close
    forces native checkpoint
    proof for retained page-version WAL
@@ -7160,9 +7160,8 @@ subsystems that this mode needs:
      `CREATE TABLE`, focused CTAS, ordinary replacement, and replacement-copy
      LIKE/CTAS plus single-pair same-schema rename, focused truncate, and
      focused drop plus focused force rebuild, dynamic row-format rebuild, and
-     focused compressed key-block `8` row-format rebuild prefinish boundaries,
+     focused compressed key-block row-format rebuild prefinish boundaries,
      especially crash recovery for cross-schema or multi-pair rename, rebuilt,
-     remaining compressed key-block `1`, `2`, `4`, and `16` row-format-rebuilt,
      broader truncated, and multi-table/cross-schema dropped file-per-table
      tablespaces while peers remain live.
   2. Close remaining transaction crash windows, especially kills inside
