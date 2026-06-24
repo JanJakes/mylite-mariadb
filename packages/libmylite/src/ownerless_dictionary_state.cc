@@ -338,7 +338,8 @@ void store64(unsigned char *base, std::size_t offset, std::uint64_t value) {
 
 bool valid_recovery_kind(std::uint32_t recovery_kind) {
     return recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE ||
-           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE_LIKE;
+           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE_LIKE ||
+           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE_SELECT;
 }
 
 void clear_recoverable_state(unsigned char *state) {

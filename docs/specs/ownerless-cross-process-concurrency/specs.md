@@ -2748,11 +2748,11 @@ Tasks:
    `CREATE TABLE ... SELECT`. Hook-build crash coverage now kills
    representative `CREATE TABLE ... LIKE` and CTAS writers after native
    destination table creation but before ownerless dictionary finish. The LIKE
-   selector now proves live-peer cleanup can finish the dead dictionary
-   generation while another ownerless peer remains open, while CTAS remains on
-   the no-live recovery path; coverage verifies recovered native files,
-   table/column metadata, copied `LIKE` index metadata, CTAS rows,
-   post-recovery writes, ownerless/native reopen, and forced `.shm` rebuild.
+   and focused no-definition-list CTAS selectors now prove live-peer cleanup can
+   finish the dead dictionary generation while another ownerless peer remains
+   open; coverage verifies recovered native files, table/column metadata,
+   copied `LIKE` index metadata, CTAS rows, post-recovery writes,
+   ownerless/native reopen, and forced `.shm` rebuild.
    Table idempotent DDL coverage now exercises
    `CREATE TABLE IF NOT EXISTS`, duplicate-create errno 1050 for the
    non-idempotent spelling, no-op duplicate preservation of the original table
@@ -3489,9 +3489,9 @@ Tasks:
    plus formerly invalid writes through ownerless and native reopen. Hook-build
    crash coverage also kills representative `CREATE TABLE ... LIKE` and
    `CREATE TABLE ... SELECT` writers after native destination table creation
-   but before ownerless dictionary finish. The LIKE selector proves live-peer
-   dictionary cleanup after native `FILE_CREATE`, while CTAS still requires
-   no-live recovery; coverage verifies recovered `.frm`/`.ibd` files,
+   but before ownerless dictionary finish. The LIKE and focused
+   no-definition-list CTAS selectors prove live-peer dictionary cleanup after
+   native `FILE_CREATE`; coverage verifies recovered `.frm`/`.ibd` files,
    destination table/column metadata, copied secondary-index metadata for
    `LIKE`, CTAS copied rows, post-recovery writes, ownerless/native reopen, and
    forced `.shm` rebuild. Hook-build
@@ -4712,9 +4712,11 @@ Tasks:
    existing no-live checkpoint path. Non-temporary `CREATE TABLE ... LIKE`
    prefinish crash coverage now uses a separate recoverable dictionary marker
    to provide the same live-peer recovery for the copied empty destination
-   table and secondary-index metadata; CTAS, replacement, rename, truncate,
-   drop, rebuild, schema, view, trigger, and foreign-key multi-DDL live-peer
-   recovery remain planned. Final no-live close
+   table and secondary-index metadata. Focused no-definition-list CTAS
+   prefinish crash coverage uses a separate recoverable dictionary marker to
+   provide live-peer recovery for the populated destination table. Replacement,
+   rename, truncate, drop, rebuild, schema, view, trigger, and foreign-key
+   multi-DDL live-peer recovery remain planned. Final no-live close
    forces native checkpoint
    proof for retained page-version WAL
    after active pins release, restores the 12 KiB redo startup prefix if
@@ -5201,9 +5203,10 @@ Minimum suites before support can be claimed:
     no-live close,
   - after representative `CREATE TABLE ... SELECT` destination table creation
     and population but before ownerless dictionary finish; hook coverage proves
-    live-peer cleanup remains busy until no-live recovery and recovered native
-    files, table/column metadata, CTAS copied rows, post-recovery writes,
-    ownerless/native reopen, and forced `.shm` rebuild remain correct,
+    live-peer cleanup can finish the dead dictionary generation, recovered
+    native files, table/column metadata, CTAS copied rows, post-recovery writes,
+    ownerless/native reopen, and forced `.shm` rebuild remain correct, and the
+    native file-op marker drains only after final no-live close,
   - after representative `CREATE OR REPLACE TABLE` native old-table
     replacement but before ownerless dictionary finish; hook coverage proves
     live-peer cleanup remains busy until no-live recovery and recovered
