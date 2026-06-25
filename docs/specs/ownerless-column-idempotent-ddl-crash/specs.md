@@ -81,9 +81,11 @@ Extend `mylite_ownerless_cross_process_sql_test` with two hook-only selectors:
    - Reopen with no live peer and verify `note` remains present and writable,
      while `missing_note` remains absent.
 
-Both selectors reuse the existing live-peer crash helper to prove cleanup stays
-busy while another ownerless process is live, then recheck state through
-ownerless and native opens before and after `.shm` recreation.
+Both selectors now use the held-live-peer crash helper and
+`ownerless-column-idempotent-live-recovery` metadata proof to recover while
+another ownerless process is live with the native file-operation marker clear,
+then recheck state through ownerless and native opens before and after `.shm`
+recreation.
 
 ## Compatibility Impact
 
@@ -93,9 +95,9 @@ semantics.
 
 ## Directory And Lifecycle Impact
 
-No directory layout change. The tests exercise ownerless dictionary recovery,
-volatile shared-memory rebuild, and native exclusive reopen against InnoDB
-table metadata stored in the MyLite database directory.
+No directory layout change. The tests exercise ownerless dictionary live
+recovery, volatile shared-memory rebuild, and native exclusive reopen against
+InnoDB table metadata stored in the MyLite database directory.
 
 ## Native Storage Impact
 
@@ -122,7 +124,7 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - Both focused selectors reach `dictionary-before-finish` and do not hang.
-- Live-peer cleanup remains busy until no-live recovery.
+- Duplicate add and missing drop recover while a peer remains live.
 - Duplicate idempotent add recovery preserves original column metadata and
   default-backed writes.
 - Missing idempotent drop recovery preserves the real column and leaves the

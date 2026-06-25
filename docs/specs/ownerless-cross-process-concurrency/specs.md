@@ -2808,10 +2808,12 @@ Tasks:
    Hook-build column-idempotent crash coverage kills duplicate
    `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` and missing
    `ALTER TABLE ... DROP COLUMN IF EXISTS` no-op writers after MariaDB returns
-   success but before ownerless dictionary finish, then verifies original
-   column/default preservation, missing-column absence, plain duplicate-add
-   errno 1060, plain missing-drop errno 1091, post-recovery writes,
-   ownerless/native reopen, and forced `.shm` rebuild.
+   success but before ownerless dictionary finish, then verifies metadata-only
+   live recovery with the native file-operation marker clear after
+   pre-execution metadata proves the duplicate-add or missing-drop no-op
+   branch, original column/default preservation, missing-column absence, plain
+   duplicate-add errno 1060, plain missing-drop errno 1091, post-recovery
+   writes, ownerless/native reopen, and forced `.shm` rebuild.
    Hook-build column missing-`IF EXISTS` crash coverage kills missing
    `ALTER TABLE ... MODIFY COLUMN IF EXISTS`, missing
    `ALTER TABLE ... RENAME COLUMN IF EXISTS`, missing
@@ -3393,10 +3395,11 @@ Tasks:
    Focused column-idempotent crash coverage preserves completed no-op
    `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` and
    `ALTER TABLE ... DROP COLUMN IF EXISTS` dictionary boundaries, then verifies
-   the duplicate-add path keeps the original column default, the missing-drop
-   path keeps the real column and missing name absent, plain non-idempotent
-   retries continue returning MariaDB 1060/1091, and post-recovery writes work
-   through ownerless/native reopen before and after forced `.shm` rebuild.
+   metadata-only live recovery with the native file-operation marker clear, the
+   duplicate-add path keeps the original column default, the missing-drop path
+   keeps the real column and missing name absent, plain non-idempotent retries
+   continue returning MariaDB 1060/1091, and post-recovery writes work through
+   ownerless/native reopen before and after forced `.shm` rebuild.
    Focused column missing-`IF EXISTS` crash coverage preserves completed no-op
    `ALTER TABLE ... MODIFY COLUMN IF EXISTS` and
    `ALTER TABLE ... RENAME COLUMN IF EXISTS` dictionary boundaries, then
@@ -5285,10 +5288,12 @@ Minimum suites before support can be claimed:
     dependent-expression rename state remains correct,
   - after duplicate `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` and missing
     `ALTER TABLE ... DROP COLUMN IF EXISTS` no-op success but before ownerless
-    dictionary finish; hook coverage proves live-peer cleanup remains busy until
-    no-live recovery and preserved original column/default metadata,
-    missing-column absence, MariaDB 1060/1091 retry errno, post-recovery writes,
-    ownerless/native reopen, and forced `.shm` rebuild remain correct,
+    dictionary finish; hook coverage proves metadata-only live recovery after
+    pre-execution metadata proves the no-op branch, keeps the native
+    file-operation marker clear, and preserves original column/default
+    metadata, missing-column absence, MariaDB 1060/1091 retry errno,
+    post-recovery writes, ownerless/native reopen, and forced `.shm` rebuild
+    remain correct,
   - after missing `ALTER TABLE ... MODIFY COLUMN IF EXISTS`,
     `ALTER TABLE ... RENAME COLUMN IF EXISTS`,
     `ALTER TABLE ... CHANGE COLUMN IF EXISTS`,
