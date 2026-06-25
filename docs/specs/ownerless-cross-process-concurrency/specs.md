@@ -7167,6 +7167,14 @@ subsystems that this mode needs:
   reopen preserve the original row while both native file-operation markers
   remain clear. This covers a MyLite-owned post-native rollback boundary, not
   arbitrary crashes inside InnoDB rollback internals.
+  The implicit-rename follow-up broadens `RENAME TABLE` dictionary recovery
+  classification from only explicit `schema.table` rename pairs to one- or
+  two-part identifiers, then kills an implicit-schema `USE app; RENAME TABLE
+  source TO target` writer at `dictionary-before-finish` with a live peer.
+  Recovery observes the target table, retains the native file-operation marker
+  while the peer remains live, drains it after final no-live checkpoint proof,
+  and preserves the rename through forced `.shm` rebuild and ordinary native
+  reopen.
 
   Ownerless DDL stress now treats pre-execution MyLite statement-lock
   `MYLITE_BUSY` as bounded retryable harness contention while keeping native
@@ -7181,12 +7189,12 @@ subsystems that this mode needs:
   1. Broaden native redo/checkpoint reconciliation and live-peer
      DDL/file-lifecycle recovery beyond the now-covered plain/table-copy
      `CREATE TABLE`, focused CTAS, ordinary replacement, and replacement-copy
-     LIKE/CTAS plus explicit schema-qualified rename lists, focused truncate,
-     and focused drop plus focused force rebuild, dynamic row-format rebuild,
-     and focused compressed key-block row-format rebuild prefinish boundaries,
-     especially implicit/variant rename forms, rebuilt, broader truncated, and
-     multi-table/cross-schema dropped file-per-table tablespaces while peers
-     remain live.
+     LIKE/CTAS plus explicit schema-qualified and implicit-schema rename
+     lists, focused truncate, and focused drop plus focused force rebuild,
+     dynamic row-format rebuild, and focused compressed key-block row-format
+     rebuild prefinish boundaries, especially remaining rename variants,
+     rebuilt, broader truncated, and multi-table/cross-schema dropped
+     file-per-table tablespaces while peers remain live.
   2. Close remaining transaction crash windows, especially native
      rollback/savepoint-rollback internals and concurrent-writer savepoint
      schedules that combine native undo, ownerless page-write ownership, and

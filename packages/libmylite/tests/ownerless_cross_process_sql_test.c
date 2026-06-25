@@ -1028,6 +1028,7 @@ static void test_crashed_dictionary_ddl_begin_rebuilds_ownerless_state(void);
 static void test_crashed_create_table_dictionary_ddl_recovers_with_live_peer(void);
 static void test_crashed_dictionary_ddl_finish_allows_peer_cleanup(void);
 static void test_crashed_rename_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds(void);
+static void test_crashed_implicit_schema_rename_dictionary_ddl_recovers_moved_table(void);
 static void test_crashed_cross_schema_rename_dictionary_ddl_recovers_moved_table(void);
 static void test_crashed_multi_rename_dictionary_ddl_recovers_swapped_tables(void);
 static void test_crashed_cross_schema_multi_rename_dictionary_ddl_recovers_swapped_tables(void);
@@ -1613,6 +1614,10 @@ static void create_table_until_dictionary_after_finish_fault(
     int ready_fd
 );
 static void rename_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
+static void rename_implicit_schema_table_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void rename_cross_schema_table_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -4567,6 +4572,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-implicit-rename-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_implicit_schema_rename_dictionary_ddl_recovers_moved_table();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-cross-schema-rename-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_cross_schema_rename_dictionary_ddl_recovers_moved_table();
@@ -5910,6 +5921,9 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_crashed_dictionary_ddl_finish_allows_peer_cleanup),
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_rename_dictionary_ddl_blocks_peer_cleanup_until_reopen_rebuilds
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_implicit_schema_rename_dictionary_ddl_recovers_moved_table
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_cross_schema_rename_dictionary_ddl_recovers_moved_table),
     OWNERLESS_SQL_TEST_CASE(test_crashed_multi_rename_dictionary_ddl_recovers_swapped_tables),
@@ -42266,6 +42280,98 @@ static void test_crashed_rename_dictionary_ddl_blocks_peer_cleanup_until_reopen_
     free(root);
 }
 
+static void test_crashed_implicit_schema_rename_dictionary_ddl_recovers_moved_table(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-dictionary-implicit-rename-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_implicit_rename_crash_source ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_implicit_rename_crash_source VALUES (1, 10)");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        rename_implicit_schema_table_until_dictionary_finish_fault
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_implicit_rename_crash_source'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_implicit_rename_crash_target'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_implicit_rename_crash_target") ==
+        10U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_implicit_rename_crash_target VALUES (2, 20)");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_implicit_rename_crash_target") == 2U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_implicit_rename_crash_target") ==
+        30U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_implicit_rename_crash_target") == 2U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_implicit_rename_crash_target") ==
+        30U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_implicit_rename_crash_target") == 2U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_implicit_rename_crash_target") ==
+        30U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_cross_schema_rename_dictionary_ddl_recovers_moved_table(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -64449,6 +64555,27 @@ static void rename_table_until_dictionary_finish_fault(open_database_paths paths
         "RENAME TABLE app.ownerless_rename_crash_source "
         "TO app.ownerless_rename_crash_target"
     );
+}
+
+static void rename_implicit_schema_table_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    mylite_db *db;
+    char ready_fd_value[32];
+
+    assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", ready_fd) > 0);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "USE app");
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "dictionary-before-finish", 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
+    exec_ok(
+        db,
+        "RENAME TABLE ownerless_implicit_rename_crash_source "
+        "TO ownerless_implicit_rename_crash_target"
+    );
+    (void)mylite_close(db);
+    _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
 }
 
 static void rename_cross_schema_table_until_dictionary_finish_fault(

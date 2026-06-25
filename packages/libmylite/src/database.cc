@@ -2200,7 +2200,7 @@ bool ownerless_create_table_select_recovery_statement(const SqlPolicyTokens &tok
 bool ownerless_create_or_replace_table_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_create_or_replace_table_like_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_create_or_replace_table_select_recovery_statement(const SqlPolicyTokens &tokens);
-bool ownerless_explicit_rename_table_recovery_statement(const SqlPolicyTokens &tokens);
+bool ownerless_rename_table_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_truncate_table_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_drop_table_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_alter_table_force_rebuild_recovery_statement(const SqlPolicyTokens &tokens);
@@ -15182,7 +15182,7 @@ std::uint32_t ownerless_dictionary_recovery_kind_for_statement(const SqlPolicyTo
     if (ownerless_create_or_replace_table_select_recovery_statement(tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_OR_REPLACE_TABLE_SELECT;
     }
-    if (ownerless_explicit_rename_table_recovery_statement(tokens)) {
+    if (ownerless_rename_table_recovery_statement(tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_RENAME_TABLE;
     }
     if (ownerless_truncate_table_recovery_statement(tokens)) {
@@ -15448,8 +15448,20 @@ bool ownerless_create_or_replace_table_select_recovery_statement(const SqlPolicy
     return false;
 }
 
-bool ownerless_explicit_rename_table_recovery_statement(const SqlPolicyTokens &tokens) {
-    if (tokens.count < 9U || !token_equals(tokens.values[0], "RENAME") ||
+bool consume_ownerless_rename_table_identifier(const SqlPolicyTokens &tokens, std::size_t &index) {
+    if (index >= tokens.count || !ownerless_table_identifier_token(tokens.values[index])) {
+        return false;
+    }
+    ++index;
+    if (index + 1U < tokens.count && token_equals(tokens.values[index], ".") &&
+        ownerless_table_identifier_token(tokens.values[index + 1U])) {
+        index += 2U;
+    }
+    return true;
+}
+
+bool ownerless_rename_table_recovery_statement(const SqlPolicyTokens &tokens) {
+    if (tokens.count < 5U || !token_equals(tokens.values[0], "RENAME") ||
         !token_equals(tokens.values[1], "TABLE")) {
         return false;
     }
@@ -15457,20 +15469,15 @@ bool ownerless_explicit_rename_table_recovery_statement(const SqlPolicyTokens &t
     std::size_t index = 2U;
     bool saw_pair = false;
     for (;;) {
-        if (index + 6U >= tokens.count) {
+        if (!consume_ownerless_rename_table_identifier(tokens, index) || index >= tokens.count ||
+            !token_equals(tokens.values[index], "TO")) {
             return false;
         }
-        if (!ownerless_table_identifier_token(tokens.values[index]) ||
-            !token_equals(tokens.values[index + 1U], ".") ||
-            !ownerless_table_identifier_token(tokens.values[index + 2U]) ||
-            !token_equals(tokens.values[index + 3U], "TO") ||
-            !ownerless_table_identifier_token(tokens.values[index + 4U]) ||
-            !token_equals(tokens.values[index + 5U], ".") ||
-            !ownerless_table_identifier_token(tokens.values[index + 6U])) {
+        ++index;
+        if (!consume_ownerless_rename_table_identifier(tokens, index)) {
             return false;
         }
         saw_pair = true;
-        index += 7U;
         if (index >= tokens.count || !token_equals(tokens.values[index], ",")) {
             break;
         }
