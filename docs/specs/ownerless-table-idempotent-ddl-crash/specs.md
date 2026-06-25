@@ -42,11 +42,14 @@ Add two unsafe-hook selectors to
   `dictionary-before-finish`.
 
 Both selectors keep a live ownerless peer open while the writer is killed. The
-duplicate-create selector proves cleanup remains busy until no-live recovery.
-The missing-drop selector is promoted by
-`ownerless-table-if-exists-drop-live-recovery` to recover while the peer remains
-live with the native file-operation marker clear, then verifies ownerless and
-ordinary native reopen before and after forced `.shm` rebuild.
+duplicate-create selector is promoted by
+`ownerless-table-if-not-exists-live-recovery` to recover while the peer remains
+live with the native file-operation marker clear after pre-execution metadata
+proves the target table already exists. The missing-drop selector is promoted
+by `ownerless-table-if-exists-drop-live-recovery` to recover while the peer
+remains live with the native file-operation marker clear, then both selectors
+verify ownerless and ordinary native reopen before and after forced `.shm`
+rebuild.
 
 ## Scope And Non-Goals
 
@@ -78,8 +81,9 @@ replacement, removal, or stale peer state.
 ## Directory And Lifecycle Impact
 
 No directory layout changes. The tests exercise native InnoDB `.frm` and
-`.ibd` files under `datadir/app/`, ownerless live-peer cleanup blocking,
-no-live recovery, forced `.shm` rebuild, and ordinary native exclusive reopen.
+`.ibd` files under `datadir/app/`, ownerless live-peer metadata-only recovery
+for proven no-op create/drop paths, forced `.shm` rebuild, and ordinary native
+exclusive reopen.
 
 ## Native Storage Impact
 
@@ -104,7 +108,7 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selectors reach the dictionary fault hook and do not hang.
-- A live peer prevents duplicate-create cleanup until no-live recovery.
+- Duplicate idempotent create recovers while a peer remains live.
 - Missing idempotent drop recovers while a peer remains live.
 - Duplicate idempotent create recovery keeps the original table definition,
   leaves the attempted `note` column absent, and keeps plain duplicate create

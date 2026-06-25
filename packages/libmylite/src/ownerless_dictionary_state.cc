@@ -375,7 +375,8 @@ bool valid_recovery_kind(std::uint32_t recovery_kind) {
            recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_INDEX_IDEMPOTENT_CREATE ||
            recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_INDEX_IDEMPOTENT_DROP ||
            recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_COMMENT ||
-           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_COLUMN_SET_DEFAULT;
+           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_COLUMN_SET_DEFAULT ||
+           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE_IF_NOT_EXISTS;
 }
 
 void clear_recoverable_state(unsigned char *state) {

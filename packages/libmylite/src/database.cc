@@ -2201,6 +2201,10 @@ std::uint32_t ownerless_dictionary_recovery_kind_for_statement(
 bool ownerless_create_view_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_create_or_replace_view_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_create_trigger_recovery_statement(const SqlPolicyTokens &tokens);
+bool ownerless_create_table_if_not_exists_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
 bool ownerless_plain_create_table_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_create_table_like_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_create_table_select_recovery_statement(const SqlPolicyTokens &tokens);
@@ -2275,6 +2279,12 @@ bool ownerless_index_metadata_lookup(
     std::string_view schema_name,
     std::string_view table_name,
     std::string_view index_name,
+    bool *out_exists
+);
+bool ownerless_table_metadata_lookup(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
     bool *out_exists
 );
 bool consume_ownerless_optional_view_column_list(const SqlPolicyTokens &tokens, std::size_t &index);
@@ -15255,6 +15265,9 @@ std::uint32_t ownerless_dictionary_recovery_kind_for_statement(
     if (ownerless_alter_schema_recovery_statement(tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_SCHEMA;
     }
+    if (ownerless_create_table_if_not_exists_recovery_statement(db, tokens)) {
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE_IF_NOT_EXISTS;
+    }
     if (ownerless_plain_create_table_recovery_statement(tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE;
     }
@@ -15463,6 +15476,36 @@ bool ownerless_plain_create_table_recovery_statement(const SqlPolicyTokens &toke
         }
     }
     return true;
+}
+
+bool ownerless_create_table_if_not_exists_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    if (tokens.count < 6U || !token_equals(tokens.values[0], "CREATE") ||
+        !token_equals(tokens.values[1], "TABLE") || !token_equals(tokens.values[2], "IF") ||
+        !token_equals(tokens.values[3], "NOT") || !token_equals(tokens.values[4], "EXISTS")) {
+        return false;
+    }
+
+    std::size_t index = 5U;
+    std::string schema_name;
+    std::string table_name;
+    if (!consume_ownerless_table_identifier_parts(db, tokens, index, &schema_name, &table_name)) {
+        return false;
+    }
+
+    for (std::size_t token_index = 1U; token_index < tokens.count; ++token_index) {
+        const std::string_view token = identifier_token_at(tokens, token_index);
+        if (token_in(token, "OR", "REPLACE", "TEMPORARY", "LIKE") ||
+            token_equals(token, "SELECT")) {
+            return false;
+        }
+    }
+
+    bool table_exists = false;
+    return ownerless_table_metadata_lookup(db, schema_name, table_name, &table_exists) &&
+           table_exists;
 }
 
 bool ownerless_create_table_like_recovery_statement(const SqlPolicyTokens &tokens) {
@@ -15776,6 +15819,44 @@ bool ownerless_index_metadata_lookup(
         return false;
     }
     *out_exists = index_exists;
+    return true;
+}
+
+bool ownerless_table_metadata_lookup(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    bool *out_exists
+) {
+    if (out_exists == nullptr || schema_name.empty() || table_name.empty()) {
+        return false;
+    }
+    *out_exists = false;
+
+    const ErrorSnapshot snapshot = capture_error(db);
+    const std::string escaped_schema = ownerless_escape_metadata_literal(db, schema_name);
+    const std::string escaped_table = ownerless_escape_metadata_literal(db, table_name);
+    const std::string sql = "SELECT COUNT(*) FROM information_schema.tables "
+                            "WHERE table_schema = '" +
+                            escaped_schema + "' AND table_name = '" + escaped_table + "'";
+
+    bool query_succeeded = false;
+    bool table_exists = false;
+    if (mysql_query(&db.mysql, sql.c_str()) == 0) {
+        MYSQL_RES *result = mysql_store_result(&db.mysql);
+        if (result != nullptr) {
+            MYSQL_ROW row = mysql_fetch_row(result);
+            table_exists =
+                row != nullptr && row[0] != nullptr && std::strtoull(row[0], nullptr, 10) != 0U;
+            query_succeeded = row != nullptr && row[0] != nullptr;
+            mysql_free_result(result);
+        }
+    }
+    restore_error(db, snapshot);
+    if (!query_succeeded) {
+        return false;
+    }
+    *out_exists = table_exists;
     return true;
 }
 
@@ -16591,7 +16672,8 @@ bool ownerless_dictionary_recovery_kind_is_metadata_only(std::uint32_t recovery_
            recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_INDEX_IDEMPOTENT_CREATE ||
            recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_INDEX_IDEMPOTENT_DROP ||
            recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_COMMENT ||
-           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_COLUMN_SET_DEFAULT;
+           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_COLUMN_SET_DEFAULT ||
+           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE_IF_NOT_EXISTS;
 }
 
 bool ownerless_table_identifier_token(std::string_view token) {
@@ -22069,7 +22151,7 @@ bool ownerless_process_recover_dead_dictionary_owner(
         }
     }
 
-    constexpr std::array<std::uint32_t, 17> metadata_only_recovery_kinds = {
+    constexpr std::array<std::uint32_t, 18> metadata_only_recovery_kinds = {
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_VIEW,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_DROP_VIEW,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_OR_REPLACE_VIEW,
@@ -22087,6 +22169,7 @@ bool ownerless_process_recover_dead_dictionary_owner(
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_INDEX_IDEMPOTENT_DROP,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_COMMENT,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_COLUMN_SET_DEFAULT,
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE_IF_NOT_EXISTS,
     };
     for (const std::uint32_t recovery_kind : metadata_only_recovery_kinds) {
         std::uint64_t generation = 0;

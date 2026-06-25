@@ -2799,11 +2799,12 @@ Tasks:
    `DROP TABLE IF EXISTS` no-ops, and existing single-table and two-table-list
    `DROP TABLE IF EXISTS` writers after
    MariaDB returns success but before ownerless dictionary finish, then verifies
-   duplicate create stays no-live-only, missing drops recover while a peer
-   remains live with the native file-operation marker clear, existing drops
-   recover while a peer remains live with the marker retained until final
-   no-live drain, and ownerless/native reopen plus forced `.shm` rebuild remain
-   correct.
+   duplicate create recovers while a peer remains live with the native
+   file-operation marker clear after pre-execution metadata proves the target
+   table already exists, missing drops recover while a peer remains live with
+   the marker clear, existing drops recover while a peer remains live with the
+   marker retained until final no-live drain, and ownerless/native reopen plus
+   forced `.shm` rebuild remain correct.
    Hook-build column-idempotent crash coverage kills duplicate
    `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` and missing
    `ALTER TABLE ... DROP COLUMN IF EXISTS` no-op writers after MariaDB returns
@@ -3546,10 +3547,10 @@ Tasks:
    `CREATE TABLE IF NOT EXISTS`, missing single-table and multi-table-list
    `DROP TABLE IF EXISTS` no-ops, and existing single-table and two-table-list
    `DROP TABLE IF EXISTS` writers before
-   ownerless dictionary finish and verifies duplicate-create no-live recovery,
-   missing-drop live recovery with the marker clear, existing-drop live recovery
-   with marker retention until final no-live drain, ownerless/native reopen, and
-   forced `.shm` rebuild.
+   ownerless dictionary finish and verifies duplicate-create metadata-only live
+   recovery with the marker clear, missing-drop live recovery with the marker
+   clear, existing-drop live recovery with marker retention until final no-live
+   drain, ownerless/native reopen, and forced `.shm` rebuild.
    Hook-build
    crash coverage also kills simple `CREATE VIEW`, `DROP VIEW`,
    `CREATE OR REPLACE VIEW`, and `ALTER VIEW` before ownerless dictionary
@@ -5356,12 +5357,12 @@ Minimum suites before support can be claimed:
     multi-table-list `DROP TABLE IF EXISTS` no-op success, and existing
     single-table or two-table-list `DROP TABLE IF EXISTS` native removal but
     before ownerless dictionary
-    finish; hook coverage proves duplicate-create live-peer cleanup remains
-    busy until no-live recovery, missing-drop live recovery preserves native
-    table metadata and keeps the native file-operation marker clear, and
-    existing-drop live recovery preserves table absence while retaining the
-    marker until final no-live drain, with ownerless/native reopen and forced
-    `.shm` rebuild correct,
+    finish; hook coverage proves duplicate-create metadata-only live recovery
+    after pre-execution metadata proves the target table already exists,
+    missing-drop live recovery preserves native table metadata and keeps the
+    native file-operation marker clear, and existing-drop live recovery
+    preserves table absence while retaining the marker until final no-live
+    drain, with ownerless/native reopen and forced `.shm` rebuild correct,
   - after duplicate top-level `CREATE INDEX IF NOT EXISTS` and missing
     top-level `DROP INDEX IF EXISTS` no-op success but before ownerless
     dictionary finish; hook coverage proves live-peer metadata-only recovery
