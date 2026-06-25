@@ -1073,6 +1073,10 @@ static void test_crashed_create_or_replace_ctas_dictionary_ddl_marks_file_op_che
 static void test_crashed_table_idempotent_create_dictionary_ddl_preserves_table(void);
 static void test_crashed_table_idempotent_drop_dictionary_ddl_preserves_table(void);
 static void test_crashed_table_idempotent_existing_drop_dictionary_ddl_recovers_absent_table(void);
+static void test_crashed_table_idempotent_multi_drop_dictionary_ddl_preserves_table(void);
+static void test_crashed_table_idempotent_multi_existing_drop_dictionary_ddl_recovers_absent_tables(
+    void
+);
 static void test_crashed_generated_column_success_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_generated_column_foreign_key_dictionary_ddl_recovers_constraints(void);
 static void test_crashed_generated_column_foreign_key_drop_dictionary_ddl_recovers_absent_constraints(
@@ -1874,6 +1878,14 @@ static void idempotent_existing_drop_table_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
+static void idempotent_multi_drop_table_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void idempotent_multi_existing_drop_table_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void generated_column_create_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -2579,6 +2591,16 @@ static void assert_ownerless_table_idempotent_drop_crash_state(
     const char *database_path
 );
 static void assert_ownerless_table_idempotent_existing_drop_crash_absent_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_table_idempotent_multi_drop_crash_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_table_idempotent_multi_existing_drop_crash_absent_state(
     open_database_paths paths,
     unsigned flags,
     const char *database_path
@@ -4904,6 +4926,19 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-table-idempotent-multi-drop-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_table_idempotent_multi_drop_dictionary_ddl_preserves_table();
+#endif
+        return 0;
+    }
+    if (argc == 2 &&
+        strcmp(argv[1], "dictionary-table-idempotent-multi-existing-drop-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_table_idempotent_multi_existing_drop_dictionary_ddl_recovers_absent_tables();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-view-create-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_view_create_dictionary_ddl_recovers_view();
@@ -5757,6 +5792,11 @@ int main(int argc, char **argv) {
             "dictionary-table-idempotent-create-crash|"
             "dictionary-table-idempotent-drop-crash|"
             "dictionary-table-idempotent-existing-drop-crash|"
+            "dictionary-table-idempotent-multi-drop-crash|",
+            stderr
+        );
+        fputs(
+            "dictionary-table-idempotent-multi-existing-drop-crash|"
             "dictionary-view-create-crash|"
             "dictionary-view-drop-crash|"
             "dictionary-view-idempotent-create-crash|"
@@ -6185,6 +6225,12 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_crashed_table_idempotent_drop_dictionary_ddl_preserves_table),
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_table_idempotent_existing_drop_dictionary_ddl_recovers_absent_table
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_table_idempotent_multi_drop_dictionary_ddl_preserves_table
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_table_idempotent_multi_existing_drop_dictionary_ddl_recovers_absent_tables
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_view_create_dictionary_ddl_recovers_view),
     OWNERLESS_SQL_TEST_CASE(test_crashed_view_drop_dictionary_ddl_recovers_absent_view),
@@ -47988,6 +48034,192 @@ static void test_crashed_table_idempotent_existing_drop_dictionary_ddl_recovers_
     free(root);
 }
 
+static void test_crashed_table_idempotent_multi_drop_dictionary_ddl_preserves_table(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-table-idempotent-multi-drop-crash.mylite");
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *real_frm_path = path_join(app_path, "ownerless_table_idempotent_multi_drop_real.frm");
+    char *real_ibd_path = path_join(app_path, "ownerless_table_idempotent_multi_drop_real.ibd");
+    char *missing_a_frm_path =
+        path_join(app_path, "ownerless_table_idempotent_multi_drop_missing_a.frm");
+    char *missing_b_frm_path =
+        path_join(app_path, "ownerless_table_idempotent_multi_drop_missing_b.frm");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_table_idempotent_multi_drop_real ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_table_idempotent_multi_drop_real "
+        "VALUES (1, 10), (2, 20)"
+    );
+    exec_ok(db, "COMMIT");
+    assert(path_exists(real_frm_path));
+    assert(path_exists(real_ibd_path));
+    assert(!path_exists(missing_a_frm_path));
+    assert(!path_exists(missing_b_frm_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_table_idempotent_multi_drop_real"
+        ) == 30U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        idempotent_multi_drop_table_until_dictionary_finish_fault
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    assert_ownerless_table_idempotent_multi_drop_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
+
+    assert_ownerless_table_idempotent_multi_drop_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    remove_concurrency_shm(database_path);
+    assert_ownerless_table_idempotent_multi_drop_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_table_idempotent_multi_drop_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+
+    free(missing_b_frm_path);
+    free(missing_a_frm_path);
+    free(real_ibd_path);
+    free(real_frm_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_crashed_table_idempotent_multi_existing_drop_dictionary_ddl_recovers_absent_tables(
+    void
+) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-table-idempotent-multi-existing-drop-crash.mylite");
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *first_frm_path = path_join(app_path, "ownerless_table_idempotent_multi_drop_a.frm");
+    char *first_ibd_path = path_join(app_path, "ownerless_table_idempotent_multi_drop_a.ibd");
+    char *second_frm_path = path_join(app_path, "ownerless_table_idempotent_multi_drop_b.frm");
+    char *second_ibd_path = path_join(app_path, "ownerless_table_idempotent_multi_drop_b.ibd");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_table_idempotent_multi_drop_a ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_table_idempotent_multi_drop_b ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_table_idempotent_multi_drop_a VALUES (1, 10)");
+    exec_ok(db, "INSERT INTO app.ownerless_table_idempotent_multi_drop_b VALUES (1, 20)");
+    exec_ok(db, "COMMIT");
+    assert(path_exists(first_frm_path));
+    assert(path_exists(first_ibd_path));
+    assert(path_exists(second_frm_path));
+    assert(path_exists(second_ibd_path));
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_table_idempotent_multi_drop_a") ==
+        10U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_table_idempotent_multi_drop_b") ==
+        20U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        idempotent_multi_existing_drop_table_until_dictionary_finish_fault
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    assert_ownerless_table_idempotent_multi_existing_drop_crash_absent_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
+
+    assert_ownerless_table_idempotent_multi_existing_drop_crash_absent_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    remove_concurrency_shm(database_path);
+    assert_ownerless_table_idempotent_multi_existing_drop_crash_absent_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_table_idempotent_multi_existing_drop_crash_absent_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+
+    free(second_ibd_path);
+    free(second_frm_path);
+    free(first_ibd_path);
+    free(first_frm_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_generated_column_success_dictionary_ddl_recovers_metadata(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -67437,6 +67669,34 @@ static void idempotent_existing_drop_table_until_dictionary_finish_fault(
     );
 }
 
+static void idempotent_multi_drop_table_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "DROP TABLE IF EXISTS "
+        "app.ownerless_table_idempotent_multi_drop_missing_a, "
+        "app.ownerless_table_idempotent_multi_drop_missing_b"
+    );
+}
+
+static void idempotent_multi_existing_drop_table_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "DROP TABLE IF EXISTS "
+        "app.ownerless_table_idempotent_multi_drop_a, "
+        "app.ownerless_table_idempotent_multi_drop_b"
+    );
+}
+
 static void generated_column_create_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -71866,6 +72126,132 @@ static void assert_ownerless_table_idempotent_existing_drop_crash_absent_state(
 
     free(ibd_path);
     free(frm_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_table_idempotent_multi_drop_crash_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *real_frm_path = path_join(app_path, "ownerless_table_idempotent_multi_drop_real.frm");
+    char *real_ibd_path = path_join(app_path, "ownerless_table_idempotent_multi_drop_real.ibd");
+    char *missing_a_frm_path =
+        path_join(app_path, "ownerless_table_idempotent_multi_drop_missing_a.frm");
+    char *missing_a_ibd_path =
+        path_join(app_path, "ownerless_table_idempotent_multi_drop_missing_a.ibd");
+    char *missing_b_frm_path =
+        path_join(app_path, "ownerless_table_idempotent_multi_drop_missing_b.frm");
+    char *missing_b_ibd_path =
+        path_join(app_path, "ownerless_table_idempotent_multi_drop_missing_b.ibd");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(path_exists(real_frm_path));
+    assert(path_exists(real_ibd_path));
+    assert(!path_exists(missing_a_frm_path));
+    assert(!path_exists(missing_a_ibd_path));
+    assert(!path_exists(missing_b_frm_path));
+    assert(!path_exists(missing_b_ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_table_idempotent_multi_drop_real'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name IN ("
+            "'ownerless_table_idempotent_multi_drop_missing_a', "
+            "'ownerless_table_idempotent_multi_drop_missing_b')"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_table_idempotent_multi_drop_real") ==
+        2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_table_idempotent_multi_drop_real"
+        ) == 30U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_table_idempotent_multi_drop_real VALUES (3, 30)");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_table_idempotent_multi_drop_real") ==
+        3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_table_idempotent_multi_drop_real"
+        ) == 60U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_table_idempotent_multi_drop_real WHERE id = 3");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_table_idempotent_multi_drop_real") ==
+        2U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(missing_b_ibd_path);
+    free(missing_b_frm_path);
+    free(missing_a_ibd_path);
+    free(missing_a_frm_path);
+    free(real_ibd_path);
+    free(real_frm_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_table_idempotent_multi_existing_drop_crash_absent_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *first_frm_path = path_join(app_path, "ownerless_table_idempotent_multi_drop_a.frm");
+    char *first_ibd_path = path_join(app_path, "ownerless_table_idempotent_multi_drop_a.ibd");
+    char *second_frm_path = path_join(app_path, "ownerless_table_idempotent_multi_drop_b.frm");
+    char *second_ibd_path = path_join(app_path, "ownerless_table_idempotent_multi_drop_b.ibd");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(!path_exists(first_frm_path));
+    assert(!path_exists(first_ibd_path));
+    assert(!path_exists(second_frm_path));
+    assert(!path_exists(second_ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name IN ("
+            "'ownerless_table_idempotent_multi_drop_a', "
+            "'ownerless_table_idempotent_multi_drop_b')"
+        ) == 0U
+    );
+    assert(
+        exec_status(db, "SELECT COUNT(*) FROM app.ownerless_table_idempotent_multi_drop_a", NULL) !=
+        MYLITE_OK
+    );
+    assert(
+        exec_status(db, "SELECT COUNT(*) FROM app.ownerless_table_idempotent_multi_drop_b", NULL) !=
+        MYLITE_OK
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(second_ibd_path);
+    free(second_frm_path);
+    free(first_ibd_path);
+    free(first_frm_path);
     free(app_path);
     free(datadir_path);
 }

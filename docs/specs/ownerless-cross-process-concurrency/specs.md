@@ -2793,12 +2793,13 @@ Tasks:
    replacement rows, and page-0 space identity through ownerless/native reopen
    before and after forced `.shm` rebuild.
    Hook-build crash coverage also kills duplicate
-   `CREATE TABLE IF NOT EXISTS`, missing single-table `DROP TABLE IF EXISTS`
-   no-op, and existing single-table `DROP TABLE IF EXISTS` writers after
+   `CREATE TABLE IF NOT EXISTS`, missing single-table and multi-table-list
+   `DROP TABLE IF EXISTS` no-ops, and existing single-table and two-table-list
+   `DROP TABLE IF EXISTS` writers after
    MariaDB returns success but before ownerless dictionary finish, then verifies
-   duplicate create stays no-live-only, missing drop recovers while a peer
-   remains live with the native file-operation marker clear, existing drop
-   recovers while a peer remains live with the marker retained until final
+   duplicate create stays no-live-only, missing drops recover while a peer
+   remains live with the native file-operation marker clear, existing drops
+   recover while a peer remains live with the marker retained until final
    no-live drain, and ownerless/native reopen plus forced `.shm` rebuild remain
    correct.
    Hook-build column-idempotent crash coverage kills duplicate
@@ -3538,8 +3539,9 @@ Tasks:
    copied rows, post-recovery writes, ownerless/native reopen, and forced
    `.shm` rebuild.
    Hook-build crash coverage also kills duplicate
-   `CREATE TABLE IF NOT EXISTS`, missing single-table `DROP TABLE IF EXISTS`
-   no-op, and existing single-table `DROP TABLE IF EXISTS` writers before
+   `CREATE TABLE IF NOT EXISTS`, missing single-table and multi-table-list
+   `DROP TABLE IF EXISTS` no-ops, and existing single-table and two-table-list
+   `DROP TABLE IF EXISTS` writers before
    ownerless dictionary finish and verifies duplicate-create no-live recovery,
    missing-drop live recovery with the marker clear, existing-drop live recovery
    with marker retention until final no-live drain, ownerless/native reopen, and
@@ -4831,8 +4833,8 @@ Tasks:
    recovers while a peer remains live and keeps the native file-operation
    marker set until final no-live drain.
    Implicit-schema, temporary-table, and view-only rename forms plus
-   `DROP TEMPORARY TABLE`, multi-table `DROP TABLE IF EXISTS` lists,
-   inside-MariaDB-loop multi-drop crash points, broader ALTER rebuild beyond the
+   `DROP TEMPORARY TABLE`, inside-MariaDB-loop multi-drop crash points,
+   broader ALTER rebuild beyond the
    focused force, row-format, compressed, and charset-conversion cases,
    broader schema option variants, broader view and trigger variants, and
    non-rename foreign-key multi-DDL live-peer recovery remain planned.
@@ -5341,9 +5343,10 @@ Minimum suites before support can be claimed:
     old-column/index absence, copied `LIKE` secondary-index metadata, CTAS
     copied rows, post-recovery writes, ownerless/native reopen, and forced
     `.shm` rebuild remain correct,
-  - after duplicate `CREATE TABLE IF NOT EXISTS`, missing single-table
-    `DROP TABLE IF EXISTS` no-op success, and existing single-table
-    `DROP TABLE IF EXISTS` native removal but before ownerless dictionary
+  - after duplicate `CREATE TABLE IF NOT EXISTS`, missing single-table or
+    multi-table-list `DROP TABLE IF EXISTS` no-op success, and existing
+    single-table or two-table-list `DROP TABLE IF EXISTS` native removal but
+    before ownerless dictionary
     finish; hook coverage proves duplicate-create live-peer cleanup remains
     busy until no-live recovery, missing-drop live recovery preserves native
     table metadata and keeps the native file-operation marker clear, and
@@ -5505,8 +5508,9 @@ completion, focused post-checkpoint DML observation of the native
 `FILE_MODIFY` redo flag, an `ALTER TABLE ... FORCE, ALGORITHM=COPY` writer
 after native table-copy rebuild, a `CREATE OR REPLACE TABLE` writer
 after native old-table replacement, duplicate `CREATE TABLE IF NOT EXISTS`,
-missing single-table `DROP TABLE IF EXISTS` no-op writers, and existing
-single-table `DROP TABLE IF EXISTS` writers, duplicate top-level
+missing single-table and multi-table-list `DROP TABLE IF EXISTS` no-op writers,
+and existing single-table and two-table-list `DROP TABLE IF EXISTS` writers,
+duplicate top-level
 `CREATE INDEX IF NOT EXISTS`, missing top-level `DROP INDEX IF EXISTS`,
 duplicate `ALTER TABLE ... ADD INDEX IF NOT EXISTS`, and missing
 `ALTER TABLE ... DROP INDEX IF EXISTS` no-op writers, duplicate top-level
@@ -7354,7 +7358,8 @@ subsystems that this mode needs:
      `CREATE TABLE`, focused CTAS, ordinary replacement, and replacement-copy
      LIKE/CTAS plus explicit schema-qualified and implicit-schema rename
      lists, focused explicit and implicit truncate, focused explicit and
-     implicit single-table, single-table missing/existing `DROP TABLE IF EXISTS`,
+     implicit single-table, single-table and multi-table-list missing/existing
+     `DROP TABLE IF EXISTS`,
      and same-schema/cross-schema two-table drop, plus focused force rebuild,
      dynamic row-format rebuild, focused compressed
      key-block row-format rebuild, and focused charset-conversion rebuild
@@ -7365,9 +7370,8 @@ subsystems that this mode needs:
      metadata-only prefinish boundaries, plus focused CREATE/ALTER/DROP
      DATABASE and schema idempotent/no-op prefinish boundaries, especially
      remaining rename/truncate variants, rebuild variants, broader
-     metadata-only DDL, temporary, multi-table `DROP TABLE IF EXISTS`, broader
-     schema option variants, intra-loop drop cases, and broader DDL file
-     lifecycle while peers remain live.
+     metadata-only DDL, temporary, broader schema option variants, intra-loop
+     drop cases, and broader DDL file lifecycle while peers remain live.
   2. Close remaining transaction crash windows, especially native
      rollback/savepoint-rollback internals and concurrent-writer savepoint
      schedules that combine native undo, ownerless page-write ownership, and

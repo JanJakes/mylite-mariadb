@@ -8,9 +8,9 @@ not let another ownerless opener recover the dead dictionary generation while a
 peer remains live, because the recovery classifier intentionally rejects
 `IF EXISTS`.
 
-MyLite should recover bounded single-table `DROP TABLE IF EXISTS` crashes at
-`dictionary-before-finish` while another ownerless peer remains live, covering
-both outcomes MariaDB can produce:
+MyLite should recover bounded single-table and multi-table
+`DROP TABLE IF EXISTS` crashes at `dictionary-before-finish` while another
+ownerless peer remains live, covering both outcomes MariaDB can produce:
 
 - missing table no-op, with no native file-operation marker, and
 - existing table removal, with the native file-operation checkpoint-needed
@@ -50,10 +50,10 @@ Add a distinct recovery kind:
 
 - `MYLITE_OWNERLESS_DICTIONARY_RECOVERY_DROP_TABLE_IF_EXISTS`
 
-Classify bounded single-table `DROP TABLE IF EXISTS <identifier>` statements
-into that recovery kind. Keep `DROP TEMPORARY TABLE IF EXISTS` out of scope
-because temporary table state is connection-local and already excluded from
-ownerless native file-lifecycle claims.
+Classify bounded `DROP TABLE IF EXISTS <identifier>[, <identifier> ...]`
+statements into that recovery kind. Keep `DROP TEMPORARY TABLE IF EXISTS` out
+of scope because temporary table state is connection-local and already
+excluded from ownerless native file-lifecycle claims.
 
 Register the new kind in both recovery lanes:
 
@@ -66,12 +66,21 @@ Add one new unsafe-hook selector for existing-table removal and promote the
 existing missing-table idempotent drop selector from no-live-only recovery to
 held-live-peer recovery.
 
+Extend the focused evidence with multi-table list selectors for:
+
+- all-missing table names, proving the metadata-only marker-clear lane for a
+  list, and
+- two existing table names, proving marker retention and drain for multiple
+  native table-file removals.
+
 ## Scope
 
 In scope:
 
 - Missing single-table `DROP TABLE IF EXISTS` live recovery.
 - Existing single-table `DROP TABLE IF EXISTS` live recovery.
+- Missing multi-table `DROP TABLE IF EXISTS` list live recovery.
+- Existing multi-table `DROP TABLE IF EXISTS` list live recovery.
 - Native `.frm`/`.ibd` preservation for the missing-table no-op case.
 - Native `.frm`/`.ibd` removal plus marker retention/drain for the existing
   table-removal case.
@@ -80,7 +89,6 @@ In scope:
 Out of scope:
 
 - Temporary table drops.
-- Multi-table `DROP TABLE IF EXISTS` lists.
 - Partitioned tables.
 - Crash injection between individual tables in MariaDB's internal drop loop.
 - SQL-level table-lock fault injection.
@@ -116,6 +124,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - Run focused selectors:
   - `dictionary-table-idempotent-drop-crash`
   - `dictionary-table-idempotent-existing-drop-crash`
+  - `dictionary-table-idempotent-multi-drop-crash`
+  - `dictionary-table-idempotent-multi-existing-drop-crash`
 - Run adjacent table/drop selectors:
   - `dictionary-table-idempotent-create-crash`
   - `dictionary-drop-crash`
@@ -135,6 +145,10 @@ No public API, build-profile, binary-size, license, or dependency changes.
   keeps the native file-operation marker clear.
 - Existing-table `DROP TABLE IF EXISTS` recovers while a peer remains live and
   keeps the native file-operation marker set until the final peer exits.
+- Missing-list `DROP TABLE IF EXISTS` recovers while a peer remains live and
+  keeps the native file-operation marker clear.
+- Existing-list `DROP TABLE IF EXISTS` recovers while a peer remains live and
+  keeps the native file-operation marker set until the final peer exits.
 - Preserved or removed table state matches `INFORMATION_SCHEMA`, direct reads,
   native file presence, ownerless/native reopen, and forced `.shm` rebuild
   expectations.
@@ -144,9 +158,12 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 Passed:
 
-- `cmake --build --preset ownerless-test-hooks --target mylite_ownerless_primitives_test mylite_ownerless_cross_process_sql_test -j2`
+- `cmake --build --preset ownerless-test-hooks --target mylite_ownerless_cross_process_sql_test -j2`
+- `cmake --build --preset ownerless-test-hooks --target mylite_ownerless_primitives_test -j2`
 - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-table-idempotent-drop-crash`
 - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-table-idempotent-existing-drop-crash`
+- `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-table-idempotent-multi-drop-crash`
+- `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-table-idempotent-multi-existing-drop-crash`
 - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-table-idempotent-create-crash`
 - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-drop-crash`
 - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-drop-file-op-marker-crash`

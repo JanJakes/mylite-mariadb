@@ -15892,6 +15892,12 @@ bool ownerless_drop_table_if_exists_recovery_statement(const SqlPolicyTokens &to
     if (!consume_ownerless_table_identifier(tokens, index)) {
         return false;
     }
+    while (index < tokens.count && token_equals(tokens.values[index], ",")) {
+        ++index;
+        if (!consume_ownerless_table_identifier(tokens, index)) {
+            return false;
+        }
+    }
     for (; index < tokens.count; ++index) {
         if (!token_equals(tokens.values[index], ";")) {
             return false;
