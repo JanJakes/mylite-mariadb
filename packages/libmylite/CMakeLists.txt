@@ -907,7 +907,8 @@ if(BUILD_TESTING)
         TIMEOUT 900
       )
       set_tests_properties(libmylite.ownerless-cross-process-ddl-stress PROPERTIES
-        ENVIRONMENT "MYLITE_OWNERLESS_DDL_STRESS_ROUNDS=8"
+        ENVIRONMENT
+          "MYLITE_OWNERLESS_DDL_STRESS_ROUNDS=8;MYLITE_OWNERLESS_DDL_STRESS_LOCK_WAIT_TIMEOUT=1"
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-stress"
         TIMEOUT 900
       )

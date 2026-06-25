@@ -4795,10 +4795,11 @@ Tasks:
    `.TRG`/`.TRN` creation or removal while a peer remains live and the native
    file-operation marker stays clear.
    Implicit-schema, `IF EXISTS`, temporary-table, and view-only rename forms
-   plus multi-table and cross-schema drop, broader ALTER rebuild beyond the
-   focused force, row-format, compressed, and charset-conversion cases, schema,
-   broader view and trigger variants, and non-rename foreign-key multi-DDL
-   live-peer recovery remain planned.
+   plus `DROP TABLE IF EXISTS`, `DROP TEMPORARY TABLE`, inside-MariaDB-loop
+   multi-drop crash points, broader ALTER rebuild beyond the focused force,
+   row-format, compressed, and charset-conversion cases, schema, broader view
+   and trigger variants, and non-rename foreign-key multi-DDL live-peer recovery
+   remain planned.
    Final no-live close
    forces native checkpoint
    proof for retained page-version WAL
@@ -7236,8 +7237,11 @@ subsystems that this mode needs:
   one- or two-part identifiers, kills a `USE app; DROP TABLE table` writer at
   `dictionary-before-finish` with a live peer, and proves absent-table/file
   recovery, live marker retention, final marker drain, forced `.shm` rebuild,
-  and ordinary native reopen. Same-statement multi-drop remains open because
-  the attempted selector hit a native InnoDB purge assertion before this hook.
+  and ordinary native reopen. The multi-drop follow-up broadens that classifier
+  to comma-separated simple table lists, kills same-schema and cross-schema
+  two-table `DROP TABLE` writers at `dictionary-before-finish` with a live
+  peer, and proves every table and native `.frm`/`.ibd` pair stays absent while
+  the native file-operation marker remains durable until final no-live drain.
   The charset-convert follow-up classifies focused
   `ALTER TABLE ... CONVERT TO CHARACTER SET ... COLLATE ...` as recoverable
   dictionary DDL, kills the writer at `dictionary-before-finish` with a live
@@ -7285,9 +7289,12 @@ subsystems that this mode needs:
   `MYLITE_BUSY` as bounded retryable harness contention while keeping native
   lock-timeout, deadlock, metadata, and storage errors fatal. A focused
   short-timeout stress selector forces immediate ownerless statement-lock
-  misses to exercise that retry path. This stabilizes evidence collection for
-  the existing DDL/DML stress workload; it does not change product retry
-  semantics or close the broader DDL/file-lifecycle recovery matrix.
+  misses to exercise that retry path. The regular ownerless-stress DDL CTest
+  also caps its statement-lock wait at `1` second so the same eight-round
+  workload uses repeated short retries inside the harness deadline instead of
+  six long `30` second waits. This stabilizes evidence collection for the
+  existing DDL/DML stress workload; it does not change product retry semantics
+  or close the broader DDL/file-lifecycle recovery matrix.
 
   The current completion order is:
 
@@ -7296,16 +7303,17 @@ subsystems that this mode needs:
      `CREATE TABLE`, focused CTAS, ordinary replacement, and replacement-copy
      LIKE/CTAS plus explicit schema-qualified and implicit-schema rename
      lists, focused explicit and implicit truncate, focused explicit and
-     implicit single-table drop, plus focused force rebuild, dynamic row-format
-     rebuild, focused compressed key-block row-format rebuild, and focused
-     charset-conversion rebuild prefinish boundaries, plus simple CREATE/DROP
-     VIEW, focused CREATE OR REPLACE/ALTER VIEW, and focused explicit
-     column-list, check-option, nested check-option, security/definer, and
-     idempotent/no-op view metadata-only prefinish boundaries, plus simple
-     CREATE/DROP TRIGGER metadata-only prefinish boundaries, especially
-     remaining rename/truncate variants, rebuild variants, broader metadata-only DDL, and
-     multi-table/cross-schema dropped file-per-table tablespaces while peers
-     remain live.
+     implicit single-table and same-schema/cross-schema two-table drop, plus
+     focused force rebuild, dynamic row-format rebuild, focused compressed
+     key-block row-format rebuild, and focused charset-conversion rebuild
+     prefinish boundaries, plus simple CREATE/DROP VIEW, focused CREATE OR
+     REPLACE/ALTER VIEW, and focused explicit column-list, check-option,
+     nested check-option, security/definer, and idempotent/no-op view
+     metadata-only prefinish boundaries, plus simple CREATE/DROP TRIGGER
+     metadata-only prefinish boundaries, especially remaining rename/truncate
+     variants, rebuild variants, broader metadata-only DDL, `DROP TABLE IF
+     EXISTS`/temporary/intra-loop drop cases, and broader DDL file lifecycle
+     while peers remain live.
   2. Close remaining transaction crash windows, especially native
      rollback/savepoint-rollback internals and concurrent-writer savepoint
      schedules that combine native undo, ownerless page-write ownership, and
