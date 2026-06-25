@@ -23,8 +23,9 @@ missing idempotent schema create/drop boundaries.
   `mysql_create_db()` and `SQLCOM_DROP_DB` through `mysql_rm_db()`.
 - `mariadb/sql/sql_db.cc` handles an existing schema with `IF NOT EXISTS` as a
   successful note/no-op path without rewriting the existing `db.opt` defaults.
-- `mariadb/sql/sql_db.cc` handles a missing schema under `DROP DATABASE IF
-  EXISTS` as a successful note/no-op path without table-file lifecycle work.
+- `mariadb/sql/sql_db.cc` handles a missing schema under
+  `DROP DATABASE IF EXISTS` as a successful note/no-op path without table-file
+  lifecycle work.
 - `packages/libmylite/src/database.cc`
   `ownerless_dictionary_ddl_statement()` classifies `CREATE` and `DROP` as
   ownerless dictionary DDL and exposes the unsafe `dictionary-before-finish`
@@ -38,11 +39,12 @@ Add distinct recoverable dictionary kinds for the no-op statement shapes:
 - `MYLITE_OWNERLESS_DICTIONARY_RECOVERY_DROP_SCHEMA_IF_EXISTS`
 
 Classify bounded `CREATE DATABASE|SCHEMA IF NOT EXISTS <identifier>` with
-default charset/collation options and bounded `DROP DATABASE|SCHEMA IF EXISTS
-<identifier>` into those kinds after native SQL success. Register both as
-metadata-only recovery. Also register `DROP_SCHEMA_IF_EXISTS` in the native
-file-operation lane so the same SQL spelling can safely recover through marker
-evidence when an existing-schema variant performs native file removals.
+default charset/collation options and bounded
+`DROP DATABASE|SCHEMA IF EXISTS <identifier>` into those kinds after native SQL
+success. Register both as metadata-only recovery. Also register
+`DROP_SCHEMA_IF_EXISTS` in the native file-operation lane so the same SQL
+spelling can safely recover through marker evidence when an existing-schema
+variant performs native file removals.
 
 Promote the existing unsafe-hook selectors in
 `packages/libmylite/tests/ownerless_cross_process_sql_test.c`:
@@ -59,6 +61,9 @@ Promote the existing unsafe-hook selectors in
   reaches `dictionary-before-finish`.
 - `dictionary-schema-idempotent-existing-drop-crash` kills a writer after
   `DROP DATABASE IF EXISTS` removes a table-bearing schema and reaches
+  `dictionary-before-finish`.
+- `dictionary-schema-idempotent-existing-drop-synonym-crash` kills a writer
+  after `DROP SCHEMA IF EXISTS` removes a table-bearing schema and reaches
   `dictionary-before-finish`.
 - `dictionary-schema-idempotent-empty-drop-crash` kills a writer after
   `DROP DATABASE IF EXISTS` removes an empty existing schema and reaches
@@ -84,6 +89,8 @@ In scope:
 - Crash-at-`dictionary-before-finish` coverage for existing
   `DROP DATABASE IF EXISTS` table-bearing drop behavior.
 - Crash-at-`dictionary-before-finish` coverage for existing
+  `DROP SCHEMA IF EXISTS` table-bearing drop behavior.
+- Crash-at-`dictionary-before-finish` coverage for existing
   `DROP DATABASE IF EXISTS` empty-schema drop behavior.
 - Native schema directory and `db.opt` preservation for the real schema.
 - Absence of missing-schema native directories and metadata after no-op drop
@@ -94,8 +101,6 @@ Out of scope:
 
 - `CREATE OR REPLACE DATABASE`.
 - Crash injection inside native `db.opt` write or schema directory creation.
-- `DROP SCHEMA IF EXISTS` existing-schema synonym crash recovery beyond the
-  `DROP DATABASE IF EXISTS` spellings.
 - SQL-level table-lock fault injection for native table-wait paths.
 - External randomized DDL/RQG stress.
 
@@ -134,6 +139,7 @@ No public API, build-profile, binary-size, license, or dependency changes.
   - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-idempotent-drop-crash`
   - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-idempotent-missing-create-crash`
   - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-idempotent-existing-drop-crash`
+  - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-idempotent-existing-drop-synonym-crash`
   - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-idempotent-empty-drop-crash`
 - Run the ownerless dictionary primitive test.
 - Run normal `schema-idempotent-ddl` selectors in `embedded-dev` and
@@ -146,8 +152,9 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - The focused selectors reach the dictionary fault hook and do not hang.
 - Live-peer recovery completes while the native file-operation marker remains
   clear for duplicate create, missing drop, missing create, and empty drop.
-- Existing drop live-peer recovery keeps the native file-operation marker set
-  until the final no-live drain when native table files were removed.
+- Existing `DROP DATABASE|SCHEMA IF EXISTS` live-peer recovery keeps the native
+  file-operation marker set until the final no-live drain when native table
+  files were removed.
 - Duplicate idempotent create recovery keeps the original schema defaults,
   leaves the original table column collation unchanged, and keeps plain
   duplicate create returning errno 1007.
@@ -171,6 +178,7 @@ Passed:
 - `cmake --build --preset ownerless-test-hooks --target mylite_ownerless_cross_process_sql_test -j2`
 - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-idempotent-missing-create-crash`
 - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-idempotent-existing-drop-crash`
+- `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-idempotent-existing-drop-synonym-crash`
 - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-idempotent-empty-drop-crash`
 - `ctest --preset ownerless-test-hooks -R '^libmylite\.ownerless-primitives$' --output-on-failure`
 - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test schema-idempotent-ddl`
@@ -190,6 +198,5 @@ Passed:
 
 ## Risks And Follow-Up
 
-- This covers deterministic no-op schema DDL crash recovery, not every schema
-  lifecycle spelling.
+- This covers deterministic idempotent schema DDL crash recovery.
 - Broader randomized DDL oracle execution remains planned.

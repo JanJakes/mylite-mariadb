@@ -7,9 +7,9 @@ recovery after a writer dies at `dictionary-before-finish`. They still leave a
 live peer unable to recover the dead dictionary generation, so another
 ownerless opener observes `MYLITE_BUSY` until the final peer exits.
 
-MyLite should recover representative successful `CREATE DATABASE`,
-`ALTER DATABASE`, and table-bearing `DROP DATABASE` boundaries while another
-ownerless peer remains live.
+MyLite should recover representative successful `CREATE DATABASE|SCHEMA`,
+`ALTER DATABASE|SCHEMA`, and table-bearing `DROP DATABASE|SCHEMA` boundaries
+while another ownerless peer remains live.
 
 ## Source Findings
 
@@ -23,6 +23,9 @@ Relevant source paths:
 - `mariadb/sql/sql_yacc.yy`
   - parses `CREATE DATABASE opt_if_not_exists ident`,
     `ALTER DATABASE ident_or_empty`, and `DROP DATABASE opt_if_exists ident`.
+- `mariadb/sql/lex.h`
+  - maps `SCHEMA` to the `DATABASE` token, so MariaDB's parser treats
+    `DATABASE` and `SCHEMA` spellings as one schema command family.
 - `mariadb/sql/sql_db.cc`
   - `mysql_create_db_internal()` locks the schema name, creates the native
     schema directory, and writes `db.opt`.
@@ -44,20 +47,20 @@ Add distinct recovery kinds:
 - `MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_SCHEMA`
 - `MYLITE_OWNERLESS_DICTIONARY_RECOVERY_DROP_SCHEMA`
 
-Classify bounded named `CREATE DATABASE <identifier>`,
-`ALTER DATABASE <identifier>`, and `DROP DATABASE <identifier>` statements into
-those kinds after native SQL success. `CREATE` and `ALTER` accept the default
-charset/collation option grammar exercised by the focused selectors; other
-schema clauses stay outside this slice.
+Classify bounded named `CREATE DATABASE|SCHEMA <identifier>`,
+`ALTER DATABASE|SCHEMA <identifier>`, and `DROP DATABASE|SCHEMA <identifier>`
+statements into those kinds after native SQL success. `CREATE` and `ALTER`
+accept the default charset/collation option grammar exercised by the focused
+selectors; other schema clauses stay outside this slice.
 
 Register recovery lanes:
 
-- `CREATE DATABASE` and `ALTER DATABASE` use metadata-only live recovery because
-  their native durable boundary is the schema directory and/or `db.opt`, not
-  an InnoDB file-operation marker.
-- `DROP DATABASE` participates in both lanes. A table-bearing drop keeps the
-  native file-operation marker durable while a peer remains live, while empty
-  future drops can still recover through the metadata-only lane.
+- `CREATE DATABASE|SCHEMA` and `ALTER DATABASE|SCHEMA` use metadata-only live
+  recovery because their native durable boundary is the schema directory and/or
+  `db.opt`, not an InnoDB file-operation marker.
+- `DROP DATABASE|SCHEMA` participates in both lanes. A table-bearing drop keeps
+  the native file-operation marker durable while a peer remains live, while
+  empty future drops can still recover through the metadata-only lane.
 
 Promote the existing schema create, alter, and drop unsafe-hook selectors from
 no-live-only recovery to held-live-peer recovery. Keep idempotent duplicate
@@ -68,8 +71,11 @@ create and missing drop schema no-ops out of this slice.
 In scope:
 
 - Successful named `CREATE DATABASE` live recovery.
+- Successful named `CREATE SCHEMA` live recovery.
 - Successful named `ALTER DATABASE` live recovery.
+- Successful named `ALTER SCHEMA` live recovery.
 - Successful named table-bearing `DROP DATABASE` live recovery.
+- Successful named table-bearing `DROP SCHEMA` live recovery.
 - Schema directory and `db.opt` presence/removal.
 - Schema defaults through `INFORMATION_SCHEMA.SCHEMATA`.
 - Native table presence/absence for the existing schema crash selectors.
@@ -77,7 +83,6 @@ In scope:
 
 Out of scope:
 
-- `SCHEMA` synonym spellings.
 - `CREATE DATABASE IF NOT EXISTS` duplicate no-op recovery.
 - `DROP DATABASE IF EXISTS` or `DROP SCHEMA IF EXISTS` missing no-op recovery.
 - `CREATE OR REPLACE DATABASE`.
@@ -95,10 +100,11 @@ native completion and before ownerless dictionary finish.
 
 ## Directory And Lifecycle Impact
 
-No directory layout changes. `CREATE DATABASE` and `ALTER DATABASE` recovery
-must keep the native file-operation marker clear. Table-bearing
-`DROP DATABASE` recovery must keep that marker durable while a peer remains
-live and drain it only after final no-live recovery.
+No directory layout changes. `CREATE DATABASE|SCHEMA` and
+`ALTER DATABASE|SCHEMA` recovery must keep the native file-operation marker
+clear. Table-bearing `DROP DATABASE|SCHEMA` recovery must keep that marker
+durable while a peer remains live and drain it only after final no-live
+recovery.
 
 ## Native Storage Impact
 
@@ -115,8 +121,11 @@ No public API, build-profile, binary-size, license, or dependency changes.
   `mylite_ownerless_primitives_test` with `ownerless-test-hooks`.
 - Run focused selectors:
   - `dictionary-schema-create-crash`
+  - `dictionary-schema-synonym-create-crash`
   - `dictionary-schema-alter-crash`
+  - `dictionary-schema-synonym-alter-crash`
   - `dictionary-schema-drop-crash`
+  - `dictionary-schema-synonym-drop-crash`
 - Run adjacent schema selectors:
   - `dictionary-schema-idempotent-create-crash`
   - `dictionary-schema-idempotent-drop-crash`
@@ -131,10 +140,12 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 ## Acceptance Criteria
 
-- Schema create/alter live recovery completes while a peer remains live and the
-  native file-operation marker remains clear.
-- Schema drop live recovery completes while a peer remains live and the native
-  file-operation marker remains set until the final peer exits.
+- Schema create/alter live recovery completes for `DATABASE` and `SCHEMA`
+  spellings while a peer remains live and the native file-operation marker
+  remains clear.
+- Schema drop live recovery completes for `DATABASE` and `SCHEMA` spellings
+  while a peer remains live and the native file-operation marker remains set
+  until the final peer exits.
 - Recovered schema defaults, native directory/`db.opt` state, table state,
   ownerless/native reopen, and forced `.shm` rebuild match the existing schema
   crash selector expectations.
@@ -146,8 +157,11 @@ Passed:
 
 - `cmake --build --preset ownerless-test-hooks --target mylite_ownerless_primitives_test mylite_ownerless_cross_process_sql_test -j2`
 - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-create-crash`
+- `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-synonym-create-crash`
 - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-alter-crash`
+- `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-synonym-alter-crash`
 - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-drop-crash`
+- `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-synonym-drop-crash`
 - `ctest --preset ownerless-test-hooks -R '^libmylite\.ownerless-primitives$' --output-on-failure`
 - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-idempotent-create-crash`
 - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-idempotent-drop-crash`
@@ -169,5 +183,5 @@ Passed:
 
 - Idempotent schema no-op live recovery is covered by
   `ownerless-schema-idempotent-ddl-crash`.
-- `SCHEMA` synonym spellings, empty-schema drops, schema-drop intra-loop crash
-  points, and external randomized DDL oracle execution remain planned.
+- Empty-schema non-idempotent drops, schema-drop intra-loop crash points, and
+  external randomized DDL oracle execution remain planned.

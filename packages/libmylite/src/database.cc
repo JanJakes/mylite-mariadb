@@ -15902,7 +15902,7 @@ bool ownerless_drop_table_if_exists_recovery_statement(const SqlPolicyTokens &to
 
 bool ownerless_create_schema_recovery_statement(const SqlPolicyTokens &tokens) {
     if (tokens.count < 3U || !token_equals(tokens.values[0], "CREATE") ||
-        !token_equals(tokens.values[1], "DATABASE")) {
+        !token_in(tokens.values[1], "DATABASE", "SCHEMA")) {
         return false;
     }
 
@@ -15926,7 +15926,7 @@ bool ownerless_create_schema_if_not_exists_recovery_statement(const SqlPolicyTok
 
 bool ownerless_alter_schema_recovery_statement(const SqlPolicyTokens &tokens) {
     if (tokens.count < 3U || !token_equals(tokens.values[0], "ALTER") ||
-        !token_equals(tokens.values[1], "DATABASE")) {
+        !token_in(tokens.values[1], "DATABASE", "SCHEMA")) {
         return false;
     }
 
@@ -15937,7 +15937,7 @@ bool ownerless_alter_schema_recovery_statement(const SqlPolicyTokens &tokens) {
 
 bool ownerless_drop_schema_recovery_statement(const SqlPolicyTokens &tokens) {
     if (tokens.count < 3U || !token_equals(tokens.values[0], "DROP") ||
-        !token_equals(tokens.values[1], "DATABASE")) {
+        !token_in(tokens.values[1], "DATABASE", "SCHEMA")) {
         return false;
     }
 
