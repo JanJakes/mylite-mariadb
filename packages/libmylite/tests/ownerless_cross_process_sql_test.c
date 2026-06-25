@@ -1145,6 +1145,7 @@ static void test_crashed_compressed_key_block_16_dictionary_ddl_recovers_rebuilt
 static void test_crashed_compressed_key_block_16_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_table_comment_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_truncate_dictionary_ddl_recovers_empty_table(void);
+static void test_crashed_implicit_truncate_dictionary_ddl_recovers_empty_table(void);
 static void test_crashed_truncate_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_drop_dictionary_ddl_recovers_absent_table(void);
 static void test_crashed_drop_dictionary_ddl_marks_file_op_checkpoint(void);
@@ -2053,6 +2054,10 @@ static void compressed_row_format_key_block_16_until_dictionary_finish_fault(
 );
 static void table_comment_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void truncate_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
+static void truncate_implicit_table_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void drop_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void create_schema_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void alter_schema_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
@@ -5221,6 +5226,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-implicit-truncate-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_implicit_truncate_dictionary_ddl_recovers_empty_table();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-truncate-file-op-marker-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_truncate_dictionary_ddl_marks_file_op_checkpoint();
@@ -6081,6 +6092,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_table_comment_dictionary_ddl_recovers_metadata),
     OWNERLESS_SQL_TEST_CASE(test_crashed_truncate_dictionary_ddl_recovers_empty_table),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_implicit_truncate_dictionary_ddl_recovers_empty_table),
     OWNERLESS_SQL_TEST_CASE(test_crashed_drop_dictionary_ddl_recovers_absent_table),
     OWNERLESS_SQL_TEST_CASE(test_crashed_stale_drop_dictionary_ddl_skips_retained_tablespace),
     OWNERLESS_SQL_TEST_CASE(test_crashed_schema_create_dictionary_ddl_recovers_schema),
@@ -54974,6 +54986,81 @@ static void test_crashed_truncate_dictionary_ddl_recovers_empty_table(void) {
     run_crashed_truncate_dictionary_ddl_recovers_empty_table(0);
 }
 
+static void test_crashed_implicit_truncate_dictionary_ddl_recovers_empty_table(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-dictionary-implicit-truncate-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_implicit_truncate_crash ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_implicit_truncate_crash VALUES (1, 10), (2, 20)");
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_implicit_truncate_crash") == 30U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        truncate_implicit_table_until_dictionary_finish_fault
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_implicit_truncate_crash'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_implicit_truncate_crash") == 0U);
+    exec_ok(db, "INSERT INTO app.ownerless_implicit_truncate_crash VALUES (3, 30)");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_implicit_truncate_crash") == 1U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_implicit_truncate_crash") == 30U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_implicit_truncate_crash") == 1U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_implicit_truncate_crash") == 30U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_implicit_truncate_crash") == 1U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_implicit_truncate_crash") == 30U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_truncate_dictionary_ddl_marks_file_op_checkpoint(void) {
     run_crashed_truncate_dictionary_ddl_recovers_empty_table(1);
 }
@@ -66379,6 +66466,23 @@ static void truncate_table_until_dictionary_finish_fault(open_database_paths pat
         "dictionary-before-finish",
         "TRUNCATE TABLE app.ownerless_truncate_crash"
     );
+}
+
+static void truncate_implicit_table_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    mylite_db *db;
+    char ready_fd_value[32];
+
+    assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", ready_fd) > 0);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "USE app");
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "dictionary-before-finish", 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
+    exec_ok(db, "TRUNCATE ownerless_implicit_truncate_crash");
+    (void)mylite_close(db);
+    _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
 }
 
 static void drop_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {

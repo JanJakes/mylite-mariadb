@@ -15452,7 +15452,7 @@ bool ownerless_create_or_replace_table_select_recovery_statement(const SqlPolicy
     return false;
 }
 
-bool consume_ownerless_rename_table_identifier(const SqlPolicyTokens &tokens, std::size_t &index) {
+bool consume_ownerless_table_identifier(const SqlPolicyTokens &tokens, std::size_t &index) {
     if (index >= tokens.count || !ownerless_table_identifier_token(tokens.values[index])) {
         return false;
     }
@@ -15473,12 +15473,12 @@ bool ownerless_rename_table_recovery_statement(const SqlPolicyTokens &tokens) {
     std::size_t index = 2U;
     bool saw_pair = false;
     for (;;) {
-        if (!consume_ownerless_rename_table_identifier(tokens, index) || index >= tokens.count ||
+        if (!consume_ownerless_table_identifier(tokens, index) || index >= tokens.count ||
             !token_equals(tokens.values[index], "TO")) {
             return false;
         }
         ++index;
-        if (!consume_ownerless_rename_table_identifier(tokens, index)) {
+        if (!consume_ownerless_table_identifier(tokens, index)) {
             return false;
         }
         saw_pair = true;
@@ -15506,7 +15506,7 @@ bool ownerless_alter_table_rename_recovery_statement(const SqlPolicyTokens &toke
     }
 
     std::size_t index = 2U;
-    if (!consume_ownerless_rename_table_identifier(tokens, index) || index >= tokens.count ||
+    if (!consume_ownerless_table_identifier(tokens, index) || index >= tokens.count ||
         !token_equals(tokens.values[index], "RENAME")) {
         return false;
     }
@@ -15514,7 +15514,7 @@ bool ownerless_alter_table_rename_recovery_statement(const SqlPolicyTokens &toke
     if (index < tokens.count && token_in(tokens.values[index], "TO", "AS", "=")) {
         ++index;
     }
-    if (!consume_ownerless_rename_table_identifier(tokens, index)) {
+    if (!consume_ownerless_table_identifier(tokens, index)) {
         return false;
     }
     for (; index < tokens.count; ++index) {
@@ -15526,16 +15526,18 @@ bool ownerless_alter_table_rename_recovery_statement(const SqlPolicyTokens &toke
 }
 
 bool ownerless_truncate_table_recovery_statement(const SqlPolicyTokens &tokens) {
-    if (tokens.count < 5U || !token_equals(tokens.values[0], "TRUNCATE") ||
-        !token_equals(tokens.values[1], "TABLE")) {
+    if (tokens.count < 2U || !token_equals(tokens.values[0], "TRUNCATE")) {
         return false;
     }
-    if (!ownerless_table_identifier_token(tokens.values[2]) ||
-        !token_equals(tokens.values[3], ".") ||
-        !ownerless_table_identifier_token(tokens.values[4])) {
+
+    std::size_t index = 1U;
+    if (index < tokens.count && token_equals(tokens.values[index], "TABLE")) {
+        ++index;
+    }
+    if (!consume_ownerless_table_identifier(tokens, index)) {
         return false;
     }
-    for (std::size_t index = 5U; index < tokens.count; ++index) {
+    for (; index < tokens.count; ++index) {
         if (!token_equals(tokens.values[index], ";")) {
             return false;
         }

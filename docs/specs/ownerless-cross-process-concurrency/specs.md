@@ -7180,6 +7180,11 @@ subsystems that this mode needs:
   `dictionary-before-finish` with a live peer, and proves target-table
   recovery, marker retention/drain, forced `.shm` rebuild, ordinary native
   reopen, and adjacent ALTER index rename non-regression.
+  The implicit-truncate follow-up broadens truncate recovery classification to
+  MariaDB's `TRUNCATE opt_table_sym table_name` shape, then kills a `USE app;
+  TRUNCATE table` writer at `dictionary-before-finish` with a live peer and
+  proves empty-table recovery, live marker retention, final marker drain,
+  forced `.shm` rebuild, and ordinary native reopen.
 
   Ownerless DDL stress now treats pre-execution MyLite statement-lock
   `MYLITE_BUSY` as bounded retryable harness contention while keeping native
@@ -7195,10 +7200,10 @@ subsystems that this mode needs:
      DDL/file-lifecycle recovery beyond the now-covered plain/table-copy
      `CREATE TABLE`, focused CTAS, ordinary replacement, and replacement-copy
      LIKE/CTAS plus explicit schema-qualified and implicit-schema rename
-     lists, focused truncate, and focused drop plus focused force rebuild,
-     dynamic row-format rebuild, and focused compressed key-block row-format
-     rebuild prefinish boundaries, especially remaining rename variants,
-     rebuilt, broader truncated, and multi-table/cross-schema dropped
+     lists, focused explicit and implicit truncate, and focused drop plus
+     focused force rebuild, dynamic row-format rebuild, and focused compressed
+     key-block row-format rebuild prefinish boundaries, especially remaining
+     rename/truncate variants, rebuilt, and multi-table/cross-schema dropped
      file-per-table tablespaces while peers remain live.
   2. Close remaining transaction crash windows, especially native
      rollback/savepoint-rollback internals and concurrent-writer savepoint

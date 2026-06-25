@@ -311,12 +311,14 @@ now also have live-peer recovery for their native replacement boundaries.
 Explicit schema-qualified `RENAME TABLE schema.table TO schema.table [, ...]`
 lists now have live-peer recovery for the native file-move boundary, including
 same-schema, cross-schema, multi-pair swap, cross-schema multi-pair swap, and
-foreign-key parent/child multi-pair rename coverage. Focused non-temporary
-`TRUNCATE TABLE schema.table` now has live-peer recovery for the native
-truncate/recreate boundary. Implicit-schema, `IF EXISTS`, temporary-table, and
-view-only rename forms, plus multi-table and cross-schema drop, broader ALTER
-rebuild, schema, view, trigger, and non-rename foreign-key multi-DDL live-peer
-recovery remain partial/planned.
+foreign-key parent/child multi-pair rename coverage, plus implicit-schema
+`RENAME TABLE` and native-loop `ALTER TABLE ... RENAME TO` forms. Focused
+non-temporary `TRUNCATE TABLE schema.table` and implicit-schema `TRUNCATE
+table` now have live-peer recovery for the native truncate/recreate boundary.
+`IF EXISTS`, temporary-table, and view-only rename forms, plus partition/FK
+truncate variants, multi-table and cross-schema drop, broader ALTER rebuild,
+schema, view, trigger, and non-rename foreign-key multi-DDL live-peer recovery
+remain partial/planned.
 Focused hook coverage also now forces a native checkpoint, clears the
 ownerless file-op redo flag, updates a file-per-table InnoDB table, and
 observes the flag set again, proving ordinary post-checkpoint DML reaches
