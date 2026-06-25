@@ -16301,16 +16301,25 @@ bool ownerless_create_index_if_not_exists_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 ) {
-    if (tokens.count < 9U || !token_equals(tokens.values[0], "CREATE") ||
-        !token_equals(tokens.values[1], "INDEX") || !token_equals(tokens.values[2], "IF") ||
-        !token_equals(tokens.values[3], "NOT") || !token_equals(tokens.values[4], "EXISTS") ||
-        !ownerless_table_identifier_token(tokens.values[5]) ||
-        !token_equals(tokens.values[6], "ON")) {
+    if (tokens.count < 9U || !token_equals(tokens.values[0], "CREATE")) {
         return false;
     }
 
-    const std::string index_name = ownerless_normalized_identifier(tokens.values[5]);
-    std::size_t index = 7U;
+    std::size_t index = 1U;
+    if (index < tokens.count && token_equals(tokens.values[index], "UNIQUE")) {
+        ++index;
+    }
+    if (index + 5U >= tokens.count || !token_equals(tokens.values[index], "INDEX") ||
+        !token_equals(tokens.values[index + 1U], "IF") ||
+        !token_equals(tokens.values[index + 2U], "NOT") ||
+        !token_equals(tokens.values[index + 3U], "EXISTS") ||
+        !ownerless_table_identifier_token(tokens.values[index + 4U]) ||
+        !token_equals(tokens.values[index + 5U], "ON")) {
+        return false;
+    }
+
+    const std::string index_name = ownerless_normalized_identifier(tokens.values[index + 4U]);
+    index += 6U;
     std::string schema_name;
     std::string table_name;
     if (!consume_ownerless_table_identifier_parts(db, tokens, index, &schema_name, &table_name) ||
@@ -16373,17 +16382,23 @@ bool ownerless_alter_table_add_index_if_not_exists_recovery_statement(
     std::string schema_name;
     std::string table_name;
     if (!consume_ownerless_table_identifier_parts(db, tokens, index, &schema_name, &table_name) ||
-        index + 5U >= tokens.count || !token_equals(tokens.values[index], "ADD") ||
-        !token_in(tokens.values[index + 1U], "INDEX", "KEY") ||
-        !token_equals(tokens.values[index + 2U], "IF") ||
-        !token_equals(tokens.values[index + 3U], "NOT") ||
-        !token_equals(tokens.values[index + 4U], "EXISTS") ||
-        !ownerless_table_identifier_token(tokens.values[index + 5U])) {
+        index >= tokens.count || !token_equals(tokens.values[index], "ADD")) {
+        return false;
+    }
+    ++index;
+    if (index < tokens.count && token_equals(tokens.values[index], "UNIQUE")) {
+        ++index;
+    }
+    if (index + 4U >= tokens.count || !token_in(tokens.values[index], "INDEX", "KEY") ||
+        !token_equals(tokens.values[index + 1U], "IF") ||
+        !token_equals(tokens.values[index + 2U], "NOT") ||
+        !token_equals(tokens.values[index + 3U], "EXISTS") ||
+        !ownerless_table_identifier_token(tokens.values[index + 4U])) {
         return false;
     }
 
-    const std::string index_name = ownerless_normalized_identifier(tokens.values[index + 5U]);
-    index += 6U;
+    const std::string index_name = ownerless_normalized_identifier(tokens.values[index + 4U]);
+    index += 5U;
     if (!consume_ownerless_parenthesized_clause(tokens, index) ||
         !consume_ownerless_remaining_semicolons(tokens, index)) {
         return false;

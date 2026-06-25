@@ -50,13 +50,15 @@ Add two unsafe-hook selectors to
   `ALTER TABLE ... ADD UNIQUE INDEX IF NOT EXISTS` for the same index name over
   a different key part reaches `dictionary-before-finish`.
 
-Both selectors keep a live ownerless peer open while the writer is killed,
-prove cleanup remains busy until no-live recovery, then verify ownerless and
-ordinary native reopen before and after forced `.shm` rebuild. The post-crash
-checks verify the original unique key part is still enforced, the attempted
-replacement key part remains absent/non-unique, plain duplicate key-name DDL
-still returns errno 1061, post-recovery writes succeed, and forced-index reads
-observe the preserved native InnoDB unique index.
+Both selectors now use the held-live-peer crash helper and
+`ownerless-unique-index-idempotent-live-recovery` metadata proof to recover
+while another ownerless process is live with the native file-operation marker
+clear, then verify ownerless and ordinary native reopen before and after forced
+`.shm` rebuild. The post-crash checks verify the original unique key part is
+still enforced, the attempted replacement key part remains absent/non-unique,
+plain duplicate key-name DDL still returns errno 1061, post-recovery writes
+succeed, and forced-index reads observe the preserved native InnoDB unique
+index.
 
 ## Scope And Non-Goals
 
@@ -95,8 +97,8 @@ unique key definition or leave stale peer state.
 ## Directory And Lifecycle Impact
 
 No directory layout changes. The tests exercise native InnoDB secondary-index
-metadata inside the table's native files, ownerless live-peer cleanup blocking,
-no-live recovery, forced `.shm` rebuild, and ordinary native exclusive reopen.
+metadata inside the table's native files, ownerless dictionary live recovery,
+forced `.shm` rebuild, and ordinary native exclusive reopen.
 
 ## Native Storage Impact
 
@@ -121,7 +123,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selectors reach the dictionary fault hook and do not hang.
-- A live peer prevents cleanup until no-live recovery.
+- Duplicate top-level and ALTER-table unique-index no-ops recover while a peer
+  remains live.
 - Duplicate top-level unique-index create recovery keeps the original unique
   key definition, keeps plain duplicate create returning errno 1061, rejects
   duplicate values for the original key, and allows values that would only
@@ -140,7 +143,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - Metadata-only live-peer recovery for non-unique top-level and ALTER
   secondary-index no-op forms is covered by
   `docs/specs/ownerless-index-idempotent-live-recovery/specs.md`; unique-index
-  no-op live recovery remains a separate promotion because duplicate-key
-  enforcement semantics are part of its proof.
+  no-op live recovery is covered by
+  `docs/specs/ownerless-unique-index-idempotent-live-recovery/specs.md`
+  because duplicate-key enforcement semantics are part of its proof.
 - Prefix, direction, generated-column, online-option matrices, and broader
   randomized DDL oracle execution remain planned.

@@ -3748,8 +3748,10 @@ Tasks:
    crash coverage kills duplicate top-level
    `CREATE UNIQUE INDEX IF NOT EXISTS` and duplicate
    `ALTER TABLE ... ADD UNIQUE INDEX IF NOT EXISTS` no-op writers after MariaDB
-   returns success but before ownerless dictionary finish, with preserved unique
-   key parts, duplicate-key enforcement, attempted-key non-enforcement,
+   returns success but before ownerless dictionary finish, then verifies
+   metadata-only live recovery with the native file-operation marker clear
+   after pre-execution metadata proves the duplicate no-op branch, preserved
+   unique key parts, duplicate-key enforcement, attempted-key non-enforcement,
    ownerless/native reopen, and forced `.shm` rebuild checks.
    Secondary-index rename coverage adds ownerless
    `ALTER TABLE ... RENAME INDEX`, already-open peer metadata refresh for the
@@ -5382,8 +5384,9 @@ Minimum suites before support can be claimed:
     ownerless/native reopen, and forced `.shm` rebuild remain correct,
   - after duplicate top-level `CREATE UNIQUE INDEX IF NOT EXISTS` and duplicate
     `ALTER TABLE ... ADD UNIQUE INDEX IF NOT EXISTS` no-op success but before
-    ownerless dictionary finish; hook coverage proves live-peer cleanup remains
-    busy until no-live recovery and preserved unique key-part metadata,
+    ownerless dictionary finish; hook coverage proves metadata-only live
+    recovery after pre-execution metadata proves the no-op branch, keeps the
+    native file-operation marker clear, and preserves unique key-part metadata,
     duplicate-key enforcement, attempted-key non-enforcement, ownerless/native
     reopen, and forced `.shm` rebuild remain correct,
   - after representative `CREATE DATABASE|SCHEMA` native schema directory/`db.opt`
