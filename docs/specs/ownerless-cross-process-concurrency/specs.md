@@ -2931,10 +2931,11 @@ Tasks:
    `CREATE VIEW ... WITH CASCADED CHECK OPTION`, `CREATE OR REPLACE VIEW ...
    WITH LOCAL CHECK OPTION`, and `ALTER VIEW ... WITH CASCADED CHECK OPTION`
    writers after native view definition storage or rewrite but before ownerless
-   dictionary finish, then verifies recovered `CHECK_OPTION`, `IS_UPDATABLE`,
-   view query behavior, valid through-view DML, errno 1369 for invalid DML,
-   base-table writes, and ownerless/native reopen before and after forced
-   `.shm` rebuild.
+   dictionary finish, then recovers them while a peer remains live, keeps the
+   native file-operation marker clear, and verifies recovered `CHECK_OPTION`,
+   `IS_UPDATABLE`, view query behavior, valid through-view DML, errno 1369 for
+   invalid DML, base-table writes, and ownerless/native reopen before and after
+   forced `.shm` rebuild.
    Nested view check-option coverage now verifies an already-open peer observes
    an inner `CASCADED` check-option view and an outer `LOCAL` check-option view,
    inserts a row through the outer view that satisfies the outer predicate while
@@ -3222,9 +3223,10 @@ Tasks:
    after forced `.shm` rebuild.
    Hook-build view check-option crash coverage kills cascaded create, local
    replacement, and cascaded alter writers after native view definition storage
-   or rewrite but before ownerless dictionary finish, then verifies recovered
-   check-option metadata and DML enforcement through ownerless/native reopen
-   before and after forced `.shm` rebuild. Hook-build nested view check-option
+   or rewrite but before ownerless dictionary finish, then recovers them while
+   a peer remains live and verifies recovered check-option metadata and DML
+   enforcement through ownerless/native reopen before and after forced `.shm`
+   rebuild. Hook-build nested view check-option
    crash coverage kills outer replacement and inner alter writers before
    ownerless dictionary finish, then verifies recovered nested metadata and
    DML enforcement through ownerless/native reopen before and after forced
@@ -4764,9 +4766,12 @@ Tasks:
    metadata-only lane for native view definition rewrites. Focused explicit
    column-list `CREATE VIEW`, `CREATE OR REPLACE VIEW`, and `ALTER VIEW`
    prefinish crash coverage now consumes the optional alias list before `AS`
-   and recovers alias metadata while a peer remains live. Security/definer,
-   check-option, nested, idempotent/no-op, and invalid-dependency view variants
-   remain planned for live-recovery promotion.
+   and recovers alias metadata while a peer remains live. Focused
+   `CREATE VIEW`, `CREATE OR REPLACE VIEW`, and `ALTER VIEW` check-option
+   prefinish crash coverage uses the same metadata-only lane and recovers
+   updatable-view enforcement while a peer remains live. Security/definer,
+   nested, idempotent/no-op, and invalid-dependency view variants remain
+   planned for live-recovery promotion.
    Implicit-schema, `IF EXISTS`, temporary-table, and view-only rename forms
    plus multi-table and cross-schema drop, broader ALTER rebuild beyond the
    focused force, row-format, compressed, and charset-conversion cases, schema,
@@ -7229,6 +7234,11 @@ subsystems that this mode needs:
   classifiers to consume an optional parenthesized alias list before `AS`, then
   proves explicit column-list create/replace/alter recovery while a peer
   remains live and the native file-operation marker stays clear.
+  The view check-option follow-up uses the existing focused view recovery
+  classifiers for trailing `WITH LOCAL/CASCADED CHECK OPTION` clauses, then
+  proves check-option create/replace/alter recovery and through-view DML
+  enforcement while a peer remains live and the native file-operation marker
+  stays clear.
 
   Ownerless DDL stress now treats pre-execution MyLite statement-lock
   `MYLITE_BUSY` as bounded retryable harness contention while keeping native
@@ -7249,8 +7259,8 @@ subsystems that this mode needs:
      rebuild, focused compressed key-block row-format rebuild, and focused
      charset-conversion rebuild prefinish boundaries, plus simple CREATE/DROP
      VIEW, focused CREATE OR REPLACE/ALTER VIEW, and focused explicit
-     column-list view metadata-only prefinish boundaries, especially remaining
-     rename/truncate variants, rebuild
+     column-list and check-option view metadata-only prefinish boundaries,
+     especially remaining rename/truncate variants, rebuild
      variants, broader metadata-only DDL, and multi-table/cross-schema dropped
      file-per-table tablespaces while peers remain live.
   2. Close remaining transaction crash windows, especially native

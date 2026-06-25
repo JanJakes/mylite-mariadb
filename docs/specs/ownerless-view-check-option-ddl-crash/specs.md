@@ -14,7 +14,11 @@ ownerless dictionary finish.
 This slice adds deterministic crash-boundary evidence for check-option view
 creation and replacement. `ALTER VIEW ... WITH CHECK OPTION` crash coverage is
 tracked separately by
-`docs/specs/ownerless-view-check-option-alter-ddl-crash/specs.md`.
+`docs/specs/ownerless-view-check-option-alter-ddl-crash/specs.md`. The
+follow-up
+[ownerless-view-check-option-live-recovery](../ownerless-view-check-option-live-recovery/specs.md)
+promotes the focused create, replacement, and alter forms to metadata-only
+live-peer recovery.
 
 ## Source Findings
 
@@ -57,7 +61,8 @@ Add two unsafe-hook selectors to `mylite_ownerless_cross_process_sql_test`:
   dictionary finish, then verifies recovered `CHECK_OPTION='LOCAL'`, the
   replacement predicate, valid DML, and MariaDB errno 1369 for invalid DML.
 
-Both selectors verify ownerless and ordinary native reopen before and after a
+Both selectors verify metadata-only live recovery while another ownerless peer
+remains open, then ownerless and ordinary native reopen before and after a
 forced `.shm` rebuild.
 
 ## Scope
@@ -73,6 +78,7 @@ In scope:
 - Query behavior and valid DML through the recovered updatable view.
 - Invalid insert/update failure with MariaDB errno 1369.
 - Base-table writes after recovery.
+- Live-peer recovery without native file-operation marker evidence.
 - Ownerless/native reopen before and after forced `.shm` rebuild.
 
 Out of scope:
@@ -93,7 +99,7 @@ to enforce MariaDB-compatible DML errors.
 
 No directory layout changes are introduced. The tests exercise native MariaDB
 view `.frm` files inside the MyLite-owned database directory, ownerless
-live-peer cleanup blocking, no-live recovery, forced `.shm` rebuild, and native
+live-peer recovery, final no-live cleanup, forced `.shm` rebuild, and native
 exclusive reopen.
 
 ## Native Storage Impact
@@ -121,7 +127,10 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selectors reach the dictionary fault hook and do not hang.
-- A live peer prevents cleanup until no-live recovery.
+- A live peer remains open while a new ownerless opener recovers the completed
+  native view metadata and check-option enforcement state.
+- The native file-operation marker remains clear for these metadata-only view
+  forms.
 - Create recovery exposes `CHECK_OPTION='CASCADED'`, `IS_UPDATABLE='YES'`,
   queryable view rows, valid through-view DML, and errno 1369 for invalid DML.
 - Replacement recovery exposes `CHECK_OPTION='LOCAL'`, `IS_UPDATABLE='YES'`,

@@ -620,6 +620,24 @@ if(BUILD_TESTING)
           dictionary-view-column-list-alter-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-view-check-option-create-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-view-check-option-create-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-view-check-option-replace-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-view-check-option-replace-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-view-check-option-alter-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-view-check-option-alter-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-view-idempotent-create-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -997,6 +1015,9 @@ if(BUILD_TESTING)
         libmylite.ownerless-dictionary-view-column-list-create-crash
         libmylite.ownerless-dictionary-view-column-list-replace-crash
         libmylite.ownerless-dictionary-view-column-list-alter-crash
+        libmylite.ownerless-dictionary-view-check-option-create-crash
+        libmylite.ownerless-dictionary-view-check-option-replace-crash
+        libmylite.ownerless-dictionary-view-check-option-alter-crash
         libmylite.ownerless-dictionary-view-idempotent-create-crash
         libmylite.ownerless-dictionary-view-idempotent-drop-crash
         libmylite.ownerless-dictionary-trigger-definer-crash
