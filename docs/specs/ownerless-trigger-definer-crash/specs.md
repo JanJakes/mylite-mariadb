@@ -38,8 +38,9 @@ Add a hook-only selector,
 3. Kill a writer after
    `CREATE DEFINER=CURRENT_USER TRIGGER ... AFTER INSERT ...` writes native
    trigger metadata but before ownerless dictionary finish.
-4. Verify live-peer cleanup remains busy until the peer closes.
-5. Reopen no-live ownerless and verify `.TRG`/`.TRN` files,
+4. Recover from a new ownerless opener while the peer remains live and verify
+   the native file-operation marker remains clear.
+5. Verify `.TRG`/`.TRN` files,
    `INFORMATION_SCHEMA.TRIGGERS.DEFINER`, `SHOW CREATE TRIGGER` containing
    `DEFINER=`, trigger firing, ownerless/native reopen, and forced `.shm`
    rebuild.
@@ -104,7 +105,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selector reaches the dictionary fault hook and does not hang.
-- A live peer prevents cleanup until no-live recovery.
+- Recovery completes while another ownerless peer remains live and the native
+  file-operation marker remains clear.
 - Recovered metadata exposes the trigger through
   `INFORMATION_SCHEMA.TRIGGERS` with a non-empty definer, keeps `.TRG` and
   `.TRN` files present, and preserves `DEFINER=` in `SHOW CREATE TRIGGER`.

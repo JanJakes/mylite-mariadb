@@ -2273,6 +2273,10 @@ bool consume_ownerless_optional_view_security_clauses(
     const SqlPolicyTokens &tokens,
     std::size_t &index
 );
+bool consume_ownerless_optional_trigger_definer_clause(
+    const SqlPolicyTokens &tokens,
+    std::size_t &index
+);
 bool consume_ownerless_optional_view_if_not_exists(
     const SqlPolicyTokens &tokens,
     std::size_t &index
@@ -15438,6 +15442,9 @@ bool ownerless_create_trigger_recovery_statement(const SqlPolicyTokens &tokens) 
         index += 2U;
         or_replace = true;
     }
+    if (!consume_ownerless_optional_trigger_definer_clause(tokens, index)) {
+        return false;
+    }
     if (index >= tokens.count || !token_equals(tokens.values[index], "TRIGGER")) {
         return false;
     }
@@ -15472,7 +15479,11 @@ bool ownerless_create_trigger_recovery_statement(const SqlPolicyTokens &tokens) 
     }
     index += 3U;
     if (index < tokens.count && token_in(tokens.values[index], "FOLLOWS", "PRECEDES")) {
-        return false;
+        ++index;
+        if (index >= tokens.count || !ownerless_table_identifier_token(tokens.values[index])) {
+            return false;
+        }
+        ++index;
     }
     return true;
 }
@@ -16058,6 +16069,28 @@ bool consume_ownerless_optional_view_security_clauses(
         }
         return true;
     }
+}
+
+bool consume_ownerless_optional_trigger_definer_clause(
+    const SqlPolicyTokens &tokens,
+    std::size_t &index
+) {
+    if (index >= tokens.count || !token_equals(tokens.values[index], "DEFINER")) {
+        return true;
+    }
+    ++index;
+    if (index < tokens.count && token_equals(tokens.values[index], "=")) {
+        ++index;
+    }
+    if (index >= tokens.count || !token_equals(tokens.values[index], "CURRENT_USER")) {
+        return false;
+    }
+    ++index;
+    if (index + 1U < tokens.count && token_equals(tokens.values[index], "(") &&
+        token_equals(tokens.values[index + 1U], ")")) {
+        index += 2U;
+    }
+    return true;
 }
 
 bool consume_ownerless_optional_view_if_not_exists(

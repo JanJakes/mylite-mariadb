@@ -3064,26 +3064,26 @@ Tasks:
    crash coverage now also uses the metadata-only live-peer lane for
    `CREATE OR REPLACE TRIGGER`, duplicate `CREATE TRIGGER IF NOT EXISTS`, and
    missing `DROP TRIGGER IF EXISTS`, preserving replacement or original trigger
-   state after a killed writer at dictionary finish. Ordered trigger crash
-   variants remain covered as no-live recovery until ordering semantics are
-   promoted separately. Delayed invalid-dependency crash coverage now uses the
-   same
-   live-peer metadata-only lane for the syntax-simple trigger create, proving a
+   state after a killed writer at dictionary finish. Ordered and
+   explicit-definer trigger crash coverage now also use the metadata-only
+   live-peer lane for `CREATE TRIGGER ... PRECEDES ...` and
+   `CREATE DEFINER=CURRENT_USER TRIGGER`, preserving `ACTION_ORDER`, firing
+   order, non-empty definer metadata, `DEFINER=` in `SHOW CREATE TRIGGER`, and
+   the native file-operation marker clear while a peer remains live. Delayed
+   invalid-dependency crash coverage now uses the same live-peer metadata-only
+   lane for the syntax-simple trigger create, proving a
    trigger whose body references a missing audit table survives the boundary,
    reports MariaDB 1146 when fired before the dependency exists, and fires once
-   the dependency is created. Explicit-definer crash coverage now proves
-   `CREATE DEFINER=CURRENT_USER TRIGGER` preserves non-empty
-   `INFORMATION_SCHEMA.TRIGGERS.DEFINER` metadata, `DEFINER=` in
-   `SHOW CREATE TRIGGER`, and trigger firing through ownerless/native reopen
-   before and after forced `.shm` rebuild. Stored-function trigger crash
+   the dependency is created. Stored-function trigger crash
    coverage now uses the same live-peer metadata-only lane for the
    syntax-simple trigger create, proving a trigger body that calls an
    exclusive-created stored function survives the dictionary boundary, remains
    visible through native trigger files and `SHOW CREATE TRIGGER`, fails closed
    under the ownerless stored-routine execution guard when fired, and still
    fires through ordinary native reopen. Broader privilege/security and randomized trigger
-   crash variants remain planned. The explicit-definer crash selector is also
-   registered as a standalone hook CTest so CI reports its timing and failures
+   crash variants remain planned. The ordered and explicit-definer crash
+   selectors are also registered as standalone hook CTests so CI reports their
+   timing and failures
    separately from larger crash-tail coverage.
    Stored-routine DDL is a deliberately unsupported ownerless class for now:
    the routine path writes `mysql.proc`/`mysql.procs_priv` and a proof attempt
@@ -7381,9 +7381,12 @@ subsystems that this mode needs:
   remains live and the native file-operation marker stays clear.
   The trigger replacement/idempotent follow-up extends that metadata-only
   live-recovery lane to `CREATE OR REPLACE TRIGGER`, duplicate
-  `CREATE TRIGGER IF NOT EXISTS`, and missing `DROP TRIGGER IF EXISTS`, while
-  leaving ordered and explicit-definer trigger crash variants on the no-live
-  path until separately promoted.
+  `CREATE TRIGGER IF NOT EXISTS`, and missing `DROP TRIGGER IF EXISTS`.
+  The trigger order/definer follow-up extends the same live-recovery lane to
+  `CREATE TRIGGER ... FOLLOWS|PRECEDES ...` and
+  `CREATE DEFINER=CURRENT_USER TRIGGER`, proving `ACTION_ORDER`, firing order,
+  definer metadata, and clear native file-operation markers while a peer
+  remains live.
 
   Ownerless DDL stress now treats pre-execution MyLite statement-lock
   `MYLITE_BUSY` as bounded retryable harness contention while keeping native

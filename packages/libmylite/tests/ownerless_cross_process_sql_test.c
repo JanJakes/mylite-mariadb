@@ -51683,6 +51683,7 @@ static void test_crashed_trigger_order_dictionary_ddl_recovers_ordered_triggers(
     char *second_trn_path = path_join(app_path, "ownerless_trigger_order_crash_second.TRN");
     char *third_trn_path = path_join(app_path, "ownerless_trigger_order_crash_third.TRN");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -51726,13 +51727,21 @@ static void test_crashed_trigger_order_dictionary_ddl_recovers_ordered_triggers(
     assert(!path_exists(third_trn_path));
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(paths, ordered_trigger_until_dictionary_finish_fault);
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        ordered_trigger_until_dictionary_finish_fault
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     assert_ownerless_trigger_order_crash_ddl_state(
         paths,
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
         database_path
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
+
     assert_ownerless_trigger_order_crash_ddl_state(paths, MYLITE_OPEN_READWRITE, database_path);
     remove_concurrency_shm(database_path);
     assert_ownerless_trigger_order_crash_ddl_state(
@@ -51901,6 +51910,7 @@ static void test_crashed_trigger_definer_dictionary_ddl_recovers_definer(void) {
     char *trg_path = path_join(app_path, "ownerless_trigger_definer_crash_base.TRG");
     char *trn_path = path_join(app_path, "ownerless_trigger_definer_crash_ai.TRN");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -51933,7 +51943,11 @@ static void test_crashed_trigger_definer_dictionary_ddl_recovers_definer(void) {
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(paths, definer_trigger_until_dictionary_finish_fault);
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        definer_trigger_until_dictionary_finish_fault
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(path_exists(trg_path));
@@ -51978,6 +51992,9 @@ static void test_crashed_trigger_definer_dictionary_ddl_recovers_definer(void) {
         10U
     );
     assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_trigger_definer_crash_ddl_state(
         paths,

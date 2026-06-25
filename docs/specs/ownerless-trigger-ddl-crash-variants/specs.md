@@ -51,15 +51,17 @@ Add two unsafe-hook selectors to
   row, creates a `BEFORE UPDATE` trigger that increments `NEW.value` by one,
   keeps a live ownerless peer open, kills a writer after
   `CREATE OR REPLACE TRIGGER` rewrites the native trigger metadata to increment
-  by two, verifies live-peer cleanup remains busy, then reopens no-live
-  ownerless/native and verifies the replacement trigger body is recovered and
-  fires.
+  by two, and verifies the replacement trigger body is recovered and fires.
+  Replacement live recovery is promoted by
+  `docs/specs/ownerless-trigger-idempotent-replace-live-recovery/specs.md`.
 - `dictionary-trigger-order-crash` creates two ordered `AFTER INSERT` triggers,
   keeps a live ownerless peer open, kills a writer after a third trigger is
-  created with `PRECEDES ownerless_trigger_order_crash_first`, verifies
-  live-peer cleanup remains busy, then reopens no-live ownerless/native and
-  verifies `.TRG`/`.TRN` file presence, `INFORMATION_SCHEMA.TRIGGERS`
-  `ACTION_ORDER`, `SHOW CREATE TRIGGER`, and firing order.
+  created with `PRECEDES ownerless_trigger_order_crash_first`, recovers while
+  the peer remains live, and verifies `.TRG`/`.TRN` file presence,
+  `INFORMATION_SCHEMA.TRIGGERS` `ACTION_ORDER`, `SHOW CREATE TRIGGER`, firing
+  order, and a clear native file-operation marker. Ordered live recovery is
+  promoted by
+  `docs/specs/ownerless-trigger-order-definer-live-recovery/specs.md`.
 
 Both selectors verify ownerless and ordinary native reopen before and after
 forced `.shm` rebuild.
@@ -132,7 +134,10 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selectors reach the dictionary fault hook and do not hang.
-- A live peer prevents cleanup until no-live recovery.
+- Ordered trigger recovery completes while another ownerless peer remains live
+  and the native file-operation marker stays clear.
+- Replacement live recovery is covered by
+  `docs/specs/ownerless-trigger-idempotent-replace-live-recovery/specs.md`.
 - Replacement recovery exposes the trigger through
   `INFORMATION_SCHEMA.TRIGGERS`, preserves the `.TRG` and `.TRN` files,
   preserves the replacement body in `SHOW CREATE TRIGGER`, and fires the
@@ -149,7 +154,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - This is deterministic trigger replacement and ordering crash coverage, not
   the full trigger crash matrix. Replacement live recovery is covered by
   `docs/specs/ownerless-trigger-idempotent-replace-live-recovery/specs.md`;
-  ordered trigger live recovery remains planned.
+  ordered trigger live recovery is covered by
+  `docs/specs/ownerless-trigger-order-definer-live-recovery/specs.md`.
 - Bounded idempotent no-op trigger DDL crash recovery is covered by
   `ownerless-trigger-idempotent-crash`; delayed invalid-dependency trigger
   crash recovery is covered by `ownerless-trigger-invalid-dependency-crash`,

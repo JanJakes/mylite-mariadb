@@ -126,5 +126,5 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - Missing idempotent drop recovery completes while another ownerless peer
   remains live, keeps the native file-operation marker clear, preserves the real
   trigger, and keeps the missing `.TRN` absent.
-- Ordered-trigger and explicit-definer crash selectors keep their existing
-  no-live coverage behavior until separately promoted.
+- Ordered-trigger and explicit-definer crash selector live recovery is covered
+  by `docs/specs/ownerless-trigger-order-definer-live-recovery/specs.md`.

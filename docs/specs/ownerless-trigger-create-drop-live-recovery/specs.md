@@ -197,10 +197,11 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Risks And Follow-Up
 
 - This covers only syntax-simple trigger create/drop live recovery.
-- Trigger ordering, definer, privilege/security, and broader trigger metadata
-  variants remain planned for live-recovery promotion. Replacement and
-  idempotent/no-op trigger forms are covered by
+- Trigger ordering and current-user definer live recovery are covered by
+  `docs/specs/ownerless-trigger-order-definer-live-recovery/specs.md`.
+  Replacement and idempotent/no-op trigger forms are covered by
   `docs/specs/ownerless-trigger-idempotent-replace-live-recovery/specs.md`.
+  Broader privilege/security and trigger metadata variants remain planned.
 - Broader schema metadata-only recovery and multi-table/cross-schema dropped
   tablespace live recovery remain planned.
 - Longer external MariaDB/RQG-style stress remains planned after bounded
