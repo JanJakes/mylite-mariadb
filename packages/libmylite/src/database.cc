@@ -15913,8 +15913,9 @@ bool ownerless_create_schema_recovery_statement(const SqlPolicyTokens &tokens) {
 
 bool ownerless_create_schema_if_not_exists_recovery_statement(const SqlPolicyTokens &tokens) {
     if (tokens.count < 6U || !token_equals(tokens.values[0], "CREATE") ||
-        !token_equals(tokens.values[1], "DATABASE") || !token_equals(tokens.values[2], "IF") ||
-        !token_equals(tokens.values[3], "NOT") || !token_equals(tokens.values[4], "EXISTS")) {
+        !token_in(tokens.values[1], "DATABASE", "SCHEMA") ||
+        !token_equals(tokens.values[2], "IF") || !token_equals(tokens.values[3], "NOT") ||
+        !token_equals(tokens.values[4], "EXISTS")) {
         return false;
     }
 
@@ -15954,8 +15955,8 @@ bool ownerless_drop_schema_recovery_statement(const SqlPolicyTokens &tokens) {
 
 bool ownerless_drop_schema_if_exists_recovery_statement(const SqlPolicyTokens &tokens) {
     if (tokens.count < 5U || !token_equals(tokens.values[0], "DROP") ||
-        !token_equals(tokens.values[1], "SCHEMA") || !token_equals(tokens.values[2], "IF") ||
-        !token_equals(tokens.values[3], "EXISTS")) {
+        !token_in(tokens.values[1], "DATABASE", "SCHEMA") ||
+        !token_equals(tokens.values[2], "IF") || !token_equals(tokens.values[3], "EXISTS")) {
         return false;
     }
 
