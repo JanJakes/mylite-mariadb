@@ -49219,6 +49219,7 @@ static void test_crashed_view_column_list_create_dictionary_ddl_recovers_aliases
     char *app_path = path_join(datadir_path, "app");
     char *view_path = path_join(app_path, "ownerless_view_column_list_create_crash.frm");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -49249,10 +49250,57 @@ static void test_crashed_view_column_list_create_dictionary_ddl_recovers_aliases
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         column_list_create_view_until_dictionary_finish_fault
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(path_exists(view_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_column_list_create_crash' "
+            "AND column_name = 'view_id' "
+            "AND ordinal_position = 1"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_column_list_create_crash' "
+            "AND column_name = 'view_value' "
+            "AND ordinal_position = 2"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_column_list_create_crash' "
+            "AND column_name = 'view_note' "
+            "AND ordinal_position = 3"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_column_list_create_crash") == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(view_value) FROM app.ownerless_view_column_list_create_crash"
+        ) == 60U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_view_column_list_create_crash_ddl_state(
         paths,
@@ -49294,6 +49342,7 @@ static void test_crashed_view_column_list_replace_dictionary_ddl_recovers_aliase
     char *app_path = path_join(datadir_path, "app");
     char *view_path = path_join(app_path, "ownerless_view_column_list_replace_crash.frm");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -49344,10 +49393,54 @@ static void test_crashed_view_column_list_replace_dictionary_ddl_recovers_aliase
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         column_list_replace_view_until_dictionary_finish_fault
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(path_exists(view_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_column_list_replace_crash' "
+            "AND column_name = 'adjusted_value' "
+            "AND ordinal_position = 2"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_column_list_replace_crash' "
+            "AND column_name = 'view_value'"
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT SUM(view_value) FROM app.ownerless_view_column_list_replace_crash",
+            NULL
+        ) != MYLITE_OK
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_column_list_replace_crash") ==
+        2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(adjusted_value) FROM app.ownerless_view_column_list_replace_crash"
+        ) == 60U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_view_column_list_replace_crash_ddl_state(
         paths,
@@ -49389,6 +49482,7 @@ static void test_crashed_view_column_list_alter_dictionary_ddl_recovers_aliases(
     char *app_path = path_join(datadir_path, "app");
     char *view_path = path_join(app_path, "ownerless_view_column_list_alter_crash.frm");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -49438,10 +49532,53 @@ static void test_crashed_view_column_list_alter_dictionary_ddl_recovers_aliases(
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         column_list_alter_view_until_dictionary_finish_fault
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(path_exists(view_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_column_list_alter_crash' "
+            "AND column_name = 'doubled_value' "
+            "AND ordinal_position = 2"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_column_list_alter_crash' "
+            "AND column_name = 'view_value'"
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT SUM(view_value) FROM app.ownerless_view_column_list_alter_crash",
+            NULL
+        ) != MYLITE_OK
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_column_list_alter_crash") == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(doubled_value) FROM app.ownerless_view_column_list_alter_crash"
+        ) == 100U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_view_column_list_alter_crash_ddl_state(
         paths,

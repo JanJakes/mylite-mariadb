@@ -2216,6 +2216,7 @@ std::uint32_t ownerless_alter_table_compressed_row_format_key_block_recovery_kin
 );
 bool ownerless_dictionary_recovery_kind_is_metadata_only(std::uint32_t recovery_kind);
 bool consume_ownerless_table_identifier(const SqlPolicyTokens &tokens, std::size_t &index);
+bool consume_ownerless_optional_view_column_list(const SqlPolicyTokens &tokens, std::size_t &index);
 bool ownerless_stale_engine_error_allows_retry(
     const mylite_db &db,
     const SqlPolicyTokens &tokens,
@@ -15238,7 +15239,8 @@ bool ownerless_create_view_recovery_statement(const SqlPolicyTokens &tokens) {
     }
 
     std::size_t index = 2U;
-    if (!consume_ownerless_table_identifier(tokens, index) || index >= tokens.count ||
+    if (!consume_ownerless_table_identifier(tokens, index) ||
+        !consume_ownerless_optional_view_column_list(tokens, index) || index >= tokens.count ||
         !token_equals(tokens.values[index], "AS")) {
         return false;
     }
@@ -15253,7 +15255,8 @@ bool ownerless_create_or_replace_view_recovery_statement(const SqlPolicyTokens &
     }
 
     std::size_t index = 4U;
-    if (!consume_ownerless_table_identifier(tokens, index) || index >= tokens.count ||
+    if (!consume_ownerless_table_identifier(tokens, index) ||
+        !consume_ownerless_optional_view_column_list(tokens, index) || index >= tokens.count ||
         !token_equals(tokens.values[index], "AS")) {
         return false;
     }
@@ -15515,6 +15518,35 @@ bool consume_ownerless_table_identifier(const SqlPolicyTokens &tokens, std::size
     return true;
 }
 
+bool consume_ownerless_optional_view_column_list(
+    const SqlPolicyTokens &tokens,
+    std::size_t &index
+) {
+    if (index >= tokens.count || !token_equals(tokens.values[index], "(")) {
+        return true;
+    }
+
+    std::size_t depth = 0U;
+    for (; index < tokens.count; ++index) {
+        if (token_equals(tokens.values[index], "(")) {
+            ++depth;
+            continue;
+        }
+        if (!token_equals(tokens.values[index], ")")) {
+            continue;
+        }
+        if (depth == 0U) {
+            return false;
+        }
+        --depth;
+        if (depth == 0U) {
+            ++index;
+            return true;
+        }
+    }
+    return false;
+}
+
 bool ownerless_rename_table_recovery_statement(const SqlPolicyTokens &tokens) {
     if (tokens.count < 5U || !token_equals(tokens.values[0], "RENAME") ||
         !token_equals(tokens.values[1], "TABLE")) {
@@ -15557,7 +15589,8 @@ bool ownerless_alter_view_recovery_statement(const SqlPolicyTokens &tokens) {
     }
 
     std::size_t index = 2U;
-    if (!consume_ownerless_table_identifier(tokens, index) || index >= tokens.count ||
+    if (!consume_ownerless_table_identifier(tokens, index) ||
+        !consume_ownerless_optional_view_column_list(tokens, index) || index >= tokens.count ||
         !token_equals(tokens.values[index], "AS")) {
         return false;
     }

@@ -2959,9 +2959,11 @@ Tasks:
    Hook-build view column-list crash coverage now kills explicit
    column-list `CREATE VIEW`, `CREATE OR REPLACE VIEW`, and `ALTER VIEW`
    writers after native view definition storage or rewrite but before
-   ownerless dictionary finish, then verifies recovered alias names, ordinal
-   positions, stale-column rejection, query behavior, base-table writes, and
-   ownerless/native reopen before and after forced `.shm` rebuild.
+   ownerless dictionary finish, then recovers them while a peer remains live,
+   keeps the native file-operation marker clear, and verifies recovered alias
+   names, ordinal positions, stale-column rejection, query behavior,
+   base-table writes, and ownerless/native reopen before and after forced
+   `.shm` rebuild.
    View security/definer coverage now verifies an already-open peer observes a
    `DEFINER=CURRENT_USER SQL SECURITY DEFINER` view, then observes
    `CREATE OR REPLACE SQL SECURITY INVOKER VIEW` and
@@ -4759,9 +4761,12 @@ Tasks:
    checkpoint evidence, while preserving the file-operation marker requirement
    for table DDL. Focused `CREATE OR REPLACE VIEW schema.view AS ...` and
    `ALTER VIEW schema.view AS ...` prefinish crash coverage use the same
-   metadata-only lane for native view definition rewrites while keeping
-   security/definer, column-list, check-option, and nested view variants
-   planned.
+   metadata-only lane for native view definition rewrites. Focused explicit
+   column-list `CREATE VIEW`, `CREATE OR REPLACE VIEW`, and `ALTER VIEW`
+   prefinish crash coverage now consumes the optional alias list before `AS`
+   and recovers alias metadata while a peer remains live. Security/definer,
+   check-option, nested, idempotent/no-op, and invalid-dependency view variants
+   remain planned for live-recovery promotion.
    Implicit-schema, `IF EXISTS`, temporary-table, and view-only rename forms
    plus multi-table and cross-schema drop, broader ALTER rebuild beyond the
    focused force, row-format, compressed, and charset-conversion cases, schema,
@@ -7220,6 +7225,10 @@ subsystems that this mode needs:
   focused `CREATE OR REPLACE VIEW ... AS ...` and `ALTER VIEW ... AS ...`
   rewrites, proving the replaced/altered projection while a peer remains live
   and keeping the native file-operation marker clear.
+  The view column-list follow-up broadens the same focused view recovery
+  classifiers to consume an optional parenthesized alias list before `AS`, then
+  proves explicit column-list create/replace/alter recovery while a peer
+  remains live and the native file-operation marker stays clear.
 
   Ownerless DDL stress now treats pre-execution MyLite statement-lock
   `MYLITE_BUSY` as bounded retryable harness contention while keeping native
@@ -7239,8 +7248,9 @@ subsystems that this mode needs:
      implicit single-table drop, plus focused force rebuild, dynamic row-format
      rebuild, focused compressed key-block row-format rebuild, and focused
      charset-conversion rebuild prefinish boundaries, plus simple CREATE/DROP
-     VIEW and focused CREATE OR REPLACE/ALTER VIEW metadata-only prefinish
-     boundaries, especially remaining rename/truncate variants, rebuild
+     VIEW, focused CREATE OR REPLACE/ALTER VIEW, and focused explicit
+     column-list view metadata-only prefinish boundaries, especially remaining
+     rename/truncate variants, rebuild
      variants, broader metadata-only DDL, and multi-table/cross-schema dropped
      file-per-table tablespaces while peers remain live.
   2. Close remaining transaction crash windows, especially native

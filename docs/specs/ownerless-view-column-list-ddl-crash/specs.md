@@ -11,7 +11,9 @@ survives a writer death after MariaDB writes the native view definition file and
 before MyLite publishes ownerless dictionary finish.
 
 This slice adds deterministic crash-boundary evidence for explicit column-list
-create, replace, and alter paths.
+create, replace, and alter paths. The follow-up
+[ownerless-view-column-list-live-recovery](../ownerless-view-column-list-live-recovery/specs.md)
+promotes those focused forms to metadata-only live-peer recovery.
 
 ## Source Findings
 
@@ -59,7 +61,8 @@ Add three unsafe-hook selectors to
   doubled_value, label)` rewrites the native view definition, then verifies the
   altered aliases and predicate.
 
-Each selector verifies ownerless and ordinary native reopen before and after a
+Each selector verifies metadata-only live recovery while another ownerless peer
+remains open, then ownerless and ordinary native reopen before and after a
 forced `.shm` rebuild.
 
 ## Scope
@@ -77,6 +80,7 @@ In scope:
   metadata, including alias names and ordinal positions.
 - Query behavior proving stale exposed column names disappear after rewrites.
 - Base-table writes after recovery.
+- Live-peer recovery without native file-operation marker evidence.
 - Ownerless/native reopen before and after forced `.shm` rebuild.
 
 Out of scope:
@@ -97,7 +101,7 @@ survive a writer death at MyLite's dictionary publication boundary.
 
 No directory layout changes are introduced. The tests exercise native MariaDB
 view `.frm` files inside the MyLite-owned database directory, ownerless
-live-peer cleanup blocking, no-live recovery, forced `.shm` rebuild, and native
+live-peer recovery, final no-live cleanup, forced `.shm` rebuild, and native
 exclusive reopen.
 
 ## Native Storage Impact
@@ -126,7 +130,10 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selectors reach the dictionary fault hook and do not hang.
-- A live peer prevents cleanup until no-live recovery.
+- A live peer remains open while a new ownerless opener recovers the completed
+  native view metadata.
+- The native file-operation marker remains clear for these metadata-only view
+  forms.
 - Create recovery exposes `view_id`, `view_value`, and `view_note` metadata in
   ordinal order and queries the created view.
 - Replacement recovery exposes `adjusted_value`, rejects the old `view_value`
