@@ -2846,11 +2846,12 @@ Tasks:
    retained reader-boundary WAL for multiple tables inside a dropped schema is
    checkpointed during no-live rebuild without recreating schema metadata,
    table metadata, the schema directory, or table files. Hook-build schema-drop
-   crash coverage now kills a `DROP DATABASE|SCHEMA` writer after native schema/table
-   removal but before ownerless dictionary finish, then verifies live-peer
-   recovery with marker retention until final no-live drain and
-   ownerless/native reopen of the absent schema before and after forced `.shm`
-   rebuild. Schema default DDL
+   crash coverage now kills table-bearing and empty `DROP DATABASE|SCHEMA`
+   writers after native schema removal but before ownerless dictionary finish,
+   then verifies live-peer recovery with marker retention until final no-live
+   drain for table-bearing drops, marker-clear live recovery for empty drops,
+   and ownerless/native reopen of the absent schema before and after forced
+   `.shm` rebuild. Schema default DDL
    coverage now creates a schema with
    explicit default charset/collation, verifies native `db.opt` presence, runs
    `ALTER DATABASE` from another ownerless process, verifies an already-open
@@ -4819,7 +4820,9 @@ Tasks:
    remains live and the native file-operation marker stays clear. Focused
    table-bearing `DROP DATABASE|SCHEMA` prefinish crash coverage now recovers
    while a peer remains live and keeps the native file-operation marker set
-   until final no-live drain. Focused duplicate
+   until final no-live drain; empty `DROP DATABASE|SCHEMA` prefinish crash
+   coverage now recovers while a peer remains live with the marker clear.
+   Focused duplicate
    `CREATE DATABASE IF NOT EXISTS`, missing `CREATE SCHEMA IF NOT EXISTS`,
    missing `DROP SCHEMA IF EXISTS` no-op, and empty `DROP DATABASE IF EXISTS`
    prefinish crash coverage now recovers while a peer remains live with the
@@ -5375,10 +5378,11 @@ Minimum suites before support can be claimed:
     pre-alter table collation preservation, post-recovery table default
     inheritance, ownerless/native reopen, and forced `.shm` rebuild remain
     correct,
-  - after representative table-bearing `DROP DATABASE|SCHEMA` native schema/table
-    removal but before ownerless dictionary finish; hook coverage proves
-    live-peer recovery preserves schema/table absence while retaining the native
-    file-operation marker until final no-live drain, with ownerless/native
+  - after representative table-bearing and empty `DROP DATABASE|SCHEMA` native
+    schema removal but before ownerless dictionary finish; hook coverage proves
+    live-peer recovery preserves schema/table absence while retaining the
+    native file-operation marker until final no-live drain for table-bearing
+    drops and keeping the marker clear for empty drops, with ownerless/native
     reopen and forced `.shm` rebuild correct,
   - after duplicate `CREATE DATABASE IF NOT EXISTS`, missing
     `CREATE SCHEMA IF NOT EXISTS`, missing `DROP SCHEMA IF EXISTS` no-op, empty
@@ -5539,10 +5543,10 @@ row-format, compressed 4 KiB/8 KiB/16 KiB row-format, and table-comment writers
 after native table-option metadata update or rebuild, a
 `DROP TABLE` writer after native file removal, a stale-reader retained-WAL
 `DROP TABLE` writer after native file removal before ownerless dictionary
-finish, and `DROP DATABASE|SCHEMA` writers
-after native schema/table removal plus `CREATE DATABASE|SCHEMA` writers after
-native schema directory/`db.opt` creation and `ALTER DATABASE|SCHEMA` writers
-after native `db.opt` rewrite but before ownerless dictionary finish, and
+finish, and table-bearing or empty `DROP DATABASE|SCHEMA` writers
+after native schema removal plus `CREATE DATABASE|SCHEMA` writers after native
+schema directory/`db.opt` creation and `ALTER DATABASE|SCHEMA` writers after
+native `db.opt` rewrite but before ownerless dictionary finish, and
 successful generated-column CREATE TABLE, generated-column ALTER TABLE ...
 ADD COLUMN, generated-column secondary-index, and generated-column
 child/referenced-column FK ADD/DROP writers after native metadata completion or

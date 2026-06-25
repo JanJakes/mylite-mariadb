@@ -76,6 +76,8 @@ In scope:
 - Successful named `ALTER SCHEMA` live recovery.
 - Successful named table-bearing `DROP DATABASE` live recovery.
 - Successful named table-bearing `DROP SCHEMA` live recovery.
+- Successful named empty `DROP DATABASE` live recovery.
+- Successful named empty `DROP SCHEMA` live recovery.
 - Schema directory and `db.opt` presence/removal.
 - Schema defaults through `INFORMATION_SCHEMA.SCHEMATA`.
 - Native table presence/absence for the existing schema crash selectors.
@@ -126,6 +128,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
   - `dictionary-schema-synonym-alter-crash`
   - `dictionary-schema-drop-crash`
   - `dictionary-schema-synonym-drop-crash`
+  - `dictionary-schema-empty-drop-crash`
+  - `dictionary-schema-synonym-empty-drop-crash`
 - Run adjacent schema selectors:
   - `dictionary-schema-idempotent-create-crash`
   - `dictionary-schema-idempotent-drop-crash`
@@ -143,9 +147,12 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - Schema create/alter live recovery completes for `DATABASE` and `SCHEMA`
   spellings while a peer remains live and the native file-operation marker
   remains clear.
-- Schema drop live recovery completes for `DATABASE` and `SCHEMA` spellings
-  while a peer remains live and the native file-operation marker remains set
-  until the final peer exits.
+- Table-bearing schema drop live recovery completes for `DATABASE` and
+  `SCHEMA` spellings while a peer remains live and the native file-operation
+  marker remains set until the final peer exits.
+- Empty schema drop live recovery completes for `DATABASE` and `SCHEMA`
+  spellings while a peer remains live and the native file-operation marker
+  remains clear.
 - Recovered schema defaults, native directory/`db.opt` state, table state,
   ownerless/native reopen, and forced `.shm` rebuild match the existing schema
   crash selector expectations.
@@ -162,6 +169,8 @@ Passed:
 - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-synonym-alter-crash`
 - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-drop-crash`
 - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-synonym-drop-crash`
+- `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-empty-drop-crash`
+- `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-synonym-empty-drop-crash`
 - `ctest --preset ownerless-test-hooks -R '^libmylite\.ownerless-primitives$' --output-on-failure`
 - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-idempotent-create-crash`
 - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-idempotent-drop-crash`
@@ -183,5 +192,5 @@ Passed:
 
 - Idempotent schema no-op live recovery is covered by
   `ownerless-schema-idempotent-ddl-crash`.
-- Empty-schema non-idempotent drops, schema-drop intra-loop crash points, and
-  external randomized DDL oracle execution remain planned.
+- Schema-drop intra-loop crash points and external randomized DDL oracle
+  execution remain planned.
