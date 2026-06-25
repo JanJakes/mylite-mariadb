@@ -640,6 +640,12 @@ if(BUILD_TESTING)
           dictionary-alter-unique-index-idempotent-create-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-primary-key-idempotent-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-primary-key-idempotent-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-column-default-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -1137,6 +1143,7 @@ if(BUILD_TESTING)
         libmylite.ownerless-dictionary-alter-index-idempotent-drop-crash
         libmylite.ownerless-dictionary-unique-index-idempotent-create-crash
         libmylite.ownerless-dictionary-alter-unique-index-idempotent-create-crash
+        libmylite.ownerless-dictionary-primary-key-idempotent-crash
         libmylite.ownerless-dictionary-table-idempotent-create-crash
         libmylite.ownerless-dictionary-column-idempotent-add-crash
         libmylite.ownerless-dictionary-column-idempotent-drop-crash

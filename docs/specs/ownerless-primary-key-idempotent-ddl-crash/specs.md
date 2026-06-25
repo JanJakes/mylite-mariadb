@@ -40,9 +40,11 @@ Add one unsafe-hook selector to
   after `ALTER TABLE ... ADD PRIMARY KEY IF NOT EXISTS (code)` reaches
   `dictionary-before-finish`.
 
-The selector keeps a live ownerless peer open while the writer is killed,
-proves cleanup remains busy until no-live recovery, then verifies ownerless and
-ordinary native reopen before and after forced `.shm` rebuild.
+The selector now uses the held-live-peer crash helper and
+`ownerless-primary-key-idempotent-live-recovery` metadata proof to recover
+while another ownerless process is live with the native file-operation marker
+clear, then verifies ownerless and ordinary native reopen before and after
+forced `.shm` rebuild.
 
 ## Scope And Non-Goals
 
@@ -76,8 +78,8 @@ key, make the candidate column unique, or leave stale peer state.
 ## Directory And Lifecycle Impact
 
 No directory layout changes. The test exercises native InnoDB primary-key
-metadata inside the table's native files, ownerless live-peer cleanup blocking,
-no-live recovery, forced `.shm` rebuild, and ordinary native exclusive reopen.
+metadata inside the table's native files, ownerless dictionary live recovery,
+forced `.shm` rebuild, and ordinary native exclusive reopen.
 
 ## Native Storage Impact
 
@@ -101,7 +103,7 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selector reaches the dictionary fault hook and does not hang.
-- A live peer prevents cleanup until no-live recovery.
+- Duplicate primary-key no-op recovery completes while a peer remains live.
 - Duplicate idempotent ADD-primary recovery keeps `PRIMARY(id)`, leaves
   `PRIMARY(code)` absent, and keeps plain duplicate primary-key add returning
   errno 1068.

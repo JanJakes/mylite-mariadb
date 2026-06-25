@@ -152,5 +152,5 @@ Passed:
 
 - The classifier intentionally does not claim live recovery for multi-action
   ALTER statements or unique-index replacement/drop variants.
-- Broader DDL/file-lifecycle recovery, primary-key idempotent no-op live
-  recovery, and external MariaDB/RQG stress remain open completion work.
+- Broader DDL/file-lifecycle recovery and external MariaDB/RQG stress remain
+  open completion work.

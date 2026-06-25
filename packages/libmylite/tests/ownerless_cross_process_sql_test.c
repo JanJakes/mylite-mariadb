@@ -45257,6 +45257,7 @@ static void test_crashed_primary_key_idempotent_dictionary_ddl_preserves_key_met
     char *database_path =
         path_join(root, "ownerless-dictionary-primary-key-idempotent-crash.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -45298,10 +45299,19 @@ static void test_crashed_primary_key_idempotent_dictionary_ddl_preserves_key_met
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         idempotent_primary_key_until_dictionary_finish_fault
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    assert_ownerless_primary_key_idempotent_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_primary_key_idempotent_crash_state(
         paths,

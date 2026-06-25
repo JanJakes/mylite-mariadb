@@ -2230,6 +2230,10 @@ bool ownerless_alter_table_add_index_if_not_exists_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 );
+bool ownerless_alter_table_add_primary_key_if_not_exists_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
 bool ownerless_alter_table_drop_index_if_exists_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
@@ -15323,7 +15327,8 @@ std::uint32_t ownerless_dictionary_recovery_kind_for_statement(
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_DROP_TABLE;
     }
     if (ownerless_create_index_if_not_exists_recovery_statement(db, tokens) ||
-        ownerless_alter_table_add_index_if_not_exists_recovery_statement(db, tokens)) {
+        ownerless_alter_table_add_index_if_not_exists_recovery_statement(db, tokens) ||
+        ownerless_alter_table_add_primary_key_if_not_exists_recovery_statement(db, tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_INDEX_IDEMPOTENT_CREATE;
     }
     if (ownerless_drop_index_if_exists_recovery_statement(db, tokens) ||
@@ -16412,6 +16417,44 @@ bool ownerless_alter_table_add_index_if_not_exists_recovery_statement(
                &index_exists
            ) &&
            index_exists;
+}
+
+bool ownerless_alter_table_add_primary_key_if_not_exists_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    if (tokens.count < 11U || !token_equals(tokens.values[0], "ALTER") ||
+        !token_equals(tokens.values[1], "TABLE")) {
+        return false;
+    }
+
+    std::size_t index = 2U;
+    std::string schema_name;
+    std::string table_name;
+    if (!consume_ownerless_table_identifier_parts(db, tokens, index, &schema_name, &table_name) ||
+        index + 5U >= tokens.count || !token_equals(tokens.values[index], "ADD") ||
+        !token_equals(tokens.values[index + 1U], "PRIMARY") ||
+        !token_equals(tokens.values[index + 2U], "KEY") ||
+        !token_equals(tokens.values[index + 3U], "IF") ||
+        !token_equals(tokens.values[index + 4U], "NOT") ||
+        !token_equals(tokens.values[index + 5U], "EXISTS")) {
+        return false;
+    }
+
+    index += 6U;
+    if (!consume_ownerless_parenthesized_clause(tokens, index) ||
+        !consume_ownerless_remaining_semicolons(tokens, index)) {
+        return false;
+    }
+    bool primary_exists = false;
+    return ownerless_index_metadata_lookup(
+               db,
+               schema_name,
+               table_name,
+               "PRIMARY",
+               &primary_exists
+           ) &&
+           primary_exists;
 }
 
 bool ownerless_alter_table_drop_index_if_exists_recovery_statement(
