@@ -60,13 +60,16 @@ Promote the existing unsafe-hook selectors in
 - `dictionary-schema-idempotent-existing-drop-crash` kills a writer after
   `DROP DATABASE IF EXISTS` removes a table-bearing schema and reaches
   `dictionary-before-finish`.
+- `dictionary-schema-idempotent-empty-drop-crash` kills a writer after
+  `DROP DATABASE IF EXISTS` removes an empty existing schema and reaches
+  `dictionary-before-finish`.
 
-The no-op and missing-create selectors keep a live ownerless peer open while
-the writer is killed, recover through a new ownerless opener while that peer
-remains live with the native file-operation marker clear, then verify
+The no-op, missing-create, and empty-drop selectors keep a live ownerless peer
+open while the writer is killed, recover through a new ownerless opener while
+that peer remains live with the native file-operation marker clear, then verify
 ownerless and ordinary native reopen before and after forced `.shm` rebuild.
-The existing-drop selector keeps the native file-operation marker set while a
-peer remains live and drains it only after final no-live recovery.
+The table-bearing existing-drop selector keeps the native file-operation marker
+set while a peer remains live and drains it only after final no-live recovery.
 
 ## Scope And Non-Goals
 
@@ -80,6 +83,8 @@ In scope:
   `CREATE SCHEMA IF NOT EXISTS` create behavior.
 - Crash-at-`dictionary-before-finish` coverage for existing
   `DROP DATABASE IF EXISTS` table-bearing drop behavior.
+- Crash-at-`dictionary-before-finish` coverage for existing
+  `DROP DATABASE IF EXISTS` empty-schema drop behavior.
 - Native schema directory and `db.opt` preservation for the real schema.
 - Absence of missing-schema native directories and metadata after no-op drop
   recovery.
@@ -89,8 +94,8 @@ Out of scope:
 
 - `CREATE OR REPLACE DATABASE`.
 - Crash injection inside native `db.opt` write or schema directory creation.
-- Empty-schema `DROP DATABASE IF EXISTS` / `DROP SCHEMA IF EXISTS` existing
-  drop recovery.
+- `DROP SCHEMA IF EXISTS` existing-schema synonym crash recovery beyond the
+  `DROP DATABASE IF EXISTS` spellings.
 - SQL-level table-lock fault injection for native table-wait paths.
 - External randomized DDL/RQG stress.
 
@@ -107,8 +112,9 @@ stale peer state.
 No directory layout changes. The tests exercise native schema directories and
 `db.opt` files under `datadir/`, ownerless live-peer recovery with the native
 file-operation marker clear for no-op/create cases, native file-operation
-marker retention and no-live drain for table-bearing drop, forced `.shm`
-rebuild, and ordinary native exclusive reopen.
+marker retention and no-live drain for table-bearing drop, marker-clear live
+recovery for empty existing drop, forced `.shm` rebuild, and ordinary native
+exclusive reopen.
 
 ## Native Storage Impact
 
@@ -128,6 +134,7 @@ No public API, build-profile, binary-size, license, or dependency changes.
   - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-idempotent-drop-crash`
   - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-idempotent-missing-create-crash`
   - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-idempotent-existing-drop-crash`
+  - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-idempotent-empty-drop-crash`
 - Run the ownerless dictionary primitive test.
 - Run normal `schema-idempotent-ddl` selectors in `embedded-dev` and
   `ownerless-test-hooks`.
@@ -138,9 +145,9 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 - The focused selectors reach the dictionary fault hook and do not hang.
 - Live-peer recovery completes while the native file-operation marker remains
-  clear for duplicate create, missing drop, and missing create.
+  clear for duplicate create, missing drop, missing create, and empty drop.
 - Existing drop live-peer recovery keeps the native file-operation marker set
-  until the final no-live drain.
+  until the final no-live drain when native table files were removed.
 - Duplicate idempotent create recovery keeps the original schema defaults,
   leaves the original table column collation unchanged, and keeps plain
   duplicate create returning errno 1007.
@@ -149,6 +156,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - Missing idempotent create recovery exposes the created schema defaults and
   supports post-recovery table writes.
 - Existing idempotent drop recovery keeps the removed schema/table absent.
+- Empty idempotent drop recovery keeps the removed schema absent while the
+  native file-operation marker remains clear.
 - Ownerless and ordinary native reopen observe the same rows and metadata
   before and after forced `.shm` rebuild.
 
@@ -162,6 +171,7 @@ Passed:
 - `cmake --build --preset ownerless-test-hooks --target mylite_ownerless_cross_process_sql_test -j2`
 - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-idempotent-missing-create-crash`
 - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-idempotent-existing-drop-crash`
+- `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-idempotent-empty-drop-crash`
 - `ctest --preset ownerless-test-hooks -R '^libmylite\.ownerless-primitives$' --output-on-failure`
 - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test schema-idempotent-ddl`
 - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-create-crash`

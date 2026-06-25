@@ -2862,13 +2862,14 @@ Tasks:
    existing-schema drop, and final absent-schema ownerless/native reopen before
    and after forced `.shm` rebuild. Hook-build schema-idempotent crash coverage
    now kills duplicate `CREATE DATABASE IF NOT EXISTS`, missing
-   `CREATE SCHEMA IF NOT EXISTS`, missing `DROP SCHEMA IF EXISTS` no-op, and
-   table-bearing `DROP DATABASE IF EXISTS` writers after MariaDB returns
-   success but before ownerless dictionary finish, then verifies live-peer
-   recovery with the native file-operation marker clear for the create/no-op
-   cases, marker retention until final no-live drain for the table-bearing drop
-   case, original schema defaults, created schema defaults, real schema/table
-   preservation, missing-schema absence, dropped-schema absence,
+   `CREATE SCHEMA IF NOT EXISTS`, missing `DROP SCHEMA IF EXISTS` no-op, empty
+   `DROP DATABASE IF EXISTS`, and table-bearing `DROP DATABASE IF EXISTS`
+   writers after MariaDB returns success but before ownerless dictionary
+   finish, then verifies live-peer recovery with the native file-operation
+   marker clear for the create/no-op/empty-drop cases, marker retention until
+   final no-live drain for the table-bearing drop case, original schema
+   defaults, created schema defaults, real schema/table preservation,
+   missing-schema absence, dropped-schema absence,
    ownerless/native reopen, and forced `.shm` rebuild. Cross-schema rename
    coverage now creates an InnoDB table in `app`, writes through it from an
    already-open peer, renames it into a second schema from the DDL process,
@@ -3594,12 +3595,13 @@ Tasks:
    reopen checks before and after forced `.shm` rebuild.
    Hook-build schema-idempotent crash coverage adds killed duplicate
    `CREATE DATABASE IF NOT EXISTS`, missing `CREATE SCHEMA IF NOT EXISTS`,
-   missing `DROP SCHEMA IF EXISTS` no-op, and table-bearing
+   missing `DROP SCHEMA IF EXISTS` no-op, empty `DROP DATABASE IF EXISTS`, and table-bearing
    `DROP DATABASE IF EXISTS` writers after MariaDB returns success but before
    ownerless dictionary finish, with live-peer marker-clear recovery for the
-   create/no-op cases, marker-retaining live recovery for table-bearing drop,
-   preserved original schema defaults, created schema defaults, preserved real
-   schema/table state, missing-schema absence, dropped-schema absence,
+   create/no-op/empty-drop cases, marker-retaining live recovery for
+   table-bearing drop, preserved original schema defaults, created schema
+   defaults, preserved real schema/table state, missing-schema absence,
+   dropped-schema absence,
    ownerless/native reopen, and forced `.shm` rebuild checks.
    Hook-build schema-create crash coverage adds a killed
    `CREATE DATABASE ... DEFAULT CHARACTER SET/COLLATE` writer after native
@@ -4818,9 +4820,9 @@ Tasks:
    `DROP DATABASE` prefinish crash coverage now recovers while a peer remains
    live and keeps the native file-operation marker set until final no-live
    drain. Focused duplicate `CREATE DATABASE IF NOT EXISTS`, missing
-   `CREATE SCHEMA IF NOT EXISTS`, and missing `DROP SCHEMA IF EXISTS` no-op
-   prefinish crash coverage now recovers while a peer remains live with the
-   native file-operation marker clear. Focused table-bearing
+   `CREATE SCHEMA IF NOT EXISTS`, missing `DROP SCHEMA IF EXISTS` no-op, and
+   empty `DROP DATABASE IF EXISTS` prefinish crash coverage now recovers while
+   a peer remains live with the native file-operation marker clear. Focused table-bearing
    `DROP DATABASE IF EXISTS` prefinish crash coverage now recovers while a peer
    remains live and keeps the native file-operation marker set until final
    no-live drain.
@@ -4828,7 +4830,7 @@ Tasks:
    `DROP TEMPORARY TABLE`, multi-table `DROP TABLE IF EXISTS` lists,
    inside-MariaDB-loop multi-drop crash points, broader ALTER rebuild beyond the
    focused force, row-format, compressed, and charset-conversion cases, schema
-   lifecycle synonym and empty existing `IF EXISTS` variants, broader view and
+   lifecycle synonym and existing-drop synonym variants, broader view and
    trigger variants, and non-rename foreign-key multi-DDL live-peer recovery
    remain planned.
    Final no-live close
@@ -5379,11 +5381,12 @@ Minimum suites before support can be claimed:
     file-operation marker until final no-live drain, with ownerless/native
     reopen and forced `.shm` rebuild correct,
   - after duplicate `CREATE DATABASE IF NOT EXISTS`, missing
-    `CREATE SCHEMA IF NOT EXISTS`, missing `DROP SCHEMA IF EXISTS` no-op, and
-    table-bearing `DROP DATABASE IF EXISTS` success but before ownerless
-    dictionary finish; hook coverage proves live-peer recovery with the native
-    file-operation marker clear for create/no-op cases, marker retention until
-    final no-live drain for table-bearing drop, preserved schema defaults,
+    `CREATE SCHEMA IF NOT EXISTS`, missing `DROP SCHEMA IF EXISTS` no-op, empty
+    `DROP DATABASE IF EXISTS`, and table-bearing `DROP DATABASE IF EXISTS`
+    success but before ownerless dictionary finish; hook coverage proves
+    live-peer recovery with the native file-operation marker clear for
+    create/no-op/empty-drop cases, marker retention until final no-live drain
+    for table-bearing drop, preserved schema defaults,
     created schema defaults, preserved real schema/table state,
     missing-schema absence, dropped-schema absence, ownerless/native reopen,
     and forced `.shm` rebuild remain correct,
@@ -7359,7 +7362,7 @@ subsystems that this mode needs:
      DATABASE and schema idempotent/no-op prefinish boundaries, especially
      remaining rename/truncate variants, rebuild variants, broader
      metadata-only DDL, temporary, multi-table `DROP TABLE IF EXISTS`, schema
-     lifecycle synonym and empty existing `IF EXISTS` variants, intra-loop drop
+     lifecycle synonym and existing-drop synonym variants, intra-loop drop
      cases, and broader DDL file lifecycle while peers remain live.
   2. Close remaining transaction crash windows, especially native
      rollback/savepoint-rollback internals and concurrent-writer savepoint

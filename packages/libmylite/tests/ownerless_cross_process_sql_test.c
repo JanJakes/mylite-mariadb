@@ -1163,6 +1163,7 @@ static void test_crashed_schema_idempotent_missing_create_dictionary_ddl_recover
 static void test_crashed_schema_idempotent_existing_drop_dictionary_ddl_recovers_absent_schema(
     void
 );
+static void test_crashed_schema_idempotent_empty_drop_dictionary_ddl_recovers_absent_schema(void);
 static void test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema(void);
 #endif
 static void test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds(void);
@@ -5369,6 +5370,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-schema-idempotent-empty-drop-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_schema_idempotent_empty_drop_dictionary_ddl_recovers_absent_schema();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-schema-drop-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema();
@@ -5767,6 +5774,7 @@ int main(int argc, char **argv) {
             "dictionary-schema-idempotent-drop-crash|"
             "dictionary-schema-idempotent-missing-create-crash|"
             "dictionary-schema-idempotent-existing-drop-crash|"
+            "dictionary-schema-idempotent-empty-drop-crash|"
             "dictionary-schema-drop-crash|"
             "crash-tail]\n",
             stderr
@@ -6205,6 +6213,9 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     ),
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_schema_idempotent_existing_drop_dictionary_ddl_recovers_absent_schema
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_schema_idempotent_empty_drop_dictionary_ddl_recovers_absent_schema
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema),
 #endif
@@ -57151,6 +57162,79 @@ static void test_crashed_schema_idempotent_existing_drop_dictionary_ddl_recovers
 
     free(ibd_path);
     free(frm_path);
+    free(schema_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_crashed_schema_idempotent_empty_drop_dictionary_ddl_recovers_absent_schema(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-schema-idempotent-empty-drop-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    char *datadir_path;
+    char *schema_path;
+    char *db_opt_path;
+    ownerless_live_peer_guard live_peer;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    datadir_path = path_join(database_path, "datadir");
+    schema_path = path_join(datadir_path, "ownerless_schema");
+    db_opt_path = path_join(schema_path, "db.opt");
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE DATABASE ownerless_schema "
+        "DEFAULT CHARACTER SET latin1 COLLATE latin1_swedish_ci"
+    );
+    assert(path_exists(schema_path));
+    assert(path_exists(db_opt_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.schemata "
+            "WHERE schema_name = 'ownerless_schema'"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        idempotent_existing_drop_schema_until_dictionary_finish_fault
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    assert_ownerless_schema_lifecycle_absent(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
+
+    assert_ownerless_schema_lifecycle_absent(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    remove_concurrency_shm(database_path);
+    assert_ownerless_schema_lifecycle_absent(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_schema_lifecycle_absent(paths, MYLITE_OPEN_READWRITE, database_path);
+
+    free(db_opt_path);
     free(schema_path);
     free(datadir_path);
     free(database_path);
