@@ -2219,6 +2219,11 @@ bool consume_ownerless_optional_view_security_clauses(
     const SqlPolicyTokens &tokens,
     std::size_t &index
 );
+bool consume_ownerless_optional_view_if_not_exists(
+    const SqlPolicyTokens &tokens,
+    std::size_t &index
+);
+bool consume_ownerless_optional_view_if_exists(const SqlPolicyTokens &tokens, std::size_t &index);
 bool consume_ownerless_table_identifier(const SqlPolicyTokens &tokens, std::size_t &index);
 bool consume_ownerless_optional_view_column_list(const SqlPolicyTokens &tokens, std::size_t &index);
 bool ownerless_stale_engine_error_allows_retry(
@@ -15247,6 +15252,9 @@ bool ownerless_create_view_recovery_statement(const SqlPolicyTokens &tokens) {
         return false;
     }
     ++index;
+    if (!consume_ownerless_optional_view_if_not_exists(tokens, index)) {
+        return false;
+    }
     if (!consume_ownerless_table_identifier(tokens, index) ||
         !consume_ownerless_optional_view_column_list(tokens, index) || index >= tokens.count ||
         !token_equals(tokens.values[index], "AS")) {
@@ -15560,6 +15568,32 @@ bool consume_ownerless_optional_view_security_clauses(
     }
 }
 
+bool consume_ownerless_optional_view_if_not_exists(
+    const SqlPolicyTokens &tokens,
+    std::size_t &index
+) {
+    if (index + 2U >= tokens.count || !token_equals(tokens.values[index], "IF")) {
+        return true;
+    }
+    if (!token_equals(tokens.values[index + 1U], "NOT") ||
+        !token_equals(tokens.values[index + 2U], "EXISTS")) {
+        return false;
+    }
+    index += 3U;
+    return true;
+}
+
+bool consume_ownerless_optional_view_if_exists(const SqlPolicyTokens &tokens, std::size_t &index) {
+    if (index + 1U >= tokens.count || !token_equals(tokens.values[index], "IF")) {
+        return true;
+    }
+    if (!token_equals(tokens.values[index + 1U], "EXISTS")) {
+        return false;
+    }
+    index += 2U;
+    return true;
+}
+
 bool consume_ownerless_optional_view_column_list(
     const SqlPolicyTokens &tokens,
     std::size_t &index
@@ -15714,6 +15748,9 @@ bool ownerless_drop_view_recovery_statement(const SqlPolicyTokens &tokens) {
     }
 
     std::size_t index = 2U;
+    if (!consume_ownerless_optional_view_if_exists(tokens, index)) {
+        return false;
+    }
     if (!consume_ownerless_table_identifier(tokens, index)) {
         return false;
     }

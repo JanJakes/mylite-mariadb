@@ -2993,10 +2993,11 @@ Tasks:
    rebuild.
    Hook-build view idempotent crash coverage kills duplicate
    `CREATE VIEW IF NOT EXISTS` and missing `DROP VIEW IF EXISTS` no-op writers
-   after MariaDB success but before ownerless dictionary finish, then verifies
-   recovered original view-definition preservation, missing-view absence,
-   queryability, base-table writes, and ownerless/native reopen before and after
-   forced `.shm` rebuild. The two view-idempotent crash selectors are also
+   after MariaDB success but before ownerless dictionary finish, then recovers
+   them while a peer remains live, keeps the native file-operation marker clear,
+   verifies recovered original view-definition preservation, missing-view
+   absence, queryability, base-table writes, and ownerless/native reopen before
+   and after forced `.shm` rebuild. The two view-idempotent crash selectors are also
    registered as standalone hook CTests so CI reports their timing and failures
    separately from larger crash-tail coverage.
    Trigger
@@ -4775,9 +4776,11 @@ Tasks:
    check-option outer replacement and inner alter prefinish crash coverage now
    recovers dependent-view enforcement while a peer remains live. Focused
    security/definer create, replacement, and alter prefinish crash coverage now
-   recovers security metadata while a peer remains live.
-   Idempotent/no-op and invalid-dependency view variants remain planned for
-   live-recovery promotion.
+   recovers security metadata while a peer remains live. Focused idempotent
+   `CREATE VIEW IF NOT EXISTS` and `DROP VIEW IF EXISTS` no-op prefinish crash
+   coverage now recovers preserved/absent view metadata while a peer remains
+   live. Invalid-dependency view variants remain planned for live-recovery
+   promotion.
    Implicit-schema, `IF EXISTS`, temporary-table, and view-only rename forms
    plus multi-table and cross-schema drop, broader ALTER rebuild beyond the
    focused force, row-format, compressed, and charset-conversion cases, schema,
@@ -7254,6 +7257,11 @@ subsystems that this mode needs:
   metadata-only live-recovery lane, proving persisted `SECURITY_TYPE` and
   definer metadata while a peer remains live and the native file-operation
   marker stays clear.
+  The idempotent/no-op follow-up promotes duplicate `CREATE VIEW IF NOT EXISTS`
+  and missing `DROP VIEW IF EXISTS` crash selectors to the same metadata-only
+  live-recovery lane, proving original definition preservation and missing-view
+  absence while a peer remains live and the native file-operation marker stays
+  clear.
 
   Ownerless DDL stress now treats pre-execution MyLite statement-lock
   `MYLITE_BUSY` as bounded retryable harness contention while keeping native
@@ -7274,9 +7282,9 @@ subsystems that this mode needs:
      rebuild, focused compressed key-block row-format rebuild, and focused
      charset-conversion rebuild prefinish boundaries, plus simple CREATE/DROP
      VIEW, focused CREATE OR REPLACE/ALTER VIEW, and focused explicit
-     column-list, check-option, nested check-option, and security/definer view
-     metadata-only prefinish boundaries, especially remaining rename/truncate
-     variants, rebuild variants, broader metadata-only DDL, and
+     column-list, check-option, nested check-option, security/definer, and
+     idempotent/no-op view metadata-only prefinish boundaries, especially
+     remaining rename/truncate variants, rebuild variants, broader metadata-only DDL, and
      multi-table/cross-schema dropped file-per-table tablespaces while peers
      remain live.
   2. Close remaining transaction crash windows, especially native

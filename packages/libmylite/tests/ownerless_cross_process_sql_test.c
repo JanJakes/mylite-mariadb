@@ -48823,6 +48823,7 @@ static void test_crashed_view_idempotent_create_dictionary_ddl_preserves_view(vo
     char *app_path = path_join(datadir_path, "app");
     char *view_path = path_join(app_path, "ownerless_view_idempotent_create_crash.frm");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -48866,10 +48867,20 @@ static void test_crashed_view_idempotent_create_dictionary_ddl_preserves_view(vo
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         idempotent_create_view_until_dictionary_finish_fault
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    assert_ownerless_view_idempotent_create_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_view_idempotent_create_crash_ddl_state(
         paths,
@@ -48912,6 +48923,7 @@ static void test_crashed_view_idempotent_drop_dictionary_ddl_preserves_view(void
     char *missing_view_path =
         path_join(app_path, "ownerless_view_idempotent_drop_crash_missing.frm");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -48954,10 +48966,20 @@ static void test_crashed_view_idempotent_drop_dictionary_ddl_preserves_view(void
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         idempotent_drop_view_until_dictionary_finish_fault
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    assert_ownerless_view_idempotent_drop_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_view_idempotent_drop_crash_ddl_state(
         paths,

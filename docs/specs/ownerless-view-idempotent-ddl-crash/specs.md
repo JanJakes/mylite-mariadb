@@ -9,7 +9,10 @@ kills mutating simple view create/drop writers, but the duplicate-create and
 missing-drop no-op paths still need deterministic crash evidence.
 
 This slice adds hook-build recovery evidence for duplicate idempotent view
-create and missing idempotent view drop.
+create and missing idempotent view drop. The follow-up
+[ownerless-view-idempotent-live-recovery](../ownerless-view-idempotent-live-recovery/specs.md)
+promotes these focused idempotent/no-op view forms to metadata-only live-peer
+recovery.
 
 ## Source Findings
 
@@ -41,7 +44,8 @@ Add two unsafe-hook selectors to
   name reaches `dictionary-before-finish`.
 
 Both selectors keep a live ownerless peer open while the writer is killed,
-prove cleanup remains busy until no-live recovery, then verify ownerless and
+recover the completed metadata-only no-op boundary through a new ownerless
+opener, keep the native file-operation marker clear, then verify ownerless and
 ordinary native reopen before and after forced `.shm` rebuild.
 
 ## Scope And Non-Goals
@@ -54,6 +58,7 @@ In scope:
   `DROP VIEW IF EXISTS` no-op behavior.
 - Definition preservation for the real view.
 - Absence of missing-view native files and metadata after no-op drop recovery.
+- Live-peer recovery without native file-operation marker evidence.
 - Ownerless/native reopen before and after forced `.shm` rebuild.
 
 Out of scope:
@@ -81,8 +86,8 @@ drop the real view, create missing-view metadata, or leave stale peer state.
 ## Directory And Lifecycle Impact
 
 No directory layout changes. The tests exercise native MariaDB view `.frm`
-files under `datadir/app/`, ownerless live-peer cleanup blocking, no-live
-recovery, forced `.shm` rebuild, and ordinary native exclusive reopen.
+files under `datadir/app/`, ownerless live-peer recovery, final no-live
+cleanup, forced `.shm` rebuild, and ordinary native exclusive reopen.
 
 ## Native Storage Impact
 
@@ -110,7 +115,10 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selectors reach the dictionary fault hook and do not hang.
-- A live peer prevents cleanup until no-live recovery.
+- A live peer remains open while a new ownerless opener recovers the completed
+  idempotent/no-op view metadata boundary.
+- The native file-operation marker remains clear for these metadata-only view
+  forms.
 - Duplicate idempotent create recovery keeps the original view definition,
   leaves the attempted replacement definition absent, and keeps plain duplicate
   create returning errno 1050.
