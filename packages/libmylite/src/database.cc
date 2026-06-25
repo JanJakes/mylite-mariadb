@@ -15546,16 +15546,16 @@ bool ownerless_truncate_table_recovery_statement(const SqlPolicyTokens &tokens) 
 }
 
 bool ownerless_drop_table_recovery_statement(const SqlPolicyTokens &tokens) {
-    if (tokens.count < 5U || !token_equals(tokens.values[0], "DROP") ||
+    if (tokens.count < 3U || !token_equals(tokens.values[0], "DROP") ||
         !token_equals(tokens.values[1], "TABLE")) {
         return false;
     }
-    if (!ownerless_table_identifier_token(tokens.values[2]) ||
-        !token_equals(tokens.values[3], ".") ||
-        !ownerless_table_identifier_token(tokens.values[4])) {
+
+    std::size_t index = 2U;
+    if (!consume_ownerless_table_identifier(tokens, index)) {
         return false;
     }
-    for (std::size_t index = 5U; index < tokens.count; ++index) {
+    for (; index < tokens.count; ++index) {
         if (!token_equals(tokens.values[index], ";")) {
             return false;
         }

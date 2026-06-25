@@ -608,6 +608,10 @@ if(BUILD_TESTING)
         COMMAND mylite_ownerless_cross_process_sql_test dictionary-drop-file-op-marker-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-implicit-drop-crash
+        COMMAND mylite_ownerless_cross_process_sql_test dictionary-implicit-drop-crash
+      )
+      add_test(
         NAME libmylite.ownerless-platform-probe-failure
         COMMAND mylite_ownerless_cross_process_sql_test platform-probe-failure
       )
@@ -961,6 +965,10 @@ if(BUILD_TESTING)
         TIMEOUT 120
       )
       set_tests_properties(libmylite.ownerless-dictionary-drop-file-op-marker-crash PROPERTIES
+        LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
+        TIMEOUT 120
+      )
+      set_tests_properties(libmylite.ownerless-dictionary-implicit-drop-crash PROPERTIES
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
         TIMEOUT 120
       )

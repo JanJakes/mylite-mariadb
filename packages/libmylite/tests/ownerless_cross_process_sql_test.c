@@ -1148,6 +1148,7 @@ static void test_crashed_truncate_dictionary_ddl_recovers_empty_table(void);
 static void test_crashed_implicit_truncate_dictionary_ddl_recovers_empty_table(void);
 static void test_crashed_truncate_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_drop_dictionary_ddl_recovers_absent_table(void);
+static void test_crashed_implicit_drop_dictionary_ddl_recovers_absent_table(void);
 static void test_crashed_drop_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_stale_drop_dictionary_ddl_skips_retained_tablespace(void);
 static void test_crashed_schema_create_dictionary_ddl_recovers_schema(void);
@@ -2059,6 +2060,10 @@ static void truncate_implicit_table_until_dictionary_finish_fault(
     int ready_fd
 );
 static void drop_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
+static void drop_implicit_table_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void create_schema_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void alter_schema_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void idempotent_create_schema_until_dictionary_finish_fault(
@@ -5244,6 +5249,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-implicit-drop-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_implicit_drop_dictionary_ddl_recovers_absent_table();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-drop-file-op-marker-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_drop_dictionary_ddl_marks_file_op_checkpoint();
@@ -6094,6 +6105,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_crashed_truncate_dictionary_ddl_recovers_empty_table),
     OWNERLESS_SQL_TEST_CASE(test_crashed_implicit_truncate_dictionary_ddl_recovers_empty_table),
     OWNERLESS_SQL_TEST_CASE(test_crashed_drop_dictionary_ddl_recovers_absent_table),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_implicit_drop_dictionary_ddl_recovers_absent_table),
     OWNERLESS_SQL_TEST_CASE(test_crashed_stale_drop_dictionary_ddl_skips_retained_tablespace),
     OWNERLESS_SQL_TEST_CASE(test_crashed_schema_create_dictionary_ddl_recovers_schema),
     OWNERLESS_SQL_TEST_CASE(test_crashed_schema_alter_dictionary_ddl_recovers_defaults),
@@ -55219,6 +55231,124 @@ static void test_crashed_drop_dictionary_ddl_recovers_absent_table(void) {
     run_crashed_drop_dictionary_ddl_recovers_absent_table(0);
 }
 
+static void test_crashed_implicit_drop_dictionary_ddl_recovers_absent_table(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-dictionary-implicit-drop-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    char *datadir_path;
+    char *app_path;
+    char *frm_path;
+    char *ibd_path;
+    ownerless_live_peer_guard live_peer;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    datadir_path = path_join(database_path, "datadir");
+    app_path = path_join(datadir_path, "app");
+    frm_path = path_join(app_path, "ownerless_implicit_drop_crash.frm");
+    ibd_path = path_join(app_path, "ownerless_implicit_drop_crash.ibd");
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_implicit_drop_crash ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_implicit_drop_crash VALUES (1, 10)");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_implicit_drop_crash") == 10U);
+    assert(path_exists(frm_path));
+    assert(path_exists(ibd_path));
+    assert(mylite_close(db) == MYLITE_OK);
+
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        drop_implicit_table_until_dictionary_finish_fault
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_implicit_drop_crash'"
+        ) == 0U
+    );
+    assert(
+        exec_status(db, "SELECT COUNT(*) FROM app.ownerless_implicit_drop_crash", NULL) != MYLITE_OK
+    );
+    assert(!path_exists(frm_path));
+    assert(!path_exists(ibd_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_implicit_drop_crash'"
+        ) == 0U
+    );
+    assert(
+        exec_status(db, "SELECT COUNT(*) FROM app.ownerless_implicit_drop_crash", NULL) != MYLITE_OK
+    );
+    assert(!path_exists(frm_path));
+    assert(!path_exists(ibd_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_implicit_drop_crash'"
+        ) == 0U
+    );
+    assert(
+        exec_status(db, "SELECT COUNT(*) FROM app.ownerless_implicit_drop_crash", NULL) != MYLITE_OK
+    );
+    assert(!path_exists(frm_path));
+    assert(!path_exists(ibd_path));
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_implicit_drop_crash'"
+        ) == 0U
+    );
+    assert(
+        exec_status(db, "SELECT COUNT(*) FROM app.ownerless_implicit_drop_crash", NULL) != MYLITE_OK
+    );
+    assert(!path_exists(frm_path));
+    assert(!path_exists(ibd_path));
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(ibd_path);
+    free(frm_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_drop_dictionary_ddl_marks_file_op_checkpoint(void) {
     run_crashed_drop_dictionary_ddl_recovers_absent_table(1);
 }
@@ -66492,6 +66622,23 @@ static void drop_table_until_dictionary_finish_fault(open_database_paths paths, 
         "dictionary-before-finish",
         "DROP TABLE app.ownerless_drop_crash"
     );
+}
+
+static void drop_implicit_table_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    mylite_db *db;
+    char ready_fd_value[32];
+
+    assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", ready_fd) > 0);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "USE app");
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "dictionary-before-finish", 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
+    exec_ok(db, "DROP TABLE ownerless_implicit_drop_crash");
+    (void)mylite_close(db);
+    _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
 }
 
 static void create_schema_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {

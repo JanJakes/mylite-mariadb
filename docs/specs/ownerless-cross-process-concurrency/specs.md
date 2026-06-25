@@ -7185,6 +7185,12 @@ subsystems that this mode needs:
   TRUNCATE table` writer at `dictionary-before-finish` with a live peer and
   proves empty-table recovery, live marker retention, final marker drain,
   forced `.shm` rebuild, and ordinary native reopen.
+  The implicit-drop follow-up broadens focused single-table drop recovery to
+  one- or two-part identifiers, kills a `USE app; DROP TABLE table` writer at
+  `dictionary-before-finish` with a live peer, and proves absent-table/file
+  recovery, live marker retention, final marker drain, forced `.shm` rebuild,
+  and ordinary native reopen. Same-statement multi-drop remains open because
+  the attempted selector hit a native InnoDB purge assertion before this hook.
 
   Ownerless DDL stress now treats pre-execution MyLite statement-lock
   `MYLITE_BUSY` as bounded retryable harness contention while keeping native
@@ -7200,11 +7206,12 @@ subsystems that this mode needs:
      DDL/file-lifecycle recovery beyond the now-covered plain/table-copy
      `CREATE TABLE`, focused CTAS, ordinary replacement, and replacement-copy
      LIKE/CTAS plus explicit schema-qualified and implicit-schema rename
-     lists, focused explicit and implicit truncate, and focused drop plus
-     focused force rebuild, dynamic row-format rebuild, and focused compressed
-     key-block row-format rebuild prefinish boundaries, especially remaining
-     rename/truncate variants, rebuilt, and multi-table/cross-schema dropped
-     file-per-table tablespaces while peers remain live.
+     lists, focused explicit and implicit truncate, focused explicit and
+     implicit single-table drop, plus focused force rebuild, dynamic row-format
+     rebuild, and focused compressed key-block row-format rebuild prefinish
+     boundaries, especially remaining rename/truncate variants, rebuilt, and
+     multi-table/cross-schema dropped file-per-table tablespaces while peers
+     remain live.
   2. Close remaining transaction crash windows, especially native
      rollback/savepoint-rollback internals and concurrent-writer savepoint
      schedules that combine native undo, ownerless page-write ownership, and
