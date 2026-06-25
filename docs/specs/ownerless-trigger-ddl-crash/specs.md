@@ -6,8 +6,11 @@ Ownerless trigger refresh coverage proves already-open peers observe simple
 `CREATE TRIGGER`, fire the trigger through base-table DML, and later observe
 `DROP TRIGGER`. The crash boundary still needs focused evidence: if a writer
 dies after MariaDB creates or removes native trigger metadata but before MyLite
-publishes ownerless dictionary finish, no-live recovery must preserve the
-completed trigger metadata state.
+publishes ownerless dictionary finish, ownerless recovery must preserve the
+completed trigger metadata state. The original selectors proved no-live
+recovery; `ownerless-trigger-create-drop-live-recovery` promotes the simple
+create/drop boundary to metadata-only recovery while another ownerless peer
+remains live.
 
 This slice adds deterministic crash-boundary evidence for simple trigger
 CREATE/DROP DDL. Replacement and ordering crash coverage is documented in
@@ -52,15 +55,16 @@ Add two unsafe-hook selectors:
   InnoDB base and audit tables, verifies the target trigger and native metadata
   files are absent, keeps a live ownerless peer open, kills a writer after
   `CREATE TRIGGER` completes natively but before ownerless dictionary finish,
-  verifies live-peer cleanup remains busy, then reopens no-live ownerless and
-  checks recovered trigger metadata and trigger firing.
+  then opens another ownerless handle while the peer remains live and checks
+  recovered trigger metadata, trigger firing, and the clear native
+  file-operation marker.
 - `dictionary-trigger-drop-crash` initializes an ownerless database with
   InnoDB base and audit tables plus a simple `AFTER INSERT` trigger, verifies
   the trigger is present and fires, keeps a live ownerless peer open, kills a
   writer after `DROP TRIGGER` completes natively but before ownerless
-  dictionary finish, verifies live-peer cleanup remains busy, then reopens
-  no-live ownerless and checks recovered trigger absence while the base table
-  remains writable and later inserts do not fire the dropped trigger.
+  dictionary finish, then opens another ownerless handle while the peer remains
+  live and checks recovered trigger absence, non-firing state, and the clear
+  native file-operation marker while the base table remains writable.
 
 Both selectors verify ownerless and ordinary native reopen before and after
 forced `.shm` rebuild.
@@ -123,7 +127,9 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selectors reach the dictionary fault hook and do not hang.
-- A live peer prevents cleanup until no-live recovery.
+- A live peer can remain open while another ownerless opener recovers the
+  completed trigger metadata boundary.
+- The native file-operation checkpoint-needed marker remains clear.
 - CREATE recovery exposes the trigger through `INFORMATION_SCHEMA.TRIGGERS`,
   preserves the `.TRG` and `.TRN` files, and fires the trigger through
   base-table inserts.
@@ -138,11 +144,10 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - This is deterministic simple trigger CREATE/DROP crash coverage, not the full
   trigger crash matrix.
 - Replacement/ordering crash recovery and bounded idempotent no-op crash
-  recovery are covered separately; delayed invalid-dependency trigger crash
-  recovery is covered by `ownerless-trigger-invalid-dependency-crash`, and
-  explicit current-user definer crash recovery is covered by
-  `ownerless-trigger-definer-crash`; stored-function trigger crash recovery is
-  covered by `ownerless-trigger-stored-function-crash`, while broader
-  privilege/security and randomized trigger crash variants remain separate
-  candidate slices.
+  recovery are covered separately. Delayed invalid-dependency and
+  stored-function trigger-body crash recovery share the syntax-simple
+  live-recovery lane from `ownerless-trigger-create-drop-live-recovery`.
+  Explicit current-user definer crash recovery is covered separately by
+  `ownerless-trigger-definer-crash`, while broader privilege/security and
+  randomized trigger crash variants remain separate candidate slices.
 - Full external MariaDB/RQG long-running DDL stress remains planned.

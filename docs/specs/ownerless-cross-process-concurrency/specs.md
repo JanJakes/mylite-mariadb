@@ -3032,26 +3032,30 @@ Tasks:
    Trigger DDL crash coverage now kills simple `CREATE TRIGGER` and
    `DROP TRIGGER` writers after MariaDB creates/removes native `.TRG` and
    `.TRN` metadata but before MyLite publishes ownerless dictionary finish;
-   live-peer cleanup remains busy until no-live recovery, and recovered
-   present/absent trigger metadata, file state, firing/non-firing behavior,
-   ownerless reopen, forced `.shm` rebuild, and native exclusive reopen are
-   verified. Replacement and ordering crash variants are covered separately,
+   a new ownerless opener now recovers those simple metadata-only boundaries
+   while another ownerless peer remains live and the native file-operation
+   marker stays clear, and recovered present/absent trigger metadata, file
+   state, firing/non-firing behavior, ownerless reopen, forced `.shm` rebuild,
+   and native exclusive reopen are verified. Replacement and ordering crash
+   variants are covered separately,
    and idempotent no-op crash coverage now proves duplicate
    `CREATE TRIGGER IF NOT EXISTS` and missing `DROP TRIGGER IF EXISTS`
    preserve the original trigger state after a killed writer at dictionary
-   finish. Delayed invalid-dependency crash coverage now proves a trigger
-   whose body references a missing audit table survives the same boundary,
+   finish. Delayed invalid-dependency crash coverage now uses the same
+   live-peer metadata-only lane for the syntax-simple trigger create, proving a
+   trigger whose body references a missing audit table survives the boundary,
    reports MariaDB 1146 when fired before the dependency exists, and fires once
    the dependency is created. Explicit-definer crash coverage now proves
    `CREATE DEFINER=CURRENT_USER TRIGGER` preserves non-empty
    `INFORMATION_SCHEMA.TRIGGERS.DEFINER` metadata, `DEFINER=` in
    `SHOW CREATE TRIGGER`, and trigger firing through ownerless/native reopen
    before and after forced `.shm` rebuild. Stored-function trigger crash
-   coverage now proves a trigger body that calls an exclusive-created stored
-   function survives the same dictionary boundary, remains visible through
-   native trigger files and `SHOW CREATE TRIGGER`, fails closed under the
-   ownerless stored-routine execution guard when fired, and still fires through
-   ordinary native reopen. Broader privilege/security and randomized trigger
+   coverage now uses the same live-peer metadata-only lane for the
+   syntax-simple trigger create, proving a trigger body that calls an
+   exclusive-created stored function survives the dictionary boundary, remains
+   visible through native trigger files and `SHOW CREATE TRIGGER`, fails closed
+   under the ownerless stored-routine execution guard when fired, and still
+   fires through ordinary native reopen. Broader privilege/security and randomized trigger
    crash variants remain planned. The explicit-definer crash selector is also
    registered as a standalone hook CTest so CI reports its timing and failures
    separately from larger crash-tail coverage.
@@ -4786,10 +4790,14 @@ Tasks:
    live. Focused invalid-dependency `DROP VIEW` prefinish crash coverage now
    recovers absent view metadata while a peer remains live after the base table
    was already dropped and the view was already reporting MariaDB errno 1356.
+   Focused simple `CREATE TRIGGER` and `DROP TRIGGER` prefinish crash coverage
+   now uses metadata-only recoverable dictionary markers to recover native
+   `.TRG`/`.TRN` creation or removal while a peer remains live and the native
+   file-operation marker stays clear.
    Implicit-schema, `IF EXISTS`, temporary-table, and view-only rename forms
    plus multi-table and cross-schema drop, broader ALTER rebuild beyond the
    focused force, row-format, compressed, and charset-conversion cases, schema,
-   broader view variants, trigger, and non-rename foreign-key multi-DDL
+   broader view and trigger variants, and non-rename foreign-key multi-DDL
    live-peer recovery remain planned.
    Final no-live close
    forces native checkpoint
@@ -7267,6 +7275,11 @@ subsystems that this mode needs:
   live-recovery lane, proving original definition preservation and missing-view
   absence while a peer remains live and the native file-operation marker stays
   clear.
+  The simple trigger create/drop follow-up promotes focused `CREATE TRIGGER`
+  and `DROP TRIGGER` crash selectors to the same metadata-only live-recovery
+  lane, proving native `.TRG`/`.TRN` creation or removal, trigger
+  firing/non-firing state, and `SHOW CREATE TRIGGER` behavior while a peer
+  remains live and the native file-operation marker stays clear.
 
   Ownerless DDL stress now treats pre-execution MyLite statement-lock
   `MYLITE_BUSY` as bounded retryable harness contention while keeping native
@@ -7288,7 +7301,8 @@ subsystems that this mode needs:
      charset-conversion rebuild prefinish boundaries, plus simple CREATE/DROP
      VIEW, focused CREATE OR REPLACE/ALTER VIEW, and focused explicit
      column-list, check-option, nested check-option, security/definer, and
-     idempotent/no-op view metadata-only prefinish boundaries, especially
+     idempotent/no-op view metadata-only prefinish boundaries, plus simple
+     CREATE/DROP TRIGGER metadata-only prefinish boundaries, especially
      remaining rename/truncate variants, rebuild variants, broader metadata-only DDL, and
      multi-table/cross-schema dropped file-per-table tablespaces while peers
      remain live.
