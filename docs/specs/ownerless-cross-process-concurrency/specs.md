@@ -7175,6 +7175,11 @@ subsystems that this mode needs:
   while the peer remains live, drains it after final no-live checkpoint proof,
   and preserves the rename through forced `.shm` rebuild and ordinary native
   reopen.
+  The ALTER-table rename follow-up classifies `ALTER TABLE ... RENAME TO` as
+  the same ownerless rename recovery kind, kills the writer at
+  `dictionary-before-finish` with a live peer, and proves target-table
+  recovery, marker retention/drain, forced `.shm` rebuild, ordinary native
+  reopen, and adjacent ALTER index rename non-regression.
 
   Ownerless DDL stress now treats pre-execution MyLite statement-lock
   `MYLITE_BUSY` as bounded retryable harness contention while keeping native

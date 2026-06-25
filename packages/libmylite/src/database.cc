@@ -2201,6 +2201,7 @@ bool ownerless_create_or_replace_table_recovery_statement(const SqlPolicyTokens 
 bool ownerless_create_or_replace_table_like_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_create_or_replace_table_select_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_rename_table_recovery_statement(const SqlPolicyTokens &tokens);
+bool ownerless_alter_table_rename_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_truncate_table_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_drop_table_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_alter_table_force_rebuild_recovery_statement(const SqlPolicyTokens &tokens);
@@ -15185,6 +15186,9 @@ std::uint32_t ownerless_dictionary_recovery_kind_for_statement(const SqlPolicyTo
     if (ownerless_rename_table_recovery_statement(tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_RENAME_TABLE;
     }
+    if (ownerless_alter_table_rename_recovery_statement(tokens)) {
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_RENAME_TABLE;
+    }
     if (ownerless_truncate_table_recovery_statement(tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_TRUNCATE_TABLE;
     }
@@ -15485,6 +15489,32 @@ bool ownerless_rename_table_recovery_statement(const SqlPolicyTokens &tokens) {
     }
 
     if (!saw_pair) {
+        return false;
+    }
+    for (; index < tokens.count; ++index) {
+        if (!token_equals(tokens.values[index], ";")) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool ownerless_alter_table_rename_recovery_statement(const SqlPolicyTokens &tokens) {
+    if (tokens.count < 6U || !token_equals(tokens.values[0], "ALTER") ||
+        !token_equals(tokens.values[1], "TABLE")) {
+        return false;
+    }
+
+    std::size_t index = 2U;
+    if (!consume_ownerless_rename_table_identifier(tokens, index) || index >= tokens.count ||
+        !token_equals(tokens.values[index], "RENAME")) {
+        return false;
+    }
+    ++index;
+    if (index < tokens.count && token_in(tokens.values[index], "TO", "AS", "=")) {
+        ++index;
+    }
+    if (!consume_ownerless_rename_table_identifier(tokens, index)) {
         return false;
     }
     for (; index < tokens.count; ++index) {
