@@ -2863,9 +2863,10 @@ Tasks:
    and after forced `.shm` rebuild. Hook-build schema-idempotent crash coverage
    now kills duplicate `CREATE DATABASE IF NOT EXISTS` and missing
    `DROP SCHEMA IF EXISTS` no-op writers after MariaDB returns success but
-   before ownerless dictionary finish, then verifies original schema defaults,
-   real schema/table preservation, missing-schema absence, ownerless/native
-   reopen, and forced `.shm` rebuild. Cross-schema rename coverage now creates an
+   before ownerless dictionary finish, then verifies live-peer recovery with the
+   native file-operation marker clear, original schema defaults, real
+   schema/table preservation, missing-schema absence, ownerless/native reopen,
+   and forced `.shm` rebuild. Cross-schema rename coverage now creates an
    InnoDB table in `app`, writes through it from an already-open peer, renames
    it into a second schema from the DDL process, verifies peer-visible source
    absence
@@ -3591,9 +3592,9 @@ Tasks:
    Hook-build schema-idempotent crash coverage adds killed duplicate
    `CREATE DATABASE IF NOT EXISTS` and missing `DROP SCHEMA IF EXISTS` no-op
    writers after MariaDB returns success but before ownerless dictionary finish,
-   with preserved original schema defaults, preserved real schema/table state,
-   missing-schema absence, ownerless/native reopen, and forced `.shm` rebuild
-   checks.
+   with live-peer marker-clear recovery, preserved original schema defaults,
+   preserved real schema/table state, missing-schema absence, ownerless/native
+   reopen, and forced `.shm` rebuild checks.
    Hook-build schema-create crash coverage adds a killed
    `CREATE DATABASE ... DEFAULT CHARACTER SET/COLLATE` writer after native
    schema directory/`db.opt` creation but before ownerless dictionary finish,
@@ -4810,12 +4811,14 @@ Tasks:
    native file-operation marker stays clear. Focused table-bearing
    `DROP DATABASE` prefinish crash coverage now recovers while a peer remains
    live and keeps the native file-operation marker set until final no-live
-   drain.
-   Implicit-schema, `IF EXISTS`, temporary-table, and view-only rename forms
-   plus `DROP TEMPORARY TABLE`, multi-table `DROP TABLE IF EXISTS` lists,
+   drain. Focused duplicate `CREATE DATABASE IF NOT EXISTS` and missing
+   `DROP SCHEMA IF EXISTS` no-op prefinish crash coverage now recovers while a
+   peer remains live with the native file-operation marker clear.
+   Implicit-schema, temporary-table, and view-only rename forms plus
+   `DROP TEMPORARY TABLE`, multi-table `DROP TABLE IF EXISTS` lists,
    inside-MariaDB-loop multi-drop crash points, broader ALTER rebuild beyond the
    focused force, row-format, compressed, and charset-conversion cases, schema
-   idempotent/no-op and synonym variants, broader view and trigger variants,
+   synonym and existing `IF EXISTS` variants, broader view and trigger variants,
    and non-rename foreign-key multi-DDL live-peer recovery remain planned.
    Final no-live close
    forces native checkpoint
@@ -5366,10 +5369,10 @@ Minimum suites before support can be claimed:
     reopen and forced `.shm` rebuild correct,
   - after duplicate `CREATE DATABASE IF NOT EXISTS` and missing
     `DROP SCHEMA IF EXISTS` no-op success but before ownerless dictionary
-    finish; hook coverage proves live-peer cleanup remains busy until no-live
-    recovery and preserved schema defaults, preserved real schema/table state,
-    missing-schema absence, ownerless/native reopen, and forced `.shm` rebuild
-    remain correct,
+    finish; hook coverage proves live-peer recovery with the native
+    file-operation marker clear and preserved schema defaults, preserved real
+    schema/table state, missing-schema absence, ownerless/native reopen, and
+    forced `.shm` rebuild remain correct,
   - after failed generated-column CREATE/ALTER/primary-key validation but
     before ownerless dictionary finish; hook coverage proves live-peer cleanup
     remains busy until no-live recovery, rejected tables/columns/files remain
@@ -7339,11 +7342,11 @@ subsystems that this mode needs:
      nested check-option, security/definer, and idempotent/no-op view
      metadata-only prefinish boundaries, plus simple CREATE/DROP TRIGGER
      metadata-only prefinish boundaries, plus focused CREATE/ALTER/DROP
-     DATABASE prefinish boundaries, especially remaining rename/truncate
-     variants, rebuild variants, broader metadata-only DDL, temporary,
-     multi-table `DROP TABLE IF EXISTS`, schema idempotent/no-op and synonym
-     variants, intra-loop drop cases, and broader DDL file lifecycle while
-     peers remain live.
+     DATABASE and schema idempotent/no-op prefinish boundaries, especially
+     remaining rename/truncate variants, rebuild variants, broader
+     metadata-only DDL, temporary, multi-table `DROP TABLE IF EXISTS`, schema
+     synonym and existing `IF EXISTS` variants, intra-loop drop cases, and
+     broader DDL file lifecycle while peers remain live.
   2. Close remaining transaction crash windows, especially native
      rollback/savepoint-rollback internals and concurrent-writer savepoint
      schedules that combine native undo, ownerless page-write ownership, and

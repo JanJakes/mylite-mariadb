@@ -8,8 +8,8 @@ Ownerless schema-idempotent DDL coverage verifies peer refresh for
 killed after MariaDB completes duplicate-create or missing-drop no-op schema DDL
 but before MyLite publishes ownerless dictionary finish.
 
-This slice adds hook-build recovery evidence for duplicate idempotent schema
-create and missing idempotent schema drop.
+This slice adds hook-build live-peer recovery evidence for duplicate
+idempotent schema create and missing idempotent schema drop.
 
 ## Source Findings
 
@@ -32,7 +32,19 @@ create and missing idempotent schema drop.
 
 ## Design
 
-Add two unsafe-hook selectors to
+Add distinct recoverable dictionary kinds for the no-op statement shapes:
+
+- `MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_SCHEMA_IF_NOT_EXISTS`
+- `MYLITE_OWNERLESS_DICTIONARY_RECOVERY_DROP_SCHEMA_IF_EXISTS`
+
+Classify bounded duplicate `CREATE DATABASE IF NOT EXISTS <identifier>` with
+default charset/collation options and bounded `DROP SCHEMA IF EXISTS
+<identifier>` into those kinds after native SQL success. Register both as
+metadata-only recovery. Also register `DROP_SCHEMA_IF_EXISTS` in the native
+file-operation lane so the same SQL spelling can safely recover through marker
+evidence when a later existing-schema variant performs native file removals.
+
+Promote the existing unsafe-hook selectors in
 `packages/libmylite/tests/ownerless_cross_process_sql_test.c`:
 
 - `dictionary-schema-idempotent-create-crash` creates a schema with explicit
@@ -44,8 +56,9 @@ Add two unsafe-hook selectors to
   missing schema name reaches `dictionary-before-finish`.
 
 Both selectors keep a live ownerless peer open while the writer is killed,
-prove cleanup remains busy until no-live recovery, then verify ownerless and
-ordinary native reopen before and after forced `.shm` rebuild.
+recover through a new ownerless opener while that peer remains live with the
+native file-operation marker clear, then verify ownerless and ordinary native
+reopen before and after forced `.shm` rebuild.
 
 ## Scope And Non-Goals
 
@@ -64,6 +77,8 @@ Out of scope:
 
 - `CREATE OR REPLACE DATABASE`.
 - Crash injection inside native `db.opt` write or schema directory creation.
+- Existing-schema `DROP DATABASE IF EXISTS` / `DROP SCHEMA IF EXISTS`
+  file-removal recovery beyond the conservative recovery-lane registration.
 - SQL-level table-lock fault injection for native table-wait paths.
 - External randomized DDL/RQG stress.
 
@@ -78,8 +93,9 @@ stale peer state.
 ## Directory And Lifecycle Impact
 
 No directory layout changes. The tests exercise native schema directories and
-`db.opt` files under `datadir/`, ownerless live-peer cleanup blocking, no-live
-recovery, forced `.shm` rebuild, and ordinary native exclusive reopen.
+`db.opt` files under `datadir/`, ownerless live-peer recovery with the native
+file-operation marker clear, forced `.shm` rebuild, and ordinary native
+exclusive reopen.
 
 ## Native Storage Impact
 
@@ -97,14 +113,17 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - Run focused selectors:
   - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-idempotent-create-crash`
   - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-idempotent-drop-crash`
+- Run the ownerless dictionary primitive test.
 - Run normal `schema-idempotent-ddl` selectors in `embedded-dev` and
   `ownerless-test-hooks`.
-- Run the relevant ownerless SQL CTest shards, `format-check`, and diff checks.
+- Run representative production schema selectors, ownerless DDL stress,
+  production-build guards, `format-check`, and diff checks.
 
 ## Acceptance Criteria
 
 - The focused selectors reach the dictionary fault hook and do not hang.
-- A live peer prevents cleanup until no-live recovery.
+- Live-peer recovery completes while the native file-operation marker remains
+  clear.
 - Duplicate idempotent create recovery keeps the original schema defaults,
   leaves the original table column collation unchanged, and keeps plain
   duplicate create returning errno 1007.
@@ -112,6 +131,28 @@ No public API, build-profile, binary-size, license, or dependency changes.
   missing schema absent.
 - Ownerless and ordinary native reopen observe the same rows and metadata
   before and after forced `.shm` rebuild.
+
+## Verification Results
+
+Passed:
+
+- `cmake --build --preset ownerless-test-hooks --target mylite_ownerless_primitives_test mylite_ownerless_cross_process_sql_test -j2`
+- `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-idempotent-create-crash`
+- `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-idempotent-drop-crash`
+- `ctest --preset ownerless-test-hooks -R '^libmylite\.ownerless-primitives$' --output-on-failure`
+- `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test schema-idempotent-ddl`
+- `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-create-crash`
+- `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-alter-crash`
+- `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-schema-drop-crash`
+- `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test schema-lifecycle`
+- `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test schema-default-ddl`
+- `cmake --build --preset php-embedded-prod --target mylite_ownerless_cross_process_sql_test -j2`
+- `build/php-embedded-prod/packages/libmylite/mylite_ownerless_cross_process_sql_test schema-idempotent-ddl`
+- `build/php-embedded-prod/packages/libmylite/mylite_ownerless_cross_process_sql_test schema-lifecycle`
+- `build/php-embedded-prod/packages/libmylite/mylite_ownerless_cross_process_sql_test schema-default-ddl`
+- `build/php-embedded-prod/packages/libmylite/mylite_ownerless_cross_process_sql_test ddl-broader`
+- `cmake --build --preset ownerless-stress --target mylite_ownerless_cross_process_sql_test -j2`
+- `ctest --preset ownerless-stress -R '^libmylite\.ownerless-cross-process-ddl-stress$' --output-on-failure`
 
 ## Risks And Follow-Up
 

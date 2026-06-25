@@ -14802,6 +14802,8 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_SCHEMA,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_SCHEMA,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_DROP_SCHEMA,
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_SCHEMA_IF_NOT_EXISTS,
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_DROP_SCHEMA_IF_EXISTS,
     };
     for (size_t index = 0U;
          index < sizeof(schema_recovery_kinds) / sizeof(schema_recovery_kinds[0]);

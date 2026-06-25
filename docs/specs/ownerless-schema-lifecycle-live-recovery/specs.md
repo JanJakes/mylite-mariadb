@@ -167,6 +167,7 @@ Passed:
 
 ## Risks And Follow-Up
 
-- Idempotent schema no-op live recovery remains a separate bounded slice.
+- Idempotent schema no-op live recovery is covered by
+  `ownerless-schema-idempotent-ddl-crash`.
 - `SCHEMA` synonym spellings, empty-schema drops, schema-drop intra-loop crash
   points, and external randomized DDL oracle execution remain planned.
