@@ -56,7 +56,8 @@ Out of scope:
 
 - Implicit-schema rename names.
 - `RENAME TABLE IF EXISTS` and temporary-table rename.
-- View-only rename classes.
+- View-only rename classes, covered separately by
+  `docs/specs/ownerless-view-rename-live-recovery/specs.md`.
 - Trigger-bearing rename classes.
 - Truncate, drop, rebuild, schema, view, trigger, partition/import/export, or
   metadata-only DDL live recovery.
@@ -151,7 +152,10 @@ Passed:
 
 ## Risks And Follow-Up
 
-- Implicit-schema, `IF EXISTS`, temporary-table, and view-only rename forms
-  require separate coverage before being considered live-recoverable.
+- Implicit-schema rename is covered by
+  `docs/specs/ownerless-implicit-rename-recovery/specs.md`, view-only rename is
+  covered by `docs/specs/ownerless-view-rename-live-recovery/specs.md`, and
+  `IF EXISTS` plus temporary-table rename forms require separate coverage before
+  being considered live-recoverable.
 - Broader DDL/file-lifecycle recovery and external randomized stress remain
   open completion gates.

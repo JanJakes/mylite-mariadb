@@ -58,8 +58,11 @@ In scope:
 
 Out of scope:
 
-- `RENAME TABLE IF EXISTS`, implicit-schema rename names, temporary-table
-  rename, view-only rename, and malformed rename lists.
+- `RENAME TABLE IF EXISTS`, temporary-table rename, and malformed rename lists.
+  Implicit-schema rename is covered separately by
+  `docs/specs/ownerless-implicit-rename-recovery/specs.md`, and view-only
+  rename is covered separately by
+  `docs/specs/ownerless-view-rename-live-recovery/specs.md`.
 - Crash injection inside MariaDB's native rename loop or DDL-log rollback path.
 - Foreign-key ADD/DROP live recovery outside rename-list file movement.
 - Broader schema, view, trigger, partition, import/export, and arbitrary ALTER
@@ -84,8 +87,9 @@ The classifier requires every old and new name to be represented as
 commas only between complete pairs, and allows only trailing semicolons after
 the final pair. Because `ownerless_finish_dictionary_ddl()` marks the
 dictionary owner recoverable only after native file-op redo has been observed,
-the classifier alone does not make non-InnoDB or view-only rename classes live
-recoverable.
+the classifier alone does not make non-InnoDB table rename classes live
+recoverable. View-only rename uses the separate metadata-only kind documented in
+`docs/specs/ownerless-view-rename-live-recovery/specs.md`.
 
 Hook tests now keep the original peer open after killing the writer, open a
 second ownerless handle, verify the final renamed state and post-recovery
@@ -154,7 +158,7 @@ and hook-test coverage only.
 - The classifier is intentionally syntactic. It admits explicit
   schema-qualified native rename lists only when InnoDB file-op redo evidence
   exists, but it does not prove crashes inside MariaDB's rename loop.
-- Implicit-schema and `IF EXISTS` rename forms remain planned until they have
+- `IF EXISTS` and temporary-table rename forms remain planned until they have
   focused recovery coverage.
 - Broader DDL/file-lifecycle recovery, transaction crash windows,
   active-reader pressure crash/oracle breadth, and randomized external

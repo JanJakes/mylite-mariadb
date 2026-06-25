@@ -602,6 +602,10 @@ if(BUILD_TESTING)
         COMMAND mylite_ownerless_cross_process_sql_test dictionary-view-alter-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-view-rename-crash
+        COMMAND mylite_ownerless_cross_process_sql_test dictionary-view-rename-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-view-column-list-create-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -1049,6 +1053,7 @@ if(BUILD_TESTING)
         libmylite.ownerless-dictionary-view-drop-crash
         libmylite.ownerless-dictionary-view-replace-crash
         libmylite.ownerless-dictionary-view-alter-crash
+        libmylite.ownerless-dictionary-view-rename-crash
         libmylite.ownerless-dictionary-view-column-list-create-crash
         libmylite.ownerless-dictionary-view-column-list-replace-crash
         libmylite.ownerless-dictionary-view-column-list-alter-crash

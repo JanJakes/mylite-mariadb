@@ -1089,6 +1089,7 @@ static void test_crashed_view_idempotent_create_dictionary_ddl_preserves_view(vo
 static void test_crashed_view_idempotent_drop_dictionary_ddl_preserves_view(void);
 static void test_crashed_view_replace_dictionary_ddl_recovers_replaced_view(void);
 static void test_crashed_view_alter_dictionary_ddl_recovers_altered_view(void);
+static void test_crashed_view_rename_dictionary_ddl_recovers_renamed_view(void);
 static void test_crashed_view_column_list_create_dictionary_ddl_recovers_aliases(void);
 static void test_crashed_view_column_list_replace_dictionary_ddl_recovers_aliases(void);
 static void test_crashed_view_column_list_alter_dictionary_ddl_recovers_aliases(void);
@@ -1658,6 +1659,7 @@ static void rename_cross_schema_multi_table_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
+static void rename_view_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void create_secondary_index_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -3144,6 +3146,11 @@ static void assert_ownerless_view_replace_crash_ddl_state(
     const char *database_path
 );
 static void assert_ownerless_view_alter_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_view_rename_crash_ddl_state(
     open_database_paths paths,
     unsigned flags,
     const char *database_path
@@ -4975,6 +4982,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-view-rename-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_view_rename_dictionary_ddl_recovers_renamed_view();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-view-column-list-create-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_view_column_list_create_dictionary_ddl_recovers_aliases();
@@ -5803,6 +5816,7 @@ int main(int argc, char **argv) {
             "dictionary-view-idempotent-drop-crash|"
             "dictionary-view-replace-crash|"
             "dictionary-view-alter-crash|"
+            "dictionary-view-rename-crash|"
             "dictionary-view-column-list-create-crash|"
             "dictionary-view-column-list-replace-crash|"
             "dictionary-view-column-list-alter-crash|"
@@ -6238,6 +6252,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_crashed_view_idempotent_drop_dictionary_ddl_preserves_view),
     OWNERLESS_SQL_TEST_CASE(test_crashed_view_replace_dictionary_ddl_recovers_replaced_view),
     OWNERLESS_SQL_TEST_CASE(test_crashed_view_alter_dictionary_ddl_recovers_altered_view),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_view_rename_dictionary_ddl_recovers_renamed_view),
     OWNERLESS_SQL_TEST_CASE(test_crashed_view_column_list_create_dictionary_ddl_recovers_aliases),
     OWNERLESS_SQL_TEST_CASE(test_crashed_view_column_list_replace_dictionary_ddl_recovers_aliases),
     OWNERLESS_SQL_TEST_CASE(test_crashed_view_column_list_alter_dictionary_ddl_recovers_aliases),
@@ -49729,6 +49744,107 @@ static void test_crashed_view_alter_dictionary_ddl_recovers_altered_view(void) {
     free(root);
 }
 
+static void test_crashed_view_rename_dictionary_ddl_recovers_renamed_view(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-dictionary-view-rename-crash.mylite");
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *source_view_path = path_join(app_path, "ownerless_view_rename_crash_source.frm");
+    char *target_view_path = path_join(app_path, "ownerless_view_rename_crash_target.frm");
+    char *base_ibd_path = path_join(app_path, "ownerless_view_rename_crash_base.ibd");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_view_rename_crash_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note VARCHAR(24) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_view_rename_crash_base VALUES "
+        "(1, 10, 'alpha'), (2, 20, 'beta')"
+    );
+    exec_ok(
+        db,
+        "CREATE VIEW app.ownerless_view_rename_crash_source AS "
+        "SELECT id, value, note "
+        "FROM app.ownerless_view_rename_crash_base "
+        "WHERE value >= 10"
+    );
+    exec_ok(db, "COMMIT");
+    assert(path_exists(source_view_path));
+    assert(!path_exists(target_view_path));
+    assert(path_exists(base_ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_rename_crash_source'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_rename_crash_target'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_rename_crash_source") == 30U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        rename_view_until_dictionary_finish_fault
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    assert_ownerless_view_rename_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
+
+    assert_ownerless_view_rename_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_view_rename_crash_ddl_state(paths, MYLITE_OPEN_READWRITE, database_path);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_view_rename_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_view_rename_crash_ddl_state(paths, MYLITE_OPEN_READWRITE, database_path);
+
+    free(base_ibd_path);
+    free(target_view_path);
+    free(source_view_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_view_column_list_create_dictionary_ddl_recovers_aliases(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -66863,6 +66979,16 @@ static void rename_cross_schema_multi_table_until_dictionary_finish_fault(
     );
 }
 
+static void rename_view_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "RENAME TABLE app.ownerless_view_rename_crash_source "
+        "TO app.ownerless_view_rename_crash_target"
+    );
+}
+
 static void create_secondary_index_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -81245,6 +81371,77 @@ static void assert_ownerless_view_alter_crash_ddl_state(
     assert(path_exists(view_path));
 
     free(view_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_view_rename_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *source_view_path = path_join(app_path, "ownerless_view_rename_crash_source.frm");
+    char *target_view_path = path_join(app_path, "ownerless_view_rename_crash_target.frm");
+    char *base_ibd_path = path_join(app_path, "ownerless_view_rename_crash_base.ibd");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(!path_exists(source_view_path));
+    assert(path_exists(target_view_path));
+    assert(path_exists(base_ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_rename_crash_source'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_rename_crash_target'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_rename_crash_target' "
+            "AND column_name IN ('id', 'value', 'note')"
+        ) == 3U
+    );
+    assert(
+        exec_status(db, "SELECT COUNT(*) FROM app.ownerless_view_rename_crash_source", NULL) !=
+        MYLITE_OK
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_rename_crash_base") == 2U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_rename_crash_base") == 30U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_rename_crash_target") == 2U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_rename_crash_target") == 30U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_view_rename_crash_base VALUES (3, 30, 'gamma')");
+    exec_ok(db, "COMMIT");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_rename_crash_target") == 3U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_rename_crash_target") == 60U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_view_rename_crash_base WHERE id = 3");
+    exec_ok(db, "COMMIT");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_rename_crash_base") == 2U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_rename_crash_target") == 2U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(base_ibd_path);
+    free(target_view_path);
+    free(source_view_path);
     free(app_path);
     free(datadir_path);
 }

@@ -4832,10 +4832,11 @@ Tasks:
    table-bearing `DROP DATABASE|SCHEMA IF EXISTS` prefinish crash coverage now
    recovers while a peer remains live and keeps the native file-operation
    marker set until final no-live drain.
-   Implicit-schema, temporary-table, and view-only rename forms plus
-   `DROP TEMPORARY TABLE`, inside-MariaDB-loop multi-drop crash points,
-   broader ALTER rebuild beyond the
-   focused force, row-format, compressed, and charset-conversion cases,
+   View-only `RENAME TABLE` prefinish crash coverage now uses metadata-only
+   live-peer recovery while keeping the native file-operation marker clear.
+   Temporary-table rename forms plus `DROP TEMPORARY TABLE`,
+   inside-MariaDB-loop multi-drop crash points, broader ALTER rebuild beyond
+   the focused force, row-format, compressed, and charset-conversion cases,
    broader schema option variants, broader view and trigger variants, and
    non-rename foreign-key multi-DDL live-peer recovery remain planned.
    Final no-live close
@@ -7283,6 +7284,12 @@ subsystems that this mode needs:
   `dictionary-before-finish` with a live peer, and proves target-table
   recovery, marker retention/drain, forced `.shm` rebuild, ordinary native
   reopen, and adjacent ALTER index rename non-regression.
+  The view-rename follow-up proves `RENAME TABLE` for a source object that is
+  preflighted as a view before execution uses a metadata-only recoverable
+  dictionary marker, kills the writer at `dictionary-before-finish` with a live
+  peer, and proves source-view absence, target-view reads, base-table
+  preservation, forced `.shm` rebuild, ordinary native reopen, and a clear
+  native file-operation marker.
   The implicit-truncate follow-up broadens truncate recovery classification to
   MariaDB's `TRUNCATE opt_table_sym table_name` shape, then kills a `USE app;
   TRUNCATE table` writer at `dictionary-before-finish` with a live peer and
