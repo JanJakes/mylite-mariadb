@@ -40,7 +40,7 @@ The selector:
 - kills a writer after `ALTER DATABASE ownerless_schema_alter_crash DEFAULT
   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci` completes natively but
   before ownerless dictionary finish,
-- verifies live-peer cleanup remains busy until no-live recovery,
+- verifies live-peer recovery with the native file-operation marker clear,
 - verifies recovered schema defaults are `utf8mb4`/`utf8mb4_unicode_ci`,
 - verifies the pre-alter table keeps its `latin1` column metadata,
 - creates a post-recovery table that inherits the recovered `utf8mb4` defaults,
@@ -74,8 +74,8 @@ dictionary publication boundary.
 ## Directory And Lifecycle Impact
 
 No directory layout changes. The test exercises MariaDB's native
-`datadir/<schema>/db.opt`, ownerless live-peer cleanup blocking, no-live
-recovery, forced `.shm` rebuild, and ordinary native exclusive reopen.
+`datadir/<schema>/db.opt`, ownerless live-peer recovery, forced `.shm` rebuild,
+and ordinary native exclusive reopen.
 
 ## Native Storage Impact
 
@@ -98,7 +98,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selector reaches the dictionary fault hook and does not hang.
-- A live peer prevents cleanup until no-live recovery.
+- Live-peer recovery observes the altered defaults while the native
+  file-operation marker remains clear.
 - Recovery exposes the altered schema defaults through
   `INFORMATION_SCHEMA.SCHEMATA`.
 - The schema directory and `db.opt` file exist under `datadir/`.

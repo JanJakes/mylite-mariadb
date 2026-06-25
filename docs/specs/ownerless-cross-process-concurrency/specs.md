@@ -2833,11 +2833,13 @@ Tasks:
    verifies peer-visible absence plus ownerless/native reopen before and after
    forced `.shm` rebuild. Hook-build schema-create crash coverage now kills a
    `CREATE DATABASE` writer after native schema directory/`db.opt` creation
-   but before ownerless dictionary finish and verifies recovered schema
-   defaults, post-recovery table creation, ownerless/native reopen, and forced
-   `.shm` rebuild. Hook-build schema-alter crash coverage now kills an
+   but before ownerless dictionary finish, then verifies live-peer recovery
+   with the native file-operation marker clear, recovered schema defaults,
+   post-recovery table creation, ownerless/native reopen, and forced `.shm`
+   rebuild. Hook-build schema-alter crash coverage now kills an
    `ALTER DATABASE` writer after native `db.opt` rewrite but before ownerless
-   dictionary finish and verifies recovered schema defaults, pre-alter table
+   dictionary finish, then verifies live-peer recovery with the native
+   file-operation marker clear, recovered schema defaults, pre-alter table
    collation preservation, post-recovery table default inheritance,
    ownerless/native reopen, and forced `.shm` rebuild. Stale-reader
    schema-drop replay coverage now verifies
@@ -2845,7 +2847,8 @@ Tasks:
    checkpointed during no-live rebuild without recreating schema metadata,
    table metadata, the schema directory, or table files. Hook-build schema-drop
    crash coverage now kills a `DROP DATABASE` writer after native schema/table
-   removal but before ownerless dictionary finish and verifies no-live
+   removal but before ownerless dictionary finish, then verifies live-peer
+   recovery with marker retention until final no-live drain and
    ownerless/native reopen of the absent schema before and after forced `.shm`
    rebuild. Schema default DDL
    coverage now creates a schema with
@@ -3594,14 +3597,15 @@ Tasks:
    Hook-build schema-create crash coverage adds a killed
    `CREATE DATABASE ... DEFAULT CHARACTER SET/COLLATE` writer after native
    schema directory/`db.opt` creation but before ownerless dictionary finish,
-   with recovered default metadata, post-recovery InnoDB table writes,
-   ownerless/native reopen, and forced `.shm` rebuild checks.
+   with live-peer marker-clear recovery, recovered default metadata,
+   post-recovery InnoDB table writes, ownerless/native reopen, and forced
+   `.shm` rebuild checks.
    Hook-build schema-alter crash coverage adds a killed
    `ALTER DATABASE ... DEFAULT CHARACTER SET/COLLATE` writer after native
-   `db.opt` rewrite but before ownerless dictionary finish, with recovered
-   default metadata, pre-alter table collation preservation, post-recovery
-   default inheritance, ownerless/native reopen, and forced `.shm` rebuild
-   checks.
+   `db.opt` rewrite but before ownerless dictionary finish, with live-peer
+   marker-clear recovery, recovered default metadata, pre-alter table collation
+   preservation, post-recovery default inheritance, ownerless/native reopen,
+   and forced `.shm` rebuild checks.
    Cross-schema rename coverage adds ownerless `RENAME TABLE app.t TO other.t`,
    already-open peer metadata refresh for the old and new schema-qualified
    names, peer writes through the moved table, `.frm`/`.ibd` movement checks,
@@ -4800,12 +4804,19 @@ Tasks:
    now uses metadata-only recoverable dictionary markers to recover native
    `.TRG`/`.TRN` creation or removal while a peer remains live and the native
    file-operation marker stays clear.
+   Focused `CREATE DATABASE` and `ALTER DATABASE` prefinish crash coverage now
+   uses metadata-only recoverable dictionary markers to recover native schema
+   directory/`db.opt` creation or rewrite while a peer remains live and the
+   native file-operation marker stays clear. Focused table-bearing
+   `DROP DATABASE` prefinish crash coverage now recovers while a peer remains
+   live and keeps the native file-operation marker set until final no-live
+   drain.
    Implicit-schema, `IF EXISTS`, temporary-table, and view-only rename forms
    plus `DROP TEMPORARY TABLE`, multi-table `DROP TABLE IF EXISTS` lists,
    inside-MariaDB-loop multi-drop crash points, broader ALTER rebuild beyond the
-   focused force, row-format, compressed, and charset-conversion cases, schema,
-   broader view and trigger variants, and non-rename foreign-key multi-DDL
-   live-peer recovery remain planned.
+   focused force, row-format, compressed, and charset-conversion cases, schema
+   idempotent/no-op and synonym variants, broader view and trigger variants,
+   and non-rename foreign-key multi-DDL live-peer recovery remain planned.
    Final no-live close
    forces native checkpoint
    proof for retained page-version WAL
@@ -5339,14 +5350,20 @@ Minimum suites before support can be claimed:
     reopen, and forced `.shm` rebuild remain correct,
   - after representative `CREATE DATABASE` native schema directory/`db.opt`
     creation but before ownerless dictionary finish; hook coverage proves
-    live-peer cleanup remains busy until no-live recovery and recovered schema
-    defaults, post-recovery table writes, ownerless/native reopen, and forced
-    `.shm` rebuild remain correct,
+    live-peer recovery with the native file-operation marker clear and
+    recovered schema defaults, post-recovery table writes, ownerless/native
+    reopen, and forced `.shm` rebuild remain correct,
   - after representative `ALTER DATABASE` native `db.opt` rewrite but before
-    ownerless dictionary finish; hook coverage proves live-peer cleanup remains
-    busy until no-live recovery and recovered schema defaults, pre-alter table
-    collation preservation, post-recovery table default inheritance,
-    ownerless/native reopen, and forced `.shm` rebuild remain correct,
+    ownerless dictionary finish; hook coverage proves live-peer recovery with
+    the native file-operation marker clear and recovered schema defaults,
+    pre-alter table collation preservation, post-recovery table default
+    inheritance, ownerless/native reopen, and forced `.shm` rebuild remain
+    correct,
+  - after representative table-bearing `DROP DATABASE` native schema/table
+    removal but before ownerless dictionary finish; hook coverage proves
+    live-peer recovery preserves schema/table absence while retaining the native
+    file-operation marker until final no-live drain, with ownerless/native
+    reopen and forced `.shm` rebuild correct,
   - after duplicate `CREATE DATABASE IF NOT EXISTS` and missing
     `DROP SCHEMA IF EXISTS` no-op success but before ownerless dictionary
     finish; hook coverage proves live-peer cleanup remains busy until no-live
@@ -7321,10 +7338,12 @@ subsystems that this mode needs:
      REPLACE/ALTER VIEW, and focused explicit column-list, check-option,
      nested check-option, security/definer, and idempotent/no-op view
      metadata-only prefinish boundaries, plus simple CREATE/DROP TRIGGER
-     metadata-only prefinish boundaries, especially remaining rename/truncate
+     metadata-only prefinish boundaries, plus focused CREATE/ALTER/DROP
+     DATABASE prefinish boundaries, especially remaining rename/truncate
      variants, rebuild variants, broader metadata-only DDL, temporary,
-     multi-table `DROP TABLE IF EXISTS`, intra-loop drop cases, and broader DDL
-     file lifecycle while peers remain live.
+     multi-table `DROP TABLE IF EXISTS`, schema idempotent/no-op and synonym
+     variants, intra-loop drop cases, and broader DDL file lifecycle while
+     peers remain live.
   2. Close remaining transaction crash windows, especially native
      rollback/savepoint-rollback internals and concurrent-writer savepoint
      schedules that combine native undo, ownerless page-write ownership, and

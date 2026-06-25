@@ -48,7 +48,7 @@ The selector:
 - kills a writer after `CREATE DATABASE ownerless_schema_create_crash DEFAULT
   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci` completes natively but
   before ownerless dictionary finish,
-- verifies live-peer cleanup remains busy until no-live recovery,
+- verifies live-peer recovery with the native file-operation marker clear,
 - verifies the recovered schema directory and `db.opt` file exist,
 - verifies `INFORMATION_SCHEMA.SCHEMATA` reports the recovered defaults,
 - creates and writes an InnoDB table in the recovered schema,
@@ -84,8 +84,8 @@ survives writer death at MyLite's dictionary publication boundary.
 
 No directory layout changes are introduced. The test exercises the MariaDB
 native schema directory and `db.opt` under the MyLite-owned `datadir/`
-directory, ownerless live-peer cleanup blocking, no-live recovery, forced
-`.shm` rebuild, and ordinary native exclusive reopen.
+directory, ownerless live-peer recovery, forced `.shm` rebuild, and ordinary
+native exclusive reopen.
 
 ## Native Storage Impact
 
@@ -111,7 +111,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selector reaches the dictionary fault hook and does not hang.
-- A live peer prevents cleanup until no-live recovery.
+- Live-peer recovery observes the schema while the native file-operation marker
+  remains clear.
 - Recovery exposes the schema through `INFORMATION_SCHEMA.SCHEMATA`.
 - The schema directory and `db.opt` file exist under `datadir/`.
 - Explicit recovered charset/collation defaults are visible.

@@ -56360,6 +56360,7 @@ static void test_crashed_schema_create_dictionary_ddl_recovers_schema(void) {
     char *schema_path = path_join(datadir_path, "ownerless_schema_create_crash");
     char *db_opt_path = path_join(schema_path, "db.opt");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -56375,7 +56376,11 @@ static void test_crashed_schema_create_dictionary_ddl_recovers_schema(void) {
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(paths, create_schema_until_dictionary_finish_fault);
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        create_schema_until_dictionary_finish_fault
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(path_exists(schema_path));
@@ -56389,6 +56394,12 @@ static void test_crashed_schema_create_dictionary_ddl_recovers_schema(void) {
             "AND default_collation_name = 'utf8mb4_unicode_ci'"
         ) == 1U
     );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(
         db,
         "CREATE TABLE ownerless_schema_create_crash.ownerless_schema_create_crash_table ("
@@ -56443,6 +56454,7 @@ static void test_crashed_schema_alter_dictionary_ddl_recovers_defaults(void) {
     char *schema_path = path_join(datadir_path, "ownerless_schema_alter_crash");
     char *db_opt_path = path_join(schema_path, "db.opt");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -56479,7 +56491,11 @@ static void test_crashed_schema_alter_dictionary_ddl_recovers_defaults(void) {
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(paths, alter_schema_until_dictionary_finish_fault);
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        alter_schema_until_dictionary_finish_fault
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(path_exists(schema_path));
@@ -56504,6 +56520,12 @@ static void test_crashed_schema_alter_dictionary_ddl_recovers_defaults(void) {
             "AND collation_name = 'latin1_swedish_ci'"
         ) == 1U
     );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(
         db,
         "UPDATE ownerless_schema_alter_crash.ownerless_schema_alter_before "
@@ -56848,12 +56870,7 @@ static void test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema(void)
     char *schema_path;
     char *frm_path;
     char *ibd_path;
-    int writer_ready_pipe[2];
-    int peer_ready_pipe[2];
-    int peer_release_pipe[2];
-    pid_t writer_child;
-    pid_t peer_child;
-    pid_t probe_child;
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -56881,59 +56898,27 @@ static void test_crashed_schema_drop_dictionary_ddl_recovers_absent_schema(void)
     assert(path_exists(ibd_path));
     assert(mylite_close(db) == MYLITE_OK);
 
-    assert(pipe(writer_ready_pipe) == 0);
-    assert(pipe(peer_ready_pipe) == 0);
-    assert(pipe(peer_release_pipe) == 0);
-
-    peer_child = fork();
-    assert(peer_child >= 0);
-    if (peer_child == 0) {
-        close(peer_ready_pipe[0]);
-        close(peer_release_pipe[1]);
-        close(writer_ready_pipe[0]);
-        close(writer_ready_pipe[1]);
-        hold_ownerless_open_until_released(
-            paths,
-            (child_pipes){
-                .ready_write_fd = peer_ready_pipe[1],
-                .release_read_fd = peer_release_pipe[0],
-            }
-        );
-    }
-
-    close(peer_ready_pipe[1]);
-    close(peer_release_pipe[0]);
-    wait_for_pipe(peer_ready_pipe[0]);
-
-    writer_child = fork();
-    assert(writer_child >= 0);
-    if (writer_child == 0) {
-        close(writer_ready_pipe[0]);
-        close(peer_ready_pipe[0]);
-        close(peer_release_pipe[1]);
-        drop_schema_until_dictionary_finish_fault(paths, writer_ready_pipe[1]);
-    }
-
-    close(writer_ready_pipe[1]);
-    wait_for_pipe(writer_ready_pipe[0]);
-    assert(kill(writer_child, SIGKILL) == 0);
-    wait_for_signaled_child(writer_child, SIGKILL);
-
-    probe_child = fork();
-    assert(probe_child >= 0);
-    if (probe_child == 0) {
-        assert_ownerless_open_returns_busy(paths);
-    }
-    wait_for_child(probe_child);
-
-    signal_pipe(peer_release_pipe[1]);
-    wait_for_child(peer_child);
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        drop_schema_until_dictionary_finish_fault
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     assert_ownerless_schema_lifecycle_absent(
         paths,
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
         database_path
     );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
+
+    assert_ownerless_schema_lifecycle_absent(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     remove_concurrency_shm(database_path);
     assert_ownerless_schema_lifecycle_absent(
         paths,

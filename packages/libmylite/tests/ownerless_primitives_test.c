@@ -14797,6 +14797,57 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
         ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
     );
     assert(generation == 40U);
+
+    const uint32_t schema_recovery_kinds[] = {
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_SCHEMA,
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_SCHEMA,
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_DROP_SCHEMA,
+    };
+    for (size_t index = 0U;
+         index < sizeof(schema_recovery_kinds) / sizeof(schema_recovery_kinds[0]);
+         ++index) {
+        assert(
+            mylite_ownerless_dictionary_state_begin_ddl(
+                state,
+                sizeof(state),
+                10U,
+                100U,
+                UINT64_MAX,
+                MYLITE_TEST_WAIT_TIMEOUT_MS,
+                &generation
+            ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+        );
+        assert(
+            mylite_ownerless_dictionary_state_mark_recoverable(
+                state,
+                sizeof(state),
+                10U,
+                100U,
+                schema_recovery_kinds[index]
+            ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+        );
+        assert(
+            mylite_ownerless_dictionary_state_recover_dead_owner(
+                state,
+                sizeof(state),
+                10U,
+                100U,
+                MYLITE_OWNERLESS_DICTIONARY_RECOVERY_DROP_TABLE_IF_EXISTS,
+                &generation
+            ) == MYLITE_OWNERLESS_DICTIONARY_STATE_ERROR
+        );
+        assert(
+            mylite_ownerless_dictionary_state_recover_dead_owner(
+                state,
+                sizeof(state),
+                10U,
+                100U,
+                schema_recovery_kinds[index],
+                &generation
+            ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+        );
+        assert(generation == 42U + (2U * (uint64_t)index));
+    }
 }
 
 static void test_redo_state_tracks_lsn_and_owner_lifecycle(void) {
