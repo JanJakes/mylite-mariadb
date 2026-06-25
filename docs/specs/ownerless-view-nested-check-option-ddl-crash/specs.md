@@ -9,7 +9,10 @@ MariaDB has rewritten the native view definition file and before MyLite
 publishes ownerless dictionary finish.
 
 This slice adds deterministic crash-boundary evidence for nested view
-check-option propagation.
+check-option propagation. The follow-up
+[ownerless-view-nested-check-option-live-recovery](../ownerless-view-nested-check-option-live-recovery/specs.md)
+promotes the focused nested outer replacement and inner alter forms to
+metadata-only live-peer recovery.
 
 ## Source Findings
 
@@ -63,7 +66,8 @@ Add two unsafe-hook selectors to `mylite_ownerless_cross_process_sql_test`:
   predicate from `value >= 10` to `value >= 8`, then verifies recovered nested
   metadata and the altered inner-predicate enforcement through the outer view.
 
-Both selectors verify ownerless and ordinary native reopen before and after a
+Both selectors verify metadata-only live recovery while another ownerless peer
+remains open, then ownerless and ordinary native reopen before and after a
 forced `.shm` rebuild.
 
 ## Scope
@@ -80,6 +84,7 @@ In scope:
 - Query behavior and valid DML through the recovered outer updatable view.
 - Invalid insert/update failure with MariaDB errno 1369 for inner and outer
   predicate violations.
+- Live-peer recovery without native file-operation marker evidence.
 - Ownerless/native reopen before and after forced `.shm` rebuild.
 
 Out of scope:
@@ -100,7 +105,7 @@ enforce MariaDB-compatible DML errors.
 
 No directory layout changes are introduced. The tests exercise native MariaDB
 view `.frm` files inside the MyLite-owned database directory, ownerless
-live-peer cleanup blocking, no-live recovery, forced `.shm` rebuild, and native
+live-peer recovery, final no-live cleanup, forced `.shm` rebuild, and native
 exclusive reopen.
 
 ## Native Storage Impact
@@ -127,7 +132,10 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selectors reach the dictionary fault hook and do not hang.
-- A live peer prevents cleanup until no-live recovery.
+- A live peer remains open while a new ownerless opener recovers the completed
+  nested view metadata and check-option propagation state.
+- The native file-operation marker remains clear for these metadata-only view
+  forms.
 - Outer replacement recovery exposes the outer view as `CASCADED`, rejects a
   row that violates the inner predicate, accepts a valid nested view write, and
   rejects a row that violates the outer predicate.

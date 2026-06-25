@@ -638,6 +638,18 @@ if(BUILD_TESTING)
           dictionary-view-check-option-alter-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-view-nested-check-option-outer-replace-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-view-nested-check-option-outer-replace-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-view-nested-check-option-inner-alter-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-view-nested-check-option-inner-alter-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-view-idempotent-create-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -1018,6 +1030,8 @@ if(BUILD_TESTING)
         libmylite.ownerless-dictionary-view-check-option-create-crash
         libmylite.ownerless-dictionary-view-check-option-replace-crash
         libmylite.ownerless-dictionary-view-check-option-alter-crash
+        libmylite.ownerless-dictionary-view-nested-check-option-outer-replace-crash
+        libmylite.ownerless-dictionary-view-nested-check-option-inner-alter-crash
         libmylite.ownerless-dictionary-view-idempotent-create-crash
         libmylite.ownerless-dictionary-view-idempotent-drop-crash
         libmylite.ownerless-dictionary-trigger-definer-crash

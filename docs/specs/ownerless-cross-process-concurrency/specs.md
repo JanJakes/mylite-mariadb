@@ -2946,10 +2946,11 @@ Tasks:
    through ownerless/native reopen before and after forced `.shm` rebuild.
    Hook-build nested view check-option crash coverage kills an outer
    replacement from `LOCAL` to `CASCADED` and an inner predicate `ALTER VIEW`
-   before ownerless dictionary finish, then verifies recovered inner/outer
-   metadata, nested valid DML, errno 1369 for invalid inner or outer predicate
-   violations, base-table writes, and ownerless/native reopen before and after
-   forced `.shm` rebuild.
+   before ownerless dictionary finish, then recovers them while a peer remains
+   live, keeps the native file-operation marker clear, and verifies recovered
+   inner/outer metadata, nested valid DML, errno 1369 for invalid inner or
+   outer predicate violations, base-table writes, and ownerless/native reopen
+   before and after forced `.shm` rebuild.
    View column-list coverage now verifies an already-open peer observes
    explicit column aliases created by another ownerless process, then observes
    `CREATE OR REPLACE VIEW` and `ALTER VIEW` column-list changes through
@@ -4769,9 +4770,11 @@ Tasks:
    and recovers alias metadata while a peer remains live. Focused
    `CREATE VIEW`, `CREATE OR REPLACE VIEW`, and `ALTER VIEW` check-option
    prefinish crash coverage uses the same metadata-only lane and recovers
-   updatable-view enforcement while a peer remains live. Security/definer,
-   nested, idempotent/no-op, and invalid-dependency view variants remain
-   planned for live-recovery promotion.
+   updatable-view enforcement while a peer remains live. Focused nested
+   check-option outer replacement and inner alter prefinish crash coverage now
+   recovers dependent-view enforcement while a peer remains live.
+   Security/definer, idempotent/no-op, and invalid-dependency view variants
+   remain planned for live-recovery promotion.
    Implicit-schema, `IF EXISTS`, temporary-table, and view-only rename forms
    plus multi-table and cross-schema drop, broader ALTER rebuild beyond the
    focused force, row-format, compressed, and charset-conversion cases, schema,
@@ -7239,6 +7242,10 @@ subsystems that this mode needs:
   proves check-option create/replace/alter recovery and through-view DML
   enforcement while a peer remains live and the native file-operation marker
   stays clear.
+  The nested check-option follow-up promotes the outer replacement and inner
+  alter crash selectors to the same metadata-only live-recovery lane, proving
+  dependent inner/outer DML enforcement while a peer remains live and the
+  native file-operation marker stays clear.
 
   Ownerless DDL stress now treats pre-execution MyLite statement-lock
   `MYLITE_BUSY` as bounded retryable harness contention while keeping native
@@ -7259,8 +7266,8 @@ subsystems that this mode needs:
      rebuild, focused compressed key-block row-format rebuild, and focused
      charset-conversion rebuild prefinish boundaries, plus simple CREATE/DROP
      VIEW, focused CREATE OR REPLACE/ALTER VIEW, and focused explicit
-     column-list and check-option view metadata-only prefinish boundaries,
-     especially remaining rename/truncate variants, rebuild
+     column-list, check-option, and nested check-option view metadata-only
+     prefinish boundaries, especially remaining rename/truncate variants, rebuild
      variants, broader metadata-only DDL, and multi-table/cross-schema dropped
      file-per-table tablespaces while peers remain live.
   2. Close remaining transaction crash windows, especially native
