@@ -10,7 +10,9 @@ but before MyLite publishes ownerless dictionary finish, no-live recovery must
 preserve the completed view metadata state.
 
 This slice adds deterministic crash-boundary evidence for simple view
-CREATE/DROP DDL.
+CREATE/DROP DDL. A later metadata-live-recovery follow-up upgrades the focused
+selectors so another ownerless opener can recover the completed native view
+metadata boundary while a peer remains live.
 
 ## Source Findings
 
@@ -55,18 +57,20 @@ Add two unsafe-hook selectors:
 - `dictionary-view-create-crash` initializes an ownerless database with an
   InnoDB base table, verifies the target view is absent, keeps a live ownerless
   peer open, kills a writer after `CREATE VIEW` completes natively but before
-  ownerless dictionary finish, verifies live-peer cleanup remains busy, then
-  reopens no-live ownerless and checks the recovered view metadata and query
-  behavior.
+  ownerless dictionary finish, verifies another ownerless opener recovers the
+  created view while the peer remains live, then releases the peer and checks
+  the recovered view metadata and query behavior.
 - `dictionary-view-drop-crash` initializes an ownerless database with an InnoDB
   base table plus a simple view, verifies the view is present and queryable,
   keeps a live ownerless peer open, kills a writer after `DROP VIEW` completes
-  natively but before ownerless dictionary finish, verifies live-peer cleanup
-  remains busy, then reopens no-live ownerless and checks recovered view
-  absence while the base table remains writable.
+  natively but before ownerless dictionary finish, verifies another ownerless
+  opener recovers the absent view while the peer remains live, then releases
+  the peer and checks recovered view absence while the base table remains
+  writable.
 
-Both selectors verify ownerless and ordinary native reopen before and after
-forced `.shm` rebuild.
+Both selectors verify the native file-operation checkpoint marker remains clear
+for this metadata-only path, then verify ownerless and ordinary native reopen
+before and after forced `.shm` rebuild.
 
 ## Scope And Non-Goals
 
@@ -118,6 +122,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - Run focused selectors:
   - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-view-create-crash`
   - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-view-drop-crash`
+- Run focused CTest entries:
+  - `ctest --preset ownerless-test-hooks -R 'libmylite\.ownerless-dictionary-view-(create|drop)-crash$' --output-on-failure`
 - Run the normal embedded `view-ddl` selector.
 - Run the hook crash-tail selector and ownerless hook SQL shards.
 - Run `format-check`, `dev` CTest, `tidy`, and `git diff --check`.
@@ -125,7 +131,10 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selectors reach the dictionary fault hook and do not hang.
-- A live peer prevents cleanup until no-live recovery.
+- A live peer remains open while another ownerless opener recovers the completed
+  native view metadata boundary.
+- The native file-operation checkpoint marker remains clear for both
+  metadata-only view paths.
 - CREATE recovery exposes the view through `INFORMATION_SCHEMA.VIEWS`,
   preserves the `.frm` file, and allows queries through the view.
 - DROP recovery removes the view from `INFORMATION_SCHEMA.VIEWS`, removes the

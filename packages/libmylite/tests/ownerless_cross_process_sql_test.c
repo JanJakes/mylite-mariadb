@@ -48614,12 +48614,7 @@ static void test_crashed_view_create_dictionary_ddl_recovers_view(void) {
     char *app_path = path_join(datadir_path, "app");
     char *view_path = path_join(app_path, "ownerless_view_create_crash.frm");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
-    int writer_ready_pipe[2];
-    int peer_ready_pipe[2];
-    int peer_release_pipe[2];
-    pid_t writer_child;
-    pid_t peer_child;
-    pid_t probe_child;
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -48645,53 +48640,28 @@ static void test_crashed_view_create_dictionary_ddl_recovers_view(void) {
     assert(!path_exists(view_path));
     assert(mylite_close(db) == MYLITE_OK);
 
-    assert(pipe(writer_ready_pipe) == 0);
-    assert(pipe(peer_ready_pipe) == 0);
-    assert(pipe(peer_release_pipe) == 0);
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        create_view_until_dictionary_finish_fault
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
-    peer_child = fork();
-    assert(peer_child >= 0);
-    if (peer_child == 0) {
-        close(peer_ready_pipe[0]);
-        close(peer_release_pipe[1]);
-        close(writer_ready_pipe[0]);
-        close(writer_ready_pipe[1]);
-        hold_ownerless_open_until_released(
-            paths,
-            (child_pipes){
-                .ready_write_fd = peer_ready_pipe[1],
-                .release_read_fd = peer_release_pipe[0],
-            }
-        );
-    }
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(path_exists(view_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_create_crash'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_create_crash") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_create_crash") == 30U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
-    close(peer_ready_pipe[1]);
-    close(peer_release_pipe[0]);
-    wait_for_pipe(peer_ready_pipe[0]);
-
-    writer_child = fork();
-    assert(writer_child >= 0);
-    if (writer_child == 0) {
-        close(writer_ready_pipe[0]);
-        close(peer_ready_pipe[0]);
-        close(peer_release_pipe[1]);
-        create_view_until_dictionary_finish_fault(paths, writer_ready_pipe[1]);
-    }
-
-    close(writer_ready_pipe[1]);
-    wait_for_pipe(writer_ready_pipe[0]);
-    assert(kill(writer_child, SIGKILL) == 0);
-    wait_for_signaled_child(writer_child, SIGKILL);
-
-    probe_child = fork();
-    assert(probe_child >= 0);
-    if (probe_child == 0) {
-        assert_ownerless_open_returns_busy(paths);
-    }
-    wait_for_child(probe_child);
-
-    signal_pipe(peer_release_pipe[1]);
-    wait_for_child(peer_child);
+    release_ownerless_live_peer(&live_peer);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(path_exists(view_path));
@@ -48742,12 +48712,7 @@ static void test_crashed_view_drop_dictionary_ddl_recovers_absent_view(void) {
     char *app_path = path_join(datadir_path, "app");
     char *view_path = path_join(app_path, "ownerless_view_drop_crash.frm");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
-    int writer_ready_pipe[2];
-    int peer_ready_pipe[2];
-    int peer_release_pipe[2];
-    pid_t writer_child;
-    pid_t peer_child;
-    pid_t probe_child;
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -48779,53 +48744,11 @@ static void test_crashed_view_drop_dictionary_ddl_recovers_absent_view(void) {
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_drop_crash") == 30U);
     assert(mylite_close(db) == MYLITE_OK);
 
-    assert(pipe(writer_ready_pipe) == 0);
-    assert(pipe(peer_ready_pipe) == 0);
-    assert(pipe(peer_release_pipe) == 0);
-
-    peer_child = fork();
-    assert(peer_child >= 0);
-    if (peer_child == 0) {
-        close(peer_ready_pipe[0]);
-        close(peer_release_pipe[1]);
-        close(writer_ready_pipe[0]);
-        close(writer_ready_pipe[1]);
-        hold_ownerless_open_until_released(
-            paths,
-            (child_pipes){
-                .ready_write_fd = peer_ready_pipe[1],
-                .release_read_fd = peer_release_pipe[0],
-            }
-        );
-    }
-
-    close(peer_ready_pipe[1]);
-    close(peer_release_pipe[0]);
-    wait_for_pipe(peer_ready_pipe[0]);
-
-    writer_child = fork();
-    assert(writer_child >= 0);
-    if (writer_child == 0) {
-        close(writer_ready_pipe[0]);
-        close(peer_ready_pipe[0]);
-        close(peer_release_pipe[1]);
-        drop_view_until_dictionary_finish_fault(paths, writer_ready_pipe[1]);
-    }
-
-    close(writer_ready_pipe[1]);
-    wait_for_pipe(writer_ready_pipe[0]);
-    assert(kill(writer_child, SIGKILL) == 0);
-    wait_for_signaled_child(writer_child, SIGKILL);
-
-    probe_child = fork();
-    assert(probe_child >= 0);
-    if (probe_child == 0) {
-        assert_ownerless_open_returns_busy(paths);
-    }
-    wait_for_child(probe_child);
-
-    signal_pipe(peer_release_pipe[1]);
-    wait_for_child(peer_child);
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        drop_view_until_dictionary_finish_fault
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(!path_exists(view_path));
@@ -48840,6 +48763,28 @@ static void test_crashed_view_drop_dictionary_ddl_recovers_absent_view(void) {
     assert(
         exec_status(db, "SELECT SUM(value) FROM app.ownerless_view_drop_crash", NULL) != MYLITE_OK
     );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_drop_crash_base") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_drop_crash_base") == 30U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(!path_exists(view_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.views "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_view_drop_crash'"
+        ) == 0U
+    );
+    assert(
+        exec_status(db, "SELECT SUM(value) FROM app.ownerless_view_drop_crash", NULL) != MYLITE_OK
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_drop_crash_base") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_view_drop_crash_base") == 30U);
     exec_ok(db, "INSERT INTO app.ownerless_view_drop_crash_base VALUES (3, 30)");
     exec_ok(db, "COMMIT");
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_view_drop_crash_base") == 3U);

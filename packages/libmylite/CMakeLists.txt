@@ -586,6 +586,14 @@ if(BUILD_TESTING)
           dictionary-foreign-key-cross-schema-multi-rename-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-view-create-crash
+        COMMAND mylite_ownerless_cross_process_sql_test dictionary-view-create-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-view-drop-crash
+        COMMAND mylite_ownerless_cross_process_sql_test dictionary-view-drop-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-view-idempotent-create-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -956,6 +964,8 @@ if(BUILD_TESTING)
           TIMEOUT 120
       )
       set_tests_properties(
+        libmylite.ownerless-dictionary-view-create-crash
+        libmylite.ownerless-dictionary-view-drop-crash
         libmylite.ownerless-dictionary-view-idempotent-create-crash
         libmylite.ownerless-dictionary-view-idempotent-drop-crash
         libmylite.ownerless-dictionary-trigger-definer-crash

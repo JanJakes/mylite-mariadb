@@ -4753,11 +4753,16 @@ Tasks:
    to provide live-peer recovery for the native charset-conversion rewrite
    boundary, preserving converted column metadata and retaining native
    file-operation checkpoint evidence until the final live peer exits.
+   Simple `CREATE VIEW schema.view AS ...` and `DROP VIEW schema.view`
+   prefinish crash coverage now uses metadata-only recoverable dictionary
+   markers to provide live-peer recovery without native file-operation
+   checkpoint evidence, while preserving the file-operation marker requirement
+   for table DDL.
    Implicit-schema, `IF EXISTS`, temporary-table, and view-only rename forms
    plus multi-table and cross-schema drop, broader ALTER rebuild beyond the
    focused force, row-format, compressed, and charset-conversion cases, schema,
-   view, trigger, and non-rename foreign-key multi-DDL live-peer recovery
-   remain planned.
+   broader view variants, trigger, and non-rename foreign-key multi-DDL
+   live-peer recovery remain planned.
    Final no-live close
    forces native checkpoint
    proof for retained page-version WAL
@@ -7197,6 +7202,16 @@ subsystems that this mode needs:
   recovery, live marker retention, final marker drain, forced `.shm` rebuild,
   and ordinary native reopen. Same-statement multi-drop remains open because
   the attempted selector hit a native InnoDB purge assertion before this hook.
+  The charset-convert follow-up classifies focused
+  `ALTER TABLE ... CONVERT TO CHARACTER SET ... COLLATE ...` as recoverable
+  dictionary DDL, kills the writer at `dictionary-before-finish` with a live
+  peer, and proves converted metadata, live native file-operation marker
+  retention, final marker drain, forced `.shm` rebuild, and ordinary native
+  reopen.
+  The simple view metadata follow-up adds metadata-only recoverable dictionary
+  kinds for `CREATE VIEW ... AS ...` and single-view `DROP VIEW`, then proves a
+  live peer can remain open while another opener recovers the created or absent
+  view without a native file-operation marker.
 
   Ownerless DDL stress now treats pre-execution MyLite statement-lock
   `MYLITE_BUSY` as bounded retryable harness contention while keeping native
@@ -7215,9 +7230,11 @@ subsystems that this mode needs:
      lists, focused explicit and implicit truncate, focused explicit and
      implicit single-table drop, plus focused force rebuild, dynamic row-format
      rebuild, focused compressed key-block row-format rebuild, and focused
-     charset-conversion rebuild prefinish boundaries, especially remaining
-     rename/truncate variants, rebuild variants, and multi-table/cross-schema
-     dropped file-per-table tablespaces while peers remain live.
+     charset-conversion rebuild prefinish boundaries, plus simple CREATE/DROP
+     VIEW metadata-only prefinish boundaries, especially remaining
+     rename/truncate variants, rebuild variants, broader metadata-only DDL, and
+     multi-table/cross-schema dropped file-per-table tablespaces while peers
+     remain live.
   2. Close remaining transaction crash windows, especially native
      rollback/savepoint-rollback internals and concurrent-writer savepoint
      schedules that combine native undo, ownerless page-write ownership, and
