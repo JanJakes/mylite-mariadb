@@ -93,10 +93,11 @@ Extend `mylite_ownerless_cross_process_sql_test` with two hook-only selectors:
      real column succeed, and plain `RENAME COLUMN missing_note TO ...` fails
      with 1054.
 
-Both selectors reuse the existing live-peer crash helper so active dictionary
-state blocks cleanup while another ownerless process is live, then recheck the
-same state through ownerless and native opens before and after `.shm`
-recreation.
+Both selectors now use the held-live-peer crash helper and
+`ownerless-column-if-exists-live-recovery` metadata proof to recover while
+another ownerless process is live with the native file-operation marker clear,
+then recheck the same state through ownerless and native opens before and after
+`.shm` recreation.
 
 ## Compatibility Impact
 
@@ -106,9 +107,9 @@ no-op semantics.
 
 ## Directory And Lifecycle Impact
 
-No directory layout change. The tests exercise ownerless dictionary recovery,
-volatile shared-memory rebuild, and native exclusive reopen against InnoDB
-table metadata stored in the MyLite database directory.
+No directory layout change. The tests exercise ownerless dictionary live
+recovery, volatile shared-memory rebuild, and native exclusive reopen against
+InnoDB table metadata stored in the MyLite database directory.
 
 ## Native Storage Impact
 
@@ -135,7 +136,7 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - Both focused selectors reach `dictionary-before-finish` and do not hang.
-- Live-peer cleanup remains busy until no-live recovery.
+- Missing modify/rename no-ops recover while a peer remains live.
 - Missing `MODIFY COLUMN IF EXISTS` recovery preserves original real-column
   metadata/default, keeps the missing column absent, and keeps plain missing
   modify returning errno 1054.

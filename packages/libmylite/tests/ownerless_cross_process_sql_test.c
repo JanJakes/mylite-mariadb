@@ -53250,6 +53250,7 @@ static void test_crashed_column_idempotent_modify_dictionary_ddl_preserves_colum
     char *database_path =
         path_join(root, "ownerless-dictionary-column-idempotent-modify-crash.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -53296,10 +53297,11 @@ static void test_crashed_column_idempotent_modify_dictionary_ddl_preserves_colum
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         idempotent_modify_column_until_dictionary_finish_fault
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -53353,6 +53355,9 @@ static void test_crashed_column_idempotent_modify_dictionary_ddl_preserves_colum
         ) == 18U
     );
     assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_column_idempotent_modify_crash_state(
         paths,
@@ -53378,6 +53383,7 @@ static void test_crashed_column_idempotent_rename_dictionary_ddl_preserves_colum
     char *database_path =
         path_join(root, "ownerless-dictionary-column-idempotent-rename-crash.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -53424,10 +53430,11 @@ static void test_crashed_column_idempotent_rename_dictionary_ddl_preserves_colum
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         idempotent_rename_column_until_dictionary_finish_fault
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -53486,6 +53493,9 @@ static void test_crashed_column_idempotent_rename_dictionary_ddl_preserves_colum
         ) == 24U
     );
     assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_column_idempotent_rename_crash_state(
         paths,
