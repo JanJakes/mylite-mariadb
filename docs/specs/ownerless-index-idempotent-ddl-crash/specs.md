@@ -44,9 +44,13 @@ Add two unsafe-hook selectors to
   secondary index over `value`, then kills a writer after `DROP INDEX IF
   EXISTS` for a missing index name reaches `dictionary-before-finish`.
 
-Both selectors keep a live ownerless peer open while the writer is killed,
-prove cleanup remains busy until no-live recovery, then verify ownerless and
-ordinary native reopen before and after forced `.shm` rebuild.
+Both selectors initially kept a live ownerless peer open while the writer was
+killed, proved cleanup remained busy until no-live recovery, then verified
+ownerless and ordinary native reopen before and after forced `.shm` rebuild.
+The follow-up in
+`docs/specs/ownerless-index-idempotent-live-recovery/specs.md` promotes these
+top-level no-op selectors to metadata-only live-peer recovery after
+pre-execution metadata proves the no-op branch.
 
 ## Scope And Non-Goals
 
@@ -80,8 +84,8 @@ leave stale peer state.
 ## Directory And Lifecycle Impact
 
 No directory layout changes. The tests exercise native InnoDB secondary-index
-metadata inside the table's native files, ownerless live-peer cleanup blocking,
-no-live recovery, forced `.shm` rebuild, and ordinary native exclusive reopen.
+metadata inside the table's native files, ownerless live-peer recovery, forced
+`.shm` rebuild, and ordinary native exclusive reopen.
 
 ## Native Storage Impact
 
@@ -106,7 +110,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selectors reach the dictionary fault hook and do not hang.
-- A live peer prevents cleanup until no-live recovery.
+- Live-peer recovery is covered by
+  `docs/specs/ownerless-index-idempotent-live-recovery/specs.md`.
 - Duplicate idempotent create recovery keeps the original `value` index key
   part, leaves the attempted `note` replacement absent, and keeps plain
   duplicate create returning errno 1061.
@@ -120,7 +125,9 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - This covers deterministic top-level no-op secondary-index DDL crash recovery,
   not every idempotent index spelling.
 - `ALTER TABLE` secondary-index idempotent no-op crash recovery is covered by
-  `docs/specs/ownerless-alter-index-idempotent-ddl-crash/specs.md`.
+  `docs/specs/ownerless-alter-index-idempotent-ddl-crash/specs.md`; live-peer
+  recovery for both top-level and ALTER no-op forms is covered by
+  `docs/specs/ownerless-index-idempotent-live-recovery/specs.md`.
 - Unique-index no-op crash recovery is covered by
   `docs/specs/ownerless-unique-index-idempotent-ddl-crash/specs.md`.
 - Online-option matrices and broader randomized DDL oracle execution remain

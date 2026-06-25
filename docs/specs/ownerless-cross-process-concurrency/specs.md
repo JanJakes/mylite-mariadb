@@ -2646,9 +2646,11 @@ Tasks:
    kills duplicate top-level `CREATE INDEX IF NOT EXISTS`, missing top-level
    `DROP INDEX IF EXISTS`, duplicate `ALTER TABLE ... ADD INDEX IF NOT EXISTS`,
    and missing `ALTER TABLE ... DROP INDEX IF EXISTS` no-op writers after MariaDB
-   returns success but before ownerless dictionary finish, then verifies original
-   key-part preservation, missing-index absence, post-recovery writes,
-   ownerless/native reopen, and forced `.shm` rebuild.
+   returns success but before ownerless dictionary finish, then recovers the
+   proven no-op dictionary boundary while a peer remains live with the native
+   file-operation marker clear and verifies original key-part preservation,
+   missing-index absence, post-recovery writes, ownerless/native reopen, and
+   forced `.shm` rebuild.
    Primary-key coverage now verifies initial
    peer-visible `PRIMARY(id)` metadata, duplicate plain primary-key add errno
    1068, `ALTER TABLE ... ADD PRIMARY KEY IF NOT EXISTS (code)` no-op
@@ -3728,9 +3730,11 @@ Tasks:
    `CREATE INDEX IF NOT EXISTS`, missing top-level `DROP INDEX IF EXISTS`,
    duplicate `ALTER TABLE ... ADD INDEX IF NOT EXISTS`, and missing
    `ALTER TABLE ... DROP INDEX IF EXISTS` no-op writers after MariaDB returns
-   success but before ownerless dictionary finish, with preserved original key
-   part, missing-index absence, post-recovery writes, ownerless/native reopen,
-   and forced `.shm` rebuild checks.
+   success but before ownerless dictionary finish, then recovers those proven
+   no-op dictionary boundaries while a peer remains live with the native
+   file-operation marker clear, with preserved original key part,
+   missing-index absence, post-recovery writes, ownerless/native reopen, and
+   forced `.shm` rebuild checks.
    Unique-index idempotent DDL
    coverage adds top-level `CREATE UNIQUE INDEX IF NOT EXISTS`, duplicate
    plain-create errno 1061, duplicate no-op preservation of the original unique
@@ -5358,15 +5362,16 @@ Minimum suites before support can be claimed:
     `.shm` rebuild correct,
   - after duplicate top-level `CREATE INDEX IF NOT EXISTS` and missing
     top-level `DROP INDEX IF EXISTS` no-op success but before ownerless
-    dictionary finish; hook coverage proves live-peer cleanup remains busy until
-    no-live recovery and preserved index key-part metadata, missing-index
-    absence, ownerless/native reopen, and forced `.shm` rebuild remain correct,
+    dictionary finish; hook coverage proves live-peer metadata-only recovery
+    with the native file-operation marker clear and preserved index key-part
+    metadata, missing-index absence, ownerless/native reopen, and forced `.shm`
+    rebuild remain correct,
   - after duplicate `ALTER TABLE ... ADD INDEX IF NOT EXISTS` and missing
     `ALTER TABLE ... DROP INDEX IF EXISTS` no-op success but before ownerless
-    dictionary finish; hook coverage proves live-peer cleanup remains busy until
-    no-live recovery and preserved ALTER-index key-part metadata, missing-index
-    absence, post-recovery writes, ownerless/native reopen, and forced `.shm`
-    rebuild remain correct,
+    dictionary finish; hook coverage proves live-peer metadata-only recovery
+    with the native file-operation marker clear and preserved ALTER-index
+    key-part metadata, missing-index absence, post-recovery writes,
+    ownerless/native reopen, and forced `.shm` rebuild remain correct,
   - after duplicate top-level `CREATE UNIQUE INDEX IF NOT EXISTS` and duplicate
     `ALTER TABLE ... ADD UNIQUE INDEX IF NOT EXISTS` no-op success but before
     ownerless dictionary finish; hook coverage proves live-peer cleanup remains
@@ -7382,8 +7387,9 @@ subsystems that this mode needs:
      nested check-option, security/definer, and idempotent/no-op view
      metadata-only prefinish boundaries, plus simple CREATE/DROP TRIGGER
      metadata-only prefinish boundaries, plus focused CREATE/ALTER/DROP
-     DATABASE and schema idempotent/no-op prefinish boundaries, especially
-     remaining rename/truncate variants, rebuild variants, broader
+     DATABASE and schema idempotent/no-op prefinish boundaries, plus focused
+     top-level and ALTER secondary-index idempotent/no-op prefinish boundaries,
+     especially remaining rename/truncate variants, rebuild variants, broader
      metadata-only DDL, temporary, broader schema option variants, intra-loop
      drop cases, and broader DDL file lifecycle while peers remain live.
   2. Close remaining transaction crash windows, especially native

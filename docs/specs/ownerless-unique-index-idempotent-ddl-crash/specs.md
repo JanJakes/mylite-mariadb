@@ -137,5 +137,10 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 - This covers deterministic duplicate unique secondary-index no-op crash
   recovery, not every idempotent unique-index spelling.
+- Metadata-only live-peer recovery for non-unique top-level and ALTER
+  secondary-index no-op forms is covered by
+  `docs/specs/ownerless-index-idempotent-live-recovery/specs.md`; unique-index
+  no-op live recovery remains a separate promotion because duplicate-key
+  enforcement semantics are part of its proof.
 - Prefix, direction, generated-column, online-option matrices, and broader
   randomized DDL oracle execution remain planned.

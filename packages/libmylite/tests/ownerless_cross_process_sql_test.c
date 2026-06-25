@@ -43645,6 +43645,7 @@ static void test_crashed_index_idempotent_create_dictionary_ddl_preserves_index(
     char *database_path =
         path_join(root, "ownerless-dictionary-index-idempotent-create-crash.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -43698,10 +43699,11 @@ static void test_crashed_index_idempotent_create_dictionary_ddl_preserves_index(
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         idempotent_create_index_until_dictionary_finish_fault
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -43738,8 +43740,10 @@ static void test_crashed_index_idempotent_create_dictionary_ddl_preserves_index(
             "WHERE value >= 20"
         ) == 5U
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     exec_ok(db, "INSERT INTO app.ownerless_index_idempotent_create_crash_base VALUES (4, 40, 400)");
     assert(mylite_close(db) == MYLITE_OK);
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_index_idempotent_create_crash_state(
         paths,
@@ -43765,6 +43769,7 @@ static void test_crashed_index_idempotent_drop_dictionary_ddl_preserves_index(vo
     char *database_path =
         path_join(root, "ownerless-dictionary-index-idempotent-drop-crash.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -43817,10 +43822,11 @@ static void test_crashed_index_idempotent_drop_dictionary_ddl_preserves_index(vo
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         idempotent_drop_index_until_dictionary_finish_fault
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -43850,8 +43856,10 @@ static void test_crashed_index_idempotent_drop_dictionary_ddl_preserves_index(vo
             "WHERE value >= 20"
         ) == 5U
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     exec_ok(db, "INSERT INTO app.ownerless_index_idempotent_drop_crash_base VALUES (4, 40, 400)");
     assert(mylite_close(db) == MYLITE_OK);
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_index_idempotent_drop_crash_state(
         paths,
@@ -43877,6 +43885,7 @@ static void test_crashed_alter_index_idempotent_create_dictionary_ddl_preserves_
     char *database_path =
         path_join(root, "ownerless-dictionary-alter-index-idempotent-create-crash.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -43930,10 +43939,11 @@ static void test_crashed_alter_index_idempotent_create_dictionary_ddl_preserves_
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         alter_index_idempotent_create_until_dictionary_finish_fault
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -43970,11 +43980,13 @@ static void test_crashed_alter_index_idempotent_create_dictionary_ddl_preserves_
             "WHERE value >= 20"
         ) == 5U
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     exec_ok(
         db,
         "INSERT INTO app.ownerless_alter_index_idempotent_create_crash_base VALUES (4, 40, 400)"
     );
     assert(mylite_close(db) == MYLITE_OK);
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_alter_index_idempotent_create_crash_state(
         paths,
@@ -44000,6 +44012,7 @@ static void test_crashed_alter_index_idempotent_drop_dictionary_ddl_preserves_in
     char *database_path =
         path_join(root, "ownerless-dictionary-alter-index-idempotent-drop-crash.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -44052,10 +44065,11 @@ static void test_crashed_alter_index_idempotent_drop_dictionary_ddl_preserves_in
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         alter_index_idempotent_drop_until_dictionary_finish_fault
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -44085,11 +44099,13 @@ static void test_crashed_alter_index_idempotent_drop_dictionary_ddl_preserves_in
             "WHERE value >= 20"
         ) == 5U
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     exec_ok(
         db,
         "INSERT INTO app.ownerless_alter_index_idempotent_drop_crash_base VALUES (4, 40, 400)"
     );
     assert(mylite_close(db) == MYLITE_OK);
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_alter_index_idempotent_drop_crash_state(
         paths,
