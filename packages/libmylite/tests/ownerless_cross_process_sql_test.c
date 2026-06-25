@@ -53978,6 +53978,7 @@ static void test_crashed_charset_convert_dictionary_ddl_recovers_metadata(void) 
     char *frm_path = path_join(app_path, "ownerless_charset_convert_base.frm");
     char *ibd_path = path_join(app_path, "ownerless_charset_convert_base.ibd");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -54021,7 +54022,38 @@ static void test_crashed_charset_convert_dictionary_ddl_recovers_metadata(void) 
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(paths, charset_convert_until_dictionary_finish_fault);
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        charset_convert_until_dictionary_finish_fault
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(path_exists(frm_path));
+    assert(path_exists(ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_charset_convert_base' "
+            "AND column_name = 'name' "
+            "AND character_set_name = 'utf8mb4' "
+            "AND collation_name = 'utf8mb4_general_ci'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_charset_convert_base") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_charset_convert_base") == 30U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(CHAR_LENGTH(name)) FROM app.ownerless_charset_convert_base"
+        ) == 9U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(path_exists(frm_path));
@@ -54055,6 +54087,7 @@ static void test_crashed_charset_convert_dictionary_ddl_recovers_metadata(void) 
         ) == 14U
     );
     assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     assert_ownerless_charset_convert_crash_ddl_state(
         paths,

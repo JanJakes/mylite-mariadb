@@ -9,7 +9,9 @@ boundary is a writer killed after MariaDB updates the native table metadata and
 storage, but before MyLite publishes ownerless dictionary finish.
 
 This slice adds hook-build recovery evidence for a representative successful
-table-wide character-set conversion.
+table-wide character-set conversion. A later live-recovery follow-up upgrades
+the selector so a new ownerless opener recovers the completed native ALTER
+boundary while another peer remains live.
 
 ## Source Findings
 
@@ -43,7 +45,10 @@ The selector:
 - kills a writer after
   `ALTER TABLE app.ownerless_charset_convert_base CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci`
   completes natively but before ownerless dictionary finish,
-- verifies live-peer cleanup remains busy until no-live recovery,
+- verifies another ownerless opener can recover the dead writer while the peer
+  remains live,
+- verifies the native file-operation checkpoint marker remains durable until
+  the peer exits,
 - verifies the recovered column charset/collation through
   `information_schema.COLUMNS`,
 - verifies retained rows, inserts one post-recovery row, and
@@ -76,8 +81,8 @@ publication boundary.
 ## Directory And Lifecycle Impact
 
 No directory layout changes. The test exercises native InnoDB table metadata
-and file-per-table storage, ownerless live-peer cleanup blocking, no-live
-recovery, forced `.shm` rebuild, and ordinary native exclusive reopen.
+and file-per-table storage, ownerless live-peer recovery, no-live marker drain,
+forced `.shm` rebuild, and ordinary native exclusive reopen.
 
 ## Native Storage Impact
 
@@ -94,6 +99,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - Build `mylite_ownerless_cross_process_sql_test` with `ownerless-test-hooks`.
 - Run focused selector:
   - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-charset-convert-crash`
+- Run focused CTest:
+  - `ctest --preset ownerless-test-hooks -R 'libmylite\.ownerless-dictionary-charset-convert-crash$' --output-on-failure`
 - Run adjacent `charset-convert-ddl` selectors in `embedded-dev` and
   `ownerless-test-hooks`.
 - Run the relevant ownerless SQL CTest shard, `format-check`, and diff checks.
@@ -101,7 +108,10 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selector reaches the dictionary fault hook and does not hang.
-- A live peer prevents cleanup until no-live recovery.
+- A live peer remains open while a new ownerless opener recovers the completed
+  native boundary.
+- The native file-operation checkpoint marker remains set while the peer is
+  live and drains after final no-live close.
 - Recovery exposes converted `utf8mb4_general_ci` metadata through
   `information_schema.COLUMNS`.
 - Retained rows survive and post-recovery DML succeeds.
