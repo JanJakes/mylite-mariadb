@@ -68,6 +68,11 @@ Both selectors keep a live ownerless peer open while the writer is killed, prove
 cleanup remains busy until no-live recovery, then verify ownerless and ordinary
 native reopen before and after forced `.shm` rebuild.
 
+The follow-up in
+`docs/specs/ownerless-trigger-idempotent-replace-live-recovery/specs.md`
+promotes these idempotent/no-op trigger selectors to metadata-only live-peer
+recovery.
+
 ## Scope And Non-Goals
 
 In scope:
@@ -154,4 +159,7 @@ No public API, build-profile, binary-size, license, or dependency changes.
   crash recovery is covered by `ownerless-trigger-definer-crash`, while broader
   privilege/security and randomized trigger crash variants
   remain planned.
+- Metadata-only live-peer recovery for these idempotent/no-op trigger forms is
+  covered by
+  `docs/specs/ownerless-trigger-idempotent-replace-live-recovery/specs.md`.
 - Full external MariaDB/RQG long-running DDL stress remains planned.

@@ -15330,12 +15330,30 @@ bool ownerless_create_or_replace_view_recovery_statement(const SqlPolicyTokens &
 }
 
 bool ownerless_create_trigger_recovery_statement(const SqlPolicyTokens &tokens) {
-    if (tokens.count < 8U || !token_equals(tokens.values[0], "CREATE") ||
-        !token_equals(tokens.values[1], "TRIGGER")) {
+    if (tokens.count < 8U || !token_equals(tokens.values[0], "CREATE")) {
         return false;
     }
 
-    std::size_t index = 2U;
+    std::size_t index = 1U;
+    bool or_replace = false;
+    if (index + 1U < tokens.count && token_equals(tokens.values[index], "OR") &&
+        token_equals(tokens.values[index + 1U], "REPLACE")) {
+        index += 2U;
+        or_replace = true;
+    }
+    if (index >= tokens.count || !token_equals(tokens.values[index], "TRIGGER")) {
+        return false;
+    }
+    ++index;
+    if (index < tokens.count && token_equals(tokens.values[index], "IF")) {
+        if (or_replace || index + 2U >= tokens.count ||
+            !token_equals(tokens.values[index + 1U], "NOT") ||
+            !token_equals(tokens.values[index + 2U], "EXISTS")) {
+            return false;
+        }
+        index += 3U;
+    }
+
     if (!consume_ownerless_table_identifier(tokens, index) || index + 3U >= tokens.count ||
         !token_in(tokens.values[index], "BEFORE", "AFTER")) {
         return false;
@@ -16085,6 +16103,12 @@ bool ownerless_drop_trigger_recovery_statement(const SqlPolicyTokens &tokens) {
     }
 
     std::size_t index = 2U;
+    if (index < tokens.count && token_equals(tokens.values[index], "IF")) {
+        if (index + 1U >= tokens.count || !token_equals(tokens.values[index + 1U], "EXISTS")) {
+            return false;
+        }
+        index += 2U;
+    }
     if (!consume_ownerless_table_identifier(tokens, index)) {
         return false;
     }

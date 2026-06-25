@@ -55,9 +55,12 @@ Classify only the already-covered simple trigger SQL shapes:
 - `CREATE TRIGGER <trigger> BEFORE|AFTER INSERT|UPDATE|DELETE ON <table> FOR EACH ROW ...`
 - `DROP TRIGGER <trigger>`
 
-The classifier deliberately does not promote `CREATE OR REPLACE TRIGGER`,
-`CREATE TRIGGER IF NOT EXISTS`, `DROP TRIGGER IF EXISTS`,
-`DEFINER=CURRENT_USER`, or ordered triggers. MariaDB places
+The initial classifier deliberately did not promote `CREATE OR REPLACE
+TRIGGER`, `CREATE TRIGGER IF NOT EXISTS`, `DROP TRIGGER IF EXISTS`,
+`DEFINER=CURRENT_USER`, or ordered triggers. The follow-up documented in
+`docs/specs/ownerless-trigger-idempotent-replace-live-recovery/specs.md`
+promotes replacement and idempotent/no-op forms while keeping
+`DEFINER=CURRENT_USER` and ordered triggers separate. MariaDB places
 `FOLLOWS`/`PRECEDES` after `FOR EACH ROW`, so the classifier rejects those
 ordering tokens before the body. Simple create trigger bodies, including the
 covered delayed missing-dependency and stored-function-body selectors, share
@@ -89,8 +92,9 @@ In scope:
 
 Out of scope:
 
-- Trigger replacement, ordering, idempotent no-op, definer, privilege/security,
-  and randomized trigger crash variants.
+- Trigger ordering, definer, privilege/security, and randomized trigger crash
+  variants. Replacement and idempotent no-op variants are covered separately by
+  `docs/specs/ownerless-trigger-idempotent-replace-live-recovery/specs.md`.
 - Table/file-per-table DDL, schema DDL, foreign-key multi-DDL, and broader
   metadata-only DDL classes.
 - SQL-level table-lock fault injection.
@@ -147,8 +151,10 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - Recovered create exposes the trigger and fires it through base-table inserts.
 - Recovered drop removes the trigger and keeps later base-table inserts from
   updating the audit table.
-- Existing trigger replacement, ordering, idempotent, and definer crash
-  selectors continue to pass as separate no-live recovery cases.
+- Existing trigger ordering and definer crash selectors continue to pass as
+  separate no-live recovery cases. Replacement and idempotent/no-op selectors
+  are promoted by
+  `docs/specs/ownerless-trigger-idempotent-replace-live-recovery/specs.md`.
 - Delayed missing-dependency and stored-function-body simple create selectors
   recover while a peer remains live, preserve their existing firing/error
   behavior, and keep the native file-operation marker clear at the recovery
@@ -191,9 +197,10 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Risks And Follow-Up
 
 - This covers only syntax-simple trigger create/drop live recovery.
-- Trigger replacement, ordering, idempotent no-op, definer, privilege/security,
-  and broader trigger metadata variants remain planned for live-recovery
-  promotion.
+- Trigger ordering, definer, privilege/security, and broader trigger metadata
+  variants remain planned for live-recovery promotion. Replacement and
+  idempotent/no-op trigger forms are covered by
+  `docs/specs/ownerless-trigger-idempotent-replace-live-recovery/specs.md`.
 - Broader schema metadata-only recovery and multi-table/cross-schema dropped
   tablespace live recovery remain planned.
 - Longer external MariaDB/RQG-style stress remains planned after bounded

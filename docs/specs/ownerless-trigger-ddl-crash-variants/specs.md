@@ -64,6 +64,12 @@ Add two unsafe-hook selectors to
 Both selectors verify ownerless and ordinary native reopen before and after
 forced `.shm` rebuild.
 
+The follow-up in
+`docs/specs/ownerless-trigger-idempotent-replace-live-recovery/specs.md`
+promotes the replacement selector to metadata-only live-peer recovery. Ordered
+trigger recovery remains no-live until ordering semantics are promoted
+separately.
+
 ## Scope And Non-Goals
 
 In scope:
@@ -141,7 +147,9 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Risks And Unresolved Questions
 
 - This is deterministic trigger replacement and ordering crash coverage, not
-  the full trigger crash matrix.
+  the full trigger crash matrix. Replacement live recovery is covered by
+  `docs/specs/ownerless-trigger-idempotent-replace-live-recovery/specs.md`;
+  ordered trigger live recovery remains planned.
 - Bounded idempotent no-op trigger DDL crash recovery is covered by
   `ownerless-trigger-idempotent-crash`; delayed invalid-dependency trigger
   crash recovery is covered by `ownerless-trigger-invalid-dependency-crash`,

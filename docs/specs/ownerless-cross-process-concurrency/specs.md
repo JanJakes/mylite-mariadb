@@ -3050,12 +3050,14 @@ Tasks:
    while another ownerless peer remains live and the native file-operation
    marker stays clear, and recovered present/absent trigger metadata, file
    state, firing/non-firing behavior, ownerless reopen, forced `.shm` rebuild,
-   and native exclusive reopen are verified. Replacement and ordering crash
-   variants are covered separately,
-   and idempotent no-op crash coverage now proves duplicate
-   `CREATE TRIGGER IF NOT EXISTS` and missing `DROP TRIGGER IF EXISTS`
-   preserve the original trigger state after a killed writer at dictionary
-   finish. Delayed invalid-dependency crash coverage now uses the same
+   and native exclusive reopen are verified. Replacement and idempotent/no-op
+   crash coverage now also uses the metadata-only live-peer lane for
+   `CREATE OR REPLACE TRIGGER`, duplicate `CREATE TRIGGER IF NOT EXISTS`, and
+   missing `DROP TRIGGER IF EXISTS`, preserving replacement or original trigger
+   state after a killed writer at dictionary finish. Ordered trigger crash
+   variants remain covered as no-live recovery until ordering semantics are
+   promoted separately. Delayed invalid-dependency crash coverage now uses the
+   same
    live-peer metadata-only lane for the syntax-simple trigger create, proving a
    trigger whose body references a missing audit table survives the boundary,
    reports MariaDB 1146 when fired before the dependency exists, and fires once
@@ -7346,6 +7348,11 @@ subsystems that this mode needs:
   lane, proving native `.TRG`/`.TRN` creation or removal, trigger
   firing/non-firing state, and `SHOW CREATE TRIGGER` behavior while a peer
   remains live and the native file-operation marker stays clear.
+  The trigger replacement/idempotent follow-up extends that metadata-only
+  live-recovery lane to `CREATE OR REPLACE TRIGGER`, duplicate
+  `CREATE TRIGGER IF NOT EXISTS`, and missing `DROP TRIGGER IF EXISTS`, while
+  leaving ordered and explicit-definer trigger crash variants on the no-live
+  path until separately promoted.
 
   Ownerless DDL stress now treats pre-execution MyLite statement-lock
   `MYLITE_BUSY` as bounded retryable harness contention while keeping native
