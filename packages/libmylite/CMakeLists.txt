@@ -610,6 +610,18 @@ if(BUILD_TESTING)
           dictionary-alter-index-idempotent-drop-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-column-default-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-column-default-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-table-comment-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-table-comment-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-view-create-crash
         COMMAND mylite_ownerless_cross_process_sql_test dictionary-view-create-crash
       )
@@ -1093,6 +1105,8 @@ if(BUILD_TESTING)
         libmylite.ownerless-dictionary-index-idempotent-drop-crash
         libmylite.ownerless-dictionary-alter-index-idempotent-create-crash
         libmylite.ownerless-dictionary-alter-index-idempotent-drop-crash
+        libmylite.ownerless-dictionary-column-default-crash
+        libmylite.ownerless-dictionary-table-comment-crash
         PROPERTIES
           LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
           TIMEOUT 120

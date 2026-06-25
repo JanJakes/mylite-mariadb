@@ -40,7 +40,9 @@ The selector:
 - kills a writer after
   `ALTER TABLE app.ownerless_column_default_crash ALTER COLUMN value SET DEFAULT 25`
   completes natively but before ownerless dictionary finish,
-- verifies live-peer cleanup remains busy until no-live recovery,
+- verifies metadata-only live-peer recovery with the native file-operation
+  marker clear through
+  `docs/specs/ownerless-metadata-alter-live-recovery/specs.md`,
 - verifies the recovered `value` default is `25`,
 - inserts a default-backed row that uses `25`,
 - drops the `value` default after recovery,
@@ -74,8 +76,8 @@ boundary.
 ## Directory And Lifecycle Impact
 
 No directory layout changes. The test exercises native InnoDB table metadata,
-ownerless live-peer cleanup blocking, no-live recovery, forced `.shm` rebuild,
-and ordinary native exclusive reopen.
+ownerless live-peer recovery, forced `.shm` rebuild, and ordinary native
+exclusive reopen.
 
 ## Native Storage Impact
 
@@ -99,7 +101,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selector reaches the dictionary fault hook and does not hang.
-- A live peer prevents cleanup until no-live recovery.
+- Live-peer recovery is covered by
+  `docs/specs/ownerless-metadata-alter-live-recovery/specs.md`.
 - Recovery exposes `value DEFAULT 25` through `INFORMATION_SCHEMA.COLUMNS`.
 - A post-recovery default-backed insert uses `25`.
 - Dropping the `value` default after recovery makes omitted NOT NULL inserts

@@ -52422,6 +52422,7 @@ static void test_crashed_column_default_dictionary_ddl_recovers_defaults(void) {
     char *frm_path = path_join(app_path, "ownerless_column_default_crash.frm");
     char *ibd_path = path_join(app_path, "ownerless_column_default_crash.ibd");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -52447,7 +52448,11 @@ static void test_crashed_column_default_dictionary_ddl_recovers_defaults(void) {
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(paths, set_column_default_until_dictionary_finish_fault);
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        set_column_default_until_dictionary_finish_fault
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(path_exists(frm_path));
@@ -52470,6 +52475,11 @@ static void test_crashed_column_default_dictionary_ddl_recovers_defaults(void) {
             "WHERE id = 2 AND value = 25 AND note = 'ready'"
         ) == 1U
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    release_ownerless_live_peer(&live_peer);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(
         db,
         "ALTER TABLE app.ownerless_column_default_crash "
@@ -55881,6 +55891,7 @@ static void test_crashed_table_comment_dictionary_ddl_recovers_metadata(void) {
     char *frm_path = path_join(app_path, "ownerless_table_comment_base.frm");
     char *ibd_path = path_join(app_path, "ownerless_table_comment_base.ibd");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -55914,7 +55925,11 @@ static void test_crashed_table_comment_dictionary_ddl_recovers_metadata(void) {
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_table_comment_base") == 30U);
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(paths, table_comment_until_dictionary_finish_fault);
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        table_comment_until_dictionary_finish_fault
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(path_exists(frm_path));
@@ -55930,10 +55945,12 @@ static void test_crashed_table_comment_dictionary_ddl_recovers_metadata(void) {
     );
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_table_comment_base") == 2U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_table_comment_base") == 30U);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     exec_ok(db, "INSERT INTO app.ownerless_table_comment_base VALUES (3, 30)");
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_table_comment_base") == 3U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_table_comment_base") == 60U);
     assert(mylite_close(db) == MYLITE_OK);
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_table_comment_crash_ddl_state(
         paths,

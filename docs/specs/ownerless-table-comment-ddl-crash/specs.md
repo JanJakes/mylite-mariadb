@@ -43,7 +43,9 @@ The selector:
 - kills a writer after
   `ALTER TABLE app.ownerless_table_comment_base COMMENT='ownerless updated comment'`
   completes natively but before ownerless dictionary finish,
-- verifies live-peer cleanup remains busy until no-live recovery,
+- verifies metadata-only live-peer recovery with the native file-operation
+  marker clear through
+  `docs/specs/ownerless-metadata-alter-live-recovery/specs.md`,
 - verifies the recovered table comment through `information_schema.TABLES`,
 - verifies retained rows, inserts one post-recovery row, and
 - verifies ownerless/native reopen before and after forced `.shm` rebuild.
@@ -75,8 +77,8 @@ boundary.
 ## Directory And Lifecycle Impact
 
 No directory layout changes. The test exercises native InnoDB table metadata,
-ownerless live-peer cleanup blocking, no-live recovery, forced `.shm` rebuild,
-and ordinary native exclusive reopen.
+ownerless live-peer recovery, forced `.shm` rebuild, and ordinary native
+exclusive reopen.
 
 ## Native Storage Impact
 
@@ -100,7 +102,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selector reaches the dictionary fault hook and does not hang.
-- A live peer prevents cleanup until no-live recovery.
+- Live-peer recovery is covered by
+  `docs/specs/ownerless-metadata-alter-live-recovery/specs.md`.
 - Recovery exposes the updated table comment through
   `information_schema.TABLES.TABLE_COMMENT`.
 - Retained rows survive and post-recovery DML succeeds.

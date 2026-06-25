@@ -4170,9 +4170,10 @@ Tasks:
    boundary, and verifies final comment metadata and rows before and after
    forced `.shm` rebuild. Hook-build crash coverage kills an
    `ALTER TABLE ... COMMENT` writer after native metadata update but before
-   ownerless dictionary finish, then verifies recovered comment metadata,
-   retained rows, post-recovery DML, ownerless/native reopen, and forced
-   `.shm` rebuild.
+   ownerless dictionary finish, then recovers the metadata-only boundary while
+   another peer remains live with the native file-operation marker clear and
+   verifies recovered comment metadata, retained rows, post-recovery DML,
+   ownerless/native reopen, and forced `.shm` rebuild.
    Force-rebuild coverage adds ownerless `ALTER TABLE ... FORCE`, verifies an
    already-open peer can continue reading through a secondary index after the
    rebuild boundary, inserts through the rebuilt table, and verifies final
@@ -4184,9 +4185,10 @@ Tasks:
    NOT NULL column after its default is dropped, and verifies final metadata and
    rows before and after forced `.shm` rebuild. Hook-build crash coverage now
    kills an `ALTER COLUMN ... SET DEFAULT` writer after native metadata update
-   but before ownerless dictionary finish, then verifies recovered default
-   metadata, post-recovery default-backed inserts, ownerless/native reopen, and
-   forced `.shm` rebuild.
+   but before ownerless dictionary finish, then recovers the metadata-only
+   boundary while another peer remains live with the native file-operation
+   marker clear and verifies recovered default metadata, post-recovery
+   default-backed inserts, ownerless/native reopen, and forced `.shm` rebuild.
    Column-idempotent crash coverage kills duplicate
    `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` and missing
    `ALTER TABLE ... DROP COLUMN IF EXISTS` no-op writers after MariaDB success
@@ -5309,15 +5311,15 @@ Minimum suites before support can be claimed:
     key-part direction metadata, replacement-key enforcement, old-key duplicate
     writes, ownerless/native reopen, and forced `.shm` rebuild remain correct,
   - after representative `ALTER COLUMN ... SET DEFAULT` native metadata update
-    but before ownerless dictionary finish; hook coverage proves live-peer
-    cleanup remains busy until no-live recovery and recovered default metadata,
-    post-recovery default-backed inserts, ownerless/native reopen, and forced
-    `.shm` rebuild remain correct,
+    but before ownerless dictionary finish; hook coverage proves metadata-only
+    live-peer recovery with the native file-operation marker clear and recovered
+    default metadata, post-recovery default-backed inserts, ownerless/native
+    reopen, and forced `.shm` rebuild remain correct,
   - after representative `ALTER TABLE ... COMMENT` native metadata update but
-    before ownerless dictionary finish; hook coverage proves live-peer cleanup
-    remains busy until no-live recovery and recovered comment metadata,
-    retained rows, post-recovery DML, ownerless/native reopen, and forced
-    `.shm` rebuild remain correct,
+    before ownerless dictionary finish; hook coverage proves metadata-only
+    live-peer recovery with the native file-operation marker clear and recovered
+    comment metadata, retained rows, post-recovery DML, ownerless/native reopen,
+    and forced `.shm` rebuild remain correct,
   - after representative `ALTER TABLE ... CONVERT TO CHARACTER SET` native
     metadata/storage update but before ownerless dictionary finish; hook
     coverage proves live-peer cleanup remains busy until no-live recovery and
@@ -7389,9 +7391,11 @@ subsystems that this mode needs:
      metadata-only prefinish boundaries, plus focused CREATE/ALTER/DROP
      DATABASE and schema idempotent/no-op prefinish boundaries, plus focused
      top-level and ALTER secondary-index idempotent/no-op prefinish boundaries,
-     especially remaining rename/truncate variants, rebuild variants, broader
-     metadata-only DDL, temporary, broader schema option variants, intra-loop
-     drop cases, and broader DDL file lifecycle while peers remain live.
+     plus focused table-comment and column-default metadata ALTER prefinish
+     boundaries, especially remaining rename/truncate variants, rebuild
+     variants, broader metadata-only DDL, temporary, broader schema option
+     variants, intra-loop drop cases, and broader DDL file lifecycle while
+     peers remain live.
   2. Close remaining transaction crash windows, especially native
      rollback/savepoint-rollback internals and concurrent-writer savepoint
      schedules that combine native undo, ownerless page-write ownership, and
