@@ -2101,6 +2101,18 @@ static void write_redo_header_backup(
 static void truncate_redo_header_backup(const char *database_path, off_t size);
 #  endif
 typedef void (*ownerless_dictionary_fault_writer_fn)(open_database_paths paths, int ready_fd);
+
+typedef struct ownerless_live_peer_guard {
+    int release_write_fd;
+    pid_t child_pid;
+} ownerless_live_peer_guard;
+
+static ownerless_live_peer_guard start_ownerless_live_peer(open_database_paths paths);
+static void release_ownerless_live_peer(ownerless_live_peer_guard *guard);
+static ownerless_live_peer_guard crash_ownerless_dictionary_writer_with_held_live_peer(
+    open_database_paths paths,
+    ownerless_dictionary_fault_writer_fn writer_fn
+);
 static void crash_ownerless_dictionary_writer_with_live_peer(
     open_database_paths paths,
     ownerless_dictionary_fault_writer_fn writer_fn
@@ -42127,12 +42139,7 @@ static void test_crashed_cross_schema_rename_dictionary_ddl_recovers_moved_table
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(root, "ownerless-dictionary-cross-schema-rename-crash.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
-    int writer_ready_pipe[2];
-    int peer_ready_pipe[2];
-    int peer_release_pipe[2];
-    pid_t writer_child;
-    pid_t peer_child;
-    pid_t probe_child;
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -42149,53 +42156,11 @@ static void test_crashed_cross_schema_rename_dictionary_ddl_recovers_moved_table
     exec_ok(db, "INSERT INTO app.ownerless_cross_schema_rename_crash_source VALUES (1, 10)");
     assert(mylite_close(db) == MYLITE_OK);
 
-    assert(pipe(writer_ready_pipe) == 0);
-    assert(pipe(peer_ready_pipe) == 0);
-    assert(pipe(peer_release_pipe) == 0);
-
-    peer_child = fork();
-    assert(peer_child >= 0);
-    if (peer_child == 0) {
-        close(peer_ready_pipe[0]);
-        close(peer_release_pipe[1]);
-        close(writer_ready_pipe[0]);
-        close(writer_ready_pipe[1]);
-        hold_ownerless_open_until_released(
-            paths,
-            (child_pipes){
-                .ready_write_fd = peer_ready_pipe[1],
-                .release_read_fd = peer_release_pipe[0],
-            }
-        );
-    }
-
-    close(peer_ready_pipe[1]);
-    close(peer_release_pipe[0]);
-    wait_for_pipe(peer_ready_pipe[0]);
-
-    writer_child = fork();
-    assert(writer_child >= 0);
-    if (writer_child == 0) {
-        close(writer_ready_pipe[0]);
-        close(peer_ready_pipe[0]);
-        close(peer_release_pipe[1]);
-        rename_cross_schema_table_until_dictionary_finish_fault(paths, writer_ready_pipe[1]);
-    }
-
-    close(writer_ready_pipe[1]);
-    wait_for_pipe(writer_ready_pipe[0]);
-    assert(kill(writer_child, SIGKILL) == 0);
-    wait_for_signaled_child(writer_child, SIGKILL);
-
-    probe_child = fork();
-    assert(probe_child >= 0);
-    if (probe_child == 0) {
-        assert_ownerless_open_returns_busy(paths);
-    }
-    wait_for_child(probe_child);
-
-    signal_pipe(peer_release_pipe[1]);
-    wait_for_child(peer_child);
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        rename_cross_schema_table_until_dictionary_finish_fault
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -42225,6 +42190,25 @@ static void test_crashed_cross_schema_rename_dictionary_ddl_recovers_moved_table
         "INSERT INTO app_archive.ownerless_cross_schema_rename_crash_target VALUES (2, 20)"
     );
     assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app_archive.ownerless_cross_schema_rename_crash_target"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app_archive.ownerless_cross_schema_rename_crash_target"
+        ) == 30U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -42276,12 +42260,7 @@ static void test_crashed_multi_rename_dictionary_ddl_recovers_swapped_tables(voi
     char *right_ibd_path;
     char *tmp_frm_path;
     char *tmp_ibd_path;
-    int writer_ready_pipe[2];
-    int peer_ready_pipe[2];
-    int peer_release_pipe[2];
-    pid_t writer_child;
-    pid_t peer_child;
-    pid_t probe_child;
+    ownerless_live_peer_guard live_peer;
     unsigned long long left_space_before;
     unsigned long long right_space_before;
     unsigned long long left_space_after;
@@ -42353,53 +42332,11 @@ static void test_crashed_multi_rename_dictionary_ddl_recovers_swapped_tables(voi
     assert(left_space_before != right_space_before);
     assert(mylite_close(db) == MYLITE_OK);
 
-    assert(pipe(writer_ready_pipe) == 0);
-    assert(pipe(peer_ready_pipe) == 0);
-    assert(pipe(peer_release_pipe) == 0);
-
-    peer_child = fork();
-    assert(peer_child >= 0);
-    if (peer_child == 0) {
-        close(peer_ready_pipe[0]);
-        close(peer_release_pipe[1]);
-        close(writer_ready_pipe[0]);
-        close(writer_ready_pipe[1]);
-        hold_ownerless_open_until_released(
-            paths,
-            (child_pipes){
-                .ready_write_fd = peer_ready_pipe[1],
-                .release_read_fd = peer_release_pipe[0],
-            }
-        );
-    }
-
-    close(peer_ready_pipe[1]);
-    close(peer_release_pipe[0]);
-    wait_for_pipe(peer_ready_pipe[0]);
-
-    writer_child = fork();
-    assert(writer_child >= 0);
-    if (writer_child == 0) {
-        close(writer_ready_pipe[0]);
-        close(peer_ready_pipe[0]);
-        close(peer_release_pipe[1]);
-        rename_multi_table_until_dictionary_finish_fault(paths, writer_ready_pipe[1]);
-    }
-
-    close(writer_ready_pipe[1]);
-    wait_for_pipe(writer_ready_pipe[0]);
-    assert(kill(writer_child, SIGKILL) == 0);
-    wait_for_signaled_child(writer_child, SIGKILL);
-
-    probe_child = fork();
-    assert(probe_child >= 0);
-    if (probe_child == 0) {
-        assert_ownerless_open_returns_busy(paths);
-    }
-    wait_for_child(probe_child);
-
-    signal_pipe(peer_release_pipe[1]);
-    wait_for_child(peer_child);
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        rename_multi_table_until_dictionary_finish_fault
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -42476,6 +42413,9 @@ static void test_crashed_multi_rename_dictionary_ddl_recovers_swapped_tables(voi
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_rename_crash_right") == 60U
     );
     assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_multi_rename_crash_state(
         paths,
@@ -42484,6 +42424,7 @@ static void test_crashed_multi_rename_dictionary_ddl_recovers_swapped_tables(voi
         right_space_before,
         left_space_before
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_ownerless_multi_rename_crash_state(
         paths,
         MYLITE_OPEN_READWRITE,
@@ -42536,6 +42477,7 @@ static void test_crashed_cross_schema_multi_rename_dictionary_ddl_recovers_swapp
     char *right_ibd_path;
     char *tmp_frm_path;
     char *tmp_ibd_path;
+    ownerless_live_peer_guard live_peer;
     unsigned long long left_space_before;
     unsigned long long right_space_before;
     unsigned long long left_space_after;
@@ -42618,10 +42560,11 @@ static void test_crashed_cross_schema_multi_rename_dictionary_ddl_recovers_swapp
     assert(left_space_before != right_space_before);
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_ownerless_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         rename_cross_schema_multi_table_until_dictionary_finish_fault
     );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -42744,6 +42687,9 @@ static void test_crashed_cross_schema_multi_rename_dictionary_ddl_recovers_swapp
         ) == 60U
     );
     assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_cross_schema_multi_rename_crash_state(
         paths,
@@ -42752,6 +42698,7 @@ static void test_crashed_cross_schema_multi_rename_dictionary_ddl_recovers_swapp
         right_space_before,
         left_space_before
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_ownerless_cross_schema_multi_rename_crash_state(
         paths,
         MYLITE_OPEN_READWRITE,
@@ -45080,6 +45027,7 @@ static void test_crashed_foreign_key_multi_rename_dictionary_ddl_recovers_constr
     char *child_moved_frm_path = path_join(app_path, "ownerless_fk_multi_rename_child_moved.frm");
     char *child_moved_ibd_path = path_join(app_path, "ownerless_fk_multi_rename_child_moved.ibd");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
     unsigned mariadb_errno = 0U;
 
@@ -45131,10 +45079,11 @@ static void test_crashed_foreign_key_multi_rename_dictionary_ddl_recovers_constr
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_ownerless_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         foreign_key_multi_rename_until_dictionary_finish_fault
     );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -45210,12 +45159,16 @@ static void test_crashed_foreign_key_multi_rename_dictionary_ddl_recovers_constr
         300U
     );
     assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_foreign_key_multi_rename_state(
         paths,
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
         database_path
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_ownerless_foreign_key_multi_rename_state(paths, MYLITE_OPEN_READWRITE, database_path);
     remove_concurrency_shm(database_path);
     assert_ownerless_foreign_key_multi_rename_state(
@@ -45266,6 +45219,7 @@ static void test_crashed_foreign_key_cross_schema_multi_rename_dictionary_ddl_re
     char *child_moved_ibd_path =
         path_join(target_schema_path, "ownerless_fk_cross_schema_multi_child_moved.ibd");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
     unsigned mariadb_errno = 0U;
 
@@ -45317,10 +45271,11 @@ static void test_crashed_foreign_key_cross_schema_multi_rename_dictionary_ddl_re
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_ownerless_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         foreign_key_cross_schema_multi_rename_until_dictionary_finish_fault
     );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -45406,12 +45361,16 @@ static void test_crashed_foreign_key_cross_schema_multi_rename_dictionary_ddl_re
         ) == 300U
     );
     assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_foreign_key_cross_schema_multi_rename_state(
         paths,
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
         database_path
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_ownerless_foreign_key_cross_schema_multi_rename_state(
         paths,
         MYLITE_OPEN_READWRITE,
@@ -66357,19 +66316,12 @@ static void truncate_redo_header_backup(const char *database_path, off_t size) {
     free(backup_path);
 }
 
-static void crash_ownerless_dictionary_writer_with_live_peer(
-    open_database_paths paths,
-    ownerless_dictionary_fault_writer_fn writer_fn
-) {
-    int writer_ready_pipe[2];
+static ownerless_live_peer_guard start_ownerless_live_peer(open_database_paths paths) {
     int peer_ready_pipe[2];
     int peer_release_pipe[2];
-    pid_t writer_child;
     pid_t peer_child;
-    pid_t probe_child;
+    ownerless_live_peer_guard guard = {.release_write_fd = -1, .child_pid = -1};
 
-    assert(writer_fn != NULL);
-    assert(pipe(writer_ready_pipe) == 0);
     assert(pipe(peer_ready_pipe) == 0);
     assert(pipe(peer_release_pipe) == 0);
 
@@ -66378,8 +66330,6 @@ static void crash_ownerless_dictionary_writer_with_live_peer(
     if (peer_child == 0) {
         close(peer_ready_pipe[0]);
         close(peer_release_pipe[1]);
-        close(writer_ready_pipe[0]);
-        close(writer_ready_pipe[1]);
         hold_ownerless_open_until_released(
             paths,
             (child_pipes){
@@ -66392,13 +66342,41 @@ static void crash_ownerless_dictionary_writer_with_live_peer(
     close(peer_ready_pipe[1]);
     close(peer_release_pipe[0]);
     wait_for_pipe(peer_ready_pipe[0]);
+    close(peer_ready_pipe[0]);
+
+    guard.release_write_fd = peer_release_pipe[1];
+    guard.child_pid = peer_child;
+    return guard;
+}
+
+static void release_ownerless_live_peer(ownerless_live_peer_guard *guard) {
+    assert(guard != NULL);
+    assert(guard->release_write_fd >= 0);
+    assert(guard->child_pid > 0);
+
+    signal_pipe(guard->release_write_fd);
+    wait_for_child(guard->child_pid);
+    guard->release_write_fd = -1;
+    guard->child_pid = -1;
+}
+
+static ownerless_live_peer_guard crash_ownerless_dictionary_writer_with_held_live_peer(
+    open_database_paths paths,
+    ownerless_dictionary_fault_writer_fn writer_fn
+) {
+    int writer_ready_pipe[2];
+    pid_t writer_child;
+    ownerless_live_peer_guard guard;
+
+    assert(writer_fn != NULL);
+    assert(pipe(writer_ready_pipe) == 0);
+    guard = start_ownerless_live_peer(paths);
 
     writer_child = fork();
     assert(writer_child >= 0);
     if (writer_child == 0) {
         close(writer_ready_pipe[0]);
-        close(peer_ready_pipe[0]);
-        close(peer_release_pipe[1]);
+        close(guard.release_write_fd);
         writer_fn(paths, writer_ready_pipe[1]);
     }
 
@@ -66406,23 +66384,28 @@ static void crash_ownerless_dictionary_writer_with_live_peer(
     wait_for_pipe(writer_ready_pipe[0]);
     assert(kill(writer_child, SIGKILL) == 0);
     wait_for_signaled_child(writer_child, SIGKILL);
+    close(writer_ready_pipe[0]);
+
+    return guard;
+}
+
+static void crash_ownerless_dictionary_writer_with_live_peer(
+    open_database_paths paths,
+    ownerless_dictionary_fault_writer_fn writer_fn
+) {
+    ownerless_live_peer_guard guard =
+        crash_ownerless_dictionary_writer_with_held_live_peer(paths, writer_fn);
+    pid_t probe_child;
 
     probe_child = fork();
     assert(probe_child >= 0);
     if (probe_child == 0) {
-        close(writer_ready_pipe[0]);
-        close(peer_ready_pipe[0]);
-        close(peer_release_pipe[1]);
+        close(guard.release_write_fd);
         assert_ownerless_open_returns_busy(paths);
     }
     wait_for_child(probe_child);
 
-    signal_pipe(peer_release_pipe[1]);
-    wait_for_child(peer_child);
-
-    close(writer_ready_pipe[0]);
-    close(peer_ready_pipe[0]);
-    close(peer_release_pipe[1]);
+    release_ownerless_live_peer(&guard);
 }
 #endif
 

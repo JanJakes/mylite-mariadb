@@ -2870,10 +2870,11 @@ Tasks:
    identities swap with the table names, and verifies final ownerless/native
    reopen before and after forced `.shm` rebuild. Hook-build cross-schema
    multi-rename crash coverage now kills the same three-pair swap shape after
-   native file movement but before ownerless dictionary finish, verifies
-   live-peer cleanup remains busy until no-live recovery, and checks swapped
-   InnoDB `SPACE` identities, final schema-directory files, post-recovery
-   writes, ownerless/native reopen, and forced `.shm` rebuild. View metadata
+   native file movement but before ownerless dictionary finish, verifies live
+   ownerless recovery while another peer remains open, keeps the native
+   file-op marker durable until final no-live drain, and checks swapped InnoDB
+   `SPACE` identities, final schema-directory files, post-recovery writes,
+   ownerless/native reopen, and forced `.shm` rebuild. View metadata
    coverage now creates and queries a simple view over an InnoDB base table
    from one ownerless process,
    verifies that an already-open peer observes the view and base-table changes
@@ -3931,10 +3932,12 @@ Tasks:
    1451, and checks ownerless/native reopen before and after forced `.shm`
    rebuild. Hook-build same-schema foreign-key multi-pair rename crash coverage
    now kills that parent-through-temporary plus child-rename writer after native
-   FK metadata and file moves but before ownerless dictionary finish, then
-   verifies no-live recovery of the moved generated constraint identity,
-   absence of the temporary parent name, FK enforcement, and ownerless/native
-   reopen before and after forced `.shm` rebuild.
+   FK metadata and file moves but before ownerless dictionary finish, verifies
+   live ownerless recovery while another peer remains open, keeps the native
+   file-op marker durable until final no-live drain, and checks the moved
+   generated constraint identity, absence of the temporary parent name, FK
+   enforcement, and ownerless/native reopen before and after forced `.shm`
+   rebuild.
    Cross-schema foreign-key multi-pair rename coverage now moves both
    the referenced parent table and the child table owning an unnamed foreign key
    from `app` into another schema in one `RENAME TABLE` statement, verifies an
@@ -3947,10 +3950,11 @@ Tasks:
    ownerless/native reopen before and after forced `.shm` rebuild.
    Hook-build cross-schema foreign-key multi-pair rename crash coverage now
    kills the moved parent/child writer after native FK metadata and file moves
-   but before ownerless dictionary finish, then verifies no-live recovery of the
-   moved generated constraint identity, target-schema parent/child files,
-   FK enforcement, and ownerless/native reopen before and after forced `.shm`
-   rebuild.
+   but before ownerless dictionary finish, verifies live ownerless recovery
+   while another peer remains open, keeps the native file-op marker durable
+   until final no-live drain, and checks the moved generated constraint
+   identity, target-schema parent/child files, FK enforcement, and
+   ownerless/native reopen before and after forced `.shm` rebuild.
    Generated-column foreign-key policy coverage now verifies that indexed
    virtual generated child columns can participate in `CREATE TABLE` and
    `ALTER TABLE` foreign keys with `ON UPDATE RESTRICT` and
@@ -4722,11 +4726,13 @@ Tasks:
    provide live-peer recovery for the copied replacement metadata.
    Replacement-copy `CREATE OR REPLACE TABLE ... AS SELECT` prefinish crash
    coverage now uses a separate recoverable dictionary marker to provide
-   live-peer recovery for the populated replacement rows. Single-pair
-   same-schema `RENAME TABLE` prefinish crash coverage now uses a separate
-   recoverable dictionary marker to provide live-peer recovery for the native
-   file-move boundary while leaving cross-schema and multi-pair rename on the
-   no-live path. Focused `TRUNCATE TABLE schema.table` prefinish crash
+   live-peer recovery for the populated replacement rows. Explicit
+   schema-qualified `RENAME TABLE schema.table TO schema.table [, ...]`
+   prefinish crash coverage now uses the rename recoverable dictionary marker
+   to provide live-peer recovery for single-pair same-schema, cross-schema,
+   multi-pair swap, cross-schema multi-pair swap, and foreign-key parent/child
+   multi-pair rename file-move boundaries. Focused `TRUNCATE TABLE
+   schema.table` prefinish crash
    coverage now uses a separate recoverable dictionary marker to provide
    live-peer recovery for the native truncate/recreate boundary. Focused
    `DROP TABLE schema.table` prefinish crash coverage now uses a separate
@@ -4742,8 +4748,10 @@ Tasks:
    coverage now uses a separate recoverable dictionary marker to provide
    live-peer recovery for the native compressed copy rebuild boundary, and the
    same live-peer recovery now covers key-block sizes `1`, `2`, `4`, and `16`.
-   Multi-table and cross-schema drop, broader ALTER rebuild, schema, view,
-   trigger, and foreign-key multi-DDL live-peer recovery remain planned.
+   Implicit-schema, `IF EXISTS`, temporary-table, and view-only rename forms
+   plus multi-table and cross-schema drop, broader ALTER rebuild, schema, view,
+   trigger, and non-rename foreign-key multi-DDL live-peer recovery remain
+   planned.
    Final no-live close
    forces native checkpoint
    proof for retained page-version WAL
@@ -7166,12 +7174,12 @@ subsystems that this mode needs:
   1. Broaden native redo/checkpoint reconciliation and live-peer
      DDL/file-lifecycle recovery beyond the now-covered plain/table-copy
      `CREATE TABLE`, focused CTAS, ordinary replacement, and replacement-copy
-     LIKE/CTAS plus single-pair same-schema rename, focused truncate, and
-     focused drop plus focused force rebuild, dynamic row-format rebuild, and
-     focused compressed key-block row-format rebuild prefinish boundaries,
-     especially crash recovery for cross-schema or multi-pair rename, rebuilt,
-     broader truncated, and multi-table/cross-schema dropped file-per-table
-     tablespaces while peers remain live.
+     LIKE/CTAS plus explicit schema-qualified rename lists, focused truncate,
+     and focused drop plus focused force rebuild, dynamic row-format rebuild,
+     and focused compressed key-block row-format rebuild prefinish boundaries,
+     especially implicit/variant rename forms, rebuilt, broader truncated, and
+     multi-table/cross-schema dropped file-per-table tablespaces while peers
+     remain live.
   2. Close remaining transaction crash windows, especially kills inside
      rollback/savepoint rollback and concurrent-writer savepoint schedules
      that combine native undo, ownerless page-write ownership, and

@@ -8,10 +8,12 @@ lifecycle class is `RENAME TABLE`, where MariaDB moves the native table files
 and dictionary identity before MyLite reaches `dictionary-before-finish`.
 
 Existing hook coverage proved same-schema, cross-schema, and multi-pair rename
-after no-live recovery. This slice upgrades only the conservative single-pair
+after no-live recovery. This slice upgraded only the conservative single-pair
 same-schema form, `RENAME TABLE schema.table TO schema.other_table`, so a live
-ownerless opener can finish the dead dictionary generation while another peer
-remains open.
+ownerless opener could finish the dead dictionary generation while another peer
+remained open. The follow-up
+`docs/specs/ownerless-live-rename-list-recovery/specs.md` now extends that
+live recovery to explicit schema-qualified rename lists.
 
 ## Source Findings
 
@@ -52,9 +54,9 @@ In scope:
 
 Out of scope:
 
-- Cross-schema rename.
-- Multi-pair rename and swap cycles.
-- Foreign-key parent/child rename classes.
+- Implicit-schema rename names.
+- `RENAME TABLE IF EXISTS` and temporary-table rename.
+- View-only rename classes.
 - Trigger-bearing rename classes.
 - Truncate, drop, rebuild, schema, view, trigger, partition/import/export, or
   metadata-only DDL live recovery.
@@ -124,7 +126,9 @@ tests/docs.
 - After the final live peer closes, no-live ownerless recovery drains the marker
   and preserves rename state through ownerless/native reopen and forced `.shm`
   rebuild.
-- Cross-schema and multi-pair rename selectors remain no-live recovery guards.
+- Cross-schema, multi-pair, and foreign-key parent/child rename-list selectors
+  are covered by
+  `docs/specs/ownerless-live-rename-list-recovery/specs.md`.
 
 ## Verification Results
 
@@ -147,9 +151,7 @@ Passed:
 
 ## Risks And Follow-Up
 
-- Cross-schema and multi-pair rename require separate live recovery because they
-  move files across schema directories or through temporary names.
-- Foreign-key rename classes require separate coverage for parent/child metadata
-  and enforcement after live recovery.
+- Implicit-schema, `IF EXISTS`, temporary-table, and view-only rename forms
+  require separate coverage before being considered live-recoverable.
 - Broader DDL/file-lifecycle recovery and external randomized stress remain
   open completion gates.

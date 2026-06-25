@@ -8,10 +8,13 @@ generation. The remaining DDL/file-lifecycle recovery gap still needs sharper
 evidence for multi-object native rename statements, especially the common swap
 shape `left TO tmp, right TO left, tmp TO right`.
 
-This slice proves that if a writer dies after MariaDB completes that multi-pair
-rename but before ownerless dictionary finish, no live peer can clean up the
-stale dictionary owner, and no-live ownerless/native reopen reconstructs the
-swapped table state from native storage.
+This slice originally proved that if a writer dies after MariaDB completes that
+multi-pair rename but before ownerless dictionary finish, no-live
+ownerless/native reopen reconstructs the swapped table state from native
+storage. The follow-up
+`docs/specs/ownerless-live-rename-list-recovery/specs.md` now upgrades this
+selector to prove live-peer recovery for the same explicit schema-qualified
+rename-list shape.
 
 ## Source Findings
 
@@ -48,9 +51,10 @@ In scope:
   swap.
 - Killing the writer at `dictionary-before-finish`, after native rename
   execution and before ownerless dictionary finish.
-- Busy cleanup behavior while a live ownerless peer still exists.
-- No-live ownerless recovery of final metadata, native files, row contents, and
-  swapped InnoDB `SPACE` identities.
+- Live ownerless recovery while another peer still exists, with native file-op
+  marker retention until final no-live drain.
+- Ownerless recovery of final metadata, native files, row contents, and swapped
+  InnoDB `SPACE` identities.
 - Final ownerless/native reopen before and after forced `.shm` rebuild.
 
 Out of scope:
@@ -86,14 +90,17 @@ Out of scope:
 
 - Arm `MYLITE_OWNERLESS_TEST_FAULT=dictionary-before-finish` in the writer and
   kill it after the hook signals readiness.
-- Verify a new ownerless opener remains busy while the live peer exists.
-- Release the peer, reopen ownerless, and verify:
+- Verify a new ownerless opener can finish the dead dictionary generation while
+  the live peer exists, then verify:
   - `left` now contains the former right rows.
   - `right` now contains the former left rows.
   - the temporary SQL and InnoDB dictionary name is absent.
   - final `SPACE` values are swapped.
   - both final tables accept writes.
-- Recheck the final state through ownerless/native reopen before and after
+- Verify the native file-op marker remains set while the original live peer
+  remains open.
+- Release the peer, reopen ownerless with no live peers to drain the marker,
+  and recheck the final state through ownerless/native reopen before and after
   deleting `concurrency/mylite-concurrency.shm`.
 
 No production code change is intended. The slice exercises existing native DDL
@@ -103,9 +110,9 @@ and ownerless dictionary recovery boundaries.
 
 No SQL syntax or public C API behavior changes. The compatibility matrix moves
 the hook-build DDL crash evidence from single-table rename classes to include a
-same-schema multi-pair rename swap. Overall DDL/file-lifecycle recovery remains
-partial until broader durable lifecycle metadata and randomized/oracle-backed
-crash coverage exist.
+same-schema multi-pair rename swap with live recovery. Overall
+DDL/file-lifecycle recovery remains partial until broader durable lifecycle
+metadata and randomized/oracle-backed crash coverage exist.
 
 ## Directory And Lifecycle Impact
 
@@ -123,7 +130,7 @@ dictionary finish.
 ## Embedded Lifecycle And API
 
 No public API changes. The slice covers embedded ownerless open/close behavior
-around a killed DDL writer, a live peer that blocks cleanup, no-live recovery,
+around a killed DDL writer, live peer recovery, final no-live marker drain,
 forced `.shm` rebuild, and ordinary native exclusive reopen.
 
 ## Build, Size, And Dependencies
@@ -144,13 +151,16 @@ hook-build test code and documentation only.
 ## Acceptance Criteria
 
 - A writer killed at `dictionary-before-finish` after a three-pair native
-  rename leaves ownerless cleanup busy while a live peer remains.
-- After no-live recovery, `left` and `right` exist, the temporary table is
+  rename can be recovered by a live ownerless opener while another peer remains
+  open.
+- After live recovery, `left` and `right` exist, the temporary table is
   absent from SQL and InnoDB metadata, and final native files match the final
   names.
 - InnoDB `SPACE` identities are swapped relative to the pre-crash source names.
 - Both swapped tables preserve their original rows and accept post-recovery
   writes.
+- The native file-op marker remains set while the original live peer remains
+  open, then final no-live ownerless recovery drains it.
 - Ownerless/native reopen before and after forced `.shm` rebuild observe the
   same final state.
 
