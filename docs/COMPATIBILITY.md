@@ -317,12 +317,13 @@ non-temporary `TRUNCATE TABLE schema.table` and implicit-schema `TRUNCATE
 table` now have live-peer recovery for the native truncate/recreate boundary;
 explicit and implicit single-table drop now have live-peer recovery for native
 file removal, and focused `ALTER TABLE ... CONVERT TO CHARACTER SET` now has
-live-peer recovery for its native ALTER rewrite boundary. Simple `CREATE VIEW`
-and `DROP VIEW` now have metadata-only live-peer recovery without native
-file-operation marker evidence. `IF EXISTS`, temporary-table, and view-only
-rename forms, plus partition/FK truncate variants, same-statement multi-table
-and cross-schema drop, broader ALTER rebuild, schema, broader view, trigger,
-and non-rename foreign-key multi-DDL live-peer recovery remain partial/planned.
+live-peer recovery for its native ALTER rewrite boundary. Simple `CREATE VIEW`,
+`DROP VIEW`, `CREATE OR REPLACE VIEW`, and `ALTER VIEW` now have metadata-only
+live-peer recovery without native file-operation marker evidence. `IF EXISTS`,
+temporary-table, and view-only rename forms, plus partition/FK truncate
+variants, same-statement multi-table and cross-schema drop, broader ALTER
+rebuild, schema, broader view, trigger, and non-rename foreign-key multi-DDL
+live-peer recovery remain partial/planned.
 Focused hook coverage also now forces a native checkpoint, clears the
 ownerless file-op redo flag, updates a file-per-table InnoDB table, and
 observes the flag set again, proving ordinary post-checkpoint DML reaches

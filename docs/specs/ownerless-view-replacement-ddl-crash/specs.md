@@ -11,7 +11,9 @@ publishes ownerless dictionary finish, no-live recovery must preserve the
 completed replacement or alteration.
 
 This slice adds hook-build crash selectors for `CREATE OR REPLACE VIEW` and
-`ALTER VIEW` over InnoDB base tables.
+`ALTER VIEW` over InnoDB base tables. A later live-recovery follow-up upgrades
+the focused selectors so another ownerless opener can recover the completed
+view rewrite while a peer remains live.
 
 ## Source Findings
 
@@ -47,17 +49,18 @@ Add two unsafe-hook selectors to `mylite_ownerless_cross_process_sql_test`:
 
 - `dictionary-view-replace-crash` creates an InnoDB base table and an initial
   view, kills a writer after `CREATE OR REPLACE VIEW` rewrites the native view
-  definition but before ownerless dictionary finish, verifies live-peer cleanup
-  remains busy, then reopens no-live ownerless and checks the replaced
-  projection and column metadata.
+  definition but before ownerless dictionary finish, verifies another ownerless
+  opener recovers the replaced projection while a peer remains live, then
+  releases the peer and checks the replaced projection and column metadata.
 - `dictionary-view-alter-crash` creates an InnoDB base table and an initial
   view, kills a writer after `ALTER VIEW` rewrites the native view definition
-  but before ownerless dictionary finish, verifies live-peer cleanup remains
-  busy, then reopens no-live ownerless and checks the altered projection and
-  column metadata.
+  but before ownerless dictionary finish, verifies another ownerless opener
+  recovers the altered projection while a peer remains live, then releases the
+  peer and checks the altered projection and column metadata.
 
-Both selectors verify ownerless and ordinary native reopen before and after a
-forced `.shm` rebuild.
+Both selectors verify the native file-operation checkpoint marker stays clear,
+then verify ownerless and ordinary native reopen before and after a forced
+`.shm` rebuild.
 
 ## Scope
 
@@ -119,6 +122,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - Run focused selectors:
   - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-view-replace-crash`
   - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-view-alter-crash`
+- Run focused CTest entries:
+  - `ctest --preset ownerless-test-hooks -R 'libmylite\.ownerless-dictionary-view-(replace|alter)-crash$' --output-on-failure`
 - Run adjacent hook selectors for simple and idempotent view DDL crashes.
 - Run normal embedded view replacement refresh coverage.
 - Run the relevant ownerless hook SQL shard and DDL stress.
@@ -127,7 +132,10 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selectors reach the dictionary fault hook and do not hang.
-- A live peer prevents cleanup until no-live recovery.
+- A live peer remains open while another ownerless opener recovers the completed
+  native view rewrite.
+- The native file-operation checkpoint marker remains clear for both
+  metadata-only view rewrite paths.
 - Replacement recovery exposes the replaced view metadata, removes the old
   `value` column, and queries the new `adjusted` projection.
 - Alter recovery exposes the altered view metadata, removes the old `value`

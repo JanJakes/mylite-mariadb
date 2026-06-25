@@ -594,6 +594,14 @@ if(BUILD_TESTING)
         COMMAND mylite_ownerless_cross_process_sql_test dictionary-view-drop-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-view-replace-crash
+        COMMAND mylite_ownerless_cross_process_sql_test dictionary-view-replace-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-view-alter-crash
+        COMMAND mylite_ownerless_cross_process_sql_test dictionary-view-alter-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-view-idempotent-create-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -966,6 +974,8 @@ if(BUILD_TESTING)
       set_tests_properties(
         libmylite.ownerless-dictionary-view-create-crash
         libmylite.ownerless-dictionary-view-drop-crash
+        libmylite.ownerless-dictionary-view-replace-crash
+        libmylite.ownerless-dictionary-view-alter-crash
         libmylite.ownerless-dictionary-view-idempotent-create-crash
         libmylite.ownerless-dictionary-view-idempotent-drop-crash
         libmylite.ownerless-dictionary-trigger-definer-crash

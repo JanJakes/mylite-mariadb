@@ -4757,7 +4757,11 @@ Tasks:
    prefinish crash coverage now uses metadata-only recoverable dictionary
    markers to provide live-peer recovery without native file-operation
    checkpoint evidence, while preserving the file-operation marker requirement
-   for table DDL.
+   for table DDL. Focused `CREATE OR REPLACE VIEW schema.view AS ...` and
+   `ALTER VIEW schema.view AS ...` prefinish crash coverage use the same
+   metadata-only lane for native view definition rewrites while keeping
+   security/definer, column-list, check-option, and nested view variants
+   planned.
    Implicit-schema, `IF EXISTS`, temporary-table, and view-only rename forms
    plus multi-table and cross-schema drop, broader ALTER rebuild beyond the
    focused force, row-format, compressed, and charset-conversion cases, schema,
@@ -7212,6 +7216,10 @@ subsystems that this mode needs:
   kinds for `CREATE VIEW ... AS ...` and single-view `DROP VIEW`, then proves a
   live peer can remain open while another opener recovers the created or absent
   view without a native file-operation marker.
+  The view rewrite follow-up extends that metadata-only live-recovery lane to
+  focused `CREATE OR REPLACE VIEW ... AS ...` and `ALTER VIEW ... AS ...`
+  rewrites, proving the replaced/altered projection while a peer remains live
+  and keeping the native file-operation marker clear.
 
   Ownerless DDL stress now treats pre-execution MyLite statement-lock
   `MYLITE_BUSY` as bounded retryable harness contention while keeping native
@@ -7231,10 +7239,10 @@ subsystems that this mode needs:
      implicit single-table drop, plus focused force rebuild, dynamic row-format
      rebuild, focused compressed key-block row-format rebuild, and focused
      charset-conversion rebuild prefinish boundaries, plus simple CREATE/DROP
-     VIEW metadata-only prefinish boundaries, especially remaining
-     rename/truncate variants, rebuild variants, broader metadata-only DDL, and
-     multi-table/cross-schema dropped file-per-table tablespaces while peers
-     remain live.
+     VIEW and focused CREATE OR REPLACE/ALTER VIEW metadata-only prefinish
+     boundaries, especially remaining rename/truncate variants, rebuild
+     variants, broader metadata-only DDL, and multi-table/cross-schema dropped
+     file-per-table tablespaces while peers remain live.
   2. Close remaining transaction crash windows, especially native
      rollback/savepoint-rollback internals and concurrent-writer savepoint
      schedules that combine native undo, ownerless page-write ownership, and

@@ -2195,6 +2195,7 @@ bool ownerless_dictionary_ddl_statement(const SqlPolicyTokens &tokens);
 bool ownerless_dictionary_ddl_needs_native_file_op_checkpoint(const SqlPolicyTokens &tokens);
 std::uint32_t ownerless_dictionary_recovery_kind_for_statement(const SqlPolicyTokens &tokens);
 bool ownerless_create_view_recovery_statement(const SqlPolicyTokens &tokens);
+bool ownerless_create_or_replace_view_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_plain_create_table_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_create_table_like_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_create_table_select_recovery_statement(const SqlPolicyTokens &tokens);
@@ -2202,6 +2203,7 @@ bool ownerless_create_or_replace_table_recovery_statement(const SqlPolicyTokens 
 bool ownerless_create_or_replace_table_like_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_create_or_replace_table_select_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_rename_table_recovery_statement(const SqlPolicyTokens &tokens);
+bool ownerless_alter_view_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_alter_table_rename_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_truncate_table_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_drop_table_recovery_statement(const SqlPolicyTokens &tokens);
@@ -15173,6 +15175,9 @@ std::uint32_t ownerless_dictionary_recovery_kind_for_statement(const SqlPolicyTo
     if (ownerless_create_view_recovery_statement(tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_VIEW;
     }
+    if (ownerless_create_or_replace_view_recovery_statement(tokens)) {
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_OR_REPLACE_VIEW;
+    }
     if (ownerless_plain_create_table_recovery_statement(tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE;
     }
@@ -15193,6 +15198,9 @@ std::uint32_t ownerless_dictionary_recovery_kind_for_statement(const SqlPolicyTo
     }
     if (ownerless_rename_table_recovery_statement(tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_RENAME_TABLE;
+    }
+    if (ownerless_alter_view_recovery_statement(tokens)) {
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_VIEW;
     }
     if (ownerless_alter_table_rename_recovery_statement(tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_RENAME_TABLE;
@@ -15230,6 +15238,21 @@ bool ownerless_create_view_recovery_statement(const SqlPolicyTokens &tokens) {
     }
 
     std::size_t index = 2U;
+    if (!consume_ownerless_table_identifier(tokens, index) || index >= tokens.count ||
+        !token_equals(tokens.values[index], "AS")) {
+        return false;
+    }
+    return true;
+}
+
+bool ownerless_create_or_replace_view_recovery_statement(const SqlPolicyTokens &tokens) {
+    if (tokens.count < 7U || !token_equals(tokens.values[0], "CREATE") ||
+        !token_equals(tokens.values[1], "OR") || !token_equals(tokens.values[2], "REPLACE") ||
+        !token_equals(tokens.values[3], "VIEW")) {
+        return false;
+    }
+
+    std::size_t index = 4U;
     if (!consume_ownerless_table_identifier(tokens, index) || index >= tokens.count ||
         !token_equals(tokens.values[index], "AS")) {
         return false;
@@ -15527,6 +15550,20 @@ bool ownerless_rename_table_recovery_statement(const SqlPolicyTokens &tokens) {
     return true;
 }
 
+bool ownerless_alter_view_recovery_statement(const SqlPolicyTokens &tokens) {
+    if (tokens.count < 5U || !token_equals(tokens.values[0], "ALTER") ||
+        !token_equals(tokens.values[1], "VIEW")) {
+        return false;
+    }
+
+    std::size_t index = 2U;
+    if (!consume_ownerless_table_identifier(tokens, index) || index >= tokens.count ||
+        !token_equals(tokens.values[index], "AS")) {
+        return false;
+    }
+    return true;
+}
+
 bool ownerless_alter_table_rename_recovery_statement(const SqlPolicyTokens &tokens) {
     if (tokens.count < 6U || !token_equals(tokens.values[0], "ALTER") ||
         !token_equals(tokens.values[1], "TABLE")) {
@@ -15723,7 +15760,9 @@ std::uint32_t ownerless_alter_table_compressed_row_format_key_block_recovery_kin
 
 bool ownerless_dictionary_recovery_kind_is_metadata_only(std::uint32_t recovery_kind) {
     return recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_VIEW ||
-           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_DROP_VIEW;
+           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_DROP_VIEW ||
+           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_OR_REPLACE_VIEW ||
+           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_VIEW;
 }
 
 bool ownerless_table_identifier_token(std::string_view token) {
@@ -21198,9 +21237,11 @@ bool ownerless_process_recover_dead_dictionary_owner(
         }
     }
 
-    constexpr std::array<std::uint32_t, 2> metadata_only_recovery_kinds = {
+    constexpr std::array<std::uint32_t, 4> metadata_only_recovery_kinds = {
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_VIEW,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_DROP_VIEW,
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_OR_REPLACE_VIEW,
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_VIEW,
     };
     for (const std::uint32_t recovery_kind : metadata_only_recovery_kinds) {
         std::uint64_t generation = 0;

@@ -360,7 +360,9 @@ bool valid_recovery_kind(std::uint32_t recovery_kind) {
                MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_COMPRESSED_ROW_FORMAT_KEY_BLOCK_16 ||
            recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_CHARSET_CONVERT ||
            recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_VIEW ||
-           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_DROP_VIEW;
+           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_DROP_VIEW ||
+           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_OR_REPLACE_VIEW ||
+           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_VIEW;
 }
 
 void clear_recoverable_state(unsigned char *state) {
