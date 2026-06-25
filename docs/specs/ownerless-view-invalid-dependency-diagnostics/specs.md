@@ -82,7 +82,8 @@ Out of scope:
 
 - Invalid definers, privilege/security failures, stored functions, trigger
   dependencies, nested invalid dependencies, and complex join/union views.
-- Crash-at-boundary recovery for invalid dependency transitions.
+- Crash-at-boundary recovery for dropping an already-invalid view is covered by
+  `docs/specs/ownerless-view-invalid-dependency-drop-live-recovery/specs.md`.
 - External randomized view oracle coverage.
 
 ## Compatibility Impact
@@ -134,4 +135,5 @@ through `mylite_mariadb_errno()`.
 
 - This covers one direct SQL dependency-drop/recreate shape. Invalid definers,
   privilege/security failures, nested invalid dependencies, complex views,
-  crash-boundary recovery, and randomized view oracles remain planned.
+  and randomized view oracles remain planned. Crash-boundary recovery for
+  dropping an already-invalid view is covered separately.

@@ -154,8 +154,9 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - This remains focused SQL-shape recovery, not a complete parser or oracle for
   every legal updatable view definition.
 - Nested check-option propagation, non-updatable diagnostics, security/definer,
-  idempotent/no-op, and invalid-dependency view variants still need
-  live-recovery promotion.
+  and idempotent/no-op view variants are covered by separate live-recovery
+  slices; invalid-dependency view drop recovery is covered by
+  `ownerless-view-invalid-dependency-drop-live-recovery`.
 - Trigger, schema, and broader metadata-only DDL live recovery remain planned.
 - Longer external MariaDB/RQG-style stress remains planned after bounded
   recovery classes stop producing correctness fixes.

@@ -164,8 +164,8 @@ Collected on branch `ownerless-concurrency` after the implementation:
   privilege enforcement.
 - Invalid-definer, account-lifecycle, stored-function view, and randomized view
   oracle coverage remain planned.
-- Idempotent/no-op and invalid-dependency view live-recovery promotion remain
-  planned.
+- Idempotent/no-op and invalid-dependency view drop recovery are covered by
+  separate live-recovery slices.
 - Trigger, schema, and broader metadata-only DDL live recovery remain planned.
 - Longer external MariaDB/RQG-style stress remains planned after bounded
   recovery classes stop producing correctness fixes.

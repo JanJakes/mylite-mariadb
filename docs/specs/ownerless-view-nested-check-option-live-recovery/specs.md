@@ -151,8 +151,8 @@ Collected on branch `ownerless-concurrency` after the implementation:
 - This remains focused nested-view recovery, not a full oracle for every nested
   view shape.
 - Complex joins, non-updatable diagnostics, prepared nested view DML,
-  security/definer, idempotent/no-op, and invalid-dependency view variants
-  still need live-recovery promotion.
+  security/definer, idempotent/no-op, and invalid-dependency view drop recovery
+  are covered by separate live-recovery slices.
 - Trigger, schema, and broader metadata-only DDL live recovery remain planned.
 - Longer external MariaDB/RQG-style stress remains planned after bounded
   recovery classes stop producing correctness fixes.

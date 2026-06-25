@@ -58,7 +58,8 @@ The original rewrite slice constrained the base classifiers to:
 
 Follow-up live-recovery slices broaden the shared view classifiers for explicit
 column lists, check-option, nested check-option, and security/definer variants.
-Invalid-dependency view recovery remains separate planned work.
+Invalid-dependency view drop recovery is covered separately by
+`ownerless-view-invalid-dependency-drop-live-recovery`.
 
 The existing metadata-only finish and cleanup path should mark these kinds
 recoverable after native execution and recover them without native
@@ -131,9 +132,8 @@ classifiers, focused tests, CTest registration, and docs.
 ## Risks And Follow-Up
 
 - This promotes only the focused no-column-list rewrite forms. Column-list,
-  check-option, nested, and security/definer view variants are covered by
-  follow-up metadata-only live-recovery slices; invalid-dependency view variants
-  remain planned.
+  check-option, nested, security/definer, and invalid-dependency view drop
+  variants are covered by follow-up metadata-only live-recovery slices.
 - Trigger, schema, and table metadata-only live recovery remain planned.
 - External MariaDB/RQG stress remains planned after bounded recovery gates stop
   producing new correctness issues.

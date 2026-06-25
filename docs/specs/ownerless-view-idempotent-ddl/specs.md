@@ -147,5 +147,8 @@ API, or default runtime feature is added.
   `docs/specs/ownerless-view-ddl-crash/specs.md`.
 - Duplicate-create and missing-drop no-op crash recovery is covered separately
   by `docs/specs/ownerless-view-idempotent-ddl-crash/specs.md`.
-- Replacement/alter, check-option, nested, column-list, security/definer,
-  invalid dependency, and broader randomized view crash variants remain planned.
+- Replacement/alter, check-option, nested, column-list, and security/definer
+  crash variants are covered by separate focused slices; invalid-dependency
+  view drop crash recovery is covered by
+  `docs/specs/ownerless-view-invalid-dependency-drop-live-recovery/specs.md`.
+  Broader randomized view crash variants remain planned.

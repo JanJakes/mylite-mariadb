@@ -262,6 +262,10 @@ broader durable DDL file-lifecycle protocol is complete.
 Focused single-table `DROP TABLE schema.table` prefinish recovery now allows
 live-peer dictionary cleanup after native file removal; multi-table and
 cross-schema drop live recovery remains planned.
+Focused invalid-dependency `DROP VIEW schema.view` prefinish recovery now
+allows live-peer metadata-only dictionary cleanup after MariaDB has removed an
+invalid view definition whose base table was already dropped, while preserving
+the absence of the view after the base table is later recreated.
 Focused `ALTER TABLE schema.table FORCE, ALGORITHM=COPY, LOCK=EXCLUSIVE`
 prefinish recovery now allows live-peer dictionary cleanup after the native
 copy-style rebuild. Focused `ALTER TABLE schema.table ROW_FORMAT=DYNAMIC`

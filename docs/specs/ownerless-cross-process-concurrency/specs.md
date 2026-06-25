@@ -3625,7 +3625,11 @@ Tasks:
    peer-replaced aggregate view definitions.
    Invalid view dependency diagnostics add ownerless view query errno 1356 after
    peer base-table drop, then recovery of the same view after peer base-table
-   recreation.
+   recreation. Hook-build invalid-dependency view drop recovery now kills a
+   writer after native `DROP VIEW` removes the invalid view definition but
+   before MyLite dictionary finish, then proves live-peer metadata-only cleanup
+   removes the view while preserving later base-table recreation without
+   reanimating the dropped view.
    Nested view check-option coverage adds ownerless inner/outer updatable views
    that distinguish outer `LOCAL` from outer `CASCADED` propagation, refresh an
    altered inner predicate under an already-open outer cascaded view, and verify
@@ -4779,8 +4783,9 @@ Tasks:
    recovers security metadata while a peer remains live. Focused idempotent
    `CREATE VIEW IF NOT EXISTS` and `DROP VIEW IF EXISTS` no-op prefinish crash
    coverage now recovers preserved/absent view metadata while a peer remains
-   live. Invalid-dependency view variants remain planned for live-recovery
-   promotion.
+   live. Focused invalid-dependency `DROP VIEW` prefinish crash coverage now
+   recovers absent view metadata while a peer remains live after the base table
+   was already dropped and the view was already reporting MariaDB errno 1356.
    Implicit-schema, `IF EXISTS`, temporary-table, and view-only rename forms
    plus multi-table and cross-schema drop, broader ALTER rebuild beyond the
    focused force, row-format, compressed, and charset-conversion cases, schema,

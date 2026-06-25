@@ -153,7 +153,8 @@ Collected on branch `ownerless-concurrency` after the implementation:
 
 - This covers deterministic no-op view DDL recovery, not every idempotent view
   lifecycle spelling.
-- Invalid-dependency view live recovery remains planned.
+- Invalid-dependency view drop recovery is covered separately by
+  `ownerless-view-invalid-dependency-drop-live-recovery`.
 - Trigger, schema, and broader metadata-only DDL live recovery remain planned.
 - Longer external MariaDB/RQG-style stress remains planned after bounded
   recovery classes stop producing correctness fixes.

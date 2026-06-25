@@ -680,6 +680,12 @@ if(BUILD_TESTING)
           dictionary-view-idempotent-drop-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-view-invalid-dependency-drop-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-view-invalid-dependency-drop-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-trigger-definer-crash
         COMMAND mylite_ownerless_cross_process_sql_test dictionary-trigger-definer-crash
       )
@@ -1055,6 +1061,7 @@ if(BUILD_TESTING)
         libmylite.ownerless-dictionary-view-security-alter-crash
         libmylite.ownerless-dictionary-view-idempotent-create-crash
         libmylite.ownerless-dictionary-view-idempotent-drop-crash
+        libmylite.ownerless-dictionary-view-invalid-dependency-drop-crash
         libmylite.ownerless-dictionary-trigger-definer-crash
         PROPERTIES
           LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"

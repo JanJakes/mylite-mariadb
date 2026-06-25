@@ -65,8 +65,9 @@ Out of scope:
 
 - `CREATE OR REPLACE VIEW` and `ALTER VIEW` crash recovery, which is covered
   by `docs/specs/ownerless-view-replacement-ddl-crash/specs.md`.
-- Nested-view, security/definer, invalid-dependency, and updatable-view crash
-  variants.
+- Nested-view, security/definer, and updatable-view crash variants.
+- Invalid-dependency view drop crash recovery, which is covered separately by
+  `docs/specs/ownerless-view-invalid-dependency-drop-live-recovery/specs.md`.
 - Explicit column-list crash coverage, which is covered separately by
   `docs/specs/ownerless-view-column-list-ddl-crash/specs.md`.
 - Check-option create/replacement crash coverage, which is covered separately by
