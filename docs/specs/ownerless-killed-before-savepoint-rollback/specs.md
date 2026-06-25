@@ -115,7 +115,10 @@ embedded MariaDB profile.
 
 ## Risks
 
-This closes a killed-before-savepoint-rollback boundary. It does not prove a
-kill inside the InnoDB savepoint rollback routine, arbitrary concurrent-writer
+This closes a killed-before-savepoint-rollback boundary. The
+`ownerless-savepoint-rollback-before-state-crash` slice separately covers the
+MyLite-owned boundary after native savepoint rollback succeeds but before
+ownerless process-local savepoint state is updated. Neither slice proves a kill
+inside the InnoDB savepoint rollback routine, arbitrary concurrent-writer
 savepoint schedules, broader native redo/checkpoint reconciliation, or
 DDL/file-lifecycle recovery.

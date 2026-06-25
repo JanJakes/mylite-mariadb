@@ -7160,6 +7160,13 @@ subsystems that this mode needs:
   both native file-operation markers remain clear. This narrows the savepoint
   crash matrix, but does not claim a kill inside InnoDB savepoint rollback or
   concurrent-writer savepoint schedules.
+  The savepoint-rollback-before-state hook follow-up kills a writer after
+  native `ROLLBACK TO SAVEPOINT` succeeds but before MyLite updates
+  process-local savepoint state and discards rolled-back file-operation
+  evidence. Ownerless recovery, forced `.shm` rebuild, and ordinary native
+  reopen preserve the original row while both native file-operation markers
+  remain clear. This covers a MyLite-owned post-native rollback boundary, not
+  arbitrary crashes inside InnoDB rollback internals.
 
   Ownerless DDL stress now treats pre-execution MyLite statement-lock
   `MYLITE_BUSY` as bounded retryable harness contention while keeping native
@@ -7180,9 +7187,9 @@ subsystems that this mode needs:
      especially implicit/variant rename forms, rebuilt, broader truncated, and
      multi-table/cross-schema dropped file-per-table tablespaces while peers
      remain live.
-  2. Close remaining transaction crash windows, especially kills inside
-     rollback/savepoint rollback and concurrent-writer savepoint schedules
-     that combine native undo, ownerless page-write ownership, and
+  2. Close remaining transaction crash windows, especially native
+     rollback/savepoint-rollback internals and concurrent-writer savepoint
+     schedules that combine native undo, ownerless page-write ownership, and
      file-operation marker cleanup.
   3. Extend active-reader pressure evidence from retained-WAL policy to crash
      and external-oracle breadth for the high-risk DML/DDL classes already

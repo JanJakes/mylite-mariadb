@@ -16421,6 +16421,7 @@ void update_ownerless_savepoint_state_after_successful_sql(
         if (name.empty()) {
             return;
         }
+        pause_for_ownerless_test_fault("savepoint-rollback-before-state");
         for (std::size_t index = db.ownerless_transaction_savepoints.size(); index > 0U; --index) {
             if (db.ownerless_transaction_savepoints[index - 1U].name != name) {
                 continue;
