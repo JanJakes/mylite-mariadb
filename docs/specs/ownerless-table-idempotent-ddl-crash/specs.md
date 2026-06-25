@@ -41,8 +41,11 @@ Add two unsafe-hook selectors to
   `DROP TABLE IF EXISTS` for a missing table name reaches
   `dictionary-before-finish`.
 
-Both selectors keep a live ownerless peer open while the writer is killed,
-prove cleanup remains busy until no-live recovery, then verify ownerless and
+Both selectors keep a live ownerless peer open while the writer is killed. The
+duplicate-create selector proves cleanup remains busy until no-live recovery.
+The missing-drop selector is promoted by
+`ownerless-table-if-exists-drop-live-recovery` to recover while the peer remains
+live with the native file-operation marker clear, then verifies ownerless and
 ordinary native reopen before and after forced `.shm` rebuild.
 
 ## Scope And Non-Goals
@@ -101,7 +104,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selectors reach the dictionary fault hook and do not hang.
-- A live peer prevents cleanup until no-live recovery.
+- A live peer prevents duplicate-create cleanup until no-live recovery.
+- Missing idempotent drop recovers while a peer remains live.
 - Duplicate idempotent create recovery keeps the original table definition,
   leaves the attempted `note` column absent, and keeps plain duplicate create
   returning errno 1050.
