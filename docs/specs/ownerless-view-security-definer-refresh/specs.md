@@ -135,6 +135,8 @@ runtime feature is added.
 - Hook-build crash recovery for definer creation, invoker replacement, and
   definer alteration is covered by
   `docs/specs/ownerless-view-security-ddl-crash/specs.md` and
-  `docs/specs/ownerless-view-security-alter-ddl-crash/specs.md`; invalid
-  definer recovery remains planned work.
+  `docs/specs/ownerless-view-security-alter-ddl-crash/specs.md`; focused
+  metadata-only live recovery is covered by
+  `docs/specs/ownerless-view-security-live-recovery/specs.md`; invalid definer
+  recovery remains planned work.
 - Invalid-definer and randomized view-oracle coverage remain planned.

@@ -2980,9 +2980,10 @@ Tasks:
    definition storage, and
    `ALTER DEFINER=CURRENT_USER SQL SECURITY DEFINER VIEW` writers after native
    view definition rewrite, but before ownerless dictionary finish, then
-   verifies recovered `SECURITY_TYPE`, non-empty definer metadata, view query
-   behavior, base-table writes, and ownerless/native reopen before and after
-   forced `.shm` rebuild.
+   recovers them while a peer remains live, keeps the native file-operation
+   marker clear, and verifies recovered `SECURITY_TYPE`, non-empty definer
+   metadata, view query behavior, base-table writes, and ownerless/native
+   reopen before and after forced `.shm` rebuild.
    View idempotent DDL coverage verifies that an already-open ownerless peer
    observes `CREATE VIEW IF NOT EXISTS`, duplicate plain `CREATE VIEW` returns
    MariaDB errno 1050, repeated `CREATE VIEW IF NOT EXISTS` preserves the
@@ -4772,9 +4773,11 @@ Tasks:
    prefinish crash coverage uses the same metadata-only lane and recovers
    updatable-view enforcement while a peer remains live. Focused nested
    check-option outer replacement and inner alter prefinish crash coverage now
-   recovers dependent-view enforcement while a peer remains live.
-   Security/definer, idempotent/no-op, and invalid-dependency view variants
-   remain planned for live-recovery promotion.
+   recovers dependent-view enforcement while a peer remains live. Focused
+   security/definer create, replacement, and alter prefinish crash coverage now
+   recovers security metadata while a peer remains live.
+   Idempotent/no-op and invalid-dependency view variants remain planned for
+   live-recovery promotion.
    Implicit-schema, `IF EXISTS`, temporary-table, and view-only rename forms
    plus multi-table and cross-schema drop, broader ALTER rebuild beyond the
    focused force, row-format, compressed, and charset-conversion cases, schema,
@@ -7246,6 +7249,11 @@ subsystems that this mode needs:
   alter crash selectors to the same metadata-only live-recovery lane, proving
   dependent inner/outer DML enforcement while a peer remains live and the
   native file-operation marker stays clear.
+  The security/definer follow-up promotes focused definer create, invoker
+  replacement, and definer-security alter crash selectors to the same
+  metadata-only live-recovery lane, proving persisted `SECURITY_TYPE` and
+  definer metadata while a peer remains live and the native file-operation
+  marker stays clear.
 
   Ownerless DDL stress now treats pre-execution MyLite statement-lock
   `MYLITE_BUSY` as bounded retryable harness contention while keeping native
@@ -7266,10 +7274,11 @@ subsystems that this mode needs:
      rebuild, focused compressed key-block row-format rebuild, and focused
      charset-conversion rebuild prefinish boundaries, plus simple CREATE/DROP
      VIEW, focused CREATE OR REPLACE/ALTER VIEW, and focused explicit
-     column-list, check-option, and nested check-option view metadata-only
-     prefinish boundaries, especially remaining rename/truncate variants, rebuild
-     variants, broader metadata-only DDL, and multi-table/cross-schema dropped
-     file-per-table tablespaces while peers remain live.
+     column-list, check-option, nested check-option, and security/definer view
+     metadata-only prefinish boundaries, especially remaining rename/truncate
+     variants, rebuild variants, broader metadata-only DDL, and
+     multi-table/cross-schema dropped file-per-table tablespaces while peers
+     remain live.
   2. Close remaining transaction crash windows, especially native
      rollback/savepoint-rollback internals and concurrent-writer savepoint
      schedules that combine native undo, ownerless page-write ownership, and

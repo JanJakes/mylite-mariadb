@@ -50157,6 +50157,7 @@ static void test_crashed_view_security_create_dictionary_ddl_recovers_definer(vo
     char *app_path = path_join(datadir_path, "app");
     char *view_path = path_join(app_path, "ownerless_view_security_create_crash.frm");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -50187,10 +50188,20 @@ static void test_crashed_view_security_create_dictionary_ddl_recovers_definer(vo
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         security_create_view_until_dictionary_finish_fault
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    assert_ownerless_view_security_create_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_view_security_create_crash_ddl_state(
         paths,
@@ -50232,6 +50243,7 @@ static void test_crashed_view_security_replace_dictionary_ddl_recovers_invoker(v
     char *app_path = path_join(datadir_path, "app");
     char *view_path = path_join(app_path, "ownerless_view_security_replace_crash.frm");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -50272,10 +50284,20 @@ static void test_crashed_view_security_replace_dictionary_ddl_recovers_invoker(v
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         security_replace_view_until_dictionary_finish_fault
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    assert_ownerless_view_security_replace_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_view_security_replace_crash_ddl_state(
         paths,
@@ -50316,6 +50338,7 @@ static void test_crashed_view_security_alter_dictionary_ddl_recovers_definer(voi
     char *app_path = path_join(datadir_path, "app");
     char *view_path = path_join(app_path, "ownerless_view_security_alter_crash.frm");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -50355,10 +50378,20 @@ static void test_crashed_view_security_alter_dictionary_ddl_recovers_definer(voi
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         security_alter_view_until_dictionary_finish_fault
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    assert_ownerless_view_security_alter_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_view_security_alter_crash_ddl_state(
         paths,

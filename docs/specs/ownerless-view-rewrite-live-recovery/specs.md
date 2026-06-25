@@ -51,14 +51,14 @@ Add two metadata-only ownerless dictionary recovery kinds:
 - `MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_OR_REPLACE_VIEW`
 - `MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_VIEW`
 
-The classifiers accept only:
+The original rewrite slice constrained the base classifiers to:
 
 - `CREATE OR REPLACE VIEW <one-or-two-part-name> AS ...`
 - `ALTER VIEW <one-or-two-part-name> AS ...`
 
-They intentionally reject definer/security clauses, explicit column lists, and
-check-option variants. Those already have crash selectors and can be promoted
-through separate bounded live-recovery slices.
+Follow-up live-recovery slices broaden the shared view classifiers for explicit
+column lists, check-option, nested check-option, and security/definer variants.
+Invalid-dependency view recovery remains separate planned work.
 
 The existing metadata-only finish and cleanup path should mark these kinds
 recoverable after native execution and recover them without native
@@ -131,8 +131,9 @@ classifiers, focused tests, CTest registration, and docs.
 ## Risks And Follow-Up
 
 - This promotes only the focused no-column-list rewrite forms. Column-list,
-  check-option, nested, security/definer, and invalid-dependency view variants
-  remain separate planned metadata-only live-recovery work.
+  check-option, nested, and security/definer view variants are covered by
+  follow-up metadata-only live-recovery slices; invalid-dependency view variants
+  remain planned.
 - Trigger, schema, and table metadata-only live recovery remain planned.
 - External MariaDB/RQG stress remains planned after bounded recovery gates stop
   producing new correctness issues.

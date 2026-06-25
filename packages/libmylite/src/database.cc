@@ -2215,6 +2215,10 @@ std::uint32_t ownerless_alter_table_compressed_row_format_key_block_recovery_kin
     const SqlPolicyTokens &tokens
 );
 bool ownerless_dictionary_recovery_kind_is_metadata_only(std::uint32_t recovery_kind);
+bool consume_ownerless_optional_view_security_clauses(
+    const SqlPolicyTokens &tokens,
+    std::size_t &index
+);
 bool consume_ownerless_table_identifier(const SqlPolicyTokens &tokens, std::size_t &index);
 bool consume_ownerless_optional_view_column_list(const SqlPolicyTokens &tokens, std::size_t &index);
 bool ownerless_stale_engine_error_allows_retry(
@@ -15233,12 +15237,16 @@ std::uint32_t ownerless_dictionary_recovery_kind_for_statement(const SqlPolicyTo
 }
 
 bool ownerless_create_view_recovery_statement(const SqlPolicyTokens &tokens) {
-    if (tokens.count < 5U || !token_equals(tokens.values[0], "CREATE") ||
-        !token_equals(tokens.values[1], "VIEW")) {
+    if (tokens.count < 5U || !token_equals(tokens.values[0], "CREATE")) {
         return false;
     }
 
-    std::size_t index = 2U;
+    std::size_t index = 1U;
+    if (!consume_ownerless_optional_view_security_clauses(tokens, index) || index >= tokens.count ||
+        !token_equals(tokens.values[index], "VIEW")) {
+        return false;
+    }
+    ++index;
     if (!consume_ownerless_table_identifier(tokens, index) ||
         !consume_ownerless_optional_view_column_list(tokens, index) || index >= tokens.count ||
         !token_equals(tokens.values[index], "AS")) {
@@ -15249,12 +15257,16 @@ bool ownerless_create_view_recovery_statement(const SqlPolicyTokens &tokens) {
 
 bool ownerless_create_or_replace_view_recovery_statement(const SqlPolicyTokens &tokens) {
     if (tokens.count < 7U || !token_equals(tokens.values[0], "CREATE") ||
-        !token_equals(tokens.values[1], "OR") || !token_equals(tokens.values[2], "REPLACE") ||
-        !token_equals(tokens.values[3], "VIEW")) {
+        !token_equals(tokens.values[1], "OR") || !token_equals(tokens.values[2], "REPLACE")) {
         return false;
     }
 
-    std::size_t index = 4U;
+    std::size_t index = 3U;
+    if (!consume_ownerless_optional_view_security_clauses(tokens, index) || index >= tokens.count ||
+        !token_equals(tokens.values[index], "VIEW")) {
+        return false;
+    }
+    ++index;
     if (!consume_ownerless_table_identifier(tokens, index) ||
         !consume_ownerless_optional_view_column_list(tokens, index) || index >= tokens.count ||
         !token_equals(tokens.values[index], "AS")) {
@@ -15518,6 +15530,36 @@ bool consume_ownerless_table_identifier(const SqlPolicyTokens &tokens, std::size
     return true;
 }
 
+bool consume_ownerless_optional_view_security_clauses(
+    const SqlPolicyTokens &tokens,
+    std::size_t &index
+) {
+    for (;;) {
+        if (index < tokens.count && token_equals(tokens.values[index], "DEFINER")) {
+            ++index;
+            if (index < tokens.count && token_equals(tokens.values[index], "=")) {
+                ++index;
+            }
+            if (index >= tokens.count || !token_equals(tokens.values[index], "CURRENT_USER")) {
+                return false;
+            }
+            ++index;
+            if (index + 1U < tokens.count && token_equals(tokens.values[index], "(") &&
+                token_equals(tokens.values[index + 1U], ")")) {
+                index += 2U;
+            }
+            continue;
+        }
+        if (index + 2U < tokens.count && token_equals(tokens.values[index], "SQL") &&
+            token_equals(tokens.values[index + 1U], "SECURITY") &&
+            token_in(tokens.values[index + 2U], "DEFINER", "INVOKER")) {
+            index += 3U;
+            continue;
+        }
+        return true;
+    }
+}
+
 bool consume_ownerless_optional_view_column_list(
     const SqlPolicyTokens &tokens,
     std::size_t &index
@@ -15583,12 +15625,16 @@ bool ownerless_rename_table_recovery_statement(const SqlPolicyTokens &tokens) {
 }
 
 bool ownerless_alter_view_recovery_statement(const SqlPolicyTokens &tokens) {
-    if (tokens.count < 5U || !token_equals(tokens.values[0], "ALTER") ||
-        !token_equals(tokens.values[1], "VIEW")) {
+    if (tokens.count < 5U || !token_equals(tokens.values[0], "ALTER")) {
         return false;
     }
 
-    std::size_t index = 2U;
+    std::size_t index = 1U;
+    if (!consume_ownerless_optional_view_security_clauses(tokens, index) || index >= tokens.count ||
+        !token_equals(tokens.values[index], "VIEW")) {
+        return false;
+    }
+    ++index;
     if (!consume_ownerless_table_identifier(tokens, index) ||
         !consume_ownerless_optional_view_column_list(tokens, index) || index >= tokens.count ||
         !token_equals(tokens.values[index], "AS")) {

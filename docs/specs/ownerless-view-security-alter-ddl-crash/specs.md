@@ -10,7 +10,10 @@ MariaDB rewrites a view through `ALTER DEFINER ... SQL SECURITY ... VIEW` but
 before MyLite publishes ownerless dictionary finish.
 
 This slice adds deterministic recovery evidence for that `ALTER VIEW` security
-metadata boundary.
+metadata boundary. The follow-up
+[ownerless-view-security-live-recovery](../ownerless-view-security-live-recovery/specs.md)
+promotes this focused `ALTER VIEW` security form to metadata-only live-peer
+recovery.
 
 ## Source Findings
 
@@ -47,9 +50,10 @@ Add a focused unsafe-hook selector:
   no-live recovery exposes `SECURITY_TYPE='DEFINER'`, non-empty `DEFINER`
   metadata, and the altered predicate.
 
-The selector uses the existing live-peer dictionary crash harness so cleanup
-must stay busy while another ownerless peer is live, then verifies ownerless and
-ordinary native reopen before and after a forced `.shm` rebuild.
+The selector keeps another ownerless peer live, opens a new ownerless handle to
+recover the completed metadata-only view rewrite, keeps the native
+file-operation marker clear, then verifies ownerless and ordinary native reopen
+before and after a forced `.shm` rebuild.
 
 ## Scope
 
@@ -60,6 +64,7 @@ In scope:
 - Recovered `.frm` presence under `datadir/app/`.
 - Recovered `INFORMATION_SCHEMA.VIEWS.security_type` and non-empty `DEFINER`.
 - View query behavior and base-table writes after recovery.
+- Live-peer recovery without native file-operation marker evidence.
 - Ownerless/native reopen before and after forced `.shm` rebuild.
 
 Out of scope:
@@ -80,7 +85,7 @@ survive a writer death at MyLite's dictionary publication boundary.
 
 No directory layout changes are introduced. The test exercises native MariaDB
 view `.frm` files inside the MyLite-owned database directory, ownerless
-live-peer cleanup blocking, no-live recovery, forced `.shm` rebuild, and native
+live-peer recovery, final no-live cleanup, forced `.shm` rebuild, and native
 exclusive reopen.
 
 ## Native Storage Impact
@@ -108,7 +113,10 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selector reaches the dictionary fault hook and does not hang.
-- A live peer prevents cleanup until no-live recovery.
+- A live peer remains open while a new ownerless opener recovers the completed
+  security/definer view metadata.
+- The native file-operation marker remains clear for this metadata-only view
+  form.
 - Recovery exposes `SECURITY_TYPE='DEFINER'`, non-empty `DEFINER` metadata,
   the `.frm` file, the altered predicate, and queryable view rows.
 - Ownerless and ordinary native reopen observe the same state before and after
