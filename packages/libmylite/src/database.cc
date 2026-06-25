@@ -2281,6 +2281,7 @@ bool consume_ownerless_optional_view_if_exists(const SqlPolicyTokens &tokens, st
 bool consume_ownerless_schema_identifier(const SqlPolicyTokens &tokens, std::size_t &index);
 bool consume_ownerless_schema_default_options(const SqlPolicyTokens &tokens, std::size_t &index);
 bool consume_ownerless_remaining_semicolons(const SqlPolicyTokens &tokens, std::size_t &index);
+bool consume_ownerless_single_clause_alter_tail(const SqlPolicyTokens &tokens, std::size_t &index);
 bool consume_ownerless_table_identifier(const SqlPolicyTokens &tokens, std::size_t &index);
 bool consume_ownerless_table_identifier_parts(
     mylite_db &db,
@@ -16000,6 +16001,35 @@ bool consume_ownerless_remaining_semicolons(const SqlPolicyTokens &tokens, std::
     return true;
 }
 
+bool consume_ownerless_single_clause_alter_tail(const SqlPolicyTokens &tokens, std::size_t &index) {
+    bool saw_semicolon = false;
+    std::size_t depth = 0U;
+    for (; index < tokens.count; ++index) {
+        if (token_equals(tokens.values[index], ";")) {
+            saw_semicolon = true;
+            continue;
+        }
+        if (saw_semicolon) {
+            return false;
+        }
+        if (token_equals(tokens.values[index], "(")) {
+            ++depth;
+            continue;
+        }
+        if (token_equals(tokens.values[index], ")")) {
+            if (depth == 0U) {
+                return false;
+            }
+            --depth;
+            continue;
+        }
+        if (depth == 0U && token_equals(tokens.values[index], ",")) {
+            return false;
+        }
+    }
+    return depth == 0U;
+}
+
 bool consume_ownerless_optional_view_security_clauses(
     const SqlPolicyTokens &tokens,
     std::size_t &index
@@ -16626,17 +16656,70 @@ bool ownerless_alter_table_column_if_exists_noop_recovery_statement(
         }
         column_name = ownerless_normalized_identifier(tokens.values[index + 2U]);
         index += 3U;
-        bool saw_semicolon = false;
-        for (; index < tokens.count; ++index) {
-            if (token_equals(tokens.values[index], ",")) {
+        if (index >= tokens.count || token_equals(tokens.values[index], ";") ||
+            token_equals(tokens.values[index], ",")) {
+            return false;
+        }
+        if (!consume_ownerless_single_clause_alter_tail(tokens, index)) {
+            return false;
+        }
+    } else if (token_equals(tokens.values[index], "CHANGE")) {
+        ++index;
+        if (index < tokens.count && token_equals(tokens.values[index], "COLUMN")) {
+            ++index;
+        }
+        if (index + 3U >= tokens.count || !token_equals(tokens.values[index], "IF") ||
+            !token_equals(tokens.values[index + 1U], "EXISTS") ||
+            !ownerless_table_identifier_token(tokens.values[index + 2U]) ||
+            !ownerless_table_identifier_token(tokens.values[index + 3U])) {
+            return false;
+        }
+        column_name = ownerless_normalized_identifier(tokens.values[index + 2U]);
+        index += 4U;
+        if (index >= tokens.count || token_equals(tokens.values[index], ";") ||
+            token_equals(tokens.values[index], ",")) {
+            return false;
+        }
+        if (!consume_ownerless_single_clause_alter_tail(tokens, index)) {
+            return false;
+        }
+    } else if (token_equals(tokens.values[index], "ALTER")) {
+        ++index;
+        if (index < tokens.count && token_equals(tokens.values[index], "COLUMN")) {
+            ++index;
+        }
+        if (index + 2U >= tokens.count || !token_equals(tokens.values[index], "IF") ||
+            !token_equals(tokens.values[index + 1U], "EXISTS") ||
+            !ownerless_table_identifier_token(tokens.values[index + 2U])) {
+            return false;
+        }
+        column_name = ownerless_normalized_identifier(tokens.values[index + 2U]);
+        index += 3U;
+        if (index + 1U >= tokens.count) {
+            return false;
+        }
+        if (token_equals(tokens.values[index], "SET")) {
+            if (!token_equals(tokens.values[index + 1U], "DEFAULT")) {
                 return false;
             }
-            if (saw_semicolon && !token_equals(tokens.values[index], ";")) {
+            index += 2U;
+            if (index >= tokens.count || token_equals(tokens.values[index], ";") ||
+                token_equals(tokens.values[index], ",")) {
                 return false;
             }
-            if (token_equals(tokens.values[index], ";")) {
-                saw_semicolon = true;
+            if (!consume_ownerless_single_clause_alter_tail(tokens, index)) {
+                return false;
             }
+        } else if (token_equals(tokens.values[index], "DROP")) {
+            if (!token_equals(tokens.values[index + 1U], "DEFAULT")) {
+                return false;
+            }
+            index += 2U;
+            if (!consume_ownerless_remaining_semicolons(tokens, index)) {
+                return false;
+            }
+        } else {
+            return false;
         }
     } else if (token_equals(tokens.values[index], "RENAME")) {
         ++index;

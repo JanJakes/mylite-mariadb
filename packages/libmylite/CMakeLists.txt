@@ -616,6 +616,48 @@ if(BUILD_TESTING)
           dictionary-column-idempotent-rename-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-column-idempotent-rename-expression-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-column-idempotent-rename-expression-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-column-idempotent-change-expression-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-column-idempotent-change-expression-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-column-idempotent-default-set-expression-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-column-idempotent-default-set-expression-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-column-idempotent-default-drop-expression-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-column-idempotent-default-drop-expression-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-column-idempotent-change-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-column-idempotent-change-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-column-idempotent-default-set-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-column-idempotent-default-set-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-column-idempotent-default-drop-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-column-idempotent-default-drop-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-index-idempotent-create-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -1161,6 +1203,13 @@ if(BUILD_TESTING)
         libmylite.ownerless-dictionary-column-idempotent-drop-crash
         libmylite.ownerless-dictionary-column-idempotent-modify-crash
         libmylite.ownerless-dictionary-column-idempotent-rename-crash
+        libmylite.ownerless-dictionary-column-idempotent-rename-expression-crash
+        libmylite.ownerless-dictionary-column-idempotent-change-expression-crash
+        libmylite.ownerless-dictionary-column-idempotent-default-set-expression-crash
+        libmylite.ownerless-dictionary-column-idempotent-default-drop-expression-crash
+        libmylite.ownerless-dictionary-column-idempotent-change-crash
+        libmylite.ownerless-dictionary-column-idempotent-default-set-crash
+        libmylite.ownerless-dictionary-column-idempotent-default-drop-crash
         libmylite.ownerless-dictionary-column-default-crash
         libmylite.ownerless-dictionary-table-comment-crash
         PROPERTIES

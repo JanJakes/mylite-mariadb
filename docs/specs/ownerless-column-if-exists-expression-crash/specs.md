@@ -2,9 +2,9 @@
 
 ## Problem
 
-Ownerless missing-column `IF EXISTS` crash coverage now proves simple
-`MODIFY`, `RENAME`, `CHANGE`, and `ALTER COLUMN ... DEFAULT` no-op branches at
-the dictionary-finish crash boundary. The nearby expression-table gap is a
+Ownerless missing-column `IF EXISTS` crash coverage proves simple `MODIFY`,
+`RENAME`, `CHANGE`, and `ALTER COLUMN ... DEFAULT` no-op branches at the
+dictionary-finish crash boundary. The expression-table variant is a
 missing-column no-op on a table whose metadata includes generated-column and
 CHECK expressions that reference the real column.
 
@@ -40,10 +40,11 @@ dictionary finish.
 
 In scope:
 
-- Add unsafe-hook selectors for missing `ALTER TABLE ... RENAME COLUMN IF
+- Promote unsafe-hook selectors for missing `ALTER TABLE ... RENAME COLUMN IF
   EXISTS`, `CHANGE COLUMN IF EXISTS`, `ALTER COLUMN IF EXISTS SET DEFAULT`, and
   `ALTER COLUMN IF EXISTS DROP DEFAULT` on tables with stored and virtual
-  generated columns plus named CHECK constraints that reference the real column.
+  generated columns plus named CHECK constraints that reference the real column
+  to metadata-only live-peer recovery.
 - Verify recovery preserves the real column, keeps the missing and attempted
   renamed/changed columns absent, keeps generated-column values, column
   defaults, and CHECK enforcement unchanged, keeps plain missing retries
@@ -75,7 +76,7 @@ Extend `mylite_ownerless_cross_process_sql_test` with hook-only selectors:
 2. Kill writers running missing-column `RENAME COLUMN IF EXISTS`,
    `CHANGE COLUMN IF EXISTS`, `ALTER COLUMN IF EXISTS SET DEFAULT`, and
    `ALTER COLUMN IF EXISTS DROP DEFAULT` at `dictionary-before-finish`.
-3. Reopen with no live peer and verify:
+3. Reopen while the held peer remains live and verify:
    - `base_value` remains present;
    - `missing_base` and attempted renamed/changed columns remain absent;
    - stored and virtual generated values still match the original expression;
@@ -111,24 +112,25 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 ## Test Plan
 
-- Build `mylite_ownerless_cross_process_sql_test` with `embedded-dev`.
 - Build the same target with `ownerless-test-hooks`.
 - Run focused hook selectors:
   - `dictionary-column-idempotent-rename-expression-crash`
   - `dictionary-column-idempotent-change-expression-crash`
   - `dictionary-column-idempotent-default-set-expression-crash`
   - `dictionary-column-idempotent-default-drop-expression-crash`
+- Run standalone hook CTests for the same selectors.
 - Run adjacent hook selectors:
   - `dictionary-column-idempotent-rename-crash`
   - `dictionary-column-rename-expression-crash`
   - `dictionary-column-idempotent-change-crash`
-- Run the ownerless hook CTest shard containing the new selector.
+- Run production representative column-idempotent DDL coverage.
 - Run `format-check`, `git diff --check`, and staged diff checks.
 
 ## Acceptance Criteria
 
 - The focused selectors reach `dictionary-before-finish` and do not hang.
-- Live-peer cleanup remains busy until no-live recovery.
+- Live-peer recovery succeeds while the held peer remains open.
+- The native file-operation marker remains clear before and after recovery.
 - Recovery preserves real-column metadata, generated-column values, CHECK
   enforcement, real-column defaults, missing-column absence, plain missing
   retry errno 1054, and post-recovery writes.

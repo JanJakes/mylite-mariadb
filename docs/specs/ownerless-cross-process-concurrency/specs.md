@@ -2824,13 +2824,11 @@ Tasks:
    `ALTER TABLE ... ALTER COLUMN IF EXISTS SET DEFAULT`, and missing
    `ALTER TABLE ... ALTER COLUMN IF EXISTS DROP DEFAULT` no-op writers after
    MariaDB returns success but before ownerless dictionary finish, then verifies
-   metadata-only live recovery with the native file-operation marker clear for
-   missing `MODIFY` and `RENAME` after pre-execution metadata proves the source
-   column is absent, while missing `CHANGE` and default variants still use
-   no-live recovery; all paths verify original column/default preservation,
-   missing and attempted renamed/changed column absence, plain retry errno
-   1054, post-recovery writes, ownerless/native reopen, and forced `.shm`
-   rebuild. Focused
+   metadata-only live recovery with the native file-operation marker clear
+   after pre-execution metadata proves the source column is absent; all paths
+   verify original column/default preservation, missing and attempted
+   renamed/changed column absence, plain retry errno 1054, post-recovery
+   writes, ownerless/native reopen, and forced `.shm` rebuild. Focused
    expression-table variants kill missing `RENAME COLUMN IF EXISTS`,
    `CHANGE COLUMN IF EXISTS`, and `ALTER COLUMN IF EXISTS SET/DROP DEFAULT`,
    then verify the real column, stored and virtual generated expressions, real
@@ -4220,12 +4218,12 @@ Tasks:
    `ALTER TABLE ... ALTER COLUMN IF EXISTS SET DEFAULT`, and
    `ALTER TABLE ... ALTER COLUMN IF EXISTS DROP DEFAULT` no-op writers after
    MariaDB success but before ownerless dictionary finish, then verifies
-   metadata-only live recovery with the native file-operation marker clear for
-   missing `MODIFY` and `RENAME`, while missing `CHANGE` and default variants
-   still use no-live recovery; all paths verify original column/default
-   preservation, missing and attempted renamed/changed column absence, MariaDB
-   1054 retry errno, post-recovery writes, ownerless/native reopen, and forced
-   `.shm` rebuild. Focused expression
+   metadata-only live recovery with the native file-operation marker clear
+   after pre-execution metadata proves the source column is absent; all paths
+   verify original column/default preservation, missing and attempted
+   renamed/changed column absence, MariaDB 1054 retry errno, post-recovery
+   writes, ownerless/native reopen, and forced `.shm` rebuild. Focused
+   expression
    variants kill missing `RENAME COLUMN IF EXISTS`, `CHANGE COLUMN IF EXISTS`,
    and `ALTER COLUMN IF EXISTS SET/DROP DEFAULT` on tables with stored and
    virtual generated columns plus CHECK constraints, verifying the real column,
@@ -5317,10 +5315,8 @@ Minimum suites before support can be claimed:
     `ALTER TABLE ... ALTER COLUMN IF EXISTS SET DEFAULT`, and
     `ALTER TABLE ... ALTER COLUMN IF EXISTS DROP DEFAULT` no-op success but
     before ownerless dictionary finish; hook coverage proves metadata-only live
-    recovery with the native file-operation marker clear for missing `MODIFY`
-    and `RENAME` after pre-execution metadata proves the source column is
-    absent, while missing `CHANGE` and default variants still prove live-peer
-    cleanup remains busy until no-live recovery, and preserved original
+    recovery with the native file-operation marker clear after pre-execution
+    metadata proves the source column is absent, and preserved original
     column/default metadata, missing and attempted renamed/changed-column
     absence, MariaDB 1054 retry errno, post-recovery writes,
     ownerless/native reopen, and forced `.shm` rebuild remain correct; focused
@@ -7419,11 +7415,12 @@ subsystems that this mode needs:
      metadata-only prefinish boundaries, plus focused CREATE/ALTER/DROP
      DATABASE and schema idempotent/no-op prefinish boundaries, plus focused
      top-level and ALTER secondary-index idempotent/no-op prefinish boundaries,
-     plus focused table-comment and column-default metadata ALTER prefinish
-     boundaries, especially remaining rename/truncate variants, rebuild
-     variants, broader metadata-only DDL, temporary, broader schema option
-     variants, intra-loop drop cases, and broader DDL file lifecycle while
-     peers remain live.
+     plus focused column idempotent and column `IF EXISTS` missing-column
+     no-op prefinish boundaries, plus focused table-comment and column-default
+     metadata ALTER prefinish boundaries, especially remaining rename/truncate
+     variants, rebuild variants, broader metadata-only DDL, temporary, broader
+     schema option variants, intra-loop drop cases, and broader DDL file
+     lifecycle while peers remain live.
   2. Close remaining transaction crash windows, especially native
      rollback/savepoint-rollback internals and concurrent-writer savepoint
      schedules that combine native undo, ownerless page-write ownership, and

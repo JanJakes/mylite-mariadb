@@ -2,11 +2,10 @@
 
 ## Problem
 
-Ownerless column missing-`IF EXISTS` crash coverage now covers representative
-missing `MODIFY COLUMN IF EXISTS` and `RENAME COLUMN IF EXISTS` no-op ALTER
-branches. The same MariaDB source path has additional missing-column branches
-for `CHANGE COLUMN IF EXISTS` and `ALTER COLUMN IF EXISTS ... DEFAULT`
-spellings. Those statements succeed as no-ops after MariaDB removes the missing
+Ownerless column missing-`IF EXISTS` crash coverage covers representative
+missing `MODIFY COLUMN IF EXISTS`, `RENAME COLUMN IF EXISTS`,
+`CHANGE COLUMN IF EXISTS`, and `ALTER COLUMN IF EXISTS ... DEFAULT` no-op ALTER
+branches. Those statements succeed as no-ops after MariaDB removes the missing
 column operation, then still cross MyLite's ownerless dictionary-generation
 boundary.
 
@@ -43,9 +42,10 @@ dictionary finish.
 
 In scope:
 
-- Add unsafe-hook selectors for missing-column `CHANGE COLUMN IF EXISTS`,
+- Promote unsafe-hook selectors for missing-column `CHANGE COLUMN IF EXISTS`,
   `ALTER COLUMN IF EXISTS ... SET DEFAULT`, and
-  `ALTER COLUMN IF EXISTS ... DROP DEFAULT` no-op crash recovery.
+  `ALTER COLUMN IF EXISTS ... DROP DEFAULT` no-op crash recovery to
+  metadata-only live-peer recovery.
 - Verify recovery preserves the real `note` column metadata/default, leaves
   missing and attempted changed columns absent, keeps plain non-idempotent retry
   spellings returning errno 1054, and accepts later writes.
@@ -91,9 +91,10 @@ selectors:
      absent, later default-backed writes use `'stable'`, and plain missing
      `ALTER COLUMN ... DROP DEFAULT` fails with 1054.
 
-Each selector reuses the existing live-peer crash helper so active dictionary
-state blocks cleanup while another ownerless process is live, then rechecks
-state through ownerless and native opens before and after `.shm` recreation.
+Each selector holds another ownerless process live while the killed writer's
+dictionary state is recovered by a new opener, verifies the native
+file-operation marker stays clear, then rechecks state through ownerless and
+native opens before and after `.shm` recreation.
 
 ## Compatibility Impact
 
@@ -118,21 +119,22 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 ## Test Plan
 
-- Build `mylite_ownerless_cross_process_sql_test` with `embedded-dev`.
 - Build the same target with `ownerless-test-hooks`.
 - Run focused hook selectors:
   - `dictionary-column-idempotent-change-crash`
   - `dictionary-column-idempotent-default-set-crash`
   - `dictionary-column-idempotent-default-drop-crash`
+- Run standalone hook CTests for the same selectors.
 - Run adjacent hook selectors for real column default/modify/rename and the
   prior missing-column IF EXISTS no-op crashes.
-- Run the ownerless hook CTest shards containing the new selectors.
+- Run production representative column-idempotent DDL coverage.
 - Run `format-check`, `git diff --check`, and staged diff checks.
 
 ## Acceptance Criteria
 
 - Focused selectors reach `dictionary-before-finish` and do not hang.
-- Live-peer cleanup remains busy until no-live recovery.
+- Live-peer recovery succeeds while the held peer remains open.
+- The native file-operation marker remains clear before and after recovery.
 - Missing `CHANGE COLUMN IF EXISTS` recovery preserves original real-column
   metadata/default, keeps missing/changed names absent, and keeps plain missing
   change returning errno 1054.
