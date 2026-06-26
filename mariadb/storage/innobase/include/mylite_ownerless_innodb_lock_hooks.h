@@ -438,6 +438,8 @@ int mylite_ownerless_innodb_set_statement_suppress_native_lifecycle_refresh(int 
 int mylite_ownerless_innodb_statement_suppress_native_lifecycle_refresh(void);
 uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
     struct trx_t *trx, uint64_t visible_lsn);
+uint64_t mylite_ownerless_innodb_publish_transaction_buffer_pages_to_lsn(
+    struct trx_t *trx, uint64_t visible_lsn);
 void mylite_ownerless_innodb_flush_dirty_pages_to_lsn(uint64_t visible_lsn);
 void mylite_ownerless_innodb_publish_pages_visible_lsn(uint64_t visible_lsn);
 void mylite_ownerless_innodb_publish_dirty_pages_to_lsn(uint64_t visible_lsn);
@@ -524,6 +526,7 @@ uint64_t mylite_ownerless_innodb_current_lsn(void);
 uint64_t mylite_ownerless_innodb_checkpoint_lsn(void);
 int mylite_ownerless_innodb_make_checkpoint(void);
 int mylite_ownerless_innodb_checkpoint_covers_lsn(uint64_t lsn);
+int mylite_ownerless_innodb_settle_purge_before_hooks(unsigned int timeout_ms);
 int mylite_ownerless_innodb_redo_is_active(void);
 int mylite_ownerless_innodb_redo_enter(uint64_t *out_latest_lsn);
 int mylite_ownerless_innodb_redo_observe(uint64_t *out_latest_lsn);

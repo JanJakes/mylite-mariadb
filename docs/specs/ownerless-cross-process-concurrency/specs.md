@@ -417,6 +417,20 @@ Roles:
   reclaimed bulk-insert visible LSN to native InnoDB checkpoint coverage,
   removes both `.wal` and `.shm`, and verifies ordinary native reopen without
   page-version WAL overlay.
+  Same-process embedded restarts also reset MariaDB's static purge queue,
+  purge page map, purge iterators, and purge coordinator running/task state
+  before startup. When no live peer exists and no retained page-version payloads
+  remain, ownerless startup defers InnoDB ownerless hooks, lets the native
+  purge coordinator settle until history stops decreasing or drains, then
+  publishes the native-current LSN as the ownerless visible boundary. Focused
+  FK graph stress covers the previously stale same-process parent verifier,
+  ordinary native reopen, and forced `.shm` rebuild. Live ownerless read-view
+  hooks are also a native purge deferral signal: purge wake/coordinator paths
+  clone the directory-owned oldest read view and return without deleting undo
+  history while a peer process has a published snapshot. Active-reader pressure
+  coverage now asserts the reader's process slot and read-view slot stay
+  published while writer processes repeatedly open, update, close, and later
+  release the retained WAL.
   Transactions that already performed local writes or locking reads avoid
   global refresh, and clean-page refresh skips locally dirty buffer pages.
   DML/DDL, recovery, checkpointing, and tablespace replay still use the
@@ -3222,12 +3236,14 @@ Tasks:
    Foreign-key crash coverage now kills an
    `ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY` writer after native
    foreign-key metadata creation but before ownerless dictionary finish, then
-   verifies recovered FK metadata, orphan-row rejection, valid child writes, and
-   ownerless/native reopen before and after forced `.shm` rebuild.
+   verifies metadata-only live-peer recovery with the native file-operation
+   marker clear, recovered FK metadata, orphan-row rejection, valid child
+   writes, and ownerless/native reopen before and after forced `.shm` rebuild.
    Foreign-key DROP crash coverage now kills an
    `ALTER TABLE ... DROP FOREIGN KEY` writer after native foreign-key metadata
-   removal but before ownerless dictionary finish, then verifies recovered FK
-   metadata absence, orphan-row writes, parent deletes, and ownerless/native
+   removal but before ownerless dictionary finish, then verifies metadata-only
+   live-peer recovery with the native file-operation marker clear, recovered
+   FK metadata absence, orphan-row writes, parent deletes, and ownerless/native
    reopen before and after forced `.shm` rebuild.
    CHECK constraint crash coverage now kills an
    `ALTER TABLE ... ADD CONSTRAINT ... CHECK` writer after native
@@ -3517,13 +3533,15 @@ Tasks:
    metadata, retained rows, and post-recovery writes through ownerless and
    native reopen. Hook-build crash coverage also kills
    `ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY` before ownerless dictionary
-   finish and verifies recovered FK metadata, orphan-row rejection without a
-   pending rejected child row surviving to `COMMIT`, and valid child writes
-   through ownerless and native reopen. Hook-build crash coverage
+   finish and verifies metadata-only live-peer recovery with the native
+   file-operation marker clear, recovered FK metadata, orphan-row rejection
+   without a pending rejected child row surviving to `COMMIT`, and valid child
+   writes through ownerless and native reopen. Hook-build crash coverage
    also kills
    `ALTER TABLE ... DROP FOREIGN KEY` before ownerless dictionary finish and
-   verifies recovered FK metadata absence plus post-drop orphan child writes and
-   parent deletes through ownerless and native reopen. Hook-build crash coverage
+   verifies metadata-only live-peer recovery with the native file-operation
+   marker clear, recovered FK metadata absence plus post-drop orphan child
+   writes and parent deletes through ownerless and native reopen. Hook-build crash coverage
    also kills `ALTER TABLE ... ADD CONSTRAINT ... CHECK` before ownerless
    dictionary finish and verifies recovered CHECK metadata plus errno 4025
    enforcement through ownerless and native reopen. Hook-build crash coverage
@@ -4097,7 +4115,13 @@ Tasks:
    page-write transaction identities to hold first dirty user pages until SQL
    commit, now documented in `ownerless-transient-page-write-boundaries`, and
    later exposed a tracked secondary-index page publication boundary gap,
-   documented in `ownerless-transaction-page-lsn-coverage`. The
+   documented in `ownerless-transaction-page-lsn-coverage`. A later 48-round
+   reducer exposed false unique-secondary duplicates when ownerless page
+   refresh ran after an MTR byte mutation; the
+   `ownerless-mtr-modify-page-ownership` slice makes X/SX page-latch
+   preparation acquire real page-write ownership before B-tree cursor
+   positioning and prepares low-level delete-mark updates before mutating the
+   record byte. The
    `ownerless-fk-graph-trace-export` slice adds deterministic SQL trace export
    for external harness input, and its worker trace now includes bounded
    `1205`/`1213` retry procedures so Docker-backed external MariaDB smoke can
@@ -4714,9 +4738,14 @@ Tasks:
    page publication to the highest valid LSN observed among the tracked
    transaction pages before flushing and releasing page-write locks, preventing
    a committed clustered row from outrunning its secondary-index page version.
-   It also refreshes clean local pages for DML/locking-read current reads inside
-   explicit ownerless transactions, preserving dirty local pages while avoiding
-   zero-row parent updates caused by stale search pages. Native InnoDB
+   The `ownerless-mtr-modify-page-ownership` follow-up makes ownerless X/SX
+   page-latch preparation acquire full page-write ownership instead of
+   refresh-only ownership, so B-tree modify cursors are positioned on a page
+   image that will not be refreshed again by the later MTR dirty-page hook.
+   The transaction page-LSN slice also refreshes clean local pages for
+   DML/locking-read current reads inside explicit ownerless transactions,
+   preserving dirty local pages while avoiding zero-row parent updates caused
+   by stale search pages. Native InnoDB
    foreign-key checks now prepare that ownerless current-read boundary before
    opening FK B-tree cursors, then refresh and reopen the FK cursor page so
    parent-side referential actions resolve peer-created child secondary and
@@ -4865,7 +4894,8 @@ Tasks:
    inside-MariaDB-loop multi-drop crash points, broader ALTER rebuild beyond
    the focused force, row-format, compressed, and charset-conversion cases,
    broader schema option variants, broader view and trigger variants, and
-   non-rename foreign-key multi-DDL live-peer recovery remain planned.
+   comma-separated non-rename foreign-key multi-clause ALTER live-peer recovery
+   remain planned.
    Final no-live close
    forces native checkpoint
    proof for retained page-version WAL
@@ -5443,14 +5473,15 @@ Minimum suites before support can be claimed:
     ownerless/native reopen, and forced `.shm` rebuild remain correct,
   - after generated-column child and referenced-column
     `ALTER TABLE ... ADD CONSTRAINT` FK creation but before ownerless
-    dictionary finish; hook coverage proves live-peer cleanup remains busy
-    until no-live recovery and recovered generated-column values, FK metadata,
+    dictionary finish; hook coverage keeps live-peer cleanup busy until
+    no-live recovery because these ALTER forms can change native table
+    identity, then proves recovered generated-column values, FK metadata,
     missing-parent errors, restricted-update errors, cascaded deletes,
     ownerless/native reopen, and forced `.shm` rebuild remain correct,
   - after generated-column child and referenced-column
     `ALTER TABLE ... DROP FOREIGN KEY` removal but before ownerless dictionary
-    finish; hook coverage proves live-peer cleanup remains busy until no-live
-    recovery and recovered generated-column values, absent FK metadata, orphan
+    finish; hook coverage keeps live-peer cleanup busy until no-live recovery,
+    then proves recovered generated-column values, absent FK metadata, orphan
     writes, parent deletes without stale cascade/restrict behavior,
     ownerless/native reopen, and forced `.shm` rebuild remain correct,
   - before/after commit publish,
@@ -5592,7 +5623,10 @@ removal but before ownerless dictionary finish, and verifies no-live
 ownerless/native reopen of the recovered table, generated-column, index,
 foreign-key, or schema states, including recovered old/new index-name and
 ignored/not-ignored metadata, but MyLite still lacks durable file lifecycle
-metadata for broader DDL recovery.
+metadata for broader DDL recovery. Ordinary non-generated FK ADD/DROP is
+separately classified as metadata-only live recoverable; generated-column FK
+ADD/DROP deliberately remains conservative until native table identity effects
+are reconciled.
 
 ## Binary Size Impact
 

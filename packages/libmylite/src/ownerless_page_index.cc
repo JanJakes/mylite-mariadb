@@ -48,6 +48,12 @@ int publish_entry_locked(
 );
 bool entry_matches_page(unsigned char *entry, std::uint32_t space_id, std::uint32_t page_no);
 bool version_is_at_least(unsigned char *entry, std::uint64_t commit_lsn, std::uint64_t page_lsn);
+bool version_is_newer_or_same_offset(
+    unsigned char *entry,
+    std::uint64_t commit_lsn,
+    std::uint64_t page_lsn,
+    std::uint64_t record_offset
+);
 bool entry_visible_for_page(
     unsigned char *entry,
     std::uint32_t space_id,
@@ -57,7 +63,8 @@ bool entry_visible_for_page(
 bool entry_is_better_version(
     unsigned char *candidate,
     std::uint64_t best_commit_lsn,
-    std::uint64_t best_page_lsn
+    std::uint64_t best_page_lsn,
+    std::uint64_t best_record_offset
 );
 int latch_result_to_index_result(int result);
 
@@ -339,6 +346,7 @@ int mylite_ownerless_page_index_find_with_generation(
     unsigned char *best = nullptr;
     std::uint64_t best_commit_lsn = 0;
     std::uint64_t best_page_lsn = 0;
+    std::uint64_t best_record_offset = 0;
     if (wal_scan_required(bytes)) {
         const int release_result =
             mylite_ownerless_latch_release(latch, owner_id, owner_generation);
@@ -364,10 +372,12 @@ int mylite_ownerless_page_index_find_with_generation(
         if (!entry_visible_for_page(entry, space_id, page_no, max_commit_lsn)) {
             continue;
         }
-        if (best == nullptr || entry_is_better_version(entry, best_commit_lsn, best_page_lsn)) {
+        if (best == nullptr ||
+            entry_is_better_version(entry, best_commit_lsn, best_page_lsn, best_record_offset)) {
             best = entry;
             best_commit_lsn = load64(entry, k_entry_commit_lsn_offset);
             best_page_lsn = load64(entry, k_entry_page_lsn_offset);
+            best_record_offset = load64(entry, k_entry_record_offset_offset);
         }
     }
 
@@ -533,7 +543,7 @@ int publish_entry_locked(
             break;
         }
         if (entry_matches_page(entry, space_id, page_no)) {
-            if (version_is_at_least(entry, commit_lsn, page_lsn)) {
+            if (version_is_newer_or_same_offset(entry, commit_lsn, page_lsn, record_offset)) {
                 store64(entry, k_entry_commit_lsn_offset, commit_lsn);
                 store64(entry, k_entry_page_lsn_offset, page_lsn);
                 store64(entry, k_entry_record_offset_offset, record_offset);
@@ -572,6 +582,22 @@ bool version_is_at_least(unsigned char *entry, std::uint64_t commit_lsn, std::ui
            (commit_lsn == existing_commit_lsn && page_lsn > existing_page_lsn);
 }
 
+bool version_is_newer_or_same_offset(
+    unsigned char *entry,
+    std::uint64_t commit_lsn,
+    std::uint64_t page_lsn,
+    std::uint64_t record_offset
+) {
+    if (version_is_at_least(entry, commit_lsn, page_lsn)) {
+        return true;
+    }
+    const std::uint64_t existing_commit_lsn = load64(entry, k_entry_commit_lsn_offset);
+    const std::uint64_t existing_page_lsn = load64(entry, k_entry_page_lsn_offset);
+    const std::uint64_t existing_record_offset = load64(entry, k_entry_record_offset_offset);
+    return commit_lsn == existing_commit_lsn && page_lsn == existing_page_lsn &&
+           record_offset > existing_record_offset;
+}
+
 bool entry_visible_for_page(
     unsigned char *entry,
     std::uint32_t space_id,
@@ -586,12 +612,16 @@ bool entry_visible_for_page(
 bool entry_is_better_version(
     unsigned char *candidate,
     std::uint64_t best_commit_lsn,
-    std::uint64_t best_page_lsn
+    std::uint64_t best_page_lsn,
+    std::uint64_t best_record_offset
 ) {
     const std::uint64_t candidate_commit_lsn = load64(candidate, k_entry_commit_lsn_offset);
     const std::uint64_t candidate_page_lsn = load64(candidate, k_entry_page_lsn_offset);
+    const std::uint64_t candidate_record_offset = load64(candidate, k_entry_record_offset_offset);
     return candidate_commit_lsn > best_commit_lsn ||
-           (candidate_commit_lsn == best_commit_lsn && candidate_page_lsn > best_page_lsn);
+           (candidate_commit_lsn == best_commit_lsn &&
+            (candidate_page_lsn > best_page_lsn || (candidate_page_lsn == best_page_lsn &&
+                                                    candidate_record_offset > best_record_offset)));
 }
 
 int latch_result_to_index_result(int result) {

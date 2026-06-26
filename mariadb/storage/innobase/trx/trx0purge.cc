@@ -144,10 +144,17 @@ void purge_sys_t::create()
   query= purge_graph_build();
   next_stored= false;
   rseg= nullptr;
+  /* Embedded restart reuses this static object after close(). */
+  head.trx_no= 0;
+  head.undo_no= 0;
+  tail.trx_no= 0;
+  tail.undo_no= 0;
   page_no= 0;
   offset= 0;
   hdr_page_no= 0;
   hdr_offset= 0;
+  pages.clear();
+  purge_queue.clear();
   latch.SRW_LOCK_INIT(trx_purge_latch_key);
   end_latch.init();
   mysql_mutex_init(purge_sys_pq_mutex_key, &pq_mutex, nullptr);

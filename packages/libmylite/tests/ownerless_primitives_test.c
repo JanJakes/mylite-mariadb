@@ -1010,6 +1010,7 @@ static void test_page_log_reads_latest_visible_page(void) {
     int fd = open_file(log_path);
     uint8_t page_v1[32];
     uint8_t page_v2[32];
+    uint8_t page_v2_republished[32];
     uint8_t page_stale_boundary[32];
     uint8_t other_page[32];
     uint8_t page_zero[32];
@@ -1023,6 +1024,7 @@ static void test_page_log_reads_latest_visible_page(void) {
 
     memset(page_v1, 0x11, sizeof(page_v1));
     memset(page_v2, 0x22, sizeof(page_v2));
+    memset(page_v2_republished, 0x55, sizeof(page_v2_republished));
     memset(page_stale_boundary, 0x66, sizeof(page_stale_boundary));
     memset(other_page, 0x33, sizeof(other_page));
     memset(page_zero, 0x44, sizeof(page_zero));
@@ -1051,6 +1053,18 @@ static void test_page_log_reads_latest_visible_page(void) {
             page_v2,
             sizeof(page_v2),
             &second_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            0U,
+            7U,
+            190U,
+            200U,
+            page_v2_republished,
+            sizeof(page_v2_republished),
+            NULL
         ) == MYLITE_OWNERLESS_PAGE_LOG_OK
     );
     assert(
@@ -1109,6 +1123,25 @@ static void test_page_log_reads_latest_visible_page(void) {
     assert(out_page_lsn == 90U);
     assert(out_commit_lsn == 100U);
     assert(memcmp(out_page, page_v1, sizeof(page_v1)) == 0);
+
+    memset(out_page, 0, sizeof(out_page));
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            0U,
+            7U,
+            200U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &out_page_lsn,
+            &out_commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page_v2_republished));
+    assert(out_page_lsn == 190U);
+    assert(out_commit_lsn == 200U);
+    assert(memcmp(out_page, page_v2_republished, sizeof(page_v2_republished)) == 0);
 
     memset(out_page, 0, sizeof(out_page));
     assert(
@@ -8246,6 +8279,36 @@ static void test_page_index_publishes_latest_record_offsets(void) {
             10U,
             42U,
             7U,
+            120U,
+            110U,
+            9216U
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(
+        mylite_ownerless_page_index_find(
+            index,
+            index_size,
+            2U,
+            20U,
+            42U,
+            7U,
+            120U,
+            &record_offset,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(record_offset == 9216U);
+    assert(page_lsn == 110U);
+    assert(commit_lsn == 120U);
+    assert(
+        mylite_ownerless_page_index_publish(
+            index,
+            index_size,
+            1U,
+            10U,
+            42U,
+            7U,
             140U,
             100U,
             12288U
@@ -15125,6 +15188,56 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
         ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
     );
     assert(generation == 68U);
+
+    const uint32_t foreign_key_recovery_kinds[] = {
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_ADD_FOREIGN_KEY,
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_FOREIGN_KEY,
+    };
+    for (size_t index = 0U;
+         index < sizeof(foreign_key_recovery_kinds) / sizeof(foreign_key_recovery_kinds[0]);
+         ++index) {
+        assert(
+            mylite_ownerless_dictionary_state_begin_ddl(
+                state,
+                sizeof(state),
+                10U,
+                100U,
+                UINT64_MAX,
+                MYLITE_TEST_WAIT_TIMEOUT_MS,
+                &generation
+            ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+        );
+        assert(
+            mylite_ownerless_dictionary_state_mark_recoverable(
+                state,
+                sizeof(state),
+                10U,
+                100U,
+                foreign_key_recovery_kinds[index]
+            ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+        );
+        assert(
+            mylite_ownerless_dictionary_state_recover_dead_owner(
+                state,
+                sizeof(state),
+                10U,
+                100U,
+                MYLITE_OWNERLESS_DICTIONARY_RECOVERY_COLUMN_IF_EXISTS_NOOP,
+                &generation
+            ) == MYLITE_OWNERLESS_DICTIONARY_STATE_ERROR
+        );
+        assert(
+            mylite_ownerless_dictionary_state_recover_dead_owner(
+                state,
+                sizeof(state),
+                10U,
+                100U,
+                foreign_key_recovery_kinds[index],
+                &generation
+            ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+        );
+        assert(generation == 70U + (2U * (uint64_t)index));
+    }
 }
 
 static void test_redo_state_tracks_lsn_and_owner_lifecycle(void) {

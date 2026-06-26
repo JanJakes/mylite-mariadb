@@ -4331,6 +4331,8 @@ return_after_reservations:
 template<bool flag>
 void btr_rec_set_deleted(buf_block_t *block, rec_t *rec, mtr_t *mtr)
 {
+  mtr->ownerless_page_write_prepare(*block);
+
   if (UNIV_LIKELY(page_is_comp(block->page.frame) != 0))
   {
     byte *b= &rec[-REC_NEW_INFO_BITS];

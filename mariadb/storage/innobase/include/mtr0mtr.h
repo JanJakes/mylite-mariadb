@@ -346,7 +346,18 @@ public:
     const buf_block_t *block= static_cast<const buf_block_t*>(slot.object);
     if (!ownerless_page_write_should_prepare(block->page))
       return;
-    ownerless_page_write_enter(*block, true, true);
+    ownerless_page_write_enter(*block);
+  }
+
+  /** Acquire ownerless page-write ownership before an in-place page update.
+  @param block  latched block that will be modified */
+  void ownerless_page_write_prepare(const buf_block_t &block) noexcept
+  {
+    if (UNIV_LIKELY(!ownerless_hooks_enabled()))
+      return;
+    if (!ownerless_page_write_should_prepare(block.page))
+      return;
+    ownerless_page_write_enter(block);
   }
 
   /** Upgrade U locks on a block to X
@@ -422,7 +433,7 @@ public:
       if (UNIV_UNLIKELY(ownerless_hooks_enabled()) &&
           (type & (MTR_MEMO_PAGE_X_FIX | MTR_MEMO_PAGE_SX_FIX)) &&
           ownerless_page_write_should_prepare(block->page))
-        ownerless_page_write_enter(*block, true, true);
+        ownerless_page_write_enter(*block);
     }
     else if (block->page.id().space() >= SRV_TMP_SPACE_ID)
     {

@@ -1060,7 +1060,12 @@ bool record_requires_oldest_snapshot_boundary(
 );
 bool record_page_type_is_native_support_state(std::uint16_t page_type);
 bool record_checksum_matches(const void *page, std::uint64_t page_size, std::uint64_t checksum);
-bool record_is_better(const PageRecordHeader &candidate, const PageRecordHeader &current);
+bool record_is_better(
+    const PageRecordHeader &candidate,
+    off_t candidate_record_offset,
+    const PageRecordHeader &current,
+    off_t current_record_offset
+);
 std::uint64_t checksum_bytes(const void *buffer, std::size_t size);
 std::uint64_t legacy_checksum_bytes(const void *buffer, std::size_t size);
 std::uint16_t load_be16(const unsigned char *bytes);
@@ -4081,7 +4086,7 @@ int find_latest_in_snapshot_range(
             continue;
         }
         ++scanned_visible_page_records;
-        if (!record_is_better(record, best)) {
+        if (!record_is_better(record, record_offset, best, best_record_offset)) {
             record_offset = next_record_offset;
             continue;
         }
@@ -4463,8 +4468,12 @@ int checkpoint_preserving_oldest_snapshot_locked(
         } else {
             const bool record_can_bound_snapshot = record.commit_lsn <= oldest_snapshot_lsn;
             const bool record_improves_boundary =
-                !retention.has_boundary_record ||
-                record_is_better(record, retention.boundary_record);
+                !retention.has_boundary_record || record_is_better(
+                                                      record,
+                                                      record_offset,
+                                                      retention.boundary_record,
+                                                      retention.boundary_record_offset
+                                                  );
             if (record_can_bound_snapshot && record_improves_boundary) {
                 retention.has_boundary_record = true;
                 retention.boundary_record_offset = record_offset;
@@ -7784,9 +7793,17 @@ bool record_page_type_is_native_support_state(std::uint16_t page_type) {
     }
 }
 
-bool record_is_better(const PageRecordHeader &candidate, const PageRecordHeader &current) {
+bool record_is_better(
+    const PageRecordHeader &candidate,
+    off_t candidate_record_offset,
+    const PageRecordHeader &current,
+    off_t current_record_offset
+) {
     return current.commit_lsn == 0U || candidate.commit_lsn > current.commit_lsn ||
-           (candidate.commit_lsn == current.commit_lsn && candidate.page_lsn > current.page_lsn);
+           (candidate.commit_lsn == current.commit_lsn &&
+            (candidate.page_lsn > current.page_lsn ||
+             (candidate.page_lsn == current.page_lsn &&
+              candidate_record_offset > current_record_offset)));
 }
 
 std::uint64_t page_key(std::uint32_t space_id, std::uint32_t page_no) {

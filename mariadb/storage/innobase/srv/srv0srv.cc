@@ -52,6 +52,7 @@ Created 10/8/1995 Heikki Tuuri
 #include "log0recv.h"
 #include "mem0mem.h"
 #include "mylite_ownerless_innodb_lock_hooks.h"
+#include "mylite_ownerless_read_view_hooks.h"
 #include "pars0pars.h"
 #include "que0que.h"
 #include "row0mysql.h"
@@ -73,6 +74,8 @@ Created 10/8/1995 Heikki Tuuri
 #include "transactional_lock_guard.h"
 
 #include <my_service_manager.h>
+#include <chrono>
+#include <thread>
 /* The following is the maximum allowed duration of a lock wait. */
 ulong	srv_fatal_semaphore_wait_threshold =  DEFAULT_SRV_FATAL_SEMAPHORE_TIMEOUT;
 
@@ -1121,10 +1124,16 @@ static tpool::task_group purge_truncation_task_group(1);
 static tpool::waitable_task purge_truncation_task
   (purge_truncation_callback, nullptr, &purge_truncation_task_group);
 
+static inline bool mylite_ownerless_purge_must_defer()
+{
+  return mylite_ownerless_innodb_lock_has_hooks() ||
+         mylite_ownerless_read_view_has_hooks();
+}
+
 /** Wake up the purge threads if there is work to do. */
 void purge_sys_t::wake_if_not_active()
 {
-  if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks()))
+  if (UNIV_UNLIKELY(mylite_ownerless_purge_must_defer()))
   {
     if (enabled() && !paused())
       clone_oldest_view<true>();
@@ -1141,6 +1150,43 @@ void purge_sys_t::wake_if_not_active()
 bool purge_sys_t::running()
 {
   return purge_coordinator_task.is_running();
+}
+
+extern "C" int
+mylite_ownerless_innodb_settle_purge_before_hooks(unsigned int timeout_ms)
+{
+  if (recv_recovery_is_on() || !srv_was_started || srv_thread_pool == nullptr)
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+  if (mylite_ownerless_innodb_lock_has_hooks())
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+  if (!purge_sys.enabled() || purge_sys.paused() || !trx_sys.history_exists())
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+
+  const auto start= std::chrono::steady_clock::now();
+  const auto timeout= std::chrono::milliseconds(timeout_ms);
+  size_t previous_history_size= trx_sys.history_size();
+
+  purge_coordinator_task.enable();
+  purge_coordinator_task.wait();
+  for (;;)
+  {
+    if (!trx_sys.history_exists())
+      return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+    purge_state.m_running= 1;
+    srv_thread_pool->submit_task(&purge_coordinator_task);
+    purge_coordinator_task.wait();
+
+    const size_t current_history_size= trx_sys.history_size();
+    if (current_history_size == 0)
+      return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+    if (current_history_size >= previous_history_size)
+      return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+    if (timeout_ms != 0 &&
+        std::chrono::steady_clock::now() - start >= timeout)
+      return MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT;
+    previous_history_size= current_history_size;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
 }
 
 void purge_sys_t::stop_FTS()
@@ -1391,7 +1437,7 @@ inline void purge_coordinator_state::do_purge(trx_t *trx)
 {
   ut_ad(!srv_read_only_mode);
 
-  if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks()))
+  if (UNIV_UNLIKELY(mylite_ownerless_purge_must_defer()))
   {
     if (purge_sys.enabled() && !purge_sys.paused())
       purge_sys.clone_oldest_view<true>();
@@ -1537,6 +1583,8 @@ static void purge_coordinator_callback(void*)
 void srv_init_purge_tasks()
 {
   purge_create_background_thds(innodb_purge_threads_MAX);
+  purge_state.m_running= 0;
+  purge_coordinator_task.enable();
   purge_sys.coordinator_startup();
 }
 

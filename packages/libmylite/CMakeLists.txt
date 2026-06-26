@@ -574,6 +574,18 @@ if(BUILD_TESTING)
           dictionary-cross-schema-multi-rename-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-foreign-key-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-foreign-key-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-foreign-key-drop-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-foreign-key-drop-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-fk-multi-rename-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -814,6 +826,18 @@ if(BUILD_TESTING)
         COMMAND
           mylite_ownerless_cross_process_sql_test
           dictionary-view-invalid-dependency-drop-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-generated-column-foreign-key-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-generated-column-foreign-key-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-generated-column-foreign-key-drop-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-generated-column-foreign-key-drop-crash
       )
       add_test(
         NAME libmylite.ownerless-dictionary-trigger-definer-crash

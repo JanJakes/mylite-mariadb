@@ -10,8 +10,10 @@ evidence: if a writer dies after native InnoDB removes the constraint but before
 ownerless dictionary finish, no-live recovery must preserve the completed
 constraint removal and must not resurrect stale ownerless enforcement state.
 
-This slice adds focused crash-boundary evidence for a completed DROP FOREIGN
-KEY operation.
+This slice added focused crash-boundary evidence for a completed DROP FOREIGN
+KEY operation. The later
+`docs/specs/ownerless-foreign-key-live-recovery/specs.md` slice promotes the
+same bounded DROP FOREIGN KEY syntax to live-peer recovery.
 
 ## Source Findings
 
@@ -60,9 +62,8 @@ Add one unsafe-hook selector:
   under the existing `dictionary-before-finish` hook,
 - kill the writer after native MariaDB/InnoDB DDL completes but before
   ownerless dictionary finish,
-- prove an ownerless opener returns `MYLITE_BUSY` while the live peer remains,
-- release the peer and reopen ownerless read/write to rebuild volatile
-  coordination,
+- open a new ownerless read/write handle while the live peer remains open and
+  finish the recoverable dictionary boundary,
 - verify the recovered `information_schema.referential_constraints` and
   `information_schema.key_column_usage` entries for the named FK are absent,
 - verify FK enforcement no longer blocks orphan child inserts or parent deletes,
@@ -75,7 +76,7 @@ Add one unsafe-hook selector:
 In scope:
 
 - crash-at-dictionary-before-finish coverage for completed DROP FOREIGN KEY,
-- live-peer cleanup-busy behavior and no-live rebuild,
+- live-peer recovery for the completed DROP FOREIGN KEY boundary,
 - recovered absence of FK metadata and enforcement through ownerless/native
   reopen before and after forced `.shm` rebuild.
 
@@ -103,7 +104,7 @@ rebuild, and ordinary native exclusive reopen lifecycle.
 ## Native Storage Impact
 
 The covered DDL uses MariaDB/InnoDB's native DROP FOREIGN KEY ALTER machinery.
-MyLite does not reinterpret foreign-key metadata; it proves no-live ownerless
+MyLite does not reinterpret foreign-key metadata; it proves ownerless live
 recovery rebuilds volatile coordination around the completed native dictionary
 removal.
 
@@ -124,7 +125,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selector reaches the dictionary fault hook and does not hang.
-- A live peer prevents cleanup until no-live recovery.
+- A live peer can remain open while a new ownerless opener recovers the
+  completed dictionary boundary.
 - Recovered metadata omits the named child-to-parent FK from
   `information_schema.referential_constraints` and
   `information_schema.key_column_usage`.

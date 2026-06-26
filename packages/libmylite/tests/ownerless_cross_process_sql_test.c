@@ -57,8 +57,12 @@ extern uint32_t my_crc32c(uint32_t crc, const void *buf, size_t len);
 #define MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_DESCRIPTOR_SIZE 32
 #define MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_TYPE_OFFSET 0
 #define MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_DATA_OFFSET 8
+#define MYLITE_TEST_CONCURRENCY_PROCESS_SEGMENT_TYPE 1U
+#define MYLITE_TEST_CONCURRENCY_PROCESS_ACTIVE_COUNT_OFFSET 16
 #define MYLITE_TEST_CONCURRENCY_TRX_SEGMENT_TYPE 4U
 #define MYLITE_TEST_CONCURRENCY_TRX_ACTIVE_COUNT_OFFSET 16
+#define MYLITE_TEST_CONCURRENCY_READ_VIEW_SEGMENT_TYPE 5U
+#define MYLITE_TEST_CONCURRENCY_READ_VIEW_ACTIVE_COUNT_OFFSET 16
 #define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SEGMENT_TYPE 6U
 #define MYLITE_TEST_CONCURRENCY_PAGE_WRITE_LOCK_SEGMENT_TYPE 10U
 #define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_WAITING_COUNT_OFFSET 64
@@ -3569,6 +3573,8 @@ static void write_concurrency_checkpoint_visible_lsn(
     uint64_t visible_lsn
 );
 static uint64_t read_concurrency_trx_active_count(const char *database_path);
+static uint64_t read_concurrency_process_active_count(const char *database_path);
+static uint64_t read_concurrency_read_view_active_count(const char *database_path);
 static uint64_t read_concurrency_page_index_active_count(const char *database_path);
 static uint64_t read_concurrency_shm_segment_offset(int fd, uint32_t segment_type);
 static void read_exact_at(int fd, void *buffer, size_t size, off_t offset);
@@ -17044,9 +17050,13 @@ static void test_ownerless_active_reader_pressure_reclaims_after_release(void) {
     close(ready_pipe[1]);
     close(release_pipe[0]);
     wait_for_pipe(ready_pipe[0]);
+    assert(read_concurrency_process_active_count(database_path) == 1U);
+    assert(read_concurrency_read_view_active_count(database_path) == 1U);
 
     for (unsigned round = 0U; round < rounds; ++round) {
         const unsigned expected_sum = 31U + round;
+        assert(read_concurrency_process_active_count(database_path) == 1U);
+        assert(read_concurrency_read_view_active_count(database_path) == 1U);
 
         db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
         exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1");
@@ -17067,12 +17077,16 @@ static void test_ownerless_active_reader_pressure_reclaims_after_release(void) {
             assert(actual_sum == expected_sum);
         }
         assert(mylite_close(db) == MYLITE_OK);
+        assert(read_concurrency_process_active_count(database_path) == 1U);
+        assert(read_concurrency_read_view_active_count(database_path) == 1U);
         assert(!concurrency_wal_is_checkpointed(database_path));
         assert(count_concurrency_wal_records_at_or_before(database_path, UINT64_MAX) > 0U);
     }
 
     signal_pipe(release_pipe[1]);
     wait_for_child(reader_child);
+    assert(read_concurrency_process_active_count(database_path) == 0U);
+    assert(read_concurrency_read_view_active_count(database_path) == 0U);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U + rounds);
@@ -45336,12 +45350,7 @@ static void test_crashed_foreign_key_dictionary_ddl_recovers_constraint(void) {
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(root, "ownerless-dictionary-foreign-key-crash.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
-    int writer_ready_pipe[2];
-    int peer_ready_pipe[2];
-    int peer_release_pipe[2];
-    pid_t writer_child;
-    pid_t peer_child;
-    pid_t probe_child;
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
     unsigned mariadb_errno = 0U;
 
@@ -45385,53 +45394,11 @@ static void test_crashed_foreign_key_dictionary_ddl_recovers_constraint(void) {
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    assert(pipe(writer_ready_pipe) == 0);
-    assert(pipe(peer_ready_pipe) == 0);
-    assert(pipe(peer_release_pipe) == 0);
-
-    peer_child = fork();
-    assert(peer_child >= 0);
-    if (peer_child == 0) {
-        close(peer_ready_pipe[0]);
-        close(peer_release_pipe[1]);
-        close(writer_ready_pipe[0]);
-        close(writer_ready_pipe[1]);
-        hold_ownerless_open_until_released(
-            paths,
-            (child_pipes){
-                .ready_write_fd = peer_ready_pipe[1],
-                .release_read_fd = peer_release_pipe[0],
-            }
-        );
-    }
-
-    close(peer_ready_pipe[1]);
-    close(peer_release_pipe[0]);
-    wait_for_pipe(peer_ready_pipe[0]);
-
-    writer_child = fork();
-    assert(writer_child >= 0);
-    if (writer_child == 0) {
-        close(writer_ready_pipe[0]);
-        close(peer_ready_pipe[0]);
-        close(peer_release_pipe[1]);
-        foreign_key_until_dictionary_finish_fault(paths, writer_ready_pipe[1]);
-    }
-
-    close(writer_ready_pipe[1]);
-    wait_for_pipe(writer_ready_pipe[0]);
-    assert(kill(writer_child, SIGKILL) == 0);
-    wait_for_signaled_child(writer_child, SIGKILL);
-
-    probe_child = fork();
-    assert(probe_child >= 0);
-    if (probe_child == 0) {
-        assert_ownerless_open_returns_busy(paths);
-    }
-    wait_for_child(probe_child);
-
-    signal_pipe(peer_release_pipe[1]);
-    wait_for_child(peer_child);
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        foreign_key_until_dictionary_finish_fault
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -45475,6 +45442,9 @@ static void test_crashed_foreign_key_dictionary_ddl_recovers_constraint(void) {
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_crash_child") == 2U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_crash_child") == 300U);
     assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_foreign_key_crash_ddl_state(
         paths,
@@ -45499,12 +45469,7 @@ static void test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constra
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(root, "ownerless-dictionary-foreign-key-drop-crash.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
-    int writer_ready_pipe[2];
-    int peer_ready_pipe[2];
-    int peer_release_pipe[2];
-    pid_t writer_child;
-    pid_t peer_child;
-    pid_t probe_child;
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
     unsigned mariadb_errno = 0U;
 
@@ -45563,53 +45528,11 @@ static void test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constra
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    assert(pipe(writer_ready_pipe) == 0);
-    assert(pipe(peer_ready_pipe) == 0);
-    assert(pipe(peer_release_pipe) == 0);
-
-    peer_child = fork();
-    assert(peer_child >= 0);
-    if (peer_child == 0) {
-        close(peer_ready_pipe[0]);
-        close(peer_release_pipe[1]);
-        close(writer_ready_pipe[0]);
-        close(writer_ready_pipe[1]);
-        hold_ownerless_open_until_released(
-            paths,
-            (child_pipes){
-                .ready_write_fd = peer_ready_pipe[1],
-                .release_read_fd = peer_release_pipe[0],
-            }
-        );
-    }
-
-    close(peer_ready_pipe[1]);
-    close(peer_release_pipe[0]);
-    wait_for_pipe(peer_ready_pipe[0]);
-
-    writer_child = fork();
-    assert(writer_child >= 0);
-    if (writer_child == 0) {
-        close(writer_ready_pipe[0]);
-        close(peer_ready_pipe[0]);
-        close(peer_release_pipe[1]);
-        foreign_key_drop_until_dictionary_finish_fault(paths, writer_ready_pipe[1]);
-    }
-
-    close(writer_ready_pipe[1]);
-    wait_for_pipe(writer_ready_pipe[0]);
-    assert(kill(writer_child, SIGKILL) == 0);
-    wait_for_signaled_child(writer_child, SIGKILL);
-
-    probe_child = fork();
-    assert(probe_child >= 0);
-    if (probe_child == 0) {
-        assert_ownerless_open_returns_busy(paths);
-    }
-    wait_for_child(probe_child);
-
-    signal_pipe(peer_release_pipe[1]);
-    wait_for_child(peer_child);
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        foreign_key_drop_until_dictionary_finish_fault
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -45634,6 +45557,9 @@ static void test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constra
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_drop_crash_child") == 3U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_drop_crash_child") == 1290U);
     assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_foreign_key_drop_crash_ddl_state(
         paths,
@@ -88156,6 +88082,50 @@ static uint64_t read_concurrency_trx_active_count(const char *database_path) {
         bytes,
         sizeof(bytes),
         (off_t)(trx_offset + MYLITE_TEST_CONCURRENCY_TRX_ACTIVE_COUNT_OFFSET)
+    );
+    assert(close(fd) == 0);
+    free(shm_path);
+    free(concurrency_path);
+    return read_native64(bytes);
+}
+
+static uint64_t read_concurrency_process_active_count(const char *database_path) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *shm_path = path_join(concurrency_path, "mylite-concurrency.shm");
+    uint64_t process_offset;
+    unsigned char bytes[8];
+    int fd = open(shm_path, O_RDONLY | O_CLOEXEC);
+
+    assert(fd >= 0);
+    process_offset =
+        read_concurrency_shm_segment_offset(fd, MYLITE_TEST_CONCURRENCY_PROCESS_SEGMENT_TYPE);
+    read_exact_at(
+        fd,
+        bytes,
+        sizeof(bytes),
+        (off_t)(process_offset + MYLITE_TEST_CONCURRENCY_PROCESS_ACTIVE_COUNT_OFFSET)
+    );
+    assert(close(fd) == 0);
+    free(shm_path);
+    free(concurrency_path);
+    return read_native64(bytes);
+}
+
+static uint64_t read_concurrency_read_view_active_count(const char *database_path) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *shm_path = path_join(concurrency_path, "mylite-concurrency.shm");
+    uint64_t read_view_offset;
+    unsigned char bytes[8];
+    int fd = open(shm_path, O_RDONLY | O_CLOEXEC);
+
+    assert(fd >= 0);
+    read_view_offset =
+        read_concurrency_shm_segment_offset(fd, MYLITE_TEST_CONCURRENCY_READ_VIEW_SEGMENT_TYPE);
+    read_exact_at(
+        fd,
+        bytes,
+        sizeof(bytes),
+        (off_t)(read_view_offset + MYLITE_TEST_CONCURRENCY_READ_VIEW_ACTIVE_COUNT_OFFSET)
     );
     assert(close(fd) == 0);
     free(shm_path);

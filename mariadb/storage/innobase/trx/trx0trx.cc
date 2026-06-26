@@ -2556,7 +2556,11 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
             ownerless_stage_start);
         ownerless_stage_start=
           ownerless_visibility_start != 0 ? ownerless_commit_visibility_now_ns() : 0;
-        mylite_ownerless_innodb_publish_pages_visible_lsn(ownerless_flush_lsn);
+        const lsn_t ownerless_post_flush_visible_lsn=
+          mylite_ownerless_innodb_publish_transaction_buffer_pages_to_lsn(
+              this, ownerless_flush_lsn);
+        mylite_ownerless_innodb_publish_pages_visible_lsn(
+            ownerless_post_flush_visible_lsn);
       }
       ownerless_commit_visibility_add_elapsed(
           ownerless_commit_visibility_publish_visible_ns, ownerless_stage_start);
