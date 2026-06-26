@@ -1884,12 +1884,20 @@ static lsn_t ownerless_flush_wait_lsn(uint64_t flush_lsn)
   return lsn >= LSN_MAX - 1 ? LSN_MAX - 1 : lsn + 1;
 }
 
-static bool transaction_page_image_matches_buffer(
+enum class transaction_page_image_buffer_state
+{
+  missing,
+  matches,
+  mismatch
+};
+
+static transaction_page_image_buffer_state transaction_page_image_buffer(
     const trx_t::mylite_ownerless_page_image &image)
 {
   const uint32_t space_id= static_cast<uint32_t>(image.packed_page >> 32);
   const uint32_t page_no= static_cast<uint32_t>(image.packed_page);
-  bool matches= false;
+  transaction_page_image_buffer_state state=
+      transaction_page_image_buffer_state::missing;
 
   mtr_t mtr(nullptr);
   mtr.start();
@@ -1898,6 +1906,7 @@ static bool transaction_page_image_matches_buffer(
           page_id_t(space_id, page_no), 0, RW_S_LATCH, nullptr,
           BUF_GET_IF_IN_POOL, &mtr, &err))
   {
+    state= transaction_page_image_buffer_state::mismatch;
     const buf_page_t &bpage= block->page;
     const byte *source= bpage.zip.data ? bpage.zip.data : bpage.frame;
     const bool compressed= bpage.zip.data != nullptr;
@@ -1906,13 +1915,14 @@ static bool transaction_page_image_matches_buffer(
         bpage.physical_size() == image.page_size)
     {
       const lsn_t page_lsn= mach_read_from_8(source + FIL_PAGE_LSN);
-      matches= page_lsn == image.page_lsn &&
-               memcmp(source, image.page.data(), image.page_size) == 0;
+      if (page_lsn == image.page_lsn &&
+          memcmp(source, image.page.data(), image.page_size) == 0)
+        state= transaction_page_image_buffer_state::matches;
     }
   }
   mtr.commit();
 
-  return matches;
+  return state;
 }
 
 extern "C" uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
@@ -1944,7 +1954,11 @@ extern "C" uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
       if (image.page_lsn == 0 || image.page_size == 0 ||
           image.page.size() != image.page_size)
         continue;
-      if (!transaction_page_image_matches_buffer(image))
+      const transaction_page_image_buffer_state buffer_state=
+          transaction_page_image_buffer(image);
+      if (buffer_state == transaction_page_image_buffer_state::mismatch ||
+          (buffer_state == transaction_page_image_buffer_state::missing &&
+           image.page_lsn > visible_lsn))
         continue;
 
       const uint32_t space_id= static_cast<uint32_t>(image.packed_page >> 32);

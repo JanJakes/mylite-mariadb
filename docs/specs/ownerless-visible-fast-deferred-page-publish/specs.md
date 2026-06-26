@@ -43,6 +43,12 @@ MariaDB base ref: `mariadb-11.8.6`
   tracked pages when needed, and sets
   `mylite_ownerless_page_write_deferred_pages_published` only when the deferred
   dirty-page proof is complete.
+- `mariadb/storage/innobase/lock/mylite_ownerless_innodb_lock_hooks.cc`
+  later validation found the transaction publisher was treating an evicted
+  buffer-pool page as an image mismatch. A dirty user/index page whose latest
+  captured transaction image was still private to the committing transaction
+  could therefore remain unproved solely because `BUF_GET_IF_IN_POOL` no
+  longer returned the page at commit time.
 - `mariadb/storage/innobase/trx/trx0trx.cc`
   commit visibility already treats successfully proven transaction-deferred
   pages as eligible for the visible-fast path and otherwise falls back to the
@@ -79,6 +85,14 @@ the deferred pages, the existing conservative flush counters and path remain
 active. Peer-present ownerless statements retain the append-session batching
 guard but publish user pages through the immediate path until broader
 cross-process redo/checkpoint reconciliation is proven.
+
+Captured transaction images are validated against a resident buffer-pool page
+when one is still present. A real resident-page mismatch rejects the captured
+image and keeps the buffer-pool fallback/conservative flush path intact. If
+the page is no longer resident, the captured image remains acceptable only when
+its page LSN is at or below the statement's visible LSN; page-write ownership
+still prevents an ownerless peer from interleaving a different user-page image
+before commit cleanup releases the transaction's page-write records.
 
 ## Scope And Non-Goals
 
@@ -185,6 +199,15 @@ zero snapshot-boundary immediate user-page publication. The same selector also
 verifies the 257-row guard still uses immediate snapshot-boundary publication,
 opens more than one append session, and does not coalesce latest-only
 checkpoint updates.
+
+A later follow-up keeps the same selector as the regression test for
+buffer-pool eviction during transaction-deferred publish. The local failure
+case had a dirty file-per-table user/index page whose captured image LSN was
+below the commit visible LSN, while the buffer-pool fallback could no longer
+observe that page. The transaction publisher now distinguishes missing
+buffer-pool pages from true mismatches, publishes that valid captured image,
+and preserves fast commit visibility instead of recording a
+`flush_deferred_pages` fallback.
 
 Local production evidence on 2026-06-18:
 
