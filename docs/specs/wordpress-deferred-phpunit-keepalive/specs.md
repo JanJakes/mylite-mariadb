@@ -37,6 +37,12 @@ Move the keepalive reopen outside that reconnect guard. The wrapper still
 closes the keepalive before the child runs, so single-directory locking and
 baseline restore remain safe. After the child exits, the wrapper reopens only
 the harness-owned keepalive when `MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE=1`.
+Process-isolated children still run the normal WordPress PHPUnit bootstrap, but
+the wrapper marks them with
+`MYLITE_WORDPRESS_PHPUNIT_CHILD_DISABLE_KEEPALIVE=1`, so the generated
+keepalive bootstrap does not open a child keepalive or write keepalive
+diagnostics to child stderr. PHPUnit treats child stderr as a process-isolated
+test error, so keepalive diagnostics must remain parent-only.
 
 Enable keepalive for:
 
@@ -71,6 +77,8 @@ conservative with respect to native file ownership.
 
 - The PHPUnit wrapper contains an explicit keepalive reopen marker outside the
   `MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD` guard.
+- The PHPUnit wrapper marks process-isolated children so generated keepalive
+  diagnostics stay out of child stderr.
 - The three deferred WordPress PHPUnit shard matrix entries keep
   `reconnect_after_child: "0"` and set `keepalive: "1"`.
 - The CI production-build audit fails if those shard settings or the wrapper

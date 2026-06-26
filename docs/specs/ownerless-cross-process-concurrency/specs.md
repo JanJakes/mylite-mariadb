@@ -1773,7 +1773,14 @@ Tasks:
    published at the transaction boundary rather than the mini-transaction
    boundary while autocommit DDL/DML keeps the prior mini-transaction release
    behavior unless InnoDB assigns a native transaction ID. Ownerless
-   mini-transactions also prepare later persistent user pages in an
+   autocommit statement errors preserve MariaDB's statement-level failure
+   semantics: non-deadlock duplicate-key and similar errors clean up MyLite
+   ownerless transaction pins and page-write bookkeeping without issuing a
+   connection-wide SQL `ROLLBACK` or clearing the handle's committed ownerless
+   read boundary, so earlier successful autocommit statements on the same
+   handle remain visible and committed. Explicit transactions and deadlock
+   cleanup keep their existing rollback paths. Ownerless mini-transactions
+   also prepare later persistent user pages in an
    already-modified tablespace before X/SX page-linked access, so
    secondary-index navigation refreshes before using peer-modified page state
    without turning cross-table row deadlocks into page-write deadlocks.

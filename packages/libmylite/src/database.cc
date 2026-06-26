@@ -3088,6 +3088,7 @@ void rollback_failed_ownerless_implicit_statement(
     mylite_db &db,
     bool statement_started_in_explicit_transaction
 );
+int cleanup_failed_ownerless_implicit_statement(mylite_db &db);
 int rollback_active_transaction(mylite_db &db);
 void prepare_ownerless_statement_for_internal_rollback();
 void refresh_ownerless_visibility_after_rolled_back_write(mylite_db &db);
@@ -8922,11 +8923,38 @@ void rollback_failed_ownerless_implicit_statement(
 
     const ErrorSnapshot snapshot = capture_error(db);
     prepare_ownerless_statement_for_internal_rollback();
-    const int rollback_result = rollback_active_transaction(db);
-    if (rollback_result == MYLITE_OK) {
-        refresh_ownerless_visibility_after_rolled_back_write(db);
-    }
+    static_cast<void>(cleanup_failed_ownerless_implicit_statement(db));
     restore_error(db, snapshot);
+}
+
+int cleanup_failed_ownerless_implicit_statement(mylite_db &db) {
+    release_ownerless_transaction_page_version_pin(db);
+    mylite_ownerless_innodb_close_current_read_view();
+    const int page_write_release_result = release_ownerless_page_write_trx_ids(db);
+    if (page_write_release_result != MYLITE_OK) {
+        return page_write_release_result;
+    }
+    // Match the refresh preparation a following read would perform before the
+    // next write can reuse local native pages after a statement-level error.
+    bool page_version_reads_enabled = false;
+    if (refresh_ownerless_external_pages_before_statement(
+            db,
+            true,
+            true,
+            false,
+            &page_version_reads_enabled
+        ) == MYLITE_OK &&
+        page_version_reads_enabled) {
+        release_ownerless_completed_statement_page_visibility(db, true);
+    }
+    set_ownerless_explicit_transaction_active(db, false);
+    db.ownerless_transaction_has_local_write = false;
+    db.ownerless_transaction_has_locking_read = false;
+    reset_ownerless_transaction_savepoints(db);
+    reset_ownerless_transaction_visible_fast_proof(db);
+    db.ownerless_transaction_snapshot_visible_lsn = 0;
+    db.ownerless_transaction_snapshot_visibility_pinned = false;
+    return MYLITE_OK;
 }
 
 int rollback_active_transaction(mylite_db &db) {

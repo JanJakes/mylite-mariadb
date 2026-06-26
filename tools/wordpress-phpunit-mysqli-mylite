@@ -1018,6 +1018,7 @@ $childScriptProfileGuardMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_PROFILE_
 $childScriptOutputProfileGuardMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_OUTPUT_PROFILE_GUARD';
 $childScriptAverageProfileGuardMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_AVERAGE_PROFILE_GUARD';
 $childMysqliProfileContextMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_MYSQLI_PROFILE_CONTEXT';
+$childKeepaliveBootstrapMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_KEEPALIVE_BOOTSTRAP_GUARD';
 $childSkipInstallMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL_ENV';
 $parentSkipInstallMarker = 'MYLITE_WORDPRESS_PHPUNIT_PARENT_SKIP_INSTALL_ENV';
 $childBaselineRestoreMarker = 'MYLITE_WORDPRESS_PHPUNIT_CHILD_RESTORE_BASELINE';
@@ -1042,6 +1043,7 @@ $hasChildScriptProfileGuardMarker = str_contains($source, $childScriptProfileGua
 $hasChildScriptOutputProfileGuardMarker = str_contains($source, $childScriptOutputProfileGuardMarker);
 $hasChildScriptAverageProfileGuardMarker = str_contains($source, $childScriptAverageProfileGuardMarker);
 $hasChildMysqliProfileContextMarker = str_contains($source, $childMysqliProfileContextMarker);
+$hasChildKeepaliveBootstrapMarker = str_contains($source, $childKeepaliveBootstrapMarker);
 $hasChildSkipInstallMarker = str_contains($source, $childSkipInstallMarker);
 $hasParentSkipInstallMarker = str_contains($source, $parentSkipInstallMarker);
 $hasChildBaselineRestoreMarker = str_contains($source, $childBaselineRestoreMarker);
@@ -1070,6 +1072,7 @@ if ($hasTimingMarker &&
     $hasChildScriptOutputProfileGuardMarker &&
     $hasChildScriptAverageProfileGuardMarker &&
     $hasChildMysqliProfileContextMarker &&
+    $hasChildKeepaliveBootstrapMarker &&
     $hasChildSkipInstallMarker &&
     $hasParentSkipInstallMarker &&
     $hasChildBaselineRestoreMarker &&
@@ -1189,6 +1192,21 @@ $childMysqliProfileContextSetup = <<<'PATCH'
             }
             $env['MYLITE_MYSQLI_PROFILE_CONTEXT'] = 'wordpress_phpunit_child';
         }
+
+PATCH;
+
+$childKeepaliveBootstrapSetup = <<<'PATCH'
+        // MYLITE_WORDPRESS_PHPUNIT_CHILD_KEEPALIVE_BOOTSTRAP_GUARD
+        if ($env === null) {
+            $env = $_SERVER ?? [];
+            unset($env['argv'], $env['argc']);
+            foreach ($env as $envKey => $envVar) {
+                if (\is_array($envVar)) {
+                    unset($env[$envKey]);
+                }
+            }
+        }
+        $env['MYLITE_WORDPRESS_PHPUNIT_CHILD_DISABLE_KEEPALIVE'] = '1';
 
 PATCH;
 
@@ -2129,6 +2147,19 @@ if (!str_contains($patched, $childMysqliProfileContextMarker)) {
     $patched = $patchedWithChildMysqliProfileContext;
 }
 
+if (!str_contains($patched, $childKeepaliveBootstrapMarker)) {
+    $patchedWithChildKeepaliveBootstrap = str_replace(
+        "        \$process = proc_open(\n",
+        $childKeepaliveBootstrapSetup . "        \$process = proc_open(\n",
+        $patched
+    );
+    if ($patchedWithChildKeepaliveBootstrap === $patched) {
+        fwrite(STDERR, "Could not add PHPUnit child keepalive bootstrap guard setup.\n");
+        exit(1);
+    }
+    $patched = $patchedWithChildKeepaliveBootstrap;
+}
+
 if (str_contains($patched, $childSkipInstallMarker) &&
     !str_contains($patched, $parentSkipInstallMarker)) {
     $patchedWithParentSkipInstall = str_replace(
@@ -2922,6 +2953,10 @@ if (!is_string($myliteWordPressOriginalBootstrap) || $myliteWordPressOriginalBoo
     exit(1);
 }
 require $myliteWordPressOriginalBootstrap;
+
+if (getenv('MYLITE_WORDPRESS_PHPUNIT_CHILD_DISABLE_KEEPALIVE') === '1') {
+    return;
+}
 
 $myliteWordPressKeepalivePath = getenv('MYLITE_WORDPRESS_DB_DIR');
 if (!is_string($myliteWordPressKeepalivePath) || $myliteWordPressKeepalivePath === '') {

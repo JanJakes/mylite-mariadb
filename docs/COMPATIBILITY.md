@@ -377,6 +377,13 @@ close, retains the peer-observed explicit DML marker and page-version WAL while
 the peer is live, then drains that DML-only evidence after final peer exit when
 no-live native checkpoint and page-image proof succeeds, forces `.shm` rebuild,
 and verifies ownerless and ordinary native reopen preserve the updated rows.
+Ownerless non-deadlock autocommit statement errors now keep MariaDB's
+statement-level failure behavior: duplicate-key failures on direct or prepared
+DML release MyLite ownerless pins and page-write bookkeeping without issuing a
+connection-wide SQL `ROLLBACK` or clearing the handle's committed ownerless
+read boundary, so prior successful autocommit statements on the same handle
+remain visible and committed. Explicit transactions and MariaDB deadlock
+cleanup keep their rollback paths.
 Focused Linux process-lifecycle coverage also commits post-checkpoint DML in a
 child, observes the durable DML marker/WAL while that child is an unreaped
 zombie after `_exit(0)` without `mylite_close()`, verifies the next ownerless
@@ -1658,8 +1665,10 @@ process-isolated shards now use the same keepalive while leaving
 deferred but the harness-owned keepalive is reopened outside the reconnect
 guard after each child. Baseline-restored children still close the keepalive
 before copying the prepared database tree and reopen it only after the child
-exits. The database shard keeps keepalive disabled for explicit process-style
-profiling.
+exits. Process-isolated children still run the WordPress bootstrap, but they
+skip the generated keepalive open/close diagnostics so PHPUnit does not treat
+parent keepalive output on child stderr as a test error. The database shard
+keeps keepalive disabled for explicit process-style profiling.
 The workflow now runs `tools/check-ci-production-builds`, also registered as
 `tools.ci-production-builds` under production CTest, so CI fails if a CMake
 timing path is moved back to developer presets, old developer build

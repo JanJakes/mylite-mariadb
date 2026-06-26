@@ -684,6 +684,12 @@ require_file_literal "${wordpress_harness}" "sha256sum -c"
 require_file_literal \
   "${wordpress_harness}" \
   "MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE_RECONNECT_AFTER_CHILD_GUARD"
+require_file_literal \
+  "${wordpress_harness}" \
+  "MYLITE_WORDPRESS_PHPUNIT_CHILD_KEEPALIVE_BOOTSTRAP_GUARD"
+require_file_literal \
+  "${wordpress_harness}" \
+  "MYLITE_WORDPRESS_PHPUNIT_CHILD_DISABLE_KEEPALIVE"
 require_file_literal "${wordpress_harness}" "tools/wordpress-phpunit.Dockerfile"
 require_file_literal "${root_dir}/tools/wordpress-phpunit.Dockerfile" "FROM php:8.3-cli-bookworm"
 require_file_literal "${root_dir}/tools/wordpress-phpunit.Dockerfile" "docker-php-ext-install"
