@@ -277,10 +277,11 @@ after pre-execution metadata proves the source is an InnoDB base table. Focused
 `ALTER TABLE schema.table ROW_FORMAT=DYNAMIC, ALGORITHM=COPY, LOCK=EXCLUSIVE`
 prefinish recovery now allow live-peer dictionary cleanup after the native
 dynamic row-format copy rebuild. Focused
+plain and explicit copy-lock
 `ALTER TABLE schema.table ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=<n>` prefinish
-recovery for key-block sizes `1`, `2`, `4`, `8`, and `16` now allows
-live-peer dictionary cleanup after the native compressed copy rebuild; other
-ALTER rebuild live recovery remains planned.
+recovery for key-block sizes `1`, `2`, `4`, `8`, and `16` now allows live-peer
+dictionary cleanup after the native compressed copy rebuild; other ALTER
+rebuild live recovery remains planned.
 Primitive native tablespace replay also now proves duplicate page-0 FSP-header
 tablespace candidates fail closed: strict replay errors, product skip mode
 leaves both ambiguous files unchanged, and native boundary reads return
@@ -304,6 +305,7 @@ truncate/recreate, `DROP TABLE` `FILE_DELETE`, and replacement-copy
 boundaries plus representative `ALTER TABLE ... FORCE` and
 plain and explicit copy-lock `ALTER TABLE ... ENGINE=InnoDB` forms and
 plain and explicit copy-lock `ALTER TABLE ... ROW_FORMAT=DYNAMIC` rebuild
+boundaries plus plain and explicit copy-lock compressed key-block rebuild
 boundaries, so a killed writer
 cannot lose the durable checkpoint-needed boundary before no-live recovery for
 those classes.

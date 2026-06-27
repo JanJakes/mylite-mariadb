@@ -1184,6 +1184,9 @@ static void test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_ta
 static void test_crashed_compressed_key_block_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_compressed_key_block_16_dictionary_ddl_recovers_rebuilt_table(void);
 static void test_crashed_compressed_key_block_16_dictionary_ddl_marks_file_op_checkpoint(void);
+static void test_crashed_compressed_key_block_copy_lock_dictionary_ddl_marks_file_op_checkpoint(
+    void
+);
 static void test_crashed_table_comment_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_truncate_dictionary_ddl_recovers_empty_table(void);
 static void test_crashed_implicit_truncate_dictionary_ddl_recovers_empty_table(void);
@@ -2188,7 +2191,15 @@ static void compressed_row_format_key_block_1_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
+static void compressed_row_format_key_block_1_copy_lock_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void compressed_row_format_key_block_2_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void compressed_row_format_key_block_2_copy_lock_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -2196,7 +2207,19 @@ static void compressed_row_format_key_block_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
+static void compressed_row_format_key_block_copy_lock_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void compressed_row_format_key_block_8_copy_lock_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void compressed_row_format_key_block_16_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void compressed_row_format_key_block_16_copy_lock_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -5624,6 +5647,13 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 &&
+        strcmp(argv[1], "dictionary-compressed-row-format-key-block-copy-lock-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_compressed_key_block_copy_lock_dictionary_ddl_marks_file_op_checkpoint();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-table-comment-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_table_comment_dictionary_ddl_recovers_metadata();
@@ -6196,6 +6226,7 @@ int main(int argc, char **argv) {
             "dictionary-compressed-row-format-key-block-file-op-marker-crash|"
             "dictionary-compressed-row-format-key-block-16-crash|"
             "dictionary-compressed-row-format-key-block-16-file-op-marker-crash|"
+            "dictionary-compressed-row-format-key-block-copy-lock-crash|"
             "dictionary-table-comment-crash|"
             "dictionary-truncate-crash|"
             "dictionary-foreign-key-child-truncate-crash|"
@@ -6674,6 +6705,9 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     ),
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_compressed_key_block_16_dictionary_ddl_recovers_rebuilt_table
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_compressed_key_block_copy_lock_dictionary_ddl_marks_file_op_checkpoint
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_table_comment_dictionary_ddl_recovers_metadata),
     OWNERLESS_SQL_TEST_CASE(test_crashed_truncate_dictionary_ddl_recovers_empty_table),
@@ -58047,6 +58081,46 @@ static void test_crashed_compressed_key_block_16_dictionary_ddl_marks_file_op_ch
     );
 }
 
+static void test_crashed_compressed_key_block_copy_lock_dictionary_ddl_marks_file_op_checkpoint(
+    void
+) {
+    run_crashed_compressed_key_block_dictionary_ddl_case(
+        "ownerless-dictionary-compressed-row-format-key-block-1-copy-lock-crash.mylite",
+        "ownerless_compressed_row_format_copy_lock_kb1",
+        1U,
+        compressed_row_format_key_block_1_copy_lock_until_dictionary_finish_fault,
+        1
+    );
+    run_crashed_compressed_key_block_dictionary_ddl_case(
+        "ownerless-dictionary-compressed-row-format-key-block-2-copy-lock-crash.mylite",
+        "ownerless_compressed_row_format_copy_lock_kb2",
+        2U,
+        compressed_row_format_key_block_2_copy_lock_until_dictionary_finish_fault,
+        1
+    );
+    run_crashed_compressed_key_block_dictionary_ddl_case(
+        "ownerless-dictionary-compressed-row-format-key-block-4-copy-lock-crash.mylite",
+        "ownerless_compressed_row_format_copy_lock_kb4",
+        4U,
+        compressed_row_format_key_block_copy_lock_until_dictionary_finish_fault,
+        1
+    );
+    run_crashed_compressed_key_block_dictionary_ddl_case(
+        "ownerless-dictionary-compressed-row-format-key-block-8-copy-lock-crash.mylite",
+        "ownerless_compressed_row_format_copy_lock_kb8",
+        8U,
+        compressed_row_format_key_block_8_copy_lock_until_dictionary_finish_fault,
+        1
+    );
+    run_crashed_compressed_key_block_dictionary_ddl_case(
+        "ownerless-dictionary-compressed-row-format-key-block-16-copy-lock-crash.mylite",
+        "ownerless_compressed_row_format_copy_lock_kb16",
+        16U,
+        compressed_row_format_key_block_16_copy_lock_until_dictionary_finish_fault,
+        1
+    );
+}
+
 static void test_crashed_table_comment_dictionary_ddl_recovers_metadata(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -71838,6 +71912,19 @@ static void compressed_row_format_key_block_1_until_dictionary_finish_fault(
     );
 }
 
+static void compressed_row_format_key_block_1_copy_lock_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_compressed_row_format_copy_lock_kb1 "
+        "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=1, ALGORITHM=COPY, LOCK=EXCLUSIVE"
+    );
+}
+
 static void compressed_row_format_key_block_2_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -71848,6 +71935,19 @@ static void compressed_row_format_key_block_2_until_dictionary_finish_fault(
         "dictionary-before-finish",
         "ALTER TABLE app.ownerless_compressed_row_format_kb2 "
         "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=2"
+    );
+}
+
+static void compressed_row_format_key_block_2_copy_lock_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_compressed_row_format_copy_lock_kb2 "
+        "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=2, ALGORITHM=COPY, LOCK=EXCLUSIVE"
     );
 }
 
@@ -71864,6 +71964,32 @@ static void compressed_row_format_key_block_until_dictionary_finish_fault(
     );
 }
 
+static void compressed_row_format_key_block_copy_lock_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_compressed_row_format_copy_lock_kb4 "
+        "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=4, ALGORITHM=COPY, LOCK=EXCLUSIVE"
+    );
+}
+
+static void compressed_row_format_key_block_8_copy_lock_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_compressed_row_format_copy_lock_kb8 "
+        "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8, ALGORITHM=COPY, LOCK=EXCLUSIVE"
+    );
+}
+
 static void compressed_row_format_key_block_16_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -71874,6 +72000,19 @@ static void compressed_row_format_key_block_16_until_dictionary_finish_fault(
         "dictionary-before-finish",
         "ALTER TABLE app.ownerless_compressed_row_format_kb16 "
         "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=16"
+    );
+}
+
+static void compressed_row_format_key_block_16_copy_lock_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_compressed_row_format_copy_lock_kb16 "
+        "ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=16, ALGORITHM=COPY, LOCK=EXCLUSIVE"
     );
 }
 

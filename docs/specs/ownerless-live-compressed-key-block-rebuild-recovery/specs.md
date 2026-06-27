@@ -66,9 +66,12 @@ classifier accepts only:
 - `KEY_BLOCK_SIZE = 1`, `2`, `4`, `8`, or `16`;
 - optional trailing semicolons.
 
-It does not accept omitted key-block size, other row formats, extra ALTER
-clauses, partition/tablespace options, unqualified table names, or any
-non-MariaDB-accepted key-block value.
+It does not accept omitted key-block size, other row formats,
+partition/tablespace options, unqualified table names, or any
+non-MariaDB-accepted key-block value. The exact
+`ALGORITHM=COPY, LOCK=EXCLUSIVE` tail is covered separately by
+`docs/specs/ownerless-compressed-key-block-copy-lock-live-recovery/specs.md`;
+broader extra ALTER clauses and option matrices remain out of scope.
 
 The parameterized compressed key-block crash runner changes from a live-peer
 `MYLITE_BUSY` probe to a successful live ownerless opener while the original
@@ -108,6 +111,8 @@ Out of scope:
 - dynamic, compact, redundant, page-compressed, encrypted, partitioned,
   external-directory, tablespace import/discard, and multi-action ALTER
   variants;
+- `ALGORITHM`/`LOCK` option matrices beyond the exact
+  `ALGORITHM=COPY, LOCK=EXCLUSIVE` follow-up slice;
 - broader charset, primary-key, foreign-key, CHECK, generated-column, column,
   schema, view, or trigger rebuild classes;
 - SQL-level table-lock callback reachability;
@@ -244,6 +249,7 @@ Completed locally:
 ## Risks And Unresolved Questions
 
 - This exact classifier deliberately does not generalize to all compressed
-  ALTER forms.
+  ALTER forms. The exact copy-lock tail is covered by the follow-up
+  `ownerless-compressed-key-block-copy-lock-live-recovery` slice.
 - Broader native redo/checkpoint reconciliation and external randomized stress
   remain ownerless completion gates.

@@ -18710,10 +18710,9 @@ std::uint32_t ownerless_alter_table_compressed_row_format_key_block_recovery_kin
         !token_equals(tokens.values[8], "KEY_BLOCK_SIZE") || !token_equals(tokens.values[9], "=")) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE;
     }
-    for (std::size_t index = 11U; index < tokens.count; ++index) {
-        if (!token_equals(tokens.values[index], ";")) {
-            return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE;
-        }
+    std::size_t index = 11U;
+    if (!consume_ownerless_optional_copy_exclusive_alter_tail(tokens, index)) {
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE;
     }
     if (token_equals(tokens.values[10], "1")) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_COMPRESSED_ROW_FORMAT_KEY_BLOCK_1;

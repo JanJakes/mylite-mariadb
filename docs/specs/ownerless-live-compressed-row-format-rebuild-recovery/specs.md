@@ -70,9 +70,13 @@ The classifier accepts only:
 - optional trailing semicolons.
 
 It does not accept other key-block sizes, omitted key-block size, other row
-formats, extra ALTER clauses, partition/tablespace options, or unqualified
-table names. The 1/2/4/16 key-block crash selectors are widened by
-`ownerless-live-compressed-key-block-rebuild-recovery`.
+formats, partition/tablespace options, or unqualified table names. The
+1/2/4/16 key-block crash selectors are widened by
+`ownerless-live-compressed-key-block-rebuild-recovery`; the exact
+`ALGORITHM=COPY, LOCK=EXCLUSIVE` tail for all supported key-block sizes is
+covered separately by
+`docs/specs/ownerless-compressed-key-block-copy-lock-live-recovery/specs.md`.
+Broader extra ALTER clauses and option matrices remain out of scope.
 
 The focused compressed crash runner changes from a live-peer `MYLITE_BUSY`
 probe to a live ownerless opener while the old peer remains held. The opener
@@ -110,6 +114,8 @@ Out of scope:
 - dynamic, compact, redundant, page-compressed, encrypted, partitioned,
   external-directory, tablespace import/discard, and multi-action ALTER
   variants;
+- `ALGORITHM`/`LOCK` option matrices beyond the exact
+  `ALGORITHM=COPY, LOCK=EXCLUSIVE` follow-up slice;
 - broader charset, primary-key, foreign-key, CHECK, generated-column, column,
   schema, view, or trigger rebuild classes;
 - SQL-level table-lock callback reachability;
