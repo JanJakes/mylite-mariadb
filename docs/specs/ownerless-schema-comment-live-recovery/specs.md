@@ -63,7 +63,7 @@ In scope:
 
 Out of scope:
 
-- The current-schema `ALTER DATABASE COMMENT ...` grammar form.
+- Current-schema default charset/collation-only forms.
 - Character-set introducers on schema comment literals.
 - Invalid or overlong schema comment error cleanup.
 - Exhaustive ordering of comment, charset, and collation options.
@@ -118,8 +118,7 @@ changes. The slice adds hook test coverage and documentation.
 
 ## Risks And Follow-Up
 
-- The current-schema `ALTER DATABASE COMMENT ...` form remains unclaimed until
-  a separate slice proves how ownerless recovery should classify statements
-  that rely on the session default schema.
+- The current-schema `ALTER DATABASE COMMENT ...` form is covered by
+  `docs/specs/ownerless-current-schema-comment-live-recovery/specs.md`.
 - Broader schema option permutations, invalid-option cleanup, and longer
   external MariaDB/RQG stress remain planned.
