@@ -133,7 +133,10 @@ extern uint32_t my_crc32c(uint32_t crc, const void *buf, size_t len);
 #define MYLITE_TEST_PAGE_LOG_RECORD_FLAGS_OFFSET 20
 #define MYLITE_TEST_PAGE_LOG_RECORD_COMMIT_LSN_OFFSET 32
 #define MYLITE_TEST_PAGE_LOG_RECORD_PAYLOAD_SIZE_OFFSET 40
+#define MYLITE_TEST_PAGE_LOG_RECORD_SNAPSHOT_BOUNDARY 128U
 #define MYLITE_TEST_PAGE_LOG_RECORD_EXTERNAL_SNAPSHOT_LINEAGE 256U
+#define MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE 1024U
+#define MYLITE_TEST_PAGE_LOG_RECORD_PROOF_ONLY 2048U
 #define MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS 128U
 #define MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES 24000U
 #define MYLITE_TEST_BLOB_PAGE_SIZE_MATRIX_ROWS 5U
@@ -767,6 +770,9 @@ static void run_ownerless_crash_tail_test(ownerless_test_fn test_fn);
 static void test_two_processes_update_different_innodb_rows(void);
 static void test_two_processes_update_same_innodb_row(void);
 static void test_two_processes_update_different_innodb_tables(void);
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void test_ownerless_visible_skip_releases_deferred_page_batch(void);
+#endif
 static void test_ownerless_concurrent_transaction_commits(void);
 static void test_two_processes_deadlock_on_innodb_rows(void);
 static void test_ownerless_explicit_dml_deadlock_discards_file_op_marker(void);
@@ -1171,8 +1177,7 @@ static void test_crashed_schema_synonym_alter_dictionary_ddl_recovers_defaults(v
 static void test_crashed_schema_idempotent_create_dictionary_ddl_preserves_defaults(void);
 static void test_crashed_schema_idempotent_drop_dictionary_ddl_preserves_schema(void);
 static void test_crashed_schema_idempotent_missing_create_dictionary_ddl_recovers_schema(void);
-static void test_crashed_schema_idempotent_existing_drop_dictionary_ddl_recovers_absent_schema(
-    void
+static void test_crashed_schema_idempotent_existing_drop_dictionary_ddl_recovers_absent_schema(void
 );
 static void test_crashed_schema_idempotent_existing_drop_synonym_dictionary_ddl_recovers_absent_schema(
     void
@@ -1219,6 +1224,15 @@ static void update_second_row(open_database_paths paths);
 static void update_first_row_by_two(open_database_paths paths);
 static void update_first_table_until_released(open_database_paths paths, child_pipes pipes);
 static void update_second_table_until_released(open_database_paths paths, child_pipes pipes);
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void update_first_table_until_active_writer_visible_skip(
+    open_database_paths paths,
+    int updated_ready_fd,
+    int commit_release_fd,
+    int fault_ready_fd,
+    int fault_release_fd
+);
+#endif
 static void commit_race_update_row_after_signal(
     open_database_paths paths,
     unsigned table_id,
@@ -3414,6 +3428,12 @@ static unsigned count_concurrency_wal_records_with_flags(
     const char *database_path,
     uint32_t required_flags
 );
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static unsigned count_concurrency_wal_records_without_flags(
+    const char *database_path,
+    uint32_t excluded_flags
+);
+#endif
 static unsigned count_ownerless_blob_pressure_blob_pages(const char *database_path);
 static unsigned count_ownerless_blob_size_matrix_blob_pages(const char *database_path);
 static unsigned count_ownerless_compressed_blob_pressure_zblob_pages(const char *database_path);
@@ -5463,7 +5483,8 @@ int main(int argc, char **argv) {
     if (argc == 2 &&
         strcmp(argv[1], "dictionary-schema-idempotent-existing-drop-synonym-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-        test_crashed_schema_idempotent_existing_drop_synonym_dictionary_ddl_recovers_absent_schema();
+        test_crashed_schema_idempotent_existing_drop_synonym_dictionary_ddl_recovers_absent_schema(
+        );
 #endif
         return 0;
     }
@@ -5922,6 +5943,9 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_two_processes_update_different_innodb_rows),
     OWNERLESS_SQL_TEST_CASE(test_two_processes_update_same_innodb_row),
     OWNERLESS_SQL_TEST_CASE(test_two_processes_update_different_innodb_tables),
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_visible_skip_releases_deferred_page_batch),
+#endif
     OWNERLESS_SQL_TEST_CASE(test_ownerless_concurrent_transaction_commits),
     OWNERLESS_SQL_TEST_CASE(test_two_processes_deadlock_on_innodb_rows),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_gap_lock_blocks_insert),
@@ -7013,6 +7037,100 @@ static void test_two_processes_update_different_innodb_tables(void) {
     remove_tree(root);
     free(root);
 }
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void test_ownerless_visible_skip_releases_deferred_page_batch(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-visible-skip-batch.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int first_ready_pipe[2];
+    int first_commit_pipe[2];
+    int first_fault_ready_pipe[2];
+    int first_fault_release_pipe[2];
+    int second_ready_pipe[2];
+    int second_release_pipe[2];
+    pid_t first_child;
+    pid_t second_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(first_ready_pipe) == 0);
+    assert(pipe(first_commit_pipe) == 0);
+    assert(pipe(first_fault_ready_pipe) == 0);
+    assert(pipe(first_fault_release_pipe) == 0);
+    assert(pipe(second_ready_pipe) == 0);
+    assert(pipe(second_release_pipe) == 0);
+
+    first_child = fork();
+    assert(first_child >= 0);
+    if (first_child == 0) {
+        close(first_ready_pipe[0]);
+        close(first_commit_pipe[1]);
+        close(first_fault_ready_pipe[0]);
+        close(first_fault_release_pipe[1]);
+        close(second_ready_pipe[0]);
+        close(second_ready_pipe[1]);
+        close(second_release_pipe[0]);
+        close(second_release_pipe[1]);
+        update_first_table_until_active_writer_visible_skip(
+            paths,
+            first_ready_pipe[1],
+            first_commit_pipe[0],
+            first_fault_ready_pipe[1],
+            first_fault_release_pipe[0]
+        );
+    }
+
+    close(first_ready_pipe[1]);
+    close(first_commit_pipe[0]);
+    close(first_fault_ready_pipe[1]);
+    close(first_fault_release_pipe[0]);
+    wait_for_pipe(first_ready_pipe[0]);
+
+    second_child = fork();
+    assert(second_child >= 0);
+    if (second_child == 0) {
+        close(second_ready_pipe[0]);
+        close(second_release_pipe[1]);
+        close(first_ready_pipe[0]);
+        close(first_commit_pipe[1]);
+        close(first_fault_ready_pipe[0]);
+        close(first_fault_release_pipe[1]);
+        update_second_table_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = second_ready_pipe[1],
+                .release_read_fd = second_release_pipe[0],
+            }
+        );
+    }
+
+    close(second_ready_pipe[1]);
+    close(second_release_pipe[0]);
+    wait_for_pipe(second_ready_pipe[0]);
+    signal_pipe(first_commit_pipe[1]);
+    wait_for_pipe(first_fault_ready_pipe[0]);
+    assert(
+        count_concurrency_wal_records_without_flags(
+            database_path,
+            MYLITE_TEST_PAGE_LOG_RECORD_SNAPSHOT_BOUNDARY |
+                MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE |
+                MYLITE_TEST_PAGE_LOG_RECORD_PROOF_ONLY
+        ) > 0U
+    );
+    signal_pipe(first_fault_release_pipe[1]);
+    wait_for_child(first_child);
+    signal_pipe(second_release_pipe[1]);
+    wait_for_child(second_child);
+    assert_table_values(paths);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+#endif
 
 static unsigned wait_for_commit_race_ready_barrier(
     const char *database_path,
@@ -57999,8 +58117,7 @@ static void test_crashed_schema_synonym_empty_drop_dictionary_ddl_recovers_absen
     );
 }
 
-static void test_crashed_schema_idempotent_existing_drop_dictionary_ddl_recovers_absent_schema(
-    void
+static void test_crashed_schema_idempotent_existing_drop_dictionary_ddl_recovers_absent_schema(void
 ) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -58826,6 +58943,46 @@ static void update_second_table_until_released(open_database_paths paths, child_
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);
 }
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void update_first_table_until_active_writer_visible_skip(
+    open_database_paths paths,
+    int updated_ready_fd,
+    int commit_release_fd,
+    int fault_ready_fd,
+    int fault_release_fd
+) {
+    mylite_db *db;
+    char ready_fd_value[32];
+    char release_fd_value[32];
+    uint64_t commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT] = {0};
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "START TRANSACTION");
+    exec_ok(db, "UPDATE app.ownerless_a SET value = value + 1 WHERE id = 1");
+    signal_pipe(updated_ready_fd);
+    wait_for_pipe(commit_release_fd);
+
+    assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", fault_ready_fd) > 0);
+    assert(snprintf(release_fd_value, sizeof(release_fd_value), "%d", fault_release_fd) > 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "pages-visible-active-writer-skip", 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_RELEASE_FD", release_fd_value, 1) == 0);
+
+    mylite_ownerless_innodb_set_commit_visibility_stats_enabled(1);
+    mylite_ownerless_innodb_reset_commit_visibility_stats();
+    exec_ok(db, "COMMIT");
+    mylite_ownerless_innodb_read_commit_visibility_stats(
+        commit_stats,
+        OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT
+    );
+    mylite_ownerless_innodb_set_commit_visibility_stats_enabled(0);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FAST] > 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH] == 0U);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+#endif
 
 static void commit_race_update_row_after_signal(
     open_database_paths paths,
@@ -86468,6 +86625,59 @@ static unsigned count_concurrency_wal_records_with_flags(
     free(concurrency_path);
     return count;
 }
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static unsigned count_concurrency_wal_records_without_flags(
+    const char *database_path,
+    uint32_t excluded_flags
+) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *wal_path = path_join(concurrency_path, "mylite-concurrency.wal");
+    struct stat wal_stat;
+    unsigned char size_bytes[8];
+    unsigned char flag_bytes[4];
+    unsigned count = 0U;
+    off_t record_offset =
+        MYLITE_TEST_CONCURRENCY_RECOVERY_HEADER_SIZE + MYLITE_TEST_PAGE_LOG_HEADER_SIZE;
+    int fd = open(wal_path, O_RDONLY | O_CLOEXEC);
+
+    assert(fd >= 0);
+    assert(fstat(fd, &wal_stat) == 0);
+    while (record_offset + MYLITE_TEST_PAGE_LOG_RECORD_HEADER_SIZE <= wal_stat.st_size) {
+        uint64_t payload_size;
+        uint32_t record_flags;
+        off_t payload_offset;
+        off_t next_record_offset;
+
+        read_exact_at(
+            fd,
+            flag_bytes,
+            sizeof(flag_bytes),
+            record_offset + MYLITE_TEST_PAGE_LOG_RECORD_FLAGS_OFFSET
+        );
+        record_flags = read_le32(flag_bytes);
+        read_exact_at(
+            fd,
+            size_bytes,
+            sizeof(size_bytes),
+            record_offset + MYLITE_TEST_PAGE_LOG_RECORD_PAYLOAD_SIZE_OFFSET
+        );
+        payload_size = read_le64(size_bytes);
+        payload_offset = record_offset + MYLITE_TEST_PAGE_LOG_RECORD_HEADER_SIZE;
+        assert(payload_size <= (uint64_t)(wal_stat.st_size - payload_offset));
+        next_record_offset = payload_offset + (off_t)payload_size;
+        if ((record_flags & excluded_flags) == 0U) {
+            ++count;
+        }
+        record_offset = next_record_offset;
+    }
+
+    assert(close(fd) == 0);
+    free(wal_path);
+    free(concurrency_path);
+    return count;
+}
+#endif
 
 static unsigned count_ownerless_blob_pressure_blob_pages(const char *database_path) {
     char *datadir_path = path_join(database_path, "datadir");

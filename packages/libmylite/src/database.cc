@@ -2064,8 +2064,7 @@ void discard_ownerless_native_file_op_redo_after_rolled_back_write(
     bool transaction_rollback_had_local_write
 );
 bool mark_ownerless_native_file_op_checkpoint_before_dictionary_finish(mylite_db &db);
-bool ownerless_dictionary_recovery_kind_skips_native_file_op_checkpoint(
-    std::uint32_t recovery_kind
+bool ownerless_dictionary_recovery_kind_skips_native_file_op_checkpoint(std::uint32_t recovery_kind
 );
 bool mark_ownerless_dictionary_state_recoverable_before_finish(mylite_db &db);
 bool advance_ownerless_no_live_page_visible_lsn_for_reclaim(
@@ -11827,8 +11826,7 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
     const bool runtime_has_local_write =
         runtime.ownerless_runtime_has_local_write.load(std::memory_order_relaxed);
     const bool runtime_has_peer_explicit_transaction_write =
-        runtime.ownerless_runtime_has_peer_explicit_transaction_write.load(
-            std::memory_order_relaxed
+        runtime.ownerless_runtime_has_peer_explicit_transaction_write.load(std::memory_order_relaxed
         );
     if (!no_live_peers && runtime_has_local_write && !runtime_has_peer_explicit_transaction_write &&
         !runtime.ownerless_runtime_started_with_page_version_wal) {
@@ -11838,8 +11836,7 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
                 &live_native_dml_marker_needed
             ) &&
             live_native_dml_marker_needed &&
-            clear_concurrency_native_dml_file_op_checkpoint_needed(
-                runtime.concurrency_checkpoint_fd
+            clear_concurrency_native_dml_file_op_checkpoint_needed(runtime.concurrency_checkpoint_fd
             )) {
             set_ownerless_native_dml_file_op_checkpoint_cache(runtime, false);
         }
@@ -12862,8 +12859,7 @@ bool mark_ownerless_native_file_op_checkpoint_before_dictionary_finish(mylite_db
     return marker_written;
 }
 
-bool ownerless_dictionary_recovery_kind_skips_native_file_op_checkpoint(
-    std::uint32_t recovery_kind
+bool ownerless_dictionary_recovery_kind_skips_native_file_op_checkpoint(std::uint32_t recovery_kind
 ) {
     return recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_ADD_FOREIGN_KEY ||
            recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_FOREIGN_KEY;
@@ -13525,8 +13521,9 @@ bool verify_ownerless_native_page_checkpoint_latest_record(
                 }
             }
         }
-        if (allow_no_live_consumed_native_successor && record.space_id > 3U &&
-            disk_page_lsn > record.page_lsn && disk_page_lsn <= visible_lsn) {
+        if (allow_no_live_consumed_native_successor && record.external_snapshot_lineage_record &&
+            record.space_id > 3U && disk_page_lsn > record.page_lsn &&
+            disk_page_lsn <= visible_lsn) {
             return true;
         }
     }
@@ -18140,9 +18137,9 @@ int ownerless_finish_dictionary_ddl(mylite_db &db, bool ddl_started) {
 
     const bool native_file_op_marker_written =
         mark_ownerless_native_file_op_checkpoint_before_dictionary_finish(db);
-    if (native_file_op_marker_written || ownerless_dictionary_recovery_kind_is_metadata_only(
-                                             db.ownerless_dictionary_recovery_kind
-                                         )) {
+    if (native_file_op_marker_written ||
+        ownerless_dictionary_recovery_kind_is_metadata_only(db.ownerless_dictionary_recovery_kind
+        )) {
         static_cast<void>(mark_ownerless_dictionary_state_recoverable_before_finish(db));
     }
     pause_for_ownerless_test_fault("dictionary-before-finish");
@@ -20882,6 +20879,14 @@ void ownerless_innodb_pages_visible_hook(std::uint64_t visible_lsn, void *ctx) {
         hook->redo_state_size < k_concurrency_redo_state_segment_size) {
         return;
     }
+    /*
+     * Visible-fast commits can keep page-log append batches open until the
+     * visible boundary is published. If a peer transaction is still active,
+     * this hook must still close the local batch before it declines to publish
+     * the visible LSN, so a later peer cannot advance the boundary while this
+     * writer's pages remain private to the thread-local append session.
+     */
+    ownerless_page_log_append_batch_release_for_snapshot(hook);
     const bool force_visible = mylite_ownerless_innodb_pages_visible_force() != 0;
     const bool other_trx =
         !force_visible && ownerless_trx_registry_has_other_active_transactions(hook);
@@ -20892,11 +20897,11 @@ void ownerless_innodb_pages_visible_hook(std::uint64_t visible_lsn, void *ctx) {
                               hook->owner_id
                           );
     if (other_trx || other_explicit) {
+        pause_for_ownerless_test_fault("pages-visible-active-writer-skip");
         return;
     }
     std::uint64_t stage_start_ns =
         ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
-    ownerless_page_log_append_batch_release_for_snapshot(hook);
     const int sync_result = sync_ownerless_page_log_if_changed(hook);
     ownerless_database_perf_add_elapsed(
         OWNERLESS_DATABASE_PERF_PAGES_VISIBLE_SYNC_NS,
@@ -24795,8 +24800,8 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
             }
 
             innodb_ownerless_hooks_needed =
-                (ownerless_runtime_open &&
-                 !ownerless_startup_current_native_redo_is_authoritative) ||
+                (ownerless_runtime_open && !ownerless_startup_current_native_redo_is_authoritative
+                ) ||
                 ordinary_native_page_log_reads || ordinary_native_checkpoint_refresh;
             if (innodb_ownerless_hooks_needed) {
                 stage_start_ns = embedded_open_perf_start_ns();

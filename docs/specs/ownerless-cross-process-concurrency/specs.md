@@ -5734,7 +5734,13 @@ subsystems that this mode needs:
   only when the record carries the external-snapshot lineage marker from a
   runtime that consumed WAL retained for another owner's reader snapshot; plain
   concurrent-writer records, including commit-race records, still require exact
-  native proof or replay. Explicit transaction-end statements with local
+  native proof or replay. When `pages_visible` skips shared visible-boundary
+  publication because another writer transaction is still active, it first
+  releases any deferred page-log append batch; later no-live reclaim must still
+  retain plain user-page WAL unless exact native image proof succeeds, so an
+  ordinary native reopen can replay the skipped writer's committed page image
+  instead of trusting a higher-LSN but nonmatching native page. Explicit
+  transaction-end statements with local
   writes serialize on the global ownerless write statement lock before
   current-state refresh
   except when a peer holding that global statement read lock is waiting on this
