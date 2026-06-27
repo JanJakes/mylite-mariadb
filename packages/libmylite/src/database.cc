@@ -2331,6 +2331,10 @@ bool ownerless_alter_table_drop_foreign_key_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 );
+bool ownerless_alter_table_mixed_foreign_key_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
 bool ownerless_create_schema_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_create_schema_if_not_exists_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_alter_schema_recovery_statement(const SqlPolicyTokens &tokens);
@@ -15778,6 +15782,9 @@ std::uint32_t ownerless_dictionary_recovery_kind_for_statement(
     if (ownerless_alter_table_drop_foreign_key_recovery_statement(db, tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_FOREIGN_KEY;
     }
+    if (ownerless_alter_table_mixed_foreign_key_recovery_statement(db, tokens)) {
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_ADD_FOREIGN_KEY;
+    }
     if (ownerless_alter_table_engine_innodb_rebuild_recovery_statement(db, tokens) ||
         ownerless_alter_table_force_rebuild_recovery_statement(tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_FORCE_REBUILD;
@@ -18372,6 +18379,76 @@ bool ownerless_alter_table_drop_foreign_key_recovery_statement(
         }
         if (token_equals(tokens.values[index], ";")) {
             return consume_ownerless_remaining_semicolons(tokens, index);
+        }
+        return false;
+    }
+}
+
+bool ownerless_alter_table_mixed_foreign_key_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    if (tokens.count < 15U || !token_equals(tokens.values[0], "ALTER") ||
+        !token_equals(tokens.values[1], "TABLE")) {
+        return false;
+    }
+
+    std::size_t index = 2U;
+    std::string child_schema_name;
+    std::string child_table_name;
+    if (!consume_ownerless_table_identifier_parts(
+            db,
+            tokens,
+            index,
+            &child_schema_name,
+            &child_table_name
+        )) {
+        return false;
+    }
+    bool child_has_generated_columns = true;
+    if (!ownerless_table_has_generated_columns(
+            db,
+            child_schema_name,
+            child_table_name,
+            &child_has_generated_columns
+        ) ||
+        child_has_generated_columns) {
+        return false;
+    }
+
+    bool saw_add_clause = false;
+    bool saw_drop_clause = false;
+    for (;;) {
+        if (index < tokens.count && token_equals(tokens.values[index], "ADD")) {
+            if (!consume_ownerless_alter_table_add_foreign_key_recovery_clause(db, tokens, index)) {
+                return false;
+            }
+            saw_add_clause = true;
+        } else if (index < tokens.count && token_equals(tokens.values[index], "DROP")) {
+            if (!consume_ownerless_alter_table_drop_foreign_key_recovery_clause(
+                    db,
+                    tokens,
+                    index,
+                    child_schema_name,
+                    child_table_name
+                )) {
+                return false;
+            }
+            saw_drop_clause = true;
+        } else {
+            return false;
+        }
+
+        if (index >= tokens.count) {
+            return saw_add_clause && saw_drop_clause;
+        }
+        if (token_equals(tokens.values[index], ",")) {
+            ++index;
+            continue;
+        }
+        if (token_equals(tokens.values[index], ";")) {
+            return saw_add_clause && saw_drop_clause &&
+                   consume_ownerless_remaining_semicolons(tokens, index);
         }
         return false;
     }

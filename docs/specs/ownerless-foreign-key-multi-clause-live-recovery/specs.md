@@ -122,7 +122,9 @@ adds parser helpers, focused hook tests, CTest registration, and documentation.
   ADD recovery kind.
 - Pure multi-FK DROP statements are marked with the existing metadata-only FK
   DROP recovery kind.
-- Mixed comma-separated FK/non-FK ALTER lists are not claimed by this slice.
+- Mixed FK-only ADD/DROP lists are covered separately by
+  `docs/specs/ownerless-foreign-key-mixed-clause-live-recovery/specs.md`;
+  mixed comma-separated FK/non-FK ALTER lists are not claimed by this slice.
 - A crash after native multi-FK ADD and before ownerless dictionary finish
   recovers both constraints while a live peer remains open, with the native
   file-op marker clear.
@@ -136,5 +138,6 @@ adds parser helpers, focused hook tests, CTest registration, and documentation.
 
 - This remains a token-level recognizer, not a replacement for MariaDB's parser.
 - Mixed FK/column/index ALTER lists still need a separate design because they
-  may require native file-operation checkpoint evidence.
+  may require native file-operation checkpoint evidence. FK-only mixed ADD/DROP
+  recovery is covered by the follow-up mixed-clause slice.
 - Generated-column FK live recovery remains conservative and planned.

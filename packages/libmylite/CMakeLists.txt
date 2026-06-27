@@ -642,6 +642,12 @@ if(BUILD_TESTING)
           dictionary-foreign-key-multi-drop-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-foreign-key-mixed-alter-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-foreign-key-mixed-alter-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-fk-multi-rename-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -1411,6 +1417,7 @@ if(BUILD_TESTING)
       set_tests_properties(
         libmylite.ownerless-dictionary-foreign-key-multi-add-crash
         libmylite.ownerless-dictionary-foreign-key-multi-drop-crash
+        libmylite.ownerless-dictionary-foreign-key-mixed-alter-crash
         libmylite.ownerless-dictionary-fk-multi-rename-crash
         PROPERTIES
           LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
