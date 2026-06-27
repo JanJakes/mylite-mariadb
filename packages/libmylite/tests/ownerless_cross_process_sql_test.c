@@ -1058,6 +1058,7 @@ static void test_crashed_unique_index_drop_dictionary_ddl_recovers_absent_index(
 static void test_crashed_secondary_index_rename_dictionary_ddl_recovers_renamed_index(void);
 static void test_crashed_secondary_index_ignorability_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_primary_key_dictionary_ddl_recovers_key_metadata(void);
+static void test_crashed_descending_primary_key_dictionary_ddl_recovers_key_metadata(void);
 static void test_crashed_composite_direction_primary_key_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_primary_key_idempotent_dictionary_ddl_preserves_key_metadata(void);
 static void test_crashed_foreign_key_dictionary_ddl_recovers_constraint(void);
@@ -1728,6 +1729,10 @@ static void restore_secondary_index_until_dictionary_finish_fault(
     int ready_fd
 );
 static void primary_key_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
+static void descending_primary_key_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void composite_direction_primary_key_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -4815,6 +4820,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-descending-primary-key-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_descending_primary_key_dictionary_ddl_recovers_key_metadata();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-composite-direction-primary-key-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_composite_direction_primary_key_dictionary_ddl_recovers_metadata();
@@ -5553,6 +5564,7 @@ int main(int argc, char **argv) {
             test_crashed_secondary_index_rename_dictionary_ddl_recovers_renamed_index,
             test_crashed_secondary_index_ignorability_dictionary_ddl_recovers_metadata,
             test_crashed_primary_key_dictionary_ddl_recovers_key_metadata,
+            test_crashed_descending_primary_key_dictionary_ddl_recovers_key_metadata,
             test_crashed_composite_direction_primary_key_dictionary_ddl_recovers_metadata,
             test_crashed_primary_key_idempotent_dictionary_ddl_preserves_key_metadata,
             test_crashed_foreign_key_dictionary_ddl_recovers_constraint,
@@ -5807,6 +5819,7 @@ int main(int argc, char **argv) {
             "dictionary-secondary-index-rename-crash|"
             "dictionary-secondary-index-ignorability-crash|"
             "dictionary-primary-key-crash|"
+            "dictionary-descending-primary-key-crash|"
             "dictionary-composite-direction-primary-key-crash|"
             "dictionary-primary-key-idempotent-crash|"
             "dictionary-foreign-key-crash|"
@@ -6225,6 +6238,9 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_unique_index_drop_dictionary_ddl_recovers_absent_index),
     OWNERLESS_SQL_TEST_CASE(test_crashed_primary_key_dictionary_ddl_recovers_key_metadata),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_descending_primary_key_dictionary_ddl_recovers_key_metadata
+    ),
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_composite_direction_primary_key_dictionary_ddl_recovers_metadata
     ),
@@ -45178,6 +45194,135 @@ static void test_crashed_primary_key_dictionary_ddl_recovers_key_metadata(void) 
     free(root);
 }
 
+static void test_crashed_descending_primary_key_dictionary_ddl_recovers_key_metadata(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-descending-primary-key-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
+    mylite_db *db;
+    unsigned mariadb_errno = 0U;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_descending_primary_key_base ("
+        "id INT NOT NULL, "
+        "code INT NOT NULL, "
+        "value INT NOT NULL, "
+        "PRIMARY KEY (id)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_descending_primary_key_base VALUES "
+        "(1, 10, 100), (2, 20, 200), (3, 30, 300)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_descending_primary_key_base' "
+            "AND index_name = 'PRIMARY' "
+            "AND column_name = 'id'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_descending_primary_key_base' "
+            "AND index_name = 'PRIMARY' "
+            "AND column_name = 'code'"
+        ) == 0U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        descending_primary_key_until_dictionary_finish_fault
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_descending_primary_key_base' "
+            "AND index_name = 'PRIMARY' "
+            "AND column_name = 'code' "
+            "AND seq_in_index = 1 "
+            "AND non_unique = 0 "
+            "AND collation = 'D'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_descending_primary_key_base' "
+            "AND index_name = 'PRIMARY' "
+            "AND column_name = 'id'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_descending_primary_key_base "
+            "FORCE INDEX (PRIMARY) "
+            "WHERE code >= 20"
+        ) == 500U
+    );
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_descending_primary_key_base "
+            "VALUES (4, 20, 400)",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_DUPLICATE_KEY_ERRNO);
+    exec_ok(db, "INSERT INTO app.ownerless_descending_primary_key_base VALUES (1, 40, 400)");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_descending_primary_key_base") == 4U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_descending_primary_key_base") ==
+        1000U
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    release_ownerless_live_peer(&live_peer);
+
+    assert_ownerless_descending_primary_key_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert_ownerless_descending_primary_key_ddl_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_descending_primary_key_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_descending_primary_key_ddl_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_composite_direction_primary_key_dictionary_ddl_recovers_metadata(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -67329,6 +67474,19 @@ static void primary_key_until_dictionary_finish_fault(open_database_paths paths,
         "dictionary-before-finish",
         "ALTER TABLE app.ownerless_primary_key_crash_base "
         "DROP PRIMARY KEY, ADD PRIMARY KEY (code)"
+    );
+}
+
+static void descending_primary_key_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_descending_primary_key_base "
+        "DROP PRIMARY KEY, ADD PRIMARY KEY (code DESC)"
     );
 }
 

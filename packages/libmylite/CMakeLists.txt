@@ -712,6 +712,12 @@ if(BUILD_TESTING)
           dictionary-primary-key-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-descending-primary-key-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-descending-primary-key-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-composite-direction-primary-key-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -1238,6 +1244,7 @@ if(BUILD_TESTING)
         libmylite.ownerless-dictionary-unique-index-idempotent-create-crash
         libmylite.ownerless-dictionary-alter-unique-index-idempotent-create-crash
         libmylite.ownerless-dictionary-primary-key-crash
+        libmylite.ownerless-dictionary-descending-primary-key-crash
         libmylite.ownerless-dictionary-composite-direction-primary-key-crash
         libmylite.ownerless-dictionary-primary-key-idempotent-crash
         libmylite.ownerless-dictionary-table-idempotent-create-crash

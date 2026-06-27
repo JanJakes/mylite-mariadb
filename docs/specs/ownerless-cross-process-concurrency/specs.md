@@ -2728,6 +2728,12 @@ Tasks:
    `COLLATION = 'D'`, rejects duplicate replacement-key writes, accepts a
    duplicate of the old key column, and verifies final clustered-index metadata
    through ownerless/native reopen before and after forced `.shm` rebuild.
+   Hook-build crash coverage kills the same descending primary-key replacement
+   after native clustered-key rebuild but before ownerless dictionary finish,
+   proves live-peer recovery while another ownerless peer remains open, retains
+   the native file-operation marker until final no-live drain, and verifies the
+   same final metadata/enforcement through ownerless/native reopen and forced
+   `.shm` rebuild.
    Composite direction primary-key replacement coverage now performs
    `ALTER TABLE ... DROP PRIMARY KEY, ADD PRIMARY KEY (tenant_id ASC, code DESC)`,
    verifies an already-open peer observes both replacement key parts with
@@ -5416,6 +5422,13 @@ Minimum suites before support can be claimed:
     the peer remains open, drains the marker after the final peer exits, and
     verifies replacement-key enforcement, old-key duplicate writes,
     ownerless/native reopen, and forced `.shm` rebuild remain correct,
+  - after representative descending primary-key replacement native
+    clustered-key rebuild but before ownerless dictionary finish; hook coverage
+    proves live-peer recovery, retains the native file-operation marker while
+    the peer remains open, drains the marker after the final peer exits, and
+    verifies recovered key-part direction metadata, replacement-key enforcement,
+    old-key duplicate writes, ownerless/native reopen, and forced `.shm` rebuild
+    remain correct,
   - after representative composite direction primary-key replacement native
     clustered-key rebuild but before ownerless dictionary finish; hook coverage
     proves live-peer recovery, retains the native file-operation marker while
@@ -5645,7 +5658,9 @@ duplicate `ALTER TABLE ... ADD INDEX IF NOT EXISTS`, and missing
 writers, secondary-index rename and
 ignored/not-ignored metadata writers after native index metadata changes, a
 single-column primary-key replacement writer after native clustered-key rebuild
-with live-peer recovery plus retained-marker no-live drain, foreign-key
+with live-peer recovery plus retained-marker no-live drain, a descending
+primary-key replacement writer after native clustered-key rebuild with
+live-peer recovery plus retained-marker no-live drain, foreign-key
 ADD/DROP writers after native
 constraint metadata creation/removal, CHECK ADD/DROP writers after native
 table-definition mutation, a cross-schema foreign-key multi-pair rename writer
@@ -7528,8 +7543,8 @@ subsystems that this mode needs:
      top-level and ALTER secondary-index idempotent/no-op prefinish boundaries,
      plus focused column idempotent and column `IF EXISTS` missing-column
      no-op prefinish boundaries, plus focused plain ADD COLUMN, table-comment,
-     column-default metadata ALTER, and plain plus composite direction
-     primary-key replacement prefinish boundaries, especially remaining
+     column-default metadata ALTER, and plain, descending, and composite
+     direction primary-key replacement prefinish boundaries, especially remaining
      rename/truncate variants, other rebuild variants, broader
      metadata-only DDL, temporary, broader schema option variants, intra-loop
      drop cases, and broader DDL file lifecycle while peers remain live.

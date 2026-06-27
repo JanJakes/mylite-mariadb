@@ -52,8 +52,10 @@ In scope:
 
 Out of scope:
 
-- Full algorithm/lock option matrix, crash recovery during primary-key rebuild,
-  concurrent duplicate-key races, and external randomized DDL oracles.
+- Full algorithm/lock option matrix, alternate crash points during primary-key
+  rebuild, concurrent duplicate-key races, and external randomized DDL oracles.
+  Focused post-native-rebuild crash recovery for this SQL shape is covered by
+  `ownerless-descending-primary-key-ddl-crash`.
   Composite direction primary-key replacement is covered separately by
   `ownerless-composite-direction-primary-key-ddl-refresh`, and AUTO_INCREMENT
   descending primary-key replacement is covered separately by
@@ -135,8 +137,10 @@ No production binary-size impact beyond focused test code and docs.
 
 ## Risks And Follow-Up
 
-- Algorithm/lock matrices and crash recovery during primary-key rebuild remain
-  planned. Composite direction primary-key replacement is covered separately by
+- Algorithm/lock matrices and alternate primary-key rebuild crash points remain
+  planned. Focused post-native-rebuild crash recovery is covered separately by
+  `ownerless-descending-primary-key-ddl-crash`. Composite direction primary-key
+  replacement is covered separately by
   `ownerless-composite-direction-primary-key-ddl-refresh`, and AUTO_INCREMENT
   descending primary-key replacement is covered separately by
   `ownerless-autoinc-descending-primary-key-ddl-refresh`.
