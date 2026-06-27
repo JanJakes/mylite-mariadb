@@ -374,6 +374,10 @@ if(BUILD_TESTING)
       COMMAND mylite_ownerless_cross_process_sql_test insert-fk-fast-path-cache
     )
     add_test(
+      NAME libmylite.ownerless-cyclic-foreign-key-truncate-policy
+      COMMAND mylite_ownerless_cross_process_sql_test cyclic-foreign-key-truncate-policy
+    )
+    add_test(
       NAME libmylite.ownerless-uncommitted-peer-hidden
       COMMAND mylite_ownerless_cross_process_sql_test uncommitted-peer-hidden
     )
@@ -1110,6 +1114,10 @@ if(BUILD_TESTING)
       TIMEOUT 90
     )
     set_tests_properties(libmylite.ownerless-insert-fk-fast-path-cache PROPERTIES
+      LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
+      TIMEOUT 90
+    )
+    set_tests_properties(libmylite.ownerless-cyclic-foreign-key-truncate-policy PROPERTIES
       LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
       TIMEOUT 90
     )

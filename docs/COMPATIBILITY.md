@@ -361,11 +361,13 @@ prefinish recovery also uses metadata-only live-peer recovery with the native
 file-operation marker clear.
 `DROP TEMPORARY TABLE`,
 inside-MariaDB-loop multi-drop crash points,
-cyclic foreign-key truncate, broader ALTER rebuild, broader schema option
-variants, broader view and trigger variants, and non-rename foreign-key
-multi-DDL live-peer recovery remain partial/planned. Partition truncate stays
-under the ownerless partition-DDL rejection policy, and parent-table truncate
-for non-self foreign keys remains MariaDB's native pre-truncate error path.
+broader ALTER rebuild, broader schema option variants, broader view and
+trigger variants, and non-rename foreign-key multi-DDL live-peer recovery
+remain partial/planned. Cyclic foreign-key truncate is covered as MariaDB's
+native pre-truncate error path with clear ownerless file-operation markers.
+Partition truncate stays under the ownerless partition-DDL rejection policy,
+and parent-table truncate for non-self foreign keys remains MariaDB's native
+pre-truncate error path.
 Focused hook coverage also now forces a native checkpoint, clears the
 ownerless file-op redo flag, updates a file-per-table InnoDB table, and
 observes the flag set again, proving ordinary post-checkpoint DML reaches

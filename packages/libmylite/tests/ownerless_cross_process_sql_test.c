@@ -41,6 +41,7 @@ extern uint32_t my_crc32c(uint32_t crc, const void *buf, size_t len);
 #define MYLITE_TEST_ROW_IS_REFERENCED_ERRNO 1451U
 #define MYLITE_TEST_NO_REFERENCED_ROW_ERRNO 1452U
 #define MYLITE_TEST_NON_INSERTABLE_TABLE_ERRNO 1471U
+#define MYLITE_TEST_TRUNCATE_ILLEGAL_FK_ERRNO 1701U
 #define MYLITE_TEST_GENERATED_COLUMN_FUNCTION_ERRNO 1901U
 #define MYLITE_TEST_GENERATED_COLUMN_PRIMARY_KEY_ERRNO 1903U
 #define MYLITE_TEST_WRONG_FK_OPTION_FOR_GENERATED_COLUMN_ERRNO 1905U
@@ -991,6 +992,7 @@ static void test_crashed_generated_fk_action_row_step_sixth_after_recovers_state
 #endif
 static void test_ownerless_cyclic_foreign_key_cross_process(void);
 static void test_ownerless_cyclic_foreign_key_variants_cross_process(void);
+static void test_ownerless_cyclic_foreign_key_truncate_policy(void);
 static void test_ownerless_foreign_key_rename_refreshes_peer_dictionary(void);
 static void test_ownerless_foreign_key_child_rename_refreshes_peer_dictionary(void);
 static void test_ownerless_foreign_key_cross_schema_rename_refreshes_peer_dictionary(void);
@@ -3366,6 +3368,10 @@ static void assert_ownerless_cyclic_foreign_key_variants_state(
     open_database_paths paths,
     unsigned flags
 );
+static void assert_ownerless_cyclic_foreign_key_truncate_policy_state(
+    open_database_paths paths,
+    unsigned flags
+);
 static void assert_ownerless_foreign_key_rename_state(
     open_database_paths paths,
     unsigned flags,
@@ -4202,6 +4208,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "cyclic-foreign-key-variants") == 0) {
         test_ownerless_cyclic_foreign_key_variants_cross_process();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "cyclic-foreign-key-truncate-policy") == 0) {
+        test_ownerless_cyclic_foreign_key_truncate_policy();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "foreign-key-rename") == 0) {
@@ -5805,7 +5815,8 @@ int main(int argc, char **argv) {
             "generated-column-foreign-key-action-row-step-third-after-crash|"
             "generated-column-foreign-key-action-row-step-sixth-after-crash|"
             "cyclic-foreign-key|"
-            "cyclic-foreign-key-variants|foreign-key-rename|foreign-key-child-rename|"
+            "cyclic-foreign-key-variants|cyclic-foreign-key-truncate-policy|"
+            "foreign-key-rename|foreign-key-child-rename|"
             "foreign-key-cross-schema-rename|foreign-key-cross-schema-child-rename|"
             "foreign-key-multi-rename|foreign-key-cross-schema-multi-rename|"
             "check-constraint-ddl|field-generated-check-ddl|"
@@ -6227,6 +6238,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_generated_column_foreign_key_policy),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_cyclic_foreign_key_cross_process),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_cyclic_foreign_key_variants_cross_process),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_cyclic_foreign_key_truncate_policy),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_foreign_key_rename_refreshes_peer_dictionary),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_foreign_key_child_rename_refreshes_peer_dictionary),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_foreign_key_cross_schema_rename_refreshes_peer_dictionary
@@ -38722,6 +38734,119 @@ static void test_ownerless_cyclic_foreign_key_variants_cross_process(void) {
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
     assert_ownerless_cyclic_foreign_key_variants_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_cyclic_foreign_key_truncate_policy(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-cyclic-fk-truncate-policy.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    unsigned mariadb_errno = 0U;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_truncate_cycle_a ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "b_id INT NULL, "
+        "value INT NOT NULL, "
+        "INDEX ownerless_fk_truncate_cycle_a_b_idx (b_id)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_truncate_cycle_b ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "a_id INT NOT NULL, "
+        "value INT NOT NULL, "
+        "INDEX ownerless_fk_truncate_cycle_b_a_idx (a_id), "
+        "CONSTRAINT ownerless_fk_truncate_cycle_b_a "
+        "FOREIGN KEY (a_id) "
+        "REFERENCES app.ownerless_fk_truncate_cycle_a (id) "
+        "ON UPDATE RESTRICT "
+        "ON DELETE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_fk_truncate_cycle_a "
+        "ADD CONSTRAINT ownerless_fk_truncate_cycle_a_b "
+        "FOREIGN KEY (b_id) "
+        "REFERENCES app.ownerless_fk_truncate_cycle_b (id) "
+        "ON UPDATE RESTRICT "
+        "ON DELETE CASCADE"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_fk_truncate_cycle_a VALUES (1, NULL, 10)");
+    exec_ok(db, "INSERT INTO app.ownerless_fk_truncate_cycle_b VALUES (1, 1, 20)");
+    exec_ok(db, "UPDATE app.ownerless_fk_truncate_cycle_a SET b_id = 1 WHERE id = 1");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_truncate_cycle_a") == 10U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_truncate_cycle_b") == 20U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(mylite_ownerless_innodb_make_checkpoint() == MYLITE_TEST_OWNERLESS_INNODB_LOCK_OK);
+    (void)mylite_ownerless_innodb_take_file_op_redo();
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    mariadb_errno = 0U;
+    assert(
+        exec_status(db, "TRUNCATE TABLE app.ownerless_fk_truncate_cycle_a", &mariadb_errno) !=
+        MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_TRUNCATE_ILLEGAL_FK_ERRNO);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(concurrency_wal_is_checkpointed(database_path));
+    mariadb_errno = 0U;
+    assert(
+        exec_status(db, "TRUNCATE TABLE app.ownerless_fk_truncate_cycle_b", &mariadb_errno) !=
+        MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_TRUNCATE_ILLEGAL_FK_ERRNO);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(concurrency_wal_is_checkpointed(database_path));
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_truncate_cycle_a") == 1U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_truncate_cycle_b") == 1U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    assert_ownerless_cyclic_foreign_key_truncate_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_cyclic_foreign_key_truncate_policy_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_cyclic_foreign_key_truncate_policy_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_cyclic_foreign_key_truncate_policy_state(paths, MYLITE_OPEN_READWRITE);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    exec_ok(db, "INSERT INTO app.ownerless_fk_truncate_cycle_a VALUES (10, NULL, 100)");
+    exec_ok(db, "INSERT INTO app.ownerless_fk_truncate_cycle_b VALUES (20, 10, 200)");
+    exec_ok(db, "UPDATE app.ownerless_fk_truncate_cycle_a SET b_id = 20 WHERE id = 10");
+    exec_ok(db, "DELETE FROM app.ownerless_fk_truncate_cycle_a WHERE id = 10");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_truncate_cycle_a") == 1U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_truncate_cycle_b") == 1U);
+    assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);
     free(runtime_root);
@@ -85809,6 +85934,55 @@ static void assert_ownerless_cyclic_foreign_key_variants_state(
             "AND delete_rule = 'SET NULL'"
         ) == 2U
     );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_cyclic_foreign_key_truncate_policy_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+    unsigned mariadb_errno = 0U;
+
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_truncate_cycle_a") == 1U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_fk_truncate_cycle_a") == 1U);
+    assert(query_unsigned(db, "SELECT SUM(b_id) FROM app.ownerless_fk_truncate_cycle_a") == 1U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_truncate_cycle_a") == 10U);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_truncate_cycle_b") == 1U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_fk_truncate_cycle_b") == 1U);
+    assert(query_unsigned(db, "SELECT SUM(a_id) FROM app.ownerless_fk_truncate_cycle_b") == 1U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_truncate_cycle_b") == 20U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND constraint_name IN ("
+            "'ownerless_fk_truncate_cycle_a_b', "
+            "'ownerless_fk_truncate_cycle_b_a') "
+            "AND update_rule = 'RESTRICT' "
+            "AND delete_rule = 'CASCADE'"
+        ) == 2U
+    );
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_fk_truncate_cycle_b VALUES (2, 999, 200)",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_NO_REFERENCED_ROW_ERRNO);
+    mariadb_errno = 0U;
+    assert(
+        exec_status(
+            db,
+            "UPDATE app.ownerless_fk_truncate_cycle_a SET b_id = 999 WHERE id = 1",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_NO_REFERENCED_ROW_ERRNO);
     assert(mylite_close(db) == MYLITE_OK);
 }
 

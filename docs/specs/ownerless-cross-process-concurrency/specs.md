@@ -7593,13 +7593,13 @@ subsystems that this mode needs:
      prefinish boundaries, plus child-only, self-referencing, and stored
      generated-column child foreign-key truncate prefinish boundaries,
      especially remaining
-     rename variants, cyclic foreign-key truncate, other rebuild variants,
-     broader metadata-only DDL,
+     rename variants, other rebuild variants, broader metadata-only DDL,
      temporary, broader schema option variants, intra-loop drop cases, and
      broader DDL file lifecycle while peers remain live. Partition truncate
-     remains governed by the ownerless partition-DDL rejection policy, and
-     non-self parent-table FK truncate remains MariaDB's pre-truncate error
-     path rather than a positive recovery boundary.
+     remains governed by the ownerless partition-DDL rejection policy, cyclic
+     FK truncate is covered as MariaDB's pre-truncate error path, and non-self
+     parent-table FK truncate remains MariaDB's pre-truncate error path rather
+     than a positive recovery boundary.
   2. Close remaining transaction crash windows, especially native
      rollback/savepoint-rollback internals and broader same-page/same-table
      concurrent-writer savepoint schedules that combine native undo,

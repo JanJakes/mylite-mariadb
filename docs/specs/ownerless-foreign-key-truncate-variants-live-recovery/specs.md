@@ -61,8 +61,11 @@ Out of scope:
   truncate when the parent is referenced by another table.
 - Partition truncate; ownerless read/write mode rejects partitioned and
   partition-maintenance DDL before native file lifecycle.
-- Cyclic multi-table FK truncate, temporary-table truncate, and randomized
-  external MariaDB/RQG coverage.
+- Cyclic multi-table FK truncate under default FK checks; MariaDB rejects that
+  before native truncate, and
+  `docs/specs/ownerless-cyclic-foreign-key-truncate-negative-proof/specs.md`
+  covers it as a negative proof.
+- Temporary-table truncate and randomized external MariaDB/RQG coverage.
 
 ## Design
 
@@ -185,8 +188,10 @@ Completed on 2026-06-27 with `ownerless-test-hooks`, `ownerless-stress`, and
 
 ## Risks And Follow-Up
 
-- Cyclic multi-table FK truncate and temporary-table truncate remain separate
-  follow-ups.
+- Cyclic multi-table FK truncate is covered by
+  `docs/specs/ownerless-cyclic-foreign-key-truncate-negative-proof/specs.md`
+  as a MariaDB pre-truncate error path under default FK checks.
+- Temporary-table truncate remains a separate follow-up.
 - Parent-table truncate remains a MariaDB error path; additional negative
   coverage can be added if the compatibility matrix needs a direct ownerless
   assertion for errno stability.
