@@ -5018,6 +5018,14 @@ Tasks:
    while the writer is still a zombie, both file-op markers remain clear,
    recovery close checkpoints retained non-marker WAL, and the next
    ownerless/native reopen still sees the pre-savepoint row.
+   A concurrent handoff follow-up keeps one ownerless writer open after
+   rolling back post-savepoint DML, commits independent explicit DML from a
+   second ownerless writer while the first remains live, verifies the second
+   writer's committed row is visible while the first writer's uncommitted row
+   remains hidden, retains native DML marker/WAL evidence while the peer is
+   live, and then proves ownerless reopen, forced `.shm` rebuild, and ordinary
+   native reopen preserve only the first writer's pre-savepoint row plus the
+   second writer's committed row.
    Deadlock victims after local explicit-transaction writes now reuse that
    discard rule after MyLite's internal deadlock rollback, while accepted 1205
    timeout victims prove the same discard after explicit rollback; focused
@@ -5026,9 +5034,11 @@ Tasks:
    later no-live ownerless close after both children are reaped drains
    committed DML marker/WAL evidence after native checkpoint proof.
    That closes the focused checkpointed representative DML commit marker and
-   rollback/deadlock/savepoint classification gaps, not the broader DML-origin
-   `FILE_MODIFY`, crash, killed-transaction, or
-   concurrent-writer explicit-transaction matrices.
+   rollback/deadlock/savepoint classification gaps, including one
+   independent-table concurrent savepoint handoff, not the broader DML-origin
+   `FILE_MODIFY`, native mid-rollback crash, same-page/same-table savepoint
+   contention, killed-transaction, or concurrent-writer explicit-transaction
+   matrices.
    The no-argument
    aggregate harness remains
    available for manual runs, while CTest registers the normal ownerless SQL
@@ -7439,8 +7449,14 @@ subsystems that this mode needs:
   killed before rollback or commit. No-live ownerless recovery, forced `.shm`
   rebuild, and ordinary native reopen preserve the pre-transaction rows while
   both native file-operation markers remain clear. This narrows the savepoint
-  crash matrix, but does not claim a kill inside InnoDB savepoint rollback or
-  concurrent-writer savepoint schedules.
+  crash matrix, but does not claim a kill inside InnoDB savepoint rollback.
+  The concurrent savepoint handoff follow-up keeps one ownerless writer open
+  after successful `ROLLBACK TO SAVEPOINT`, commits independent explicit DML
+  from a second ownerless writer, verifies live visibility and marker/WAL
+  retention, and preserves only the first writer's pre-savepoint row plus the
+  second writer's row through ownerless, forced-`.shm`, and native reopen.
+  Broader same-page/same-table concurrent-writer savepoint schedules remain
+  planned.
   The savepoint-rollback-before-state hook follow-up kills a writer after
   native `ROLLBACK TO SAVEPOINT` succeeds but before MyLite updates
   process-local savepoint state and discards rolled-back file-operation
@@ -7585,9 +7601,10 @@ subsystems that this mode needs:
      non-self parent-table FK truncate remains MariaDB's pre-truncate error
      path rather than a positive recovery boundary.
   2. Close remaining transaction crash windows, especially native
-     rollback/savepoint-rollback internals and concurrent-writer savepoint
-     schedules that combine native undo, ownerless page-write ownership, and
-     file-operation marker cleanup.
+     rollback/savepoint-rollback internals and broader same-page/same-table
+     concurrent-writer savepoint schedules that combine native undo,
+     ownerless page-write ownership, and file-operation marker cleanup beyond
+     the covered independent-table handoff.
   3. Extend active-reader pressure evidence from retained-WAL policy to crash
      and external-oracle breadth for the high-risk DML/DDL classes already
      covered by bounded pressure policy tests.
