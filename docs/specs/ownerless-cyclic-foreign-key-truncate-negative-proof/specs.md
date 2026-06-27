@@ -51,9 +51,10 @@ In scope:
 
 Out of scope:
 
-- Positive crash recovery for cyclic FK truncate; MariaDB does not reach native
-  truncate under default FK checks.
-- `FOREIGN_KEY_CHECKS=0` truncate behavior.
+- Positive crash recovery for cyclic FK truncate under default FK checks;
+  MariaDB does not reach native truncate in that mode.
+- `FOREIGN_KEY_CHECKS=0` truncate behavior, covered separately by
+  `docs/specs/ownerless-unchecked-cyclic-foreign-key-truncate-live-recovery/specs.md`.
 - Partition or temporary-table truncate behavior.
 - Broader randomized DDL/RQG coverage.
 
@@ -168,8 +169,8 @@ Completed on 2026-06-27 with `php-embedded-prod`, `ownerless-test-hooks`, and
 
 ## Risks And Follow-Up
 
-- This does not cover `FOREIGN_KEY_CHECKS=0`; that mode may reach native
-  truncate and needs separate compatibility/recovery analysis.
+- `FOREIGN_KEY_CHECKS=0` reaches a native truncate boundary and is covered by
+  `docs/specs/ownerless-unchecked-cyclic-foreign-key-truncate-live-recovery/specs.md`.
 - Temporary-table truncate and broader DDL file-lifecycle recovery remain open.
 - Broader native redo/checkpoint reconciliation, active-reader pressure
   crash/oracle breadth, and external MariaDB/RQG stress remain ownerless

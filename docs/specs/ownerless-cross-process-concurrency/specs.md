@@ -7597,9 +7597,11 @@ subsystems that this mode needs:
      temporary, broader schema option variants, intra-loop drop cases, and
      broader DDL file lifecycle while peers remain live. Partition truncate
      remains governed by the ownerless partition-DDL rejection policy, cyclic
-     FK truncate is covered as MariaDB's pre-truncate error path, and non-self
-     parent-table FK truncate remains MariaDB's pre-truncate error path rather
-     than a positive recovery boundary.
+     FK truncate under default FK checks is covered as MariaDB's pre-truncate
+     error path, unchecked `FOREIGN_KEY_CHECKS=0` cyclic FK truncate now has
+     focused live-peer native truncate recovery, and non-self parent-table FK
+     truncate remains MariaDB's pre-truncate error path rather than a positive
+     recovery boundary.
   2. Close remaining transaction crash windows, especially native
      rollback/savepoint-rollback internals and broader same-page/same-table
      concurrent-writer savepoint schedules that combine native undo,

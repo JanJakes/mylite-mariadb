@@ -64,7 +64,9 @@ Out of scope:
 - Cyclic multi-table FK truncate under default FK checks; MariaDB rejects that
   before native truncate, and
   `docs/specs/ownerless-cyclic-foreign-key-truncate-negative-proof/specs.md`
-  covers it as a negative proof.
+  covers it as a negative proof. The `FOREIGN_KEY_CHECKS=0` positive native
+  truncate path is covered separately by
+  `docs/specs/ownerless-unchecked-cyclic-foreign-key-truncate-live-recovery/specs.md`.
 - Temporary-table truncate and randomized external MariaDB/RQG coverage.
 
 ## Design
@@ -190,7 +192,9 @@ Completed on 2026-06-27 with `ownerless-test-hooks`, `ownerless-stress`, and
 
 - Cyclic multi-table FK truncate is covered by
   `docs/specs/ownerless-cyclic-foreign-key-truncate-negative-proof/specs.md`
-  as a MariaDB pre-truncate error path under default FK checks.
+  as a MariaDB pre-truncate error path under default FK checks, and the
+  unchecked positive recovery path is covered by
+  `docs/specs/ownerless-unchecked-cyclic-foreign-key-truncate-live-recovery/specs.md`.
 - Temporary-table truncate remains a separate follow-up.
 - Parent-table truncate remains a MariaDB error path; additional negative
   coverage can be added if the compatibility matrix needs a direct ownerless

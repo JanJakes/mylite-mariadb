@@ -364,7 +364,13 @@ inside-MariaDB-loop multi-drop crash points,
 broader ALTER rebuild, broader schema option variants, broader view and
 trigger variants, and non-rename foreign-key multi-DDL live-peer recovery
 remain partial/planned. Cyclic foreign-key truncate is covered as MariaDB's
-native pre-truncate error path with clear ownerless file-operation markers.
+native pre-truncate error path with clear ownerless file-operation markers
+under default FK checks, while `FOREIGN_KEY_CHECKS=0` cyclic FK truncate now
+has focused live-peer recovery that preserves the intentionally orphaned peer
+row, restores a valid cycle, keeps both FK metadata records enforceable,
+retains the native file-operation marker while a peer is live, drains it after
+no-live recovery, and survives ownerless/native reopen plus forced `.shm`
+rebuild.
 Partition truncate stays under the ownerless partition-DDL rejection policy,
 and parent-table truncate for non-self foreign keys remains MariaDB's native
 pre-truncate error path.
