@@ -18691,12 +18691,8 @@ bool ownerless_alter_table_row_format_dynamic_recovery_statement(const SqlPolicy
         !token_equals(tokens.values[7], "DYNAMIC")) {
         return false;
     }
-    for (std::size_t index = 8U; index < tokens.count; ++index) {
-        if (!token_equals(tokens.values[index], ";")) {
-            return false;
-        }
-    }
-    return true;
+    std::size_t index = 8U;
+    return consume_ownerless_optional_copy_exclusive_alter_tail(tokens, index);
 }
 
 std::uint32_t ownerless_alter_table_compressed_row_format_key_block_recovery_kind(

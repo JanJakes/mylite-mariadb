@@ -57,9 +57,12 @@ The classifier accepts only:
 - optional trailing semicolons.
 
 It does not accept compressed row-format, `KEY_BLOCK_SIZE`, other row formats,
-additional ALTER clauses, partition or tablespace options, multi-action ALTER,
-or unqualified table names. That keeps live recovery tied to the single SQL
-shape already covered by the focused crash selector.
+partition or tablespace options, multi-action ALTER, or unqualified table
+names. The exact `ALGORITHM=COPY, LOCK=EXCLUSIVE` tail is covered separately by
+`docs/specs/ownerless-row-format-copy-lock-live-recovery/specs.md`; broader
+additional ALTER clauses and option matrices remain out of scope. That keeps
+live recovery tied to the single SQL shape already covered by the focused crash
+selector.
 
 The hook crash runner changes from a live-peer `MYLITE_BUSY` probe to a live
 ownerless opener while the old peer remains held. The opener must:
@@ -94,6 +97,8 @@ Out of scope:
 - `ROW_FORMAT=COMPRESSED`, `KEY_BLOCK_SIZE`, redundant row-format, page
   compression, encryption, tablespace, external-directory, partition, and
   multi-action ALTER variants;
+- `ALGORITHM`/`LOCK` option matrices beyond the exact
+  `ALGORITHM=COPY, LOCK=EXCLUSIVE` follow-up slice;
 - charset, primary-key, foreign-key, generated-column, CHECK, and column
   rebuild variants;
 - cross-schema or multi-table DDL recovery;
@@ -217,7 +222,9 @@ classifier, and focused test coverage.
 ## Risks And Unresolved Questions
 
 - This exact classifier deliberately does not generalize to all row-format
-  rebuilds or all copy-style ALTER statements.
+  rebuilds or all copy-style ALTER statements. The exact copy-lock tail is
+  covered by the follow-up `ownerless-row-format-copy-lock-live-recovery`
+  slice.
 - Compressed/key-block rebuilds have additional physical page-size and ZBLOB
   evidence requirements and remain separate live-recovery slices.
 - Broader native redo/checkpoint reconciliation and external randomized stress

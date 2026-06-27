@@ -3381,8 +3381,8 @@ Tasks:
    rebuild but before ownerless dictionary finish, then verifies recovered
    InnoDB table/space/index metadata, copied payload bytes, and later writes
    through ownerless/native reopen before and after forced `.shm` rebuild.
-   Row-format crash coverage now kills an
-   `ALTER TABLE ... ROW_FORMAT=DYNAMIC` writer after native row-format rebuild
+   Row-format crash coverage now kills plain and explicit copy-lock
+   `ALTER TABLE ... ROW_FORMAT=DYNAMIC` writers after native row-format rebuild
    but before ownerless dictionary finish, then verifies recovered dynamic
    row-format metadata, retained row payloads, and later writes through
    ownerless/native reopen before and after forced `.shm` rebuild.
@@ -4881,7 +4881,8 @@ Tasks:
    `CREATE OR REPLACE TABLE ... LIKE`/`CREATE OR REPLACE TABLE ... AS SELECT`
    marker coverage plus representative `ALTER TABLE ... FORCE` and plain plus
    explicit copy-lock `ALTER TABLE ... ENGINE=InnoDB` forms and
-   `ALTER TABLE ... ROW_FORMAT=DYNAMIC` rebuild marker coverage, plus
+   plain plus explicit copy-lock `ALTER TABLE ... ROW_FORMAT=DYNAMIC` rebuild
+   marker coverage, plus
    compressed `ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8` rebuild marker coverage
    at the same prefinish crash boundary, now extended to the existing
    compressed key-block `1`/`2`/`4`/`16` crash variants so every focused
@@ -4922,11 +4923,12 @@ Tasks:
    `ALTER TABLE schema.table FORCE, ALGORITHM=COPY, LOCK=EXCLUSIVE` prefinish
    crash coverage now uses a separate recoverable dictionary marker to provide
    live-peer recovery for the native force-rebuild boundary. Focused
-   `ALTER TABLE schema.table ROW_FORMAT=DYNAMIC` prefinish crash coverage now
-   uses a separate recoverable dictionary marker to provide live-peer recovery
-   for the native dynamic row-format copy rebuild boundary. Focused `ALTER TABLE
-   schema.table ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8` prefinish crash
-   coverage now uses a separate recoverable dictionary marker to provide
+   plain and explicit copy-lock `ALTER TABLE schema.table ROW_FORMAT=DYNAMIC`
+   prefinish crash coverage now uses a separate recoverable dictionary marker to
+   provide live-peer recovery for the native dynamic row-format copy rebuild
+   boundary. Focused
+   `ALTER TABLE schema.table ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8` prefinish
+   crash coverage now uses a separate recoverable dictionary marker to provide
    live-peer recovery for the native compressed copy rebuild boundary, and the
    same live-peer recovery now covers key-block sizes `1`, `2`, `4`, and `16`.
    Focused `ALTER TABLE schema.table CONVERT TO CHARACTER SET ... COLLATE ...`
@@ -5718,11 +5720,12 @@ and row population, a `TRUNCATE TABLE` writer after native truncate/recreate,
 and a `DROP TABLE` writer after native `FILE_DELETE`, replacement-copy
 `CREATE OR REPLACE TABLE ... LIKE` and `CREATE OR REPLACE TABLE ... AS SELECT`
 writers after native replacement-copy completion, marker-specific coverage for
-representative `ALTER TABLE ... FORCE` and
+representative `ALTER TABLE ... FORCE` and plain plus explicit copy-lock
 `ALTER TABLE ... ROW_FORMAT=DYNAMIC` rebuild writers after native rebuild
 completion, focused post-checkpoint DML observation of the native
 `FILE_MODIFY` redo flag, plain `ALTER TABLE ... FORCE` and explicit
-`ALTER TABLE ... FORCE, ALGORITHM=COPY` writers after native table-copy rebuild,
+`ALTER TABLE ... FORCE, ALGORITHM=COPY, LOCK=EXCLUSIVE` writers after native
+table-copy rebuild,
 a `CREATE OR REPLACE TABLE` writer
 after native old-table replacement, duplicate `CREATE TABLE IF NOT EXISTS`,
 missing single-table and multi-table-list `DROP TABLE IF EXISTS` no-op writers,
@@ -5768,7 +5771,8 @@ missing `DROP TRIGGER IF EXISTS`, delayed missing-dependency `CREATE TRIGGER`,
 and explicit `CREATE DEFINER=CURRENT_USER TRIGGER` writers after native
 `.TRG`/`.TRN` metadata creation/removal, rewrite, no-op preservation, delayed
 dependency acceptance, or definer metadata storage, charset-conversion, dynamic
-row-format, compressed 4 KiB/8 KiB/16 KiB row-format, and table-comment writers
+row-format including exact copy-lock, compressed 4 KiB/8 KiB/16 KiB row-format,
+and table-comment writers
 after native table-option metadata update or rebuild, a
 `DROP TABLE` writer after native file removal, a stale-reader retained-WAL
 `DROP TABLE` writer after native file removal before ownerless dictionary
@@ -7637,7 +7641,7 @@ subsystems that this mode needs:
      implicit single-table, single-table and multi-table-list missing/existing
      `DROP TABLE IF EXISTS`,
      and same-schema/cross-schema two-table drop, plus focused force rebuild,
-     dynamic row-format rebuild, focused compressed
+     dynamic row-format rebuild including exact copy-lock, focused compressed
      key-block row-format rebuild, and focused charset-conversion rebuild
      prefinish boundaries, plus simple CREATE/DROP VIEW, focused CREATE OR
      REPLACE/ALTER VIEW, and focused explicit column-list, check-option,
@@ -7658,9 +7662,9 @@ subsystems that this mode needs:
      temp-first plus permanent-first mixed temporary/permanent rename-list
      prefinish boundaries, especially
      remaining rename variants, other rebuild variants beyond the covered
-     FORCE, same-engine ENGINE including exact copy-lock, row-format,
-     compressed row-format, and charset boundaries, broader metadata-only DDL,
-     broader mixed temporary/permanent
+     FORCE, same-engine ENGINE including exact copy-lock, row-format including
+     exact copy-lock, compressed row-format, and charset boundaries, broader
+     metadata-only DDL, broader mixed temporary/permanent
      rename matrices, broader FK plus non-FK ALTER lists, broader schema option
      variants, intra-loop drop cases, and broader DDL file lifecycle while
      peers remain live. Partition truncate
