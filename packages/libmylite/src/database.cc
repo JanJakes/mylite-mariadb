@@ -16927,37 +16927,21 @@ bool ownerless_alter_table_add_primary_key_if_not_exists_recovery_statement(
            primary_exists;
 }
 
-bool ownerless_alter_table_replace_primary_key_recovery_statement(
-    mylite_db &db,
-    const SqlPolicyTokens &tokens
+bool consume_ownerless_key_part_list(
+    const SqlPolicyTokens &tokens,
+    std::size_t &index,
+    std::vector<std::string> *column_names
 ) {
-    if (tokens.count < 13U || !token_equals(tokens.values[0], "ALTER") ||
-        !token_equals(tokens.values[1], "TABLE")) {
+    if (index >= tokens.count || !token_equals(tokens.values[index], "(")) {
         return false;
     }
-
-    std::size_t index = 2U;
-    std::string schema_name;
-    std::string table_name;
-    if (!consume_ownerless_table_identifier_parts(db, tokens, index, &schema_name, &table_name) ||
-        index + 7U >= tokens.count || !token_equals(tokens.values[index], "DROP") ||
-        !token_equals(tokens.values[index + 1U], "PRIMARY") ||
-        !token_equals(tokens.values[index + 2U], "KEY") ||
-        !token_equals(tokens.values[index + 3U], ",") ||
-        !token_equals(tokens.values[index + 4U], "ADD") ||
-        !token_equals(tokens.values[index + 5U], "PRIMARY") ||
-        !token_equals(tokens.values[index + 6U], "KEY") ||
-        !token_equals(tokens.values[index + 7U], "(")) {
-        return false;
-    }
-
-    index += 8U;
-    std::vector<std::string> column_names;
+    ++index;
+    std::vector<std::string> parsed_column_names;
     for (;;) {
         if (index >= tokens.count || !ownerless_table_identifier_token(tokens.values[index])) {
             return false;
         }
-        column_names.push_back(ownerless_normalized_identifier(tokens.values[index]));
+        parsed_column_names.push_back(ownerless_normalized_identifier(tokens.values[index]));
         ++index;
         if (index < tokens.count && token_in(tokens.values[index], "ASC", "DESC")) {
             ++index;
@@ -16975,7 +16959,73 @@ bool ownerless_alter_table_replace_primary_key_recovery_statement(
         }
         return false;
     }
-    if (column_names.empty() || !consume_ownerless_remaining_semicolons(tokens, index)) {
+    if (parsed_column_names.empty()) {
+        return false;
+    }
+    if (column_names != nullptr) {
+        *column_names = std::move(parsed_column_names);
+    }
+    return true;
+}
+
+bool ownerless_alter_table_replace_primary_key_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    if (tokens.count < 13U || !token_equals(tokens.values[0], "ALTER") ||
+        !token_equals(tokens.values[1], "TABLE")) {
+        return false;
+    }
+
+    std::size_t index = 2U;
+    std::string schema_name;
+    std::string table_name;
+    if (!consume_ownerless_table_identifier_parts(db, tokens, index, &schema_name, &table_name) ||
+        index + 7U >= tokens.count || !token_equals(tokens.values[index], "DROP") ||
+        !token_equals(tokens.values[index + 1U], "PRIMARY") ||
+        !token_equals(tokens.values[index + 2U], "KEY") ||
+        !token_equals(tokens.values[index + 3U], ",")) {
+        return false;
+    }
+
+    index += 4U;
+    std::string dropped_index_name;
+    std::string added_unique_index_name;
+    std::vector<std::string> added_unique_column_names;
+    if (index < tokens.count && token_equals(tokens.values[index], "DROP")) {
+        if (index + 3U >= tokens.count || !token_in(tokens.values[index + 1U], "INDEX", "KEY") ||
+            !ownerless_table_identifier_token(tokens.values[index + 2U]) ||
+            !token_equals(tokens.values[index + 3U], ",")) {
+            return false;
+        }
+        dropped_index_name = ownerless_normalized_identifier(tokens.values[index + 2U]);
+        index += 4U;
+        if (index + 5U >= tokens.count || !token_equals(tokens.values[index], "ADD") ||
+            !token_equals(tokens.values[index + 1U], "UNIQUE") ||
+            !token_in(tokens.values[index + 2U], "KEY", "INDEX") ||
+            !ownerless_table_identifier_token(tokens.values[index + 3U])) {
+            return false;
+        }
+        added_unique_index_name = ownerless_normalized_identifier(tokens.values[index + 3U]);
+        index += 4U;
+        if (!consume_ownerless_key_part_list(tokens, index, &added_unique_column_names) ||
+            index >= tokens.count || !token_equals(tokens.values[index], ",")) {
+            return false;
+        }
+        ++index;
+    }
+
+    if (index + 3U >= tokens.count || !token_equals(tokens.values[index], "ADD") ||
+        !token_equals(tokens.values[index + 1U], "PRIMARY") ||
+        !token_equals(tokens.values[index + 2U], "KEY")) {
+        return false;
+    }
+    index += 3U;
+    std::vector<std::string> column_names;
+    if (!consume_ownerless_key_part_list(tokens, index, &column_names)) {
+        return false;
+    }
+    if (!consume_ownerless_remaining_semicolons(tokens, index)) {
         return false;
     }
 
@@ -16983,6 +17033,45 @@ bool ownerless_alter_table_replace_primary_key_recovery_statement(
     if (!ownerless_index_metadata_lookup(db, schema_name, table_name, "PRIMARY", &primary_exists) ||
         !primary_exists) {
         return false;
+    }
+    if (!dropped_index_name.empty()) {
+        bool dropped_index_exists = false;
+        if (!ownerless_index_metadata_lookup(
+                db,
+                schema_name,
+                table_name,
+                dropped_index_name,
+                &dropped_index_exists
+            ) ||
+            !dropped_index_exists) {
+            return false;
+        }
+    }
+    if (!added_unique_index_name.empty()) {
+        bool added_unique_index_exists = false;
+        if (!ownerless_index_metadata_lookup(
+                db,
+                schema_name,
+                table_name,
+                added_unique_index_name,
+                &added_unique_index_exists
+            ) ||
+            added_unique_index_exists) {
+            return false;
+        }
+    }
+    for (const std::string &column_name : added_unique_column_names) {
+        bool column_exists = false;
+        if (!ownerless_column_metadata_lookup(
+                db,
+                schema_name,
+                table_name,
+                column_name,
+                &column_exists
+            ) ||
+            !column_exists) {
+            return false;
+        }
     }
     for (const std::string &column_name : column_names) {
         bool column_exists = false;

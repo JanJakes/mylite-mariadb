@@ -67,6 +67,8 @@ Out of scope:
   `ownerless-composite-direction-primary-key-ddl-refresh`, and AUTO_INCREMENT
   descending primary-key replacement is covered separately by
   `ownerless-autoinc-descending-primary-key-ddl-refresh`.
+- Focused post-native-rebuild crash recovery for this SQL shape is covered by
+  `ownerless-autoinc-primary-key-ddl-crash`.
 - Concurrent conflicting primary-key rebuild races.
 - Partitioned AUTO_INCREMENT tables, which remain rejected by ownerless policy.
 - SQL-level table-lock fault injection and external randomized DDL/RQG oracles.
@@ -156,4 +158,6 @@ No production binary-size impact beyond focused test code and docs.
   `ownerless-composite-direction-primary-key-ddl-refresh`, and AUTO_INCREMENT
   descending primary-key replacement is covered separately by
   `ownerless-autoinc-descending-primary-key-ddl-refresh`.
+- Focused post-native-rebuild crash recovery is covered separately by
+  `ownerless-autoinc-primary-key-ddl-crash`.
 - External randomized DDL/RQG stress remains separate validation work.

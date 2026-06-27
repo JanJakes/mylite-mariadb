@@ -2767,7 +2767,12 @@ Tasks:
    `PRIMARY` to `code`, verifies the already-open peer receives the next ID,
    and verifies a failed duplicate replacement-key insert leaves a non-reused
    AUTO_INCREMENT gap across forced `.shm` rebuild after post-rollback native
-   high-watermark replay and checkpoint. AUTO_INCREMENT descending primary-key
+   high-watermark replay and checkpoint. Hook-build crash coverage kills the
+   same AUTO_INCREMENT primary-key replacement after native clustered-key
+   rebuild but before ownerless dictionary finish, proves live-peer recovery
+   with retained native file-operation marker drain, and verifies replacement
+   metadata plus the non-reused AUTO_INCREMENT gap after forced `.shm` rebuild.
+   AUTO_INCREMENT descending primary-key
    replacement coverage keeps the same allocation proof while moving `PRIMARY`
    to `code DESC`, verifies `COLLATION = 'D'` metadata, and verifies the
    duplicate-key allocation gap across forced `.shm` rebuild.
@@ -3944,7 +3949,11 @@ Tasks:
    AUTO_INCREMENT primary-key replacement variant keeps `id` as a unique
    secondary key while moving `PRIMARY` to `code`, verifies the next implicit
    ID from an already-open peer, and proves a duplicate-key failure's consumed
-   AUTO_INCREMENT value is not reused after forced `.shm` rebuild. An
+   AUTO_INCREMENT value is not reused after forced `.shm` rebuild. Hook-build
+   crash coverage kills the same AUTO_INCREMENT primary-key replacement before
+   ownerless dictionary finish and verifies live-peer recovery, retained-marker
+   no-live drain, replacement metadata, and the non-reused AUTO_INCREMENT gap.
+   An
    AUTO_INCREMENT descending primary-key replacement variant keeps `id` as a
    unique secondary key while moving `PRIMARY` to `code DESC`, verifies
    peer-visible `COLLATION = 'D'`, verifies the next implicit ID from an
@@ -5436,6 +5445,13 @@ Minimum suites before support can be claimed:
     verifies recovered key-part direction metadata, replacement-key enforcement,
     old-key duplicate writes, ownerless/native reopen, and forced `.shm` rebuild
     remain correct,
+  - after representative AUTO_INCREMENT primary-key replacement native
+    clustered-key rebuild but before ownerless dictionary finish; hook coverage
+    proves live-peer recovery, retains the native file-operation marker while
+    the peer remains open, drains the marker after the final peer exits, and
+    verifies replacement-key enforcement, retained unique AUTO_INCREMENT-column
+    key metadata, non-reused duplicate-failure allocation gaps, ownerless/native
+    reopen, and forced `.shm` rebuild remain correct,
   - after representative `ALTER COLUMN ... SET DEFAULT` native metadata update
     but before ownerless dictionary finish; hook coverage proves metadata-only
     live-peer recovery with the native file-operation marker clear and recovered
@@ -5659,6 +5675,8 @@ writers, secondary-index rename and
 ignored/not-ignored metadata writers after native index metadata changes, a
 single-column primary-key replacement writer after native clustered-key rebuild
 with live-peer recovery plus retained-marker no-live drain, a descending
+primary-key replacement writer after native clustered-key rebuild with
+live-peer recovery plus retained-marker no-live drain, an AUTO_INCREMENT
 primary-key replacement writer after native clustered-key rebuild with
 live-peer recovery plus retained-marker no-live drain, foreign-key
 ADD/DROP writers after native
@@ -7543,8 +7561,9 @@ subsystems that this mode needs:
      top-level and ALTER secondary-index idempotent/no-op prefinish boundaries,
      plus focused column idempotent and column `IF EXISTS` missing-column
      no-op prefinish boundaries, plus focused plain ADD COLUMN, table-comment,
-     column-default metadata ALTER, and plain, descending, and composite
-     direction primary-key replacement prefinish boundaries, especially remaining
+     column-default metadata ALTER, and plain, descending, composite direction,
+     and AUTO_INCREMENT primary-key replacement prefinish boundaries,
+     especially remaining
      rename/truncate variants, other rebuild variants, broader
      metadata-only DDL, temporary, broader schema option variants, intra-loop
      drop cases, and broader DDL file lifecycle while peers remain live.
