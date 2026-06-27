@@ -77,6 +77,11 @@ native file pairs are absent, verify the native file-operation marker remains
 set while the peer is live, release the peer, and verify final marker drain plus
 ownerless/native reopen before and after forced `.shm` rebuild.
 
+This follow-up registers both selectors as standalone `ownerless-test-hooks`
+CTest jobs so the same-schema and cross-schema multi-drop file-lifecycle crash
+gates have visible CI timing and failure attribution instead of being visible
+only through direct selector runs or broad ownerless SQL shards.
+
 ## Scope
 
 In scope:
@@ -127,6 +132,9 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - Run focused selectors:
   - `dictionary-multi-drop-crash`
   - `dictionary-cross-schema-multi-drop-crash`
+- Run focused CTests:
+  - `libmylite.ownerless-dictionary-multi-drop-crash`
+  - `libmylite.ownerless-dictionary-cross-schema-multi-drop-crash`
 - Run adjacent drop selectors:
   - `dictionary-drop-file-op-marker-crash`
   - `dictionary-drop-crash`
@@ -162,6 +170,9 @@ No public API, build-profile, binary-size, license, or dependency changes.
   dictionary-multi-drop-crash`
 - `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test
   dictionary-cross-schema-multi-drop-crash`
+- `ctest --preset ownerless-test-hooks -R
+  '^libmylite\.ownerless-dictionary-(multi-drop|cross-schema-multi-drop)-crash$'
+  --output-on-failure`
 - `ctest --preset ownerless-test-hooks -R
   '^(libmylite\.ownerless-primitives|libmylite\.ownerless-dictionary-drop-file-op-marker-crash|libmylite\.ownerless-dictionary-implicit-drop-crash)$'
   --output-on-failure`

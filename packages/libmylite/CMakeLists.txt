@@ -1050,6 +1050,14 @@ if(BUILD_TESTING)
         COMMAND mylite_ownerless_cross_process_sql_test dictionary-implicit-drop-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-multi-drop-crash
+        COMMAND mylite_ownerless_cross_process_sql_test dictionary-multi-drop-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-cross-schema-multi-drop-crash
+        COMMAND mylite_ownerless_cross_process_sql_test dictionary-cross-schema-multi-drop-crash
+      )
+      add_test(
         NAME libmylite.ownerless-platform-probe-failure
         COMMAND mylite_ownerless_cross_process_sql_test platform-probe-failure
       )
@@ -1518,6 +1526,13 @@ if(BUILD_TESTING)
       set_tests_properties(libmylite.ownerless-dictionary-implicit-drop-crash PROPERTIES
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
         TIMEOUT 120
+      )
+      set_tests_properties(
+        libmylite.ownerless-dictionary-multi-drop-crash
+        libmylite.ownerless-dictionary-cross-schema-multi-drop-crash
+        PROPERTIES
+          LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
+          TIMEOUT 120
       )
       set_tests_properties(libmylite.ownerless-platform-probe-failure PROPERTIES
         LABELS "compat.concurrency;compat.platform;compat.ownerless-negative-proof"

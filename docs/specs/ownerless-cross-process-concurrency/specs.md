@@ -7538,6 +7538,9 @@ subsystems that this mode needs:
   two-table `DROP TABLE` writers at `dictionary-before-finish` with a live
   peer, and proves every table and native `.frm`/`.ibd` pair stays absent while
   the native file-operation marker remains durable until final no-live drain.
+  Both multi-drop selectors are now standalone hook CTests, giving same-schema
+  and cross-schema table-list drop recovery separate CI timing and failure
+  attribution.
   The charset-convert follow-up classifies focused
   `ALTER TABLE ... CONVERT TO CHARACTER SET ... COLLATE ...` as recoverable
   dictionary DDL, kills the writer at `dictionary-before-finish` with a live
