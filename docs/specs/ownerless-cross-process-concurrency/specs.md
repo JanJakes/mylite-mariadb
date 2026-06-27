@@ -5030,6 +5030,11 @@ Tasks:
    separate outcome: it leaves both native file-op markers clear, consumes the
    process-local ownerless InnoDB file-op redo flag, and preserves the
    pre-transaction row after forced `.shm` rebuild plus ordinary native reopen.
+   The transaction-rollback-before-state hook follow-up kills a writer after
+   native transaction-ending `ROLLBACK` succeeds but before MyLite resets
+   process-local ownerless transaction state. Ownerless recovery, forced
+   `.shm` rebuild, and ordinary native reopen preserve the original row while
+   both native file-operation markers remain clear.
    `ROLLBACK TO SAVEPOINT` after checkpointed local DML now restores
    MyLite's handle-local write-state from the savepoint boundary, consumes
    process-local file-op redo when no earlier local write survives the
@@ -7508,6 +7513,12 @@ subsystems that this mode needs:
   reopen preserve the original row while both native file-operation markers
   remain clear. This covers a MyLite-owned post-native rollback boundary, not
   arbitrary crashes inside InnoDB rollback internals.
+  The transaction-rollback-before-state hook follow-up covers the analogous
+  full-transaction boundary after native `ROLLBACK` succeeds but before MyLite
+  resets process-local ownerless transaction state. Ownerless recovery, forced
+  `.shm` rebuild, and ordinary native reopen preserve the original row while
+  both native file-operation markers remain clear; native rollback internals
+  remain out of scope.
   The implicit-rename follow-up broadens `RENAME TABLE` dictionary recovery
   classification from only explicit `schema.table` rename pairs to one- or
   two-part identifiers, then kills an implicit-schema `USE app; RENAME TABLE

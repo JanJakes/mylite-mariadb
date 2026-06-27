@@ -20012,6 +20012,9 @@ int update_ownerless_transaction_state_after_successful_sql(
         return MYLITE_OK;
     }
     if (sql_ends_explicit_transaction(tokens)) {
+        if (!sql_commits_explicit_transaction(tokens)) {
+            pause_for_ownerless_test_fault("transaction-rollback-before-state");
+        }
         release_ownerless_transaction_page_version_pin(db);
         set_ownerless_explicit_transaction_active(db, sql_chains_transaction(tokens));
         db.ownerless_active_transaction_isolation = db.ownerless_session_transaction_isolation;

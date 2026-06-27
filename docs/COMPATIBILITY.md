@@ -482,6 +482,11 @@ native `ROLLBACK TO SAVEPOINT` succeeds but before MyLite updates its
 process-local savepoint state and discards rolled-back file-operation evidence,
 then verifies both file-op markers stay clear and the original row survives
 ownerless recovery, forced `.shm` rebuild, and ordinary native reopen.
+Hook-build coverage now also kills a writer after native transaction-ending
+`ROLLBACK` succeeds but before MyLite resets process-local ownerless
+transaction state, then verifies both file-op markers stay clear and the
+original row survives ownerless recovery, forced `.shm` rebuild, and ordinary
+native reopen.
 Same-process embedded no-live ownerless startup now resets MariaDB's static
 purge queue/page-map/iterator state, re-enables the purge coordinator task
 after embedded shutdown, defers ownerless InnoDB hooks while current native
