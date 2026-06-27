@@ -45,14 +45,14 @@ Add one unsafe-hook selector:
 - initialize an ownerless database and create an InnoDB table with `id`,
   `value`, and `note` columns,
 - insert rows and verify the `note` column and aggregate values are visible,
-- start a live ownerless peer so crashed-writer cleanup remains busy,
+- start a live ownerless peer so the recovered dictionary boundary is tested
+  while another owner remains open,
 - start a writer that executes
   `ALTER TABLE app.ownerless_column_drop_crash_base DROP COLUMN note` under the
   existing `dictionary-before-finish` test fault,
 - kill the writer at the hook,
-- prove an ownerless opener returns `MYLITE_BUSY` while the live peer remains,
-- release the peer and reopen ownerless read/write to rebuild volatile
-  coordination,
+- reopen ownerless read/write while the peer remains live to recover the
+  ownerless dictionary boundary,
 - verify `INFORMATION_SCHEMA.COLUMNS` no longer exposes `note`,
 - verify reads that reference `note` fail, surviving rows retain the expected
   `value` aggregate, later inserts into the remaining columns work, and the
@@ -65,7 +65,8 @@ In scope:
 
 - crash-at-dictionary-before-finish coverage for completed ordinary
   `ALTER TABLE ... DROP COLUMN`,
-- live-peer cleanup-busy behavior and no-live rebuild,
+- live-peer recovery with native file-operation marker retention until no-live
+  drain,
 - ownerless/native reopen of recovered absent-column metadata and row values.
 
 Out of scope:
@@ -114,7 +115,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selector reaches the dictionary fault hook and does not hang.
-- A live peer prevents cleanup until no-live recovery.
+- A live peer can recover the ownerless dictionary boundary while the native
+  file-operation marker stays set until no-live drain.
 - Recovered metadata no longer exposes the dropped `note` column.
 - Reads referencing `note` fail and writes to remaining columns still work.
 - Ownerless and ordinary native reopen observe the same table definition and

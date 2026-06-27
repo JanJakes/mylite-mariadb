@@ -66,7 +66,8 @@ In scope:
 
 - crash-at-dictionary-before-finish coverage for completed ordinary
   `ALTER TABLE ... ADD COLUMN`,
-- live-peer cleanup-busy behavior and no-live rebuild,
+- live-peer recovery with native file-operation marker retention until no-live
+  drain,
 - ownerless/native reopen of recovered column metadata and row/default values.
 
 Out of scope:
@@ -115,7 +116,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selector reaches the dictionary fault hook and does not hang.
-- A live peer prevents cleanup until no-live recovery.
+- A live peer can recover the ownerless dictionary boundary while the native
+  file-operation marker stays set until no-live drain.
 - Recovered metadata exposes `note INT NOT NULL DEFAULT 7`.
 - Existing rows and later inserts observe the default value.
 - Ownerless and ordinary native reopen observe the same table definition and

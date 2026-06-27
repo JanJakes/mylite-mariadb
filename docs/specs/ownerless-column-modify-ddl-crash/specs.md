@@ -47,14 +47,14 @@ Add one unsafe-hook selector:
 - initialize an ownerless database and create an InnoDB table with `note
   VARCHAR(8) NOT NULL DEFAULT 'old'`,
 - insert rows and verify the old metadata and aggregate values are visible,
-- start a live ownerless peer so crashed-writer cleanup remains busy,
+- start a live ownerless peer so the recovered dictionary boundary is tested
+  while another owner remains open,
 - start a writer that executes
   `ALTER TABLE app.ownerless_column_modify_crash_base MODIFY COLUMN note VARCHAR(32) NOT NULL DEFAULT 'changed'`
   under the existing `dictionary-before-finish` test fault,
 - kill the writer at the hook,
-- prove an ownerless opener returns `MYLITE_BUSY` while the live peer remains,
-- release the peer and reopen ownerless read/write to rebuild volatile
-  coordination,
+- reopen ownerless read/write while the peer remains live to recover the
+  ownerless dictionary boundary,
 - verify `INFORMATION_SCHEMA.COLUMNS` exposes the recovered width and default,
 - verify existing row values survive, a later insert that omits `note` receives
   the new default, a value longer than the old width but within the new width is
@@ -67,7 +67,8 @@ In scope:
 
 - crash-at-dictionary-before-finish coverage for completed ordinary
   `ALTER TABLE ... MODIFY COLUMN`,
-- live-peer cleanup-busy behavior and no-live rebuild,
+- live-peer recovery with native file-operation marker retention until no-live
+  drain,
 - ownerless/native reopen of recovered modified-column metadata, defaults, and
   row values.
 
@@ -120,7 +121,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selector reaches the dictionary fault hook and does not hang.
-- A live peer prevents cleanup until no-live recovery.
+- A live peer can recover the ownerless dictionary boundary while the native
+  file-operation marker stays set until no-live drain.
 - Recovered metadata exposes `note VARCHAR(32) NOT NULL DEFAULT 'changed'`.
 - Existing values survive, omitted-column inserts use the new default, and
   values longer than the old width are accepted.

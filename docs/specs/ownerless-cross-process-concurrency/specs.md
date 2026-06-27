@@ -3470,10 +3470,10 @@ Tasks:
    crash coverage preserves completed `ALTER TABLE ... ADD COLUMN`,
    `ALTER TABLE ... DROP COLUMN`, `ALTER TABLE ... MODIFY COLUMN`, and
    `ALTER TABLE ... RENAME COLUMN` boundaries before ownerless dictionary
-   finish. The plain stored-column ADD case verifies native file-operation
-   live recovery while another ownerless peer remains open, with the marker
-   retained until no-live drain; the broader drop/modify/rename cases remain on
-   no-live recovery. The selectors verify recovered added-column/default
+   finish. The plain stored-column ADD case and bounded real DROP, MODIFY, and
+   RENAME cases now verify native file-operation live recovery while another
+   ownerless peer remains open, with the marker retained until no-live drain.
+   The selectors verify recovered added-column/default
    metadata, absent dropped-column metadata, modified-column width/default
    metadata, renamed-column metadata, dependent generated-column and CHECK
    expression behavior, and row values through ownerless/native reopen before
@@ -5419,10 +5419,10 @@ Minimum suites before support can be claimed:
     ignored/not-ignored index states remain correct,
   - after ordinary column-add, column-drop, column-modify, and column-rename
     ALTER but before ownerless dictionary finish; hook coverage proves the
-    focused plain stored-column ADD case can recover while another ownerless
-    peer remains live with the native file-operation marker retained until
-    no-live drain, while the broader drop/modify/rename cases remain
-    cleanup-busy until no-live recovery, and the recovered added/default,
+    focused plain stored-column ADD case and bounded real DROP, MODIFY, and
+    RENAME cases can recover while another ownerless peer remains live with the
+    native file-operation marker retained until no-live drain, and the
+    recovered added/default,
     absent-column, modified-column,
     renamed-column, or dependent-expression rename state remains correct,
   - after duplicate `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` and missing

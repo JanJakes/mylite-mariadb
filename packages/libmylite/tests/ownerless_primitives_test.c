@@ -15341,6 +15341,57 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
         assert(generation == 70U + (2U * (uint64_t)index));
     }
 
+    const uint32_t column_alter_recovery_kinds[] = {
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_COLUMN,
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_MODIFY_COLUMN,
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_RENAME_COLUMN,
+    };
+    for (size_t index = 0U;
+         index < sizeof(column_alter_recovery_kinds) / sizeof(column_alter_recovery_kinds[0]);
+         ++index) {
+        assert(
+            mylite_ownerless_dictionary_state_begin_ddl(
+                state,
+                sizeof(state),
+                10U,
+                100U,
+                UINT64_MAX,
+                MYLITE_TEST_WAIT_TIMEOUT_MS,
+                &generation
+            ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+        );
+        assert(
+            mylite_ownerless_dictionary_state_mark_recoverable(
+                state,
+                sizeof(state),
+                10U,
+                100U,
+                column_alter_recovery_kinds[index]
+            ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+        );
+        assert(
+            mylite_ownerless_dictionary_state_recover_dead_owner(
+                state,
+                sizeof(state),
+                10U,
+                100U,
+                MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_FOREIGN_KEY,
+                &generation
+            ) == MYLITE_OWNERLESS_DICTIONARY_STATE_ERROR
+        );
+        assert(
+            mylite_ownerless_dictionary_state_recover_dead_owner(
+                state,
+                sizeof(state),
+                10U,
+                100U,
+                column_alter_recovery_kinds[index],
+                &generation
+            ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+        );
+        assert(generation == 74U + (2U * (uint64_t)index));
+    }
+
     assert(
         mylite_ownerless_dictionary_state_begin_ddl(
             state,
@@ -15381,7 +15432,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
             &generation
         ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
     );
-    assert(generation == 74U);
+    assert(generation == 80U);
 }
 
 static void test_redo_state_tracks_lsn_and_owner_lifecycle(void) {

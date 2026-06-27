@@ -49,14 +49,14 @@ Add one unsafe-hook selector:
   `virtual_product AS (base_value * adjust_value)`, and CHECK constraints that
   reference `base_value`,
 - insert rows and verify the original generated aggregates and CHECK rejection,
-- start a live ownerless peer so crashed-writer cleanup remains busy,
+- start a live ownerless peer so the recovered dictionary boundary is tested
+  while another owner remains open,
 - start a writer that executes
   `ALTER TABLE app.ownerless_column_rename_expr_crash_base RENAME COLUMN base_value TO renamed_base`
   under the existing `dictionary-before-finish` fault,
 - kill the writer at the hook,
-- prove an ownerless opener returns `MYLITE_BUSY` while the live peer remains,
-- release the peer and reopen ownerless read/write to rebuild volatile
-  coordination,
+- reopen ownerless read/write while the peer remains live to recover the
+  ownerless dictionary boundary,
 - verify `base_value` is absent, `renamed_base` is present, old-name reads fail,
   generated stored/virtual values remain correct, and CHECK constraints reject
   invalid rows using the renamed column,
@@ -70,7 +70,8 @@ In scope:
 
 - crash-at-dictionary-before-finish coverage for completed column rename with
   generated-column and CHECK dependent expressions,
-- live-peer cleanup-busy behavior and no-live rebuild,
+- live-peer recovery with native file-operation marker retention until no-live
+  drain,
 - ownerless/native reopen of recovered renamed-column metadata and dependent
   expression behavior.
 
@@ -121,7 +122,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selector reaches the dictionary fault hook and does not hang.
-- A live peer prevents cleanup until no-live recovery.
+- A live peer can recover the ownerless dictionary boundary while the native
+  file-operation marker stays set until no-live drain.
 - Recovered metadata exposes `renamed_base` and does not expose `base_value`.
 - Stored and virtual generated-column values remain correct after recovery and
   after new inserts through the renamed column.

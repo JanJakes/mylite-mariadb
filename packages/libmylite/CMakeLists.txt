@@ -788,6 +788,36 @@ if(BUILD_TESTING)
           dictionary-primary-key-idempotent-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-column-add-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-column-add-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-column-drop-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-column-drop-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-column-modify-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-column-modify-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-column-rename-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-column-rename-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-column-rename-expression-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-column-rename-expression-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-column-default-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -1349,6 +1379,11 @@ if(BUILD_TESTING)
         libmylite.ownerless-dictionary-primary-key-autoinc-crash
         libmylite.ownerless-dictionary-primary-key-autoinc-descending-crash
         libmylite.ownerless-dictionary-primary-key-idempotent-crash
+        libmylite.ownerless-dictionary-column-add-crash
+        libmylite.ownerless-dictionary-column-drop-crash
+        libmylite.ownerless-dictionary-column-modify-crash
+        libmylite.ownerless-dictionary-column-rename-crash
+        libmylite.ownerless-dictionary-column-rename-expression-crash
         libmylite.ownerless-dictionary-table-idempotent-create-crash
         libmylite.ownerless-dictionary-column-idempotent-add-crash
         libmylite.ownerless-dictionary-column-idempotent-drop-crash
