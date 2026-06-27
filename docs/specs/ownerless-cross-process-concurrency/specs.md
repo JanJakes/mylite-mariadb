@@ -3266,6 +3266,8 @@ Tasks:
    Primary-key crash coverage now kills an
    `ALTER TABLE ... DROP PRIMARY KEY, ADD PRIMARY KEY` writer after native
    primary-key replacement but before ownerless dictionary finish, then verifies
+   live-peer recovery while another ownerless peer remains open, retains the
+   native file-operation marker until the final peer exits, and checks
    recovered `PRIMARY` metadata, duplicate-key enforcement on the replacement
    key, and duplicate values allowed on the former key through ownerless/native
    reopen before and after forced `.shm` rebuild. It also kills duplicate
@@ -3538,8 +3540,10 @@ Tasks:
    generated-column add/drop performed by another ownerless process. Hook-build
    crash coverage now also kills
    `ALTER TABLE ... DROP PRIMARY KEY, ADD PRIMARY KEY` before ownerless
-   dictionary finish and verifies recovered replacement primary-key metadata,
-   duplicate enforcement, and former-key duplicate allowance, and kills
+   dictionary finish and verifies live-peer recovery, retained native
+   file-operation marker drain after the final peer exits, recovered replacement
+   primary-key metadata, duplicate enforcement, and former-key duplicate
+   allowance, and kills
    duplicate `ALTER TABLE ... ADD PRIMARY KEY IF NOT EXISTS` before ownerless
    dictionary finish while verifying metadata-only live recovery with the native
    file-operation marker clear, original-key preservation, and candidate-key
@@ -5405,6 +5409,12 @@ Minimum suites before support can be claimed:
     coverage proves live-peer cleanup remains busy until no-live recovery,
     recovered implicit ID allocation remains monotonic, ownerless/native reopen
     works, and forced `.shm` rebuild remains correct,
+  - after representative single-column primary-key replacement native
+    clustered-key rebuild but before ownerless dictionary finish; hook coverage
+    proves live-peer recovery, retains the native file-operation marker while
+    the peer remains open, drains the marker after the final peer exits, and
+    verifies replacement-key enforcement, old-key duplicate writes,
+    ownerless/native reopen, and forced `.shm` rebuild remain correct,
   - after representative composite direction primary-key replacement native
     clustered-key rebuild but before ownerless dictionary finish; hook coverage
     proves live-peer cleanup remains busy until no-live recovery, recovered
@@ -5631,7 +5641,8 @@ duplicate `ALTER TABLE ... ADD INDEX IF NOT EXISTS`, and missing
 `CREATE DATABASE IF NOT EXISTS` and missing `DROP SCHEMA IF EXISTS` no-op
 writers, secondary-index rename and
 ignored/not-ignored metadata writers after native index metadata changes, a
-primary-key replacement writer after native clustered-key rebuild, foreign-key
+single-column primary-key replacement writer after native clustered-key rebuild
+with live-peer recovery plus retained-marker no-live drain, foreign-key
 ADD/DROP writers after native
 constraint metadata creation/removal, CHECK ADD/DROP writers after native
 table-definition mutation, a cross-schema foreign-key multi-pair rename writer
@@ -7513,8 +7524,9 @@ subsystems that this mode needs:
      top-level and ALTER secondary-index idempotent/no-op prefinish boundaries,
      plus focused column idempotent and column `IF EXISTS` missing-column
      no-op prefinish boundaries, plus focused plain ADD COLUMN, table-comment,
-     and column-default metadata ALTER prefinish boundaries, especially
-     remaining rename/truncate variants, rebuild variants, broader
+     column-default metadata ALTER, and single-column primary-key replacement
+     prefinish boundaries, especially remaining rename/truncate variants, other
+     rebuild variants, broader
      metadata-only DDL, temporary, broader schema option variants, intra-loop
      drop cases, and broader DDL file lifecycle while peers remain live.
   2. Close remaining transaction crash windows, especially native
