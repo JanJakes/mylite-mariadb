@@ -2378,6 +2378,10 @@ bool ownerless_stale_engine_error_allows_retry(
     bool statement_started_in_explicit_transaction
 );
 bool ownerless_temporary_table_ddl_statement(const SqlPolicyTokens &tokens);
+bool ownerless_temporary_table_recovery_statement(
+    const mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
 bool ownerless_table_identifier_token(std::string_view token);
 std::string ownerless_normalized_identifier(std::string_view token);
 bool ownerless_tracked_temporary_table_name(const mylite_db &db, std::string_view table_name);
@@ -12911,7 +12915,8 @@ bool mark_ownerless_native_file_op_checkpoint_before_dictionary_finish(mylite_db
 
 bool ownerless_dictionary_recovery_skips_native_file_op_checkpoint(std::uint32_t kind) {
     return kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_ADD_FOREIGN_KEY ||
-           kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_FOREIGN_KEY;
+           kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_FOREIGN_KEY ||
+           kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_TEMPORARY_TABLE;
 }
 
 bool ownerless_dictionary_recovery_forces_native_file_op_checkpoint(std::uint32_t kind) {
@@ -15583,6 +15588,9 @@ std::uint32_t ownerless_dictionary_recovery_kind_for_statement(
     if (ownerless_create_view_recovery_statement(tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_VIEW;
     }
+    if (ownerless_temporary_table_recovery_statement(db, tokens)) {
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_TEMPORARY_TABLE;
+    }
     if (ownerless_create_or_replace_view_recovery_statement(tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_OR_REPLACE_VIEW;
     }
@@ -17941,6 +17949,7 @@ std::uint32_t ownerless_alter_table_compressed_row_format_key_block_recovery_kin
 
 bool ownerless_dictionary_recovery_kind_is_metadata_only(std::uint32_t recovery_kind) {
     return recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_VIEW ||
+           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_TEMPORARY_TABLE ||
            recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_DROP_VIEW ||
            recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_OR_REPLACE_VIEW ||
            recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_VIEW ||
@@ -18024,6 +18033,112 @@ std::string ownerless_table_name_from_token_sequence(
     return std::string(identifier.data(), identifier.size());
 }
 
+bool ownerless_simple_temporary_create_table_recovery_statement(const SqlPolicyTokens &tokens) {
+    if (!token_equals(ownerless_raw_identifier_token_at(tokens, 0), "CREATE")) {
+        return false;
+    }
+
+    bool saw_temporary = false;
+    for (std::size_t index = 1U; index < tokens.count; ++index) {
+        const std::string_view token = ownerless_raw_identifier_token_at(tokens, index);
+        if (token.empty()) {
+            continue;
+        }
+        if (token_equals(token, "TEMPORARY")) {
+            saw_temporary = true;
+            continue;
+        }
+        if (!token_equals(token, "TABLE")) {
+            continue;
+        }
+        if (!saw_temporary) {
+            return false;
+        }
+        ++index;
+        if (index + 2U < tokens.count &&
+            token_equals(ownerless_raw_identifier_token_at(tokens, index), "IF") &&
+            token_equals(ownerless_raw_identifier_token_at(tokens, index + 1U), "NOT") &&
+            token_equals(ownerless_raw_identifier_token_at(tokens, index + 2U), "EXISTS")) {
+            index += 3U;
+        }
+        return !ownerless_table_name_from_token_sequence(tokens, index, nullptr).empty();
+    }
+    return false;
+}
+
+bool ownerless_simple_temporary_drop_table_recovery_statement(const SqlPolicyTokens &tokens) {
+    if (!token_equals(ownerless_raw_identifier_token_at(tokens, 0), "DROP")) {
+        return false;
+    }
+
+    std::size_t index = 1U;
+    if (!token_equals(ownerless_raw_identifier_token_at(tokens, index), "TEMPORARY")) {
+        return false;
+    }
+    ++index;
+    if (!token_in(ownerless_raw_identifier_token_at(tokens, index), "TABLE", "TABLES")) {
+        return false;
+    }
+    ++index;
+    if (index + 1U < tokens.count &&
+        token_equals(ownerless_raw_identifier_token_at(tokens, index), "IF") &&
+        token_equals(ownerless_raw_identifier_token_at(tokens, index + 1U), "EXISTS")) {
+        index += 2U;
+    }
+    if (ownerless_table_name_from_token_sequence(tokens, index, &index).empty()) {
+        return false;
+    }
+    if (index < tokens.count && token_equals(tokens.values[index], ",")) {
+        return false;
+    }
+    return consume_ownerless_remaining_semicolons(tokens, index);
+}
+
+bool ownerless_temporary_table_rename_recovery_statement(
+    const mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    const std::string_view first = ownerless_raw_identifier_token_at(tokens, 0);
+    if (token_equals(first, "RENAME") &&
+        token_equals(ownerless_raw_identifier_token_at(tokens, 1U), "TABLE")) {
+        std::size_t index = 2U;
+        const std::string old_table_name =
+            ownerless_table_name_from_token_sequence(tokens, index, &index);
+        if (old_table_name.empty() || !ownerless_tracked_temporary_table_name(db, old_table_name) ||
+            index >= tokens.count ||
+            !token_equals(ownerless_raw_identifier_token_at(tokens, index), "TO")) {
+            return false;
+        }
+        ++index;
+        if (ownerless_table_name_from_token_sequence(tokens, index, &index).empty()) {
+            return false;
+        }
+        if (index < tokens.count && token_equals(tokens.values[index], ",")) {
+            return false;
+        }
+        return consume_ownerless_remaining_semicolons(tokens, index);
+    }
+
+    if (!token_equals(first, "ALTER") ||
+        !token_equals(ownerless_raw_identifier_token_at(tokens, 1U), "TABLE") ||
+        !ownerless_alter_table_rename_recovery_statement(tokens)) {
+        return false;
+    }
+    std::size_t index = 2U;
+    const std::string old_table_name =
+        ownerless_table_name_from_token_sequence(tokens, index, nullptr);
+    return !old_table_name.empty() && ownerless_tracked_temporary_table_name(db, old_table_name);
+}
+
+bool ownerless_temporary_table_recovery_statement(
+    const mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    return ownerless_simple_temporary_create_table_recovery_statement(tokens) ||
+           ownerless_simple_temporary_drop_table_recovery_statement(tokens) ||
+           ownerless_temporary_table_rename_recovery_statement(db, tokens);
+}
+
 std::string ownerless_temporary_table_name_from_ddl(const SqlPolicyTokens &tokens) {
     bool table_keyword_seen = false;
     std::string table_name;
@@ -18089,15 +18204,16 @@ void update_ownerless_temporary_table_rename_state_after_successful_sql(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 ) {
-    const std::string_view first = identifier_token_at(tokens, 0);
-    if (token_equals(first, "RENAME") && token_equals(identifier_token_at(tokens, 1U), "TABLE")) {
+    const std::string_view first = ownerless_raw_identifier_token_at(tokens, 0);
+    if (token_equals(first, "RENAME") &&
+        token_equals(ownerless_raw_identifier_token_at(tokens, 1U), "TABLE")) {
         std::size_t index = 2U;
         while (index < tokens.count) {
             std::size_t old_next_index = index;
             const std::string old_table_name =
                 ownerless_table_name_from_token_sequence(tokens, index, &old_next_index);
             if (old_table_name.empty() ||
-                !token_equals(identifier_token_at(tokens, old_next_index), "TO")) {
+                !token_equals(ownerless_raw_identifier_token_at(tokens, old_next_index), "TO")) {
                 return;
             }
 
@@ -18118,7 +18234,8 @@ void update_ownerless_temporary_table_rename_state_after_successful_sql(
         return;
     }
 
-    if (!token_equals(first, "ALTER") || !token_equals(identifier_token_at(tokens, 1U), "TABLE")) {
+    if (!token_equals(first, "ALTER") ||
+        !token_equals(ownerless_raw_identifier_token_at(tokens, 1U), "TABLE")) {
         return;
     }
 
@@ -18130,12 +18247,12 @@ void update_ownerless_temporary_table_rename_state_after_successful_sql(
     }
 
     if (!ownerless_alter_table_rename_recovery_statement(tokens) ||
-        !token_equals(identifier_token_at(tokens, table_next_index), "RENAME")) {
+        !token_equals(ownerless_raw_identifier_token_at(tokens, table_next_index), "RENAME")) {
         return;
     }
 
     std::size_t new_table_index = table_next_index + 1U;
-    if (token_in(identifier_token_at(tokens, new_table_index), "TO", "AS") ||
+    if (token_in(ownerless_raw_identifier_token_at(tokens, new_table_index), "TO", "AS") ||
         token_equals(tokens.values[new_table_index], "=")) {
         ++new_table_index;
     }
@@ -18165,7 +18282,7 @@ void update_ownerless_temporary_table_state_after_successful_sql(
     if (table_name.empty()) {
         return;
     }
-    const std::string_view first = identifier_token_at(tokens, 0);
+    const std::string_view first = ownerless_raw_identifier_token_at(tokens, 0);
     if (token_equals(first, "CREATE")) {
         const bool already_tracked = std::any_of(
             db.ownerless_temporary_table_names.begin(),
@@ -23592,8 +23709,9 @@ bool ownerless_process_recover_dead_dictionary_owner(
         }
     }
 
-    constexpr std::array<std::uint32_t, 23> metadata_only_recovery_kinds = {
+    constexpr std::array<std::uint32_t, 24> metadata_only_recovery_kinds = {
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_VIEW,
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_TEMPORARY_TABLE,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_DROP_VIEW,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_OR_REPLACE_VIEW,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_VIEW,

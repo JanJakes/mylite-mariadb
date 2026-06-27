@@ -4966,8 +4966,12 @@ Tasks:
    Simple temporary-table `RENAME TABLE` and `ALTER TABLE ... RENAME TO`
    tracking now preserves conservative handling for the renamed temporary
    table and restores normal ownerless refresh for a previously shadowed
-   permanent table, while multi-pair temporary rename chains,
-   `DROP TEMPORARY TABLE` crash recovery,
+   permanent table. Focused temporary-table `DROP TEMPORARY TABLE`,
+   `RENAME TABLE`, and `ALTER TABLE ... RENAME TO` prefinish crash coverage now
+   uses metadata-only live-peer recovery while keeping the native
+   file-operation marker clear and preserving the shadowed permanent table
+   through ownerless/native reopen and forced `.shm` rebuild, while multi-pair
+   temporary rename chains,
    inside-MariaDB-loop multi-drop crash points, broader ALTER rebuild beyond
    the focused force, row-format, compressed, and charset-conversion cases,
    broader schema option variants, broader view and trigger variants, and
@@ -7604,8 +7608,8 @@ subsystems that this mode needs:
      generated-column child foreign-key truncate prefinish boundaries,
      especially remaining
      rename variants, other rebuild variants, broader metadata-only DDL,
-     temporary, broader schema option variants, intra-loop drop cases, and
-     broader DDL file lifecycle while peers remain live. Partition truncate
+     multi-pair temporary rename chains, broader schema option variants,
+     intra-loop drop cases, and broader DDL file lifecycle while peers remain live. Partition truncate
      remains governed by the ownerless partition-DDL rejection policy, cyclic
      FK truncate under default FK checks is covered as MariaDB's pre-truncate
      error path, unchecked `FOREIGN_KEY_CHECKS=0` cyclic FK truncate now has

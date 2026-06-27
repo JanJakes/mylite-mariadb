@@ -490,6 +490,18 @@ if(BUILD_TESTING)
           savepoint-rollback-before-state-crash
       )
       add_test(
+        NAME libmylite.ownerless-temporary-drop-crash
+        COMMAND mylite_ownerless_cross_process_sql_test temporary-drop-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-temporary-rename-crash
+        COMMAND mylite_ownerless_cross_process_sql_test temporary-rename-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-temporary-alter-rename-crash
+        COMMAND mylite_ownerless_cross_process_sql_test temporary-alter-rename-crash
+      )
+      add_test(
         NAME libmylite.ownerless-stale-drop-crash-recovery
         COMMAND mylite_ownerless_cross_process_sql_test stale-drop-crash-recovery
       )
@@ -1248,6 +1260,14 @@ if(BUILD_TESTING)
       set_tests_properties(libmylite.ownerless-savepoint-rollback-before-state-crash PROPERTIES
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
         TIMEOUT 90
+      )
+      set_tests_properties(
+        libmylite.ownerless-temporary-drop-crash
+        libmylite.ownerless-temporary-rename-crash
+        libmylite.ownerless-temporary-alter-rename-crash
+        PROPERTIES
+          LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
+          TIMEOUT 120
       )
       set_tests_properties(libmylite.ownerless-stale-drop-crash-recovery PROPERTIES
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
