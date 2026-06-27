@@ -2267,6 +2267,10 @@ bool ownerless_alter_table_add_column_if_not_exists_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 );
+bool ownerless_alter_table_add_column_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
 bool ownerless_alter_table_drop_column_if_exists_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
@@ -11984,7 +11988,8 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
         runtime.ownerless_page_log_start_end_offset != 0U &&
         consumed_page_log_end_offset > runtime.ownerless_page_log_start_end_offset;
     if (no_live_peers && consumed_page_version_wal && consumed_records_appended_after_open &&
-        !runtime_has_local_write && ownerless_page_log_has_uncheckpointed_records(runtime)) {
+        !runtime_has_local_write && ownerless_page_log_has_uncheckpointed_records(runtime) &&
+        !ownerless_page_log_has_native_page_lsn_proof(runtime, visible_lsn, false)) {
         return;
     }
     const bool skip_external_refresh =
@@ -15635,6 +15640,9 @@ std::uint32_t ownerless_dictionary_recovery_kind_for_statement(
     if (ownerless_alter_table_add_column_if_not_exists_recovery_statement(db, tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_COLUMN_IDEMPOTENT_ADD;
     }
+    if (ownerless_alter_table_add_column_recovery_statement(db, tokens)) {
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_ADD_COLUMN;
+    }
     if (ownerless_alter_table_drop_column_if_exists_recovery_statement(db, tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_COLUMN_IDEMPOTENT_DROP;
     }
@@ -16992,6 +17000,89 @@ bool ownerless_alter_table_add_column_if_not_exists_recovery_statement(
                &column_exists
            ) &&
            column_exists;
+}
+
+bool ownerless_alter_table_add_column_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    if (tokens.count < 6U || !token_equals(tokens.values[0], "ALTER") ||
+        !token_equals(tokens.values[1], "TABLE")) {
+        return false;
+    }
+
+    std::size_t index = 2U;
+    std::string schema_name;
+    std::string table_name;
+    if (!consume_ownerless_table_identifier_parts(db, tokens, index, &schema_name, &table_name) ||
+        index >= tokens.count || !token_equals(tokens.values[index], "ADD")) {
+        return false;
+    }
+    ++index;
+    if (index < tokens.count && token_equals(tokens.values[index], "COLUMN")) {
+        ++index;
+    }
+    if (index + 1U >= tokens.count || token_equals(tokens.values[index], "IF") ||
+        token_in(tokens.values[index], "CHECK", "CONSTRAINT", "FOREIGN") ||
+        token_in(tokens.values[index], "FULLTEXT", "INDEX", "KEY") ||
+        token_in(tokens.values[index], "PRIMARY", "SPATIAL", "UNIQUE") ||
+        !ownerless_table_identifier_token(tokens.values[index])) {
+        return false;
+    }
+
+    const std::string column_name = ownerless_normalized_identifier(tokens.values[index]);
+    ++index;
+    bool has_definition = false;
+    bool saw_semicolon = false;
+    std::size_t depth = 0U;
+    for (; index < tokens.count; ++index) {
+        const std::string_view token = tokens.values[index];
+        if (token_equals(token, ";")) {
+            saw_semicolon = true;
+            continue;
+        }
+        if (saw_semicolon) {
+            return false;
+        }
+        if (token_equals(token, "(")) {
+            ++depth;
+            has_definition = true;
+            continue;
+        }
+        if (token_equals(token, ")")) {
+            if (depth == 0U) {
+                return false;
+            }
+            --depth;
+            has_definition = true;
+            continue;
+        }
+        if (depth == 0U && token_equals(token, ",")) {
+            return false;
+        }
+        if (token_in(token, "AFTER", "ALGORITHM", "AUTO_INCREMENT", "CHECK") ||
+            token_equals(token, "CONSTRAINT") ||
+            token_in(token, "FIRST", "FOREIGN", "FULLTEXT", "GENERATED") ||
+            token_in(token, "INDEX", "KEY", "LOCK", "PRIMARY") ||
+            token_equals(token, "REFERENCES") ||
+            token_in(token, "SPATIAL", "STORED", "UNIQUE", "VIRTUAL")) {
+            return false;
+        }
+        has_definition = true;
+    }
+    if (!has_definition || depth != 0U) {
+        return false;
+    }
+
+    bool column_exists = false;
+    return ownerless_column_metadata_lookup(
+               db,
+               schema_name,
+               table_name,
+               column_name,
+               &column_exists
+           ) &&
+           !column_exists;
 }
 
 bool ownerless_alter_table_drop_column_if_exists_recovery_statement(
@@ -23088,7 +23179,7 @@ bool ownerless_process_recover_dead_dictionary_owner(
         return false;
     }
 
-    constexpr std::array<std::uint32_t, 20> file_op_recovery_kinds = {
+    constexpr std::array<std::uint32_t, 21> file_op_recovery_kinds = {
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE_LIKE,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE_SELECT,
@@ -23109,6 +23200,7 @@ bool ownerless_process_recover_dead_dictionary_owner(
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_COMPRESSED_ROW_FORMAT_KEY_BLOCK_4,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_COMPRESSED_ROW_FORMAT_KEY_BLOCK_16,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_CHARSET_CONVERT,
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_ADD_COLUMN,
     };
     if (native_file_op_checkpoint_needed) {
         for (const std::uint32_t recovery_kind : file_op_recovery_kinds) {
@@ -24711,6 +24803,8 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
     bool ownerless_startup_native_purge_drain_needed = false;
     bool ownerless_startup_native_checkpoint_refresh = false;
     bool ownerless_startup_lsn_advance_enabled = false;
+    bool native_file_op_checkpoint_needed = false;
+    bool native_dml_file_op_checkpoint_needed = false;
     std::uint64_t ordinary_native_checkpoint_visible_lsn = 0;
     std::uint64_t ownerless_startup_checkpoint_latest_lsn = 0;
     std::uint64_t ownerless_startup_checkpoint_visible_lsn = 0;
@@ -24865,8 +24959,6 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
                 set_error(db, MYLITE_IOERR, "database ownerless checkpoint is invalid");
                 return MYLITE_IOERR;
             }
-            bool native_file_op_checkpoint_needed = false;
-            bool native_dml_file_op_checkpoint_needed = false;
             if (!db.readonly_open) {
                 static_cast<void>(read_ownerless_native_file_op_checkpoint_needed(
                     g_runtime,
@@ -25244,16 +25336,24 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
             advance_ownerless_local_trx_horizon(g_runtime);
             std::uint64_t startup_latest_lsn = 0;
             std::uint64_t startup_visible_lsn = 0;
-            const bool startup_visible_boundary_missing = ownerless_runtime_open &&
-                                                          !db.readonly_open &&
-                                                          read_concurrency_checkpoint_lsn(
-                                                              g_runtime.concurrency_checkpoint_fd,
-                                                              &startup_latest_lsn,
-                                                              &startup_visible_lsn
-                                                          ) &&
-                                                          startup_visible_lsn == 0U;
-            if (startup_visible_boundary_missing &&
-                ownerless_runtime_has_no_live_peers(g_runtime)) {
+            const bool startup_checkpoint_read = ownerless_runtime_open && !db.readonly_open &&
+                                                 read_concurrency_checkpoint_lsn(
+                                                     g_runtime.concurrency_checkpoint_fd,
+                                                     &startup_latest_lsn,
+                                                     &startup_visible_lsn
+                                                 );
+            const bool startup_visible_boundary_missing =
+                startup_checkpoint_read && startup_visible_lsn == 0U;
+            const bool startup_no_live_ownerless_runtime =
+                ownerless_runtime_open && !db.readonly_open &&
+                ownerless_runtime_has_no_live_peers(g_runtime);
+            const bool startup_no_live_reclaim_needed =
+                startup_no_live_ownerless_runtime &&
+                (startup_visible_boundary_missing ||
+                 ownerless_page_log_has_uncheckpointed_records(g_runtime) ||
+                 native_file_op_checkpoint_needed || native_dml_file_op_checkpoint_needed ||
+                 ownerless_autoinc_checkpoint_pending(g_runtime));
+            if (startup_no_live_reclaim_needed) {
                 stage_start_ns = embedded_open_perf_start_ns();
                 reclaim_ownerless_page_log_after_native_checkpoint(g_runtime);
                 embedded_open_perf_add_elapsed(

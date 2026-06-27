@@ -430,7 +430,11 @@ Roles:
   without installing full ownerless lock hooks before purge drain; pending
   native file-op or DML markers still keep hooks installed for post-start
   checkpoint refresh while preserving the current native redo header as the
-  startup source. Captured transaction images that
+  startup source. If a no-live ownerless startup still finds retained
+  page-version WAL or native checkpoint markers after hooks are installed, it
+  runs the no-live reclaim path before returning from open, so killed-reader
+  cleanup can drain reader-boundary/native-support WAL without waiting for
+  close. Captured transaction images that
   match a resident page after same-LSN flush checksum/header normalization can
   still prove the committed page image, same-LSN resident mismatches still
   reject the image after normalization fails, and different-LSN resident buffer
@@ -3446,11 +3450,14 @@ Tasks:
    crash coverage preserves completed `ALTER TABLE ... ADD COLUMN`,
    `ALTER TABLE ... DROP COLUMN`, `ALTER TABLE ... MODIFY COLUMN`, and
    `ALTER TABLE ... RENAME COLUMN` boundaries before ownerless dictionary
-   finish, then verifies recovered added-column/default metadata, absent
-   dropped-column metadata, modified-column width/default metadata,
-   renamed-column metadata, dependent generated-column and CHECK expression
-   behavior, and row values through ownerless/native reopen before and after
-   forced `.shm` rebuild.
+   finish. The plain stored-column ADD case verifies native file-operation
+   live recovery while another ownerless peer remains open, with the marker
+   retained until no-live drain; the broader drop/modify/rename cases remain on
+   no-live recovery. The selectors verify recovered added-column/default
+   metadata, absent dropped-column metadata, modified-column width/default
+   metadata, renamed-column metadata, dependent generated-column and CHECK
+   expression behavior, and row values through ownerless/native reopen before
+   and after forced `.shm` rebuild.
    Focused column-idempotent crash coverage preserves completed no-op
    `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` and
    `ALTER TABLE ... DROP COLUMN IF EXISTS` dictionary boundaries, then verifies
@@ -5364,10 +5371,13 @@ Minimum suites before support can be claimed:
     busy until no-live recovery and the recovered present/absent, renamed, and
     ignored/not-ignored index states remain correct,
   - after ordinary column-add, column-drop, column-modify, and column-rename
-    ALTER but before ownerless dictionary finish; hook coverage proves live-peer
-    cleanup remains busy until no-live recovery and the recovered
-    added/default, absent-column, modified-column, renamed-column, or
-    dependent-expression rename state remains correct,
+    ALTER but before ownerless dictionary finish; hook coverage proves the
+    focused plain stored-column ADD case can recover while another ownerless
+    peer remains live with the native file-operation marker retained until
+    no-live drain, while the broader drop/modify/rename cases remain
+    cleanup-busy until no-live recovery, and the recovered added/default,
+    absent-column, modified-column,
+    renamed-column, or dependent-expression rename state remains correct,
   - after duplicate `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` and missing
     `ALTER TABLE ... DROP COLUMN IF EXISTS` no-op success but before ownerless
     dictionary finish; hook coverage proves metadata-only live recovery after
@@ -5637,8 +5647,9 @@ missing `ALTER TABLE ... RENAME COLUMN IF EXISTS`, missing
 MariaDB success, including generated-column/CHECK expression-table missing
 rename, change, and default no-ops, an `ALTER TABLE ... AUTO_INCREMENT` writer after
 native high-watermark persistence, a composite direction primary-key writer
-after native clustered-key rebuild, an `ALTER COLUMN ... SET DEFAULT` writer
-after native metadata update, simple view CREATE/DROP writers after native view
+after native clustered-key rebuild, a plain `ALTER TABLE ... ADD COLUMN` writer
+after native stored-column metadata update, an `ALTER COLUMN ... SET DEFAULT`
+writer after native metadata update, simple view CREATE/DROP writers after native view
 definition-file creation/removal, simple trigger CREATE/DROP, trigger
 replacement, ordered trigger PRECEDES, duplicate `CREATE TRIGGER IF NOT EXISTS`,
 missing `DROP TRIGGER IF EXISTS`, delayed missing-dependency `CREATE TRIGGER`,
@@ -5737,12 +5748,11 @@ subsystems that this mode needs:
   keep the conservative WAL scan proof. The skip is still bypassed for
   process-generation changes and older handle-pin advancement, which are
   mandatory clean-page refresh boundaries rather than routine steady-state
-  refresh checks. A no-live final close by a
-  runtime that only consumed the current visible page-version WAL leaves that
-  WAL for no-live recovery instead of truncating it without writer-owned native
-  page evidence; reader-only consumers do not use newer native page LSNs as
-  successor proof unless the retained payload matches exactly, and skip the
-  external refresh side effect during that failed reclaim attempt. Read/write
+  refresh checks. A no-live final close by a runtime that only consumed the
+  current visible page-version WAL leaves that WAL for no-live recovery unless
+  exact native page proof already covers the retained records; reader-only
+  consumers do not use newer native page LSNs as successor proof, and retain WAL
+  when exact proof is missing. Read/write
   runtime shutdown with live peers, or when no-live
   status cannot be proven, now refreshes the local InnoDB buffer pool to the
   latest ownerless external LSN and waits for local dirty pages through the max
@@ -7351,12 +7361,12 @@ subsystems that this mode needs:
   history proof, and full ROLLBACK refreshes tracked transaction pages from
   native storage instead of publishing rollback images or advancing visible
   LSN. SQL-layer rollback with local writes clears page-version read state and
-  installs a native-read fence, while reader-only no-live close retains peer
-  WAL appended after that runtime opened so later startup/rebuild can
-  materialize the native boundary. Focused live snapshot reader-close coverage,
-  including the synthesized native-boundary variant, now proves that a stale
-  reader close retains the peer WAL after its pin releases, then a fresh
-  ownerless opener reads the committed rows and checkpoints the retained WAL.
+  installs a native-read fence, while reader-only no-live close remains
+  proof-gated before it can materialize peer WAL appended after that runtime
+  opened. Focused live snapshot reader-close coverage, including the
+  synthesized native-boundary variant, now proves that the live pin retains peer
+  WAL until release and that post-release no-live reclaim checkpoints it once
+  native boundary proof is available.
   Focused record-lock-grant crash coverage now also proves stale-reader rebuild
   does not discard retained committed page images, and that final no-live close
   drains retained WAL through post-shutdown tablespace replay and checkpoint.
@@ -7502,11 +7512,11 @@ subsystems that this mode needs:
      DATABASE and schema idempotent/no-op prefinish boundaries, plus focused
      top-level and ALTER secondary-index idempotent/no-op prefinish boundaries,
      plus focused column idempotent and column `IF EXISTS` missing-column
-     no-op prefinish boundaries, plus focused table-comment and column-default
-     metadata ALTER prefinish boundaries, especially remaining rename/truncate
-     variants, rebuild variants, broader metadata-only DDL, temporary, broader
-     schema option variants, intra-loop drop cases, and broader DDL file
-     lifecycle while peers remain live.
+     no-op prefinish boundaries, plus focused plain ADD COLUMN, table-comment,
+     and column-default metadata ALTER prefinish boundaries, especially
+     remaining rename/truncate variants, rebuild variants, broader
+     metadata-only DDL, temporary, broader schema option variants, intra-loop
+     drop cases, and broader DDL file lifecycle while peers remain live.
   2. Close remaining transaction crash windows, especially native
      rollback/savepoint-rollback internals and concurrent-writer savepoint
      schedules that combine native undo, ownerless page-write ownership, and

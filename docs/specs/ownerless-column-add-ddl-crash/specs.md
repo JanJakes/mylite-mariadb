@@ -10,7 +10,11 @@ table-definition ALTER and ownerless dictionary finish for column metadata.
 
 This slice adds focused coverage for a killed `ALTER TABLE ... ADD COLUMN`
 writer after MariaDB/InnoDB completes the native table-definition change but
-before MyLite publishes the ownerless dictionary finish boundary.
+before MyLite publishes the ownerless dictionary finish boundary. The follow-up
+ownerless-column-add-live-recovery slice promotes this focused selector from
+cleanup-busy/no-live recovery to live-peer recovery through the native
+file-operation recovery lane while retaining the checkpoint marker until
+no-live drain.
 
 ## Source Findings
 
@@ -39,14 +43,16 @@ Add one unsafe-hook selector:
 - initialize an ownerless database and create an InnoDB table with `id` and
   `value` columns,
 - insert rows and verify the `note` column is absent,
-- start a live ownerless peer so crashed-writer cleanup remains busy,
+- start a live ownerless peer so crashed-writer cleanup exercises the live-peer
+  recovery path,
 - start a writer that executes
   `ALTER TABLE app.ownerless_column_add_crash_base ADD COLUMN note INT NOT NULL DEFAULT 7`
   under the existing `dictionary-before-finish` test fault,
 - kill the writer at the hook,
-- prove an ownerless opener returns `MYLITE_BUSY` while the live peer remains,
-- release the peer and reopen ownerless read/write to rebuild volatile
-  coordination,
+- prove an ownerless opener can recover while the live peer remains and the
+  native file-operation marker stays set,
+- release the peer and reopen ownerless read/write to drain the marker and
+  rebuild volatile coordination,
 - verify `INFORMATION_SCHEMA.COLUMNS` exposes the recovered `note` column and
   default,
 - verify existing rows read the default value, a later insert can omit `note`

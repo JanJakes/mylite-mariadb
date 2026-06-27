@@ -84,7 +84,8 @@ selectors:
 9. Kill the stale reader and verify ownerless/native reopen, forced `.shm`
    rebuild, and native reopen all preserve the ordinary-created, LIKE-created,
    and CTAS-created table metadata, native files, row counts, aggregates, and
-   checkpointed WAL.
+   checkpointed WAL. The ownerless reopen must perform dead-reader cleanup and
+   no-live startup checkpoint drain before returning.
 
 ## Scope
 
@@ -177,8 +178,8 @@ documentation only.
   `CREATE TABLE ... LIKE`, and CTAS.
 - Retained page-version WAL remains after the writer closes while the stale
   reader pin is live.
-- After killing the reader, ownerless reopen succeeds and checkpoints retained
-  reader-boundary WAL.
+- After killing the reader, ownerless reopen succeeds and has already
+  checkpointed retained reader-boundary WAL before the first SQL assertion.
 - Ownerless/native reopen before and after forced `.shm` rebuild all observe
   the created table, secondary-index metadata/use through
   `ownerless_created_replay_value_idx`, 16 rows, `SUM(id)=136`,

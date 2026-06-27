@@ -82,10 +82,11 @@ proven:
   page-version read LSN so multi-process same-handle reads keep read-your-writes
   and retained-overlay behavior.
 - No-live reclaim does not let a runtime that only consumed the current visible
-  page-version WAL truncate that WAL on final close. Writer runtimes keep the
-  normal statement/timer reclaim path, no-live writer close still needs native
-  page proof before truncating retained WAL, and older pinned-snapshot readers
-  can release their pins and allow post-release checkpointing.
+  page-version WAL truncate that WAL on final close unless exact native page
+  proof already covers the retained records. Writer runtimes keep the normal
+  statement/timer reclaim path, no-live writer close still needs native page
+  proof before truncating retained WAL, and older pinned-snapshot readers can
+  release their pins and allow post-release checkpointing.
 - Ordinary exclusive read/write reopen with retained ownerless page-version WAL
   or a nonzero ownerless checkpoint-visible boundary force-refreshes clean
   process-local InnoDB buffer-pool pages from that boundary before SQL runs, so
@@ -205,10 +206,10 @@ out of the pin. Statement and timer checkpoint scheduling ignore pins owned by
 the current single owner while still blocking peer-owned pins, preserving the
 single-owner reclaim/refresh fast paths. A pure reader that consumes the
 current visible page-version WAL may retain it for the next no-live recovery
-instead of truncating it on close, which favors correctness over a misleading
-checkpoint timing win. The slow-path native flush can add work for explicit
-write commits, but it is bounded to the slow path and prevents false production
-timing wins from unproven visibility.
+when exact native page proof is unavailable, which favors correctness over a
+misleading checkpoint timing win. The slow-path native flush can add work for
+explicit write commits, but it is bounded to the slow path and prevents false
+production timing wins from unproven visibility.
 The same single-owner proof skips explicit-transaction buffer-pool first-write
 refresh, so a single-owner prepared insert transaction does not scan retained
 ownerless WAL for every statement. A reduced production attribution probe
