@@ -17931,6 +17931,33 @@ bool ownerless_statement_uses_temporary_table(const mylite_db &db, const SqlPoli
            ownerless_statement_uses_tracked_temporary_table(db, tokens);
 }
 
+std::string ownerless_table_name_from_token_sequence(
+    const SqlPolicyTokens &tokens,
+    std::size_t index,
+    std::size_t *out_next_index
+) {
+    if (out_next_index != nullptr) {
+        *out_next_index = index;
+    }
+    if (index >= tokens.count || !ownerless_table_identifier_token(tokens.values[index])) {
+        return {};
+    }
+
+    std::size_t table_index = index;
+    std::size_t next_index = index + 1U;
+    if (next_index + 1U < tokens.count && token_equals(tokens.values[next_index], ".") &&
+        ownerless_table_identifier_token(tokens.values[next_index + 1U])) {
+        table_index = next_index + 1U;
+        next_index += 2U;
+    }
+    if (out_next_index != nullptr) {
+        *out_next_index = next_index;
+    }
+
+    const std::string_view identifier = unquoted_identifier_token(tokens.values[table_index]);
+    return std::string(identifier.data(), identifier.size());
+}
+
 std::string ownerless_temporary_table_name_from_ddl(const SqlPolicyTokens &tokens) {
     bool table_keyword_seen = false;
     std::string table_name;
@@ -17951,16 +17978,120 @@ std::string ownerless_temporary_table_name_from_ddl(const SqlPolicyTokens &token
         if (token_in(identifier, "IF", "NOT", "EXISTS")) {
             continue;
         }
-        table_name.assign(identifier.data(), identifier.size());
+        table_name = ownerless_table_name_from_token_sequence(tokens, index, nullptr);
+        break;
     }
     return table_name;
+}
+
+bool ownerless_replace_tracked_temporary_table_name(
+    mylite_db &db,
+    const std::string &old_table_name,
+    const std::string &new_table_name
+) {
+    bool old_name_was_tracked = false;
+    db.ownerless_temporary_table_names.erase(
+        std::remove_if(
+            db.ownerless_temporary_table_names.begin(),
+            db.ownerless_temporary_table_names.end(),
+            [&](const std::string &tracked_name) {
+                const bool matches = token_equals(old_table_name, tracked_name.c_str());
+                old_name_was_tracked = old_name_was_tracked || matches;
+                return matches;
+            }
+        ),
+        db.ownerless_temporary_table_names.end()
+    );
+    if (!old_name_was_tracked || new_table_name.empty()) {
+        return old_name_was_tracked;
+    }
+
+    const bool already_tracked = std::any_of(
+        db.ownerless_temporary_table_names.begin(),
+        db.ownerless_temporary_table_names.end(),
+        [&](const std::string &tracked_name) {
+            return token_equals(new_table_name, tracked_name.c_str());
+        }
+    );
+    if (!already_tracked) {
+        db.ownerless_temporary_table_names.push_back(new_table_name);
+    }
+    return true;
+}
+
+void update_ownerless_temporary_table_rename_state_after_successful_sql(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    const std::string_view first = identifier_token_at(tokens, 0);
+    if (token_equals(first, "RENAME") && token_equals(identifier_token_at(tokens, 1U), "TABLE")) {
+        std::size_t index = 2U;
+        while (index < tokens.count) {
+            std::size_t old_next_index = index;
+            const std::string old_table_name =
+                ownerless_table_name_from_token_sequence(tokens, index, &old_next_index);
+            if (old_table_name.empty() ||
+                !token_equals(identifier_token_at(tokens, old_next_index), "TO")) {
+                return;
+            }
+
+            std::size_t new_next_index = old_next_index + 1U;
+            const std::string new_table_name =
+                ownerless_table_name_from_token_sequence(tokens, new_next_index, &new_next_index);
+            if (new_table_name.empty()) {
+                return;
+            }
+            ownerless_replace_tracked_temporary_table_name(db, old_table_name, new_table_name);
+
+            if (new_next_index >= tokens.count ||
+                !token_equals(tokens.values[new_next_index], ",")) {
+                return;
+            }
+            index = new_next_index + 1U;
+        }
+        return;
+    }
+
+    if (!token_equals(first, "ALTER") || !token_equals(identifier_token_at(tokens, 1U), "TABLE")) {
+        return;
+    }
+
+    std::size_t table_next_index = 2U;
+    const std::string old_table_name =
+        ownerless_table_name_from_token_sequence(tokens, 2U, &table_next_index);
+    if (old_table_name.empty()) {
+        return;
+    }
+
+    if (!ownerless_alter_table_rename_recovery_statement(tokens) ||
+        !token_equals(identifier_token_at(tokens, table_next_index), "RENAME")) {
+        return;
+    }
+
+    std::size_t new_table_index = table_next_index + 1U;
+    if (token_in(identifier_token_at(tokens, new_table_index), "TO", "AS") ||
+        token_equals(tokens.values[new_table_index], "=")) {
+        ++new_table_index;
+    }
+    std::size_t new_next_index = new_table_index;
+    const std::string new_table_name =
+        ownerless_table_name_from_token_sequence(tokens, new_table_index, &new_next_index);
+    if (new_table_name.empty()) {
+        return;
+    }
+    ownerless_replace_tracked_temporary_table_name(db, old_table_name, new_table_name);
 }
 
 void update_ownerless_temporary_table_state_after_successful_sql(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 ) {
-    if (!db.ownerless_rw_open || !ownerless_temporary_table_ddl_statement(tokens)) {
+    if (!db.ownerless_rw_open) {
+        return;
+    }
+
+    if (!ownerless_temporary_table_ddl_statement(tokens)) {
+        update_ownerless_temporary_table_rename_state_after_successful_sql(db, tokens);
         return;
     }
 
@@ -17968,7 +18099,6 @@ void update_ownerless_temporary_table_state_after_successful_sql(
     if (table_name.empty()) {
         return;
     }
-
     const std::string_view first = identifier_token_at(tokens, 0);
     if (token_equals(first, "CREATE")) {
         const bool already_tracked = std::any_of(

@@ -4957,7 +4957,11 @@ Tasks:
    marker set until final no-live drain.
    View-only `RENAME TABLE` prefinish crash coverage now uses metadata-only
    live-peer recovery while keeping the native file-operation marker clear.
-   Temporary-table rename forms plus `DROP TEMPORARY TABLE`,
+   Simple temporary-table `RENAME TABLE` and `ALTER TABLE ... RENAME TO`
+   tracking now preserves conservative handling for the renamed temporary
+   table and restores normal ownerless refresh for a previously shadowed
+   permanent table, while multi-pair temporary rename chains,
+   `DROP TEMPORARY TABLE` crash recovery,
    inside-MariaDB-loop multi-drop crash points, broader ALTER rebuild beyond
    the focused force, row-format, compressed, and charset-conversion cases,
    broader schema option variants, broader view and trigger variants, and

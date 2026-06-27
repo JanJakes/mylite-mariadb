@@ -359,6 +359,9 @@ clear after pre-execution index metadata proves the statement is a no-op.
 Focused `ALTER TABLE ... COMMENT` and `ALTER COLUMN ... SET DEFAULT`
 prefinish recovery also uses metadata-only live-peer recovery with the native
 file-operation marker clear.
+Simple temporary-table `RENAME TABLE` and `ALTER TABLE ... RENAME TO`
+tracking now preserves conservative handling for the renamed temp table and
+restores normal ownerless refresh for a previously shadowed permanent table;
 `DROP TEMPORARY TABLE`,
 inside-MariaDB-loop multi-drop crash points,
 broader ALTER rebuild, broader schema option variants, broader view and

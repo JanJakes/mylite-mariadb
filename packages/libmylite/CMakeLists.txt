@@ -378,6 +378,10 @@ if(BUILD_TESTING)
       COMMAND mylite_ownerless_cross_process_sql_test cyclic-foreign-key-truncate-policy
     )
     add_test(
+      NAME libmylite.ownerless-temporary-table-rename-tracking
+      COMMAND mylite_ownerless_cross_process_sql_test temporary-table-rename-tracking
+    )
+    add_test(
       NAME libmylite.ownerless-uncommitted-peer-hidden
       COMMAND mylite_ownerless_cross_process_sql_test uncommitted-peer-hidden
     )
@@ -1124,6 +1128,10 @@ if(BUILD_TESTING)
       TIMEOUT 90
     )
     set_tests_properties(libmylite.ownerless-cyclic-foreign-key-truncate-policy PROPERTIES
+      LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
+      TIMEOUT 90
+    )
+    set_tests_properties(libmylite.ownerless-temporary-table-rename-tracking PROPERTIES
       LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
       TIMEOUT 90
     )
