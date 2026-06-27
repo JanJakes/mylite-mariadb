@@ -1184,9 +1184,7 @@ static void test_crashed_compressed_key_block_dictionary_ddl_recovers_rebuilt_ta
 static void test_crashed_compressed_key_block_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_compressed_key_block_16_dictionary_ddl_recovers_rebuilt_table(void);
 static void test_crashed_compressed_key_block_16_dictionary_ddl_marks_file_op_checkpoint(void);
-static void test_crashed_compressed_key_block_copy_lock_dictionary_ddl_marks_file_op_checkpoint(
-    void
-);
+static void test_crashed_compressed_key_block_copy_lock_dictionary_ddl_marks_markers(void);
 static void test_crashed_table_comment_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_truncate_dictionary_ddl_recovers_empty_table(void);
 static void test_crashed_implicit_truncate_dictionary_ddl_recovers_empty_table(void);
@@ -5650,7 +5648,7 @@ int main(int argc, char **argv) {
     if (argc == 2 &&
         strcmp(argv[1], "dictionary-compressed-row-format-key-block-copy-lock-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-        test_crashed_compressed_key_block_copy_lock_dictionary_ddl_marks_file_op_checkpoint();
+        test_crashed_compressed_key_block_copy_lock_dictionary_ddl_marks_markers();
 #endif
         return 0;
     }
@@ -6707,7 +6705,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
         test_crashed_compressed_key_block_16_dictionary_ddl_recovers_rebuilt_table
     ),
     OWNERLESS_SQL_TEST_CASE(
-        test_crashed_compressed_key_block_copy_lock_dictionary_ddl_marks_file_op_checkpoint
+        test_crashed_compressed_key_block_copy_lock_dictionary_ddl_marks_markers
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_table_comment_dictionary_ddl_recovers_metadata),
     OWNERLESS_SQL_TEST_CASE(test_crashed_truncate_dictionary_ddl_recovers_empty_table),
@@ -58081,9 +58079,7 @@ static void test_crashed_compressed_key_block_16_dictionary_ddl_marks_file_op_ch
     );
 }
 
-static void test_crashed_compressed_key_block_copy_lock_dictionary_ddl_marks_file_op_checkpoint(
-    void
-) {
+static void test_crashed_compressed_key_block_copy_lock_dictionary_ddl_marks_markers(void) {
     run_crashed_compressed_key_block_dictionary_ddl_case(
         "ownerless-dictionary-compressed-row-format-key-block-1-copy-lock-crash.mylite",
         "ownerless_compressed_row_format_copy_lock_kb1",
