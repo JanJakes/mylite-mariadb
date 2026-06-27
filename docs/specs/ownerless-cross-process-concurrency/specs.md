@@ -7605,11 +7605,13 @@ subsystems that this mode needs:
      column-default metadata ALTER, and plain, descending, composite direction,
      AUTO_INCREMENT, and AUTO_INCREMENT descending primary-key replacement
      prefinish boundaries, plus child-only, self-referencing, and stored
-     generated-column child foreign-key truncate prefinish boundaries,
-     especially remaining
-     rename variants, other rebuild variants, broader metadata-only DDL,
-     multi-pair temporary rename chains, broader schema option variants,
-     intra-loop drop cases, and broader DDL file lifecycle while peers remain live. Partition truncate
+     generated-column child foreign-key truncate prefinish boundaries, plus
+     simple temporary DDL, pure multi-pair temporary rename chains, and one
+     mixed temporary/permanent rename-list prefinish boundary, especially
+     remaining rename variants, other rebuild variants, broader metadata-only
+     DDL, broader mixed temporary/permanent rename orders, broader schema
+     option variants, intra-loop drop cases, and broader DDL file lifecycle
+     while peers remain live. Partition truncate
      remains governed by the ownerless partition-DDL rejection policy, cyclic
      FK truncate under default FK checks is covered as MariaDB's pre-truncate
      error path, unchecked `FOREIGN_KEY_CHECKS=0` cyclic FK truncate now has

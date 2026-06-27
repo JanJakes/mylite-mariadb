@@ -18094,6 +18094,53 @@ bool ownerless_simple_temporary_drop_table_recovery_statement(const SqlPolicyTok
     return consume_ownerless_remaining_semicolons(tokens, index);
 }
 
+bool ownerless_tracked_temporary_table_name(
+    const std::vector<std::string> &temporary_table_names,
+    std::string_view table_name
+) {
+    for (const std::string &tracked_name : temporary_table_names) {
+        if (token_equals(table_name, tracked_name.c_str())) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool ownerless_replace_tracked_temporary_table_name(
+    std::vector<std::string> &temporary_table_names,
+    const std::string &old_table_name,
+    const std::string &new_table_name
+) {
+    bool old_name_was_tracked = false;
+    temporary_table_names.erase(
+        std::remove_if(
+            temporary_table_names.begin(),
+            temporary_table_names.end(),
+            [&](const std::string &tracked_name) {
+                const bool matches = token_equals(old_table_name, tracked_name.c_str());
+                old_name_was_tracked = old_name_was_tracked || matches;
+                return matches;
+            }
+        ),
+        temporary_table_names.end()
+    );
+    if (!old_name_was_tracked || new_table_name.empty()) {
+        return old_name_was_tracked;
+    }
+
+    const bool already_tracked = std::any_of(
+        temporary_table_names.begin(),
+        temporary_table_names.end(),
+        [&](const std::string &tracked_name) {
+            return token_equals(new_table_name, tracked_name.c_str());
+        }
+    );
+    if (!already_tracked) {
+        temporary_table_names.push_back(new_table_name);
+    }
+    return true;
+}
+
 bool ownerless_temporary_table_rename_recovery_statement(
     const mylite_db &db,
     const SqlPolicyTokens &tokens
@@ -18102,21 +18149,35 @@ bool ownerless_temporary_table_rename_recovery_statement(
     if (token_equals(first, "RENAME") &&
         token_equals(ownerless_raw_identifier_token_at(tokens, 1U), "TABLE")) {
         std::size_t index = 2U;
-        const std::string old_table_name =
-            ownerless_table_name_from_token_sequence(tokens, index, &index);
-        if (old_table_name.empty() || !ownerless_tracked_temporary_table_name(db, old_table_name) ||
-            index >= tokens.count ||
-            !token_equals(ownerless_raw_identifier_token_at(tokens, index), "TO")) {
-            return false;
+        bool saw_pair = false;
+        std::vector<std::string> temporary_table_names = db.ownerless_temporary_table_names;
+        for (;;) {
+            const std::string old_table_name =
+                ownerless_table_name_from_token_sequence(tokens, index, &index);
+            if (old_table_name.empty() ||
+                !ownerless_tracked_temporary_table_name(temporary_table_names, old_table_name) ||
+                index >= tokens.count ||
+                !token_equals(ownerless_raw_identifier_token_at(tokens, index), "TO")) {
+                return false;
+            }
+            ++index;
+            const std::string new_table_name =
+                ownerless_table_name_from_token_sequence(tokens, index, &index);
+            if (new_table_name.empty()) {
+                return false;
+            }
+            ownerless_replace_tracked_temporary_table_name(
+                temporary_table_names,
+                old_table_name,
+                new_table_name
+            );
+            saw_pair = true;
+            if (index >= tokens.count || !token_equals(tokens.values[index], ",")) {
+                break;
+            }
+            ++index;
         }
-        ++index;
-        if (ownerless_table_name_from_token_sequence(tokens, index, &index).empty()) {
-            return false;
-        }
-        if (index < tokens.count && token_equals(tokens.values[index], ",")) {
-            return false;
-        }
-        return consume_ownerless_remaining_semicolons(tokens, index);
+        return saw_pair && consume_ownerless_remaining_semicolons(tokens, index);
     }
 
     if (!token_equals(first, "ALTER") ||
@@ -18170,34 +18231,11 @@ bool ownerless_replace_tracked_temporary_table_name(
     const std::string &old_table_name,
     const std::string &new_table_name
 ) {
-    bool old_name_was_tracked = false;
-    db.ownerless_temporary_table_names.erase(
-        std::remove_if(
-            db.ownerless_temporary_table_names.begin(),
-            db.ownerless_temporary_table_names.end(),
-            [&](const std::string &tracked_name) {
-                const bool matches = token_equals(old_table_name, tracked_name.c_str());
-                old_name_was_tracked = old_name_was_tracked || matches;
-                return matches;
-            }
-        ),
-        db.ownerless_temporary_table_names.end()
+    return ownerless_replace_tracked_temporary_table_name(
+        db.ownerless_temporary_table_names,
+        old_table_name,
+        new_table_name
     );
-    if (!old_name_was_tracked || new_table_name.empty()) {
-        return old_name_was_tracked;
-    }
-
-    const bool already_tracked = std::any_of(
-        db.ownerless_temporary_table_names.begin(),
-        db.ownerless_temporary_table_names.end(),
-        [&](const std::string &tracked_name) {
-            return token_equals(new_table_name, tracked_name.c_str());
-        }
-    );
-    if (!already_tracked) {
-        db.ownerless_temporary_table_names.push_back(new_table_name);
-    }
-    return true;
 }
 
 void update_ownerless_temporary_table_rename_state_after_successful_sql(
@@ -18330,12 +18368,7 @@ std::string ownerless_normalized_identifier(std::string_view token) {
 }
 
 bool ownerless_tracked_temporary_table_name(const mylite_db &db, std::string_view table_name) {
-    for (const std::string &tracked_name : db.ownerless_temporary_table_names) {
-        if (token_equals(table_name, tracked_name.c_str())) {
-            return true;
-        }
-    }
-    return false;
+    return ownerless_tracked_temporary_table_name(db.ownerless_temporary_table_names, table_name);
 }
 
 bool ownerless_token_in_any(std::string_view token, std::initializer_list<const char *> keywords) {
