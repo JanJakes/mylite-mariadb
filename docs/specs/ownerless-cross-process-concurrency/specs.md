@@ -7653,7 +7653,8 @@ subsystems that this mode needs:
      nested check-option, security/definer, and idempotent/no-op view
      metadata-only prefinish boundaries, plus simple CREATE/DROP TRIGGER
      metadata-only prefinish boundaries, plus focused CREATE/ALTER/DROP
-     DATABASE and schema idempotent/no-op prefinish boundaries, plus focused
+     DATABASE, named ALTER DATABASE schema-comment, and schema idempotent/no-op
+     prefinish boundaries, plus focused
      top-level and ALTER secondary-index idempotent/no-op prefinish boundaries,
      plus focused column idempotent and column `IF EXISTS` missing-column
      no-op prefinish boundaries, plus focused plain ADD COLUMN, table-comment,
@@ -7672,7 +7673,8 @@ subsystems that this mode needs:
      exact copy-lock, compressed row-format including exact copy-lock, and
      charset boundaries, broader metadata-only DDL, broader mixed temporary/permanent
      rename matrices, broader FK plus non-FK ALTER lists beyond the focused
-     ADD COLUMN case, broader schema option variants, intra-loop drop cases,
+     ADD COLUMN case, broader schema option variants beyond the focused
+     schema-comment boundary, intra-loop drop cases,
      and broader DDL file lifecycle while
      peers remain live. Partition truncate
      remains governed by the ownerless partition-DDL rejection policy, cyclic

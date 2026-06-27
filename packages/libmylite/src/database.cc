@@ -2369,6 +2369,7 @@ bool consume_ownerless_optional_view_if_not_exists(
 bool consume_ownerless_optional_view_if_exists(const SqlPolicyTokens &tokens, std::size_t &index);
 bool consume_ownerless_schema_identifier(const SqlPolicyTokens &tokens, std::size_t &index);
 bool consume_ownerless_schema_default_options(const SqlPolicyTokens &tokens, std::size_t &index);
+bool ownerless_sql_string_literal_token(std::string_view token);
 bool consume_ownerless_remaining_semicolons(const SqlPolicyTokens &tokens, std::size_t &index);
 bool consume_ownerless_single_clause_alter_tail(const SqlPolicyTokens &tokens, std::size_t &index);
 bool consume_ownerless_table_identifier(const SqlPolicyTokens &tokens, std::size_t &index);
@@ -16552,6 +16553,19 @@ bool consume_ownerless_schema_default_options(const SqlPolicyTokens &tokens, std
             return true;
         }
 
+        if (token_equals(tokens.values[index], "COMMENT")) {
+            ++index;
+            if (index < tokens.count && token_equals(tokens.values[index], "=")) {
+                ++index;
+            }
+            if (index >= tokens.count ||
+                !ownerless_sql_string_literal_token(tokens.values[index])) {
+                return false;
+            }
+            ++index;
+            continue;
+        }
+
         if (token_equals(tokens.values[index], "DEFAULT")) {
             ++index;
             if (index >= tokens.count) {
@@ -16581,6 +16595,11 @@ bool consume_ownerless_schema_default_options(const SqlPolicyTokens &tokens, std
         }
         ++index;
     }
+}
+
+bool ownerless_sql_string_literal_token(std::string_view token) {
+    return token.size() >= 2U && ((token.front() == '\'' && token.back() == '\'') ||
+                                  (token.front() == '"' && token.back() == '"'));
 }
 
 bool consume_ownerless_remaining_semicolons(const SqlPolicyTokens &tokens, std::size_t &index) {

@@ -354,6 +354,9 @@ metadata-only live-peer recovery with the native file-operation marker clear.
 Representative `CREATE DATABASE|SCHEMA`, `ALTER DATABASE|SCHEMA`, and
 table-bearing or empty `DROP DATABASE|SCHEMA` now have live-peer recovery for
 schema directory/`db.opt` creation, rewrite, or removal.
+Focused named `ALTER DATABASE ... COMMENT = 'literal'` prefinish recovery now
+also covers schema-comment `db.opt` rewrites while preserving the existing
+default charset/collation and keeping the native file-operation marker clear.
 `CREATE DATABASE|SCHEMA IF NOT EXISTS`
 duplicate no-op and missing-create outcomes plus missing `DROP SCHEMA IF
 EXISTS` no-op outcomes now have metadata-only live-peer recovery with the
@@ -393,7 +396,8 @@ temp-first plus permanent-first mixed temporary/permanent rename lists now prove
 the permanent pair keeps the durable native file-operation marker until no-live
 drain while the temporary target remains session-local and absent after crash;
 inside-MariaDB-loop multi-drop crash points,
-broader ALTER rebuild, broader schema option variants, broader view and
+broader ALTER rebuild, broader schema option variants beyond the focused
+schema-comment boundary, broader view and
 trigger variants, and mixed FK plus non-FK ALTER live-peer recovery remain
 partial/planned. Cyclic foreign-key truncate is covered as MariaDB's
 native pre-truncate error path with clear ownerless file-operation markers
