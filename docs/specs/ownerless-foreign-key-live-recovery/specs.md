@@ -50,12 +50,14 @@ boundaries:
 - `MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_ADD_FOREIGN_KEY`
 - `MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_FOREIGN_KEY`
 
-The classifier accepts bounded single-clause statements when neither the child
-table nor the referenced table has generated columns:
+The classifier accepts bounded FK-only statements when neither the child table
+nor the referenced table has generated columns:
 
 - `ALTER TABLE <table> ADD [CONSTRAINT <name>] FOREIGN KEY (...) REFERENCES <table> (...)`
-  with optional FK action tail and no comma-separated sibling ALTER clauses,
-- `ALTER TABLE <table> DROP FOREIGN KEY <name>`.
+  with optional FK action tail,
+- pure comma-separated lists of the same FK ADD clause form,
+- `ALTER TABLE <table> DROP FOREIGN KEY <name>`,
+- pure comma-separated lists of the same FK DROP clause form.
 
 These are treated as metadata-only ownerless recovery kinds because the covered
 boundary changes SQL/InnoDB dictionary metadata rather than creating, deleting,
@@ -80,6 +82,8 @@ keeps the existing conservative recovery behavior.
 In scope:
 
 - ordinary FK ADD and DROP prefinish crash recovery while a peer remains live,
+- pure comma-separated ordinary FK-only ADD and DROP list prefinish crash
+  recovery while a peer remains live,
 - marker-clear assertions for each covered ordinary live-recovery boundary,
 - direct CTest registrations for the ordinary focused FK crash selectors,
 - regression coverage proving generated-column FK ADD and DROP remain
@@ -87,7 +91,8 @@ In scope:
 
 Out of scope:
 
-- comma-separated multi-clause ALTER statements that include FK operations,
+- mixed comma-separated multi-clause ALTER statements that combine FK
+  operations with non-FK operations,
 - metadata-only live recovery for generated-column child or referenced FK
   ALTER forms,
 - FK rename recovery, already covered by rename-list live recovery,
@@ -100,7 +105,9 @@ Out of scope:
 No SQL feature is newly enabled. Supported ownerless FK DDL keeps the same
 MariaDB syntax and behavior, but an ordinary FK-only writer death after native
 FK metadata commit and before MyLite dictionary finish can now be recovered by
-another live ownerless opener instead of waiting for no-live recovery.
+another live ownerless opener instead of waiting for no-live recovery. This
+follow-up extends the same live-recovery lane to pure comma-separated ordinary
+FK ADD and DROP lists while leaving mixed FK/non-FK ALTER lists conservative.
 Generated-column FK DDL remains supported, but its crash boundary retains the
 native-file marker and waits for no-live recovery.
 

@@ -3300,6 +3300,11 @@ Tasks:
    live-peer recovery with the native file-operation marker clear, recovered
    FK metadata absence, orphan-row writes, parent deletes, and ownerless/native
    reopen before and after forced `.shm` rebuild.
+   Pure comma-separated foreign-key ADD and DROP list crash coverage now kills
+   two-FK ALTER writers at the same boundary, keeps the metadata-only native
+   file-operation marker clear, and verifies both recovered constraints or both
+   recovered absent constraints through enforcement, ownerless/native reopen,
+   and forced `.shm` rebuild.
    CHECK constraint crash coverage now kills an
    `ALTER TABLE ... ADD CONSTRAINT ... CHECK` writer after native
    table-definition mutation but before ownerless dictionary finish, then
@@ -3398,7 +3403,8 @@ Tasks:
    classes and option combinations beyond the covered ordinary/unique index,
    accepted explicit online DDL option variants, secondary-index rename,
    idempotent standalone index create/drop, ignored-index metadata,
-   primary-key replacement, foreign-key ALTER,
+   primary-key replacement, foreign-key ALTER including pure comma-separated
+   FK add/drop lists,
    same-schema foreign-key parent-table/child-table rename, cross-schema
    foreign-key parent-table/child-table rename, same-schema foreign-key
    multi-pair parent/child rename, cross-schema foreign-key multi-pair
@@ -4965,8 +4971,8 @@ Tasks:
    inside-MariaDB-loop multi-drop crash points, broader ALTER rebuild beyond
    the focused force, row-format, compressed, and charset-conversion cases,
    broader schema option variants, broader view and trigger variants, and
-   comma-separated non-rename foreign-key multi-clause ALTER live-peer recovery
-   remain planned.
+   mixed comma-separated non-rename foreign-key ALTER live-peer recovery remain
+   planned.
    Final no-live close
    forces native checkpoint
    proof for retained page-version WAL
@@ -5696,7 +5702,7 @@ primary-key replacement writer after native clustered-key rebuild with
 live-peer recovery plus retained-marker no-live drain, an AUTO_INCREMENT
 primary-key replacement writer after native clustered-key rebuild with
 live-peer recovery plus retained-marker no-live drain, foreign-key
-ADD/DROP writers after native
+ADD/DROP writers including pure comma-separated FK-only lists after native
 constraint metadata creation/removal, CHECK ADD/DROP writers after native
 table-definition mutation, a cross-schema foreign-key multi-pair rename writer
 after native FK metadata rewrite and file movement, a same-schema

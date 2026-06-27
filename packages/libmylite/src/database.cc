@@ -17491,39 +17491,14 @@ bool ownerless_alter_column_set_default_recovery_statement(
     return consume_ownerless_remaining_semicolons(tokens, index);
 }
 
-bool ownerless_alter_table_add_foreign_key_recovery_statement(
+bool consume_ownerless_alter_table_add_foreign_key_recovery_clause(
     mylite_db &db,
-    const SqlPolicyTokens &tokens
+    const SqlPolicyTokens &tokens,
+    std::size_t &index
 ) {
-    if (tokens.count < 11U || !token_equals(tokens.values[0], "ALTER") ||
-        !token_equals(tokens.values[1], "TABLE")) {
+    if (index >= tokens.count || !token_equals(tokens.values[index], "ADD")) {
         return false;
     }
-
-    std::size_t index = 2U;
-    std::string child_schema_name;
-    std::string child_table_name;
-    if (!consume_ownerless_table_identifier_parts(
-            db,
-            tokens,
-            index,
-            &child_schema_name,
-            &child_table_name
-        ) ||
-        index >= tokens.count || !token_equals(tokens.values[index], "ADD")) {
-        return false;
-    }
-    bool child_has_generated_columns = true;
-    if (!ownerless_table_has_generated_columns(
-            db,
-            child_schema_name,
-            child_table_name,
-            &child_has_generated_columns
-        ) ||
-        child_has_generated_columns) {
-        return false;
-    }
-
     ++index;
     if (index < tokens.count && token_equals(tokens.values[index], "CONSTRAINT")) {
         ++index;
@@ -17565,26 +17540,18 @@ bool ownerless_alter_table_add_foreign_key_recovery_statement(
         return false;
     }
 
-    bool saw_semicolon = false;
-    for (; index < tokens.count; ++index) {
-        if (token_equals(tokens.values[index], ",")) {
-            return false;
-        }
-        if (saw_semicolon && !token_equals(tokens.values[index], ";")) {
-            return false;
-        }
-        if (token_equals(tokens.values[index], ";")) {
-            saw_semicolon = true;
-        }
+    while (index < tokens.count && !token_equals(tokens.values[index], ",") &&
+           !token_equals(tokens.values[index], ";")) {
+        ++index;
     }
     return true;
 }
 
-bool ownerless_alter_table_drop_foreign_key_recovery_statement(
+bool ownerless_alter_table_add_foreign_key_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 ) {
-    if (tokens.count < 7U || !token_equals(tokens.values[0], "ALTER") ||
+    if (tokens.count < 11U || !token_equals(tokens.values[0], "ALTER") ||
         !token_equals(tokens.values[1], "TABLE")) {
         return false;
     }
@@ -17598,8 +17565,48 @@ bool ownerless_alter_table_drop_foreign_key_recovery_statement(
             index,
             &child_schema_name,
             &child_table_name
+        )) {
+        return false;
+    }
+    bool child_has_generated_columns = true;
+    if (!ownerless_table_has_generated_columns(
+            db,
+            child_schema_name,
+            child_table_name,
+            &child_has_generated_columns
         ) ||
-        index + 2U >= tokens.count || !token_equals(tokens.values[index], "DROP") ||
+        child_has_generated_columns) {
+        return false;
+    }
+
+    bool saw_clause = false;
+    for (;;) {
+        if (!consume_ownerless_alter_table_add_foreign_key_recovery_clause(db, tokens, index)) {
+            return false;
+        }
+        saw_clause = true;
+        if (index >= tokens.count) {
+            return saw_clause;
+        }
+        if (token_equals(tokens.values[index], ",")) {
+            ++index;
+            continue;
+        }
+        if (token_equals(tokens.values[index], ";")) {
+            return consume_ownerless_remaining_semicolons(tokens, index);
+        }
+        return false;
+    }
+}
+
+bool consume_ownerless_alter_table_drop_foreign_key_recovery_clause(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::size_t &index,
+    std::string_view child_schema_name,
+    std::string_view child_table_name
+) {
+    if (index + 2U >= tokens.count || !token_equals(tokens.values[index], "DROP") ||
         !token_equals(tokens.values[index + 1U], "FOREIGN") ||
         !token_equals(tokens.values[index + 2U], "KEY")) {
         return false;
@@ -17610,9 +17617,6 @@ bool ownerless_alter_table_drop_foreign_key_recovery_statement(
     }
     const std::string constraint_name = ownerless_normalized_identifier(tokens.values[index]);
     ++index;
-    if (!consume_ownerless_remaining_semicolons(tokens, index)) {
-        return false;
-    }
 
     bool child_has_generated_columns = true;
     if (!ownerless_table_has_generated_columns(
@@ -17648,7 +17652,69 @@ bool ownerless_alter_table_drop_foreign_key_recovery_statement(
         return false;
     }
 
+    while (index < tokens.count && !token_equals(tokens.values[index], ",") &&
+           !token_equals(tokens.values[index], ";")) {
+        ++index;
+    }
     return true;
+}
+
+bool ownerless_alter_table_drop_foreign_key_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    if (tokens.count < 7U || !token_equals(tokens.values[0], "ALTER") ||
+        !token_equals(tokens.values[1], "TABLE")) {
+        return false;
+    }
+
+    std::size_t index = 2U;
+    std::string child_schema_name;
+    std::string child_table_name;
+    if (!consume_ownerless_table_identifier_parts(
+            db,
+            tokens,
+            index,
+            &child_schema_name,
+            &child_table_name
+        )) {
+        return false;
+    }
+    bool child_has_generated_columns = true;
+    if (!ownerless_table_has_generated_columns(
+            db,
+            child_schema_name,
+            child_table_name,
+            &child_has_generated_columns
+        ) ||
+        child_has_generated_columns) {
+        return false;
+    }
+
+    bool saw_clause = false;
+    for (;;) {
+        if (!consume_ownerless_alter_table_drop_foreign_key_recovery_clause(
+                db,
+                tokens,
+                index,
+                child_schema_name,
+                child_table_name
+            )) {
+            return false;
+        }
+        saw_clause = true;
+        if (index >= tokens.count) {
+            return saw_clause;
+        }
+        if (token_equals(tokens.values[index], ",")) {
+            ++index;
+            continue;
+        }
+        if (token_equals(tokens.values[index], ";")) {
+            return consume_ownerless_remaining_semicolons(tokens, index);
+        }
+        return false;
+    }
 }
 
 bool ownerless_create_schema_recovery_statement(const SqlPolicyTokens &tokens) {
