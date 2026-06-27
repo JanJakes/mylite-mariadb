@@ -4878,6 +4878,7 @@ Tasks:
    truncate/recreate, `DROP TABLE` `FILE_DELETE`, and replacement-copy
    `CREATE OR REPLACE TABLE ... LIKE`/`CREATE OR REPLACE TABLE ... AS SELECT`
    marker coverage plus representative `ALTER TABLE ... FORCE` and
+   `ALTER TABLE ... ENGINE=InnoDB` and
    `ALTER TABLE ... ROW_FORMAT=DYNAMIC` rebuild marker coverage, plus
    compressed `ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8` rebuild marker coverage
    at the same prefinish crash boundary, now extended to the existing
@@ -5510,6 +5511,13 @@ Minimum suites before support can be claimed:
     coverage proves live-peer cleanup remains busy until no-live recovery and
     recovered charset/collation metadata, retained rows, post-recovery DML,
     ownerless/native reopen, and forced `.shm` rebuild remain correct,
+  - after representative same-engine `ALTER TABLE ... ENGINE=InnoDB` native
+    rebuild but before ownerless dictionary finish; hook coverage proves
+    live-peer recovery after pre-execution metadata proves the source table is
+    an InnoDB base table, retains the native file-operation marker while the
+    peer remains open, drains the marker after final no-live recovery, and
+    verifies rows, secondary-index metadata/use, ownerless/native reopen, and
+    forced `.shm` rebuild remain correct,
   - after representative `CREATE TABLE ... LIKE` destination table creation
     but before ownerless dictionary finish; hook coverage proves live-peer
     cleanup can finish the dead dictionary generation, recovered native files,
@@ -7624,10 +7632,11 @@ subsystems that this mode needs:
      generated-column child foreign-key truncate prefinish boundaries, plus
      simple temporary DDL, pure multi-pair temporary rename chains, and one
      mixed temporary/permanent rename-list prefinish boundary, especially
-     remaining rename variants, other rebuild variants, broader metadata-only
-     DDL, broader mixed temporary/permanent rename orders, broader schema
-     option variants, intra-loop drop cases, and broader DDL file lifecycle
-     while peers remain live. Partition truncate
+     remaining rename variants, other rebuild variants beyond the covered
+     FORCE, same-engine ENGINE, row-format, compressed row-format, and charset
+     boundaries, broader metadata-only DDL, broader mixed temporary/permanent
+     rename orders, broader schema option variants, intra-loop drop cases, and
+     broader DDL file lifecycle while peers remain live. Partition truncate
      remains governed by the ownerless partition-DDL rejection policy, cyclic
      FK truncate under default FK checks is covered as MariaDB's pre-truncate
      error path, unchecked `FOREIGN_KEY_CHECKS=0` cyclic FK truncate now has

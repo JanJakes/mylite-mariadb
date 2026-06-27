@@ -2338,6 +2338,10 @@ bool ownerless_drop_schema_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_drop_schema_if_exists_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_drop_view_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_drop_trigger_recovery_statement(const SqlPolicyTokens &tokens);
+bool ownerless_alter_table_engine_innodb_rebuild_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
 bool ownerless_alter_table_force_rebuild_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_alter_table_charset_convert_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_alter_table_row_format_dynamic_recovery_statement(const SqlPolicyTokens &tokens);
@@ -2388,6 +2392,13 @@ bool ownerless_table_metadata_lookup(
     std::string_view schema_name,
     std::string_view table_name,
     bool *out_exists
+);
+bool ownerless_table_engine_matches(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    std::string_view engine_name,
+    bool *out_matches
 );
 bool ownerless_column_metadata_lookup(
     mylite_db &db,
@@ -15767,7 +15778,8 @@ std::uint32_t ownerless_dictionary_recovery_kind_for_statement(
     if (ownerless_alter_table_drop_foreign_key_recovery_statement(db, tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_FOREIGN_KEY;
     }
-    if (ownerless_alter_table_force_rebuild_recovery_statement(tokens)) {
+    if (ownerless_alter_table_engine_innodb_rebuild_recovery_statement(db, tokens) ||
+        ownerless_alter_table_force_rebuild_recovery_statement(tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_FORCE_REBUILD;
     }
     if (ownerless_alter_table_charset_convert_recovery_statement(tokens)) {
@@ -16301,6 +16313,50 @@ bool ownerless_table_metadata_lookup(
     return true;
 }
 
+bool ownerless_table_engine_matches(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    std::string_view engine_name,
+    bool *out_matches
+) {
+    if (out_matches == nullptr || schema_name.empty() || table_name.empty() ||
+        engine_name.empty()) {
+        return false;
+    }
+    *out_matches = false;
+
+    const ErrorSnapshot snapshot = capture_error(db);
+    const std::string escaped_schema = ownerless_escape_metadata_literal(db, schema_name);
+    const std::string escaped_table = ownerless_escape_metadata_literal(db, table_name);
+    const std::string escaped_engine = ownerless_escape_metadata_literal(db, engine_name);
+    const std::string sql = "SELECT COUNT(*) FROM information_schema.tables "
+                            "WHERE table_schema = '" +
+                            escaped_schema + "' AND table_name = '" + escaped_table +
+                            "' AND table_type = 'BASE TABLE' "
+                            "AND UPPER(engine) = UPPER('" +
+                            escaped_engine + "')";
+
+    bool query_succeeded = false;
+    bool matches = false;
+    if (mysql_query(&db.mysql, sql.c_str()) == 0) {
+        MYSQL_RES *result = mysql_store_result(&db.mysql);
+        if (result != nullptr) {
+            MYSQL_ROW row = mysql_fetch_row(result);
+            matches =
+                row != nullptr && row[0] != nullptr && std::strtoull(row[0], nullptr, 10) != 0U;
+            query_succeeded = row != nullptr && row[0] != nullptr;
+            mysql_free_result(result);
+        }
+    }
+    restore_error(db, snapshot);
+    if (!query_succeeded) {
+        return false;
+    }
+    *out_matches = matches;
+    return true;
+}
+
 bool ownerless_column_metadata_lookup(
     mylite_db &db,
     std::string_view schema_name,
@@ -16782,7 +16838,7 @@ bool ownerless_alter_view_recovery_statement(const SqlPolicyTokens &tokens) {
 }
 
 bool ownerless_alter_table_rename_recovery_statement(const SqlPolicyTokens &tokens) {
-    if (tokens.count < 6U || !token_equals(tokens.values[0], "ALTER") ||
+    if (tokens.count < 5U || !token_equals(tokens.values[0], "ALTER") ||
         !token_equals(tokens.values[1], "TABLE")) {
         return false;
     }
@@ -18429,6 +18485,45 @@ bool ownerless_drop_trigger_recovery_statement(const SqlPolicyTokens &tokens) {
         }
     }
     return true;
+}
+
+bool ownerless_alter_table_engine_innodb_rebuild_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    if (tokens.count < 6U || !token_equals(tokens.values[0], "ALTER") ||
+        !token_equals(tokens.values[1], "TABLE")) {
+        return false;
+    }
+
+    std::size_t index = 2U;
+    std::string schema_name;
+    std::string table_name;
+    if (!consume_ownerless_table_identifier_parts(db, tokens, index, &schema_name, &table_name) ||
+        index >= tokens.count || !token_equals(tokens.values[index], "ENGINE")) {
+        return false;
+    }
+    ++index;
+    if (index < tokens.count && token_equals(tokens.values[index], "=")) {
+        ++index;
+    }
+    if (index >= tokens.count || !token_equals(tokens.values[index], "INNODB")) {
+        return false;
+    }
+    ++index;
+    if (!consume_ownerless_remaining_semicolons(tokens, index)) {
+        return false;
+    }
+
+    bool source_is_innodb = false;
+    return ownerless_table_engine_matches(
+               db,
+               schema_name,
+               table_name,
+               "InnoDB",
+               &source_is_innodb
+           ) &&
+           source_is_innodb;
 }
 
 bool ownerless_alter_table_force_rebuild_recovery_statement(const SqlPolicyTokens &tokens) {

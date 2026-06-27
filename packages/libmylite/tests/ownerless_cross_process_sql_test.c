@@ -915,6 +915,7 @@ static void test_ownerless_compressed_row_format_ddl_refreshes_peer_dictionary(v
 static void test_ownerless_compressed_row_format_key_block_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_table_comment_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_force_rebuild_ddl_refreshes_peer_dictionary(void);
+static void test_ownerless_engine_rebuild_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_column_default_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_column_idempotent_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_instant_column_variants_refresh_peer_dictionary(void);
@@ -1163,6 +1164,7 @@ static void test_crashed_column_idempotent_default_drop_dictionary_ddl_preserves
 static void test_crashed_column_rename_dictionary_ddl_recovers_dependent_expressions(void);
 static void test_crashed_force_rebuild_dictionary_ddl_recovers_rebuilt_table(void);
 static void test_crashed_force_rebuild_dictionary_ddl_marks_file_op_checkpoint(void);
+static void test_crashed_engine_rebuild_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_charset_convert_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(void);
 static void test_crashed_row_format_dictionary_ddl_marks_file_op_checkpoint(void);
@@ -1453,6 +1455,7 @@ static void run_ownerless_compressed_row_format_key_block_ddl_sequence(
 );
 static void run_ownerless_table_comment_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_force_rebuild_ddl_sequence(open_database_paths paths, child_pipes pipes);
+static void run_ownerless_engine_rebuild_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_column_default_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_column_idempotent_ddl_sequence(
     open_database_paths paths,
@@ -2144,6 +2147,7 @@ static void rename_expression_column_until_dictionary_finish_fault(
     int ready_fd
 );
 static void force_rebuild_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
+static void engine_rebuild_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void charset_convert_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void row_format_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void compressed_row_format_until_dictionary_finish_fault(
@@ -3987,6 +3991,10 @@ int main(int argc, char **argv) {
         test_ownerless_force_rebuild_ddl_refreshes_peer_dictionary();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "engine-rebuild-ddl") == 0) {
+        test_ownerless_engine_rebuild_ddl_refreshes_peer_dictionary();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "column-default-ddl") == 0) {
         test_ownerless_column_default_ddl_refreshes_peer_dictionary();
         return 0;
@@ -5456,6 +5464,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-engine-rebuild-file-op-marker-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_engine_rebuild_dictionary_ddl_marks_file_op_checkpoint();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-charset-convert-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_charset_convert_dictionary_ddl_recovers_metadata();
@@ -5886,7 +5900,7 @@ int main(int argc, char **argv) {
             "generated-column-blocked-function-policy|"
             "charset-convert-ddl|row-format-ddl|compressed-row-format-ddl|"
             "compressed-row-format-key-block-ddl|"
-            "table-comment-ddl|force-rebuild-ddl|column-default-ddl|"
+            "table-comment-ddl|force-rebuild-ddl|engine-rebuild-ddl|column-default-ddl|"
             "column-idempotent-ddl|instant-column-variants|view-ddl|view-ddl-variants|"
             "view-idempotent-ddl|view-check-option|"
             "view-nested-check-option|view-prepared-check-option|"
@@ -6089,7 +6103,8 @@ int main(int argc, char **argv) {
             "dictionary-column-idempotent-default-drop-crash|"
             "dictionary-column-rename-expression-crash|"
             "dictionary-force-rebuild-crash|"
-            "dictionary-force-rebuild-file-op-marker-crash|",
+            "dictionary-force-rebuild-file-op-marker-crash|"
+            "dictionary-engine-rebuild-file-op-marker-crash|",
             stderr
         );
         fputs(
@@ -6280,6 +6295,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     ),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_table_comment_ddl_refreshes_peer_dictionary),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_force_rebuild_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_engine_rebuild_ddl_refreshes_peer_dictionary),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_column_default_ddl_refreshes_peer_dictionary),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_column_idempotent_ddl_refreshes_peer_dictionary),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_instant_column_variants_refresh_peer_dictionary),
@@ -6558,6 +6574,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_crashed_column_rename_dictionary_ddl_recovers_dependent_expressions
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_force_rebuild_dictionary_ddl_recovers_rebuilt_table),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_engine_rebuild_dictionary_ddl_marks_file_op_checkpoint),
     OWNERLESS_SQL_TEST_CASE(test_crashed_charset_convert_dictionary_ddl_recovers_metadata),
     OWNERLESS_SQL_TEST_CASE(test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table),
     OWNERLESS_SQL_TEST_CASE(test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table
@@ -29163,10 +29180,13 @@ static void test_ownerless_table_comment_ddl_refreshes_peer_dictionary(void) {
     free(root);
 }
 
-static void test_ownerless_force_rebuild_ddl_refreshes_peer_dictionary(void) {
+static void run_ownerless_rebuild_ddl_refreshes_peer_dictionary(
+    void (*sequence_fn)(open_database_paths, child_pipes),
+    const char *database_basename
+) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
-    char *database_path = path_join(root, "ownerless-force-rebuild-ddl.mylite");
+    char *database_path = path_join(root, database_basename);
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     mylite_db *db;
     int rebuild_ready_pipe[2];
@@ -29187,7 +29207,7 @@ static void test_ownerless_force_rebuild_ddl_refreshes_peer_dictionary(void) {
     if (rebuild_child == 0) {
         close(rebuild_ready_pipe[0]);
         close(rebuild_release_pipe[1]);
-        run_ownerless_force_rebuild_ddl_sequence(
+        sequence_fn(
             paths,
             (child_pipes){
                 .ready_write_fd = rebuild_ready_pipe[1],
@@ -29273,6 +29293,20 @@ static void test_ownerless_force_rebuild_ddl_refreshes_peer_dictionary(void) {
     free(runtime_root);
     remove_tree(root);
     free(root);
+}
+
+static void test_ownerless_force_rebuild_ddl_refreshes_peer_dictionary(void) {
+    run_ownerless_rebuild_ddl_refreshes_peer_dictionary(
+        run_ownerless_force_rebuild_ddl_sequence,
+        "ownerless-force-rebuild-ddl.mylite"
+    );
+}
+
+static void test_ownerless_engine_rebuild_ddl_refreshes_peer_dictionary(void) {
+    run_ownerless_rebuild_ddl_refreshes_peer_dictionary(
+        run_ownerless_engine_rebuild_ddl_sequence,
+        "ownerless-engine-rebuild-ddl.mylite"
+    );
 }
 
 static void test_ownerless_column_default_ddl_refreshes_peer_dictionary(void) {
@@ -56457,10 +56491,14 @@ static void test_crashed_column_rename_dictionary_ddl_recovers_dependent_express
     free(root);
 }
 
-static void run_crashed_force_rebuild_dictionary_ddl_recovers_rebuilt_table(int assert_marker) {
+static void run_crashed_rebuild_dictionary_ddl_recovers_rebuilt_table(
+    ownerless_dictionary_fault_writer_fn writer_fn,
+    const char *database_basename,
+    int assert_marker
+) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
-    char *database_path = path_join(root, "ownerless-dictionary-force-rebuild-crash.mylite");
+    char *database_path = path_join(root, database_basename);
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     char *datadir_path;
     char *app_path;
@@ -56555,7 +56593,7 @@ static void run_crashed_force_rebuild_dictionary_ddl_recovers_rebuilt_table(int 
         close(writer_ready_pipe[0]);
         close(peer_ready_pipe[0]);
         close(peer_release_pipe[1]);
-        force_rebuild_until_dictionary_finish_fault(paths, writer_ready_pipe[1]);
+        writer_fn(paths, writer_ready_pipe[1]);
     }
 
     close(writer_ready_pipe[1]);
@@ -56691,11 +56729,27 @@ static void run_crashed_force_rebuild_dictionary_ddl_recovers_rebuilt_table(int 
 }
 
 static void test_crashed_force_rebuild_dictionary_ddl_recovers_rebuilt_table(void) {
-    run_crashed_force_rebuild_dictionary_ddl_recovers_rebuilt_table(0);
+    run_crashed_rebuild_dictionary_ddl_recovers_rebuilt_table(
+        force_rebuild_until_dictionary_finish_fault,
+        "ownerless-dictionary-force-rebuild-crash.mylite",
+        0
+    );
 }
 
 static void test_crashed_force_rebuild_dictionary_ddl_marks_file_op_checkpoint(void) {
-    run_crashed_force_rebuild_dictionary_ddl_recovers_rebuilt_table(1);
+    run_crashed_rebuild_dictionary_ddl_recovers_rebuilt_table(
+        force_rebuild_until_dictionary_finish_fault,
+        "ownerless-dictionary-force-rebuild-crash.mylite",
+        1
+    );
+}
+
+static void test_crashed_engine_rebuild_dictionary_ddl_marks_file_op_checkpoint(void) {
+    run_crashed_rebuild_dictionary_ddl_recovers_rebuilt_table(
+        engine_rebuild_until_dictionary_finish_fault,
+        "ownerless-dictionary-engine-rebuild-crash.mylite",
+        1
+    );
 }
 
 static void test_crashed_charset_convert_dictionary_ddl_recovers_metadata(void) {
@@ -65322,7 +65376,11 @@ static void run_ownerless_table_comment_ddl_sequence(open_database_paths paths, 
     _exit(0);
 }
 
-static void run_ownerless_force_rebuild_ddl_sequence(open_database_paths paths, child_pipes pipes) {
+static void run_ownerless_rebuild_ddl_sequence(
+    open_database_paths paths,
+    child_pipes pipes,
+    const char *alter_sql
+) {
     mylite_db *db;
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -65346,13 +65404,32 @@ static void run_ownerless_force_rebuild_ddl_sequence(open_database_paths paths, 
     signal_pipe_message(pipes.ready_write_fd);
 
     wait_for_pipe_message(pipes.release_read_fd);
-    exec_ok(db, "ALTER TABLE app.ownerless_force_rebuild_base FORCE");
+    exec_ok(db, alter_sql);
     signal_pipe_message(pipes.ready_write_fd);
 
     assert(close(pipes.ready_write_fd) == 0);
     assert(close(pipes.release_read_fd) == 0);
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);
+}
+
+static void run_ownerless_force_rebuild_ddl_sequence(open_database_paths paths, child_pipes pipes) {
+    run_ownerless_rebuild_ddl_sequence(
+        paths,
+        pipes,
+        "ALTER TABLE app.ownerless_force_rebuild_base FORCE"
+    );
+}
+
+static void run_ownerless_engine_rebuild_ddl_sequence(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    run_ownerless_rebuild_ddl_sequence(
+        paths,
+        pipes,
+        "ALTER TABLE app.ownerless_force_rebuild_base ENGINE InnoDB"
+    );
 }
 
 static void run_ownerless_column_default_ddl_sequence(
@@ -71153,6 +71230,15 @@ static void force_rebuild_until_dictionary_finish_fault(open_database_paths path
         "dictionary-before-finish",
         "ALTER TABLE app.ownerless_force_rebuild_crash_base "
         "FORCE, ALGORITHM=COPY, LOCK=EXCLUSIVE"
+    );
+}
+
+static void engine_rebuild_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_force_rebuild_crash_base ENGINE=InnoDB"
     );
 }
 
