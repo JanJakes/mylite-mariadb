@@ -4891,7 +4891,10 @@ Tasks:
    multi-pair rename file-move boundaries. Focused `TRUNCATE TABLE
    schema.table` prefinish crash
    coverage now uses a separate recoverable dictionary marker to provide
-   live-peer recovery for the native truncate/recreate boundary. Focused
+   live-peer recovery for the native truncate/recreate boundary. Child-only
+   foreign-key table truncate now uses that same recoverable truncate lane and
+   verifies FK metadata/enforcement, marker retention/drain, ownerless/native
+   reopen, and forced `.shm` rebuild. Focused
    `DROP TABLE schema.table` prefinish crash coverage now uses a separate
    recoverable dictionary marker to provide live-peer recovery for the native
    file-removal boundary. Focused `ALTER TABLE schema.table FORCE,
@@ -7573,9 +7576,10 @@ subsystems that this mode needs:
      AUTO_INCREMENT, and AUTO_INCREMENT descending primary-key replacement
      prefinish boundaries,
      especially remaining
-     rename/truncate variants, other rebuild variants, broader
-     metadata-only DDL, temporary, broader schema option variants, intra-loop
-     drop cases, and broader DDL file lifecycle while peers remain live.
+     rename variants, partition truncate, parent/self/cyclic/generated
+     foreign-key truncate, other rebuild variants, broader metadata-only DDL,
+     temporary, broader schema option variants, intra-loop drop cases, and
+     broader DDL file lifecycle while peers remain live.
   2. Close remaining transaction crash windows, especially native
      rollback/savepoint-rollback internals and concurrent-writer savepoint
      schedules that combine native undo, ownerless page-write ownership, and

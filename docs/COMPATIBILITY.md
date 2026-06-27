@@ -319,6 +319,9 @@ foreign-key parent/child multi-pair rename coverage, plus implicit-schema
 `RENAME TABLE` and native-loop `ALTER TABLE ... RENAME TO` forms. Focused
 non-temporary `TRUNCATE TABLE schema.table` and implicit-schema `TRUNCATE
 table` now have live-peer recovery for the native truncate/recreate boundary;
+child-only foreign-key table truncate now also has live-peer recovery that
+preserves parent rows, child emptiness, FK metadata/enforcement, marker
+retention, marker drain, ownerless/native reopen, and forced `.shm` rebuild;
 explicit and implicit single-table drop now have live-peer recovery for native
 file removal, and focused `ALTER TABLE ... CONVERT TO CHARACTER SET` now has
 live-peer recovery for its native ALTER rewrite boundary. Simple `CREATE VIEW`,
@@ -354,9 +357,10 @@ prefinish recovery also uses metadata-only live-peer recovery with the native
 file-operation marker clear.
 `DROP TEMPORARY TABLE`,
 inside-MariaDB-loop multi-drop crash points,
-partition/FK truncate variants, broader ALTER rebuild, broader schema option
-variants, broader view and trigger variants, and non-rename foreign-key
-multi-DDL live-peer recovery remain partial/planned.
+partition truncate plus parent/self/cyclic/generated foreign-key truncate
+variants, broader ALTER rebuild, broader schema option variants, broader view
+and trigger variants, and non-rename foreign-key multi-DDL live-peer recovery
+remain partial/planned.
 Focused hook coverage also now forces a native checkpoint, clears the
 ownerless file-op redo flag, updates a file-per-table InnoDB table, and
 observes the flag set again, proving ordinary post-checkpoint DML reaches

@@ -159,8 +159,10 @@ Passed:
 
 ## Risks And Follow-Up
 
-- Foreign-key and partition truncate classes need separate compatibility and
-  crash-recovery coverage.
+- Child-only foreign-key truncate is covered by
+  `ownerless-foreign-key-child-truncate-live-recovery`; parent/self/cyclic or
+  generated-column foreign-key truncate and partition truncate classes still
+  need separate compatibility and crash-recovery coverage.
 - `DROP TABLE` is the next table-file lifecycle class because it removes the
   `.frm`/`.ibd` pair rather than recreating an empty table.
 - Broader DDL/file-lifecycle recovery and external randomized stress remain
