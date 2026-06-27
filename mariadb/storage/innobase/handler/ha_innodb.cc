@@ -7930,9 +7930,14 @@ ha_innobase::innobase_set_max_autoinc(
 
 		dict_table_autoinc_update_if_greater(m_prebuilt->table, auto_inc);
 		if (UNIV_UNLIKELY(mylite_ownerless_innodb_autoinc_has_hooks())) {
+			const ulonglong persistent_autoinc =
+				m_prebuilt->table->persistent_autoinc &&
+				!m_prebuilt->table->is_temporary()
+				? auto_inc : 0;
 			const int publish_result =
 				mylite_ownerless_innodb_autoinc_publish(
-					m_prebuilt->table->id, auto_inc);
+					m_prebuilt->table->id, auto_inc,
+					persistent_autoinc);
 			if (publish_result != MYLITE_OWNERLESS_INNODB_LOCK_OK
 			    && publish_result !=
 			       MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE) {
@@ -17371,6 +17376,7 @@ ha_innobase::get_auto_increment(
 	if (innobase_autoinc_lock_mode != AUTOINC_OLD_STYLE_LOCKING) {
 		ulonglong	current;
 		ulonglong	next_value;
+		ulonglong	ownerless_persistent_autoinc = 0;
 
 		current = *first_value;
 
@@ -17389,10 +17395,26 @@ ha_innobase::get_auto_increment(
 				m_prebuilt->table,
 				m_prebuilt->autoinc_last_value);
 			if (UNIV_UNLIKELY(mylite_ownerless_innodb_autoinc_has_hooks())) {
+				if (m_prebuilt->table->persistent_autoinc
+				    && !m_prebuilt->table->is_temporary()) {
+					ownerless_persistent_autoinc =
+						*nb_reserved_values <= 1
+						? current
+						: innobase_next_autoinc(
+							current,
+							*nb_reserved_values - 1,
+							increment, offset,
+							col_max_value);
+					if (ownerless_persistent_autoinc
+					    > col_max_value) {
+						ownerless_persistent_autoinc = 0;
+					}
+				}
 				const int publish_result =
 					mylite_ownerless_innodb_autoinc_publish(
 						m_prebuilt->table->id,
-						m_prebuilt->autoinc_last_value);
+						m_prebuilt->autoinc_last_value,
+						ownerless_persistent_autoinc);
 				if (publish_result
 				    != MYLITE_OWNERLESS_INNODB_LOCK_OK
 				    && publish_result

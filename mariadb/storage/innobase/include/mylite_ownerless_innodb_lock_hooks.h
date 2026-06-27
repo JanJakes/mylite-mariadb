@@ -253,6 +253,7 @@ typedef int (*mylite_ownerless_innodb_autoinc_read_callback)(
 typedef int (*mylite_ownerless_innodb_autoinc_publish_callback)(
     uint64_t table_id,
     uint64_t next_value,
+    uint64_t persistent_value,
     void *context);
 
 enum mylite_ownerless_innodb_lock_external_wait_kind {
@@ -612,7 +613,14 @@ int mylite_ownerless_innodb_autoinc_read(
     uint64_t table_id,
     uint64_t seed_next_value,
     uint64_t *out_next_value);
-int mylite_ownerless_innodb_autoinc_publish(uint64_t table_id, uint64_t next_value);
+int mylite_ownerless_innodb_autoinc_publish(
+    uint64_t table_id,
+    uint64_t next_value,
+    uint64_t persistent_value);
+int mylite_ownerless_innodb_autoinc_replay_persistent(
+    uint64_t table_id,
+    uint64_t next_value,
+    uint64_t persistent_value);
 
 #ifdef __cplusplus
 }

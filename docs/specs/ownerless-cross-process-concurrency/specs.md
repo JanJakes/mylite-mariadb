@@ -1802,7 +1802,9 @@ Tasks:
    shared `LOCK_AUTO_INC`-compatible registry entry before reading that local
    counter, seeds or refreshes the local counter from the shared
    table-ID-keyed high watermark, and publishes the next available value before
-   releasing the local mutex. Ownerless DDL coverage now raises and then lowers
+   releasing the local mutex. Registry slots carry both MariaDB's shared next
+   available value and the native root-page high-watermark that InnoDB must
+   persist for restart. Ownerless DDL coverage now raises and then lowers
    `ALTER TABLE ... AUTO_INCREMENT` from one process while an already-open peer
    inserts implicit IDs, proving the peer refresh path and high-watermark
    registry do not reuse values before or after forced `.shm` rebuild.
@@ -1821,13 +1823,14 @@ Tasks:
    from an existing AUTO_INCREMENT column while retaining a unique secondary
    index, verifies the live peer sees the replacement clustered key, and
    preserves InnoDB's no-reuse gap after a duplicate replacement-key write
-   consumes an AUTO_INCREMENT value. The registry header now carries a shared
-   native-checkpoint pending bit that is set only when an ownerless publish
-   creates or raises a table high watermark; the final no-live ownerless close
-   path drains that bit through the existing native checkpoint/reclaim flow
-   before clearing it, so forced `.shm` rebuild seeds from native pages that
-   include consumed AUTO_INCREMENT reservations without adding per-insert
-   durable writes.
+   consumes an AUTO_INCREMENT value. Failed implicit-statement cleanup snapshots
+   the active registry slots after native rollback, replays each native
+   high-watermark to the InnoDB root page with a restart-style mini-transaction,
+   checkpoints, and only then clears the shared checkpoint-pending bit. The
+   final no-live ownerless close path still drains any remaining pending bit
+   through the existing native checkpoint/reclaim flow before clearing it, so
+   forced `.shm` rebuild seeds from native pages that include consumed
+   AUTO_INCREMENT reservations without adding per-insert durable writes.
    Traditional native `LOCK_AUTO_INC` table locks
    continue to mirror through the shared InnoDB lock registry.
    Ownerless embedded waits use the current SQL thread's session lock-wait
@@ -2037,10 +2040,12 @@ Tasks:
    forced refresh may overlay a visible native disk page even when local page
    LSN ordering alone would not prove it newer, preventing stale full-page
    flushes from erasing peer commits on the same physical page.
-   The per-space transaction page-write gate remains statement-scoped:
-   explicit transactions release gate markers at statement end so unrelated
-   writers in the same tablespace are not serialized for the transaction
-   lifetime. Explicit non-autocommit preread and prepare paths do not add
+   The per-space transaction page-write gate remains statement-scoped for clean
+   preread/prepare ownership: explicit transactions release clean gate markers
+   at statement end, including statement-failure cleanup, while keeping a gate
+   when dirty transaction pages or captured transaction images in that
+   tablespace still need commit/rollback protection. Explicit non-autocommit
+   preread and prepare paths do not add
    more transaction gates after a statement already holds one, and their
    additional clean page-write probes are untracked and nonblocking; a conflict
    returns without publishing shared-registry waiters and skips only the clean
@@ -2726,10 +2731,11 @@ Tasks:
    preserves a unique secondary index on the AUTO_INCREMENT column while moving
    `PRIMARY` to `code`, verifies the already-open peer receives the next ID,
    and verifies a failed duplicate replacement-key insert leaves a non-reused
-   AUTO_INCREMENT gap across forced `.shm` rebuild. AUTO_INCREMENT descending
-   primary-key replacement coverage keeps the same allocation proof while moving
-   `PRIMARY` to `code DESC`, verifies `COLLATION = 'D'` metadata, and verifies
-   the duplicate-key allocation gap across forced `.shm` rebuild.
+   AUTO_INCREMENT gap across forced `.shm` rebuild after post-rollback native
+   high-watermark replay and checkpoint. AUTO_INCREMENT descending primary-key
+   replacement coverage keeps the same allocation proof while moving `PRIMARY`
+   to `code DESC`, verifies `COLLATION = 'D'` metadata, and verifies the
+   duplicate-key allocation gap across forced `.shm` rebuild.
    Secondary-index rename coverage now performs
    `ALTER TABLE ... RENAME INDEX` from another ownerless process, verifies an
    already-open peer observes the new index name while the old `FORCE INDEX`

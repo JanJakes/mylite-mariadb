@@ -11949,6 +11949,8 @@ static void test_autoinc_registry_preserves_high_watermarks(void) {
     void *registry;
     uint64_t next_value = 0U;
     int checkpoint_pending = 1;
+    mylite_ownerless_autoinc_registry_entry entries[MYLITE_TEST_AUTOINC_REGISTRY_SLOT_COUNT];
+    size_t entry_count = 0U;
 
     truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
     registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
@@ -11988,7 +11990,8 @@ static void test_autoinc_registry_preserves_high_watermarks(void) {
             1U,
             MYLITE_TEST_OWNER_GENERATION(1U),
             101U,
-            12U
+            12U,
+            11U
         ) == MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK
     );
     assert(
@@ -12039,7 +12042,8 @@ static void test_autoinc_registry_preserves_high_watermarks(void) {
             2U,
             MYLITE_TEST_OWNER_GENERATION(2U),
             101U,
-            10U
+            10U,
+            9U
         ) == MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK
     );
     assert(
@@ -12077,13 +12081,32 @@ static void test_autoinc_registry_preserves_high_watermarks(void) {
     );
     assert(next_value == 3U);
     assert(
+        mylite_ownerless_autoinc_registry_snapshot(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            MYLITE_TEST_OWNER_GENERATION(1U),
+            entries,
+            MYLITE_TEST_AUTOINC_REGISTRY_SLOT_COUNT,
+            &entry_count
+        ) == MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK
+    );
+    assert(entry_count == 2U);
+    assert(entries[0].table_id == 101U);
+    assert(entries[0].next_value == 12U);
+    assert(entries[0].persistent_value == 11U);
+    assert(entries[1].table_id == 202U);
+    assert(entries[1].next_value == 3U);
+    assert(entries[1].persistent_value == 0U);
+    assert(
         mylite_ownerless_autoinc_registry_publish(
             registry,
             MYLITE_TEST_PAGE_SIZE,
             1U,
             MYLITE_TEST_OWNER_GENERATION(1U),
             303U,
-            1U
+            1U,
+            0U
         ) == MYLITE_OWNERLESS_AUTOINC_REGISTRY_FULL
     );
 

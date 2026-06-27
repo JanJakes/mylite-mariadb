@@ -18,6 +18,7 @@ constexpr std::size_t k_header_latch_offset = 32;
 constexpr std::size_t k_slot_table_id_offset = 0;
 constexpr std::size_t k_slot_next_value_offset = 8;
 constexpr std::size_t k_slot_state_offset = 16;
+constexpr std::size_t k_slot_persistent_value_offset = 24;
 constexpr std::uint32_t k_slot_state_free = 0;
 constexpr std::uint32_t k_slot_state_active = 1;
 constexpr unsigned k_registry_latch_timeout_ms = 5000U;
@@ -118,7 +119,8 @@ int mylite_ownerless_autoinc_registry_publish(
     std::uint32_t owner_id,
     std::uint64_t owner_generation,
     std::uint64_t table_id,
-    std::uint64_t next_value
+    std::uint64_t next_value,
+    std::uint64_t persistent_value
 ) {
     if (!mapping_can_hold_registry(mapping, mapping_size) || owner_id == 0U ||
         owner_generation == 0U || table_id == 0U || next_value == 0U) {
@@ -141,11 +143,18 @@ int mylite_ownerless_autoinc_registry_publish(
         }
         store64(slot, k_slot_table_id_offset, table_id);
         store64(slot, k_slot_next_value_offset, next_value);
+        store64(slot, k_slot_persistent_value_offset, persistent_value);
         store32(slot, k_slot_state_offset, k_slot_state_active);
         advanced = true;
-    } else if (next_value > load64(slot, k_slot_next_value_offset)) {
-        store64(slot, k_slot_next_value_offset, next_value);
-        advanced = true;
+    } else {
+        if (next_value > load64(slot, k_slot_next_value_offset)) {
+            store64(slot, k_slot_next_value_offset, next_value);
+            advanced = true;
+        }
+        if (persistent_value > load64(slot, k_slot_persistent_value_offset)) {
+            store64(slot, k_slot_persistent_value_offset, persistent_value);
+            advanced = true;
+        }
     }
     if (advanced) {
         store64(registry, k_header_checkpoint_pending_offset, 1U);
@@ -198,6 +207,65 @@ int mylite_ownerless_autoinc_registry_clear_checkpoint_pending(
     store64(registry, k_header_checkpoint_pending_offset, 0U);
     release_registry_latch(registry, owner_id, owner_generation);
     return MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK;
+}
+
+int mylite_ownerless_autoinc_registry_snapshot(
+    void *mapping,
+    std::size_t mapping_size,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
+    mylite_ownerless_autoinc_registry_entry *entries,
+    std::size_t entry_capacity,
+    std::size_t *out_entry_count
+) {
+    if (!mapping_can_hold_registry(mapping, mapping_size) || owner_id == 0U ||
+        owner_generation == 0U || out_entry_count == nullptr ||
+        (entry_capacity > 0U && entries == nullptr)) {
+        return MYLITE_OWNERLESS_AUTOINC_REGISTRY_ERROR;
+    }
+
+    auto *registry = static_cast<unsigned char *>(mapping);
+    const int latch_result = acquire_registry_latch(registry, owner_id, owner_generation);
+    if (latch_result != MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK) {
+        return latch_result;
+    }
+
+    std::size_t entry_count = 0;
+    bool truncated = false;
+    const std::uint32_t count = slot_count(registry);
+    for (std::uint32_t index = 0; index < count; ++index) {
+        unsigned char *slot = slot_at(registry, index);
+        if (static_cast<std::size_t>(
+                slot + MYLITE_OWNERLESS_AUTOINC_REGISTRY_SLOT_SIZE - registry
+            ) > mapping_size) {
+            release_registry_latch(registry, owner_id, owner_generation);
+            return MYLITE_OWNERLESS_AUTOINC_REGISTRY_ERROR;
+        }
+        if (load32(slot, k_slot_state_offset) != k_slot_state_active) {
+            continue;
+        }
+
+        const std::uint64_t table_id = load64(slot, k_slot_table_id_offset);
+        const std::uint64_t next_value = load64(slot, k_slot_next_value_offset);
+        const std::uint64_t persistent_value = load64(slot, k_slot_persistent_value_offset);
+        if (table_id == 0U || next_value == 0U) {
+            continue;
+        }
+
+        if (entry_count < entry_capacity) {
+            entries[entry_count].table_id = table_id;
+            entries[entry_count].next_value = next_value;
+            entries[entry_count].persistent_value = persistent_value;
+        } else {
+            truncated = true;
+        }
+        ++entry_count;
+    }
+
+    *out_entry_count = entry_count;
+    release_registry_latch(registry, owner_id, owner_generation);
+    return truncated ? MYLITE_OWNERLESS_AUTOINC_REGISTRY_FULL
+                     : MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK;
 }
 
 namespace {

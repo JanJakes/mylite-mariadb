@@ -2659,6 +2659,7 @@ int ownerless_innodb_autoinc_read_hook(
 int ownerless_innodb_autoinc_publish_hook(
     std::uint64_t table_id,
     std::uint64_t next_value,
+    std::uint64_t persistent_value,
     void *ctx
 );
 int ownerless_innodb_redo_enter_hook(std::uint64_t *out_latest_lsn, void *ctx);
@@ -3088,6 +3089,7 @@ void rollback_failed_ownerless_implicit_statement(
     mylite_db &db,
     bool statement_started_in_explicit_transaction
 );
+void replay_ownerless_autoinc_after_failed_implicit_statement(mylite_db &db);
 int cleanup_failed_ownerless_implicit_statement(mylite_db &db);
 int rollback_active_transaction(mylite_db &db);
 void prepare_ownerless_statement_for_internal_rollback();
@@ -6735,6 +6737,7 @@ bool ownerless_table_has_referential_constraints(
                             "' AND referenced_table_name = '" + escaped_table + "')";
 
     bool query_succeeded = false;
+    OwnerlessStatementPlainReadScope plain_read(true, true);
     if (mysql_query(&db.mysql, sql.c_str()) == 0) {
         MYSQL_RES *result = mysql_store_result(&db.mysql);
         if (result != nullptr) {
@@ -7035,6 +7038,7 @@ bool ownerless_insert_target_has_foreign_keys(mylite_db &db, const SqlPolicyToke
                             escaped_schema + "' AND table_name = '" + escaped_table + "'";
 
     bool query_succeeded = false;
+    OwnerlessStatementPlainReadScope plain_read(true, true);
     if (mysql_query(&db.mysql, sql.c_str()) == 0) {
         MYSQL_RES *result = mysql_store_result(&db.mysql);
         if (result != nullptr) {
@@ -8927,6 +8931,52 @@ void rollback_failed_ownerless_implicit_statement(
     restore_error(db, snapshot);
 }
 
+void replay_ownerless_autoinc_after_failed_implicit_statement(mylite_db &db) {
+    if (!db.ownerless_rw_open || db.readonly_open) {
+        return;
+    }
+
+    const std::lock_guard<std::mutex> guard(g_runtime.mutex);
+    const bool pending = ownerless_autoinc_checkpoint_pending(g_runtime);
+    if (g_runtime.ref_count == 0U || !g_runtime.ownerless_rw_mode ||
+        g_runtime.concurrency_process_slot_generation == 0U || !pending) {
+        return;
+    }
+
+    std::vector<mylite_ownerless_autoinc_registry_entry> entries(k_concurrency_autoinc_slot_count);
+    std::size_t entry_count = 0;
+    const int snapshot_result = mylite_ownerless_autoinc_registry_snapshot(
+        g_runtime.ownerless_innodb_lock_hook.autoinc_registry,
+        g_runtime.ownerless_innodb_lock_hook.autoinc_registry_size,
+        g_runtime.ownerless_innodb_lock_hook.owner_id,
+        g_runtime.ownerless_innodb_lock_hook.owner_generation,
+        entries.data(),
+        entries.size(),
+        &entry_count
+    );
+    if (snapshot_result != MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK) {
+        return;
+    }
+
+    bool replayed = true;
+    for (std::size_t index = 0; index < entry_count; ++index) {
+        const int replay_result = mylite_ownerless_innodb_autoinc_replay_persistent(
+            entries[index].table_id,
+            entries[index].next_value,
+            entries[index].persistent_value
+        );
+        if (replay_result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
+            replay_result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE) {
+            replayed = false;
+        }
+    }
+
+    if (!replayed || mylite_ownerless_innodb_make_checkpoint() != MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+        return;
+    }
+    static_cast<void>(clear_ownerless_autoinc_checkpoint_pending(g_runtime));
+}
+
 int cleanup_failed_ownerless_implicit_statement(mylite_db &db) {
     release_ownerless_transaction_page_version_pin(db);
     mylite_ownerless_innodb_close_current_read_view();
@@ -8934,6 +8984,7 @@ int cleanup_failed_ownerless_implicit_statement(mylite_db &db) {
     if (page_write_release_result != MYLITE_OK) {
         return page_write_release_result;
     }
+    replay_ownerless_autoinc_after_failed_implicit_statement(db);
     // Match the refresh preparation a following read would perform before the
     // next write can reuse local native pages after a statement-level error.
     bool page_version_reads_enabled = false;
@@ -20443,6 +20494,7 @@ int ownerless_innodb_autoinc_read_hook(
 int ownerless_innodb_autoinc_publish_hook(
     std::uint64_t table_id,
     std::uint64_t next_value,
+    std::uint64_t persistent_value,
     void *ctx
 ) {
     if (ctx == nullptr) {
@@ -20461,7 +20513,8 @@ int ownerless_innodb_autoinc_publish_hook(
         hook->owner_id,
         hook->owner_generation,
         table_id,
-        next_value
+        next_value,
+        persistent_value
     );
     if (result == MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK) {
         return MYLITE_OWNERLESS_INNODB_LOCK_OK;
