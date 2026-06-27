@@ -1022,9 +1022,7 @@ static void test_crashed_temporary_rename_dictionary_ddl_recovers_permanent_tabl
 static void test_crashed_temporary_alter_rename_dictionary_ddl_recovers_permanent_table(void);
 static void test_crashed_temporary_multi_rename_dictionary_ddl_recovers_permanent_table(void);
 static void test_crashed_temporary_mixed_rename_dictionary_ddl_recovers_permanent_table(void);
-static void test_crashed_temporary_mixed_rename_reverse_dictionary_ddl_recovers_permanent_table(
-    void
-);
+static void test_crashed_temporary_mixed_rename_reverse_recovers_permanent_table(void);
 #endif
 static void test_ownerless_rejects_non_innodb_engines(void);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
@@ -3860,7 +3858,7 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "temporary-mixed-rename-reverse-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-        test_crashed_temporary_mixed_rename_reverse_dictionary_ddl_recovers_permanent_table();
+        test_crashed_temporary_mixed_rename_reverse_recovers_permanent_table();
 #endif
         return 0;
     }
@@ -42440,9 +42438,7 @@ static void test_crashed_temporary_mixed_rename_dictionary_ddl_recovers_permanen
     );
 }
 
-static void test_crashed_temporary_mixed_rename_reverse_dictionary_ddl_recovers_permanent_table(
-    void
-) {
+static void test_crashed_temporary_mixed_rename_reverse_recovers_permanent_table(void) {
     run_crashed_temporary_mixed_rename_dictionary_ddl_recovers_permanent_table(
         temporary_mixed_rename_reverse_until_dictionary_finish_fault,
         "ownerless-temporary-mixed-reverse-rn-crash.mylite"
