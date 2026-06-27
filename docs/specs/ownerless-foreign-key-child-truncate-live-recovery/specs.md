@@ -160,8 +160,12 @@ Completed on 2026-06-27 with `ownerless-test-hooks`, `ownerless-stress`, and
 
 ## Risks And Follow-Up
 
-- Parent-table truncate rejection, self-referencing FK truncate,
-  generated-column/cyclic FK truncate shapes, partition truncate, and
-  temporary-table truncate remain separate.
+- Self-referencing FK truncate and stored generated-column child FK truncate
+  are covered by
+  `docs/specs/ownerless-foreign-key-truncate-variants-live-recovery/specs.md`.
+- Parent-table truncate rejection, cyclic FK truncate, partition truncate, and
+  temporary-table truncate remain separate; partition truncate is under the
+  ownerless partition-DDL rejection policy rather than a positive recovery
+  boundary.
 - Broader native redo/checkpoint reconciliation, active-reader pressure crash
   breadth, and external MariaDB/RQG stress remain open completion gates.

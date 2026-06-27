@@ -1167,6 +1167,7 @@ static void test_crashed_table_comment_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_truncate_dictionary_ddl_recovers_empty_table(void);
 static void test_crashed_implicit_truncate_dictionary_ddl_recovers_empty_table(void);
 static void test_crashed_foreign_key_child_truncate_dictionary_ddl_recovers_constraint(void);
+static void test_crashed_foreign_key_truncate_variants_dictionary_ddl_recovers_constraints(void);
 static void test_crashed_truncate_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_drop_dictionary_ddl_recovers_absent_table(void);
 static void test_crashed_implicit_drop_dictionary_ddl_recovers_absent_table(void);
@@ -2133,6 +2134,14 @@ static void foreign_key_child_truncate_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
+static void self_referencing_foreign_key_truncate_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void generated_column_foreign_key_child_truncate_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void drop_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void drop_implicit_table_until_dictionary_finish_fault(
     open_database_paths paths,
@@ -3000,6 +3009,14 @@ static void assert_ownerless_column_rename_expression_crash_state(
 );
 static void assert_ownerless_force_rebuild_crash_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_foreign_key_child_truncate_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags
+);
+static void assert_ownerless_self_referencing_foreign_key_truncate_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags
+);
+static void assert_ownerless_generated_column_foreign_key_child_truncate_crash_ddl_state(
     open_database_paths paths,
     unsigned flags
 );
@@ -5435,6 +5452,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-foreign-key-truncate-variants-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_foreign_key_truncate_variants_dictionary_ddl_recovers_constraints();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-truncate-file-op-marker-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_truncate_dictionary_ddl_marks_file_op_checkpoint();
@@ -5691,6 +5714,7 @@ int main(int argc, char **argv) {
             test_crashed_table_comment_dictionary_ddl_recovers_metadata,
             test_crashed_truncate_dictionary_ddl_recovers_empty_table,
             test_crashed_foreign_key_child_truncate_dictionary_ddl_recovers_constraint,
+            test_crashed_foreign_key_truncate_variants_dictionary_ddl_recovers_constraints,
             test_crashed_drop_dictionary_ddl_recovers_absent_table,
             test_crashed_stale_drop_dictionary_ddl_skips_retained_tablespace,
             test_crashed_schema_create_dictionary_ddl_recovers_schema,
@@ -5957,6 +5981,7 @@ int main(int argc, char **argv) {
             "dictionary-table-comment-crash|"
             "dictionary-truncate-crash|"
             "dictionary-foreign-key-child-truncate-crash|"
+            "dictionary-foreign-key-truncate-variants-crash|"
             "dictionary-truncate-file-op-marker-crash|"
             "dictionary-drop-crash|dictionary-implicit-drop-crash|"
             "dictionary-multi-drop-crash|dictionary-cross-schema-multi-drop-crash|"
@@ -6421,6 +6446,9 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_crashed_implicit_truncate_dictionary_ddl_recovers_empty_table),
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_foreign_key_child_truncate_dictionary_ddl_recovers_constraint
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_foreign_key_truncate_variants_dictionary_ddl_recovers_constraints
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_drop_dictionary_ddl_recovers_absent_table),
     OWNERLESS_SQL_TEST_CASE(test_crashed_implicit_drop_dictionary_ddl_recovers_absent_table),
@@ -56897,6 +56925,273 @@ static void test_crashed_foreign_key_child_truncate_dictionary_ddl_recovers_cons
     free(root);
 }
 
+static void run_crashed_self_referencing_foreign_key_truncate_recovers_constraint(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-foreign-key-self-truncate-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_truncate_self ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_id INT NULL, "
+        "value INT NOT NULL, "
+        "INDEX ownerless_fk_truncate_self_parent_idx (parent_id), "
+        "CONSTRAINT ownerless_fk_truncate_self_parent "
+        "FOREIGN KEY (parent_id) "
+        "REFERENCES app.ownerless_fk_truncate_self (id)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_fk_truncate_self VALUES "
+        "(1, NULL, 100), (2, 1, 200), (3, 2, 300)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND constraint_name = 'ownerless_fk_truncate_self_parent' "
+            "AND table_name = 'ownerless_fk_truncate_self' "
+            "AND referenced_table_name = 'ownerless_fk_truncate_self'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_truncate_self") == 3U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_truncate_self") == 600U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        self_referencing_foreign_key_truncate_until_dictionary_finish_fault
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND constraint_name = 'ownerless_fk_truncate_self_parent' "
+            "AND table_name = 'ownerless_fk_truncate_self' "
+            "AND referenced_table_name = 'ownerless_fk_truncate_self'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_truncate_self") == 0U);
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_fk_truncate_self VALUES "
+        "(10, NULL, 1000), (11, 10, 1100)"
+    );
+    expect_exec_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_fk_truncate_self VALUES (12, 99, 1200)",
+        MYLITE_TEST_NO_REFERENCED_ROW_ERRNO
+    );
+    exec_ok(db, "COMMIT");
+    expect_exec_mariadb_error(
+        db,
+        "DELETE FROM app.ownerless_fk_truncate_self WHERE id = 10",
+        MYLITE_TEST_ROW_IS_REFERENCED_ERRNO
+    );
+    exec_ok(db, "COMMIT");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_truncate_self") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_truncate_self") == 2100U);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    release_ownerless_live_peer(&live_peer);
+
+    assert_ownerless_self_referencing_foreign_key_truncate_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert_ownerless_self_referencing_foreign_key_truncate_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_self_referencing_foreign_key_truncate_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_self_referencing_foreign_key_truncate_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE
+    );
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void run_crashed_generated_column_foreign_key_child_truncate_recovers_constraint(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-generated-fk-child-truncate-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_truncate_generated_parent ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_truncate_generated_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "raw_parent INT NOT NULL, "
+        "parent_key INT GENERATED ALWAYS AS (raw_parent + 100) STORED, "
+        "value INT NOT NULL, "
+        "INDEX ownerless_fk_truncate_generated_child_idx (parent_key), "
+        "CONSTRAINT ownerless_fk_truncate_generated_child_parent "
+        "FOREIGN KEY (parent_key) "
+        "REFERENCES app.ownerless_fk_truncate_generated_parent (id)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_fk_truncate_generated_parent VALUES "
+        "(101, 1000), (102, 2000)"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_fk_truncate_generated_child "
+        "(id, raw_parent, value) VALUES (1, 1, 10), (2, 2, 20)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND constraint_name = 'ownerless_fk_truncate_generated_child_parent' "
+            "AND table_name = 'ownerless_fk_truncate_generated_child' "
+            "AND referenced_table_name = 'ownerless_fk_truncate_generated_parent'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_truncate_generated_child") == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(parent_key) FROM app.ownerless_fk_truncate_generated_child"
+        ) == 203U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        generated_column_foreign_key_child_truncate_until_dictionary_finish_fault
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_fk_truncate_generated_child' "
+            "AND column_name = 'parent_key'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND constraint_name = 'ownerless_fk_truncate_generated_child_parent' "
+            "AND table_name = 'ownerless_fk_truncate_generated_child' "
+            "AND referenced_table_name = 'ownerless_fk_truncate_generated_parent'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_truncate_generated_child") == 0U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_truncate_generated_parent") == 2U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_fk_truncate_generated_child "
+        "(id, raw_parent, value) VALUES (3, 1, 300)"
+    );
+    expect_exec_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_fk_truncate_generated_child "
+        "(id, raw_parent, value) VALUES (4, 99, 400)",
+        MYLITE_TEST_NO_REFERENCED_ROW_ERRNO
+    );
+    exec_ok(db, "COMMIT");
+    expect_exec_mariadb_error(
+        db,
+        "DELETE FROM app.ownerless_fk_truncate_generated_parent WHERE id = 101",
+        MYLITE_TEST_ROW_IS_REFERENCED_ERRNO
+    );
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_truncate_generated_child") == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(parent_key) FROM app.ownerless_fk_truncate_generated_child"
+        ) == 101U
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    release_ownerless_live_peer(&live_peer);
+
+    assert_ownerless_generated_column_foreign_key_child_truncate_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert_ownerless_generated_column_foreign_key_child_truncate_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_generated_column_foreign_key_child_truncate_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_generated_column_foreign_key_child_truncate_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE
+    );
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_crashed_foreign_key_truncate_variants_dictionary_ddl_recovers_constraints(void) {
+    run_crashed_self_referencing_foreign_key_truncate_recovers_constraint();
+    run_crashed_generated_column_foreign_key_child_truncate_recovers_constraint();
+}
+
 static void test_crashed_truncate_dictionary_ddl_marks_file_op_checkpoint(void) {
     run_crashed_truncate_dictionary_ddl_recovers_empty_table(1);
 }
@@ -69590,6 +69885,30 @@ static void foreign_key_child_truncate_until_dictionary_finish_fault(
     );
 }
 
+static void self_referencing_foreign_key_truncate_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "TRUNCATE TABLE app.ownerless_fk_truncate_self"
+    );
+}
+
+static void generated_column_foreign_key_child_truncate_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "TRUNCATE TABLE app.ownerless_fk_truncate_generated_child"
+    );
+}
+
 static void drop_table_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
     execute_sql_until_dictionary_fault(
         paths,
@@ -80647,6 +80966,181 @@ static void assert_ownerless_foreign_key_child_truncate_crash_ddl_state(
     exec_ok(db, "COMMIT");
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_truncate_child") == 1U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_truncate_parent") == 2U);
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_self_referencing_foreign_key_truncate_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND constraint_name = 'ownerless_fk_truncate_self_parent' "
+            "AND table_name = 'ownerless_fk_truncate_self' "
+            "AND referenced_table_name = 'ownerless_fk_truncate_self' "
+            "AND update_rule = 'RESTRICT' "
+            "AND delete_rule = 'RESTRICT'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.key_column_usage "
+            "WHERE constraint_schema = 'app' "
+            "AND constraint_name = 'ownerless_fk_truncate_self_parent' "
+            "AND table_name = 'ownerless_fk_truncate_self' "
+            "AND column_name = 'parent_id' "
+            "AND referenced_table_name = 'ownerless_fk_truncate_self' "
+            "AND referenced_column_name = 'id'"
+        ) == 1U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_truncate_self") == 2U);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_fk_truncate_self") == 21U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(COALESCE(parent_id, 0)) FROM app.ownerless_fk_truncate_self"
+        ) == 10U
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_truncate_self") == 2100U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_truncate_self "
+            "FORCE INDEX (ownerless_fk_truncate_self_parent_idx) "
+            "WHERE parent_id = 10"
+        ) == 1U
+    );
+    expect_exec_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_fk_truncate_self VALUES (12, 99, 1200)",
+        MYLITE_TEST_NO_REFERENCED_ROW_ERRNO
+    );
+    exec_ok(db, "COMMIT");
+    expect_exec_mariadb_error(
+        db,
+        "DELETE FROM app.ownerless_fk_truncate_self WHERE id = 10",
+        MYLITE_TEST_ROW_IS_REFERENCED_ERRNO
+    );
+    exec_ok(db, "COMMIT");
+    exec_ok(db, "INSERT INTO app.ownerless_fk_truncate_self VALUES (12, 11, 1200)");
+    exec_ok(db, "DELETE FROM app.ownerless_fk_truncate_self WHERE id = 12");
+    exec_ok(db, "COMMIT");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_truncate_self") == 2U);
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_generated_column_foreign_key_child_truncate_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_fk_truncate_generated_child' "
+            "AND column_name = 'parent_key'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND constraint_name = 'ownerless_fk_truncate_generated_child_parent' "
+            "AND table_name = 'ownerless_fk_truncate_generated_child' "
+            "AND referenced_table_name = 'ownerless_fk_truncate_generated_parent' "
+            "AND update_rule = 'RESTRICT' "
+            "AND delete_rule = 'RESTRICT'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.key_column_usage "
+            "WHERE constraint_schema = 'app' "
+            "AND constraint_name = 'ownerless_fk_truncate_generated_child_parent' "
+            "AND table_name = 'ownerless_fk_truncate_generated_child' "
+            "AND column_name = 'parent_key' "
+            "AND referenced_table_name = 'ownerless_fk_truncate_generated_parent' "
+            "AND referenced_column_name = 'id'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_truncate_generated_parent") == 2U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_fk_truncate_generated_parent") == 203U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_truncate_generated_parent") ==
+        3000U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_truncate_generated_child") == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(raw_parent) FROM app.ownerless_fk_truncate_generated_child"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(parent_key) FROM app.ownerless_fk_truncate_generated_child"
+        ) == 101U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_truncate_generated_child") ==
+        300U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_truncate_generated_child "
+            "FORCE INDEX (ownerless_fk_truncate_generated_child_idx) "
+            "WHERE parent_key = 101"
+        ) == 1U
+    );
+    expect_exec_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_fk_truncate_generated_child "
+        "(id, raw_parent, value) VALUES (4, 99, 400)",
+        MYLITE_TEST_NO_REFERENCED_ROW_ERRNO
+    );
+    exec_ok(db, "COMMIT");
+    expect_exec_mariadb_error(
+        db,
+        "DELETE FROM app.ownerless_fk_truncate_generated_parent WHERE id = 101",
+        MYLITE_TEST_ROW_IS_REFERENCED_ERRNO
+    );
+    exec_ok(db, "COMMIT");
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_fk_truncate_generated_child "
+        "(id, raw_parent, value) VALUES (4, 2, 400)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(parent_key) FROM app.ownerless_fk_truncate_generated_child "
+            "WHERE id = 4"
+        ) == 102U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_fk_truncate_generated_child WHERE id = 4");
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_truncate_generated_child") == 1U
+    );
     assert(mylite_close(db) == MYLITE_OK);
 }
 
