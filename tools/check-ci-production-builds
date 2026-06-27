@@ -1367,6 +1367,9 @@ require_step_literal \
   "wordpress_runtime_artifact_download_seconds="
 require_step_literal \
   "Record WordPress PHPUnit runtime root artifact download timing" \
+  "wordpress_artifact_download_start_missing="
+require_step_literal \
+  "Record WordPress PHPUnit runtime root artifact download timing" \
   "wordpress_artifact_download_runtime_tar_bytes="
 require_step_order \
   "Mark WordPress PHPUnit runtime root artifact download start" \
