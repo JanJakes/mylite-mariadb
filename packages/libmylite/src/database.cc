@@ -2333,7 +2333,8 @@ bool ownerless_alter_table_drop_foreign_key_recovery_statement(
 );
 bool ownerless_alter_table_mixed_foreign_key_recovery_statement(
     mylite_db &db,
-    const SqlPolicyTokens &tokens
+    const SqlPolicyTokens &tokens,
+    bool *out_saw_add_column_clause
 );
 bool ownerless_create_schema_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_create_schema_if_not_exists_recovery_statement(const SqlPolicyTokens &tokens);
@@ -15786,7 +15787,15 @@ std::uint32_t ownerless_dictionary_recovery_kind_for_statement(
     if (ownerless_alter_table_drop_foreign_key_recovery_statement(db, tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_FOREIGN_KEY;
     }
-    if (ownerless_alter_table_mixed_foreign_key_recovery_statement(db, tokens)) {
+    bool mixed_foreign_key_saw_add_column = false;
+    if (ownerless_alter_table_mixed_foreign_key_recovery_statement(
+            db,
+            tokens,
+            &mixed_foreign_key_saw_add_column
+        )) {
+        if (mixed_foreign_key_saw_add_column) {
+            return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_ADD_COLUMN;
+        }
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_ADD_FOREIGN_KEY;
     }
     if (ownerless_alter_table_engine_innodb_rebuild_recovery_statement(db, tokens) ||
@@ -17765,6 +17774,75 @@ bool ownerless_alter_table_add_column_recovery_statement(
            !column_exists;
 }
 
+bool consume_ownerless_alter_table_add_column_recovery_clause(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::size_t &index,
+    std::string_view schema_name,
+    std::string_view table_name
+) {
+    if (index >= tokens.count || !token_equals(tokens.values[index], "ADD")) {
+        return false;
+    }
+    ++index;
+    if (index < tokens.count && token_equals(tokens.values[index], "COLUMN")) {
+        ++index;
+    }
+    if (index + 1U >= tokens.count || token_equals(tokens.values[index], "IF") ||
+        token_in(tokens.values[index], "CHECK", "CONSTRAINT", "FOREIGN") ||
+        token_in(tokens.values[index], "FULLTEXT", "INDEX", "KEY") ||
+        token_in(tokens.values[index], "PRIMARY", "SPATIAL", "UNIQUE") ||
+        !ownerless_table_identifier_token(tokens.values[index])) {
+        return false;
+    }
+
+    const std::string column_name = ownerless_normalized_identifier(tokens.values[index]);
+    ++index;
+    bool has_definition = false;
+    std::size_t depth = 0U;
+    for (; index < tokens.count; ++index) {
+        const std::string_view token = tokens.values[index];
+        if (depth == 0U && (token_equals(token, ",") || token_equals(token, ";"))) {
+            break;
+        }
+        if (token_equals(token, "(")) {
+            ++depth;
+            has_definition = true;
+            continue;
+        }
+        if (token_equals(token, ")")) {
+            if (depth == 0U) {
+                return false;
+            }
+            --depth;
+            has_definition = true;
+            continue;
+        }
+        if (token_in(token, "AFTER", "ALGORITHM", "AUTO_INCREMENT", "CHECK") ||
+            token_equals(token, "CONSTRAINT") ||
+            token_in(token, "FIRST", "FOREIGN", "FULLTEXT", "GENERATED") ||
+            token_in(token, "INDEX", "KEY", "LOCK", "PRIMARY") ||
+            token_equals(token, "REFERENCES") ||
+            token_in(token, "SPATIAL", "STORED", "UNIQUE", "VIRTUAL")) {
+            return false;
+        }
+        has_definition = true;
+    }
+    if (!has_definition || depth != 0U) {
+        return false;
+    }
+
+    bool column_exists = false;
+    return ownerless_column_metadata_lookup(
+               db,
+               schema_name,
+               table_name,
+               column_name,
+               &column_exists
+           ) &&
+           !column_exists;
+}
+
 bool ownerless_alter_table_drop_column_if_exists_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
@@ -18416,8 +18494,12 @@ bool ownerless_alter_table_drop_foreign_key_recovery_statement(
 
 bool ownerless_alter_table_mixed_foreign_key_recovery_statement(
     mylite_db &db,
-    const SqlPolicyTokens &tokens
+    const SqlPolicyTokens &tokens,
+    bool *out_saw_add_column_clause
 ) {
+    if (out_saw_add_column_clause != nullptr) {
+        *out_saw_add_column_clause = false;
+    }
     if (tokens.count < 15U || !token_equals(tokens.values[0], "ALTER") ||
         !token_equals(tokens.values[1], "TABLE")) {
         return false;
@@ -18447,13 +18529,26 @@ bool ownerless_alter_table_mixed_foreign_key_recovery_statement(
     }
 
     bool saw_add_clause = false;
+    bool saw_add_column_clause = false;
     bool saw_drop_clause = false;
     for (;;) {
         if (index < tokens.count && token_equals(tokens.values[index], "ADD")) {
-            if (!consume_ownerless_alter_table_add_foreign_key_recovery_clause(db, tokens, index)) {
-                return false;
+            const std::size_t add_index = index;
+            if (consume_ownerless_alter_table_add_foreign_key_recovery_clause(db, tokens, index)) {
+                saw_add_clause = true;
+            } else {
+                index = add_index;
+                if (!consume_ownerless_alter_table_add_column_recovery_clause(
+                        db,
+                        tokens,
+                        index,
+                        child_schema_name,
+                        child_table_name
+                    )) {
+                    return false;
+                }
+                saw_add_column_clause = true;
             }
-            saw_add_clause = true;
         } else if (index < tokens.count && token_equals(tokens.values[index], "DROP")) {
             if (!consume_ownerless_alter_table_drop_foreign_key_recovery_clause(
                     db,
@@ -18470,6 +18565,9 @@ bool ownerless_alter_table_mixed_foreign_key_recovery_statement(
         }
 
         if (index >= tokens.count) {
+            if (out_saw_add_column_clause != nullptr) {
+                *out_saw_add_column_clause = saw_add_column_clause;
+            }
             return saw_add_clause && saw_drop_clause;
         }
         if (token_equals(tokens.values[index], ",")) {
@@ -18477,8 +18575,12 @@ bool ownerless_alter_table_mixed_foreign_key_recovery_statement(
             continue;
         }
         if (token_equals(tokens.values[index], ";")) {
-            return saw_add_clause && saw_drop_clause &&
-                   consume_ownerless_remaining_semicolons(tokens, index);
+            const bool accepted = saw_add_clause && saw_drop_clause &&
+                                  consume_ownerless_remaining_semicolons(tokens, index);
+            if (accepted && out_saw_add_column_clause != nullptr) {
+                *out_saw_add_column_clause = saw_add_column_clause;
+            }
+            return accepted;
         }
         return false;
     }

@@ -3417,7 +3417,8 @@ Tasks:
    accepted explicit online DDL option variants, secondary-index rename,
    idempotent standalone index create/drop, ignored-index metadata,
    primary-key replacement, foreign-key ALTER including pure comma-separated
-   FK add/drop lists and FK-only mixed drop/add lists,
+   FK add/drop lists, FK-only mixed drop/add lists, and a focused mixed
+   FK/non-FK ADD COLUMN list,
    same-schema foreign-key parent-table/child-table rename, cross-schema
    foreign-key parent-table/child-table rename, same-schema foreign-key
    multi-pair parent/child rename, cross-schema foreign-key multi-pair
@@ -5747,8 +5748,9 @@ primary-key replacement writer after native clustered-key rebuild with
 live-peer recovery plus retained-marker no-live drain, an AUTO_INCREMENT
 primary-key replacement writer after native clustered-key rebuild with
 live-peer recovery plus retained-marker no-live drain, foreign-key
-ADD/DROP writers including pure comma-separated FK-only lists and FK-only
-mixed drop/add lists after native constraint metadata creation/removal,
+ADD/DROP writers including pure comma-separated FK-only lists, FK-only mixed
+drop/add lists, and a focused mixed FK/non-FK ADD COLUMN list after native
+constraint metadata creation/removal and table-definition mutation,
 CHECK ADD/DROP writers after native
 table-definition mutation, a cross-schema foreign-key multi-pair rename writer
 after native FK metadata rewrite and file movement, a same-schema
@@ -7657,8 +7659,9 @@ subsystems that this mode needs:
      no-op prefinish boundaries, plus focused plain ADD COLUMN, table-comment,
      column-default metadata ALTER, and plain, descending, composite direction,
      AUTO_INCREMENT, and AUTO_INCREMENT descending primary-key replacement
-     prefinish boundaries, plus single-clause, pure multi-clause, and FK-only
-     mixed foreign-key add/drop prefinish boundaries, plus child-only,
+     prefinish boundaries, plus single-clause, pure multi-clause, FK-only
+     mixed foreign-key add/drop, and focused mixed FK/non-FK ADD COLUMN
+     prefinish boundaries, plus child-only,
      self-referencing, and stored generated-column child foreign-key truncate
      prefinish boundaries, plus simple temporary DDL, pure multi-pair temporary
      rename chains, and
@@ -7668,8 +7671,9 @@ subsystems that this mode needs:
      FORCE, same-engine ENGINE including exact copy-lock, row-format including
      exact copy-lock, compressed row-format including exact copy-lock, and
      charset boundaries, broader metadata-only DDL, broader mixed temporary/permanent
-     rename matrices, broader FK plus non-FK ALTER lists, broader schema option
-     variants, intra-loop drop cases, and broader DDL file lifecycle while
+     rename matrices, broader FK plus non-FK ALTER lists beyond the focused
+     ADD COLUMN case, broader schema option variants, intra-loop drop cases,
+     and broader DDL file lifecycle while
      peers remain live. Partition truncate
      remains governed by the ownerless partition-DDL rejection policy, cyclic
      FK truncate under default FK checks is covered as MariaDB's pre-truncate
