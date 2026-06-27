@@ -2071,9 +2071,7 @@ void discard_ownerless_native_file_op_redo_after_rolled_back_write(
     bool transaction_rollback_had_local_write
 );
 bool mark_ownerless_native_file_op_checkpoint_before_dictionary_finish(mylite_db &db);
-bool ownerless_dictionary_recovery_kind_skips_native_file_op_checkpoint(
-    std::uint32_t recovery_kind
-);
+bool ownerless_dictionary_recovery_skips_native_file_op_checkpoint(std::uint32_t kind);
 bool mark_ownerless_dictionary_state_recoverable_before_finish(mylite_db &db);
 bool advance_ownerless_no_live_page_visible_lsn_for_reclaim(
     RuntimeState &runtime,
@@ -11856,21 +11854,20 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
         runtime.ownerless_runtime_consumed_current_page_version_wal.load(std::memory_order_relaxed);
     const bool runtime_has_local_write =
         runtime.ownerless_runtime_has_local_write.load(std::memory_order_relaxed);
+    const auto &peer_explicit_transaction_write =
+        runtime.ownerless_runtime_has_peer_explicit_transaction_write;
     const bool runtime_has_peer_explicit_transaction_write =
-        runtime.ownerless_runtime_has_peer_explicit_transaction_write.load(
-            std::memory_order_relaxed
-        );
+        peer_explicit_transaction_write.load(std::memory_order_relaxed);
     if (!no_live_peers && runtime_has_local_write && !runtime_has_peer_explicit_transaction_write &&
         !runtime.ownerless_runtime_started_with_page_version_wal) {
         bool live_native_dml_marker_needed = false;
+        const int checkpoint_fd = runtime.concurrency_checkpoint_fd;
         if (read_ownerless_native_dml_file_op_checkpoint_needed(
                 runtime,
                 &live_native_dml_marker_needed
             ) &&
             live_native_dml_marker_needed &&
-            clear_concurrency_native_dml_file_op_checkpoint_needed(
-                runtime.concurrency_checkpoint_fd
-            )) {
+            clear_concurrency_native_dml_file_op_checkpoint_needed(checkpoint_fd)) {
             set_ownerless_native_dml_file_op_checkpoint_cache(runtime, false);
         }
     }
@@ -12876,7 +12873,7 @@ bool mark_ownerless_native_file_op_checkpoint_before_dictionary_finish(mylite_db
     if (mylite_ownerless_innodb_take_file_op_redo() == 0) {
         return false;
     }
-    if (ownerless_dictionary_recovery_kind_skips_native_file_op_checkpoint(
+    if (ownerless_dictionary_recovery_skips_native_file_op_checkpoint(
             db.ownerless_dictionary_recovery_kind
         )) {
         return false;
@@ -12899,11 +12896,9 @@ bool mark_ownerless_native_file_op_checkpoint_before_dictionary_finish(mylite_db
     return marker_written;
 }
 
-bool ownerless_dictionary_recovery_kind_skips_native_file_op_checkpoint(
-    std::uint32_t recovery_kind
-) {
-    return recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_ADD_FOREIGN_KEY ||
-           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_FOREIGN_KEY;
+bool ownerless_dictionary_recovery_skips_native_file_op_checkpoint(std::uint32_t kind) {
+    return kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_ADD_FOREIGN_KEY ||
+           kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_FOREIGN_KEY;
 }
 
 bool mark_ownerless_dictionary_state_recoverable_before_finish(mylite_db &db) {
@@ -18288,9 +18283,10 @@ int ownerless_finish_dictionary_ddl(mylite_db &db, bool ddl_started) {
 
     const bool native_file_op_marker_written =
         mark_ownerless_native_file_op_checkpoint_before_dictionary_finish(db);
-    if (native_file_op_marker_written || ownerless_dictionary_recovery_kind_is_metadata_only(
-                                             db.ownerless_dictionary_recovery_kind
-                                         )) {
+    const std::uint32_t recovery_kind = db.ownerless_dictionary_recovery_kind;
+    const bool metadata_only_recovery =
+        ownerless_dictionary_recovery_kind_is_metadata_only(recovery_kind);
+    if (native_file_op_marker_written || metadata_only_recovery) {
         static_cast<void>(mark_ownerless_dictionary_state_recoverable_before_finish(db));
     }
     pause_for_ownerless_test_fault("dictionary-before-finish");
@@ -24970,10 +24966,11 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
                 );
             }
 
-            innodb_ownerless_hooks_needed =
-                (ownerless_runtime_open &&
-                 !ownerless_startup_current_native_redo_is_authoritative) ||
-                ordinary_native_page_log_reads || ordinary_native_checkpoint_refresh;
+            const bool startup_needs_ownerless_hooks =
+                ownerless_runtime_open && !ownerless_startup_current_native_redo_is_authoritative;
+            innodb_ownerless_hooks_needed = startup_needs_ownerless_hooks ||
+                                            ordinary_native_page_log_reads ||
+                                            ordinary_native_checkpoint_refresh;
             if (innodb_ownerless_hooks_needed) {
                 stage_start_ns = embedded_open_perf_start_ns();
                 const int lock_hook_result = install_ownerless_innodb_lock_hooks(g_runtime);
