@@ -1061,6 +1061,7 @@ static void test_crashed_primary_key_dictionary_ddl_recovers_key_metadata(void);
 static void test_crashed_descending_primary_key_dictionary_ddl_recovers_key_metadata(void);
 static void test_crashed_composite_direction_primary_key_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_auto_increment_primary_key_dictionary_ddl_recovers_metadata(void);
+static void test_crashed_autoinc_desc_primary_key_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_primary_key_idempotent_dictionary_ddl_preserves_key_metadata(void);
 static void test_crashed_foreign_key_dictionary_ddl_recovers_constraint(void);
 static void test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constraint(void);
@@ -1739,6 +1740,10 @@ static void composite_direction_primary_key_until_dictionary_finish_fault(
     int ready_fd
 );
 static void auto_increment_primary_key_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void auto_increment_descending_primary_key_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -4843,6 +4848,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-primary-key-autoinc-descending-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_autoinc_desc_primary_key_dictionary_ddl_recovers_metadata();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-primary-key-idempotent-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_primary_key_idempotent_dictionary_ddl_preserves_key_metadata();
@@ -5578,6 +5589,7 @@ int main(int argc, char **argv) {
             test_crashed_descending_primary_key_dictionary_ddl_recovers_key_metadata,
             test_crashed_composite_direction_primary_key_dictionary_ddl_recovers_metadata,
             test_crashed_auto_increment_primary_key_dictionary_ddl_recovers_metadata,
+            test_crashed_autoinc_desc_primary_key_dictionary_ddl_recovers_metadata,
             test_crashed_primary_key_idempotent_dictionary_ddl_preserves_key_metadata,
             test_crashed_foreign_key_dictionary_ddl_recovers_constraint,
             test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constraint,
@@ -5834,6 +5846,7 @@ int main(int argc, char **argv) {
             "dictionary-descending-primary-key-crash|"
             "dictionary-composite-direction-primary-key-crash|"
             "dictionary-primary-key-autoinc-crash|"
+            "dictionary-primary-key-autoinc-descending-crash|"
             "dictionary-primary-key-idempotent-crash|"
             "dictionary-foreign-key-crash|"
             "dictionary-foreign-key-drop-crash|"
@@ -6259,6 +6272,9 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     ),
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_auto_increment_primary_key_dictionary_ddl_recovers_metadata
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_autoinc_desc_primary_key_dictionary_ddl_recovers_metadata
     ),
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_primary_key_idempotent_dictionary_ddl_preserves_key_metadata
@@ -45684,6 +45700,189 @@ static void test_crashed_auto_increment_primary_key_dictionary_ddl_recovers_meta
     free(root);
 }
 
+static void test_crashed_autoinc_desc_primary_key_dictionary_ddl_recovers_metadata(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-primary-key-autoinc-descending-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
+    mylite_db *db;
+    unsigned mariadb_errno = 0U;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pk_autoinc_desc ("
+        "id INT NOT NULL AUTO_INCREMENT, "
+        "code INT NOT NULL, "
+        "value INT NOT NULL, "
+        "PRIMARY KEY (id), "
+        "UNIQUE KEY ownerless_pk_autoinc_desc_code_key (code)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_pk_autoinc_desc (code, value) VALUES "
+        "(10, 100), (20, 200)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pk_autoinc_desc' "
+            "AND index_name = 'PRIMARY' "
+            "AND column_name = 'id'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pk_autoinc_desc' "
+            "AND index_name = 'ownerless_pk_autoinc_desc_code_key' "
+            "AND column_name = 'code'"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        auto_increment_descending_primary_key_until_dictionary_finish_fault
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pk_autoinc_desc' "
+            "AND index_name = 'PRIMARY' "
+            "AND column_name = 'code' "
+            "AND seq_in_index = 1 "
+            "AND non_unique = 0 "
+            "AND collation = 'D'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pk_autoinc_desc' "
+            "AND index_name = 'ownerless_pk_autoinc_desc_id_key' "
+            "AND column_name = 'id' "
+            "AND non_unique = 0"
+        ) == 1U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pk_autoinc_desc (code, value) VALUES (30, 300)");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_pk_autoinc_desc "
+            "WHERE id = 3 AND code = 30 AND value = 300"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_pk_autoinc_desc "
+            "FORCE INDEX (ownerless_pk_autoinc_desc_id_key) "
+            "WHERE id >= 2"
+        ) == 5U
+    );
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_pk_autoinc_desc (code, value) VALUES (30, 301)",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_DUPLICATE_KEY_ERRNO);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    release_ownerless_live_peer(&live_peer);
+
+    assert_ownerless_auto_increment_descending_primary_key_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        3U,
+        6U,
+        60U,
+        600U,
+        3U
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert_ownerless_auto_increment_descending_primary_key_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        3U,
+        6U,
+        60U,
+        600U,
+        3U
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_auto_increment_descending_primary_key_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        3U,
+        6U,
+        60U,
+        600U,
+        3U
+    );
+    assert_ownerless_auto_increment_descending_primary_key_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        3U,
+        6U,
+        60U,
+        600U,
+        3U
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "INSERT INTO app.ownerless_pk_autoinc_desc (code, value) VALUES (40, 400)");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_pk_autoinc_desc "
+            "WHERE id = 5 AND code = 40 AND value = 400"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_pk_autoinc_desc "
+            "WHERE id = 4"
+        ) == 0U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_ownerless_auto_increment_descending_primary_key_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        4U,
+        11U,
+        100U,
+        1000U,
+        5U
+    );
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_primary_key_idempotent_dictionary_ddl_preserves_key_metadata(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -67714,6 +67913,22 @@ static void auto_increment_primary_key_until_dictionary_finish_fault(
         "DROP INDEX ownerless_pk_autoinc_code_key, "
         "ADD UNIQUE KEY ownerless_pk_autoinc_id_key (id), "
         "ADD PRIMARY KEY (code)"
+    );
+}
+
+static void auto_increment_descending_primary_key_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_pk_autoinc_desc "
+        "DROP PRIMARY KEY, "
+        "DROP INDEX ownerless_pk_autoinc_desc_code_key, "
+        "ADD UNIQUE KEY ownerless_pk_autoinc_desc_id_key (id), "
+        "ADD PRIMARY KEY (code DESC)"
     );
 }
 

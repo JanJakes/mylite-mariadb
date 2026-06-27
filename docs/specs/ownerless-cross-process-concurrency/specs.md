@@ -7528,6 +7528,14 @@ subsystems that this mode needs:
   `CREATE DEFINER=CURRENT_USER TRIGGER`, proving `ACTION_ORDER`, firing order,
   definer metadata, and clear native file-operation markers while a peer
   remains live.
+  The AUTO_INCREMENT descending primary-key crash follow-up reuses the
+  bounded primary-key replacement classifier for the same deterministic
+  rebuild shape covered by `primary-key-autoinc-descending-ddl`, kills the
+  writer at `dictionary-before-finish` while a peer remains live, and proves
+  `PRIMARY(code DESC)`, the retained unique key on `id`, live native
+  file-operation marker retention, final no-live drain, duplicate-key-consumed
+  AUTO_INCREMENT gap preservation, forced `.shm` rebuild, and ordinary native
+  reopen.
 
   Ownerless DDL stress now treats pre-execution MyLite statement-lock
   `MYLITE_BUSY` as bounded retryable harness contention while keeping native
@@ -7562,7 +7570,8 @@ subsystems that this mode needs:
      plus focused column idempotent and column `IF EXISTS` missing-column
      no-op prefinish boundaries, plus focused plain ADD COLUMN, table-comment,
      column-default metadata ALTER, and plain, descending, composite direction,
-     and AUTO_INCREMENT primary-key replacement prefinish boundaries,
+     AUTO_INCREMENT, and AUTO_INCREMENT descending primary-key replacement
+     prefinish boundaries,
      especially remaining
      rename/truncate variants, other rebuild variants, broader
      metadata-only DDL, temporary, broader schema option variants, intra-loop

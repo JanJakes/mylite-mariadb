@@ -96,6 +96,8 @@ refresh and AUTO_INCREMENT registry seeding paths are correct.
 
 This broadens ownerless AUTO_INCREMENT and primary-key DDL evidence for one
 representative descending clustered-index rebuild involving allocation state.
+The focused crash-recovery follow-up is tracked in
+`docs/specs/ownerless-autoinc-descending-primary-key-ddl-crash/specs.md`.
 It does not claim the full primary-key option matrix.
 
 ## Directory And Lifecycle Impact
@@ -147,3 +149,7 @@ No production binary-size impact beyond focused test code and docs.
   AUTO_INCREMENT primary-key replacements, ignored/invisible, and
   algorithm/lock option variants remain planned.
 - External randomized DDL/RQG stress remains separate validation work.
+- Live-peer crash recovery for this same deterministic ALTER shape is covered
+  by the focused
+  `dictionary-primary-key-autoinc-descending-crash` hook selector; broader
+  crash points and option matrices remain separate.

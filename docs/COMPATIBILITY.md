@@ -456,6 +456,14 @@ final no-live ownerless close path drains that bit through the existing native
 checkpoint/reclaim path before clearing it, preserving duplicate-key-consumed
 AUTO_INCREMENT gaps across forced `.shm` rebuild without adding per-insert
 durable checkpoint writes.
+Focused hook coverage now also kills AUTO_INCREMENT primary-key replacement
+writers after native clustered-key rebuild and before ownerless dictionary
+finish for both non-descending and descending replacement keys. Recovery with
+a live peer proves the retained unique key on the AUTO_INCREMENT column,
+replacement `PRIMARY` metadata including descending `COLLATION = 'D'`, native
+file-operation marker retention/drain, and duplicate-key-consumed
+AUTO_INCREMENT gaps across forced `.shm` rebuild for those deterministic ALTER
+shapes.
 Already-open ownerless peers now also recover a stale InnoDB dictionary-cache
 miss for a peer-created file-per-table table after trigger DDL: ownerless text
 and prepared plain reads that hit MariaDB errno `1932` refresh native pages,
