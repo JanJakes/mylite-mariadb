@@ -34,10 +34,11 @@ class PageRecordMetadata {
         std::uint32_t page_no,
         std::uint64_t page_lsn,
         std::uint64_t commit_lsn,
-        std::uint64_t record_offset
+        std::uint64_t record_offset,
+        std::uint32_t metadata_flags
     )
         : m_space_id(space_id), m_page_no(page_no), m_page_lsn(page_lsn), m_commit_lsn(commit_lsn),
-          m_record_offset(record_offset) {}
+          m_record_offset(record_offset), m_metadata_flags(metadata_flags) {}
 
     std::uint32_t space_id() const {
         return m_space_id;
@@ -59,12 +60,17 @@ class PageRecordMetadata {
         return m_record_offset;
     }
 
+    bool snapshot_boundary() const {
+        return (m_metadata_flags & MYLITE_OWNERLESS_PAGE_LOG_RECORD_SNAPSHOT_BOUNDARY) != 0U;
+    }
+
   private:
     std::uint32_t m_space_id;
     std::uint32_t m_page_no;
     std::uint64_t m_page_lsn;
     std::uint64_t m_commit_lsn;
     std::uint64_t m_record_offset;
+    std::uint32_t m_metadata_flags;
 };
 
 class PageImage {
@@ -115,6 +121,7 @@ using PageKey = std::pair<std::uint32_t, std::uint32_t>;
 using TablespaceKey = std::pair<std::uint32_t, std::uint32_t>;
 
 struct ReplayMetadataContext {
+    int page_log_fd = -1;
     std::uint64_t visible_lsn = 0;
     std::vector<PageRecordMetadata> records;
 };
@@ -412,9 +419,18 @@ int collect_visible_record_metadata(
     if (commit_lsn == 0U || commit_lsn > metadata->visible_lsn) {
         return MYLITE_OWNERLESS_PAGE_LOG_OK;
     }
+    std::uint32_t metadata_flags = 0U;
+    if (mylite_ownerless_page_log_record_metadata_flags_at(
+            metadata->page_log_fd,
+            record_offset,
+            &metadata_flags
+        ) != MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
 
     try {
-        metadata->records.emplace_back(space_id, page_no, page_lsn, commit_lsn, record_offset);
+        metadata->records
+            .emplace_back(space_id, page_no, page_lsn, commit_lsn, record_offset, metadata_flags);
     } catch (...) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
@@ -565,7 +581,9 @@ int mylite_ownerless_tablespace_replay_apply_with_flags(
 ) {
     if (datadir == nullptr || page_log_fd < 0 ||
         (flags & ~(MYLITE_OWNERLESS_TABLESPACE_REPLAY_IGNORE_MISSING_TABLESPACES |
-                   MYLITE_OWNERLESS_TABLESPACE_REPLAY_KEEP_NATIVE_SAME_LSN)) != 0U) {
+                   MYLITE_OWNERLESS_TABLESPACE_REPLAY_KEEP_NATIVE_SAME_LSN |
+                   MYLITE_OWNERLESS_TABLESPACE_REPLAY_KEEP_NATIVE_SAME_LSN_SNAPSHOT_BOUNDARY)) !=
+            0U) {
         return MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR;
     }
     if (visible_lsn == 0U) {
@@ -573,6 +591,7 @@ int mylite_ownerless_tablespace_replay_apply_with_flags(
     }
 
     ReplayMetadataContext context = {};
+    context.page_log_fd = page_log_fd;
     context.visible_lsn = visible_lsn;
     const int replay_result = mylite_ownerless_page_log_replay_at(
         page_log_fd,
@@ -598,14 +617,19 @@ int mylite_ownerless_tablespace_replay_apply_with_flags(
         (flags & MYLITE_OWNERLESS_TABLESPACE_REPLAY_IGNORE_MISSING_TABLESPACES) != 0U;
     const bool keep_native_same_lsn =
         (flags & MYLITE_OWNERLESS_TABLESPACE_REPLAY_KEEP_NATIVE_SAME_LSN) != 0U;
+    const bool keep_native_same_lsn_snapshot_boundary =
+        (flags & MYLITE_OWNERLESS_TABLESPACE_REPLAY_KEEP_NATIVE_SAME_LSN_SNAPSHOT_BOUNDARY) != 0U;
     for (const auto &entry : latest_records) {
         PageImage page = {};
         if (!read_page_image(page_log_fd, page_log_offset, entry.second, page)) {
             return MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR;
         }
 
+        const bool keep_native_same_lsn_for_record =
+            keep_native_same_lsn ||
+            (keep_native_same_lsn_snapshot_boundary && entry.second.snapshot_boundary());
         const int apply_result =
-            resolver.apply(page, ignore_missing_tablespaces, keep_native_same_lsn);
+            resolver.apply(page, ignore_missing_tablespaces, keep_native_same_lsn_for_record);
         if (apply_result != MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK) {
             return apply_result;
         }

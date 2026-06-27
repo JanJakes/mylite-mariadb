@@ -311,6 +311,7 @@ void mylite_ownerless_innodb_lock_set_redo_written_leave_batch_hook(
     mylite_ownerless_innodb_redo_written_leave_batch_callback written_leave_batch_hook);
 void mylite_ownerless_innodb_lock_reset_hooks(void);
 int mylite_ownerless_innodb_lock_has_hooks(void);
+void mylite_ownerless_innodb_set_startup_lsn_advance_limit(uint64_t max_lsn);
 void mylite_ownerless_innodb_set_checkpoint_suppression(int suppressed);
 int mylite_ownerless_innodb_checkpoint_suppressed(void);
 void mylite_ownerless_innodb_set_relative_file_op_redo_paths(int enabled);

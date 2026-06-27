@@ -38,6 +38,7 @@ std::atomic<bool> mylite_ownerless_innodb_lock_hooks_enabled{false};
 std::atomic<bool> mylite_ownerless_innodb_lock_hooks_ever_enabled{false};
 std::atomic<bool> mylite_ownerless_innodb_autoinc_hooks_enabled{false};
 std::atomic<bool> mylite_ownerless_innodb_test_faults_enabled{false};
+std::atomic<uint64_t> mylite_ownerless_innodb_startup_lsn_advance_limit{0};
 thread_local bool mylite_ownerless_statement_visible_fast_path= false;
 thread_local bool mylite_ownerless_statement_deferred_page_publish= false;
 thread_local bool mylite_ownerless_pages_visible_force= false;
@@ -605,6 +606,8 @@ extern "C" void mylite_ownerless_innodb_lock_reset_hooks(void)
   uncheckpointed_file_rename_recovery.store(false, std::memory_order_release);
   file_op_redo_logged.store(false, std::memory_order_release);
   mylite_ownerless_innodb_set_test_faults_enabled(0);
+  mylite_ownerless_innodb_startup_lsn_advance_limit.store(
+      0, std::memory_order_release);
 }
 
 extern "C" int mylite_ownerless_innodb_lock_has_hooks(void)
@@ -640,6 +643,13 @@ extern "C" int mylite_ownerless_innodb_lock_has_hooks(void)
 extern "C" void mylite_ownerless_innodb_set_checkpoint_suppression(int suppressed)
 {
   checkpoint_suppressed.store(suppressed != 0, std::memory_order_release);
+}
+
+extern "C" void mylite_ownerless_innodb_set_startup_lsn_advance_limit(
+    uint64_t max_lsn)
+{
+  mylite_ownerless_innodb_startup_lsn_advance_limit.store(
+      max_lsn, std::memory_order_release);
 }
 
 extern "C" int mylite_ownerless_innodb_checkpoint_suppressed(void)
@@ -1896,7 +1906,8 @@ enum class transaction_page_image_buffer_state
 {
   missing,
   matches,
-  mismatch
+  same_lsn_mismatch,
+  different_lsn
 };
 
 static transaction_page_image_buffer_state transaction_page_image_buffer(
@@ -1904,6 +1915,10 @@ static transaction_page_image_buffer_state transaction_page_image_buffer(
 {
   const uint32_t space_id= static_cast<uint32_t>(image.packed_page >> 32);
   const uint32_t page_no= static_cast<uint32_t>(image.packed_page);
+  fil_space_t *space= fil_space_t::get(space_id);
+  const bool full_crc32= space != nullptr && space->full_crc32();
+  if (space != nullptr)
+    space->release();
   transaction_page_image_buffer_state state=
       transaction_page_image_buffer_state::missing;
 
@@ -1914,7 +1929,7 @@ static transaction_page_image_buffer_state transaction_page_image_buffer(
           page_id_t(space_id, page_no), 0, RW_S_LATCH, nullptr,
           BUF_GET_IF_IN_POOL, &mtr, &err))
   {
-    state= transaction_page_image_buffer_state::mismatch;
+    state= transaction_page_image_buffer_state::same_lsn_mismatch;
     const buf_page_t &bpage= block->page;
     const byte *source= bpage.zip.data ? bpage.zip.data : bpage.frame;
     const bool compressed= bpage.zip.data != nullptr;
@@ -1926,6 +1941,19 @@ static transaction_page_image_buffer_state transaction_page_image_buffer(
       if (page_lsn == image.page_lsn &&
           memcmp(source, image.page.data(), image.page_size) == 0)
         state= transaction_page_image_buffer_state::matches;
+      else if (page_lsn == image.page_lsn)
+      {
+        std::vector<byte, ut_allocator<byte> > normalized_page= image.page;
+        byte *page= normalized_page.data();
+        if (compressed)
+          buf_flush_update_zip_checksum(page, image.page_size);
+        else
+          buf_flush_init_for_writing(nullptr, page, nullptr, full_crc32);
+        if (memcmp(source, page, image.page_size) == 0)
+          state= transaction_page_image_buffer_state::matches;
+      }
+      else
+        state= transaction_page_image_buffer_state::different_lsn;
     }
   }
   mtr.commit();
@@ -1962,15 +1990,23 @@ extern "C" uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
       if (image.page_lsn == 0 || image.page_size == 0 ||
           image.page.size() != image.page_size)
         continue;
-      const transaction_page_image_buffer_state buffer_state=
-          transaction_page_image_buffer(image);
-      if (buffer_state == transaction_page_image_buffer_state::mismatch ||
-          (buffer_state == transaction_page_image_buffer_state::missing &&
-           image.page_lsn > visible_lsn))
-        continue;
-
       const uint32_t space_id= static_cast<uint32_t>(image.packed_page >> 32);
       const uint32_t page_no= static_cast<uint32_t>(image.packed_page);
+      const transaction_page_image_buffer_state buffer_state=
+          transaction_page_image_buffer(image);
+      if (buffer_state ==
+          transaction_page_image_buffer_state::same_lsn_mismatch)
+        continue;
+      /*
+      The transaction image is the commit-time proof for its own visible LSN.
+      A resident buffer page with another LSN may already reflect a later local
+      or peer attempt, especially around record-lock grant crash faults.  Do
+      not let that invalidate a bounded committed image; still reject future
+      images that cannot be covered by this transaction's visible boundary.
+      */
+      if (image.page_lsn > visible_lsn)
+        continue;
+
       fil_space_t *space= fil_space_t::get(space_id);
       const bool full_crc32= space != nullptr && space->full_crc32();
       if (space != nullptr)
@@ -2562,7 +2598,13 @@ extern "C" void mylite_ownerless_innodb_evict_clean_external_pages(void)
 extern "C" int mylite_ownerless_innodb_advance_external_lsn(uint64_t latest_lsn)
 {
   if (!mylite_ownerless_innodb_lock_has_hooks())
-    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+  {
+    const uint64_t startup_limit=
+        mylite_ownerless_innodb_startup_lsn_advance_limit.load(
+            std::memory_order_acquire);
+    if (startup_limit == 0 || latest_lsn > startup_limit)
+      return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+  }
 
   advance_external_lsn(latest_lsn);
   return MYLITE_OWNERLESS_INNODB_LOCK_OK;

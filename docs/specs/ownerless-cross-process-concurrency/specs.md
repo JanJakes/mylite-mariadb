@@ -422,10 +422,24 @@ Roles:
   before startup. When no live peer exists and no retained page-version payloads
   remain, ownerless startup defers InnoDB ownerless hooks, lets the native
   purge coordinator settle until history stops decreasing or drains, then
-  publishes the native-current LSN as the ownerless visible boundary. Focused
-  FK graph stress covers the previously stale same-process parent verifier,
-  ordinary native reopen, and forced `.shm` rebuild. Live ownerless read-view
-  hooks are also a native purge deferral signal: purge wake/coordinator paths
+  publishes the native-current LSN as the ownerless visible boundary. If that
+  WAL-empty no-live path already has a nonzero ownerless checkpoint-visible
+  boundary, startup temporarily permits the InnoDB external-LSN advance hook
+  during `mysql_server_init()`, capped at that persisted visible boundary, so
+  native page-LSN validation can catch up to the ownerless checkpoint boundary
+  without installing full ownerless lock hooks before purge drain; pending
+  native file-op or DML markers still keep hooks installed for post-start
+  checkpoint refresh while preserving the current native redo header as the
+  startup source. Captured transaction images that
+  match a resident page after same-LSN flush checksum/header normalization can
+  still prove the committed page image, same-LSN resident mismatches still
+  reject the image after normalization fails, and different-LSN resident buffer
+  pages no longer suppress bounded committed transaction images. Focused FK
+  graph stress covers the previously stale same-process
+  parent verifier, ordinary native reopen, and forced `.shm` rebuild; focused
+  record-lock-grant crash coverage now also covers the startup future-page-LSN
+  abort and stale committed-update classes. Live ownerless read-view hooks are
+  also a native purge deferral signal: purge wake/coordinator paths
   clone the directory-owned oldest read view and return without deleting undo
   history while a peer process has a published snapshot. Active-reader pressure
   coverage now asserts the reader's process slot and read-view slot stay
@@ -2369,11 +2383,12 @@ Tasks:
 4. Reconcile InnoDB redo with MyLite page-version visibility.
    Generic tablespace replay still treats the page-version WAL image as
    authoritative and primitive coverage rewrites a same-LSN different-image
-   page. Product no-live replay uses an explicit equal-LSN native-page guard
-   because retained page-version WAL can be a snapshot boundary rather than the
-   newest native side-effect image. Non-forced page-version write refresh
-   accepts newer page-version images, but does not rewind a same-LSN or newer
-   clean local page to an older page-version image;
+   page. Product no-live replay now preserves an equal-LSN native page only for
+   records explicitly marked as snapshot boundaries; ordinary committed
+   page-version images rewrite same-LSN different native pages so a retained
+   user image is not skipped as if it were only a reader boundary. Non-forced
+   page-version write refresh accepts newer page-version images, but does not
+   rewind a same-LSN or newer clean local page to an older page-version image;
    focused CTAS post-create DML coverage exercises the case where a retained
    stale-reader boundary page is older than the populated CTAS data page while
    later `UPDATE`, `DELETE`, and `INSERT ... SELECT` statements mutate that
@@ -2387,9 +2402,12 @@ Tasks:
    retained page-version records whose tablespace no longer exists, covering
    dropped and same-schema or cross-schema same-statement multi-dropped DDL
    stress tables without treating stale `.shm` state as durable truth; no-live
-   stale-reader `.shm` rebuilds
-   checkpoint retained reader-boundary WAL before segment rebuild, with focused
-   dropped, same-schema and cross-schema same-statement multi-dropped,
+   stale-reader `.shm` rebuilds now scan retained WAL before choosing between
+   reader-boundary discard and visible tablespace replay. Committed user page
+   images are replayed and retained until no-live close can checkpoint them,
+   while reader-boundary/native-support WAL can still be discarded before
+   segment rebuild. Focused dropped, same-schema and cross-schema
+   same-statement multi-dropped,
    renamed, truncated, force-rebuilt, primary-key-rebuilt, and compressed
    row-format-rebuilt file-per-table, same-schema and
    cross-schema multi-rename swap, and multi-table schema-drop SQL coverage.
@@ -2400,16 +2418,22 @@ Tasks:
    remain, publishing eligible native support/allocation/system buffer-pool
    pages and flushing native dirty pages to advance a lagging page-visible LSN
    to a newer raw latest LSN before checkpoint proof; if shared redo
-   publication is still capped by the native
-   checkpoint-record gap, no-live close persists the newer page-visible LSN
-   only after native checkpoint coverage proves it. It then refreshes external
-   clean page state, proves the native checkpoint covers that durable visible
-   LSN according to MariaDB's checkpoint-record rule, compacting records at or
-   below that safe LSN while retaining newer complete records, and replacing
-   the page-version index before checkpoint locks are released. With live peers,
+   publication is still capped by the native checkpoint-record gap, no-live
+   close keeps the newer value as ownerless latest but clamps the persisted
+   visible boundary to MariaDB's exact native checkpoint LSN before WAL-empty
+   native-authoritative startup; post-start refresh can advance visible after
+   MariaDB recovery succeeds. It then refreshes external clean page state,
+   proves the native checkpoint covers that durable visible LSN according to
+   MariaDB's checkpoint-record rule, compacting records at or below that safe
+   LSN while retaining newer complete records, and replacing the page-version
+   index before checkpoint locks are released. With live peers,
    this path is gated by a nonblocking ownerless statement gate, the shared
    page-version pin registry, and native write/recovery-idle proof, and runs
-   only when no active page-version pins remain. Page-version publication now
+   only when no active page-version pins remain. If retained payload still
+   exists after a final no-live ownerless shutdown, MyLite replays visible
+   tablespace images after `mysql_server_end()` and checkpoints the WAL at the
+   ownerless visible LSN, avoiding a running-buffer-pool race while preserving
+   ordinary native reopen semantics. Page-version publication now
    opportunistically synthesizes a boundary record from the native tablespace
    page when an older snapshot pin is active, no WAL boundary exists, and the
    native page LSN is at or below the oldest pin; if that proof is unavailable,
@@ -7333,6 +7357,12 @@ subsystems that this mode needs:
   including the synthesized native-boundary variant, now proves that a stale
   reader close retains the peer WAL after its pin releases, then a fresh
   ownerless opener reads the committed rows and checkpoints the retained WAL.
+  Focused record-lock-grant crash coverage now also proves stale-reader rebuild
+  does not discard retained committed page images, and that final no-live close
+  drains retained WAL through post-shutdown tablespace replay and checkpoint.
+  Focused production commit-race coverage now also repeats the WAL-empty
+  native-authoritative reopen path with exact native-checkpoint clamping so the
+  former checkpoint-record-gap corruption class does not recur.
   Focused production coverage includes the
   explicit transaction history-proof selectors, uncommitted-peer-hidden,
   registered three-round random rollback handoff CTest, adjacent savepoint,

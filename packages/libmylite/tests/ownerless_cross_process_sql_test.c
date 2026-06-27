@@ -1177,7 +1177,8 @@ static void test_crashed_schema_synonym_alter_dictionary_ddl_recovers_defaults(v
 static void test_crashed_schema_idempotent_create_dictionary_ddl_preserves_defaults(void);
 static void test_crashed_schema_idempotent_drop_dictionary_ddl_preserves_schema(void);
 static void test_crashed_schema_idempotent_missing_create_dictionary_ddl_recovers_schema(void);
-static void test_crashed_schema_idempotent_existing_drop_dictionary_ddl_recovers_absent_schema(void
+static void test_crashed_schema_idempotent_existing_drop_dictionary_ddl_recovers_absent_schema(
+    void
 );
 static void test_crashed_schema_idempotent_existing_drop_synonym_dictionary_ddl_recovers_absent_schema(
     void
@@ -5483,8 +5484,7 @@ int main(int argc, char **argv) {
     if (argc == 2 &&
         strcmp(argv[1], "dictionary-schema-idempotent-existing-drop-synonym-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-        test_crashed_schema_idempotent_existing_drop_synonym_dictionary_ddl_recovers_absent_schema(
-        );
+        test_crashed_schema_idempotent_existing_drop_synonym_dictionary_ddl_recovers_absent_schema();
 #endif
         return 0;
     }
@@ -58117,7 +58117,8 @@ static void test_crashed_schema_synonym_empty_drop_dictionary_ddl_recovers_absen
     );
 }
 
-static void test_crashed_schema_idempotent_existing_drop_dictionary_ddl_recovers_absent_schema(void
+static void test_crashed_schema_idempotent_existing_drop_dictionary_ddl_recovers_absent_schema(
+    void
 ) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
