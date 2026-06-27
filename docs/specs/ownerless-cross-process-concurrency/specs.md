@@ -4851,8 +4851,9 @@ Tasks:
    ownerless runtime files already exist. Ownerless startup failures are
    retried a bounded number of
    times only after ending partial MariaDB embedded startup state and restoring
-   the saved 12 KiB redo startup prefix when its checkpoint pages pass MariaDB
-   startup validation, or the captured prefix fallback; ordinary native
+   the saved 12 KiB redo startup prefix plus its recorded physical redo file
+   size when its checkpoint pages pass MariaDB startup validation, or the
+   captured prefix fallback; ordinary native
    read/write reopen uses the same failure-then-restore retry path after
    ownerless activity, and can arm only the ownerless uncheckpointed
    file-operation recovery mode during native startup when retained page WAL,
@@ -4981,10 +4982,10 @@ Tasks:
    table and restores normal ownerless refresh for a previously shadowed
    permanent table. Focused temporary-table `DROP TEMPORARY TABLE`,
    `RENAME TABLE`, and `ALTER TABLE ... RENAME TO` prefinish crash coverage now
-   uses metadata-only live-peer recovery while keeping the native
-   file-operation marker clear and preserving the shadowed permanent table
-   through ownerless/native reopen and forced `.shm` rebuild, while multi-pair
-   temporary rename chains,
+   uses metadata-only live-peer recovery while retaining the native
+   file-operation marker until final no-live drain and preserving the shadowed
+   permanent table through ownerless/native reopen and forced `.shm` rebuild,
+   while multi-pair temporary rename chains,
    inside-MariaDB-loop multi-drop crash points, broader ALTER rebuild beyond
    the focused force, row-format, compressed, and charset-conversion cases,
    broader schema option variants, broader view and trigger variants, and
@@ -5312,7 +5313,9 @@ Minimum suites before support can be claimed:
     durable ownerless redo evidence exists without retained page WAL, and
     ordinary exclusive repeated-open redo-prefix repair when final embedded
     shutdown leaves an invalid startup prefix, while active-runtime reconnect
-    timing remains measured separately from full startup/shutdown cost, and
+    timing remains measured separately from full startup/shutdown cost, restoring
+    a validated redo-header backup also restores the recorded physical redo file
+    size when the current file differs within the bounded tolerance, and
     hook-only validation that malformed saved redo-header backups do not arm
     the ordinary-open recovery bridge,
   - opener crash,
@@ -7630,12 +7633,13 @@ subsystems that this mode needs:
      AUTO_INCREMENT, and AUTO_INCREMENT descending primary-key replacement
      prefinish boundaries, plus child-only, self-referencing, and stored
      generated-column child foreign-key truncate prefinish boundaries, plus
-     simple temporary DDL, pure multi-pair temporary rename chains, and one
-     mixed temporary/permanent rename-list prefinish boundary, especially
+     simple temporary DDL, pure multi-pair temporary rename chains, and
+     temp-first plus permanent-first mixed temporary/permanent rename-list
+     prefinish boundaries, especially
      remaining rename variants, other rebuild variants beyond the covered
      FORCE, same-engine ENGINE, row-format, compressed row-format, and charset
      boundaries, broader metadata-only DDL, broader mixed temporary/permanent
-     rename orders, broader schema option variants, intra-loop drop cases, and
+     rename matrices, broader schema option variants, intra-loop drop cases, and
      broader DDL file lifecycle while peers remain live. Partition truncate
      remains governed by the ownerless partition-DDL rejection policy, cyclic
      FK truncate under default FK checks is covered as MariaDB's pre-truncate

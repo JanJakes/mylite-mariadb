@@ -510,6 +510,10 @@ if(BUILD_TESTING)
         COMMAND mylite_ownerless_cross_process_sql_test temporary-mixed-rename-crash
       )
       add_test(
+        NAME libmylite.ownerless-temporary-mixed-rename-reverse-crash
+        COMMAND mylite_ownerless_cross_process_sql_test temporary-mixed-rename-reverse-crash
+      )
+      add_test(
         NAME libmylite.ownerless-stale-drop-crash-recovery
         COMMAND mylite_ownerless_cross_process_sql_test stale-drop-crash-recovery
       )
@@ -1347,6 +1351,7 @@ if(BUILD_TESTING)
         libmylite.ownerless-temporary-alter-rename-crash
         libmylite.ownerless-temporary-multi-rename-crash
         libmylite.ownerless-temporary-mixed-rename-crash
+        libmylite.ownerless-temporary-mixed-rename-reverse-crash
         PROPERTIES
           LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
           TIMEOUT 120

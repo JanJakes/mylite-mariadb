@@ -46,8 +46,8 @@ In scope:
   `CREATE TEMPORARY TABLE ...`, `DROP TEMPORARY TABLE ...`,
   single-pair `RENAME TABLE <tracked-temp> TO <name>`, and simple
   `ALTER TABLE <tracked-temp> RENAME [TO|AS|=] <name>`.
-- Keep the native file-operation checkpoint-needed marker clear for those
-  temporary-only recovery boundaries.
+- Retain the native file-operation checkpoint-needed marker for those
+  temporary-only recovery boundaries until a final no-live checkpoint drain.
 - Add hook crash selectors for `DROP TEMPORARY TABLE`, `RENAME TABLE`, and
   `ALTER TABLE ... RENAME` over connection-local temporary tables while another
   ownerless peer remains live.
@@ -69,8 +69,11 @@ Out of scope:
 
 Add `MYLITE_OWNERLESS_DICTIONARY_RECOVERY_TEMPORARY_TABLE` as a valid
 metadata-only recovery kind. The kind is marked recoverable before dictionary
-finish and is accepted by live-owner cleanup while the native file-operation
-marker remains clear.
+finish and is accepted by live-owner cleanup. A later redo-safety follow-up
+forces the native file-operation checkpoint marker at this prefinish crash
+boundary because temporary-table DDL can still leave shared InnoDB redo
+requiring a no-live checkpoint drain even when no durable temporary table files
+remain.
 
 The classifier stays conservative:
 
@@ -125,10 +128,11 @@ registration, and documentation.
 ## Acceptance Criteria
 
 - A killed temporary-table DROP writer can be recovered while another ownerless
-  peer remains live, with the native file-operation marker clear.
+  peer remains live, with the native file-operation marker retained until the
+  final no-live checkpoint drain.
 - Killed temporary-table `RENAME TABLE` and `ALTER TABLE ... RENAME` writers can
   be recovered while another ownerless peer remains live, with the native
-  file-operation marker clear.
+  file-operation marker retained until the final no-live checkpoint drain.
 - The permanent table shadowed by the temporary table remains durable and
   visible after the temporary table disappears.
 - Ownerless reopen, native reopen, and forced `.shm` rebuild observe the

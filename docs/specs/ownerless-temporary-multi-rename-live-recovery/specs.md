@@ -75,8 +75,10 @@ That false result is intentional for mixed lists. A statement such as
 `RENAME TABLE temp_shadow TO temp_shadow_gone, durable_src TO durable_dst`
 then reaches the existing durable `RENAME_TABLE` recovery kind, which keeps the
 native file-operation checkpoint marker until no-live checkpoint drain. A pure
-temporary chain instead uses `TEMPORARY_TABLE`, stays metadata-only, and skips
-the native file-operation marker.
+temporary chain instead uses `TEMPORARY_TABLE` for dictionary recovery; a later
+redo-safety follow-up forces the native checkpoint marker for that prefinish
+crash boundary as well, because temporary-only DDL can still leave shared
+InnoDB redo requiring no-live checkpoint drain.
 
 ## Compatibility Impact
 
@@ -112,7 +114,7 @@ adds bounded classifier logic, hook tests, CTest registration, and docs.
 
 - A killed pure temporary multi-pair `RENAME TABLE` writer can be recovered
   while another ownerless peer remains live, with the native file-operation
-  marker clear.
+  marker retained until the final no-live checkpoint drain.
 - The shadowed permanent source remains durable and the temporary target names
   do not appear as permanent tables after live recovery, ownerless/native
   reopen, and forced `.shm` rebuild.

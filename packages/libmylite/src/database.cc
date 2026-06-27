@@ -12965,12 +12965,12 @@ bool mark_ownerless_native_file_op_checkpoint_before_dictionary_finish(mylite_db
 
 bool ownerless_dictionary_recovery_skips_native_file_op_checkpoint(std::uint32_t kind) {
     return kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_ADD_FOREIGN_KEY ||
-           kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_FOREIGN_KEY ||
-           kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_TEMPORARY_TABLE;
+           kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_FOREIGN_KEY;
 }
 
 bool ownerless_dictionary_recovery_forces_native_file_op_checkpoint(std::uint32_t kind) {
-    return kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_REPLACE_PRIMARY_KEY ||
+    return kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_TEMPORARY_TABLE ||
+           kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_REPLACE_PRIMARY_KEY ||
            kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_COLUMN ||
            kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_MODIFY_COLUMN ||
            kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_RENAME_COLUMN ||
@@ -25714,6 +25714,9 @@ bool read_ownerless_redo_header_backup(
 
     const std::uint64_t backed_redo_size =
         load_le64(header.data(), k_ownerless_redo_header_backup_file_size_offset);
+    if (backed_redo_size > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+        return false;
+    }
     const off_t backed_redo_file_size = static_cast<off_t>(backed_redo_size);
     const off_t redo_file_size_delta = backed_redo_file_size >= redo_file_size
                                            ? backed_redo_file_size - redo_file_size
@@ -25736,11 +25739,11 @@ bool read_ownerless_redo_header_backup(
     }
 
     snapshot.captured = true;
-    snapshot.restore_file_size = false;
+    snapshot.restore_file_size = backed_redo_file_size != redo_file_size;
     snapshot.restore_prefix_size = k_ownerless_redo_startup_prefix_size;
     snapshot.path = redo_path;
     snapshot.prefix = prefix;
-    snapshot.file_size = redo_file_size;
+    snapshot.file_size = backed_redo_file_size;
     return true;
 }
 
@@ -26450,13 +26453,9 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
             stage_start_ns
         );
         if (init_result != 0) {
-            const bool native_runtime_started = mylite_ownerless_innodb_current_lsn() != 0U ||
-                                                mylite_ownerless_innodb_checkpoint_lsn() != 0U;
             int failure_result = MYLITE_ERROR;
             const char *failure_message = "MariaDB embedded runtime initialization failed";
-            if (native_runtime_started) {
-                mysql_server_end();
-            }
+            mysql_server_end();
             const auto restore_redo_after_startup_failure = [&]() {
                 const std::filesystem::path redo_path = std::filesystem::path(db.database_path) /
                                                         k_datadir_name / k_innodb_redo_log_filename;
