@@ -51,7 +51,9 @@ In scope:
 
 Out of scope:
 
-- Plain `ALTER TABLE schema.table FORCE` without explicit algorithm/lock.
+- Plain `ALTER TABLE schema.table FORCE` without explicit algorithm/lock is
+  covered by the follow-up
+  `docs/specs/ownerless-plain-force-rebuild-live-recovery/specs.md` slice.
 - Row-format rebuilds, compressed key-block rebuilds, primary-key rebuilds,
   charset conversion, column rebuilds, foreign-key/check rebuilds, and other
   ALTER shapes.
@@ -128,7 +130,8 @@ tests/docs.
   marker and preserves rebuilt state through ownerless/native reopen and
   forced `.shm` rebuild.
 - Row-format, compressed, primary-key, charset, column, constraint, and other
-  ALTER rebuild classes remain planned.
+  ALTER rebuild classes remain planned; plain `ALTER TABLE schema.table FORCE`
+  is covered by the follow-up plain-force slice.
 
 ## Verification Results
 

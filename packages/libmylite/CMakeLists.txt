@@ -564,6 +564,12 @@ if(BUILD_TESTING)
           dictionary-force-rebuild-file-op-marker-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-force-rebuild-plain-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-force-rebuild-plain-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-engine-rebuild-file-op-marker-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -1396,6 +1402,7 @@ if(BUILD_TESTING)
         libmylite.ownerless-dictionary-create-or-replace-like-file-op-marker-crash
         libmylite.ownerless-dictionary-create-or-replace-ctas-file-op-marker-crash
         libmylite.ownerless-dictionary-force-rebuild-file-op-marker-crash
+        libmylite.ownerless-dictionary-force-rebuild-plain-crash
         libmylite.ownerless-dictionary-engine-rebuild-file-op-marker-crash
         libmylite.ownerless-dictionary-charset-convert-crash
         libmylite.ownerless-dictionary-row-format-file-op-marker-crash

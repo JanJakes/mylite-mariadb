@@ -1166,6 +1166,7 @@ static void test_crashed_column_idempotent_default_drop_dictionary_ddl_preserves
 static void test_crashed_column_rename_dictionary_ddl_recovers_dependent_expressions(void);
 static void test_crashed_force_rebuild_dictionary_ddl_recovers_rebuilt_table(void);
 static void test_crashed_force_rebuild_dictionary_ddl_marks_file_op_checkpoint(void);
+static void test_crashed_plain_force_rebuild_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_engine_rebuild_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_charset_convert_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(void);
@@ -2157,6 +2158,10 @@ static void rename_expression_column_until_dictionary_finish_fault(
     int ready_fd
 );
 static void force_rebuild_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
+static void plain_force_rebuild_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void engine_rebuild_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void charset_convert_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void row_format_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
@@ -5490,6 +5495,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-force-rebuild-plain-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_plain_force_rebuild_dictionary_ddl_marks_file_op_checkpoint();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-engine-rebuild-file-op-marker-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_engine_rebuild_dictionary_ddl_marks_file_op_checkpoint();
@@ -6132,6 +6143,7 @@ int main(int argc, char **argv) {
             "dictionary-column-rename-expression-crash|"
             "dictionary-force-rebuild-crash|"
             "dictionary-force-rebuild-file-op-marker-crash|"
+            "dictionary-force-rebuild-plain-crash|"
             "dictionary-engine-rebuild-file-op-marker-crash|",
             stderr
         );
@@ -6602,6 +6614,9 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_crashed_column_rename_dictionary_ddl_recovers_dependent_expressions
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_force_rebuild_dictionary_ddl_recovers_rebuilt_table),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_plain_force_rebuild_dictionary_ddl_marks_file_op_checkpoint
+    ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_engine_rebuild_dictionary_ddl_marks_file_op_checkpoint),
     OWNERLESS_SQL_TEST_CASE(test_crashed_charset_convert_dictionary_ddl_recovers_metadata),
     OWNERLESS_SQL_TEST_CASE(test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table),
@@ -56962,6 +56977,14 @@ static void test_crashed_force_rebuild_dictionary_ddl_marks_file_op_checkpoint(v
     );
 }
 
+static void test_crashed_plain_force_rebuild_dictionary_ddl_marks_file_op_checkpoint(void) {
+    run_crashed_rebuild_dictionary_ddl_recovers_rebuilt_table(
+        plain_force_rebuild_until_dictionary_finish_fault,
+        "ownerless-dictionary-plain-force-rebuild-crash.mylite",
+        1
+    );
+}
+
 static void test_crashed_engine_rebuild_dictionary_ddl_marks_file_op_checkpoint(void) {
     run_crashed_rebuild_dictionary_ddl_recovers_rebuilt_table(
         engine_rebuild_until_dictionary_finish_fault,
@@ -71496,6 +71519,18 @@ static void force_rebuild_until_dictionary_finish_fault(open_database_paths path
         "dictionary-before-finish",
         "ALTER TABLE app.ownerless_force_rebuild_crash_base "
         "FORCE, ALGORITHM=COPY, LOCK=EXCLUSIVE"
+    );
+}
+
+static void plain_force_rebuild_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_force_rebuild_crash_base FORCE"
     );
 }
 

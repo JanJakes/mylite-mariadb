@@ -18604,26 +18604,35 @@ bool ownerless_alter_table_engine_innodb_rebuild_recovery_statement(
 }
 
 bool ownerless_alter_table_force_rebuild_recovery_statement(const SqlPolicyTokens &tokens) {
-    if (tokens.count < 14U || !token_equals(tokens.values[0], "ALTER") ||
+    if (tokens.count < 6U || !token_equals(tokens.values[0], "ALTER") ||
         !token_equals(tokens.values[1], "TABLE")) {
         return false;
     }
     if (!ownerless_table_identifier_token(tokens.values[2]) ||
         !token_equals(tokens.values[3], ".") ||
         !ownerless_table_identifier_token(tokens.values[4]) ||
-        !token_equals(tokens.values[5], "FORCE") || !token_equals(tokens.values[6], ",") ||
-        !token_equals(tokens.values[7], "ALGORITHM") || !token_equals(tokens.values[8], "=") ||
-        !token_equals(tokens.values[9], "COPY") || !token_equals(tokens.values[10], ",") ||
-        !token_equals(tokens.values[11], "LOCK") || !token_equals(tokens.values[12], "=") ||
-        !token_equals(tokens.values[13], "EXCLUSIVE")) {
+        !token_equals(tokens.values[5], "FORCE")) {
         return false;
     }
-    for (std::size_t index = 14U; index < tokens.count; ++index) {
-        if (!token_equals(tokens.values[index], ";")) {
-            return false;
-        }
+    std::size_t index = 6U;
+    if (index >= tokens.count || token_equals(tokens.values[index], ";")) {
+        return consume_ownerless_remaining_semicolons(tokens, index);
     }
-    return true;
+    if (!token_equals(tokens.values[index], ",")) {
+        return false;
+    }
+    ++index;
+    if (index + 6U >= tokens.count || !token_equals(tokens.values[index], "ALGORITHM") ||
+        !token_equals(tokens.values[index + 1U], "=") ||
+        !token_equals(tokens.values[index + 2U], "COPY") ||
+        !token_equals(tokens.values[index + 3U], ",") ||
+        !token_equals(tokens.values[index + 4U], "LOCK") ||
+        !token_equals(tokens.values[index + 5U], "=") ||
+        !token_equals(tokens.values[index + 6U], "EXCLUSIVE")) {
+        return false;
+    }
+    index += 7U;
+    return consume_ownerless_remaining_semicolons(tokens, index);
 }
 
 bool ownerless_alter_table_charset_convert_recovery_statement(const SqlPolicyTokens &tokens) {

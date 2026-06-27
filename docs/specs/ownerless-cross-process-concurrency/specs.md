@@ -3376,10 +3376,11 @@ Tasks:
    CHECK expression behavior after a dependent column rename, existing-row
    values, widened-value writes, and later inserts through ownerless/native
    reopen before and after forced `.shm` rebuild. Force-rebuild crash coverage
-   now kills an `ALTER TABLE ... FORCE, ALGORITHM=COPY` writer after native
-   table-copy rebuild but before ownerless dictionary finish, then verifies
-   recovered InnoDB table/space/index metadata, copied payload bytes, and later
-   writes through ownerless/native reopen before and after forced `.shm` rebuild.
+   now kills `ALTER TABLE ... FORCE` and
+   `ALTER TABLE ... FORCE, ALGORITHM=COPY` writers after native table-copy
+   rebuild but before ownerless dictionary finish, then verifies recovered
+   InnoDB table/space/index metadata, copied payload bytes, and later writes
+   through ownerless/native reopen before and after forced `.shm` rebuild.
    Row-format crash coverage now kills an
    `ALTER TABLE ... ROW_FORMAT=DYNAMIC` writer after native row-format rebuild
    but before ownerless dictionary finish, then verifies recovered dynamic
@@ -3602,7 +3603,7 @@ Tasks:
    generated-column/CHECK expression-table crash variants that prove generated
    values, real defaults, and CHECK enforcement are preserved across ownerless
    and native reopen.
-   Hook-build crash coverage also kills
+   Hook-build crash coverage also kills `ALTER TABLE ... FORCE` and
    `ALTER TABLE ... FORCE, ALGORITHM=COPY` before ownerless dictionary finish
    and verifies recovered InnoDB table/space/index metadata, copied payloads,
    and post-recovery writes through ownerless and native reopen. Hook-build
@@ -4917,13 +4918,13 @@ Tasks:
    reopen, and forced `.shm` rebuild. Focused
    `DROP TABLE schema.table` prefinish crash coverage now uses a separate
    recoverable dictionary marker to provide live-peer recovery for the native
-   file-removal boundary. Focused `ALTER TABLE schema.table FORCE,
-   ALGORITHM=COPY, LOCK=EXCLUSIVE` prefinish crash coverage now uses a
-   separate recoverable dictionary marker to provide live-peer recovery for
-   the native copy-style rebuild boundary. Focused `ALTER TABLE schema.table
-   ROW_FORMAT=DYNAMIC` prefinish crash coverage now uses a separate
-   recoverable dictionary marker to provide live-peer recovery for the native
-   dynamic row-format copy rebuild boundary. Focused `ALTER TABLE
+   file-removal boundary. Focused `ALTER TABLE schema.table FORCE` and
+   `ALTER TABLE schema.table FORCE, ALGORITHM=COPY, LOCK=EXCLUSIVE` prefinish
+   crash coverage now uses a separate recoverable dictionary marker to provide
+   live-peer recovery for the native force-rebuild boundary. Focused
+   `ALTER TABLE schema.table ROW_FORMAT=DYNAMIC` prefinish crash coverage now
+   uses a separate recoverable dictionary marker to provide live-peer recovery
+   for the native dynamic row-format copy rebuild boundary. Focused `ALTER TABLE
    schema.table ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8` prefinish crash
    coverage now uses a separate recoverable dictionary marker to provide
    live-peer recovery for the native compressed copy rebuild boundary, and the
@@ -5713,8 +5714,9 @@ writers after native replacement-copy completion, marker-specific coverage for
 representative `ALTER TABLE ... FORCE` and
 `ALTER TABLE ... ROW_FORMAT=DYNAMIC` rebuild writers after native rebuild
 completion, focused post-checkpoint DML observation of the native
-`FILE_MODIFY` redo flag, an `ALTER TABLE ... FORCE, ALGORITHM=COPY` writer
-after native table-copy rebuild, a `CREATE OR REPLACE TABLE` writer
+`FILE_MODIFY` redo flag, plain `ALTER TABLE ... FORCE` and explicit
+`ALTER TABLE ... FORCE, ALGORITHM=COPY` writers after native table-copy rebuild,
+a `CREATE OR REPLACE TABLE` writer
 after native old-table replacement, duplicate `CREATE TABLE IF NOT EXISTS`,
 missing single-table and multi-table-list `DROP TABLE IF EXISTS` no-op writers,
 and existing single-table and two-table-list `DROP TABLE IF EXISTS` writers,
