@@ -45184,6 +45184,7 @@ static void test_crashed_composite_direction_primary_key_dictionary_ddl_recovers
     char *database_path =
         path_join(root, "ownerless-dictionary-composite-direction-primary-key-crash.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
     unsigned mariadb_errno = 0U;
 
@@ -45229,10 +45230,11 @@ static void test_crashed_composite_direction_primary_key_dictionary_ddl_recovers
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         composite_direction_primary_key_until_dictionary_finish_fault
     );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -45316,12 +45318,16 @@ static void test_crashed_composite_direction_primary_key_dictionary_ddl_recovers
             "SELECT SUM(value) FROM app.ownerless_composite_direction_primary_key_base"
         ) == 1000U
     );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_composite_direction_primary_key_ddl_state(
         paths,
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_ownerless_composite_direction_primary_key_ddl_state(paths, MYLITE_OPEN_READWRITE);
     remove_concurrency_shm(database_path);
     assert_ownerless_composite_direction_primary_key_ddl_state(

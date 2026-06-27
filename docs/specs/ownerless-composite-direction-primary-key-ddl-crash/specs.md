@@ -10,11 +10,12 @@ replacement and an idempotent primary-key no-op, but not a mixed-direction
 composite clustered-key rebuild after native metadata is written and before
 MyLite publishes ownerless dictionary finish.
 
-MyLite needs a bounded crash-tail proof for this accepted primary-key variant:
-if a writer dies after MariaDB completes the composite direction primary-key
-rebuild but before ownerless dictionary finish, live peers must keep recovery
-sensitive state busy, no-live recovery must rebuild volatile ownerless state,
-and the final native clustered-key metadata must remain usable.
+MyLite needs a bounded crash-tail proof for this accepted primary-key variant.
+If a writer dies after MariaDB completes the composite direction primary-key
+rebuild but before ownerless dictionary finish, another live ownerless peer
+must be able to recover the dictionary generation while retaining the native
+file-operation marker until final no-live checkpoint proof, and the final
+native clustered-key metadata must remain usable.
 
 ## Source Findings
 
@@ -42,8 +43,9 @@ In scope:
   `dictionary-composite-direction-primary-key-crash`, that kills a writer at
   `dictionary-before-finish` while executing
   `ALTER TABLE ... DROP PRIMARY KEY, ADD PRIMARY KEY (tenant_id ASC, code DESC)`.
-- Verify live-peer cleanup remains busy until the peer exits and no-live
-  recovery runs.
+- Verify live-peer recovery while another ownerless peer remains open.
+- Verify the native file-operation marker remains retained while that peer is
+  open and drains after the peer exits.
 - Verify recovered `information_schema.statistics` exposes the two-part
   `PRIMARY`, with `tenant_id` ascending and `code` descending.
 - Verify the old `id` column is no longer part of `PRIMARY`.
@@ -69,11 +71,13 @@ Out of scope:
   `PRIMARY(id)` and three rows.
 - Crash the writer while it executes the composite direction primary-key
   replacement.
-- Use `crash_dictionary_writer_with_live_peer()` so a live peer proves cleanup
-  stays busy before no-live recovery.
-- After no-live recovery, insert a row that duplicates only the old `id` but
-  has a new composite primary-key value, and verify duplicate composite-key
-  writes still fail.
+- Use `crash_ownerless_dictionary_writer_with_held_live_peer()` so a live peer
+  proves recovery works before no-live cleanup.
+- While the peer is still open, recover ownerless metadata, insert a row that
+  duplicates only the old `id` but has a new composite primary-key value, and
+  verify duplicate composite-key writes still fail.
+- Release the peer and verify the retained native file-operation marker drains
+  on the next no-live ownerless reopen.
 - Reuse the existing composite direction primary-key final-state assertion for
   ownerless/native reopen before and after forced shared-memory rebuild.
 
@@ -90,8 +94,9 @@ concurrent-conflict, or external-oracle matrix.
 ## Directory And Lifecycle Impact
 
 No new MyLite files or directory layout changes. The slice exercises
-MariaDB/InnoDB native clustered-index metadata and MyLite's existing ownerless
-dictionary-generation recovery path.
+MariaDB/InnoDB native clustered-index metadata, MyLite's ownerless
+dictionary-generation recovery path, and retained native file-operation marker
+drain after the final live peer exits.
 
 ## Native Storage Impact
 
@@ -104,14 +109,17 @@ No public API changes.
 
 ## Binary Size Impact
 
-No production binary-size impact. Changes are limited to hook-only test code
-and documentation.
+No meaningful production binary-size impact. The shared bounded primary-key
+replacement classifier now accepts composite key-part lists with optional
+`ASC`/`DESC`; tests and docs cover the new crash path.
 
 ## Test Plan
 
 - Build `mylite_ownerless_cross_process_sql_test` in `ownerless-test-hooks`.
 - Run focused `dictionary-composite-direction-primary-key-crash` in
   `ownerless-test-hooks`.
+- Run registered standalone CTest:
+  `ctest --preset ownerless-test-hooks -R '^libmylite\.ownerless-dictionary-composite-direction-primary-key-crash$' --output-on-failure`.
 - Run adjacent `dictionary-primary-key-crash`,
   `dictionary-primary-key-idempotent-crash`, `primary-key-ddl`,
   `descending-primary-key-ddl`, and `composite-direction-primary-key-ddl`
@@ -122,12 +130,35 @@ and documentation.
 ## Acceptance Criteria
 
 - The focused hook selector kills the writer at `dictionary-before-finish`.
-- A live peer keeps cleanup busy until no-live recovery.
+- A live peer can recover the dead dictionary owner.
+- The native file-operation marker remains set while the live peer stays open
+  and drains after no-live ownerless recovery.
 - Recovered ownerless and native reopen expose `PRIMARY(tenant_id ASC,
   code DESC)` and no longer expose `id` as part of `PRIMARY`.
 - Duplicate composite-key inserts fail, while inserts that duplicate only the
   old `id` succeed.
 - Final state survives forced `.shm` rebuild.
+
+## Verification Results
+
+Passed:
+
+- `cmake --build --preset ownerless-test-hooks --target mylite_ownerless_cross_process_sql_test mylite_ownerless_primitives_test mylite_embedded_ownerless_innodb_lock_hooks_test -j2`
+- `build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test dictionary-composite-direction-primary-key-crash`
+- `ctest --preset ownerless-test-hooks -R '^libmylite\.ownerless-dictionary-composite-direction-primary-key-crash$' --repeat until-fail:5 --output-on-failure`
+- `ctest --preset ownerless-test-hooks -R '^libmylite\.ownerless-dictionary-primary-key-crash$|^libmylite\.ownerless-dictionary-primary-key-idempotent-crash$|^libmylite\.ownerless-primitives$|^libmylite\.embedded-ownerless-innodb-lock-hooks$' --output-on-failure`
+- `cmake --build --preset php-embedded-prod --target mylite_ownerless_cross_process_sql_test -j2`
+- `build/php-embedded-prod/packages/libmylite/mylite_ownerless_cross_process_sql_test composite-direction-primary-key-ddl`
+- `build/php-embedded-prod/packages/libmylite/mylite_ownerless_cross_process_sql_test primary-key-ddl`
+- `build/php-embedded-prod/packages/libmylite/mylite_ownerless_cross_process_sql_test descending-primary-key-ddl`
+- `build/php-embedded-prod/packages/libmylite/mylite_ownerless_cross_process_sql_test primary-key-tablespace-replay`
+- `cmake --build --preset ownerless-stress --target mylite_ownerless_cross_process_sql_test -j2`
+- `ctest --preset ownerless-stress -R '^libmylite\.ownerless-cross-process-ddl-stress$' --output-on-failure`
+- `ctest --preset php-embedded-prod -R '^libmylite\.ownerless-cross-process-sql\.' --parallel 1 --output-on-failure`
+- `env LD_LIBRARY_PATH=/tmp/clang-format-18-root/usr/lib/x86_64-linux-gnu cmake --build --preset format-check-prod`
+- `tools/check-ci-production-builds`
+- `ctest --preset prod -R '^tools\.ci-production-builds$' --output-on-failure`
+- `git diff --check`
 
 ## Risks And Follow-Up
 

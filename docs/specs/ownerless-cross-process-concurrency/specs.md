@@ -2736,8 +2736,9 @@ Tasks:
    through ownerless/native reopen before and after forced `.shm` rebuild.
    Hook-build crash coverage kills the same composite direction primary-key
    replacement after native clustered-key rebuild but before ownerless
-   dictionary finish, proves live-peer cleanup remains busy until no-live
-   recovery, and verifies the same final metadata/enforcement through
+   dictionary finish, proves live-peer recovery while another ownerless peer
+   remains open, retains the native file-operation marker until final no-live
+   drain, and verifies the same final metadata/enforcement through
    ownerless/native reopen and forced `.shm` rebuild. This
    proves the current dictionary-generation serialization and
    pre-statement refresh path for the representative create/alter/index
@@ -5417,9 +5418,11 @@ Minimum suites before support can be claimed:
     ownerless/native reopen, and forced `.shm` rebuild remain correct,
   - after representative composite direction primary-key replacement native
     clustered-key rebuild but before ownerless dictionary finish; hook coverage
-    proves live-peer cleanup remains busy until no-live recovery, recovered
-    key-part direction metadata, replacement-key enforcement, old-key duplicate
-    writes, ownerless/native reopen, and forced `.shm` rebuild remain correct,
+    proves live-peer recovery, retains the native file-operation marker while
+    the peer remains open, drains the marker after the final peer exits, and
+    verifies recovered key-part direction metadata, replacement-key enforcement,
+    old-key duplicate writes, ownerless/native reopen, and forced `.shm` rebuild
+    remain correct,
   - after representative `ALTER COLUMN ... SET DEFAULT` native metadata update
     but before ownerless dictionary finish; hook coverage proves metadata-only
     live-peer recovery with the native file-operation marker clear and recovered
@@ -5658,7 +5661,8 @@ missing `ALTER TABLE ... RENAME COLUMN IF EXISTS`, missing
 MariaDB success, including generated-column/CHECK expression-table missing
 rename, change, and default no-ops, an `ALTER TABLE ... AUTO_INCREMENT` writer after
 native high-watermark persistence, a composite direction primary-key writer
-after native clustered-key rebuild, a plain `ALTER TABLE ... ADD COLUMN` writer
+after native clustered-key rebuild with live-peer recovery and retained-marker
+no-live drain, a plain `ALTER TABLE ... ADD COLUMN` writer
 after native stored-column metadata update, an `ALTER COLUMN ... SET DEFAULT`
 writer after native metadata update, simple view CREATE/DROP writers after native view
 definition-file creation/removal, simple trigger CREATE/DROP, trigger
@@ -7524,9 +7528,9 @@ subsystems that this mode needs:
      top-level and ALTER secondary-index idempotent/no-op prefinish boundaries,
      plus focused column idempotent and column `IF EXISTS` missing-column
      no-op prefinish boundaries, plus focused plain ADD COLUMN, table-comment,
-     column-default metadata ALTER, and single-column primary-key replacement
-     prefinish boundaries, especially remaining rename/truncate variants, other
-     rebuild variants, broader
+     column-default metadata ALTER, and plain plus composite direction
+     primary-key replacement prefinish boundaries, especially remaining
+     rename/truncate variants, other rebuild variants, broader
      metadata-only DDL, temporary, broader schema option variants, intra-loop
      drop cases, and broader DDL file lifecycle while peers remain live.
   2. Close remaining transaction crash windows, especially native

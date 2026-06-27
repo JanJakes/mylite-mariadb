@@ -16952,34 +16952,52 @@ bool ownerless_alter_table_replace_primary_key_recovery_statement(
     }
 
     index += 8U;
-    if (index + 1U >= tokens.count || !ownerless_table_identifier_token(tokens.values[index]) ||
-        !token_equals(tokens.values[index + 1U], ")")) {
+    std::vector<std::string> column_names;
+    for (;;) {
+        if (index >= tokens.count || !ownerless_table_identifier_token(tokens.values[index])) {
+            return false;
+        }
+        column_names.push_back(ownerless_normalized_identifier(tokens.values[index]));
+        ++index;
+        if (index < tokens.count && token_in(tokens.values[index], "ASC", "DESC")) {
+            ++index;
+        }
+        if (index >= tokens.count) {
+            return false;
+        }
+        if (token_equals(tokens.values[index], ",")) {
+            ++index;
+            continue;
+        }
+        if (token_equals(tokens.values[index], ")")) {
+            ++index;
+            break;
+        }
         return false;
     }
-    const std::string column_name = ownerless_normalized_identifier(tokens.values[index]);
-    index += 2U;
-    if (!consume_ownerless_remaining_semicolons(tokens, index)) {
+    if (column_names.empty() || !consume_ownerless_remaining_semicolons(tokens, index)) {
         return false;
     }
 
     bool primary_exists = false;
-    bool column_exists = false;
-    return ownerless_index_metadata_lookup(
-               db,
-               schema_name,
-               table_name,
-               "PRIMARY",
-               &primary_exists
-           ) &&
-           primary_exists &&
-           ownerless_column_metadata_lookup(
-               db,
-               schema_name,
-               table_name,
-               column_name,
-               &column_exists
-           ) &&
-           column_exists;
+    if (!ownerless_index_metadata_lookup(db, schema_name, table_name, "PRIMARY", &primary_exists) ||
+        !primary_exists) {
+        return false;
+    }
+    for (const std::string &column_name : column_names) {
+        bool column_exists = false;
+        if (!ownerless_column_metadata_lookup(
+                db,
+                schema_name,
+                table_name,
+                column_name,
+                &column_exists
+            ) ||
+            !column_exists) {
+            return false;
+        }
+    }
+    return true;
 }
 
 bool ownerless_alter_table_drop_index_if_exists_recovery_statement(

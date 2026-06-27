@@ -8,7 +8,7 @@ coverage killed a writer after MariaDB/InnoDB completed the native primary-key
 replacement but before MyLite published ownerless dictionary finish, but a live
 peer kept cleanup busy until no-live recovery.
 
-This slice promotes the bounded single-column replacement shape to live-peer
+This slice promotes the bounded replacement-key grammar to live-peer
 recovery. Primary-key replacement is a clustered-index metadata and
 rebuild-sensitive DDL class, so recovery must remain on the native file-operation
 checkpoint lane rather than the metadata-only lane.
@@ -52,12 +52,13 @@ Base: MariaDB 11.8 LTS import `mariadb-11.8.6`
 
 Add a bounded ownerless dictionary recovery kind for:
 
-- `ALTER TABLE <table> DROP PRIMARY KEY, ADD PRIMARY KEY (<column>)`
+- `ALTER TABLE <table> DROP PRIMARY KEY, ADD PRIMARY KEY (<key-part>[, ...])`
 
-The classifier only opts in when the statement has exactly that single-column
-replacement shape, with no trailing ALTER options except semicolons, and
+The classifier only opts in when the statement has exactly that replacement
+shape, each key part is a column name with optional `ASC`/`DESC`, there are no
+prefix lengths or trailing ALTER options except semicolons, and
 pre-execution `information_schema` metadata proves the table already has a
-`PRIMARY` index and the replacement column exists.
+`PRIMARY` index and every replacement column exists.
 
 The recovery kind forces the native file-operation checkpoint-needed marker
 before ownerless dictionary finish even if the low-level InnoDB file-op redo
@@ -95,7 +96,7 @@ In scope:
 
 - crash-at-dictionary-before-finish coverage for completed primary-key
   replacement,
-- live-peer recovery for the bounded single-column primary-key replacement,
+- live-peer recovery for bounded primary-key replacement key-part lists,
 - retained native file-operation marker drain after the final live peer exits,
 - ownerless/native reopen of recovered primary-key metadata and uniqueness
   behavior.
@@ -185,8 +186,8 @@ Passed:
 
 ## Risks And Unresolved Questions
 
-- This is deterministic single-column primary-key replacement live-recovery
-  coverage, not the full primary-key option matrix.
+- This is deterministic bounded primary-key replacement live-recovery coverage,
+  not the full primary-key option matrix.
 - Duplicate `ADD PRIMARY KEY IF NOT EXISTS` no-op crash recovery is covered
   separately by
   `docs/specs/ownerless-primary-key-idempotent-ddl-crash/specs.md`.
