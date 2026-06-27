@@ -7667,7 +7667,8 @@ subsystems that this mode needs:
      prefinish boundaries, plus simple temporary DDL, pure multi-pair temporary
      rename chains, and
      temp-first plus permanent-first mixed temporary/permanent rename-list
-     prefinish boundaries, especially
+     prefinish boundaries, plus a focused temporary-chain/permanent/temporary-chain
+     mixed rename-list prefinish boundary, especially
      remaining rename variants, other rebuild variants beyond the covered
      FORCE, same-engine ENGINE including exact copy-lock, row-format including
      exact copy-lock, compressed row-format including exact copy-lock, and
