@@ -2379,6 +2379,10 @@ bool consume_ownerless_table_identifier_parts(
     std::string *table_name
 );
 bool consume_ownerless_parenthesized_clause(const SqlPolicyTokens &tokens, std::size_t &index);
+bool consume_ownerless_optional_copy_exclusive_alter_tail(
+    const SqlPolicyTokens &tokens,
+    std::size_t &index
+);
 bool consume_ownerless_key_part_list(
     const SqlPolicyTokens &tokens,
     std::size_t &index,
@@ -16579,6 +16583,32 @@ bool consume_ownerless_remaining_semicolons(const SqlPolicyTokens &tokens, std::
     return true;
 }
 
+bool consume_ownerless_optional_copy_exclusive_alter_tail(
+    const SqlPolicyTokens &tokens,
+    std::size_t &index
+) {
+    if (index >= tokens.count || token_equals(tokens.values[index], ";")) {
+        return consume_ownerless_remaining_semicolons(tokens, index);
+    }
+    if (!token_equals(tokens.values[index], ",")) {
+        return false;
+    }
+
+    ++index;
+    if (index + 6U >= tokens.count || !token_equals(tokens.values[index], "ALGORITHM") ||
+        !token_equals(tokens.values[index + 1U], "=") ||
+        !token_equals(tokens.values[index + 2U], "COPY") ||
+        !token_equals(tokens.values[index + 3U], ",") ||
+        !token_equals(tokens.values[index + 4U], "LOCK") ||
+        !token_equals(tokens.values[index + 5U], "=") ||
+        !token_equals(tokens.values[index + 6U], "EXCLUSIVE")) {
+        return false;
+    }
+
+    index += 7U;
+    return consume_ownerless_remaining_semicolons(tokens, index);
+}
+
 bool consume_ownerless_single_clause_alter_tail(const SqlPolicyTokens &tokens, std::size_t &index) {
     bool saw_semicolon = false;
     std::size_t depth = 0U;
@@ -18588,7 +18618,7 @@ bool ownerless_alter_table_engine_innodb_rebuild_recovery_statement(
         return false;
     }
     ++index;
-    if (!consume_ownerless_remaining_semicolons(tokens, index)) {
+    if (!consume_ownerless_optional_copy_exclusive_alter_tail(tokens, index)) {
         return false;
     }
 
@@ -18615,24 +18645,7 @@ bool ownerless_alter_table_force_rebuild_recovery_statement(const SqlPolicyToken
         return false;
     }
     std::size_t index = 6U;
-    if (index >= tokens.count || token_equals(tokens.values[index], ";")) {
-        return consume_ownerless_remaining_semicolons(tokens, index);
-    }
-    if (!token_equals(tokens.values[index], ",")) {
-        return false;
-    }
-    ++index;
-    if (index + 6U >= tokens.count || !token_equals(tokens.values[index], "ALGORITHM") ||
-        !token_equals(tokens.values[index + 1U], "=") ||
-        !token_equals(tokens.values[index + 2U], "COPY") ||
-        !token_equals(tokens.values[index + 3U], ",") ||
-        !token_equals(tokens.values[index + 4U], "LOCK") ||
-        !token_equals(tokens.values[index + 5U], "=") ||
-        !token_equals(tokens.values[index + 6U], "EXCLUSIVE")) {
-        return false;
-    }
-    index += 7U;
-    return consume_ownerless_remaining_semicolons(tokens, index);
+    return consume_ownerless_optional_copy_exclusive_alter_tail(tokens, index);
 }
 
 bool ownerless_alter_table_charset_convert_recovery_statement(const SqlPolicyTokens &tokens) {

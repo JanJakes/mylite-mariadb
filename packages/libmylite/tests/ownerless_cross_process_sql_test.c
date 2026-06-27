@@ -1169,6 +1169,7 @@ static void test_crashed_force_rebuild_dictionary_ddl_recovers_rebuilt_table(voi
 static void test_crashed_force_rebuild_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_plain_force_rebuild_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_engine_rebuild_dictionary_ddl_marks_file_op_checkpoint(void);
+static void test_crashed_engine_rebuild_copy_lock_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_charset_convert_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(void);
 static void test_crashed_row_format_dictionary_ddl_marks_file_op_checkpoint(void);
@@ -2168,6 +2169,10 @@ static void plain_force_rebuild_until_dictionary_finish_fault(
     int ready_fd
 );
 static void engine_rebuild_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
+static void engine_rebuild_copy_lock_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void charset_convert_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void row_format_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void compressed_row_format_until_dictionary_finish_fault(
@@ -5518,6 +5523,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-engine-rebuild-copy-lock-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_engine_rebuild_copy_lock_dictionary_ddl_marks_file_op_checkpoint();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-charset-convert-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_charset_convert_dictionary_ddl_recovers_metadata();
@@ -6156,7 +6167,8 @@ int main(int argc, char **argv) {
             "dictionary-force-rebuild-crash|"
             "dictionary-force-rebuild-file-op-marker-crash|"
             "dictionary-force-rebuild-plain-crash|"
-            "dictionary-engine-rebuild-file-op-marker-crash|",
+            "dictionary-engine-rebuild-file-op-marker-crash|"
+            "dictionary-engine-rebuild-copy-lock-crash|",
             stderr
         );
         fputs(
@@ -6630,6 +6642,9 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
         test_crashed_plain_force_rebuild_dictionary_ddl_marks_file_op_checkpoint
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_engine_rebuild_dictionary_ddl_marks_file_op_checkpoint),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_engine_rebuild_copy_lock_dictionary_ddl_marks_file_op_checkpoint
+    ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_charset_convert_dictionary_ddl_recovers_metadata),
     OWNERLESS_SQL_TEST_CASE(test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table),
     OWNERLESS_SQL_TEST_CASE(test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table
@@ -57125,6 +57140,14 @@ static void test_crashed_engine_rebuild_dictionary_ddl_marks_file_op_checkpoint(
     );
 }
 
+static void test_crashed_engine_rebuild_copy_lock_dictionary_ddl_marks_file_op_checkpoint(void) {
+    run_crashed_rebuild_dictionary_ddl_recovers_rebuilt_table(
+        engine_rebuild_copy_lock_until_dictionary_finish_fault,
+        "ownerless-dictionary-engine-rebuild-copy-lock-crash.mylite",
+        1
+    );
+}
+
 static void test_crashed_charset_convert_dictionary_ddl_recovers_metadata(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -71706,6 +71729,19 @@ static void engine_rebuild_until_dictionary_finish_fault(open_database_paths pat
         ready_fd,
         "dictionary-before-finish",
         "ALTER TABLE app.ownerless_force_rebuild_crash_base ENGINE=InnoDB"
+    );
+}
+
+static void engine_rebuild_copy_lock_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_force_rebuild_crash_base "
+        "ENGINE=InnoDB, ALGORITHM=COPY, LOCK=EXCLUSIVE"
     );
 }
 

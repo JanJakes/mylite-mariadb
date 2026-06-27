@@ -33,8 +33,11 @@ live-peer crash evidence.
   because this spelling has the same ownerless recovery policy: physical native
   rebuild work with the native file-operation marker retained until final
   no-live drain.
-- Do not broaden to engine switches, partitioned tables, mixed ALTER clauses,
-  `ALGORITHM`/`LOCK` option matrices, temporary tables, or non-InnoDB engines.
+- Do not broaden this slice to engine switches, partitioned tables, mixed ALTER
+  clauses, temporary tables, or non-InnoDB engines. The exact
+  `ALGORITHM=COPY, LOCK=EXCLUSIVE` tail is covered separately by
+  `docs/specs/ownerless-engine-rebuild-copy-lock-live-recovery/specs.md`;
+  broader algorithm/lock option matrices remain out of scope.
 
 ## Compatibility Impact
 

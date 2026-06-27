@@ -269,10 +269,12 @@ the absence of the view after the base table is later recreated.
 Focused `ALTER TABLE schema.table FORCE` and `ALTER TABLE schema.table FORCE,
 ALGORITHM=COPY, LOCK=EXCLUSIVE` prefinish recovery now allow live-peer
 dictionary cleanup after the native force rebuild. Focused same-engine
-`ALTER TABLE schema.table ENGINE=InnoDB` prefinish recovery now uses that same
-marker-retaining live-peer rebuild lane after pre-execution metadata proves the
-source is an InnoDB base table. Focused `ALTER TABLE schema.table ROW_FORMAT=DYNAMIC`
-prefinish recovery now allows live-peer dictionary cleanup after the native
+`ALTER TABLE schema.table ENGINE=InnoDB` and
+`ALTER TABLE schema.table ENGINE=InnoDB, ALGORITHM=COPY, LOCK=EXCLUSIVE`
+prefinish recovery now use that same marker-retaining live-peer rebuild lane
+after pre-execution metadata proves the source is an InnoDB base table. Focused
+`ALTER TABLE schema.table ROW_FORMAT=DYNAMIC` prefinish recovery now allows
+live-peer dictionary cleanup after the native
 dynamic row-format copy rebuild. Focused
 `ALTER TABLE schema.table ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=<n>` prefinish
 recovery for key-block sizes `1`, `2`, `4`, `8`, and `16` now allows
@@ -299,8 +301,8 @@ coverage for `RENAME TABLE` `FILE_RENAME`, `CREATE TABLE ... LIKE`
 truncate/recreate, `DROP TABLE` `FILE_DELETE`, and replacement-copy
 `CREATE OR REPLACE TABLE ... LIKE`/`CREATE OR REPLACE TABLE ... AS SELECT`
 boundaries plus representative `ALTER TABLE ... FORCE` and
-`ALTER TABLE ... ENGINE=InnoDB` and `ALTER TABLE ... ROW_FORMAT=DYNAMIC`
-rebuild boundaries, so a killed writer
+plain and explicit copy-lock `ALTER TABLE ... ENGINE=InnoDB` forms and
+`ALTER TABLE ... ROW_FORMAT=DYNAMIC` rebuild boundaries, so a killed writer
 cannot lose the durable checkpoint-needed boundary before no-live recovery for
 those classes.
 Plain non-temporary InnoDB `CREATE TABLE` now also records a per-owner
