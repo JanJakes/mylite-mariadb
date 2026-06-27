@@ -2704,7 +2704,16 @@ Tasks:
    proven no-op dictionary boundary while a peer remains live with the native
    file-operation marker clear and verifies original key-part preservation,
    missing-index absence, post-recovery writes, ownerless/native reopen, and
-   forced `.shm` rebuild.
+   forced `.shm` rebuild. Hook-build real index crash coverage now kills
+   bounded top-level secondary-index create/drop, unique-index
+   create-or-replace/drop, secondary-index rename, and secondary-index
+   ignored/not-ignored writers after MariaDB returns success but before
+   ownerless dictionary finish, recovers while a peer remains live, retains the
+   native file-operation marker for physical index create/drop/replacement
+   until no-live drain, keeps the marker clear for metadata-only rename and
+   ignored/not-ignored changes, and verifies key-part metadata, unique
+   enforcement, post-recovery writes, ownerless/native reopen, and forced
+   `.shm` rebuild.
    Primary-key coverage now verifies initial
    peer-visible `PRIMARY(id)` metadata, duplicate plain primary-key add errno
    1068, `ALTER TABLE ... ADD PRIMARY KEY IF NOT EXISTS (code)` no-op
@@ -3271,7 +3280,10 @@ Tasks:
    `ALTER TABLE ... RENAME INDEX` and
    `ALTER TABLE ... ALTER INDEX ... IGNORED`/`NOT IGNORED` writers after
    native index metadata changes but before ownerless dictionary finish, then
-   verifies live-peer cleanup remains busy until no-live recovery and the
+   verifies live-peer recovery while another ownerless peer remains open,
+   native file-operation marker retention for physical index
+   create/drop/replacement until final no-live drain, metadata-only
+   marker-clear recovery for rename and ignored/not-ignored changes, and the
    recovered present/absent, replacement unique-key, dropped unique-key,
    renamed, and ignored/not-ignored index states remain visible through
    ownerless/native reopen before and after forced `.shm` rebuild.
@@ -5412,11 +5424,15 @@ Minimum suites before support can be claimed:
     can clean up the dead creator, finish the marked dictionary generation, see
     the created `.frm`/`.ibd`, insert rows, and keep the native file-op marker
     durable until the final no-live checkpoint drain,
-  - after standalone secondary-index creation/removal, secondary-index rename,
-    and secondary-index ignored/not-ignored metadata changes but before
-    ownerless dictionary finish; hook coverage proves live-peer cleanup remains
-    busy until no-live recovery and the recovered present/absent, renamed, and
-    ignored/not-ignored index states remain correct,
+  - after standalone secondary-index creation/removal, unique-index
+    replacement/drop, secondary-index rename, and secondary-index
+    ignored/not-ignored metadata changes but before ownerless dictionary
+    finish; hook coverage proves live-peer recovery for physical index
+    create/drop/replacement with the native file-operation marker retained
+    until no-live drain, metadata-only live recovery for index rename and
+    ignored/not-ignored changes with that marker clear, and the recovered
+    present/absent, unique-enforced, renamed, and ignored/not-ignored index
+    states remain correct,
   - after ordinary column-add, column-drop, column-modify, and column-rename
     ALTER but before ownerless dictionary finish; hook coverage proves the
     focused plain stored-column ADD case and bounded real DROP, MODIFY, and

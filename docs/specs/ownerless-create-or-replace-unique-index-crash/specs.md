@@ -39,8 +39,9 @@ The selector:
   `CREATE OR REPLACE UNIQUE INDEX ownerless_unique_replace_crash_idx ON ...
   (tenant_id, weight)` under the `dictionary-before-finish` fault,
 - kills the writer at the hook,
-- verifies live-peer cleanup remains busy until the live peer exits,
-- reopens ownerless to recover no-live state,
+- verifies a new ownerless opener recovers while the live peer remains open,
+- verifies the native file-operation marker remains set while the peer is live
+  and drains after the peer exits,
 - verifies the recovered index no longer includes `slug`, includes `weight`,
   permits the formerly duplicate old-key shape, and rejects duplicate
   replacement-key writes,
@@ -57,7 +58,8 @@ read/write mode.
 
 No directory layout changes. The test exercises native InnoDB index metadata
 inside the MyLite database directory plus MyLite ownerless process-slot cleanup,
-dictionary-generation recovery, and volatile shared-memory rebuild.
+live-peer dictionary-generation recovery, final no-live marker drain, and
+volatile shared-memory rebuild.
 
 ## Native Storage Impact
 
@@ -78,7 +80,9 @@ No binary-size, dependency, or license changes.
 ## Acceptance Criteria
 
 - The selector reaches the `dictionary-before-finish` hook and kills the writer.
-- A live peer keeps crashed-writer cleanup busy until no-live recovery.
+- Recovery succeeds while another ownerless peer remains live.
+- The native file-operation marker stays set while that peer is live and drains
+  after final no-live recovery.
 - Recovered metadata has the replacement unique index over `(tenant_id, weight)`
   and no `slug` key part.
 - Recovered enforcement permits duplicate `(tenant_id, slug)` rows and rejects

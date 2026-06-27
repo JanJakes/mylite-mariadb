@@ -2301,10 +2301,6 @@ static ownerless_live_peer_guard crash_ownerless_dictionary_writer_with_held_liv
     open_database_paths paths,
     ownerless_dictionary_fault_writer_fn writer_fn
 );
-static void crash_ownerless_dictionary_writer_with_live_peer(
-    open_database_paths paths,
-    ownerless_dictionary_fault_writer_fn writer_fn
-);
 #endif
 static mylite_db *open_database(open_database_paths paths, unsigned flags);
 static mylite_db *open_database_eventually(
@@ -44598,12 +44594,7 @@ static void test_crashed_secondary_index_dictionary_ddl_recovers_index_metadata(
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(root, "ownerless-dictionary-secondary-index-crash.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
-    int writer_ready_pipe[2];
-    int peer_ready_pipe[2];
-    int peer_release_pipe[2];
-    pid_t writer_child;
-    pid_t peer_child;
-    pid_t probe_child;
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -44642,53 +44633,11 @@ static void test_crashed_secondary_index_dictionary_ddl_recovers_index_metadata(
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    assert(pipe(writer_ready_pipe) == 0);
-    assert(pipe(peer_ready_pipe) == 0);
-    assert(pipe(peer_release_pipe) == 0);
-
-    peer_child = fork();
-    assert(peer_child >= 0);
-    if (peer_child == 0) {
-        close(peer_ready_pipe[0]);
-        close(peer_release_pipe[1]);
-        close(writer_ready_pipe[0]);
-        close(writer_ready_pipe[1]);
-        hold_ownerless_open_until_released(
-            paths,
-            (child_pipes){
-                .ready_write_fd = peer_ready_pipe[1],
-                .release_read_fd = peer_release_pipe[0],
-            }
-        );
-    }
-
-    close(peer_ready_pipe[1]);
-    close(peer_release_pipe[0]);
-    wait_for_pipe(peer_ready_pipe[0]);
-
-    writer_child = fork();
-    assert(writer_child >= 0);
-    if (writer_child == 0) {
-        close(writer_ready_pipe[0]);
-        close(peer_ready_pipe[0]);
-        close(peer_release_pipe[1]);
-        create_secondary_index_until_dictionary_finish_fault(paths, writer_ready_pipe[1]);
-    }
-
-    close(writer_ready_pipe[1]);
-    wait_for_pipe(writer_ready_pipe[0]);
-    assert(kill(writer_child, SIGKILL) == 0);
-    wait_for_signaled_child(writer_child, SIGKILL);
-
-    probe_child = fork();
-    assert(probe_child >= 0);
-    if (probe_child == 0) {
-        assert_ownerless_open_returns_busy(paths);
-    }
-    wait_for_child(probe_child);
-
-    signal_pipe(peer_release_pipe[1]);
-    wait_for_child(peer_child);
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        create_secondary_index_until_dictionary_finish_fault
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -44720,12 +44669,16 @@ static void test_crashed_secondary_index_dictionary_ddl_recovers_index_metadata(
             "WHERE value >= 20"
         ) == 9U
     );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_secondary_index_crash_state(
         paths,
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_ownerless_secondary_index_crash_state(paths, MYLITE_OPEN_READWRITE);
     remove_concurrency_shm(database_path);
     assert_ownerless_secondary_index_crash_state(
@@ -44745,12 +44698,7 @@ static void test_crashed_secondary_index_drop_dictionary_ddl_recovers_absent_ind
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(root, "ownerless-dictionary-secondary-index-drop-crash.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
-    int writer_ready_pipe[2];
-    int peer_ready_pipe[2];
-    int peer_release_pipe[2];
-    pid_t writer_child;
-    pid_t peer_child;
-    pid_t probe_child;
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -44794,53 +44742,11 @@ static void test_crashed_secondary_index_drop_dictionary_ddl_recovers_absent_ind
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    assert(pipe(writer_ready_pipe) == 0);
-    assert(pipe(peer_ready_pipe) == 0);
-    assert(pipe(peer_release_pipe) == 0);
-
-    peer_child = fork();
-    assert(peer_child >= 0);
-    if (peer_child == 0) {
-        close(peer_ready_pipe[0]);
-        close(peer_release_pipe[1]);
-        close(writer_ready_pipe[0]);
-        close(writer_ready_pipe[1]);
-        hold_ownerless_open_until_released(
-            paths,
-            (child_pipes){
-                .ready_write_fd = peer_ready_pipe[1],
-                .release_read_fd = peer_release_pipe[0],
-            }
-        );
-    }
-
-    close(peer_ready_pipe[1]);
-    close(peer_release_pipe[0]);
-    wait_for_pipe(peer_ready_pipe[0]);
-
-    writer_child = fork();
-    assert(writer_child >= 0);
-    if (writer_child == 0) {
-        close(writer_ready_pipe[0]);
-        close(peer_ready_pipe[0]);
-        close(peer_release_pipe[1]);
-        drop_secondary_index_until_dictionary_finish_fault(paths, writer_ready_pipe[1]);
-    }
-
-    close(writer_ready_pipe[1]);
-    wait_for_pipe(writer_ready_pipe[0]);
-    assert(kill(writer_child, SIGKILL) == 0);
-    wait_for_signaled_child(writer_child, SIGKILL);
-
-    probe_child = fork();
-    assert(probe_child >= 0);
-    if (probe_child == 0) {
-        assert_ownerless_open_returns_busy(paths);
-    }
-    wait_for_child(probe_child);
-
-    signal_pipe(peer_release_pipe[1]);
-    wait_for_child(peer_child);
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        drop_secondary_index_until_dictionary_finish_fault
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -44868,12 +44774,16 @@ static void test_crashed_secondary_index_drop_dictionary_ddl_recovers_absent_ind
     assert(
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_index_drop_crash_base") == 100U
     );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_secondary_index_drop_crash_state(
         paths,
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_ownerless_secondary_index_drop_crash_state(paths, MYLITE_OPEN_READWRITE);
     remove_concurrency_shm(database_path);
     assert_ownerless_secondary_index_drop_crash_state(
@@ -45682,6 +45592,7 @@ static void test_crashed_unique_index_replace_dictionary_ddl_recovers_replaced_i
     char *database_path = path_join(root, "ownerless-dictionary-unique-index-replace-crash.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     unsigned mariadb_errno = 0U;
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -45730,10 +45641,11 @@ static void test_crashed_unique_index_replace_dictionary_ddl_recovers_replaced_i
     assert(mariadb_errno == MYLITE_TEST_DUPLICATE_KEY_ERRNO);
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_ownerless_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         replace_unique_index_until_dictionary_finish_fault
     );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -45773,12 +45685,16 @@ static void test_crashed_unique_index_replace_dictionary_ddl_recovers_replaced_i
     );
     assert(mylite_errcode(db) == MYLITE_ERROR);
     assert(mariadb_errno == MYLITE_TEST_DUPLICATE_KEY_ERRNO);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_unique_index_replace_crash_state(
         paths,
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_ownerless_unique_index_replace_crash_state(paths, MYLITE_OPEN_READWRITE);
     remove_concurrency_shm(database_path);
     assert_ownerless_unique_index_replace_crash_state(
@@ -45799,6 +45715,7 @@ static void test_crashed_unique_index_drop_dictionary_ddl_recovers_absent_index(
     char *database_path = path_join(root, "ownerless-dictionary-unique-index-drop-crash.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     unsigned mariadb_errno = 0U;
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -45847,10 +45764,11 @@ static void test_crashed_unique_index_drop_dictionary_ddl_recovers_absent_index(
     assert(mariadb_errno == MYLITE_TEST_DUPLICATE_KEY_ERRNO);
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_ownerless_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         drop_unique_index_until_dictionary_finish_fault
     );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -45890,12 +45808,16 @@ static void test_crashed_unique_index_drop_dictionary_ddl_recovers_absent_index(
         query_unsigned(db, "SELECT SUM(weight) FROM app.ownerless_unique_index_drop_crash_base") ==
         100U
     );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_unique_index_drop_crash_state(
         paths,
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_ownerless_unique_index_drop_crash_state(paths, MYLITE_OPEN_READWRITE);
     remove_concurrency_shm(database_path);
     assert_ownerless_unique_index_drop_crash_state(
@@ -45916,6 +45838,7 @@ static void test_crashed_secondary_index_rename_dictionary_ddl_recovers_renamed_
     char *database_path =
         path_join(root, "ownerless-dictionary-secondary-index-rename-crash.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -45968,10 +45891,11 @@ static void test_crashed_secondary_index_rename_dictionary_ddl_recovers_renamed_
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_ownerless_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         rename_secondary_index_until_dictionary_finish_fault
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -46023,12 +45947,16 @@ static void test_crashed_secondary_index_rename_dictionary_ddl_recovers_renamed_
             "WHERE value >= 20"
         ) == 9U
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_secondary_index_rename_crash_state(
         paths,
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_ownerless_secondary_index_rename_crash_state(paths, MYLITE_OPEN_READWRITE);
     remove_concurrency_shm(database_path);
     assert_ownerless_secondary_index_rename_crash_state(
@@ -46049,6 +45977,7 @@ static void test_crashed_secondary_index_ignorability_dictionary_ddl_recovers_me
     char *database_path =
         path_join(root, "ownerless-dictionary-secondary-index-ignorability-crash.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -46092,10 +46021,11 @@ static void test_crashed_secondary_index_ignorability_dictionary_ddl_recovers_me
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_ownerless_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         ignore_secondary_index_until_dictionary_finish_fault
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -46120,12 +46050,16 @@ static void test_crashed_secondary_index_ignorability_dictionary_ddl_recovers_me
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_index_ignorability_crash_base") ==
         100U
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    release_ownerless_live_peer(&live_peer);
 
-    crash_ownerless_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         restore_secondary_index_until_dictionary_finish_fault
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -46155,12 +46089,16 @@ static void test_crashed_secondary_index_ignorability_dictionary_ddl_recovers_me
             "WHERE value >= 20"
         ) == 14U
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_secondary_index_ignorability_crash_state(
         paths,
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_ownerless_secondary_index_ignorability_crash_state(paths, MYLITE_OPEN_READWRITE);
     remove_concurrency_shm(database_path);
     assert_ownerless_secondary_index_ignorability_crash_state(
@@ -71928,24 +71866,6 @@ static ownerless_live_peer_guard crash_ownerless_dictionary_writer_with_held_liv
     return guard;
 }
 
-static void crash_ownerless_dictionary_writer_with_live_peer(
-    open_database_paths paths,
-    ownerless_dictionary_fault_writer_fn writer_fn
-) {
-    ownerless_live_peer_guard guard =
-        crash_ownerless_dictionary_writer_with_held_live_peer(paths, writer_fn);
-    pid_t probe_child;
-
-    probe_child = fork();
-    assert(probe_child >= 0);
-    if (probe_child == 0) {
-        close(guard.release_write_fd);
-        assert_ownerless_open_returns_busy(paths);
-    }
-    wait_for_child(probe_child);
-
-    release_ownerless_live_peer(&guard);
-}
 #endif
 
 static mylite_db *open_database(open_database_paths paths, unsigned flags) {

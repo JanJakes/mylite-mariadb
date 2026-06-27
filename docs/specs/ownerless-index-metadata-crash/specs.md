@@ -5,14 +5,17 @@
 Ownerless normal-path coverage already proves `CREATE OR REPLACE UNIQUE INDEX`,
 `ALTER TABLE ... RENAME INDEX`, and `ALTER TABLE ... ALTER INDEX ... IGNORED` /
 `NOT IGNORED` refresh already-open peers and survive reopen. Hook-build crash
-coverage, however, stopped at standalone secondary-index create/drop plus
-rename and ignorability. The remaining gap is a killed writer after MariaDB has
-applied replacement unique-index metadata but before MyLite publishes the
-ownerless dictionary generation.
+coverage originally stopped at no-live recovery for standalone secondary-index
+create/drop plus rename and ignorability. The remaining gap in this slice was a
+killed writer after MariaDB had applied replacement unique-index metadata but
+before MyLite published the ownerless dictionary generation.
 
 This slice covers secondary-index rename, index ignorability, and unique-index
 replacement crash boundaries using the existing `dictionary-before-finish`
-unsafe test hook.
+unsafe test hook. The follow-up
+`docs/specs/ownerless-index-metadata-live-recovery/specs.md` promotes those
+boundaries, plus ordinary secondary-index create/drop and unique-index drop, to
+live-peer recovery.
 
 Completed unique secondary-index drop crash recovery is covered separately by
 `ownerless-unique-index-drop-ddl-crash`.
@@ -66,10 +69,12 @@ The rename selector:
   ownerless_index_rename_crash_new_idx` under the
   `dictionary-before-finish` fault,
 - kills the writer at the hook,
-- proves a new ownerless opener stays busy while the peer is live,
-- releases the peer and verifies recovered metadata: old index absent, new
+- recovers through a new ownerless opener while the peer is live and keeps the
+  native file-operation marker clear,
+- verifies recovered metadata: old index absent, new
   index present, old `FORCE INDEX` rejected, new `FORCE INDEX` usable,
   subsequent DML accepted,
+- releases the peer,
 - verifies the final state through ownerless reopen, ordinary native reopen,
   forced `.shm` rebuild, and native reopen after rebuild.
 
@@ -80,6 +85,8 @@ The unique replacement selector:
 - kills a writer after
   `CREATE OR REPLACE UNIQUE INDEX ... (tenant_id, weight)` but before
   dictionary finish,
+- recovers through a new ownerless opener while the peer is live and keeps the
+  native file-operation marker set until no-live drain,
 - verifies recovered metadata has the same index name over `weight`, no longer
   includes `slug`, accepts the formerly duplicate `(tenant_id, slug)` shape,
   and rejects duplicate `(tenant_id, weight)` writes,
@@ -89,6 +96,8 @@ The ignorability selector:
 
 - creates an InnoDB table with rows and a secondary index,
 - kills a writer after `ALTER INDEX ... IGNORED` but before dictionary finish,
+- recovers through a new ownerless opener while the peer is live and keeps the
+  native file-operation marker clear,
 - verifies the recovered `information_schema.statistics.IGNORED = 'YES'`
   state and later DML while the index is ignored,
 - kills a second writer after `ALTER INDEX ... NOT IGNORED` but before
@@ -96,8 +105,8 @@ The ignorability selector:
 - verifies the recovered `IGNORED = 'NO'` state, final `FORCE INDEX` reads,
   and ownerless/native reopen before and after forced `.shm` rebuild.
 
-Both selectors reuse a small test helper for the live-peer/killed-writer/busy
-probe sequence so the assertions stay focused on index metadata.
+The promoted selectors reuse the held-live-peer/killed-writer helper so the
+assertions stay focused on index metadata and marker policy.
 
 ## Scope And Non-Goals
 
@@ -105,8 +114,10 @@ In scope:
 
 - crash-at-`dictionary-before-finish` coverage for completed secondary-index
   unique replacement, rename, and ignorability metadata ALTERs,
-- live-peer cleanup-busy behavior,
-- no-live recovery plus ownerless/native reopen of final metadata.
+- live-peer recovery behavior,
+- marker-retaining physical unique replacement and marker-clear metadata-only
+  rename/ignorability recovery,
+- ownerless/native reopen of final metadata.
 
 Covered separately:
 
@@ -140,8 +151,9 @@ stable generation.
 
 No directory layout changes. Durable state remains in the MyLite-owned
 database directory. The tests exercise existing ownerless `.shm` rebuild,
-process-slot cleanup, dictionary-generation recovery, and ordinary native
-exclusive reopen.
+process-slot cleanup, live-peer dictionary-generation recovery, final no-live
+marker drain where physical index work occurred, and ordinary native exclusive
+reopen.
 
 ## Native Storage Impact
 
@@ -175,7 +187,9 @@ dependency changes.
 ## Acceptance Criteria
 
 - Focused selectors reach the dictionary fault hook and do not hang.
-- A live peer prevents crashed-writer cleanup until no-live recovery.
+- Recovery succeeds while another ownerless peer remains live.
+- Physical unique replacement retains the native file-operation marker until
+  final no-live recovery, while rename and ignored/not-ignored keep it clear.
 - Recovered rename metadata has the old index absent and new index usable.
 - Recovered unique replacement metadata has the replacement key part and
   enforces replacement-key duplicates while old-key duplicates are allowed.

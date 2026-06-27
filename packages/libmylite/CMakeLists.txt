@@ -722,6 +722,18 @@ if(BUILD_TESTING)
           dictionary-index-idempotent-create-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-secondary-index-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-secondary-index-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-secondary-index-drop-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-secondary-index-drop-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-index-idempotent-drop-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -750,6 +762,30 @@ if(BUILD_TESTING)
         COMMAND
           mylite_ownerless_cross_process_sql_test
           dictionary-alter-unique-index-idempotent-create-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-unique-index-replace-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-unique-index-replace-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-unique-index-drop-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-unique-index-drop-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-secondary-index-rename-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-secondary-index-rename-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-secondary-index-ignorability-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-secondary-index-ignorability-crash
       )
       add_test(
         NAME libmylite.ownerless-dictionary-primary-key-crash
@@ -1368,11 +1404,17 @@ if(BUILD_TESTING)
       )
       set_tests_properties(
         libmylite.ownerless-dictionary-index-idempotent-create-crash
+        libmylite.ownerless-dictionary-secondary-index-crash
+        libmylite.ownerless-dictionary-secondary-index-drop-crash
         libmylite.ownerless-dictionary-index-idempotent-drop-crash
         libmylite.ownerless-dictionary-alter-index-idempotent-create-crash
         libmylite.ownerless-dictionary-alter-index-idempotent-drop-crash
         libmylite.ownerless-dictionary-unique-index-idempotent-create-crash
         libmylite.ownerless-dictionary-alter-unique-index-idempotent-create-crash
+        libmylite.ownerless-dictionary-unique-index-replace-crash
+        libmylite.ownerless-dictionary-unique-index-drop-crash
+        libmylite.ownerless-dictionary-secondary-index-rename-crash
+        libmylite.ownerless-dictionary-secondary-index-ignorability-crash
         libmylite.ownerless-dictionary-primary-key-crash
         libmylite.ownerless-dictionary-descending-primary-key-crash
         libmylite.ownerless-dictionary-composite-direction-primary-key-crash

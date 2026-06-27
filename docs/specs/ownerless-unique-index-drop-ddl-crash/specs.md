@@ -40,9 +40,10 @@ In scope:
 - Verify duplicate `(tenant_id, slug)` writes fail before the drop.
 - Kill a writer after `DROP INDEX ... ON app.<table>` completes natively but
   before ownerless dictionary finish.
-- Verify live-peer cleanup remains busy, no-live recovery observes unique-index
-  absence, `FORCE INDEX` rejects the dropped name, and the formerly duplicate
-  row shape can be inserted.
+- Verify live-peer recovery observes unique-index absence while another
+  ownerless peer remains open, retains the native file-operation marker until
+  no-live drain, rejects `FORCE INDEX` on the dropped name, and accepts the
+  formerly duplicate row shape.
 - Verify ownerless/native reopen before and after forced `.shm` rebuild.
 
 Out of scope:
@@ -56,7 +57,7 @@ Out of scope:
 
 ## Design
 
-Reuse the existing live-peer crash helper:
+Reuse the existing held-live-peer crash helper:
 
 1. Build `app.ownerless_unique_index_drop_crash_base` with rows that are unique
    under `(tenant_id, slug)`.
@@ -64,11 +65,13 @@ Reuse the existing live-peer crash helper:
    a duplicate `(tenant_id, slug)` insert fails.
 3. Run `DROP INDEX ownerless_unique_drop_crash_idx ON ...` under
    `dictionary-before-finish` while a live peer holds the ownerless runtime.
-4. Kill the writer at the hook and verify a new ownerless opener remains busy
+4. Kill the writer at the hook and recover through a new ownerless opener while
+   the peer remains live.
+5. Verify index absence and forced-index rejection, insert the formerly
+   duplicate key shape, and prove the native file-operation marker remains set
    until the peer exits.
-5. Reopen with no live peer, verify index absence and forced-index rejection,
-   insert the formerly duplicate key shape, and verify retained/final rows.
-6. Recheck that final state through ownerless and native reopen before and
+6. Release the peer and prove final no-live recovery drains the marker.
+7. Recheck that final state through ownerless and native reopen before and
    after forced `.shm` rebuild.
 
 ## Compatibility Impact
@@ -79,8 +82,9 @@ coverage for native MariaDB unique-index drop behavior.
 ## Directory And Lifecycle Impact
 
 No directory layout changes. Durable state remains in the MyLite database
-directory. The selector exercises ownerless process cleanup gating, no-live
-dictionary recovery, shared-memory rebuild, and native exclusive reopen.
+directory. The selector exercises ownerless process cleanup, live-peer
+dictionary recovery, final no-live marker drain, shared-memory rebuild, and
+native exclusive reopen.
 
 ## Native Storage Impact
 
@@ -105,7 +109,9 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selector reaches `dictionary-before-finish` and does not hang.
-- Live-peer cleanup remains busy until no-live recovery.
+- Recovery succeeds while another ownerless peer remains live.
+- The native file-operation marker remains set while that peer is live and
+  drains after final no-live recovery.
 - Recovered metadata no longer lists the unique index.
 - `FORCE INDEX` on the dropped name fails after recovery.
 - The formerly duplicate `(tenant_id, slug)` row shape inserts successfully

@@ -2248,11 +2248,21 @@ bool ownerless_create_index_if_not_exists_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 );
+bool ownerless_create_index_recovery_statement(mylite_db &db, const SqlPolicyTokens &tokens);
+bool ownerless_create_or_replace_index_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
 bool ownerless_drop_index_if_exists_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 );
+bool ownerless_drop_index_recovery_statement(mylite_db &db, const SqlPolicyTokens &tokens);
 bool ownerless_alter_table_add_index_if_not_exists_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
+bool ownerless_alter_table_add_index_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 );
@@ -2265,6 +2275,18 @@ bool ownerless_alter_table_replace_primary_key_recovery_statement(
     const SqlPolicyTokens &tokens
 );
 bool ownerless_alter_table_drop_index_if_exists_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
+bool ownerless_alter_table_drop_index_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
+bool ownerless_alter_table_rename_index_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
+bool ownerless_alter_table_alter_index_ignorability_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 );
@@ -2349,6 +2371,11 @@ bool consume_ownerless_table_identifier_parts(
     std::string *table_name
 );
 bool consume_ownerless_parenthesized_clause(const SqlPolicyTokens &tokens, std::size_t &index);
+bool consume_ownerless_key_part_list(
+    const SqlPolicyTokens &tokens,
+    std::size_t &index,
+    std::vector<std::string> *column_names
+);
 bool ownerless_index_metadata_lookup(
     mylite_db &db,
     std::string_view schema_name,
@@ -12935,7 +12962,10 @@ bool ownerless_dictionary_recovery_forces_native_file_op_checkpoint(std::uint32_
     return kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_REPLACE_PRIMARY_KEY ||
            kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_COLUMN ||
            kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_MODIFY_COLUMN ||
-           kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_RENAME_COLUMN;
+           kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_RENAME_COLUMN ||
+           kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_INDEX ||
+           kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_DROP_INDEX ||
+           kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_OR_REPLACE_INDEX;
 }
 
 bool mark_ownerless_dictionary_state_recoverable_before_finish(mylite_db &db) {
@@ -15672,6 +15702,23 @@ std::uint32_t ownerless_dictionary_recovery_kind_for_statement(
         ownerless_alter_table_drop_index_if_exists_recovery_statement(db, tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_INDEX_IDEMPOTENT_DROP;
     }
+    if (ownerless_create_or_replace_index_recovery_statement(db, tokens)) {
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_OR_REPLACE_INDEX;
+    }
+    if (ownerless_create_index_recovery_statement(db, tokens) ||
+        ownerless_alter_table_add_index_recovery_statement(db, tokens)) {
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_INDEX;
+    }
+    if (ownerless_drop_index_recovery_statement(db, tokens) ||
+        ownerless_alter_table_drop_index_recovery_statement(db, tokens)) {
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_DROP_INDEX;
+    }
+    if (ownerless_alter_table_rename_index_recovery_statement(db, tokens)) {
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_RENAME_INDEX;
+    }
+    if (ownerless_alter_table_alter_index_ignorability_recovery_statement(db, tokens)) {
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_INDEX_IGNORABILITY;
+    }
     if (ownerless_alter_table_replace_primary_key_recovery_statement(db, tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_REPLACE_PRIMARY_KEY;
     }
@@ -16295,6 +16342,31 @@ bool ownerless_column_metadata_lookup(
     return true;
 }
 
+bool ownerless_index_key_columns_exist(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    const std::vector<std::string> &column_names
+) {
+    if (column_names.empty()) {
+        return false;
+    }
+    for (const std::string &column_name : column_names) {
+        bool column_exists = false;
+        if (!ownerless_column_metadata_lookup(
+                db,
+                schema_name,
+                table_name,
+                column_name,
+                &column_exists
+            ) ||
+            !column_exists) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool ownerless_table_has_generated_columns(
     mylite_db &db,
     std::string_view schema_name,
@@ -16876,6 +16948,125 @@ bool ownerless_drop_index_if_exists_recovery_statement(
            !index_exists;
 }
 
+bool ownerless_create_index_recovery_statement(mylite_db &db, const SqlPolicyTokens &tokens) {
+    if (tokens.count < 6U || !token_equals(tokens.values[0], "CREATE")) {
+        return false;
+    }
+
+    std::size_t index = 1U;
+    if (index + 1U < tokens.count && token_equals(tokens.values[index], "OR") &&
+        token_equals(tokens.values[index + 1U], "REPLACE")) {
+        return false;
+    }
+    if (index < tokens.count && token_equals(tokens.values[index], "UNIQUE")) {
+        ++index;
+    }
+    if (index >= tokens.count || !token_equals(tokens.values[index], "INDEX")) {
+        return false;
+    }
+    ++index;
+    if (index + 2U < tokens.count && token_equals(tokens.values[index], "IF")) {
+        if (!token_equals(tokens.values[index + 1U], "NOT") ||
+            !token_equals(tokens.values[index + 2U], "EXISTS")) {
+            return false;
+        }
+        index += 3U;
+    }
+    if (index + 2U >= tokens.count || !ownerless_table_identifier_token(tokens.values[index]) ||
+        !token_equals(tokens.values[index + 1U], "ON")) {
+        return false;
+    }
+
+    const std::string index_name = ownerless_normalized_identifier(tokens.values[index]);
+    index += 2U;
+    std::string schema_name;
+    std::string table_name;
+    std::vector<std::string> column_names;
+    if (!consume_ownerless_table_identifier_parts(db, tokens, index, &schema_name, &table_name) ||
+        !consume_ownerless_key_part_list(tokens, index, &column_names) ||
+        !consume_ownerless_remaining_semicolons(tokens, index)) {
+        return false;
+    }
+    bool index_exists = false;
+    return ownerless_index_metadata_lookup(
+               db,
+               schema_name,
+               table_name,
+               index_name,
+               &index_exists
+           ) &&
+           !index_exists &&
+           ownerless_index_key_columns_exist(db, schema_name, table_name, column_names);
+}
+
+bool ownerless_create_or_replace_index_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    if (tokens.count < 8U || !token_equals(tokens.values[0], "CREATE") ||
+        !token_equals(tokens.values[1], "OR") || !token_equals(tokens.values[2], "REPLACE")) {
+        return false;
+    }
+
+    std::size_t index = 3U;
+    if (index < tokens.count && token_equals(tokens.values[index], "UNIQUE")) {
+        ++index;
+    }
+    if (index + 2U >= tokens.count || !token_equals(tokens.values[index], "INDEX") ||
+        !ownerless_table_identifier_token(tokens.values[index + 1U]) ||
+        !token_equals(tokens.values[index + 2U], "ON")) {
+        return false;
+    }
+
+    index += 3U;
+    std::string schema_name;
+    std::string table_name;
+    std::vector<std::string> column_names;
+    if (!consume_ownerless_table_identifier_parts(db, tokens, index, &schema_name, &table_name) ||
+        !consume_ownerless_key_part_list(tokens, index, &column_names) ||
+        !consume_ownerless_remaining_semicolons(tokens, index)) {
+        return false;
+    }
+    return ownerless_index_key_columns_exist(db, schema_name, table_name, column_names);
+}
+
+bool ownerless_drop_index_recovery_statement(mylite_db &db, const SqlPolicyTokens &tokens) {
+    if (tokens.count < 5U || !token_equals(tokens.values[0], "DROP") ||
+        !token_equals(tokens.values[1], "INDEX")) {
+        return false;
+    }
+
+    std::size_t index = 2U;
+    if (index + 1U < tokens.count && token_equals(tokens.values[index], "IF")) {
+        if (!token_equals(tokens.values[index + 1U], "EXISTS")) {
+            return false;
+        }
+        index += 2U;
+    }
+    if (index + 1U >= tokens.count || !ownerless_table_identifier_token(tokens.values[index]) ||
+        !token_equals(tokens.values[index + 1U], "ON")) {
+        return false;
+    }
+
+    const std::string index_name = ownerless_normalized_identifier(tokens.values[index]);
+    index += 2U;
+    std::string schema_name;
+    std::string table_name;
+    if (!consume_ownerless_table_identifier_parts(db, tokens, index, &schema_name, &table_name) ||
+        !consume_ownerless_remaining_semicolons(tokens, index)) {
+        return false;
+    }
+    bool index_exists = false;
+    return ownerless_index_metadata_lookup(
+               db,
+               schema_name,
+               table_name,
+               index_name,
+               &index_exists
+           ) &&
+           index_exists;
+}
+
 bool ownerless_alter_table_add_index_if_not_exists_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
@@ -16957,6 +17148,60 @@ bool ownerless_alter_table_add_primary_key_if_not_exists_recovery_statement(
                &primary_exists
            ) &&
            primary_exists;
+}
+
+bool ownerless_alter_table_add_index_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    if (tokens.count < 8U || !token_equals(tokens.values[0], "ALTER") ||
+        !token_equals(tokens.values[1], "TABLE")) {
+        return false;
+    }
+
+    std::size_t index = 2U;
+    std::string schema_name;
+    std::string table_name;
+    if (!consume_ownerless_table_identifier_parts(db, tokens, index, &schema_name, &table_name) ||
+        index >= tokens.count || !token_equals(tokens.values[index], "ADD")) {
+        return false;
+    }
+    ++index;
+    if (index < tokens.count && token_equals(tokens.values[index], "UNIQUE")) {
+        ++index;
+    }
+    if (index >= tokens.count || !token_in(tokens.values[index], "INDEX", "KEY")) {
+        return false;
+    }
+    ++index;
+    if (index + 2U < tokens.count && token_equals(tokens.values[index], "IF")) {
+        if (!token_equals(tokens.values[index + 1U], "NOT") ||
+            !token_equals(tokens.values[index + 2U], "EXISTS")) {
+            return false;
+        }
+        index += 3U;
+    }
+    if (index >= tokens.count || !ownerless_table_identifier_token(tokens.values[index])) {
+        return false;
+    }
+
+    const std::string index_name = ownerless_normalized_identifier(tokens.values[index]);
+    ++index;
+    std::vector<std::string> column_names;
+    if (!consume_ownerless_key_part_list(tokens, index, &column_names) ||
+        !consume_ownerless_remaining_semicolons(tokens, index)) {
+        return false;
+    }
+    bool index_exists = false;
+    return ownerless_index_metadata_lookup(
+               db,
+               schema_name,
+               table_name,
+               index_name,
+               &index_exists
+           ) &&
+           !index_exists &&
+           ownerless_index_key_columns_exist(db, schema_name, table_name, column_names);
 }
 
 bool consume_ownerless_key_part_list(
@@ -17156,6 +17401,139 @@ bool ownerless_alter_table_drop_index_if_exists_recovery_statement(
                &index_exists
            ) &&
            !index_exists;
+}
+
+bool ownerless_alter_table_drop_index_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    if (tokens.count < 6U || !token_equals(tokens.values[0], "ALTER") ||
+        !token_equals(tokens.values[1], "TABLE")) {
+        return false;
+    }
+
+    std::size_t index = 2U;
+    std::string schema_name;
+    std::string table_name;
+    if (!consume_ownerless_table_identifier_parts(db, tokens, index, &schema_name, &table_name) ||
+        index + 1U >= tokens.count || !token_equals(tokens.values[index], "DROP") ||
+        !token_in(tokens.values[index + 1U], "INDEX", "KEY")) {
+        return false;
+    }
+    index += 2U;
+    if (index + 1U < tokens.count && token_equals(tokens.values[index], "IF")) {
+        if (!token_equals(tokens.values[index + 1U], "EXISTS")) {
+            return false;
+        }
+        index += 2U;
+    }
+    if (index >= tokens.count || !ownerless_table_identifier_token(tokens.values[index])) {
+        return false;
+    }
+
+    const std::string index_name = ownerless_normalized_identifier(tokens.values[index]);
+    ++index;
+    if (!consume_ownerless_remaining_semicolons(tokens, index)) {
+        return false;
+    }
+    bool index_exists = false;
+    return ownerless_index_metadata_lookup(
+               db,
+               schema_name,
+               table_name,
+               index_name,
+               &index_exists
+           ) &&
+           index_exists;
+}
+
+bool ownerless_alter_table_rename_index_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    if (tokens.count < 9U || !token_equals(tokens.values[0], "ALTER") ||
+        !token_equals(tokens.values[1], "TABLE")) {
+        return false;
+    }
+
+    std::size_t index = 2U;
+    std::string schema_name;
+    std::string table_name;
+    if (!consume_ownerless_table_identifier_parts(db, tokens, index, &schema_name, &table_name) ||
+        index + 4U >= tokens.count || !token_equals(tokens.values[index], "RENAME") ||
+        !token_in(tokens.values[index + 1U], "INDEX", "KEY") ||
+        !ownerless_table_identifier_token(tokens.values[index + 2U]) ||
+        !token_equals(tokens.values[index + 3U], "TO") ||
+        !ownerless_table_identifier_token(tokens.values[index + 4U])) {
+        return false;
+    }
+
+    const std::string old_index_name = ownerless_normalized_identifier(tokens.values[index + 2U]);
+    const std::string new_index_name = ownerless_normalized_identifier(tokens.values[index + 4U]);
+    index += 5U;
+    if (!consume_ownerless_remaining_semicolons(tokens, index)) {
+        return false;
+    }
+    bool old_index_exists = false;
+    bool new_index_exists = true;
+    return ownerless_index_metadata_lookup(
+               db,
+               schema_name,
+               table_name,
+               old_index_name,
+               &old_index_exists
+           ) &&
+           old_index_exists &&
+           ownerless_index_metadata_lookup(
+               db,
+               schema_name,
+               table_name,
+               new_index_name,
+               &new_index_exists
+           ) &&
+           !new_index_exists;
+}
+
+bool ownerless_alter_table_alter_index_ignorability_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    if (tokens.count < 8U || !token_equals(tokens.values[0], "ALTER") ||
+        !token_equals(tokens.values[1], "TABLE")) {
+        return false;
+    }
+
+    std::size_t index = 2U;
+    std::string schema_name;
+    std::string table_name;
+    if (!consume_ownerless_table_identifier_parts(db, tokens, index, &schema_name, &table_name) ||
+        index + 3U >= tokens.count || !token_equals(tokens.values[index], "ALTER") ||
+        !token_equals(tokens.values[index + 1U], "INDEX") ||
+        !ownerless_table_identifier_token(tokens.values[index + 2U])) {
+        return false;
+    }
+
+    const std::string index_name = ownerless_normalized_identifier(tokens.values[index + 2U]);
+    index += 3U;
+    if (index < tokens.count && token_equals(tokens.values[index], "NOT")) {
+        ++index;
+    }
+    if (index >= tokens.count || !token_equals(tokens.values[index], "IGNORED")) {
+        return false;
+    }
+    ++index;
+    if (!consume_ownerless_remaining_semicolons(tokens, index)) {
+        return false;
+    }
+    bool index_exists = false;
+    return ownerless_index_metadata_lookup(
+               db,
+               schema_name,
+               table_name,
+               index_name,
+               &index_exists
+           ) &&
+           index_exists;
 }
 
 bool ownerless_alter_table_add_column_if_not_exists_recovery_statement(
@@ -18189,7 +18567,9 @@ bool ownerless_dictionary_recovery_kind_is_metadata_only(std::uint32_t recovery_
            recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_COLUMN_IDEMPOTENT_DROP ||
            recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_COLUMN_IF_EXISTS_NOOP ||
            recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_ADD_FOREIGN_KEY ||
-           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_FOREIGN_KEY;
+           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_FOREIGN_KEY ||
+           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_RENAME_INDEX ||
+           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_INDEX_IGNORABILITY;
 }
 
 bool ownerless_table_identifier_token(std::string_view token) {
@@ -23920,7 +24300,7 @@ bool ownerless_process_recover_dead_dictionary_owner(
         return false;
     }
 
-    constexpr std::array<std::uint32_t, 25> file_op_recovery_kinds = {
+    constexpr std::array<std::uint32_t, 28> file_op_recovery_kinds = {
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE_LIKE,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE_SELECT,
@@ -23946,6 +24326,9 @@ bool ownerless_process_recover_dead_dictionary_owner(
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_COLUMN,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_MODIFY_COLUMN,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_RENAME_COLUMN,
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_INDEX,
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_DROP_INDEX,
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_OR_REPLACE_INDEX,
     };
     if (native_file_op_checkpoint_needed) {
         for (const std::uint32_t recovery_kind : file_op_recovery_kinds) {
@@ -23963,7 +24346,7 @@ bool ownerless_process_recover_dead_dictionary_owner(
         }
     }
 
-    constexpr std::array<std::uint32_t, 24> metadata_only_recovery_kinds = {
+    constexpr std::array<std::uint32_t, 26> metadata_only_recovery_kinds = {
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_VIEW,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_TEMPORARY_TABLE,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_DROP_VIEW,
@@ -23988,6 +24371,8 @@ bool ownerless_process_recover_dead_dictionary_owner(
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_COLUMN_IF_EXISTS_NOOP,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_ADD_FOREIGN_KEY,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_FOREIGN_KEY,
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_RENAME_INDEX,
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_INDEX_IGNORABILITY,
     };
     for (const std::uint32_t recovery_kind : metadata_only_recovery_kinds) {
         std::uint64_t generation = 0;
