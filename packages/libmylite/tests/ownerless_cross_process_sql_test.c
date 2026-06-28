@@ -1123,7 +1123,7 @@ static void test_crashed_foreign_key_cross_schema_multi_rename_dictionary_ddl_re
     void
 );
 #  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-static void test_crashed_foreign_key_cross_schema_multi_rename_loop_recovers_ddl_log_rollback(void);
+static void test_crashed_fk_cross_schema_rename_loop_recovers_ddl_log_rollback(void);
 #  endif
 static void test_crashed_check_constraint_dictionary_ddl_recovers_constraints(void);
 static void test_crashed_check_constraint_drop_dictionary_ddl_recovers_absent_constraints(void);
@@ -5547,7 +5547,7 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "dictionary-fk-cross-schema-multi-rename-loop-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-        test_crashed_foreign_key_cross_schema_multi_rename_loop_recovers_ddl_log_rollback();
+        test_crashed_fk_cross_schema_rename_loop_recovers_ddl_log_rollback();
 #endif
         return 0;
     }
@@ -6391,7 +6391,7 @@ int main(int argc, char **argv) {
             test_crashed_foreign_key_multi_rename_dictionary_ddl_recovers_constraints,
             test_crashed_foreign_key_multi_rename_loop_recovers_ddl_log_rollback,
             test_crashed_foreign_key_cross_schema_multi_rename_dictionary_ddl_recovers_constraints,
-            test_crashed_foreign_key_cross_schema_multi_rename_loop_recovers_ddl_log_rollback,
+            test_crashed_fk_cross_schema_rename_loop_recovers_ddl_log_rollback,
             test_crashed_foreign_key_action_before_execute_recovers_retryable_state,
             test_crashed_foreign_key_action_after_execute_recovers_retryable_state,
             test_crashed_foreign_key_action_row_step_recovers_retryable_state,
@@ -51675,9 +51675,7 @@ static void test_crashed_foreign_key_cross_schema_multi_rename_dictionary_ddl_re
 }
 
 #  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-static void test_crashed_foreign_key_cross_schema_multi_rename_loop_recovers_ddl_log_rollback(
-    void
-) {
+static void test_crashed_fk_cross_schema_rename_loop_recovers_ddl_log_rollback(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
     char *database_path =
