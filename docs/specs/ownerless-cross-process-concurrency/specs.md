@@ -7523,6 +7523,12 @@ subsystems that this mode needs:
   reopen preserve the original row while both native file-operation markers
   remain clear. This covers a MyLite-owned post-native rollback boundary, not
   arbitrary crashes inside InnoDB rollback internals.
+  The prewrite follow-up repeats that same boundary after an earlier
+  same-table write before the savepoint and verifies killing the writer
+  recovers the original two rows while both native file-operation marker
+  classes stay clear through ownerless recovery, forced `.shm` rebuild, and
+  ordinary native reopen. It still does not fault inside native InnoDB
+  rollback internals.
   The transaction-rollback-before-state hook follow-up covers the analogous
   full-transaction boundary after native `ROLLBACK` succeeds but before MyLite
   resets process-local ownerless transaction state. Ownerless recovery, forced

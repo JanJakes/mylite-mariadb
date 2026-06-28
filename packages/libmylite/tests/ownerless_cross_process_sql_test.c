@@ -842,6 +842,9 @@ static void test_ownerless_killed_savepoint_dml_file_op_marker_recovery(void);
 static void test_ownerless_killed_before_savepoint_rollback_dml_file_op_marker_recovery(void);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void test_crashed_savepoint_rollback_before_state_recovers_original_row(void);
+static void test_crashed_savepoint_rollback_after_prewrite_before_state_recovers_original_rows(
+    void
+);
 static void test_crashed_transaction_rollback_before_state_recovers_original_row(void);
 #endif
 static void test_ownerless_native_file_op_marker_drains_after_single_owner_explicit_transaction_dml(
@@ -1242,6 +1245,10 @@ static void update_savepoint_dml_marker_rows_until_killed_before_rollback(
 );
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void rollback_savepoint_dml_marker_row_until_ownerless_state_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void rollback_savepoint_after_prewrite_dml_marker_rows_until_ownerless_state_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -4599,6 +4606,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "savepoint-rollback-prewrite-before-state-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_savepoint_rollback_after_prewrite_before_state_recovers_original_rows();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "transaction-rollback-before-state-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_transaction_rollback_before_state_recovers_original_row();
@@ -6181,6 +6194,8 @@ int main(int argc, char **argv) {
             "native-multi-peer-explicit-dml-file-op-marker-drain|"
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
             "native-file-modify-redo-observation|"
+            "savepoint-rollback-before-state-crash|"
+            "savepoint-rollback-prewrite-before-state-crash|"
             "transaction-rollback-before-state-crash|"
             "redo-header-backup-validation|"
 #endif
@@ -6889,6 +6904,9 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     ),
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
     OWNERLESS_SQL_TEST_CASE(test_crashed_savepoint_rollback_before_state_recovers_original_row),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_savepoint_rollback_after_prewrite_before_state_recovers_original_rows
+    ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_transaction_rollback_before_state_recovers_original_row),
 #endif
     OWNERLESS_SQL_TEST_CASE(
@@ -11924,6 +11942,145 @@ static void test_crashed_savepoint_rollback_before_state_recovers_original_row(v
             db,
             "SELECT SUM(value) FROM app.ownerless_savepoint_rollback_before_state"
         ) == 12U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+#  endif
+}
+
+static void test_crashed_savepoint_rollback_after_prewrite_before_state_recovers_original_rows(
+    void
+) {
+#  if defined(__linux__)
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-savepoint-prewrite-rollback-before-state.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int writer_ready_pipe[2];
+    pid_t writer_child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_savepoint_prewrite_rollback_before_state ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "payload VARBINARY(256) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_savepoint_prewrite_rollback_before_state VALUES "
+        "(1, 10, REPEAT('a', 256)), "
+        "(2, 20, REPEAT('a', 256))"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) "
+            "FROM app.ownerless_savepoint_prewrite_rollback_before_state"
+        ) == 30U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.ownerless_savepoint_prewrite_rollback_before_state"
+        ) == (unsigned)'a' * 2U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(mylite_ownerless_innodb_make_checkpoint() == MYLITE_TEST_OWNERLESS_INNODB_LOCK_OK);
+    (void)mylite_ownerless_innodb_take_file_op_redo();
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    assert(pipe(writer_ready_pipe) == 0);
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(writer_ready_pipe[0]);
+        rollback_savepoint_after_prewrite_dml_marker_rows_until_ownerless_state_fault(
+            paths,
+            writer_ready_pipe[1]
+        );
+    }
+
+    close(writer_ready_pipe[1]);
+    wait_for_pipe(writer_ready_pipe[0]);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(kill(writer_child, SIGKILL) == 0);
+    wait_for_signaled_child(writer_child, SIGKILL);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) "
+            "FROM app.ownerless_savepoint_prewrite_rollback_before_state"
+        ) == 30U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.ownerless_savepoint_prewrite_rollback_before_state"
+        ) == (unsigned)'a' * 2U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert_concurrency_wal_checkpointed_eventually(database_path);
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) "
+            "FROM app.ownerless_savepoint_prewrite_rollback_before_state"
+        ) == 30U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.ownerless_savepoint_prewrite_rollback_before_state"
+        ) == (unsigned)'a' * 2U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_savepoint_prewrite_rollback_before_state "
+        "SET value = 22 "
+        "WHERE id = 2"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) "
+            "FROM app.ownerless_savepoint_prewrite_rollback_before_state"
+        ) == 32U
     );
     assert(mylite_close(db) == MYLITE_OK);
 
@@ -62905,6 +63062,68 @@ static void rollback_savepoint_dml_marker_row_until_ownerless_state_fault(
         ) == 11U
     );
     exec_ok(db, "ROLLBACK TO ownerless_rollback_before_state_sp");
+    (void)mylite_close(db);
+    _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
+}
+
+static void rollback_savepoint_after_prewrite_dml_marker_rows_until_ownerless_state_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    mylite_db *db;
+    char ready_fd_value[32];
+
+    assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", ready_fd) > 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "savepoint-rollback-before-state", 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "START TRANSACTION");
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_savepoint_prewrite_rollback_before_state "
+        "SET value = 11, payload = REPEAT('b', 256) "
+        "WHERE id = 1"
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(paths.database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(paths.database_path));
+    assert(mylite_ownerless_innodb_take_file_op_redo());
+    mylite_ownerless_innodb_note_file_op_redo();
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) "
+            "FROM app.ownerless_savepoint_prewrite_rollback_before_state"
+        ) == 31U
+    );
+
+    exec_ok(db, "SAVEPOINT ownerless_prewrite_rollback_sp");
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_savepoint_prewrite_rollback_before_state "
+        "SET value = 21, payload = REPEAT('c', 256) "
+        "WHERE id = 2"
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(paths.database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(paths.database_path));
+    assert(mylite_ownerless_innodb_take_file_op_redo());
+    mylite_ownerless_innodb_note_file_op_redo();
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) "
+            "FROM app.ownerless_savepoint_prewrite_rollback_before_state"
+        ) == 32U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.ownerless_savepoint_prewrite_rollback_before_state"
+        ) == (unsigned)'b' + (unsigned)'c'
+    );
+
+    exec_ok(db, "ROLLBACK TO SAVEPOINT ownerless_prewrite_rollback_sp");
     (void)mylite_close(db);
     _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
 }

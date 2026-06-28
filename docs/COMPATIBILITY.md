@@ -503,6 +503,9 @@ native `ROLLBACK TO SAVEPOINT` succeeds but before MyLite updates its
 process-local savepoint state and discards rolled-back file-operation evidence,
 then verifies both file-op markers stay clear and the original row survives
 ownerless recovery, forced `.shm` rebuild, and ordinary native reopen.
+Adjacent hook coverage now repeats that post-native/pre-MyLite-state boundary
+after an earlier same-table write before the savepoint and proves killing the
+writer still recovers the original two rows with both marker classes clear.
 Hook-build coverage now also kills a writer after native transaction-ending
 `ROLLBACK` succeeds but before MyLite resets process-local ownerless
 transaction state, then verifies both file-op markers stay clear and the

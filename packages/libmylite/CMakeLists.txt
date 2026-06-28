@@ -490,6 +490,12 @@ if(BUILD_TESTING)
           savepoint-rollback-before-state-crash
       )
       add_test(
+        NAME libmylite.ownerless-savepoint-rollback-prewrite-before-state-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          savepoint-rollback-prewrite-before-state-crash
+      )
+      add_test(
         NAME libmylite.ownerless-transaction-rollback-before-state-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -1422,6 +1428,12 @@ if(BUILD_TESTING)
         TIMEOUT 90
       )
       set_tests_properties(libmylite.ownerless-savepoint-rollback-before-state-crash PROPERTIES
+        LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
+        TIMEOUT 90
+      )
+      set_tests_properties(
+        libmylite.ownerless-savepoint-rollback-prewrite-before-state-crash
+        PROPERTIES
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
         TIMEOUT 90
       )
