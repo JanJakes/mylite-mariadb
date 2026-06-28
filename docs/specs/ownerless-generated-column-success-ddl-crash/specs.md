@@ -14,6 +14,14 @@ publishes the ownerless dictionary generation. MyLite must recover the native
 table, generated-column metadata, generated values, and generated-column index
 metadata without requiring the crashed process to finish.
 
+Status note: the later ownerless dictionary crash CI attribution audit did not
+promote `dictionary-generated-column-success-crash` as a standalone CTest. A
+focused re-run exposed a stale selector contract: after the first successful
+generated-column create crash, a later live-peer startup can remain
+`MYLITE_BUSY` with dead process slots and active dictionary state that has no
+recoverable kind. That pre-finish dictionary recovery contract remains a
+separate follow-up before this selector can be used as standalone CI evidence.
+
 ## Source Findings
 
 Base: MariaDB 11.8 LTS import `mariadb-11.8.6`

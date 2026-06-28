@@ -1150,6 +1150,12 @@ if(BUILD_TESTING)
           dictionary-generated-column-foreign-key-drop-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-generated-column-failed-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-generated-column-failed-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-trigger-definer-crash
         COMMAND mylite_ownerless_cross_process_sql_test dictionary-trigger-definer-crash
       )
@@ -1158,8 +1164,20 @@ if(BUILD_TESTING)
         COMMAND mylite_ownerless_cross_process_sql_test dictionary-trigger-order-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-trigger-invalid-dependency-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-trigger-invalid-dependency-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-trigger-replace-crash
         COMMAND mylite_ownerless_cross_process_sql_test dictionary-trigger-replace-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-trigger-stored-function-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-trigger-stored-function-crash
       )
       add_test(
         NAME libmylite.ownerless-dictionary-trigger-idempotent-create-crash
@@ -1172,6 +1190,10 @@ if(BUILD_TESTING)
         COMMAND
           mylite_ownerless_cross_process_sql_test
           dictionary-trigger-idempotent-drop-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-auto-inc-crash
+        COMMAND mylite_ownerless_cross_process_sql_test dictionary-auto-inc-crash
       )
       add_test(
         NAME libmylite.ownerless-dictionary-truncate-file-op-marker-crash
@@ -1718,11 +1740,17 @@ if(BUILD_TESTING)
         libmylite.ownerless-dictionary-view-idempotent-create-crash
         libmylite.ownerless-dictionary-view-idempotent-drop-crash
         libmylite.ownerless-dictionary-view-invalid-dependency-drop-crash
+        libmylite.ownerless-dictionary-generated-column-foreign-key-crash
+        libmylite.ownerless-dictionary-generated-column-foreign-key-drop-crash
+        libmylite.ownerless-dictionary-generated-column-failed-crash
         libmylite.ownerless-dictionary-trigger-definer-crash
         libmylite.ownerless-dictionary-trigger-order-crash
+        libmylite.ownerless-dictionary-trigger-invalid-dependency-crash
         libmylite.ownerless-dictionary-trigger-replace-crash
+        libmylite.ownerless-dictionary-trigger-stored-function-crash
         libmylite.ownerless-dictionary-trigger-idempotent-create-crash
         libmylite.ownerless-dictionary-trigger-idempotent-drop-crash
+        libmylite.ownerless-dictionary-auto-inc-crash
         PROPERTIES
           LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
           TIMEOUT 120

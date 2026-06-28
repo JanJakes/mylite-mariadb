@@ -1829,7 +1829,9 @@ Tasks:
    Hook-build crash coverage kills an `ALTER TABLE ... AUTO_INCREMENT` writer
    after native high-watermark persistence but before ownerless dictionary
    finish, then verifies recovered implicit ID allocation through
-   ownerless/native reopen and forced `.shm` rebuild. The
+   ownerless/native reopen and forced `.shm` rebuild. The crash selector is
+   also registered as a standalone hook CTest for visible CI timing and failure
+   attribution. The
    `ownerless-autoinc-column-ddl-refresh` slice also covers adding a new
    `AUTO_INCREMENT PRIMARY KEY` column during an InnoDB table rebuild while an
    already-open ownerless peer is live, proving the peer refreshes the rebuilt
@@ -3157,10 +3159,10 @@ Tasks:
    visible through native trigger files and `SHOW CREATE TRIGGER`, fails closed
    under the ownerless stored-routine execution guard when fired, and still
    fires through ordinary native reopen. Broader privilege/security and randomized trigger
-   crash variants remain planned. The ordered and explicit-definer crash
-   selectors are also registered as standalone hook CTests so CI reports their
-   timing and failures
-   separately from larger crash-tail coverage.
+   crash variants remain planned. The ordered, explicit-definer,
+   delayed invalid-dependency, and stored-function trigger crash selectors are
+   also registered as standalone hook CTests so CI reports their timing and
+   failures separately from larger crash-tail coverage.
    Stored-routine DDL is a deliberately unsupported ownerless class for now:
    the routine path writes `mysql.proc`/`mysql.procs_priv` and a proof attempt
    hit a MariaDB error 145 `proc` system-table failure, so ownerless mode now
@@ -4183,8 +4185,13 @@ Tasks:
    kills representative generated-function and generated-primary-key writers
    after MariaDB validation failure but before ownerless dictionary finish, then
    verifies no rejected native metadata leaks and retry errno 1901/1903 remains
-   stable. Exhaustive retained-function blocked-function replay and external
-   oracle stress remain planned.
+   stable. The failed generated-column crash selector and generated-column
+   foreign-key crash selectors are also registered as standalone hook CTests for
+   visible CI timing and failure attribution. Standalone promotion of the
+   successful generated-column CREATE/ALTER/INDEX crash selector remains
+   deferred until its pre-finish dictionary recovery contract is fixed.
+   Exhaustive retained-function blocked-function replay and external oracle
+   stress remain planned.
    Deterministic ownerless foreign-key graph stress now runs concurrent workers
    over shared InnoDB parent/child tables with `ON UPDATE CASCADE`,
    `ON DELETE CASCADE`, `ON DELETE SET NULL`, and `ON DELETE RESTRICT`, verifies
