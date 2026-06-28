@@ -27177,9 +27177,8 @@ void release_runtime(void) {
     int startup_lock_fd = -1;
     OwnerlessRedoStartupPrefixSnapshot shutdown_redo_prefix = {};
     bool no_live_ownerless_shutdown = false;
-    const bool redo_shutdown_repair_candidate = ownerless_concurrency_runtime_mapped &&
-                                                !g_runtime.readonly_mode &&
-                                                !is_memory_database_path(g_runtime.database_path);
+    const bool redo_shutdown_repair_candidate =
+        !g_runtime.readonly_mode && !is_memory_database_path(g_runtime.database_path);
     if (g_runtime.ownerless_rw_mode && redo_shutdown_repair_candidate) {
         const std::filesystem::path startup_lock_path =
             std::filesystem::path(g_runtime.database_path) / k_concurrency_dir_name /

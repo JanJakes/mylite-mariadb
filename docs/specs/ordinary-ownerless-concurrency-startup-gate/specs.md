@@ -91,8 +91,12 @@ When the predicate is false, `start_runtime()` resets any process-global
 ownerless hooks, skips ownerless metadata/SHM/WAL/checkpoint preparation,
 skips ownerless mapping and process-slot allocation, and uses the ordinary
 exclusive database lock for system-table initialization. On close, ownerless
-reclaim, redo-prefix repair, native hook reset, and SHM unmap remain active
-only if the runtime actually mapped ownerless coordination state.
+reclaim, native hook reset, and SHM unmap remain active only if the runtime
+actually mapped ownerless coordination state. Ordinary non-read-only disk
+closes still keep the lightweight MariaDB redo-prefix guard from
+`embedded-repeated-open-redo-repair`, because the startup gate must not leave a
+fresh ordinary database unable to reopen once ownerless metadata is introduced
+later.
 
 ## Compatibility Impact
 
@@ -114,7 +118,9 @@ or retained from earlier ownerless activity.
 
 No native file format changes. The slice only avoids ownerless coordination I/O
 when no ownerless recovery state exists. Native InnoDB recovery remains under
-MariaDB's embedded startup and shutdown lifecycle.
+MariaDB's embedded startup and shutdown lifecycle, with ordinary close-time
+redo-prefix repair kept as a native restartability guard rather than ownerless
+coordination setup.
 
 ## Public API Impact
 

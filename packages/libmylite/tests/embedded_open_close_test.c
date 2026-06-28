@@ -1272,6 +1272,15 @@ static void test_concurrency_shared_memory_is_grow_only(void) {
         mylite_open(database_path, &db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
         MYLITE_OK
     );
+    exec_ok(db, "CREATE DATABASE app");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_shm_redo_guard ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_shm_redo_guard VALUES (1, 10)");
     assert(mylite_close(db) == MYLITE_OK);
     write_ownerless_concurrency_metadata(database_path);
     assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);

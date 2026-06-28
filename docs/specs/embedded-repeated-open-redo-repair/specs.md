@@ -31,12 +31,14 @@ actual engine/per-process startup costs.
   `capture_ownerless_redo_startup_prefix()`,
   `ownerless_redo_prefix_has_valid_current_checkpoint()`, and
   `restore_ownerless_redo_shutdown_header_if_needed()`.
-- That repair is currently used only for no-live ownerless shutdown after
-  taking `mylite-runtime-startup.lock`. Ordinary exclusive opens do not capture
-  a pre-shutdown redo prefix and do not restore one after
-  `mysql_server_end()`.
+- That repair must cover ordinary exclusive shutdown as well as no-live
+  ownerless shutdown. A later startup-gate regression narrowed it to runtimes
+  that had mapped ownerless coordination files, which exposed ordinary
+  create/close followed by ownerless-metadata introduction to the same
+  intermittent checksum abort.
 - Ordinary exclusive opens still hold `mylite.lock`, so there is no peer
-  process to coordinate with while the embedded runtime is shutting down.
+  process to coordinate with while the embedded runtime is shutting down and the
+  process-local redo prefix is conditionally restored.
 - `packages/libmylite/tests/embedded_open_close_test.c` has
   `test_open_close_repeatedly()`, but it opens only twice and does not create
   or reopen an InnoDB table. That misses the performance-probe shape: create an
