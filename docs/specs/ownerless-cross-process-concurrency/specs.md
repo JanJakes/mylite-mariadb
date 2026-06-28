@@ -5861,7 +5861,9 @@ constraint metadata creation/removal and table-definition mutation,
 plus a focused mixed FK/non-FK table-comment list after native FK metadata and
 table-option metadata mutation, plus a focused mixed FK/non-FK
 `ALTER COLUMN ... SET DEFAULT` list after native FK metadata and column-default
-metadata mutation, plus focused mixed FK/non-FK real-column
+metadata mutation, plus a focused mixed FK/non-FK named CHECK drop/add list
+after native FK and CHECK metadata mutation with native file-operation marker
+retention until final no-live drain, plus focused mixed FK/non-FK real-column
 DROP/MODIFY/CHANGE/RENAME COLUMN lists after native FK metadata and column
 definition mutation,
 CHECK ADD/DROP writers after native
@@ -7907,7 +7909,8 @@ subsystems that this mode needs:
      prefinish boundaries, plus single-clause, pure multi-clause, FK-only
      mixed foreign-key add/drop, focused mixed FK/non-FK ADD COLUMN,
      focused mixed FK/non-FK DROP/MODIFY/CHANGE/RENAME COLUMN, focused mixed
-     FK/non-FK table-comment, and focused mixed FK/non-FK column-default
+     FK/non-FK table-comment, focused mixed FK/non-FK column-default, and
+     focused mixed FK/non-FK named CHECK drop/add
      prefinish boundaries, plus child-only,
      self-referencing, and stored generated-column child foreign-key truncate
      prefinish boundaries, plus simple temporary DDL, pure multi-pair temporary
@@ -7937,8 +7940,8 @@ subsystems that this mode needs:
      ADD/DROP/MODIFY/CHANGE/RENAME COLUMN boundaries,
      broader metadata-only DDL, broader mixed temporary/permanent
      rename matrices, broader FK plus non-FK ALTER lists beyond the focused
-     ADD COLUMN, DROP/MODIFY/CHANGE/RENAME COLUMN, table-comment, and
-     column-default cases, broader schema option variants beyond the focused
+     ADD COLUMN, DROP/MODIFY/CHANGE/RENAME COLUMN, table-comment, column-default,
+     and named CHECK cases, broader schema option variants beyond the focused
      named/current-schema schema-default/comment boundaries,
      and broader DDL file lifecycle while
      peers remain live. Partition truncate

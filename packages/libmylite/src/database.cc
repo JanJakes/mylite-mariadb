@@ -2368,7 +2368,7 @@ bool ownerless_alter_table_drop_foreign_key_recovery_statement(
 bool ownerless_alter_table_mixed_foreign_key_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens,
-    std::uint32_t *out_column_recovery_kind
+    std::uint32_t *out_recovery_kind
 );
 bool ownerless_create_schema_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_create_schema_if_not_exists_recovery_statement(const SqlPolicyTokens &tokens);
@@ -2450,6 +2450,13 @@ bool ownerless_column_metadata_lookup(
     std::string_view schema_name,
     std::string_view table_name,
     std::string_view column_name,
+    bool *out_exists
+);
+bool ownerless_check_constraint_metadata_lookup(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    std::string_view constraint_name,
     bool *out_exists
 );
 bool ownerless_generated_column_metadata_lookup(
@@ -13049,7 +13056,8 @@ bool ownerless_dictionary_recovery_forces_native_file_op_checkpoint(std::uint32_
            kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_RENAME_COLUMN ||
            kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_INDEX ||
            kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_DROP_INDEX ||
-           kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_OR_REPLACE_INDEX;
+           kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_OR_REPLACE_INDEX ||
+           kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_CHECK_CONSTRAINT;
 }
 
 bool mark_ownerless_dictionary_state_recoverable_before_finish(mylite_db &db) {
@@ -15884,15 +15892,14 @@ std::uint32_t ownerless_dictionary_recovery_kind_for_statement(
     if (ownerless_alter_table_drop_foreign_key_recovery_statement(db, tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_FOREIGN_KEY;
     }
-    std::uint32_t mixed_foreign_key_column_recovery_kind =
-        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE;
+    std::uint32_t mixed_foreign_key_recovery_kind = MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE;
     if (ownerless_alter_table_mixed_foreign_key_recovery_statement(
             db,
             tokens,
-            &mixed_foreign_key_column_recovery_kind
+            &mixed_foreign_key_recovery_kind
         )) {
-        if (mixed_foreign_key_column_recovery_kind != MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE) {
-            return mixed_foreign_key_column_recovery_kind;
+        if (mixed_foreign_key_recovery_kind != MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE) {
+            return mixed_foreign_key_recovery_kind;
         }
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_ADD_FOREIGN_KEY;
     }
@@ -16662,6 +16669,49 @@ bool ownerless_column_metadata_lookup(
         return false;
     }
     *out_exists = column_exists;
+    return true;
+}
+
+bool ownerless_check_constraint_metadata_lookup(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    std::string_view constraint_name,
+    bool *out_exists
+) {
+    if (out_exists == nullptr || schema_name.empty() || table_name.empty() ||
+        constraint_name.empty()) {
+        return false;
+    }
+    *out_exists = false;
+
+    const ErrorSnapshot snapshot = capture_error(db);
+    const std::string escaped_schema = ownerless_escape_metadata_literal(db, schema_name);
+    const std::string escaped_table = ownerless_escape_metadata_literal(db, table_name);
+    const std::string escaped_constraint = ownerless_escape_metadata_literal(db, constraint_name);
+    const std::string sql = "SELECT COUNT(*) FROM information_schema.check_constraints "
+                            "WHERE constraint_schema = '" +
+                            escaped_schema + "' AND table_name = '" + escaped_table +
+                            "' AND constraint_name = '" + escaped_constraint +
+                            "' AND level = 'Table'";
+
+    bool query_succeeded = false;
+    bool constraint_exists = false;
+    if (mysql_query(&db.mysql, sql.c_str()) == 0) {
+        MYSQL_RES *result = mysql_store_result(&db.mysql);
+        if (result != nullptr) {
+            MYSQL_ROW row = mysql_fetch_row(result);
+            constraint_exists =
+                row != nullptr && row[0] != nullptr && std::strtoull(row[0], nullptr, 10) != 0U;
+            query_succeeded = row != nullptr && row[0] != nullptr;
+            mysql_free_result(result);
+        }
+    }
+    restore_error(db, snapshot);
+    if (!query_succeeded) {
+        return false;
+    }
+    *out_exists = constraint_exists;
     return true;
 }
 
@@ -19427,6 +19477,75 @@ bool consume_ownerless_alter_table_drop_foreign_key_recovery_clause(
     return true;
 }
 
+bool consume_ownerless_alter_table_add_check_constraint_recovery_clause(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::size_t &index,
+    std::string_view child_schema_name,
+    std::string_view child_table_name
+) {
+    if (index + 3U >= tokens.count || !token_equals(tokens.values[index], "ADD") ||
+        !token_equals(tokens.values[index + 1U], "CONSTRAINT") ||
+        !ownerless_table_identifier_token(tokens.values[index + 2U]) ||
+        !token_equals(tokens.values[index + 3U], "CHECK")) {
+        return false;
+    }
+
+    const std::string constraint_name = ownerless_normalized_identifier(tokens.values[index + 2U]);
+    index += 4U;
+    bool constraint_exists = true;
+    if (!ownerless_check_constraint_metadata_lookup(
+            db,
+            child_schema_name,
+            child_table_name,
+            constraint_name,
+            &constraint_exists
+        ) ||
+        constraint_exists || !consume_ownerless_parenthesized_clause(tokens, index)) {
+        return false;
+    }
+
+    while (index < tokens.count && !token_equals(tokens.values[index], ",") &&
+           !token_equals(tokens.values[index], ";")) {
+        ++index;
+    }
+    return true;
+}
+
+bool consume_ownerless_alter_table_drop_check_constraint_recovery_clause(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::size_t &index,
+    std::string_view child_schema_name,
+    std::string_view child_table_name
+) {
+    if (index + 2U >= tokens.count || !token_equals(tokens.values[index], "DROP") ||
+        !token_equals(tokens.values[index + 1U], "CONSTRAINT") ||
+        !ownerless_table_identifier_token(tokens.values[index + 2U])) {
+        return false;
+    }
+
+    const std::string constraint_name = ownerless_normalized_identifier(tokens.values[index + 2U]);
+    index += 3U;
+    bool constraint_exists = false;
+    if (!ownerless_check_constraint_metadata_lookup(
+            db,
+            child_schema_name,
+            child_table_name,
+            constraint_name,
+            &constraint_exists
+        ) ||
+        !constraint_exists) {
+        return false;
+    }
+
+    while (index < tokens.count && !token_equals(tokens.values[index], ",") &&
+           !token_equals(tokens.values[index], ";")) {
+        ++index;
+    }
+    return true;
+}
+
 bool ownerless_alter_table_drop_foreign_key_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
@@ -19488,10 +19607,10 @@ bool ownerless_alter_table_drop_foreign_key_recovery_statement(
 bool ownerless_alter_table_mixed_foreign_key_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens,
-    std::uint32_t *out_column_recovery_kind
+    std::uint32_t *out_recovery_kind
 ) {
-    if (out_column_recovery_kind != nullptr) {
-        *out_column_recovery_kind = MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE;
+    if (out_recovery_kind != nullptr) {
+        *out_recovery_kind = MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE;
     }
     if (tokens.count < 15U || !token_equals(tokens.values[0], "ALTER") ||
         !token_equals(tokens.values[1], "TABLE")) {
@@ -19522,15 +19641,32 @@ bool ownerless_alter_table_mixed_foreign_key_recovery_statement(
     }
 
     bool saw_add_clause = false;
-    std::uint32_t column_recovery_kind = MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE;
+    std::uint32_t mixed_recovery_kind = MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE;
     bool saw_drop_clause = false;
+    bool saw_check_clause = false;
     for (;;) {
         if (index < tokens.count && token_equals(tokens.values[index], "ADD")) {
             const std::size_t add_index = index;
+            bool consumed_clause = false;
             if (consume_ownerless_alter_table_add_foreign_key_recovery_clause(db, tokens, index)) {
                 saw_add_clause = true;
-            } else {
-                if (column_recovery_kind != MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE) {
+                consumed_clause = true;
+            }
+            if (!consumed_clause) {
+                index = add_index;
+                if (consume_ownerless_alter_table_add_check_constraint_recovery_clause(
+                        db,
+                        tokens,
+                        index,
+                        child_schema_name,
+                        child_table_name
+                    )) {
+                    saw_check_clause = true;
+                    consumed_clause = true;
+                }
+            }
+            if (!consumed_clause) {
+                if (mixed_recovery_kind != MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE) {
                     return false;
                 }
                 index = add_index;
@@ -19543,10 +19679,11 @@ bool ownerless_alter_table_mixed_foreign_key_recovery_statement(
                     )) {
                     return false;
                 }
-                column_recovery_kind = MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_ADD_COLUMN;
+                mixed_recovery_kind = MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_ADD_COLUMN;
             }
         } else if (index < tokens.count && token_equals(tokens.values[index], "DROP")) {
             const std::size_t drop_index = index;
+            bool consumed_clause = false;
             if (consume_ownerless_alter_table_drop_foreign_key_recovery_clause(
                     db,
                     tokens,
@@ -19555,8 +19692,23 @@ bool ownerless_alter_table_mixed_foreign_key_recovery_statement(
                     child_table_name
                 )) {
                 saw_drop_clause = true;
-            } else {
-                if (column_recovery_kind != MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE) {
+                consumed_clause = true;
+            }
+            if (!consumed_clause) {
+                index = drop_index;
+                if (consume_ownerless_alter_table_drop_check_constraint_recovery_clause(
+                        db,
+                        tokens,
+                        index,
+                        child_schema_name,
+                        child_table_name
+                    )) {
+                    saw_check_clause = true;
+                    consumed_clause = true;
+                }
+            }
+            if (!consumed_clause) {
+                if (mixed_recovery_kind != MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE) {
                     return false;
                 }
                 index = drop_index;
@@ -19569,10 +19721,10 @@ bool ownerless_alter_table_mixed_foreign_key_recovery_statement(
                     )) {
                     return false;
                 }
-                column_recovery_kind = MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_COLUMN;
+                mixed_recovery_kind = MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_COLUMN;
             }
         } else if (index < tokens.count && token_equals(tokens.values[index], "MODIFY")) {
-            if (column_recovery_kind != MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE ||
+            if (mixed_recovery_kind != MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE ||
                 !consume_ownerless_alter_table_modify_column_recovery_clause(
                     db,
                     tokens,
@@ -19582,9 +19734,9 @@ bool ownerless_alter_table_mixed_foreign_key_recovery_statement(
                 )) {
                 return false;
             }
-            column_recovery_kind = MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_MODIFY_COLUMN;
+            mixed_recovery_kind = MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_MODIFY_COLUMN;
         } else if (index < tokens.count && token_equals(tokens.values[index], "CHANGE")) {
-            if (column_recovery_kind != MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE ||
+            if (mixed_recovery_kind != MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE ||
                 !consume_ownerless_alter_table_change_column_recovery_clause(
                     db,
                     tokens,
@@ -19594,9 +19746,9 @@ bool ownerless_alter_table_mixed_foreign_key_recovery_statement(
                 )) {
                 return false;
             }
-            column_recovery_kind = MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_CHANGE_COLUMN;
+            mixed_recovery_kind = MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_CHANGE_COLUMN;
         } else if (index < tokens.count && token_equals(tokens.values[index], "RENAME")) {
-            if (column_recovery_kind != MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE ||
+            if (mixed_recovery_kind != MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE ||
                 !consume_ownerless_alter_table_rename_column_recovery_clause(
                     db,
                     tokens,
@@ -19606,7 +19758,7 @@ bool ownerless_alter_table_mixed_foreign_key_recovery_statement(
                 )) {
                 return false;
             }
-            column_recovery_kind = MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_RENAME_COLUMN;
+            mixed_recovery_kind = MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_RENAME_COLUMN;
         } else if (consume_ownerless_alter_table_comment_recovery_clause(tokens, index)) {
             /* Table comments are metadata-only and share FK live-recovery semantics. */
         } else if (consume_ownerless_alter_column_set_default_recovery_clause(tokens, index)) {
@@ -19616,8 +19768,13 @@ bool ownerless_alter_table_mixed_foreign_key_recovery_statement(
         }
 
         if (index >= tokens.count) {
-            if (out_column_recovery_kind != nullptr) {
-                *out_column_recovery_kind = column_recovery_kind;
+            if (mixed_recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE &&
+                saw_check_clause) {
+                mixed_recovery_kind =
+                    MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_CHECK_CONSTRAINT;
+            }
+            if (out_recovery_kind != nullptr) {
+                *out_recovery_kind = mixed_recovery_kind;
             }
             return saw_add_clause && saw_drop_clause;
         }
@@ -19628,8 +19785,13 @@ bool ownerless_alter_table_mixed_foreign_key_recovery_statement(
         if (token_equals(tokens.values[index], ";")) {
             const bool accepted = saw_add_clause && saw_drop_clause &&
                                   consume_ownerless_remaining_semicolons(tokens, index);
-            if (accepted && out_column_recovery_kind != nullptr) {
-                *out_column_recovery_kind = column_recovery_kind;
+            if (accepted && mixed_recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE &&
+                saw_check_clause) {
+                mixed_recovery_kind =
+                    MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_CHECK_CONSTRAINT;
+            }
+            if (accepted && out_recovery_kind != nullptr) {
+                *out_recovery_kind = mixed_recovery_kind;
             }
             return accepted;
         }
@@ -25725,7 +25887,7 @@ bool ownerless_process_recover_dead_dictionary_owner(
         return false;
     }
 
-    constexpr std::array<std::uint32_t, 29> file_op_recovery_kinds = {
+    constexpr std::array<std::uint32_t, 30> file_op_recovery_kinds = {
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE_LIKE,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE_SELECT,
@@ -25755,6 +25917,7 @@ bool ownerless_process_recover_dead_dictionary_owner(
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_INDEX,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_DROP_INDEX,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_OR_REPLACE_INDEX,
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_CHECK_CONSTRAINT,
     };
     if (native_file_op_checkpoint_needed) {
         for (const std::uint32_t recovery_kind : file_op_recovery_kinds) {

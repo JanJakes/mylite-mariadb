@@ -394,7 +394,8 @@ bool valid_recovery_kind(std::uint32_t recovery_kind) {
            recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_OR_REPLACE_INDEX ||
            recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_RENAME_INDEX ||
            recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_INDEX_IGNORABILITY ||
-           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_FAILED_DDL_NOOP;
+           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_FAILED_DDL_NOOP ||
+           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_CHECK_CONSTRAINT;
 }
 
 void clear_recoverable_state(unsigned char *state) {
