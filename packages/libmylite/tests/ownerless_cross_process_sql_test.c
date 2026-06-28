@@ -17959,6 +17959,12 @@ static void test_ownerless_single_owner_foreground_reclaim_budget_defers_to_time
     assert(mylite_ownerless_pressure_status(writer_db, &info) == MYLITE_OK);
     assert(info.active_page_version_pin_count == 1U);
 
+    assert(mylite_step(stmt) == MYLITE_ROW);
+    assert(mylite_column_uint64(stmt, 0) == 2U);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    info.size = sizeof(info);
+    assert(mylite_ownerless_pressure_status(writer_db, &info) == MYLITE_OK);
+    assert(info.active_page_version_pin_count == 0U);
     assert(mylite_finalize(stmt) == MYLITE_OK);
     stmt = NULL;
     info.size = sizeof(info);
