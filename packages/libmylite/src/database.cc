@@ -2326,6 +2326,10 @@ bool ownerless_alter_column_set_default_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 );
+bool consume_ownerless_alter_column_set_default_recovery_clause(
+    const SqlPolicyTokens &tokens,
+    std::size_t &index
+);
 bool ownerless_alter_table_add_foreign_key_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
@@ -18309,6 +18313,32 @@ bool ownerless_alter_column_set_default_recovery_statement(
     return consume_ownerless_remaining_semicolons(tokens, index);
 }
 
+bool consume_ownerless_alter_column_set_default_recovery_clause(
+    const SqlPolicyTokens &tokens,
+    std::size_t &index
+) {
+    if (index >= tokens.count || !token_equals(tokens.values[index], "ALTER")) {
+        return false;
+    }
+    ++index;
+    if (index < tokens.count && token_equals(tokens.values[index], "COLUMN")) {
+        ++index;
+    }
+    if (index + 3U >= tokens.count || !ownerless_table_identifier_token(tokens.values[index]) ||
+        !token_equals(tokens.values[index + 1U], "SET") ||
+        !token_equals(tokens.values[index + 2U], "DEFAULT") ||
+        token_equals(tokens.values[index + 3U], ";") ||
+        token_equals(tokens.values[index + 3U], ",")) {
+        return false;
+    }
+    index += 4U;
+    while (index < tokens.count && !token_equals(tokens.values[index], ",") &&
+           !token_equals(tokens.values[index], ";")) {
+        ++index;
+    }
+    return true;
+}
+
 bool consume_ownerless_alter_table_add_foreign_key_recovery_clause(
     mylite_db &db,
     const SqlPolicyTokens &tokens,
@@ -18605,6 +18635,8 @@ bool ownerless_alter_table_mixed_foreign_key_recovery_statement(
             saw_drop_clause = true;
         } else if (consume_ownerless_alter_table_comment_recovery_clause(tokens, index)) {
             /* Table comments are metadata-only and share FK live-recovery semantics. */
+        } else if (consume_ownerless_alter_column_set_default_recovery_clause(tokens, index)) {
+            /* Column defaults are metadata-only and share FK live-recovery semantics. */
         } else {
             return false;
         }

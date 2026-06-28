@@ -390,7 +390,10 @@ list now uses live-peer recovery while retaining the native file-operation
 marker until no-live drain. A focused metadata-only mixed
 `DROP FOREIGN KEY`, table `COMMENT`, and `ADD CONSTRAINT ... FOREIGN KEY`
 ALTER list now also uses live-peer recovery while keeping the native
-file-operation marker clear.
+file-operation marker clear; the same metadata-only lane covers a focused
+mixed `DROP FOREIGN KEY`, `ALTER COLUMN ... SET DEFAULT`, and
+`ADD CONSTRAINT ... FOREIGN KEY` ALTER list, including recovered default
+metadata and post-recovery implicit default inserts.
 Simple temporary-table `RENAME TABLE` and `ALTER TABLE ... RENAME TO`
 tracking now preserves conservative handling for the renamed temp table and
 restores normal ownerless refresh for a previously shadowed permanent table;
