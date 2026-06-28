@@ -400,6 +400,11 @@ Roles:
   WAL. Generic dictionary/file-op and autoincrement markers keep their stricter
   policy. Live-peer reclaim keeps checkpointable user data/index page records
   in WAL until no-live reclaim can make the native data file authoritative.
+  Focused production coverage now combines ordinary user page-version payload
+  and proof-only rollback-segment/undo history records in one explicit
+  transaction, closes the last ownerless handle, checkpoints the WAL, removes
+  `.wal` and `.shm`, and proves ordinary native reopen from the native
+  checkpoint boundary.
   Focused Linux coverage now also commits post-checkpoint file-per-table DML in
   a child process that exits with `_exit(0)` before `mylite_close()`, verifies
   the durable DML marker/WAL while that child is still an unreaped zombie, and
@@ -7862,12 +7867,15 @@ subsystems that this mode needs:
   `MYLITE_BUSY` as bounded retryable harness contention while keeping native
   lock-timeout, deadlock, metadata, and storage errors fatal. A focused
   short-timeout stress selector forces immediate ownerless statement-lock
-  misses to exercise that retry path. The regular ownerless-stress DDL CTest
-  also caps its statement-lock wait at `1` second so the same eight-round
-  workload uses repeated short retries inside the harness deadline instead of
-  six long `30` second waits. This stabilizes evidence collection for the
-  existing DDL/DML stress workload; it does not change product retry semantics
-  or close the broader DDL/file-lifecycle recovery matrix.
+  misses to exercise that retry path, then relaxes each affected worker session
+  to a `1` second statement-lock wait after the first forced miss so the
+  remaining run does not spend the full harness deadline in nonblocking retry
+  loops. The regular ownerless-stress DDL CTest also caps its statement-lock
+  wait at `1` second so the same eight-round workload uses repeated short
+  retries inside the harness deadline instead of six long `30` second waits.
+  This stabilizes evidence collection for the existing DDL/DML stress
+  workload; it does not change product retry semantics or close the broader
+  DDL/file-lifecycle recovery matrix.
 
   The current completion order is:
 

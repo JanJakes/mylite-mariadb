@@ -53,7 +53,10 @@ opened ownerless handles and reached the start barrier, the parent briefly holds
 the ownerless dictionary statement-lock byte in
 `concurrency/mylite-statements.lock`, forcing immediate statement-lock misses
 under contention and exercising the retry path without changing product
-defaults.
+defaults. After a worker observes the first forced immediate miss, that worker
+sets `lock_wait_timeout` to `1` for the rest of its session so the selector
+keeps the deliberate busy-path proof but avoids spending the full harness
+deadline in nonblocking retry loops after the parent releases the forced lock.
 
 ## Compatibility Impact
 
@@ -101,7 +104,8 @@ stress binary.
 - Unexpected MyLite, MariaDB, native lock-timeout, deadlock, metadata, and
   storage errors still abort the stress test with diagnostics.
 - The focused short-timeout selector passes and exercises the retry path under
-  deliberate statement-lock contention.
+  deliberate statement-lock contention, then completes subsequent handoffs with
+  a one-second ownerless statement-lock wait.
 - The normal DDL stress selector passes with the existing eight-round stress
   profile.
 

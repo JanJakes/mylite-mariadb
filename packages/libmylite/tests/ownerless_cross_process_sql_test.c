@@ -158,6 +158,7 @@ extern uint32_t my_crc32c(uint32_t crc, const void *buf, size_t len);
 #define MYLITE_TEST_DDL_STRESS_LOCK_WAIT_TIMEOUT_SECONDS_MAX 120U
 #define MYLITE_TEST_DDL_STRESS_RETRY_TIMEOUT_MS 180000ULL
 #define MYLITE_TEST_DDL_STRESS_FORCED_STATEMENT_LOCK_HOLD_US 500000U
+#define MYLITE_TEST_DDL_STRESS_FORCED_RETRY_LOCK_WAIT_TIMEOUT_SECONDS 1U
 #define MYLITE_TEST_DDL_STRESS_DICTIONARY_STATEMENT_LOCK_START 4
 #define MYLITE_TEST_DDL_STRESS_DICTIONARY_STATEMENT_LOCK_LENGTH 1
 #define MYLITE_TEST_TEMP_STRESS_WORKER_COUNT 4U
@@ -842,6 +843,7 @@ static void test_ownerless_purge_preserves_cross_process_snapshot(void);
 static void test_ownerless_native_checkpoint_evidence(void);
 static void test_ownerless_native_checkpoint_reclaims_page_log(void);
 static void test_ownerless_no_live_native_checkpoint_cutover_proves_bulk_pages(void);
+static void test_ownerless_mixed_history_proof_checkpoint_cutover(void);
 static void test_ownerless_checkpoint_lsn_record_recovers_from_torn_latest_slot(void);
 static void test_ownerless_checkpoint_lsn_noop_update_keeps_generation(void);
 static void test_ownerless_checkpoint_generation_cache_hits_single_owner(void);
@@ -5087,6 +5089,10 @@ int main(int argc, char **argv) {
         test_ownerless_no_live_native_checkpoint_cutover_proves_bulk_pages();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "mixed-history-proof-checkpoint-cutover") == 0) {
+        test_ownerless_mixed_history_proof_checkpoint_cutover();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "native-file-op-marker-drain") == 0) {
         test_ownerless_native_file_op_marker_clears_without_page_log();
         test_ownerless_native_file_op_marker_recovers_from_torn_clear_record();
@@ -7040,6 +7046,7 @@ int main(int argc, char **argv) {
             "local-write-first-read|isolation|"
             "shared-readonly|checkpoint-evidence|checkpoint-lsn-noop-elision|native-reclaim|"
             "no-live-native-checkpoint-cutover-proof|"
+            "mixed-history-proof-checkpoint-cutover|"
             "native-file-op-marker-drain|native-dml-file-op-marker-drain|"
             "native-killed-dml-file-op-marker-recovery|"
             "native-killed-uncommitted-dml-file-op-marker-recovery|"
@@ -7351,6 +7358,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_native_checkpoint_evidence),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_native_checkpoint_reclaims_page_log),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_no_live_native_checkpoint_cutover_proves_bulk_pages),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_mixed_history_proof_checkpoint_cutover),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_checkpoint_lsn_record_recovers_from_torn_latest_slot),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_checkpoint_lsn_noop_update_keeps_generation),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_checkpoint_generation_cache_hits_single_owner),
@@ -18282,6 +18290,170 @@ static void test_ownerless_no_live_native_checkpoint_cutover_proves_bulk_pages(v
             db,
             "SELECT COUNT(*) FROM app.ownerless_no_live_native_cutover WHERE id = 1000"
         ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_mixed_history_proof_checkpoint_cutover(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-mixed-history-proof-cutover.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    uint64_t page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT] = {0};
+    uint64_t page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_COUNT] = {0};
+    uint64_t commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT] = {0};
+    uint64_t deep_stats[OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT] = {0};
+    uint64_t checkpoint_visible_after;
+    uint64_t volatile_visible_after;
+    mylite_stmt *stmt = NULL;
+    const char *tail = NULL;
+    mylite_db *db;
+    const unsigned rows = 32U;
+    const unsigned expected_sum = 10U * rows * (rows + 1U) / 2U;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_mixed_history_cutover ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "payload VARBINARY(4000) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert(
+        mylite_prepare(
+            db,
+            "INSERT INTO app.ownerless_mixed_history_cutover "
+            "VALUES (?, ?, REPEAT('h', 4000))",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            &tail
+        ) == MYLITE_OK
+    );
+    assert(stmt != NULL);
+    assert(tail != NULL && *tail == '\0');
+    assert(mylite_bind_parameter_count(stmt) == 2U);
+
+    mylite_ownerless_innodb_set_page_publish_stats_enabled(1);
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
+    mylite_ownerless_innodb_set_commit_visibility_stats_enabled(1);
+    mylite_ownerless_innodb_deep_set_perf_stats_enabled(1);
+    mylite_ownerless_innodb_reset_page_publish_stats();
+    mylite_ownerless_page_log_reset_append_perf_stats();
+    mylite_ownerless_innodb_reset_commit_visibility_stats();
+    mylite_ownerless_innodb_deep_reset_perf_stats();
+
+    exec_ok(db, "START TRANSACTION");
+    for (unsigned id = 1U; id <= rows; ++id) {
+        assert(mylite_bind_uint64(stmt, 1U, id) == MYLITE_OK);
+        assert(mylite_bind_uint64(stmt, 2U, id * 10U) == MYLITE_OK);
+        assert(mylite_step(stmt) == MYLITE_DONE);
+        assert(mylite_reset(stmt) == MYLITE_OK);
+        assert(mylite_clear_bindings(stmt) == MYLITE_OK);
+    }
+    exec_ok(db, "COMMIT");
+
+    mylite_ownerless_innodb_read_page_publish_stats(
+        page_stats,
+        OWNERLESS_TEST_PAGE_PUBLISH_STAT_COUNT
+    );
+    mylite_ownerless_page_log_read_append_perf_stats(
+        page_log_append_stats,
+        OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_COUNT
+    );
+    mylite_ownerless_innodb_read_commit_visibility_stats(
+        commit_stats,
+        OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT
+    );
+    mylite_ownerless_innodb_deep_read_perf_stats(
+        deep_stats,
+        OWNERLESS_TEST_INNODB_DEEP_PERF_STAT_COUNT
+    );
+    mylite_ownerless_innodb_set_page_publish_stats_enabled(0);
+    mylite_ownerless_page_log_set_append_perf_stats_enabled(0);
+    mylite_ownerless_innodb_set_commit_visibility_stats_enabled(0);
+    mylite_ownerless_innodb_deep_set_perf_stats_enabled(0);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    stmt = NULL;
+
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_mixed_history_cutover") == rows);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_mixed_history_cutover") ==
+        expected_sum
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(LENGTH(payload)) FROM app.ownerless_mixed_history_cutover"
+        ) == rows * 4000U
+    );
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FAST] > 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH] == 0U);
+    assert(commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_FLUSH_PUBLISH_FAILED] == 0U);
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_PUBLISHED] > 0U);
+    assert(page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_FAILED] == 0U);
+    assert(
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_RSEG] ==
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_HISTORY_PROOF_RSEG_SAMPLES]
+    );
+    assert(
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO] ==
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_HISTORY_PROOF_UNDO_SAMPLES]
+    );
+    assert(
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_RSEG] >
+        0U
+    );
+    assert(
+        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO] >
+        0U
+    );
+    assert(page_log_append_stats[OWNERLESS_TEST_PAGE_LOG_APPEND_PERF_STAT_CALLS] > 0U);
+    assert(
+        deep_stats
+            [OWNERLESS_TEST_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES] ==
+        0U
+    );
+    assert(
+        deep_stats[OWNERLESS_TEST_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_IMAGE_PUBLISHED] +
+            deep_stats[OWNERLESS_TEST_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_BUFFER_PUBLISHED] +
+            deep_stats[OWNERLESS_TEST_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_BUFFER_RETRY_PUBLISHED] >
+        0U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_concurrency_wal_checkpointed_eventually(database_path);
+    checkpoint_visible_after = read_concurrency_checkpoint_visible_lsn(database_path);
+    volatile_visible_after = read_concurrency_redo_visible_lsn(database_path);
+    assert(checkpoint_visible_after > 0U);
+    assert(volatile_visible_after >= checkpoint_visible_after);
+
+    remove_concurrency_wal(database_path);
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(
+        mylite_ownerless_innodb_checkpoint_covers_lsn(checkpoint_visible_after) ==
+        MYLITE_TEST_OWNERLESS_INNODB_LOCK_OK
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_mixed_history_cutover") == rows);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_mixed_history_cutover") ==
+        expected_sum
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(LENGTH(payload)) FROM app.ownerless_mixed_history_cutover"
+        ) == rows * 4000U
     );
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
@@ -57138,8 +57310,7 @@ static void test_crashed_foreign_key_cross_schema_multi_rename_dictionary_ddl_re
     free(root);
 }
 
-static void test_crashed_fk_cross_schema_rename_if_exists_missing_source_recovers_constraints(
-    void
+static void test_crashed_fk_cross_schema_rename_if_exists_missing_source_recovers_constraints(void
 ) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -76105,6 +76276,23 @@ static int ownerless_ddl_stress_exec_retryable(
     return 0;
 }
 
+static void ownerless_ddl_stress_relax_statement_lock_timeout_after_forced_retry(mylite_db *db) {
+    char sql[64];
+
+    if (ownerless_ddl_stress_lock_wait_timeout_seconds() != 0U) {
+        return;
+    }
+    assert(
+        snprintf(
+            sql,
+            sizeof(sql),
+            "SET SESSION lock_wait_timeout = %u",
+            MYLITE_TEST_DDL_STRESS_FORCED_RETRY_LOCK_WAIT_TIMEOUT_SECONDS
+        ) > 0
+    );
+    exec_ok(db, sql);
+}
+
 static void ownerless_ddl_stress_exec_ok(
     mylite_db *db,
     const char *sql,
@@ -76117,6 +76305,9 @@ static void ownerless_ddl_stress_exec_ok(
     for (unsigned attempt = 1U;; ++attempt) {
         if (ownerless_ddl_stress_exec_retryable(db, sql, worker_id, round, attempt, phase)) {
             return;
+        }
+        if (attempt == 1U) {
+            ownerless_ddl_stress_relax_statement_lock_timeout_after_forced_retry(db);
         }
         if (monotonic_milliseconds() >= deadline_ms) {
             fprintf(
