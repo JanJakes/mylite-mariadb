@@ -4992,7 +4992,7 @@ Tasks:
    file-operation marker until final no-live drain and preserving the shadowed
    permanent table through ownerless/native reopen and forced `.shm` rebuild,
    while multi-pair temporary rename chains,
-   cross-schema and schema-drop internal multi-drop crash points, broader
+   schema-drop internal multi-drop crash points, broader
    ALTER rebuild beyond the focused force, row-format, compressed, and charset-conversion cases,
    broader schema option variants beyond named/current-schema default/comment
    boundaries, broader view and trigger variants, and
@@ -7573,6 +7573,11 @@ subsystems that this mode needs:
   table absent, the second table readable/writable, the native file-operation
   marker retained until final no-live drain, and ownerless/native reopen
   correct before and after forced `.shm` rebuild.
+  The cross-schema in-loop follow-up reuses the same hook for a two-schema
+  table list, kills after the `app` table's native file operation but before
+  the later schema/table pair is logged or dropped, and proves the later schema
+  and table remain present, readable, writable, and stable through ownerless
+  and ordinary native reopen before and after forced `.shm` rebuild.
   The charset-convert follow-up classifies focused
   `ALTER TABLE ... CONVERT TO CHARACTER SET ... COLLATE ...` as recoverable
   dictionary DDL, kills the writer at `dictionary-before-finish` with a live
@@ -7683,8 +7688,8 @@ subsystems that this mode needs:
      charset boundaries, broader metadata-only DDL, broader mixed temporary/permanent
      rename matrices, broader FK plus non-FK ALTER lists beyond the focused
      ADD COLUMN case, broader schema option variants beyond the focused
-     named/current-schema schema-default/comment boundaries, cross-schema and
-     schema-drop internal drop-loop cases,
+     named/current-schema schema-default/comment boundaries, schema-drop
+     internal drop-loop cases,
      and broader DDL file lifecycle while
      peers remain live. Partition truncate
      remains governed by the ownerless partition-DDL rejection policy, cyclic
