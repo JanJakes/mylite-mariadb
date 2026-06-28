@@ -55,10 +55,10 @@ In scope:
 
 Out of scope:
 
-- AUTO_INCREMENT descending primary-key crash recovery, composite
-  AUTO_INCREMENT primary-key replacements, algorithm/lock options, ignored or
-  invisible indexes, alternate crash points, concurrent conflict schedules, and
-  external randomized DDL/RQG oracles.
+- AUTO_INCREMENT descending and composite primary-key crash recovery are
+  covered by separate focused slices; broader algorithm/lock options, ignored
+  or invisible indexes, alternate crash points, concurrent conflict schedules,
+  and external randomized DDL/RQG oracles remain out of scope here.
 - SQL-level table-lock fault injection; prior exploratory SQL shapes stopped
   before the ownerless table-wait callback.
 

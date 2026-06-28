@@ -1097,6 +1097,7 @@ static void test_crashed_descending_primary_key_dictionary_ddl_recovers_key_meta
 static void test_crashed_composite_direction_primary_key_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_auto_increment_primary_key_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_autoinc_desc_primary_key_dictionary_ddl_recovers_metadata(void);
+static void test_crashed_autoinc_composite_primary_key_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_primary_key_idempotent_dictionary_ddl_preserves_key_metadata(void);
 static void test_crashed_foreign_key_dictionary_ddl_recovers_constraint(void);
 static void test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constraint(void);
@@ -1875,6 +1876,10 @@ static void auto_increment_primary_key_until_dictionary_finish_fault(
     int ready_fd
 );
 static void auto_increment_descending_primary_key_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void auto_increment_composite_primary_key_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -3412,6 +3417,18 @@ static void assert_ownerless_auto_increment_descending_primary_key_ddl_state(
     unsigned long long expected_value_sum,
     unsigned long long expected_max_id
 );
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void assert_ownerless_auto_increment_composite_primary_key_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    unsigned long long expected_count,
+    unsigned long long expected_id_sum,
+    unsigned long long expected_tenant_sum,
+    unsigned long long expected_code_sum,
+    unsigned long long expected_value_sum,
+    unsigned long long expected_max_id
+);
+#endif
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void assert_ownerless_foreign_key_crash_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_foreign_key_drop_crash_ddl_state(
@@ -5362,6 +5379,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-primary-key-autoinc-composite-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_autoinc_composite_primary_key_dictionary_ddl_recovers_metadata();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-primary-key-idempotent-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_primary_key_idempotent_dictionary_ddl_preserves_key_metadata();
@@ -6289,6 +6312,7 @@ int main(int argc, char **argv) {
             test_crashed_composite_direction_primary_key_dictionary_ddl_recovers_metadata,
             test_crashed_auto_increment_primary_key_dictionary_ddl_recovers_metadata,
             test_crashed_autoinc_desc_primary_key_dictionary_ddl_recovers_metadata,
+            test_crashed_autoinc_composite_primary_key_dictionary_ddl_recovers_metadata,
             test_crashed_primary_key_idempotent_dictionary_ddl_preserves_key_metadata,
             test_crashed_foreign_key_dictionary_ddl_recovers_constraint,
             test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constraint,
@@ -6565,6 +6589,7 @@ int main(int argc, char **argv) {
             "dictionary-composite-direction-primary-key-crash|"
             "dictionary-primary-key-autoinc-crash|"
             "dictionary-primary-key-autoinc-descending-crash|"
+            "dictionary-primary-key-autoinc-composite-crash|"
             "dictionary-primary-key-idempotent-crash|"
             "dictionary-foreign-key-crash|"
             "dictionary-foreign-key-drop-crash|"
@@ -7028,6 +7053,9 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     ),
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_autoinc_desc_primary_key_dictionary_ddl_recovers_metadata
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_autoinc_composite_primary_key_dictionary_ddl_recovers_metadata
     ),
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_primary_key_idempotent_dictionary_ddl_preserves_key_metadata
@@ -48746,6 +48774,216 @@ static void test_crashed_autoinc_desc_primary_key_dictionary_ddl_recovers_metada
     free(root);
 }
 
+static void test_crashed_autoinc_composite_primary_key_dictionary_ddl_recovers_metadata(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-primary-key-autoinc-composite-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
+    mylite_db *db;
+    unsigned mariadb_errno = 0U;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pk_autoinc_composite ("
+        "id INT NOT NULL AUTO_INCREMENT, "
+        "tenant_id INT NOT NULL, "
+        "code INT NOT NULL, "
+        "value INT NOT NULL, "
+        "PRIMARY KEY (id), "
+        "UNIQUE KEY ownerless_pk_autoinc_composite_code_key (tenant_id, code)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_pk_autoinc_composite (tenant_id, code, value) VALUES "
+        "(1, 10, 100), (1, 20, 200)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pk_autoinc_composite' "
+            "AND index_name = 'PRIMARY' "
+            "AND column_name = 'id'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pk_autoinc_composite' "
+            "AND index_name = 'ownerless_pk_autoinc_composite_code_key'"
+        ) == 2U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        auto_increment_composite_primary_key_until_dictionary_finish_fault
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pk_autoinc_composite' "
+            "AND index_name = 'PRIMARY' "
+            "AND column_name = 'tenant_id' "
+            "AND seq_in_index = 1 "
+            "AND non_unique = 0 "
+            "AND collation = 'A'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pk_autoinc_composite' "
+            "AND index_name = 'PRIMARY' "
+            "AND column_name = 'code' "
+            "AND seq_in_index = 2 "
+            "AND non_unique = 0 "
+            "AND collation = 'D'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pk_autoinc_composite' "
+            "AND index_name = 'ownerless_pk_autoinc_composite_id_key' "
+            "AND column_name = 'id' "
+            "AND non_unique = 0"
+        ) == 1U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_pk_autoinc_composite "
+        "(tenant_id, code, value) VALUES (2, 30, 300)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_pk_autoinc_composite "
+            "WHERE id = 3 AND tenant_id = 2 AND code = 30 AND value = 300"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(id) FROM app.ownerless_pk_autoinc_composite "
+            "FORCE INDEX (ownerless_pk_autoinc_composite_id_key) "
+            "WHERE id >= 2"
+        ) == 5U
+    );
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_pk_autoinc_composite "
+            "(tenant_id, code, value) VALUES (2, 30, 301)",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_DUPLICATE_KEY_ERRNO);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    release_ownerless_live_peer(&live_peer);
+
+    assert_ownerless_auto_increment_composite_primary_key_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        3U,
+        6U,
+        4U,
+        60U,
+        600U,
+        3U
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert_ownerless_auto_increment_composite_primary_key_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        3U,
+        6U,
+        4U,
+        60U,
+        600U,
+        3U
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_auto_increment_composite_primary_key_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        3U,
+        6U,
+        4U,
+        60U,
+        600U,
+        3U
+    );
+    assert_ownerless_auto_increment_composite_primary_key_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        3U,
+        6U,
+        4U,
+        60U,
+        600U,
+        3U
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_pk_autoinc_composite "
+        "(tenant_id, code, value) VALUES (3, 40, 400)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_pk_autoinc_composite "
+            "WHERE id = 5 AND tenant_id = 3 AND code = 40 AND value = 400"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_pk_autoinc_composite "
+            "WHERE id = 4"
+        ) == 0U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_ownerless_auto_increment_composite_primary_key_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        4U,
+        11U,
+        7U,
+        100U,
+        1000U,
+        5U
+    );
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_primary_key_idempotent_dictionary_ddl_preserves_key_metadata(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -75560,6 +75798,22 @@ static void auto_increment_descending_primary_key_until_dictionary_finish_fault(
     );
 }
 
+static void auto_increment_composite_primary_key_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_pk_autoinc_composite "
+        "DROP PRIMARY KEY, "
+        "DROP INDEX ownerless_pk_autoinc_composite_code_key, "
+        "ADD UNIQUE KEY ownerless_pk_autoinc_composite_id_key (id), "
+        "ADD PRIMARY KEY (tenant_id ASC, code DESC)"
+    );
+}
+
 static void idempotent_primary_key_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -88992,6 +89246,101 @@ static void assert_ownerless_auto_increment_descending_primary_key_ddl_state(
     );
     assert(mylite_close(db) == MYLITE_OK);
 }
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void assert_ownerless_auto_increment_composite_primary_key_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    unsigned long long expected_count,
+    unsigned long long expected_id_sum,
+    unsigned long long expected_tenant_sum,
+    unsigned long long expected_code_sum,
+    unsigned long long expected_value_sum,
+    unsigned long long expected_max_id
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pk_autoinc_composite' "
+            "AND index_name = 'PRIMARY' "
+            "AND non_unique = 0"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pk_autoinc_composite' "
+            "AND index_name = 'PRIMARY' "
+            "AND column_name = 'tenant_id' "
+            "AND seq_in_index = 1 "
+            "AND collation = 'A'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pk_autoinc_composite' "
+            "AND index_name = 'PRIMARY' "
+            "AND column_name = 'code' "
+            "AND seq_in_index = 2 "
+            "AND collation = 'D'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pk_autoinc_composite' "
+            "AND index_name = 'ownerless_pk_autoinc_composite_id_key' "
+            "AND column_name = 'id' "
+            "AND non_unique = 0"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pk_autoinc_composite") ==
+        expected_count
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_pk_autoinc_composite") ==
+        expected_id_sum
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(tenant_id) FROM app.ownerless_pk_autoinc_composite") ==
+        expected_tenant_sum
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(code) FROM app.ownerless_pk_autoinc_composite") ==
+        expected_code_sum
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pk_autoinc_composite") ==
+        expected_value_sum
+    );
+    assert(query_unsigned(db, "SELECT MIN(id) FROM app.ownerless_pk_autoinc_composite") == 1U);
+    assert(
+        query_unsigned(db, "SELECT MAX(id) FROM app.ownerless_pk_autoinc_composite") ==
+        expected_max_id
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_pk_autoinc_composite "
+            "FORCE INDEX (PRIMARY) "
+            "WHERE tenant_id >= 1 AND code >= 20"
+        ) == expected_value_sum - 100U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+#endif
 
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void assert_ownerless_foreign_key_crash_ddl_state(

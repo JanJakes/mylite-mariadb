@@ -54,9 +54,10 @@ In scope:
 
 Out of scope:
 
-- Composite AUTO_INCREMENT primary-key replacements, algorithm/lock options,
-  ignored or invisible indexes, alternate crash points, concurrent conflict
-  schedules, and external randomized DDL/RQG oracles.
+- Composite AUTO_INCREMENT primary-key crash recovery is covered by a separate
+  focused slice; broader algorithm/lock options, ignored or invisible indexes,
+  alternate crash points, concurrent conflict schedules, and external
+  randomized DDL/RQG oracles remain out of scope here.
 - SQL-level table-lock fault injection; prior exploratory SQL shapes stopped
   before the ownerless table-wait callback.
 
@@ -185,7 +186,6 @@ Accepted local verification for this slice:
 
 ## Risks And Follow-Up
 
-- Composite AUTO_INCREMENT primary-key crash recovery remains separate.
 - Broader primary-key option matrices, alternate action ordering, alternate
   crash points, concurrent-conflict schedules, and external MariaDB/RQG stress
   remain planned.

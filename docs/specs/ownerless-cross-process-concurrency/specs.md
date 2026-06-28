@@ -3984,6 +3984,14 @@ Tasks:
    peer-visible `COLLATION = 'D'`, verifies the next implicit ID from an
    already-open peer, and proves a duplicate-key failure's consumed
    AUTO_INCREMENT value is not reused after forced `.shm` rebuild.
+   Hook-build crash coverage kills the same AUTO_INCREMENT descending
+   primary-key replacement before ownerless dictionary finish and verifies
+   live-peer recovery, retained-marker no-live drain, replacement metadata, and
+   the non-reused AUTO_INCREMENT gap. A composite AUTO_INCREMENT primary-key
+   replacement variant keeps `id` as a unique secondary key while moving
+   `PRIMARY` to `(tenant_id ASC, code DESC)`, verifies peer-visible key-part
+   order and `COLLATION = 'A'`/`'D'`, and proves duplicate-key failure's
+   consumed AUTO_INCREMENT value is not reused after forced `.shm` rebuild.
    Foreign-key ALTER coverage adds a named child-to-parent foreign key from
    another ownerless process, verifies missing-parent rows fail while it exists,
    drops the foreign key, and verifies the formerly invalid child row shape can
@@ -5526,6 +5534,14 @@ Minimum suites before support can be claimed:
     verifies replacement-key enforcement, retained unique AUTO_INCREMENT-column
     key metadata, non-reused duplicate-failure allocation gaps, ownerless/native
     reopen, and forced `.shm` rebuild remain correct,
+  - after representative AUTO_INCREMENT composite primary-key replacement
+    native clustered-key rebuild but before ownerless dictionary finish; hook
+    coverage proves live-peer recovery, retains the native file-operation
+    marker while the peer remains open, drains the marker after the final peer
+    exits, and verifies composite key-part order/direction metadata, retained
+    unique AUTO_INCREMENT-column key metadata, non-reused duplicate-failure
+    allocation gaps, ownerless/native reopen, and forced `.shm` rebuild remain
+    correct,
   - after representative `ALTER COLUMN ... SET DEFAULT` native metadata update
     but before ownerless dictionary finish; hook coverage proves metadata-only
     live-peer recovery with the native file-operation marker clear and recovered
@@ -7728,7 +7744,8 @@ subsystems that this mode needs:
      no-op prefinish boundaries, plus focused plain and exact copy-lock
      ADD COLUMN, exact copy-lock DROP/MODIFY/CHANGE/RENAME COLUMN, table-comment,
      column-default metadata ALTER, and plain, descending, composite direction,
-     AUTO_INCREMENT, and AUTO_INCREMENT descending primary-key replacement
+     AUTO_INCREMENT, AUTO_INCREMENT descending, and AUTO_INCREMENT composite
+     primary-key replacement
      prefinish boundaries, plus single-clause, pure multi-clause, FK-only
      mixed foreign-key add/drop, focused mixed FK/non-FK ADD COLUMN,
      focused mixed FK/non-FK DROP/MODIFY/CHANGE/RENAME COLUMN, focused mixed
