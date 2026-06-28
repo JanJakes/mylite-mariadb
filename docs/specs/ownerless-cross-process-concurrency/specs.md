@@ -7582,6 +7582,13 @@ subsystems that this mode needs:
   classes stay clear through ownerless recovery, forced `.shm` rebuild, and
   ordinary native reopen. It still does not fault inside native InnoDB
   rollback internals.
+  The live-peer prewrite follow-up keeps a second ownerless process open while
+  killing the writer at that same post-native/pre-state boundary. A fresh
+  ownerless read/write opener must return busy until the live peer exits,
+  proving killed-writer cleanup is not attempted while another process still
+  owns the directory. After peer release, no-live ownerless recovery, forced
+  `.shm` rebuild, and ordinary native reopen preserve the original two rows
+  with both native file-operation marker classes clear.
   The transaction-rollback-before-state hook follow-up covers the analogous
   full-transaction boundary after native `ROLLBACK` succeeds but before MyLite
   resets process-local ownerless transaction state. Ownerless recovery, forced
@@ -7781,7 +7788,8 @@ subsystems that this mode needs:
      ownerless page-write ownership, and file-operation marker cleanup beyond
      the covered independent-table handoff, focused same-page wait/commit
      handoff, focused same-table large-row handoff, focused same-row conflict
-     handoff, and bounded randomized same-table schedule.
+     handoff, bounded randomized same-table schedule, and live-peer
+     post-native/pre-state savepoint rollback cleanup boundary.
   3. Extend active-reader pressure evidence from retained-WAL policy to crash
      and external-oracle breadth for the high-risk DML/DDL classes already
      covered by bounded pressure policy tests.

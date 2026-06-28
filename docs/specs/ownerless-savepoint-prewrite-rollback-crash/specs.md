@@ -102,5 +102,7 @@ hook-build test coverage and documentation.
 
 - This is still a SQL-layer post-native hook, not an InnoDB row-undo internal
   fault. Broader native rollback internals remain planned.
-- Cross-process savepoint schedules that keep another writer active while the
-  rollback owner dies remain planned.
+- The follow-up
+  `docs/specs/ownerless-savepoint-prewrite-live-peer-crash/specs.md` covers a
+  held live ownerless peer while the rollback owner dies at the same boundary.
+  Broader active-writer savepoint schedules remain planned.
