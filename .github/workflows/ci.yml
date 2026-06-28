@@ -314,6 +314,12 @@ jobs:
           date +%s > build/wordpress-docker-image-build-start.txt
 
       - name: Set up WordPress setup Docker Buildx
+        id: setup-wordpress-setup-docker-buildx
+        continue-on-error: true
+        uses: docker/setup-buildx-action@v4
+
+      - name: Retry WordPress setup Docker Buildx
+        if: steps.setup-wordpress-setup-docker-buildx.outcome == 'failure'
         uses: docker/setup-buildx-action@v4
 
       - name: Build WordPress setup Docker image
@@ -609,6 +615,12 @@ jobs:
           date +%s > build/wordpress-runtime-docker-image-build-start.txt
 
       - name: Set up WordPress runtime Docker Buildx
+        id: setup-wordpress-runtime-docker-buildx
+        continue-on-error: true
+        uses: docker/setup-buildx-action@v4
+
+      - name: Retry WordPress runtime Docker Buildx
+        if: steps.setup-wordpress-runtime-docker-buildx.outcome == 'failure'
         uses: docker/setup-buildx-action@v4
 
       - name: Build WordPress runtime Docker image
@@ -1027,6 +1039,12 @@ jobs:
           date +%s > build/wordpress-docker-image-build-start.txt
 
       - name: Set up WordPress shard Docker Buildx
+        id: setup-wordpress-shard-docker-buildx
+        continue-on-error: true
+        uses: docker/setup-buildx-action@v4
+
+      - name: Retry WordPress shard Docker Buildx
+        if: steps.setup-wordpress-shard-docker-buildx.outcome == 'failure'
         uses: docker/setup-buildx-action@v4
 
       - name: Build WordPress shard runtime Docker image
@@ -1067,9 +1085,14 @@ jobs:
           docker_start="$(cat build/wordpress-docker-image-build-start.txt)"
           docker_end="$(date +%s)"
           docker_seconds="$((docker_end - docker_start))"
-          docker image inspect mylite-wordpress-phpunit:php83 >/dev/null
+          if docker image inspect mylite-wordpress-phpunit:php83 >/dev/null; then
+            docker_image_available=1
+          else
+            docker_image_available=0
+          fi
           tools/wordpress-phpunit-append-timing --label docker-image-${{ matrix.shard }} \
             "wordpress_docker_build_seconds=${docker_seconds}" \
+            "wordpress_docker_image_available=${docker_image_available}" \
             "wordpress_total_seconds=${docker_seconds}"
 
       - name: Mark WordPress PHPUnit runtime root artifact download start
