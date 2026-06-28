@@ -3535,7 +3535,11 @@ Tasks:
    one temporary-table peer can be killed while another remains live, a new
    ownerless opener can still use its own same-named temporary table, and the
    name can be reused for a persistent InnoDB table after the temporary
-   sessions are gone. Opt-in stress coverage now churns same-named
+   sessions are gone. Focused production coverage now also truncates a
+   same-named temporary table, proves the temporary name remains tracked until
+   `DROP TEMPORARY TABLE`, and verifies peer permanent-table updates become
+   visible only after the temporary table is dropped. Opt-in stress coverage now
+   churns same-named
    InnoDB temporary tables across several ownerless processes and verifies the
    name can be reused for a durable table after the temporary sessions close.
 4. Add dictionary generation invalidation in every process.

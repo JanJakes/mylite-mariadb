@@ -801,6 +801,7 @@ static void test_ownerless_independent_table_stress(void);
 static void test_ownerless_concurrent_ddl_stress(void);
 static void test_ownerless_temporary_table_stress(void);
 static void test_ownerless_temporary_table_rename_tracking_refreshes_permanent_table(void);
+static void test_ownerless_temporary_table_truncate_tracking_preserves_permanent_table(void);
 static void test_ownerless_transaction_mix_stress(void);
 static void test_ownerless_checksum_stress(void);
 static void test_ownerless_random_transaction_stress(void);
@@ -4168,6 +4169,10 @@ int main(int argc, char **argv) {
         test_ownerless_temporary_table_rename_tracking_refreshes_permanent_table();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "temporary-table-truncate-tracking") == 0) {
+        test_ownerless_temporary_table_truncate_tracking_preserves_permanent_table();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "temporary-drop-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_temporary_drop_dictionary_ddl_recovers_permanent_table();
@@ -6445,6 +6450,7 @@ int main(int argc, char **argv) {
             "sql-case-count|"
             "sql-case <index-or-name>|"
             "stress|ddl-stress|temp-stress|temporary-table-rename-tracking|"
+            "temporary-table-truncate-tracking|"
             "temporary-drop-crash|temporary-rename-crash|temporary-alter-rename-crash|"
             "temporary-multi-rename-crash|temporary-mixed-rename-crash|"
             "temporary-mixed-rename-reverse-crash|"
@@ -6992,6 +6998,9 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_temporary_tablespace_allows_peer_temp_tables),
     OWNERLESS_SQL_TEST_CASE(test_crashed_ownerless_temporary_table_peer_is_recovered),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_temporary_table_rename_tracking_refreshes_permanent_table
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_ownerless_temporary_table_truncate_tracking_preserves_permanent_table
     ),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_rejects_non_innodb_engines),
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
@@ -43864,6 +43873,78 @@ static void test_ownerless_temporary_table_rename_tracking_refreshes_permanent_t
     assert(mylite_close(db) == MYLITE_OK);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_temp_rename_shadow") == 40U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_temporary_table_truncate_tracking_preserves_permanent_table(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-temporary-table-truncate-tracking.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    mylite_db *peer;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_temp_truncate_shadow ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_temp_truncate_shadow VALUES (1, 10)");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_temp_truncate_shadow") == 10U);
+    exec_ok(
+        db,
+        "CREATE TEMPORARY TABLE app.ownerless_temp_truncate_shadow ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_temp_truncate_shadow VALUES (1, 11), (2, 12)");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_temp_truncate_shadow") == 23U);
+
+    exec_ok(db, "TRUNCATE TABLE app.ownerless_temp_truncate_shadow");
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_temp_truncate_shadow") == 0U);
+
+    peer = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(peer, "UPDATE app.ownerless_temp_truncate_shadow SET value = 20 WHERE id = 1");
+    assert(
+        query_unsigned(peer, "SELECT SUM(value) FROM app.ownerless_temp_truncate_shadow") == 20U
+    );
+    assert(mylite_close(peer) == MYLITE_OK);
+
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_temp_truncate_shadow") == 0U);
+    exec_ok(db, "INSERT INTO app.ownerless_temp_truncate_shadow VALUES (3, 33)");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_temp_truncate_shadow") == 33U);
+    exec_ok(db, "DROP TEMPORARY TABLE app.ownerless_temp_truncate_shadow");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_temp_truncate_shadow") == 20U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_temp_truncate_shadow") == 20U);
+    exec_ok(db, "INSERT INTO app.ownerless_temp_truncate_shadow VALUES (2, 30)");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_temp_truncate_shadow") == 50U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_temp_truncate_shadow") == 50U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_temp_truncate_shadow") == 50U);
     assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);
