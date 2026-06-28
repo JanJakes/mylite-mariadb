@@ -5751,6 +5751,8 @@ live-peer recovery plus retained-marker no-live drain, foreign-key
 ADD/DROP writers including pure comma-separated FK-only lists, FK-only mixed
 drop/add lists, and a focused mixed FK/non-FK ADD COLUMN list after native
 constraint metadata creation/removal and table-definition mutation,
+plus a focused mixed FK/non-FK table-comment list after native FK metadata and
+table-option metadata mutation,
 CHECK ADD/DROP writers after native
 table-definition mutation, a cross-schema foreign-key multi-pair rename writer
 after native FK metadata rewrite and file movement, a same-schema
@@ -7687,8 +7689,8 @@ subsystems that this mode needs:
      column-default metadata ALTER, and plain, descending, composite direction,
      AUTO_INCREMENT, and AUTO_INCREMENT descending primary-key replacement
      prefinish boundaries, plus single-clause, pure multi-clause, FK-only
-     mixed foreign-key add/drop, and focused mixed FK/non-FK ADD COLUMN
-     prefinish boundaries, plus child-only,
+     mixed foreign-key add/drop, focused mixed FK/non-FK ADD COLUMN, and
+     focused mixed FK/non-FK table-comment prefinish boundaries, plus child-only,
      self-referencing, and stored generated-column child foreign-key truncate
      prefinish boundaries, plus simple temporary DDL, pure multi-pair temporary
      rename chains, and
@@ -7700,7 +7702,7 @@ subsystems that this mode needs:
      exact copy-lock, compressed row-format including exact copy-lock, and
      charset boundaries, broader metadata-only DDL, broader mixed temporary/permanent
      rename matrices, broader FK plus non-FK ALTER lists beyond the focused
-     ADD COLUMN case, broader schema option variants beyond the focused
+     ADD COLUMN and table-comment cases, broader schema option variants beyond the focused
      named/current-schema schema-default/comment boundaries,
      and broader DDL file lifecycle while
      peers remain live. Partition truncate
