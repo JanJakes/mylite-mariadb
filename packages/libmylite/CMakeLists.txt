@@ -746,6 +746,24 @@ if(BUILD_TESTING)
           dictionary-cross-schema-multi-rename-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-cross-schema-multi-rename-loop-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-cross-schema-multi-rename-loop-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-cross-schema-multi-rename-second-loop-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-cross-schema-multi-rename-loop-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-cross-schema-multi-rename-third-loop-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-cross-schema-multi-rename-loop-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-foreign-key-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -1794,6 +1812,7 @@ if(BUILD_TESTING)
       )
       set_tests_properties(
         libmylite.ownerless-dictionary-fk-cross-schema-multi-rename-crash
+        libmylite.ownerless-dictionary-cross-schema-multi-rename-loop-crash
         libmylite.ownerless-dictionary-fk-cross-schema-multi-rename-loop-crash
         PROPERTIES
           LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
@@ -1801,6 +1820,7 @@ if(BUILD_TESTING)
       )
       set_tests_properties(
         libmylite.ownerless-dictionary-multi-rename-second-loop-crash
+        libmylite.ownerless-dictionary-cross-schema-multi-rename-second-loop-crash
         libmylite.ownerless-dictionary-fk-multi-rename-second-loop-crash
         libmylite.ownerless-dictionary-fk-cross-schema-multi-rename-second-loop-crash
         PROPERTIES
@@ -1810,6 +1830,7 @@ if(BUILD_TESTING)
       )
       set_tests_properties(
         libmylite.ownerless-dictionary-multi-rename-third-loop-crash
+        libmylite.ownerless-dictionary-cross-schema-multi-rename-third-loop-crash
         libmylite.ownerless-dictionary-fk-multi-rename-third-loop-crash
         PROPERTIES
           LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"

@@ -50,7 +50,8 @@ In scope:
 
 Out of scope:
 
-- Cross-schema non-FK later-pair rename-loop coverage.
+- Cross-schema non-FK later-pair rename-loop coverage, covered by the
+  `ownerless-cross-schema-non-fk-rename-loop-skip-coverage` follow-up.
 - Mixed temporary/permanent rename-list loop matrices.
 - `IF EXISTS` rename-loop variants beyond the existing focused coverage.
 - Broader DDL/file-lifecycle recovery, native redo/checkpoint reconciliation,
@@ -113,6 +114,7 @@ No binary-size, dependency, or license impact.
 
 ## Risks And Open Questions
 
-- This closes only the same-schema non-FK three-pair swap. Cross-schema non-FK
-  later-pair rename-loop coverage and broader mixed rename-list matrices remain
-  completion work.
+- This closes only the same-schema non-FK three-pair swap. The
+  `ownerless-cross-schema-non-fk-rename-loop-skip-coverage` follow-up covers
+  the deterministic cross-schema three-pair swap; broader mixed rename-list
+  matrices remain completion work.

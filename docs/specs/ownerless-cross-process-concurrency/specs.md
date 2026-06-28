@@ -4947,11 +4947,12 @@ Tasks:
    multi-pair swap, cross-schema multi-pair swap, and foreign-key parent/child
    multi-pair rename file-move boundaries. Focused `RENAME TABLE IF EXISTS`
    prefinish crash coverage uses the same rename recovery lane for an
-   existing-table native file move. Same-schema non-FK multi-rename native-loop
-   crash coverage now kills after first, second, and final successful native
-   rename pairs inside MariaDB's rename loop and verifies MariaDB DDL-log
-   recovery restores the original table names and tablespace identities instead
-   of completing the swap. Same-schema and cross-schema foreign-key
+   existing-table native file move. Same-schema and cross-schema non-FK
+   multi-rename native-loop crash coverage now kills after first, second, and
+   final successful native rename pairs inside MariaDB's rename loop and
+   verifies MariaDB DDL-log recovery restores the original table names, schema
+   placement, and tablespace identities instead of completing the swap.
+   Same-schema and cross-schema foreign-key
    multi-rename native-loop crash coverage kills after first and later
    successful native rename pairs, verifies DDL-log recovery restores the
    original parent and child names instead of completing the remaining rename
@@ -5786,11 +5787,12 @@ and
 hook-build coverage now kills same-schema,
 cross-schema, same-schema multi-pair swap, and cross-schema multi-pair swap
 `RENAME TABLE` writers after the
-native file move but before ownerless dictionary finish, kills same-schema
-non-FK multi-rename writers after first, second, and final successful native
-rename pairs inside MariaDB's rename loop and verifies DDL-log rollback to the
-original swapped-table state, kills same-schema and cross-schema foreign-key
-multi-rename writers after first and later successful native rename pairs
+native file move but before ownerless dictionary finish, kills same-schema and
+cross-schema non-FK multi-rename writers after first, second, and final
+successful native rename pairs inside MariaDB's rename loop and verifies
+DDL-log rollback to the original swapped-table state, kills same-schema and
+cross-schema foreign-key multi-rename writers after first and later successful
+native rename pairs
 inside MariaDB's rename loop and verifies DDL-log rollback to the original FK
 state with marker retention/drain, plus marker-specific
 coverage for the same `RENAME TABLE` boundary, a `CREATE TABLE ... LIKE`
@@ -7820,11 +7822,11 @@ subsystems that this mode needs:
      rename chains, focused `RENAME TABLE IF EXISTS`, and
      temp-first plus permanent-first mixed temporary/permanent rename-list
      prefinish boundaries, plus a focused temporary-chain/permanent/temporary-chain
-     mixed rename-list prefinish boundary, plus same-schema non-FK
-     multi-rename native-loop rollback after first, second, and final native
+     mixed rename-list prefinish boundary, plus same-schema and cross-schema
+     non-FK multi-rename native-loop rollback after first, second, and final native
      rename pairs, especially
-     remaining rename variants including cross-schema non-FK later-pair native
-     rename-loop points, other rebuild variants beyond the covered
+     remaining rename variants including longer and `IF EXISTS` native
+     rename-loop permutations, other rebuild variants beyond the covered
      FORCE, same-engine ENGINE including both exact copy-lock option orders,
      row-format including
      exact copy-lock, compressed row-format including exact copy-lock, charset
