@@ -4992,8 +4992,8 @@ Tasks:
    file-operation marker until final no-live drain and preserving the shadowed
    permanent table through ownerless/native reopen and forced `.shm` rebuild,
    while multi-pair temporary rename chains,
-   inside-MariaDB-loop multi-drop crash points, broader ALTER rebuild beyond
-   the focused force, row-format, compressed, and charset-conversion cases,
+   cross-schema and schema-drop internal multi-drop crash points, broader
+   ALTER rebuild beyond the focused force, row-format, compressed, and charset-conversion cases,
    broader schema option variants beyond named/current-schema default/comment
    boundaries, broader view and trigger variants, and
    mixed comma-separated non-rename foreign-key ALTER live-peer recovery remain
@@ -7566,6 +7566,13 @@ subsystems that this mode needs:
   Both multi-drop selectors are now standalone hook CTests, giving same-schema
   and cross-schema table-list drop recovery separate CI timing and failure
   attribution.
+  The same-schema in-loop follow-up adds a SQL-layer ownerless dictionary hook
+  after each completed native base-table drop, kills a two-table `DROP TABLE`
+  writer after the first table's native file operation but before the second
+  table is logged or dropped, and proves live-peer recovery keeps the first
+  table absent, the second table readable/writable, the native file-operation
+  marker retained until final no-live drain, and ownerless/native reopen
+  correct before and after forced `.shm` rebuild.
   The charset-convert follow-up classifies focused
   `ALTER TABLE ... CONVERT TO CHARACTER SET ... COLLATE ...` as recoverable
   dictionary DDL, kills the writer at `dictionary-before-finish` with a live
@@ -7676,7 +7683,8 @@ subsystems that this mode needs:
      charset boundaries, broader metadata-only DDL, broader mixed temporary/permanent
      rename matrices, broader FK plus non-FK ALTER lists beyond the focused
      ADD COLUMN case, broader schema option variants beyond the focused
-     named/current-schema schema-default/comment boundaries, intra-loop drop cases,
+     named/current-schema schema-default/comment boundaries, cross-schema and
+     schema-drop internal drop-loop cases,
      and broader DDL file lifecycle while
      peers remain live. Partition truncate
      remains governed by the ownerless partition-DDL rejection policy, cyclic

@@ -1200,6 +1200,7 @@ static void test_crashed_drop_dictionary_ddl_recovers_absent_table(void);
 static void test_crashed_implicit_drop_dictionary_ddl_recovers_absent_table(void);
 static void test_crashed_multi_drop_dictionary_ddl_recovers_absent_tables(void);
 static void test_crashed_cross_schema_multi_drop_dictionary_ddl_recovers_absent_tables(void);
+static void test_crashed_multi_drop_loop_dictionary_ddl_recovers_partial_progress(void);
 static void test_crashed_drop_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_stale_drop_dictionary_ddl_skips_retained_tablespace(void);
 static void test_crashed_schema_create_dictionary_ddl_recovers_schema(void);
@@ -2265,6 +2266,10 @@ static void multi_drop_tables_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
+static void multi_drop_tables_until_first_native_file_op_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void cross_schema_multi_drop_tables_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -3304,6 +3309,11 @@ static void assert_ownerless_schema_create_crash_ddl_state(
     const char *database_path
 );
 static void assert_ownerless_schema_alter_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_multi_drop_loop_crash_state(
     open_database_paths paths,
     unsigned flags,
     const char *database_path
@@ -5775,6 +5785,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-multi-drop-loop-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_multi_drop_loop_dictionary_ddl_recovers_partial_progress();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-drop-file-op-marker-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_drop_dictionary_ddl_marks_file_op_checkpoint();
@@ -6309,6 +6325,7 @@ int main(int argc, char **argv) {
             "dictionary-truncate-file-op-marker-crash|"
             "dictionary-drop-crash|dictionary-implicit-drop-crash|"
             "dictionary-multi-drop-crash|dictionary-cross-schema-multi-drop-crash|"
+            "dictionary-multi-drop-loop-crash|"
             "dictionary-drop-file-op-marker-crash|"
             "stale-drop-crash-recovery|"
             "dictionary-schema-create-crash|"
@@ -59738,6 +59755,172 @@ static void test_crashed_multi_drop_dictionary_ddl_recovers_absent_tables(void) 
     free(root);
 }
 
+static void assert_ownerless_multi_drop_loop_crash_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *a_frm_path = path_join(app_path, "ownerless_multi_drop_loop_crash_a.frm");
+    char *a_ibd_path = path_join(app_path, "ownerless_multi_drop_loop_crash_a.ibd");
+    char *b_frm_path = path_join(app_path, "ownerless_multi_drop_loop_crash_b.frm");
+    char *b_ibd_path = path_join(app_path, "ownerless_multi_drop_loop_crash_b.ibd");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_multi_drop_loop_crash_a'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_multi_drop_loop_crash_b'"
+        ) == 1U
+    );
+    assert(
+        exec_status(db, "SELECT COUNT(*) FROM app.ownerless_multi_drop_loop_crash_a", NULL) !=
+        MYLITE_OK
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_drop_loop_crash_b") == 25U
+    );
+    assert(!path_exists(a_frm_path));
+    assert(!path_exists(a_ibd_path));
+    assert(path_exists(b_frm_path));
+    assert(path_exists(b_ibd_path));
+    exec_ok(db, "INSERT INTO app.ownerless_multi_drop_loop_crash_b VALUES (2, 30)");
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_drop_loop_crash_b") == 55U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_multi_drop_loop_crash_b WHERE id = 2");
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_drop_loop_crash_b") == 25U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(b_ibd_path);
+    free(b_frm_path);
+    free(a_ibd_path);
+    free(a_frm_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void test_crashed_multi_drop_loop_dictionary_ddl_recovers_partial_progress(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-dictionary-multi-drop-loop-crash.mylite");
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *a_frm_path = path_join(app_path, "ownerless_multi_drop_loop_crash_a.frm");
+    char *a_ibd_path = path_join(app_path, "ownerless_multi_drop_loop_crash_a.ibd");
+    char *b_frm_path = path_join(app_path, "ownerless_multi_drop_loop_crash_b.frm");
+    char *b_ibd_path = path_join(app_path, "ownerless_multi_drop_loop_crash_b.ibd");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_multi_drop_loop_crash_a ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_multi_drop_loop_crash_b ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_multi_drop_loop_crash_a VALUES (1, 10)");
+    exec_ok(db, "INSERT INTO app.ownerless_multi_drop_loop_crash_b VALUES (1, 20)");
+    exec_ok(db, "COMMIT");
+    assert(path_exists(a_frm_path));
+    assert(path_exists(a_ibd_path));
+    assert(path_exists(b_frm_path));
+    assert(path_exists(b_ibd_path));
+    assert(mylite_close(db) == MYLITE_OK);
+
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        multi_drop_tables_until_first_native_file_op_fault
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(!path_exists(a_frm_path));
+    assert(!path_exists(a_ibd_path));
+    assert(path_exists(b_frm_path));
+    assert(path_exists(b_ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_multi_drop_loop_crash_a'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_multi_drop_loop_crash_b'"
+        ) == 1U
+    );
+    assert(
+        exec_status(db, "SELECT COUNT(*) FROM app.ownerless_multi_drop_loop_crash_a", NULL) !=
+        MYLITE_OK
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_multi_drop_loop_crash_b") == 20U
+    );
+    exec_ok(db, "UPDATE app.ownerless_multi_drop_loop_crash_b SET value = value + 5 WHERE id = 1");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
+
+    assert_ownerless_multi_drop_loop_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    remove_concurrency_shm(database_path);
+    assert_ownerless_multi_drop_loop_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_multi_drop_loop_crash_state(paths, MYLITE_OPEN_READWRITE, database_path);
+
+    free(b_ibd_path);
+    free(b_frm_path);
+    free(a_ibd_path);
+    free(a_frm_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void assert_ownerless_cross_schema_multi_drop_crash_absent_state(
     open_database_paths paths,
     unsigned flags,
@@ -73038,6 +73221,19 @@ static void multi_drop_tables_until_dictionary_finish_fault(
         "dictionary-before-finish",
         "DROP TABLE app.ownerless_multi_drop_crash_a, "
         "app.ownerless_multi_drop_crash_b"
+    );
+}
+
+static void multi_drop_tables_until_first_native_file_op_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "drop-table-after-native-file-op",
+        "DROP TABLE app.ownerless_multi_drop_loop_crash_a, "
+        "app.ownerless_multi_drop_loop_crash_b"
     );
 }
 

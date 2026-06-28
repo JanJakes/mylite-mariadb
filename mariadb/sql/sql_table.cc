@@ -59,6 +59,7 @@
 #include "sql_insert.h"                // binlog_drop_table
 #include "ddl_log.h"
 #include "debug.h"                     // debug_crash_here()
+#include "mylite_ownerless_dictionary_hooks.h"
 #include <algorithm>
 #include "rpl_mi.h"
 #include "rpl_rli.h"
@@ -1894,6 +1895,11 @@ report_error:
         ddl_log.org_table=        table->table_name;
         ddl_log.org_table_id=     version;
         backup_log_ddl(&ddl_log);
+      }
+      if (!was_view && !is_temporary)
+      {
+        mylite_ownerless_dictionary_native_file_op();
+        mylite_ownerless_innodb_test_fault("drop-table-after-native-file-op");
       }
     }
     if (!was_view)

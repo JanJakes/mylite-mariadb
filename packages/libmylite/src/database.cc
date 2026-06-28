@@ -50,6 +50,7 @@
 #include <unistd.h>
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
+#  include "mylite_ownerless_dictionary_hooks.h"
 #  include "mylite_ownerless_innodb_lock_hooks.h"
 #  include "mylite_ownerless_mdl_hooks.h"
 #  include "mylite_ownerless_read_view_hooks.h"
@@ -1503,6 +1504,8 @@ struct RuntimeState {
     bool ownerless_native_file_op_checkpoint_needed_cached = false;
     bool ownerless_native_dml_file_op_checkpoint_cache_valid = false;
     bool ownerless_native_dml_file_op_checkpoint_needed_cached = false;
+    std::uint32_t ownerless_active_dictionary_recovery_kind =
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE;
     std::atomic<std::uint64_t> ownerless_page_log_known_end_offset{0};
     std::uint64_t ownerless_page_log_start_end_offset = 0;
     bool ownerless_runtime_started_with_page_version_wal = false;
@@ -2586,6 +2589,7 @@ int ownerless_mdl_acquire_hook(
     void *ctx
 );
 void ownerless_mdl_release_hook(const mylite_ownerless_mdl_key_view *key, void *ctx);
+void ownerless_dictionary_native_file_op_hook(void *ctx);
 unsigned ownerless_mdl_timeout_ms(double lock_wait_timeout);
 int ownerless_mdl_result_from_lock_table_result(int lock_table_result);
 int ownerless_trx_allocate_hook(std::uint64_t *out_trx_id, void *ctx);
@@ -14810,6 +14814,7 @@ int install_ownerless_runtime_hooks(RuntimeState &runtime) {
         ownerless_mdl_release_hook,
         &runtime.ownerless_mdl_hook
     );
+    mylite_ownerless_dictionary_set_hooks(ownerless_dictionary_native_file_op_hook, &runtime);
     mylite_ownerless_trx_set_hooks(
         ownerless_trx_allocate_hook,
         ownerless_trx_register_hook,
@@ -19799,6 +19804,10 @@ int ownerless_begin_dictionary_ddl(
     db.ownerless_observed_dictionary_generation_initialized = true;
     db.ownerless_dictionary_recovery_kind =
         ownerless_dictionary_recovery_kind_for_statement(db, tokens);
+    {
+        const std::lock_guard<std::mutex> guard(g_runtime.mutex);
+        g_runtime.ownerless_active_dictionary_recovery_kind = db.ownerless_dictionary_recovery_kind;
+    }
     clear_ownerless_statement_metadata_cache(db);
     *out_ddl_started = true;
     static_cast<void>(mylite_ownerless_innodb_take_file_op_redo());
@@ -19832,6 +19841,11 @@ int ownerless_finish_dictionary_ddl(mylite_db &db, bool ddl_started) {
     }
     if (dictionary_state == nullptr || owner_id == 0U || owner_generation == 0U) {
         db.ownerless_dictionary_recovery_kind = MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE;
+        {
+            const std::lock_guard<std::mutex> guard(g_runtime.mutex);
+            g_runtime.ownerless_active_dictionary_recovery_kind =
+                MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE;
+        }
         return MYLITE_IOERR;
     }
 
@@ -19845,6 +19859,11 @@ int ownerless_finish_dictionary_ddl(mylite_db &db, bool ddl_started) {
     );
     if (finish_result == MYLITE_OWNERLESS_DICTIONARY_STATE_OK) {
         db.ownerless_dictionary_recovery_kind = MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE;
+        {
+            const std::lock_guard<std::mutex> guard(g_runtime.mutex);
+            g_runtime.ownerless_active_dictionary_recovery_kind =
+                MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE;
+        }
         clear_ownerless_statement_metadata_cache(db);
         db.ownerless_observed_dictionary_generation = generation;
         db.ownerless_observed_dictionary_generation_initialized = true;
@@ -19852,6 +19871,11 @@ int ownerless_finish_dictionary_ddl(mylite_db &db, bool ddl_started) {
         return MYLITE_OK;
     }
     db.ownerless_dictionary_recovery_kind = MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE;
+    {
+        const std::lock_guard<std::mutex> guard(g_runtime.mutex);
+        g_runtime.ownerless_active_dictionary_recovery_kind =
+            MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE;
+    }
     return ownerless_dictionary_result_from_state_result(finish_result);
 }
 
@@ -20779,6 +20803,7 @@ void reset_ownerless_native_shutdown_hooks(RuntimeState &runtime) {
     mylite_ownerless_innodb_lock_reset_hooks();
     mylite_ownerless_read_view_reset_hooks();
     mylite_ownerless_trx_reset_hooks();
+    mylite_ownerless_dictionary_reset_hooks();
     mylite_ownerless_mdl_reset_hooks();
     (void)runtime;
 }
@@ -20820,6 +20845,7 @@ void clear_ownerless_native_hook_contexts(RuntimeState &runtime) {
     runtime.ownerless_read_view_hook = {};
     runtime.ownerless_trx_hook = {};
     runtime.ownerless_mdl_hook = {};
+    runtime.ownerless_active_dictionary_recovery_kind = MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE;
 }
 
 void reset_ownerless_page_log_sync_anchor() {
@@ -21022,6 +21048,43 @@ void ownerless_mdl_release_hook(const mylite_ownerless_mdl_key_view *key, void *
             key->ownerless_mode
         ));
     }
+}
+
+void ownerless_dictionary_native_file_op_hook(void *ctx) {
+    if (ctx == nullptr) {
+        return;
+    }
+
+    auto *runtime = static_cast<RuntimeState *>(ctx);
+    const std::lock_guard<std::mutex> guard(runtime->mutex);
+    const std::uint32_t recovery_kind = runtime->ownerless_active_dictionary_recovery_kind;
+    if (!runtime->ownerless_rw_mode || runtime->readonly_mode ||
+        recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE ||
+        ownerless_dictionary_recovery_skips_native_file_op_checkpoint(recovery_kind) ||
+        runtime->concurrency_checkpoint_fd < 0) {
+        return;
+    }
+
+    if (!mark_concurrency_native_file_op_checkpoint_needed(runtime->concurrency_checkpoint_fd)) {
+        return;
+    }
+    set_ownerless_native_file_op_checkpoint_cache(*runtime, true);
+
+    void *dictionary_state = runtime_dictionary_state(*runtime);
+    const std::uint32_t owner_id =
+        ownerless_owner_id_from_slot_index(runtime->concurrency_process_slot_index);
+    const std::uint64_t owner_generation = runtime->concurrency_process_slot_generation;
+    if (dictionary_state == nullptr || owner_id == 0U || owner_generation == 0U) {
+        return;
+    }
+
+    static_cast<void>(mylite_ownerless_dictionary_state_mark_recoverable(
+        dictionary_state,
+        k_concurrency_dictionary_state_segment_size,
+        owner_id,
+        owner_generation,
+        recovery_kind
+    ));
 }
 
 unsigned ownerless_mdl_timeout_ms(double lock_wait_timeout) {
@@ -26507,6 +26570,7 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
                 stage_start_ns = embedded_open_perf_start_ns();
                 mylite_ownerless_runtime_reset_hooks();
                 mylite_ownerless_read_view_reset_hooks();
+                mylite_ownerless_dictionary_reset_hooks();
                 embedded_open_perf_add_elapsed(
                     EMBEDDED_OPEN_PERF_START_PRE_HOOKS_NS,
                     stage_start_ns
@@ -26538,6 +26602,7 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
                 stage_start_ns = embedded_open_perf_start_ns();
                 mylite_ownerless_innodb_lock_reset_hooks();
                 mylite_ownerless_innodb_autoinc_reset_hooks();
+                mylite_ownerless_dictionary_reset_hooks();
                 embedded_open_perf_add_elapsed(
                     EMBEDDED_OPEN_PERF_START_PRE_HOOKS_NS,
                     stage_start_ns
@@ -26765,6 +26830,7 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
                 mylite_ownerless_innodb_autoinc_reset_hooks();
                 mylite_ownerless_read_view_reset_hooks();
                 mylite_ownerless_trx_reset_hooks();
+                mylite_ownerless_dictionary_reset_hooks();
                 mylite_ownerless_mdl_reset_hooks();
             }
             embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_START_POST_HOOKS_NS, stage_start_ns);
@@ -27295,6 +27361,7 @@ void clear_runtime_state(RuntimeState &runtime) {
     runtime.ownerless_native_file_op_checkpoint_needed_cached = false;
     runtime.ownerless_native_dml_file_op_checkpoint_cache_valid = false;
     runtime.ownerless_native_dml_file_op_checkpoint_needed_cached = false;
+    runtime.ownerless_active_dictionary_recovery_kind = MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE;
     runtime.ownerless_page_log_known_end_offset.store(0U, std::memory_order_relaxed);
     runtime.ownerless_page_log_start_end_offset = 0;
     runtime.ownerless_runtime_started_with_page_version_wal = false;
