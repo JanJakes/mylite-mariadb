@@ -842,9 +842,7 @@ static void test_ownerless_killed_savepoint_dml_file_op_marker_recovery(void);
 static void test_ownerless_killed_before_savepoint_rollback_dml_file_op_marker_recovery(void);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void test_crashed_savepoint_rollback_before_state_recovers_original_row(void);
-static void test_crashed_savepoint_rollback_after_prewrite_before_state_recovers_original_rows(
-    void
-);
+static void test_crashed_prewrite_savepoint_rollback_before_state_recovers_rows(void);
 static void test_crashed_transaction_rollback_before_state_recovers_original_row(void);
 #endif
 static void test_ownerless_native_file_op_marker_drains_after_single_owner_explicit_transaction_dml(
@@ -4608,7 +4606,7 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "savepoint-rollback-prewrite-before-state-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-        test_crashed_savepoint_rollback_after_prewrite_before_state_recovers_original_rows();
+        test_crashed_prewrite_savepoint_rollback_before_state_recovers_rows();
 #endif
         return 0;
     }
@@ -6904,9 +6902,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     ),
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
     OWNERLESS_SQL_TEST_CASE(test_crashed_savepoint_rollback_before_state_recovers_original_row),
-    OWNERLESS_SQL_TEST_CASE(
-        test_crashed_savepoint_rollback_after_prewrite_before_state_recovers_original_rows
-    ),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_prewrite_savepoint_rollback_before_state_recovers_rows),
     OWNERLESS_SQL_TEST_CASE(test_crashed_transaction_rollback_before_state_recovers_original_row),
 #endif
     OWNERLESS_SQL_TEST_CASE(
@@ -11952,9 +11948,7 @@ static void test_crashed_savepoint_rollback_before_state_recovers_original_row(v
 #  endif
 }
 
-static void test_crashed_savepoint_rollback_after_prewrite_before_state_recovers_original_rows(
-    void
-) {
+static void test_crashed_prewrite_savepoint_rollback_before_state_recovers_rows(void) {
 #  if defined(__linux__)
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
