@@ -176,9 +176,10 @@ test fault are enabled.
 
 ## Risks And Open Questions
 
-- This proves one deterministic same-schema FK native-loop rollback point. It
-  does not cover later rename-pair crash points, rollback after ordinary SQL
-  errors, or cross-schema FK native-loop crashes.
+- This slice originally proved one deterministic same-schema FK native-loop
+  rollback point. Later same-schema skip-count coverage, cross-schema FK loop
+  coverage, and existing-table FK `IF EXISTS` lists are covered by follow-up
+  specs; rollback after ordinary SQL errors remains outside this slice.
 - The new MariaDB hook is fork-local and should remain limited to unsafe
   ownerless hook builds.
 - Broader DDL/file-lifecycle recovery, active-reader pressure matrices, and

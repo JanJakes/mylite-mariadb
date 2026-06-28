@@ -150,8 +150,9 @@ native-loop slice.
 
 ## Risks And Open Questions
 
-- This proves the first cross-schema FK native-loop rollback point only.
-  Later-pair skip-count coverage and broader DDL/file lifecycle recovery remain
-  planned.
+- This slice originally proved the first cross-schema FK native-loop rollback
+  point only. Later-pair skip-count coverage and existing-table FK
+  `IF EXISTS` lists are covered by follow-up specs; broader DDL/file lifecycle
+  recovery remains planned.
 - The hook is fork-local and must stay constrained to unsafe ownerless hook
   tests.

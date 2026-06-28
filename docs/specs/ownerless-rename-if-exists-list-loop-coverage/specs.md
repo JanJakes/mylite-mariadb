@@ -49,8 +49,8 @@ Out of scope:
   operations.
 - Mixed temporary/permanent rename-list loop matrices.
 - Arbitrary longer rename lists or randomized rename permutations.
-- Foreign-key `IF EXISTS` rename-list permutations beyond the existing
-  non-IF foreign-key loop coverage.
+- Foreign-key `IF EXISTS` rename-list permutations, covered by the
+  `ownerless-fk-rename-if-exists-list-loop-coverage` follow-up.
 - Broader DDL/file-lifecycle recovery, native redo/checkpoint reconciliation,
   active-reader pressure oracle breadth, and external MariaDB/RQG stress.
 - SQL-level local table-lock fault injection.
@@ -116,7 +116,8 @@ No binary-size, dependency, or license impact.
 
 ## Risks And Open Questions
 
-- This closes only deterministic existing-table three-pair `IF EXISTS` swaps.
-  Missing-source no-op paths, mixed temporary/permanent lists, foreign-key
-  `IF EXISTS` permutations, arbitrary longer lists, and randomized DDL oracles
-  remain completion work.
+- This closes only deterministic existing-table three-pair non-FK
+  `IF EXISTS` swaps. Missing-source no-op paths, mixed temporary/permanent
+  lists, arbitrary longer lists, and randomized DDL oracles remain completion
+  work; focused FK `IF EXISTS` lists are covered by the
+  `ownerless-fk-rename-if-exists-list-loop-coverage` follow-up.

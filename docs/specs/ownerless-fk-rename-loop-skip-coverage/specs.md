@@ -49,8 +49,9 @@ In scope:
 Out of scope:
 
 - Arbitrary skip counts outside the covered statement lengths.
-- Non-FK rename-list matrices, `IF EXISTS` rename-loop variants, and mixed
-  temporary/permanent later-pair lists.
+- Non-FK rename-list matrices and mixed temporary/permanent later-pair lists.
+  Existing-table FK `IF EXISTS` rename-loop variants are covered by the
+  `ownerless-fk-rename-if-exists-list-loop-coverage` follow-up.
 - Broader DDL/file-lifecycle recovery, native redo/checkpoint reconciliation,
   active-reader pressure oracle breadth, and external randomized DDL/RQG
   stress.
@@ -105,5 +106,7 @@ No binary-size, dependency, or license impact.
 
 ## Risks And Open Questions
 
-- This proves deterministic FK chains only. Broader mixed rename matrices and
-  randomized DDL/RQG oracles remain completion work.
+- This proves deterministic ordinary FK chains only. Existing-table FK
+  `IF EXISTS` variants are covered by the
+  `ownerless-fk-rename-if-exists-list-loop-coverage` follow-up; broader mixed
+  rename matrices and randomized DDL/RQG oracles remain completion work.

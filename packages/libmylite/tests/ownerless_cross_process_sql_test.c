@@ -5642,6 +5642,13 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-fk-multi-rename-if-exists-loop-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        assert(setenv("MYLITE_OWNERLESS_TEST_RENAME_IF_EXISTS", "1", 1) == 0);
+        test_crashed_foreign_key_multi_rename_loop_recovers_ddl_log_rollback();
+#endif
+        return 0;
+    }
     if (argc == 2 &&
         strcmp(argv[1], "dictionary-foreign-key-cross-schema-multi-rename-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
@@ -5651,6 +5658,14 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "dictionary-fk-cross-schema-multi-rename-loop-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_fk_cross_schema_rename_loop_recovers_ddl_log_rollback();
+#endif
+        return 0;
+    }
+    if (argc == 2 &&
+        strcmp(argv[1], "dictionary-fk-cross-schema-multi-rename-if-exists-loop-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        assert(setenv("MYLITE_OWNERLESS_TEST_RENAME_IF_EXISTS", "1", 1) == 0);
         test_crashed_fk_cross_schema_rename_loop_recovers_ddl_log_rollback();
 #endif
         return 0;
@@ -6795,7 +6810,9 @@ int main(int argc, char **argv) {
             "dictionary-foreign-key-mixed-default-alter-crash|"
             "dictionary-foreign-key-mixed-column-alter-crash|"
             "dictionary-foreign-key-multi-rename-crash|"
+            "dictionary-fk-multi-rename-if-exists-loop-crash|"
             "dictionary-foreign-key-cross-schema-multi-rename-crash|"
+            "dictionary-fk-cross-schema-multi-rename-if-exists-loop-crash|"
             "dictionary-check-constraint-crash|"
             "dictionary-check-constraint-drop-crash|"
             "dictionary-field-generated-check-crash|"
@@ -78212,6 +78229,26 @@ static void foreign_key_multi_rename_until_dictionary_finish_fault(
 }
 
 #  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static const char *foreign_key_multi_rename_native_loop_sql(void) {
+    if (getenv("MYLITE_OWNERLESS_TEST_RENAME_IF_EXISTS") != NULL) {
+        return "RENAME TABLE IF EXISTS "
+               "app.ownerless_fk_multi_rename_parent "
+               "TO app.ownerless_fk_multi_rename_parent_tmp, "
+               "app.ownerless_fk_multi_rename_child "
+               "TO app.ownerless_fk_multi_rename_child_moved, "
+               "app.ownerless_fk_multi_rename_parent_tmp "
+               "TO app.ownerless_fk_multi_rename_parent_moved";
+    }
+
+    return "RENAME TABLE "
+           "app.ownerless_fk_multi_rename_parent "
+           "TO app.ownerless_fk_multi_rename_parent_tmp, "
+           "app.ownerless_fk_multi_rename_child "
+           "TO app.ownerless_fk_multi_rename_child_moved, "
+           "app.ownerless_fk_multi_rename_parent_tmp "
+           "TO app.ownerless_fk_multi_rename_parent_moved";
+}
+
 static void foreign_key_multi_rename_until_first_native_file_op_fault(
     open_database_paths paths,
     int ready_fd
@@ -78220,13 +78257,7 @@ static void foreign_key_multi_rename_until_first_native_file_op_fault(
         paths,
         ready_fd,
         "rename-table-after-native-file-op",
-        "RENAME TABLE "
-        "app.ownerless_fk_multi_rename_parent "
-        "TO app.ownerless_fk_multi_rename_parent_tmp, "
-        "app.ownerless_fk_multi_rename_child "
-        "TO app.ownerless_fk_multi_rename_child_moved, "
-        "app.ownerless_fk_multi_rename_parent_tmp "
-        "TO app.ownerless_fk_multi_rename_parent_moved"
+        foreign_key_multi_rename_native_loop_sql()
     );
 }
 #  endif
@@ -78250,6 +78281,26 @@ static void foreign_key_cross_schema_multi_rename_until_dictionary_finish_fault(
 }
 
 #  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static const char *foreign_key_cross_schema_multi_rename_native_loop_sql(void) {
+    if (getenv("MYLITE_OWNERLESS_TEST_RENAME_IF_EXISTS") != NULL) {
+        return "RENAME TABLE IF EXISTS "
+               "app.ownerless_fk_cross_schema_multi_parent "
+               "TO ownerless_fk_cross_schema_multi_schema."
+               "ownerless_fk_cross_schema_multi_parent_moved, "
+               "app.ownerless_fk_cross_schema_multi_child "
+               "TO ownerless_fk_cross_schema_multi_schema."
+               "ownerless_fk_cross_schema_multi_child_moved";
+    }
+
+    return "RENAME TABLE "
+           "app.ownerless_fk_cross_schema_multi_parent "
+           "TO ownerless_fk_cross_schema_multi_schema."
+           "ownerless_fk_cross_schema_multi_parent_moved, "
+           "app.ownerless_fk_cross_schema_multi_child "
+           "TO ownerless_fk_cross_schema_multi_schema."
+           "ownerless_fk_cross_schema_multi_child_moved";
+}
+
 static void foreign_key_cross_schema_multi_rename_until_first_native_file_op_fault(
     open_database_paths paths,
     int ready_fd
@@ -78258,13 +78309,7 @@ static void foreign_key_cross_schema_multi_rename_until_first_native_file_op_fau
         paths,
         ready_fd,
         "rename-table-after-native-file-op",
-        "RENAME TABLE "
-        "app.ownerless_fk_cross_schema_multi_parent "
-        "TO ownerless_fk_cross_schema_multi_schema."
-        "ownerless_fk_cross_schema_multi_parent_moved, "
-        "app.ownerless_fk_cross_schema_multi_child "
-        "TO ownerless_fk_cross_schema_multi_schema."
-        "ownerless_fk_cross_schema_multi_child_moved"
+        foreign_key_cross_schema_multi_rename_native_loop_sql()
     );
 }
 #  endif

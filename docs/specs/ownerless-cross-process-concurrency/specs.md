@@ -7836,9 +7836,11 @@ subsystems that this mode needs:
      mixed rename-list prefinish boundary, plus same-schema and cross-schema
      non-FK multi-rename native-loop rollback after first, second, and final native
      rename pairs, including deterministic same-schema and cross-schema
-     `RENAME TABLE IF EXISTS` three-pair lists, especially remaining rename
-     variants including foreign-key `IF EXISTS` rename lists, missing-source
-     `IF EXISTS` no-op matrices, arbitrary longer rename-list permutations,
+     `RENAME TABLE IF EXISTS` three-pair lists, plus same-schema and
+     cross-schema FK native-loop rollback including existing-table
+     `RENAME TABLE IF EXISTS` lists, especially remaining rename variants
+     including missing-source `IF EXISTS` no-op matrices, arbitrary longer
+     rename-list permutations,
      other rebuild variants beyond the covered
      FORCE, same-engine ENGINE including both exact copy-lock option orders,
      row-format including
