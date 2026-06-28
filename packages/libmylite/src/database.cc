@@ -2218,6 +2218,10 @@ int refresh_ownerless_dictionary_before_statement(mylite_db &db, bool allow_glob
 bool ownerless_observed_dictionary_generation_ready(const mylite_db &db, void *dictionary_state);
 int flush_ownerless_dictionary_cache(mylite_db &db);
 void cleanup_ownerless_dictionary_cache_after_failed_ddl(mylite_db &db, bool ddl_started);
+void prepare_ownerless_failed_dictionary_ddl_recovery_before_finish(
+    mylite_db &db,
+    bool ddl_started
+);
 int refresh_ownerless_dictionary_cache_after_stale_engine_error(mylite_db &db);
 void initialize_ownerless_dictionary_generation(mylite_db &db);
 void clear_ownerless_statement_metadata_cache(mylite_db &db);
@@ -4044,6 +4048,10 @@ int mylite_step(mylite_stmt *stmt) {
             ownerless_stage_start
         );
         if (consistent_snapshot_pin_result != MYLITE_OK) {
+            prepare_ownerless_failed_dictionary_ddl_recovery_before_finish(
+                *stmt->db,
+                dictionary_ddl_started
+            );
             const int dictionary_finish_result =
                 ownerless_finish_dictionary_ddl(*stmt->db, dictionary_ddl_started);
             if (dictionary_finish_result != MYLITE_OK) {
@@ -4110,6 +4118,10 @@ int mylite_step(mylite_stmt *stmt) {
                     policy_tokens,
                     statement_started_in_explicit_transaction
                 );
+                prepare_ownerless_failed_dictionary_ddl_recovery_before_finish(
+                    *stmt->db,
+                    dictionary_ddl_started
+                );
                 const int dictionary_finish_result =
                     ownerless_finish_dictionary_ddl(*stmt->db, dictionary_ddl_started);
                 if (dictionary_finish_result != MYLITE_OK) {
@@ -4155,6 +4167,10 @@ int mylite_step(mylite_stmt *stmt) {
                     *stmt->db,
                     policy_tokens,
                     statement_started_in_explicit_transaction
+                );
+                prepare_ownerless_failed_dictionary_ddl_recovery_before_finish(
+                    *stmt->db,
+                    dictionary_ddl_started
                 );
                 const int dictionary_finish_result =
                     ownerless_finish_dictionary_ddl(*stmt->db, dictionary_ddl_started);
@@ -4211,6 +4227,10 @@ int mylite_step(mylite_stmt *stmt) {
                     );
                     set_mariadb_statement_error(*stmt);
                 }
+                prepare_ownerless_failed_dictionary_ddl_recovery_before_finish(
+                    *stmt->db,
+                    dictionary_ddl_started
+                );
                 const int dictionary_finish_result =
                     ownerless_finish_dictionary_ddl(*stmt->db, dictionary_ddl_started);
                 if (dictionary_finish_result != MYLITE_OK) {
@@ -5586,6 +5606,7 @@ int exec_result_impl(
         ownerless_stage_start
     );
     if (consistent_snapshot_pin_result != MYLITE_OK) {
+        prepare_ownerless_failed_dictionary_ddl_recovery_before_finish(*db, dictionary_ddl_started);
         const int dictionary_finish_result =
             ownerless_finish_dictionary_ddl(*db, dictionary_ddl_started);
         if (dictionary_finish_result != MYLITE_OK) {
@@ -5679,6 +5700,7 @@ int exec_result_impl(
             exec_result_perf_add(EXEC_RESULT_PERF_MYSQL_QUERY_ERRORS, 1U);
             set_mariadb_error(*db);
         }
+        prepare_ownerless_failed_dictionary_ddl_recovery_before_finish(*db, dictionary_ddl_started);
         const int dictionary_finish_result =
             ownerless_finish_dictionary_ddl(*db, dictionary_ddl_started);
         if (dictionary_finish_result != MYLITE_OK) {
@@ -5737,6 +5759,7 @@ ownerless_query_success:
             policy_tokens,
             statement_started_in_explicit_transaction
         );
+        prepare_ownerless_failed_dictionary_ddl_recovery_before_finish(*db, dictionary_ddl_started);
         if (ownerless_finish_dictionary_ddl(*db, dictionary_ddl_started) != MYLITE_OK) {
             set_error(*db, MYLITE_IOERR, "ownerless dictionary change could not finish");
         }
@@ -15541,6 +15564,26 @@ int flush_ownerless_dictionary_cache(mylite_db &db) {
     return MYLITE_OK;
 }
 
+void prepare_ownerless_failed_dictionary_ddl_recovery_before_finish(
+    mylite_db &db,
+    bool ddl_started
+) {
+    if (!ddl_started || !db.ownerless_rw_open || db.readonly_open ||
+        db.ownerless_dictionary_recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE ||
+        ownerless_dictionary_recovery_forces_native_file_op_checkpoint(
+            db.ownerless_dictionary_recovery_kind
+        )) {
+        return;
+    }
+
+    if (mylite_ownerless_innodb_take_file_op_redo() != 0) {
+        mylite_ownerless_innodb_note_file_op_redo();
+        return;
+    }
+
+    db.ownerless_dictionary_recovery_kind = MYLITE_OWNERLESS_DICTIONARY_RECOVERY_FAILED_DDL_NOOP;
+}
+
 void cleanup_ownerless_dictionary_cache_after_failed_ddl(mylite_db &db, bool ddl_started) {
     db.ownerless_dictionary_recovery_kind = MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE;
     if (!ddl_started) {
@@ -19337,7 +19380,8 @@ bool ownerless_dictionary_recovery_kind_is_metadata_only(std::uint32_t recovery_
            recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_ADD_FOREIGN_KEY ||
            recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_FOREIGN_KEY ||
            recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_RENAME_INDEX ||
-           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_INDEX_IGNORABILITY;
+           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_INDEX_IGNORABILITY ||
+           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_FAILED_DDL_NOOP;
 }
 
 bool ownerless_table_identifier_token(std::string_view token) {
@@ -25194,7 +25238,7 @@ bool ownerless_process_recover_dead_dictionary_owner(
         }
     }
 
-    constexpr std::array<std::uint32_t, 26> metadata_only_recovery_kinds = {
+    constexpr std::array<std::uint32_t, 27> metadata_only_recovery_kinds = {
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_VIEW,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_TEMPORARY_TABLE,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_DROP_VIEW,
@@ -25221,6 +25265,7 @@ bool ownerless_process_recover_dead_dictionary_owner(
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_FOREIGN_KEY,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_RENAME_INDEX,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_INDEX_IGNORABILITY,
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_FAILED_DDL_NOOP,
     };
     for (const std::uint32_t recovery_kind : metadata_only_recovery_kinds) {
         std::uint64_t generation = 0;

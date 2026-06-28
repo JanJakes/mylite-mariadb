@@ -1074,6 +1074,8 @@ static void test_crashed_native_checkpoint_reclaim_preserves_committed_update(vo
 static void test_native_checkpoint_reclaim_race_preserves_newer_peer_commit(void);
 static void test_consistent_snapshot_start_pin_blocks_live_reclaim_before_execute(void);
 static void test_ownerless_table_wait_sql_negative_proof(void);
+static void test_crashed_rename_if_exists_target_conflict_dictionary_ddl_preserves_tables(void);
+static void test_ownerless_rename_if_exists_target_conflict_native_negative_proof(void);
 static void test_ownerless_native_table_wait_reaches_external_wait_path(void);
 static void test_crashed_native_table_wait_rebuilds_ownerless_state(void);
 static void test_ownerless_rejects_directory_probe_failure(void);
@@ -1817,6 +1819,10 @@ static void cross_schema_rename_if_exists_missing_source_until_dictionary_finish
     int ready_fd
 );
 static void rename_long_missing_if_exists_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void rename_if_exists_target_conflict_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -5402,6 +5408,19 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-rename-if-exists-target-conflict-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_rename_if_exists_target_conflict_dictionary_ddl_preserves_tables();
+#endif
+        return 0;
+    }
+    if (argc == 2 &&
+        strcmp(argv[1], "rename-if-exists-target-conflict-native-negative-proof") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_ownerless_rename_if_exists_target_conflict_native_negative_proof();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "native-table-wait") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_ownerless_native_table_wait_reaches_external_wait_path();
@@ -6901,7 +6920,9 @@ int main(int argc, char **argv) {
             "redo-gap-blocks-writer|"
             "native-reclaim-crash|native-reclaim-race|consistent-snapshot-pin-race|"
             "active-pin-reclaim-boundary|"
-            "table-lock-wait-negative-proof|native-table-wait-crash|platform-probe-failure|"
+            "table-lock-wait-negative-proof|dictionary-rename-if-exists-target-conflict-crash|"
+            "rename-if-exists-target-conflict-native-negative-proof|native-table-wait-crash|"
+            "platform-probe-failure|"
             "trx-register-crash|record-lock-before-grant-crash|record-lock-grant-crash|"
             "dictionary-rename-crash|dictionary-rename-file-op-marker-crash|"
             "dictionary-rename-if-exists-crash|"
@@ -7211,6 +7232,10 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_alter_waits_for_active_transaction),
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
     OWNERLESS_SQL_TEST_CASE(test_ownerless_table_wait_sql_negative_proof),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_rename_if_exists_target_conflict_dictionary_ddl_preserves_tables
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_rename_if_exists_target_conflict_native_negative_proof),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_native_table_wait_reaches_external_wait_path),
     OWNERLESS_SQL_TEST_CASE(test_crashed_native_table_wait_rebuilds_ownerless_state),
 #endif
@@ -28609,6 +28634,519 @@ static void test_ownerless_table_wait_sql_negative_proof(void) {
     assert_ownerless_table_wait_negative_state(db);
     assert(mylite_close(db) == MYLITE_OK);
 
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void assert_ownerless_rename_if_exists_target_conflict_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *source_frm_path,
+    const char *source_ibd_path,
+    const char *target_frm_path,
+    const char *target_ibd_path,
+    const char *missing_before_target_frm_path,
+    const char *missing_before_target_ibd_path,
+    const char *missing_after_target_frm_path,
+    const char *missing_after_target_ibd_path,
+    unsigned expected_source_rows,
+    unsigned expected_source_sum,
+    unsigned expected_target_rows,
+    unsigned expected_target_sum
+) {
+    mylite_db *db;
+
+    assert(path_exists(source_frm_path));
+    assert(path_exists(source_ibd_path));
+    assert(path_exists(target_frm_path));
+    assert(path_exists(target_ibd_path));
+    assert(!path_exists(missing_before_target_frm_path));
+    assert(!path_exists(missing_before_target_ibd_path));
+    assert(!path_exists(missing_after_target_frm_path));
+    assert(!path_exists(missing_after_target_ibd_path));
+
+    db = open_database(paths, flags);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name IN ("
+            "'ownerless_rn_if_exists_conflict_source', "
+            "'ownerless_rn_if_exists_conflict_target')"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name IN ("
+            "'ownerless_rn_if_exists_conflict_missing_before_dst', "
+            "'ownerless_rn_if_exists_conflict_missing_after_dst')"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME IN ("
+            "'app/ownerless_rn_if_exists_conflict_source', "
+            "'app/ownerless_rn_if_exists_conflict_target')"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME IN ("
+            "'app/ownerless_rn_if_exists_conflict_missing_before_dst', "
+            "'app/ownerless_rn_if_exists_conflict_missing_after_dst')"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_rn_if_exists_conflict_source") ==
+        expected_source_rows
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_rn_if_exists_conflict_source") ==
+        expected_source_sum
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_rn_if_exists_conflict_target") ==
+        expected_target_rows
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_rn_if_exists_conflict_target") ==
+        expected_target_sum
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void test_crashed_rename_if_exists_target_conflict_dictionary_ddl_preserves_tables(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-rename-if-exists-target-conflict-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    char *datadir_path;
+    char *app_path;
+    char *source_frm_path;
+    char *source_ibd_path;
+    char *target_frm_path;
+    char *target_ibd_path;
+    char *missing_before_target_frm_path;
+    char *missing_before_target_ibd_path;
+    char *missing_after_target_frm_path;
+    char *missing_after_target_ibd_path;
+    ownerless_live_peer_guard live_peer;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    datadir_path = path_join(database_path, "datadir");
+    app_path = path_join(datadir_path, "app");
+    source_frm_path = path_join(app_path, "ownerless_rn_if_exists_conflict_source.frm");
+    source_ibd_path = path_join(app_path, "ownerless_rn_if_exists_conflict_source.ibd");
+    target_frm_path = path_join(app_path, "ownerless_rn_if_exists_conflict_target.frm");
+    target_ibd_path = path_join(app_path, "ownerless_rn_if_exists_conflict_target.ibd");
+    missing_before_target_frm_path =
+        path_join(app_path, "ownerless_rn_if_exists_conflict_missing_before_dst.frm");
+    missing_before_target_ibd_path =
+        path_join(app_path, "ownerless_rn_if_exists_conflict_missing_before_dst.ibd");
+    missing_after_target_frm_path =
+        path_join(app_path, "ownerless_rn_if_exists_conflict_missing_after_dst.frm");
+    missing_after_target_ibd_path =
+        path_join(app_path, "ownerless_rn_if_exists_conflict_missing_after_dst.ibd");
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_rn_if_exists_conflict_source ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_rn_if_exists_conflict_target ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_rn_if_exists_conflict_source VALUES (1, 10)");
+    exec_ok(db, "INSERT INTO app.ownerless_rn_if_exists_conflict_target VALUES (1, 99)");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        rename_if_exists_target_conflict_until_dictionary_finish_fault
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    assert_ownerless_rename_if_exists_target_conflict_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        source_frm_path,
+        source_ibd_path,
+        target_frm_path,
+        target_ibd_path,
+        missing_before_target_frm_path,
+        missing_before_target_ibd_path,
+        missing_after_target_frm_path,
+        missing_after_target_ibd_path,
+        1U,
+        10U,
+        1U,
+        99U
+    );
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "INSERT INTO app.ownerless_rn_if_exists_conflict_source VALUES (2, 20)");
+    exec_ok(db, "INSERT INTO app.ownerless_rn_if_exists_conflict_target VALUES (2, 1)");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
+
+    assert_ownerless_rename_if_exists_target_conflict_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        source_frm_path,
+        source_ibd_path,
+        target_frm_path,
+        target_ibd_path,
+        missing_before_target_frm_path,
+        missing_before_target_ibd_path,
+        missing_after_target_frm_path,
+        missing_after_target_ibd_path,
+        2U,
+        30U,
+        2U,
+        100U
+    );
+    assert_ownerless_rename_if_exists_target_conflict_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        source_frm_path,
+        source_ibd_path,
+        target_frm_path,
+        target_ibd_path,
+        missing_before_target_frm_path,
+        missing_before_target_ibd_path,
+        missing_after_target_frm_path,
+        missing_after_target_ibd_path,
+        2U,
+        30U,
+        2U,
+        100U
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_rename_if_exists_target_conflict_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        source_frm_path,
+        source_ibd_path,
+        target_frm_path,
+        target_ibd_path,
+        missing_before_target_frm_path,
+        missing_before_target_ibd_path,
+        missing_after_target_frm_path,
+        missing_after_target_ibd_path,
+        2U,
+        30U,
+        2U,
+        100U
+    );
+    assert_ownerless_rename_if_exists_target_conflict_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        source_frm_path,
+        source_ibd_path,
+        target_frm_path,
+        target_ibd_path,
+        missing_before_target_frm_path,
+        missing_before_target_ibd_path,
+        missing_after_target_frm_path,
+        missing_after_target_ibd_path,
+        2U,
+        30U,
+        2U,
+        100U
+    );
+
+    free(missing_after_target_ibd_path);
+    free(missing_after_target_frm_path);
+    free(missing_before_target_ibd_path);
+    free(missing_before_target_frm_path);
+    free(target_ibd_path);
+    free(target_frm_path);
+    free(source_ibd_path);
+    free(source_frm_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void ownerless_rename_if_exists_target_conflict_expect_table_exists(
+    open_database_paths paths,
+    const char *fault_name,
+    int ready_fd
+) {
+    mylite_db *db;
+    char ready_fd_value[32];
+    unsigned mariadb_errno = 0U;
+    int result;
+
+    assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", ready_fd) > 0);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", fault_name, 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
+    result = exec_status(
+        db,
+        "RENAME TABLE IF EXISTS "
+        "app.ownerless_rn_if_exists_conflict_missing_before "
+        "TO app.ownerless_rn_if_exists_conflict_missing_before_dst, "
+        "app.ownerless_rn_if_exists_conflict_source "
+        "TO app.ownerless_rn_if_exists_conflict_target, "
+        "app.ownerless_rn_if_exists_conflict_missing_after "
+        "TO app.ownerless_rn_if_exists_conflict_missing_after_dst",
+        &mariadb_errno
+    );
+    if (result != MYLITE_OK && mariadb_errno == MYLITE_TEST_TABLE_EXISTS_ERRNO) {
+        assert(mylite_close(db) == MYLITE_OK);
+        _exit(MYLITE_TEST_CHILD_OK);
+    }
+
+    fprintf(
+        stderr,
+        "expected RENAME TABLE IF EXISTS target-conflict error before ownerless fault, "
+        "fault=%s result=%d errno=%u\n",
+        fault_name,
+        result,
+        mariadb_errno
+    );
+    fflush(stderr);
+    (void)mylite_close(db);
+    _exit(MYLITE_TEST_CHILD_EXPECTED_ERROR);
+}
+
+static void test_ownerless_rename_if_exists_target_conflict_native_negative_proof(void) {
+    static const char *fault_names[] = {
+        "rename-table-after-native-file-op",
+    };
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-rename-if-exists-target-conflict-negative.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    char *datadir_path;
+    char *app_path;
+    char *source_frm_path;
+    char *source_ibd_path;
+    char *target_frm_path;
+    char *target_ibd_path;
+    char *missing_before_target_frm_path;
+    char *missing_before_target_ibd_path;
+    char *missing_after_target_frm_path;
+    char *missing_after_target_ibd_path;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    datadir_path = path_join(database_path, "datadir");
+    app_path = path_join(datadir_path, "app");
+    source_frm_path = path_join(app_path, "ownerless_rn_if_exists_conflict_source.frm");
+    source_ibd_path = path_join(app_path, "ownerless_rn_if_exists_conflict_source.ibd");
+    target_frm_path = path_join(app_path, "ownerless_rn_if_exists_conflict_target.frm");
+    target_ibd_path = path_join(app_path, "ownerless_rn_if_exists_conflict_target.ibd");
+    missing_before_target_frm_path =
+        path_join(app_path, "ownerless_rn_if_exists_conflict_missing_before_dst.frm");
+    missing_before_target_ibd_path =
+        path_join(app_path, "ownerless_rn_if_exists_conflict_missing_before_dst.ibd");
+    missing_after_target_frm_path =
+        path_join(app_path, "ownerless_rn_if_exists_conflict_missing_after_dst.frm");
+    missing_after_target_ibd_path =
+        path_join(app_path, "ownerless_rn_if_exists_conflict_missing_after_dst.ibd");
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_rn_if_exists_conflict_source ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_rn_if_exists_conflict_target ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_rn_if_exists_conflict_source VALUES (1, 10)");
+    exec_ok(db, "INSERT INTO app.ownerless_rn_if_exists_conflict_target VALUES (1, 99)");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    assert_ownerless_rename_if_exists_target_conflict_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        source_frm_path,
+        source_ibd_path,
+        target_frm_path,
+        target_ibd_path,
+        missing_before_target_frm_path,
+        missing_before_target_ibd_path,
+        missing_after_target_frm_path,
+        missing_after_target_ibd_path,
+        1U,
+        10U,
+        1U,
+        99U
+    );
+
+    for (size_t index = 0U; index < sizeof(fault_names) / sizeof(fault_names[0]); ++index) {
+        int fault_pipe[2];
+        pid_t child;
+        wait_child_or_pipe_result result;
+
+        assert(pipe(fault_pipe) == 0);
+        child = fork();
+        assert(child >= 0);
+        if (child == 0) {
+            close(fault_pipe[0]);
+            ownerless_rename_if_exists_target_conflict_expect_table_exists(
+                paths,
+                fault_names[index],
+                fault_pipe[1]
+            );
+        }
+
+        close(fault_pipe[1]);
+        result = wait_for_child_result_or_pipe_message(child, fault_pipe[0], 30000U);
+        if (result.pipe_message || result.timed_out ||
+            result.child_result != MYLITE_TEST_CHILD_OK) {
+            fprintf(
+                stderr,
+                "ownerless RENAME IF EXISTS target-conflict native negative proof failed: "
+                "fault=%s pipe_message=%d timed_out=%d child_result=%d\n",
+                fault_names[index],
+                result.pipe_message,
+                result.timed_out,
+                result.child_result
+            );
+            fflush(stderr);
+        }
+        assert(!result.pipe_message);
+        assert(!result.timed_out);
+        assert(result.child_result == MYLITE_TEST_CHILD_OK);
+        assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+        assert_ownerless_rename_if_exists_target_conflict_state(
+            paths,
+            MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+            source_frm_path,
+            source_ibd_path,
+            target_frm_path,
+            target_ibd_path,
+            missing_before_target_frm_path,
+            missing_before_target_ibd_path,
+            missing_after_target_frm_path,
+            missing_after_target_ibd_path,
+            1U,
+            10U,
+            1U,
+            99U
+        );
+    }
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "INSERT INTO app.ownerless_rn_if_exists_conflict_source VALUES (2, 20)");
+    exec_ok(db, "INSERT INTO app.ownerless_rn_if_exists_conflict_target VALUES (2, 1)");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    assert_ownerless_rename_if_exists_target_conflict_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        source_frm_path,
+        source_ibd_path,
+        target_frm_path,
+        target_ibd_path,
+        missing_before_target_frm_path,
+        missing_before_target_ibd_path,
+        missing_after_target_frm_path,
+        missing_after_target_ibd_path,
+        2U,
+        30U,
+        2U,
+        100U
+    );
+    assert_ownerless_rename_if_exists_target_conflict_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        source_frm_path,
+        source_ibd_path,
+        target_frm_path,
+        target_ibd_path,
+        missing_before_target_frm_path,
+        missing_before_target_ibd_path,
+        missing_after_target_frm_path,
+        missing_after_target_ibd_path,
+        2U,
+        30U,
+        2U,
+        100U
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_rename_if_exists_target_conflict_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        source_frm_path,
+        source_ibd_path,
+        target_frm_path,
+        target_ibd_path,
+        missing_before_target_frm_path,
+        missing_before_target_ibd_path,
+        missing_after_target_frm_path,
+        missing_after_target_ibd_path,
+        2U,
+        30U,
+        2U,
+        100U
+    );
+    assert_ownerless_rename_if_exists_target_conflict_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        source_frm_path,
+        source_ibd_path,
+        target_frm_path,
+        target_ibd_path,
+        missing_before_target_frm_path,
+        missing_before_target_ibd_path,
+        missing_after_target_frm_path,
+        missing_after_target_ibd_path,
+        2U,
+        30U,
+        2U,
+        100U
+    );
+
+    free(missing_after_target_ibd_path);
+    free(missing_after_target_frm_path);
+    free(missing_before_target_ibd_path);
+    free(missing_before_target_frm_path);
+    free(target_ibd_path);
+    free(target_frm_path);
+    free(source_ibd_path);
+    free(source_frm_path);
+    free(app_path);
+    free(datadir_path);
     free(database_path);
     free(runtime_root);
     remove_tree(root);
@@ -79396,6 +79934,24 @@ static void rename_long_missing_if_exists_until_dictionary_finish_fault(
         "TO app.ownerless_rn_if_exists_long_right_dst, "
         "app.ownerless_rn_if_exists_long_missing_c "
         "TO app.ownerless_rn_if_exists_long_missing_c_dst"
+    );
+}
+
+static void rename_if_exists_target_conflict_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "RENAME TABLE IF EXISTS "
+        "app.ownerless_rn_if_exists_conflict_missing_before "
+        "TO app.ownerless_rn_if_exists_conflict_missing_before_dst, "
+        "app.ownerless_rn_if_exists_conflict_source "
+        "TO app.ownerless_rn_if_exists_conflict_target, "
+        "app.ownerless_rn_if_exists_conflict_missing_after "
+        "TO app.ownerless_rn_if_exists_conflict_missing_after_dst"
     );
 }
 

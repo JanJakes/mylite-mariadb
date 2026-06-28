@@ -506,6 +506,18 @@ if(BUILD_TESTING)
         COMMAND mylite_ownerless_cross_process_sql_test table-lock-wait-negative-proof
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-rename-if-exists-target-conflict-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-rename-if-exists-target-conflict-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-rename-if-exists-target-conflict-native-negative-proof
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          rename-if-exists-target-conflict-native-negative-proof
+      )
+      add_test(
         NAME libmylite.ownerless-native-table-wait
         COMMAND mylite_ownerless_cross_process_sql_test native-table-wait
       )
@@ -1806,6 +1818,16 @@ if(BUILD_TESTING)
       )
       set_tests_properties(libmylite.ownerless-table-wait-negative-proof PROPERTIES
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-negative-proof"
+      )
+      set_tests_properties(libmylite.ownerless-dictionary-rename-if-exists-target-conflict-crash
+        PROPERTIES
+          LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
+          TIMEOUT 120
+      )
+      set_tests_properties(
+        libmylite.ownerless-rename-if-exists-target-conflict-native-negative-proof
+        PROPERTIES
+          LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-negative-proof"
       )
       set_tests_properties(libmylite.ownerless-native-table-wait PROPERTIES
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-innodb-lock"

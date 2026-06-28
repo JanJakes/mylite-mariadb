@@ -7715,6 +7715,16 @@ subsystems that this mode needs:
   original source tables and `SPACE` ids after the second real
   `rename-table-after-native-file-op` hook, skipped-target absence, marker
   retention/drain, forced `.shm` rebuild, and ordinary native reopen.
+  The target-conflict IF EXISTS follow-up classifies a
+  missing/target-conflict/missing same-schema `RENAME TABLE IF EXISTS` list as
+  a failed-DDL ownerless dictionary boundary with no native file operation:
+  hook-build coverage kills the writer at `dictionary-before-finish` after
+  MariaDB returns errno `1050`, uses a metadata-only failed-DDL recovery kind
+  when no native file-operation redo was observed, verifies original
+  source/target metadata, `.frm`/`.ibd` files, rows, post-error writes, clear
+  native file-operation marker state, forced `.shm` rebuild, and ordinary
+  native reopen, and separately arms `rename-table-after-native-file-op` to
+  prove the native hook is not reached.
   The ALTER-table rename follow-up classifies `ALTER TABLE ... RENAME TO` as
   the same ownerless rename recovery kind, kills the writer at
   `dictionary-before-finish` with a live peer, and proves target-table
@@ -7878,8 +7888,9 @@ subsystems that this mode needs:
      `RENAME TABLE IF EXISTS` lists, plus a focused same-schema
      and cross-schema missing-source/existing/missing-source
      `RENAME TABLE IF EXISTS` matrices covering warning/no-op semantics,
-     prefinish recovery, and native-loop rollback, especially remaining
-     rename variants including FK, temporary/permanent, target-conflict, and
+     prefinish recovery, and native-loop rollback, plus target-conflict
+     `IF EXISTS` failed-DDL dictionary recovery and native file-op negative proof, especially
+     remaining rename variants including FK, temporary/permanent, and
      cross-schema longer missing-source `IF EXISTS` permutations beyond the
      now-covered same-schema three-missing/two-existing list,
      other rebuild variants beyond the covered

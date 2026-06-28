@@ -146,7 +146,9 @@ The implementation adds tests, CTest registration, and documentation.
 ## Risks And Follow-Up
 
 - The slice proves one deterministic same-schema missing/existing/missing list.
-  Cross-schema, mixed temporary/permanent, foreign-key, target-conflict, and
-  arbitrary longer missing-source permutations remain completion work.
+  Cross-schema, mixed temporary/permanent, foreign-key, and arbitrary longer
+  missing-source permutations remain completion work for this slice. A later
+  target-conflict slice covers the reachable failed-DDL dictionary boundary
+  and proves the native file-operation hook is not reached for errno `1050`.
 - SQL-level local table-lock fault injection remains an unclaimed research
   path because supported SQL shapes still do not reach that callback.
