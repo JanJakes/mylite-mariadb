@@ -364,6 +364,12 @@ if(BUILD_TESTING)
         concurrent-savepoint-same-table-handoff
     )
     add_test(
+      NAME libmylite.ownerless-concurrent-savepoint-same-row-handoff
+      COMMAND
+        mylite_ownerless_cross_process_sql_test
+        concurrent-savepoint-same-row-handoff
+    )
+    add_test(
       NAME libmylite.ownerless-killed-savepoint-dml-marker-recovery
       COMMAND
         mylite_ownerless_cross_process_sql_test
@@ -1400,6 +1406,10 @@ if(BUILD_TESTING)
       TIMEOUT 90
     )
     set_tests_properties(libmylite.ownerless-concurrent-savepoint-same-table-handoff PROPERTIES
+      LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
+      TIMEOUT 90
+    )
+    set_tests_properties(libmylite.ownerless-concurrent-savepoint-same-row-handoff PROPERTIES
       LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
       TIMEOUT 90
     )

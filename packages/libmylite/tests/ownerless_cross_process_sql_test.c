@@ -782,6 +782,7 @@ static void test_ownerless_savepoint_rollback_is_peer_visible_after_commit(void)
 static void test_ownerless_concurrent_savepoint_rollback_handoff(void);
 static void test_ownerless_concurrent_savepoint_same_page_rollback_handoff(void);
 static void test_ownerless_concurrent_savepoint_same_table_rollback_handoff(void);
+static void test_ownerless_concurrent_savepoint_same_row_rollback_handoff(void);
 static void test_ownerless_serializable_read_blocks_peer_update(void);
 static void test_ownerless_serializable_prevents_write_skew(void);
 static void test_ownerless_auto_increment_assigns_distinct_ids(void);
@@ -1340,6 +1341,11 @@ static void update_concurrent_savepoint_same_table_rollback_until_released(
     child_pipes pipes
 );
 static void update_concurrent_savepoint_same_table_peer(open_database_paths paths);
+static void update_concurrent_savepoint_same_row_rollback_until_released(
+    open_database_paths paths,
+    child_pipes pipes
+);
+static void update_concurrent_savepoint_same_row_peer(open_database_paths paths);
 static void hold_serializable_read_until_released(open_database_paths paths, child_pipes pipes);
 static void update_first_row_expect_lock_timeout(open_database_paths paths);
 static void run_serializable_write_skew_candidate_after_signal(
@@ -4986,6 +4992,10 @@ int main(int argc, char **argv) {
         test_ownerless_concurrent_savepoint_same_table_rollback_handoff();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "concurrent-savepoint-same-row-handoff") == 0) {
+        test_ownerless_concurrent_savepoint_same_row_rollback_handoff();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "serializable") == 0) {
         test_ownerless_serializable_read_blocks_peer_update();
         return 0;
@@ -6444,6 +6454,7 @@ int main(int argc, char **argv) {
             "savepoint|concurrent-savepoint-rollback-handoff|"
             "concurrent-savepoint-same-page-handoff|"
             "concurrent-savepoint-same-table-handoff|"
+            "concurrent-savepoint-same-row-handoff|"
             "serializable|write-skew|auto-inc|auto-inc-ddl|"
             "auto-inc-column-ddl|engine-policy|"
             "engine-policy-page-publish|"
@@ -6647,6 +6658,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_concurrent_savepoint_rollback_handoff),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_concurrent_savepoint_same_page_rollback_handoff),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_concurrent_savepoint_same_table_rollback_handoff),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_concurrent_savepoint_same_row_rollback_handoff),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_serializable_read_blocks_peer_update),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_serializable_prevents_write_skew),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_auto_increment_assigns_distinct_ids),
@@ -8992,6 +9004,191 @@ static void test_ownerless_concurrent_savepoint_same_table_rollback_handoff(void
             db,
             "SELECT SUM(value) FROM app.ownerless_concurrent_savepoint_same_table"
         ) == 103U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+#endif
+}
+
+static void test_ownerless_concurrent_savepoint_same_row_rollback_handoff(void) {
+#if defined(__linux__)
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-concurrent-savepoint-same-row.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t savepoint_child;
+    pid_t peer_child;
+    mylite_db *db;
+    unsigned long long final_sum;
+    unsigned long long final_payload_sum;
+    unsigned long long final_value_1;
+    unsigned long long final_value_2;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_concurrent_savepoint_same_row ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "payload VARBINARY(256) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_concurrent_savepoint_same_row VALUES "
+        "(1, 10, REPEAT('a', 256)), "
+        "(2, 20, REPEAT('a', 256)), "
+        "(3, 30, REPEAT('a', 256))"
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_concurrent_savepoint_same_row") ==
+        60U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(mylite_ownerless_innodb_make_checkpoint() == MYLITE_TEST_OWNERLESS_INNODB_LOCK_OK);
+    (void)mylite_ownerless_innodb_take_file_op_redo();
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+
+    savepoint_child = fork();
+    assert(savepoint_child >= 0);
+    if (savepoint_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        update_concurrent_savepoint_same_row_rollback_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_concurrent_savepoint_same_row") ==
+        60U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.ownerless_concurrent_savepoint_same_row"
+        ) == (unsigned)'a' * 3U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    peer_child = fork();
+    assert(peer_child >= 0);
+    if (peer_child == 0) {
+        update_concurrent_savepoint_same_row_peer(paths);
+    }
+
+    assert(wait_for_concurrency_ownerless_write_waiting_count(database_path, 1U, 5000U) >= 1U);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_concurrent_savepoint_same_row") ==
+        60U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.ownerless_concurrent_savepoint_same_row"
+        ) == (unsigned)'a' * 3U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    signal_pipe(release_pipe[1]);
+    wait_for_child(savepoint_child);
+    wait_for_child(peer_child);
+    assert(wait_for_concurrency_ownerless_write_waiting_count(database_path, 0U, 5000U) == 0U);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+#  if !MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert_concurrency_wal_checkpointed_eventually(database_path);
+#  endif
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    final_sum =
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_concurrent_savepoint_same_row");
+    final_payload_sum = query_unsigned(
+        db,
+        "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+        "FROM app.ownerless_concurrent_savepoint_same_row"
+    );
+    final_value_1 = query_unsigned(
+        db,
+        "SELECT value FROM app.ownerless_concurrent_savepoint_same_row WHERE id = 1"
+    );
+    final_value_2 = query_unsigned(
+        db,
+        "SELECT value FROM app.ownerless_concurrent_savepoint_same_row WHERE id = 2"
+    );
+    if (final_sum != 62U || final_payload_sum != (unsigned)'a' * 2U + (unsigned)'d' ||
+        final_value_1 != 12U || final_value_2 != 20U) {
+        fprintf(
+            stderr,
+            "same-row savepoint final mismatch: sum=%llu payload_sum=%llu "
+            "values=(%llu,%llu)\n",
+            final_sum,
+            final_payload_sum,
+            final_value_1,
+            final_value_2
+        );
+        fflush(stderr);
+    }
+    assert(final_sum == 62U);
+    assert(final_payload_sum == (unsigned)'a' * 2U + (unsigned)'d');
+    assert(final_value_1 == 12U);
+    assert(final_value_2 == 20U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_concurrent_savepoint_same_row") ==
+        62U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_concurrent_savepoint_same_row") ==
+        62U
+    );
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_concurrent_savepoint_same_row "
+        "SET value = 13 "
+        "WHERE id = 1"
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_concurrent_savepoint_same_row") ==
+        63U
     );
     assert(mylite_close(db) == MYLITE_OK);
 
@@ -66082,6 +66279,77 @@ static void update_concurrent_savepoint_same_table_peer(open_database_paths path
         "UPDATE app.ownerless_concurrent_savepoint_same_table "
         "SET value = 41, payload = REPEAT('d', 7000) "
         "WHERE id = 4"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
+static void update_concurrent_savepoint_same_row_rollback_until_released(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "START TRANSACTION");
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_concurrent_savepoint_same_row "
+        "SET value = 11, payload = REPEAT('b', 256) "
+        "WHERE id = 1"
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(paths.database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(paths.database_path));
+    assert(mylite_ownerless_innodb_take_file_op_redo());
+    mylite_ownerless_innodb_note_file_op_redo();
+    exec_ok(db, "SAVEPOINT ownerless_concurrent_savepoint_same_row_after_first");
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_concurrent_savepoint_same_row "
+        "SET value = 21, payload = REPEAT('c', 256) "
+        "WHERE id = 2"
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(paths.database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(paths.database_path));
+    assert(mylite_ownerless_innodb_take_file_op_redo());
+    mylite_ownerless_innodb_note_file_op_redo();
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_concurrent_savepoint_same_row") ==
+        62U
+    );
+    exec_ok(db, "ROLLBACK TO SAVEPOINT ownerless_concurrent_savepoint_same_row_after_first");
+    assert(!read_concurrency_native_file_op_checkpoint_needed(paths.database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(paths.database_path));
+    assert(mylite_ownerless_innodb_take_file_op_redo());
+    mylite_ownerless_innodb_note_file_op_redo();
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_concurrent_savepoint_same_row") ==
+        61U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.ownerless_concurrent_savepoint_same_row"
+        ) == (unsigned)'a' * 2U + (unsigned)'b'
+    );
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+    exec_ok(db, "COMMIT");
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
+static void update_concurrent_savepoint_same_row_peer(open_database_paths paths) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_concurrent_savepoint_same_row "
+        "SET value = value + 1, payload = REPEAT('d', 256) "
+        "WHERE id = 1"
     );
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);

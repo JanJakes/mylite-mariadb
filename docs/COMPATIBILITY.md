@@ -519,6 +519,10 @@ discard the rolled-back row, and keep the peer's later row. Same-table large-row
 handoff coverage now also proves a peer updating a large row in the same table
 waits behind the savepoint writer's ownerless write ownership, then commits
 after release while final reopen keeps the pre-savepoint row and peer row.
+Same-row handoff coverage now proves a peer updating the same pre-savepoint row
+waits until the savepoint writer commits and then applies on top of that
+committed row, while the rolled-back row stays discarded through ownerless,
+forced-`.shm`, and native reopen.
 Hook-build coverage
 now also kills a writer after
 native `ROLLBACK TO SAVEPOINT` succeeds but before MyLite updates its
