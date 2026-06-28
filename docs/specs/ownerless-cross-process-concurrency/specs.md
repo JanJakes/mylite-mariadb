@@ -4991,8 +4991,7 @@ Tasks:
    uses metadata-only live-peer recovery while retaining the native
    file-operation marker until final no-live drain and preserving the shadowed
    permanent table through ownerless/native reopen and forced `.shm` rebuild,
-   while multi-pair temporary rename chains,
-   schema-drop internal multi-drop crash points, broader
+   while multi-pair temporary rename chains, broader
    ALTER rebuild beyond the focused force, row-format, compressed, and charset-conversion cases,
    broader schema option variants beyond named/current-schema default/comment
    boundaries, broader view and trigger variants, and
@@ -7578,6 +7577,14 @@ subsystems that this mode needs:
   the later schema/table pair is logged or dropped, and proves the later schema
   and table remain present, readable, writable, and stable through ownerless
   and ordinary native reopen before and after forced `.shm` rebuild.
+  The schema-drop in-loop follow-up applies the same hook to
+  `mysql_rm_db_internal()`'s delegated table-drop loop, kills a two-table
+  `DROP DATABASE` after one native table file operation but before
+  `ddl_log_drop_db()`, and proves the schema directory remains present,
+  MariaDB's early `db.opt` cleanup is visible, exactly one table remains
+  readable/writable, the completed table drop remains absent, and
+  ownerless/native reopen before and after forced `.shm` rebuild preserve that
+  durable partial state.
   The charset-convert follow-up classifies focused
   `ALTER TABLE ... CONVERT TO CHARACTER SET ... COLLATE ...` as recoverable
   dictionary DDL, kills the writer at `dictionary-before-finish` with a live
@@ -7688,8 +7695,7 @@ subsystems that this mode needs:
      charset boundaries, broader metadata-only DDL, broader mixed temporary/permanent
      rename matrices, broader FK plus non-FK ALTER lists beyond the focused
      ADD COLUMN case, broader schema option variants beyond the focused
-     named/current-schema schema-default/comment boundaries, schema-drop
-     internal drop-loop cases,
+     named/current-schema schema-default/comment boundaries,
      and broader DDL file lifecycle while
      peers remain live. Partition truncate
      remains governed by the ownerless partition-DDL rejection policy, cyclic

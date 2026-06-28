@@ -1114,6 +1114,10 @@ if(BUILD_TESTING)
           dictionary-cross-schema-multi-drop-loop-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-schema-drop-loop-crash
+        COMMAND mylite_ownerless_cross_process_sql_test dictionary-schema-drop-loop-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-schema-comment-crash
         COMMAND mylite_ownerless_cross_process_sql_test dictionary-schema-comment-crash
       )
@@ -1611,6 +1615,7 @@ if(BUILD_TESTING)
         libmylite.ownerless-dictionary-cross-schema-multi-drop-crash
         libmylite.ownerless-dictionary-multi-drop-loop-crash
         libmylite.ownerless-dictionary-cross-schema-multi-drop-loop-crash
+        libmylite.ownerless-dictionary-schema-drop-loop-crash
         libmylite.ownerless-dictionary-schema-comment-crash
         libmylite.ownerless-dictionary-current-schema-comment-crash
         libmylite.ownerless-dictionary-current-schema-alter-crash
