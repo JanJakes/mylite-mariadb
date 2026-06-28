@@ -544,6 +544,10 @@ if(BUILD_TESTING)
         COMMAND mylite_ownerless_cross_process_sql_test temporary-drop-crash
       )
       add_test(
+        NAME libmylite.ownerless-temporary-truncate-crash
+        COMMAND mylite_ownerless_cross_process_sql_test temporary-truncate-crash
+      )
+      add_test(
         NAME libmylite.ownerless-temporary-rename-crash
         COMMAND mylite_ownerless_cross_process_sql_test temporary-rename-crash
       )
@@ -1627,6 +1631,7 @@ if(BUILD_TESTING)
       )
       set_tests_properties(
         libmylite.ownerless-temporary-drop-crash
+        libmylite.ownerless-temporary-truncate-crash
         libmylite.ownerless-temporary-rename-crash
         libmylite.ownerless-temporary-alter-rename-crash
         libmylite.ownerless-temporary-multi-rename-crash

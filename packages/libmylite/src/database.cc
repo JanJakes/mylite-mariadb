@@ -19545,13 +19545,31 @@ bool ownerless_temporary_table_rename_recovery_statement(
     return !old_table_name.empty() && ownerless_tracked_temporary_table_name(db, old_table_name);
 }
 
+bool ownerless_temporary_table_truncate_recovery_statement(
+    const mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    if (!token_equals(ownerless_raw_identifier_token_at(tokens, 0), "TRUNCATE")) {
+        return false;
+    }
+
+    std::size_t index = 1U;
+    if (token_equals(ownerless_raw_identifier_token_at(tokens, index), "TABLE")) {
+        ++index;
+    }
+    const std::string table_name = ownerless_table_name_from_token_sequence(tokens, index, &index);
+    return !table_name.empty() && ownerless_tracked_temporary_table_name(db, table_name) &&
+           consume_ownerless_remaining_semicolons(tokens, index);
+}
+
 bool ownerless_temporary_table_recovery_statement(
     const mylite_db &db,
     const SqlPolicyTokens &tokens
 ) {
     return ownerless_simple_temporary_create_table_recovery_statement(tokens) ||
            ownerless_simple_temporary_drop_table_recovery_statement(tokens) ||
-           ownerless_temporary_table_rename_recovery_statement(db, tokens);
+           ownerless_temporary_table_rename_recovery_statement(db, tokens) ||
+           ownerless_temporary_table_truncate_recovery_statement(db, tokens);
 }
 
 std::string ownerless_temporary_table_name_from_ddl(const SqlPolicyTokens &tokens) {

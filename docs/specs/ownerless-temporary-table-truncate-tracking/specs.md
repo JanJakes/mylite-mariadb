@@ -111,6 +111,7 @@ production selector, one CTest registration, and documentation.
 
 ## Risks And Follow-Up
 
-- Temporary-table truncate hook crash recovery remains planned separately.
+- Hook crash recovery during temporary-table truncate is covered separately by
+  `ownerless-temporary-truncate-crash-recovery`.
 - Broader temporary DDL matrices and randomized DDL external oracle stress
   remain planned.

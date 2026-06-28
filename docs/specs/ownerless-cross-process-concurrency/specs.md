@@ -3538,10 +3538,15 @@ Tasks:
    sessions are gone. Focused production coverage now also truncates a
    same-named temporary table, proves the temporary name remains tracked until
    `DROP TEMPORARY TABLE`, and verifies peer permanent-table updates become
-   visible only after the temporary table is dropped. Opt-in stress coverage now
-   churns same-named
-   InnoDB temporary tables across several ownerless processes and verifies the
-   name can be reused for a durable table after the temporary sessions close.
+   visible only after the temporary table is dropped. Hook-build coverage now
+   routes tracked temporary truncate through the temporary metadata-only
+   dictionary recovery kind, kills the writer before ownerless dictionary
+   finish while another ownerless peer remains live, retains the native
+   file-operation checkpoint marker until final no-live recovery, and verifies
+   the permanent table remains writable. Opt-in stress coverage now churns
+   same-named InnoDB temporary tables across several ownerless processes and
+   verifies the name can be reused for a durable table after the temporary
+   sessions close.
 4. Add dictionary generation invalidation in every process.
    The current ownerless runtime has a directory-backed odd/even dictionary
    generation. Ownerless DDL marks the generation active before execution and
