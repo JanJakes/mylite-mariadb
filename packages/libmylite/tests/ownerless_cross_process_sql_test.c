@@ -1043,6 +1043,7 @@ static void test_ownerless_rejects_partition_ddl(void);
 static void test_ownerless_rejects_tablespace_management_ddl(void);
 static void test_ownerless_temporary_tablespace_allows_peer_temp_tables(void);
 static void test_crashed_ownerless_temporary_table_peer_is_recovered(void);
+static void test_ownerless_temporary_mixed_if_exists_warnings(void);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void test_crashed_temporary_drop_dictionary_ddl_recovers_permanent_table(void);
 static void test_crashed_temporary_truncate_dictionary_ddl_recovers_permanent_table(void);
@@ -1052,6 +1053,8 @@ static void test_crashed_temporary_multi_rename_dictionary_ddl_recovers_permanen
 static void test_crashed_temporary_mixed_rename_dictionary_ddl_recovers_permanent_table(void);
 static void test_crashed_temporary_mixed_rename_reverse_recovers_permanent_table(void);
 static void test_crashed_temporary_mixed_chain_rename_recovers_permanent_table(void);
+static void test_crashed_temporary_mixed_if_exists_rename_recovers_perm(void);
+static void test_crashed_temporary_mixed_if_exists_reverse_recovers_perm(void);
 #endif
 static void test_ownerless_rejects_non_innodb_engines(void);
 
@@ -1884,6 +1887,14 @@ static void temporary_mixed_rename_reverse_until_dictionary_finish_fault(
     int ready_fd
 );
 static void temporary_mixed_chain_rename_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void temporary_mixed_if_exists_rename_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void temporary_mixed_if_exists_rename_reverse_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -3968,6 +3979,13 @@ static void assert_missing_source_rename_warnings3(
     const char *second_source,
     const char *third_source
 );
+static void create_temporary_mixed_if_exists_durable_base(mylite_db *db);
+static void assert_temporary_mixed_if_exists_durable_state(
+    open_database_paths paths,
+    unsigned flags,
+    unsigned expected_shadow_sum,
+    unsigned expected_perm_sum
+);
 static void assert_ownerless_foreign_key_multi_rename_state(
     open_database_paths paths,
     unsigned flags,
@@ -4416,6 +4434,22 @@ int main(int argc, char **argv) {
     if (argc == 2 && strcmp(argv[1], "temporary-mixed-chain-rename-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_temporary_mixed_chain_rename_recovers_permanent_table();
+#endif
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "temporary-mixed-if-exists-rename") == 0) {
+        test_ownerless_temporary_mixed_if_exists_warnings();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "temporary-mixed-if-exists-rename-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_temporary_mixed_if_exists_rename_recovers_perm();
+#endif
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "temporary-mixed-if-exists-rename-reverse-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_temporary_mixed_if_exists_reverse_recovers_perm();
 #endif
         return 0;
     }
@@ -6881,6 +6915,9 @@ int main(int argc, char **argv) {
             "temporary-alter-rename-crash|temporary-multi-rename-crash|"
             "temporary-mixed-rename-crash|"
             "temporary-mixed-rename-reverse-crash|"
+            "temporary-mixed-if-exists-rename|"
+            "temporary-mixed-if-exists-rename-crash|"
+            "temporary-mixed-if-exists-rename-reverse-crash|"
             "checksum-stress|"
             "tx-stress|random-tx-stress|fk-graph-stress|"
             "child-failure-cleanup|"
@@ -7478,6 +7515,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(
         test_ownerless_temporary_table_truncate_tracking_preserves_permanent_table
     ),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_temporary_mixed_if_exists_warnings),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_rejects_non_innodb_engines),
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
     OWNERLESS_SQL_TEST_CASE(test_crashed_page_publish_before_append_rebuilds_ownerless_state),
@@ -47184,6 +47222,77 @@ static void test_crashed_temporary_mixed_chain_rename_recovers_permanent_table(v
     remove_tree(root);
     free(root);
 }
+
+static void run_crashed_temporary_mixed_if_exists_rename_recovers_perm(
+    ownerless_dictionary_fault_writer_fn writer_fn,
+    const char *database_basename
+) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, database_basename);
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    create_temporary_mixed_if_exists_durable_base(db);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(paths, writer_fn);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert_temporary_mixed_if_exists_durable_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        10U,
+        20U
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "UPDATE app.ownerless_tmp_if_exists_shadow SET value = 15 WHERE id = 1");
+    exec_ok(db, "UPDATE app.ownerless_tmp_if_exists_perm_dst SET value = 30 WHERE id = 1");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    release_ownerless_live_peer(&live_peer);
+
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert_temporary_mixed_if_exists_durable_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        15U,
+        30U
+    );
+    assert_temporary_mixed_if_exists_durable_state(paths, MYLITE_OPEN_READWRITE, 15U, 30U);
+    remove_concurrency_shm(database_path);
+    assert_temporary_mixed_if_exists_durable_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        15U,
+        30U
+    );
+    assert_temporary_mixed_if_exists_durable_state(paths, MYLITE_OPEN_READWRITE, 15U, 30U);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_crashed_temporary_mixed_if_exists_rename_recovers_perm(void) {
+    run_crashed_temporary_mixed_if_exists_rename_recovers_perm(
+        temporary_mixed_if_exists_rename_until_dictionary_finish_fault,
+        "ownerless-temporary-mixed-if-exists-rn-crash.mylite"
+    );
+}
+
+static void test_crashed_temporary_mixed_if_exists_reverse_recovers_perm(void) {
+    run_crashed_temporary_mixed_if_exists_rename_recovers_perm(
+        temporary_mixed_if_exists_rename_reverse_until_dictionary_finish_fault,
+        "ownerless-temporary-mixed-if-exists-reverse-rn-crash.mylite"
+    );
+}
 #endif
 
 static void test_ownerless_rejects_non_innodb_engines(void) {
@@ -47331,6 +47440,158 @@ static void assert_missing_source_rename_warnings3(
     const char *expected_sources[] = {first_source, second_source, third_source};
 
     assert_missing_source_rename_warning_list(db, expected_sources, 3U);
+}
+
+static void assert_temporary_mixed_if_exists_missing_targets_absent(mylite_db *db) {
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name IN ("
+            "'ownerless_tmp_if_exists_missing_before_dst', "
+            "'ownerless_tmp_if_exists_missing_after_dst')"
+        ) == 0U
+    );
+}
+
+static void assert_temporary_mixed_if_exists_durable_state(
+    open_database_paths paths,
+    unsigned flags,
+    unsigned expected_shadow_sum,
+    unsigned expected_perm_sum
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_tmp_if_exists_shadow") ==
+        expected_shadow_sum
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_tmp_if_exists_shadow_moved'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_tmp_if_exists_perm_src'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_tmp_if_exists_perm_dst") ==
+        expected_perm_sum
+    );
+    assert_temporary_mixed_if_exists_missing_targets_absent(db);
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void create_temporary_mixed_if_exists_durable_base(mylite_db *db) {
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_tmp_if_exists_shadow ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_tmp_if_exists_shadow VALUES (1, 10)");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_tmp_if_exists_perm_src ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_tmp_if_exists_perm_src VALUES (1, 20)");
+}
+
+static const char *temporary_mixed_if_exists_rename_sql(void) {
+    return "RENAME TABLE IF EXISTS "
+           "app.ownerless_tmp_if_exists_missing_before "
+           "TO app.ownerless_tmp_if_exists_missing_before_dst, "
+           "app.ownerless_tmp_if_exists_shadow "
+           "TO app.ownerless_tmp_if_exists_shadow_moved, "
+           "app.ownerless_tmp_if_exists_perm_src "
+           "TO app.ownerless_tmp_if_exists_perm_dst, "
+           "app.ownerless_tmp_if_exists_missing_after "
+           "TO app.ownerless_tmp_if_exists_missing_after_dst";
+}
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static const char *temporary_mixed_if_exists_rename_reverse_sql(void) {
+    return "RENAME TABLE IF EXISTS "
+           "app.ownerless_tmp_if_exists_missing_before "
+           "TO app.ownerless_tmp_if_exists_missing_before_dst, "
+           "app.ownerless_tmp_if_exists_perm_src "
+           "TO app.ownerless_tmp_if_exists_perm_dst, "
+           "app.ownerless_tmp_if_exists_shadow "
+           "TO app.ownerless_tmp_if_exists_shadow_moved, "
+           "app.ownerless_tmp_if_exists_missing_after "
+           "TO app.ownerless_tmp_if_exists_missing_after_dst";
+}
+#endif
+
+static void test_ownerless_temporary_mixed_if_exists_warnings(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-temporary-mixed-if-exists-rename.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    create_temporary_mixed_if_exists_durable_base(db);
+    exec_ok(
+        db,
+        "CREATE TEMPORARY TABLE app.ownerless_tmp_if_exists_shadow ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_tmp_if_exists_shadow VALUES (1, 99)");
+
+    exec_ok(db, temporary_mixed_if_exists_rename_sql());
+    assert_missing_source_rename_warnings(
+        db,
+        "ownerless_tmp_if_exists_missing_before",
+        "ownerless_tmp_if_exists_missing_after"
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_tmp_if_exists_shadow_moved") == 99U
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_tmp_if_exists_shadow") == 10U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_tmp_if_exists_perm_dst") == 20U
+    );
+    assert_temporary_mixed_if_exists_missing_targets_absent(db);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_temporary_mixed_if_exists_durable_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        10U,
+        20U
+    );
+    assert_temporary_mixed_if_exists_durable_state(paths, MYLITE_OPEN_READWRITE, 10U, 20U);
+    remove_concurrency_shm(database_path);
+    assert_temporary_mixed_if_exists_durable_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        10U,
+        20U
+    );
+    assert_temporary_mixed_if_exists_durable_state(paths, MYLITE_OPEN_READWRITE, 10U, 20U);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
 }
 
 static void test_ownerless_rename_if_exists_missing_source_noop_preserves_warnings(void) {
@@ -82077,6 +82338,56 @@ static void temporary_mixed_chain_rename_until_dictionary_finish_fault(
         "app.ownerless_temp_mixed_chain_mid "
         "TO app.ownerless_temp_mixed_chain_target"
     );
+    (void)mylite_close(db);
+    _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
+}
+
+static void temporary_mixed_if_exists_rename_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    mylite_db *db;
+    char ready_fd_value[32];
+
+    assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", ready_fd) > 0);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TEMPORARY TABLE app.ownerless_tmp_if_exists_shadow ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_tmp_if_exists_shadow VALUES (1, 99)");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_tmp_if_exists_shadow") == 99U);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "dictionary-before-finish", 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
+    exec_ok(db, temporary_mixed_if_exists_rename_sql());
+    (void)mylite_close(db);
+    _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
+}
+
+static void temporary_mixed_if_exists_rename_reverse_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    mylite_db *db;
+    char ready_fd_value[32];
+
+    assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", ready_fd) > 0);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TEMPORARY TABLE app.ownerless_tmp_if_exists_shadow ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_tmp_if_exists_shadow VALUES (1, 99)");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_tmp_if_exists_shadow") == 99U);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "dictionary-before-finish", 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
+    exec_ok(db, temporary_mixed_if_exists_rename_reverse_sql());
     (void)mylite_close(db);
     _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
 }
