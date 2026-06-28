@@ -1451,6 +1451,24 @@ if(BUILD_TESTING)
           dictionary-generated-column-failed-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-generated-column-drop-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-generated-column-drop-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-generated-column-modify-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-generated-column-modify-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-generated-column-change-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-generated-column-change-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-trigger-definer-crash
         COMMAND mylite_ownerless_cross_process_sql_test dictionary-trigger-definer-crash
       )
@@ -2176,6 +2194,9 @@ if(BUILD_TESTING)
         libmylite.ownerless-dictionary-generated-column-foreign-key-drop-crash
         libmylite.ownerless-dictionary-generated-column-success-crash
         libmylite.ownerless-dictionary-generated-column-failed-crash
+        libmylite.ownerless-dictionary-generated-column-drop-crash
+        libmylite.ownerless-dictionary-generated-column-modify-crash
+        libmylite.ownerless-dictionary-generated-column-change-crash
         libmylite.ownerless-dictionary-trigger-definer-crash
         libmylite.ownerless-dictionary-trigger-order-crash
         libmylite.ownerless-dictionary-trigger-invalid-dependency-crash

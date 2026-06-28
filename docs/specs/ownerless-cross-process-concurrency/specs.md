@@ -2833,7 +2833,9 @@ Tasks:
    instant FIRST/AFTER stored-column placement including `LOCK=DEFAULT`,
    `LOCK=SHARED`, and `LOCK=EXCLUSIVE` variants, instant column rename, virtual
    generated-column add/drop including `LOCK=SHARED`/`LOCK=EXCLUSIVE`
-   variants, `CREATE TABLE ... LIKE`, and
+   variants, hook-build generated stored/virtual column DROP, MODIFY, and CHANGE
+   live recovery at the dictionary-before-finish crash boundary,
+   `CREATE TABLE ... LIKE`, and
    `CREATE TABLE ... SELECT`. Hook-build crash coverage now kills
    representative `CREATE TABLE ... LIKE` and CTAS writers after native
    destination table creation but before ownerless dictionary finish. The LIKE

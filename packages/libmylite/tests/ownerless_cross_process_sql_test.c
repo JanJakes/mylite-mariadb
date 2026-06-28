@@ -1064,6 +1064,12 @@ typedef enum ownerless_mixed_fk_column_mutation_variant {
     OWNERLESS_MIXED_FK_COLUMN_CHANGE,
     OWNERLESS_MIXED_FK_COLUMN_RENAME
 } ownerless_mixed_fk_column_mutation_variant;
+
+typedef enum ownerless_generated_column_mutation_variant {
+    OWNERLESS_GENERATED_COLUMN_DROP,
+    OWNERLESS_GENERATED_COLUMN_MODIFY,
+    OWNERLESS_GENERATED_COLUMN_CHANGE
+} ownerless_generated_column_mutation_variant;
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void test_crashed_page_publish_before_append_rebuilds_ownerless_state(void);
 static void test_crashed_page_publish_rebuilds_ownerless_state(void);
@@ -1191,6 +1197,9 @@ static void test_crashed_generated_column_foreign_key_drop_dictionary_ddl_recove
     void
 );
 static void test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_state(void);
+static void test_crashed_generated_column_drop_dictionary_ddl_recovers_metadata(void);
+static void test_crashed_generated_column_modify_dictionary_ddl_recovers_metadata(void);
+static void test_crashed_generated_column_change_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_view_create_dictionary_ddl_recovers_view(void);
 static void test_crashed_view_drop_dictionary_ddl_recovers_absent_view(void);
 static void test_crashed_view_idempotent_create_dictionary_ddl_preserves_view(void);
@@ -2248,6 +2257,18 @@ static void generated_column_create_until_dictionary_finish_fault(
     int ready_fd
 );
 static void generated_column_alter_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void generated_column_drop_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void generated_column_modify_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void generated_column_change_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -3898,6 +3919,11 @@ static void assert_ownerless_trigger_stored_function_crash_ddl_state(
 static void assert_ownerless_generated_column_success_crash_state(
     open_database_paths paths,
     unsigned flags
+);
+static void assert_ownerless_generated_column_mutation_crash_state(
+    open_database_paths paths,
+    unsigned flags,
+    ownerless_generated_column_mutation_variant variant
 );
 static void assert_ownerless_generated_column_foreign_key_crash_state(
     open_database_paths paths,
@@ -6241,6 +6267,24 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-generated-column-drop-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_generated_column_drop_dictionary_ddl_recovers_metadata();
+#endif
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "dictionary-generated-column-modify-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_generated_column_modify_dictionary_ddl_recovers_metadata();
+#endif
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "dictionary-generated-column-change-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_generated_column_change_dictionary_ddl_recovers_metadata();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-trigger-idempotent-create-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_trigger_idempotent_create_dictionary_ddl_preserves_trigger();
@@ -6845,6 +6889,9 @@ int main(int argc, char **argv) {
             test_crashed_generated_fk_action_row_step_third_after_recovers_state,
             test_crashed_generated_fk_action_row_step_sixth_after_recovers_state,
             test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_state,
+            test_crashed_generated_column_drop_dictionary_ddl_recovers_metadata,
+            test_crashed_generated_column_modify_dictionary_ddl_recovers_metadata,
+            test_crashed_generated_column_change_dictionary_ddl_recovers_metadata,
             test_crashed_trigger_idempotent_create_dictionary_ddl_preserves_trigger,
             test_crashed_trigger_idempotent_drop_dictionary_ddl_preserves_trigger,
             test_crashed_auto_increment_dictionary_ddl_recovers_high_water,
@@ -7165,6 +7212,9 @@ int main(int argc, char **argv) {
             "dictionary-generated-column-foreign-key-crash|"
             "dictionary-generated-column-foreign-key-drop-crash|"
             "dictionary-generated-column-failed-crash|"
+            "dictionary-generated-column-drop-crash|"
+            "dictionary-generated-column-modify-crash|"
+            "dictionary-generated-column-change-crash|"
             "dictionary-trigger-idempotent-create-crash|"
             "dictionary-trigger-idempotent-drop-crash|"
             "dictionary-auto-inc-crash|"
@@ -7675,6 +7725,9 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_crashed_trigger_stored_function_dictionary_ddl_recovers_policy),
     OWNERLESS_SQL_TEST_CASE(test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_state
     ),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_generated_column_drop_dictionary_ddl_recovers_metadata),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_generated_column_modify_dictionary_ddl_recovers_metadata),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_generated_column_change_dictionary_ddl_recovers_metadata),
     OWNERLESS_SQL_TEST_CASE(test_crashed_trigger_idempotent_create_dictionary_ddl_preserves_trigger
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_trigger_idempotent_drop_dictionary_ddl_preserves_trigger),
@@ -57085,7 +57138,8 @@ static void test_crashed_foreign_key_cross_schema_multi_rename_dictionary_ddl_re
     free(root);
 }
 
-static void test_crashed_fk_cross_schema_rename_if_exists_missing_source_recovers_constraints(void
+static void test_crashed_fk_cross_schema_rename_if_exists_missing_source_recovers_constraints(
+    void
 ) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -59751,6 +59805,401 @@ static void test_crashed_table_idempotent_multi_existing_drop_dictionary_ddl_rec
     free(runtime_root);
     remove_tree(root);
     free(root);
+}
+
+static void create_ownerless_generated_column_mutation_crash_base(
+    mylite_db *db,
+    ownerless_generated_column_mutation_variant variant
+) {
+    switch (variant) {
+    case OWNERLESS_GENERATED_COLUMN_DROP:
+        exec_ok(
+            db,
+            "CREATE TABLE app.ownerless_generated_drop_crash_base ("
+            "id INT NOT NULL PRIMARY KEY, "
+            "base_value INT NOT NULL, "
+            "stored_value INT GENERATED ALWAYS AS (base_value + 7) STORED, "
+            "virtual_value INT GENERATED ALWAYS AS (base_value * 2) VIRTUAL"
+            ") ENGINE=InnoDB"
+        );
+        exec_ok(
+            db,
+            "INSERT INTO app.ownerless_generated_drop_crash_base (id, base_value) "
+            "VALUES (1, 10), (2, 20), (3, 30)"
+        );
+        break;
+
+    case OWNERLESS_GENERATED_COLUMN_MODIFY:
+        exec_ok(
+            db,
+            "CREATE TABLE app.ownerless_generated_modify_crash_base ("
+            "id INT NOT NULL PRIMARY KEY, "
+            "base_value INT NOT NULL, "
+            "stored_value INT GENERATED ALWAYS AS (base_value + 3) STORED, "
+            "virtual_value INT GENERATED ALWAYS AS (base_value * 3) VIRTUAL"
+            ") ENGINE=InnoDB"
+        );
+        exec_ok(
+            db,
+            "INSERT INTO app.ownerless_generated_modify_crash_base (id, base_value) "
+            "VALUES (1, 10), (2, 20), (3, 30)"
+        );
+        break;
+
+    case OWNERLESS_GENERATED_COLUMN_CHANGE:
+        exec_ok(
+            db,
+            "CREATE TABLE app.ownerless_generated_change_crash_base ("
+            "id INT NOT NULL PRIMARY KEY, "
+            "base_value INT NOT NULL, "
+            "stored_value INT GENERATED ALWAYS AS (base_value + 3) STORED, "
+            "virtual_value INT GENERATED ALWAYS AS (base_value * 3) VIRTUAL"
+            ") ENGINE=InnoDB"
+        );
+        exec_ok(
+            db,
+            "INSERT INTO app.ownerless_generated_change_crash_base (id, base_value) "
+            "VALUES (1, 10), (2, 20), (3, 30)"
+        );
+        break;
+    }
+}
+
+static void assert_ownerless_generated_column_mutation_pre_crash_state(
+    mylite_db *db,
+    ownerless_generated_column_mutation_variant variant
+) {
+    switch (variant) {
+    case OWNERLESS_GENERATED_COLUMN_DROP:
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_generated_drop_crash_base' "
+                "AND column_name IN ('stored_value', 'virtual_value')"
+            ) == 2U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT SUM(stored_value) FROM app.ownerless_generated_drop_crash_base"
+            ) == 81U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT SUM(virtual_value) FROM app.ownerless_generated_drop_crash_base"
+            ) == 120U
+        );
+        break;
+
+    case OWNERLESS_GENERATED_COLUMN_MODIFY:
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_generated_modify_crash_base' "
+                "AND column_name IN ('stored_value', 'virtual_value') "
+                "AND data_type = 'int'"
+            ) == 2U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT SUM(stored_value) FROM app.ownerless_generated_modify_crash_base"
+            ) == 69U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT SUM(virtual_value) FROM app.ownerless_generated_modify_crash_base"
+            ) == 180U
+        );
+        break;
+
+    case OWNERLESS_GENERATED_COLUMN_CHANGE:
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_generated_change_crash_base' "
+                "AND column_name IN ('stored_value', 'virtual_value') "
+                "AND data_type = 'int'"
+            ) == 2U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_generated_change_crash_base' "
+                "AND column_name IN ('stored_changed', 'virtual_changed')"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT SUM(stored_value) FROM app.ownerless_generated_change_crash_base"
+            ) == 69U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT SUM(virtual_value) FROM app.ownerless_generated_change_crash_base"
+            ) == 180U
+        );
+        break;
+    }
+}
+
+static void assert_ownerless_generated_column_mutation_db_state(
+    mylite_db *db,
+    ownerless_generated_column_mutation_variant variant,
+    unsigned long long expected_count,
+    unsigned long long expected_base_sum
+) {
+    switch (variant) {
+    case OWNERLESS_GENERATED_COLUMN_DROP:
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_generated_drop_crash_base' "
+                "AND column_name IN ('stored_value', 'virtual_value')"
+            ) == 0U
+        );
+        assert(
+            exec_status(
+                db,
+                "SELECT SUM(stored_value) FROM app.ownerless_generated_drop_crash_base",
+                NULL
+            ) != MYLITE_OK
+        );
+        assert(
+            exec_status(
+                db,
+                "SELECT SUM(virtual_value) FROM app.ownerless_generated_drop_crash_base",
+                NULL
+            ) != MYLITE_OK
+        );
+        assert(
+            query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_drop_crash_base") ==
+            expected_count
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT SUM(base_value) FROM app.ownerless_generated_drop_crash_base"
+            ) == expected_base_sum
+        );
+        break;
+
+    case OWNERLESS_GENERATED_COLUMN_MODIFY:
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_generated_modify_crash_base' "
+                "AND column_name IN ('stored_value', 'virtual_value') "
+                "AND data_type = 'bigint'"
+            ) == 2U
+        );
+        assert(
+            query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_modify_crash_base") ==
+            expected_count
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT SUM(base_value) FROM app.ownerless_generated_modify_crash_base"
+            ) == expected_base_sum
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT SUM(stored_value) FROM app.ownerless_generated_modify_crash_base"
+            ) == expected_base_sum + (expected_count * 11U)
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT SUM(virtual_value) FROM app.ownerless_generated_modify_crash_base"
+            ) == expected_base_sum * 5U
+        );
+        break;
+
+    case OWNERLESS_GENERATED_COLUMN_CHANGE:
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_generated_change_crash_base' "
+                "AND column_name IN ('stored_value', 'virtual_value')"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_generated_change_crash_base' "
+                "AND column_name IN ('stored_changed', 'virtual_changed') "
+                "AND data_type = 'bigint'"
+            ) == 2U
+        );
+        assert(
+            exec_status(
+                db,
+                "SELECT SUM(stored_value) FROM app.ownerless_generated_change_crash_base",
+                NULL
+            ) != MYLITE_OK
+        );
+        assert(
+            exec_status(
+                db,
+                "SELECT SUM(virtual_value) FROM app.ownerless_generated_change_crash_base",
+                NULL
+            ) != MYLITE_OK
+        );
+        assert(
+            query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_change_crash_base") ==
+            expected_count
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT SUM(base_value) FROM app.ownerless_generated_change_crash_base"
+            ) == expected_base_sum
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT SUM(stored_changed) FROM app.ownerless_generated_change_crash_base"
+            ) == expected_base_sum + (expected_count * 13U)
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT SUM(virtual_changed) FROM app.ownerless_generated_change_crash_base"
+            ) == expected_base_sum * 7U
+        );
+        break;
+    }
+}
+
+static void insert_ownerless_generated_column_mutation_probe(
+    mylite_db *db,
+    ownerless_generated_column_mutation_variant variant
+) {
+    switch (variant) {
+    case OWNERLESS_GENERATED_COLUMN_DROP:
+        exec_ok(
+            db,
+            "INSERT INTO app.ownerless_generated_drop_crash_base (id, base_value) "
+            "VALUES (4, 40)"
+        );
+        break;
+
+    case OWNERLESS_GENERATED_COLUMN_MODIFY:
+        exec_ok(
+            db,
+            "INSERT INTO app.ownerless_generated_modify_crash_base (id, base_value) "
+            "VALUES (4, 40)"
+        );
+        break;
+
+    case OWNERLESS_GENERATED_COLUMN_CHANGE:
+        exec_ok(
+            db,
+            "INSERT INTO app.ownerless_generated_change_crash_base (id, base_value) "
+            "VALUES (4, 40)"
+        );
+        break;
+    }
+}
+
+static void run_crashed_generated_column_mutation_dictionary_ddl_recovers_metadata(
+    ownerless_generated_column_mutation_variant variant,
+    ownerless_dictionary_fault_writer_fn writer_fn,
+    const char *database_basename
+) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, database_basename);
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    create_ownerless_generated_column_mutation_crash_base(db, variant);
+    exec_ok(db, "COMMIT");
+    assert_ownerless_generated_column_mutation_pre_crash_state(db, variant);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(paths, writer_fn);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert_ownerless_generated_column_mutation_db_state(db, variant, 3U, 60U);
+    insert_ownerless_generated_column_mutation_probe(db, variant);
+    assert_ownerless_generated_column_mutation_db_state(db, variant, 4U, 100U);
+    exec_ok(db, "COMMIT");
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    release_ownerless_live_peer(&live_peer);
+
+    assert_ownerless_generated_column_mutation_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        variant
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert_ownerless_generated_column_mutation_crash_state(paths, MYLITE_OPEN_READWRITE, variant);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_generated_column_mutation_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        variant
+    );
+    assert_ownerless_generated_column_mutation_crash_state(paths, MYLITE_OPEN_READWRITE, variant);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_crashed_generated_column_drop_dictionary_ddl_recovers_metadata(void) {
+    run_crashed_generated_column_mutation_dictionary_ddl_recovers_metadata(
+        OWNERLESS_GENERATED_COLUMN_DROP,
+        generated_column_drop_until_dictionary_finish_fault,
+        "ownerless-dictionary-generated-column-drop-crash.mylite"
+    );
+}
+
+static void test_crashed_generated_column_modify_dictionary_ddl_recovers_metadata(void) {
+    run_crashed_generated_column_mutation_dictionary_ddl_recovers_metadata(
+        OWNERLESS_GENERATED_COLUMN_MODIFY,
+        generated_column_modify_until_dictionary_finish_fault,
+        "ownerless-dictionary-generated-column-modify-crash.mylite"
+    );
+}
+
+static void test_crashed_generated_column_change_dictionary_ddl_recovers_metadata(void) {
+    run_crashed_generated_column_mutation_dictionary_ddl_recovers_metadata(
+        OWNERLESS_GENERATED_COLUMN_CHANGE,
+        generated_column_change_until_dictionary_finish_fault,
+        "ownerless-dictionary-generated-column-change-crash.mylite"
+    );
 }
 
 static void test_crashed_generated_column_success_dictionary_ddl_recovers_metadata(void) {
@@ -83784,6 +84233,50 @@ static void generated_column_alter_until_dictionary_finish_fault(
     );
 }
 
+static void generated_column_drop_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_generated_drop_crash_base "
+        "DROP COLUMN virtual_value, "
+        "DROP COLUMN stored_value"
+    );
+}
+
+static void generated_column_modify_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_generated_modify_crash_base "
+        "MODIFY COLUMN stored_value BIGINT GENERATED ALWAYS AS (base_value + 11) STORED, "
+        "MODIFY COLUMN virtual_value BIGINT GENERATED ALWAYS AS (base_value * 5) VIRTUAL"
+    );
+}
+
+static void generated_column_change_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_generated_change_crash_base "
+        "CHANGE COLUMN stored_value stored_changed BIGINT GENERATED ALWAYS AS "
+        "(base_value + 13) STORED, "
+        "CHANGE COLUMN virtual_value virtual_changed BIGINT GENERATED ALWAYS AS "
+        "(base_value * 7) VIRTUAL"
+    );
+}
+
 static void generated_column_index_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -89826,6 +90319,17 @@ static void assert_ownerless_generated_column_success_crash_state(
             "WHERE virtual_value >= 20"
         ) == 25U
     );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_generated_column_mutation_crash_state(
+    open_database_paths paths,
+    unsigned flags,
+    ownerless_generated_column_mutation_variant variant
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert_ownerless_generated_column_mutation_db_state(db, variant, 4U, 100U);
     assert(mylite_close(db) == MYLITE_OK);
 }
 

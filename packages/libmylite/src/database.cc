@@ -2316,11 +2316,23 @@ bool ownerless_alter_table_drop_column_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 );
+bool ownerless_alter_table_drop_generated_column_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
 bool ownerless_alter_table_modify_column_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 );
+bool ownerless_alter_table_modify_generated_column_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
 bool ownerless_alter_table_change_column_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
+bool ownerless_alter_table_change_generated_column_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 );
@@ -2434,6 +2446,13 @@ bool ownerless_table_engine_matches(
     bool *out_matches
 );
 bool ownerless_column_metadata_lookup(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    std::string_view column_name,
+    bool *out_exists
+);
+bool ownerless_generated_column_metadata_lookup(
     mylite_db &db,
     std::string_view schema_name,
     std::string_view table_name,
@@ -15817,10 +15836,19 @@ std::uint32_t ownerless_dictionary_recovery_kind_for_statement(
     if (ownerless_alter_table_drop_column_recovery_statement(db, tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_COLUMN;
     }
+    if (ownerless_alter_table_drop_generated_column_recovery_statement(db, tokens)) {
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_COLUMN;
+    }
     if (ownerless_alter_table_modify_column_recovery_statement(db, tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_MODIFY_COLUMN;
     }
+    if (ownerless_alter_table_modify_generated_column_recovery_statement(db, tokens)) {
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_MODIFY_COLUMN;
+    }
     if (ownerless_alter_table_change_column_recovery_statement(db, tokens)) {
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_CHANGE_COLUMN;
+    }
+    if (ownerless_alter_table_change_generated_column_recovery_statement(db, tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_CHANGE_COLUMN;
     }
     if (ownerless_alter_table_rename_column_recovery_statement(db, tokens)) {
@@ -15986,6 +16014,153 @@ bool ownerless_create_trigger_recovery_statement(const SqlPolicyTokens &tokens) 
     return true;
 }
 
+bool ownerless_generated_column_definition_uses_rejected_function_token(std::string_view token) {
+    return token_in(token, "RAND", "UUID", "UUID_SHORT") ||
+           token_in(token, "NOW", "CURRENT_TIMESTAMP", "CURRENT_TIME", "CURRENT_DATE") ||
+           token_in(token, "DATABASE", "USER", "VERSION", "CONNECTION_ID") ||
+           token_in(token, "FOUND_ROWS", "LAST_INSERT_ID", "ROW_COUNT") ||
+           token_in(token, "GET_LOCK", "SLEEP", "AES_ENCRYPT", "SUM") ||
+           token_equals(token, "SELECT");
+}
+
+bool ownerless_create_table_has_generated_column_recovery_disqualifier(
+    const SqlPolicyTokens &tokens
+) {
+    bool has_generated_column = false;
+    for (std::size_t index = 0U; index < tokens.count; ++index) {
+        if (token_equals(tokens.values[index], "GENERATED")) {
+            has_generated_column = true;
+            break;
+        }
+    }
+    if (!has_generated_column) {
+        return false;
+    }
+
+    for (std::size_t index = 0U; index < tokens.count; ++index) {
+        if (ownerless_generated_column_definition_uses_rejected_function_token(
+                identifier_token_at(tokens, index)
+            )) {
+            return true;
+        }
+    }
+
+    std::size_t table_definition_index = 0U;
+    bool table_keyword_seen = false;
+    for (; table_definition_index < tokens.count; ++table_definition_index) {
+        if (token_equals(tokens.values[table_definition_index], "TABLE")) {
+            table_keyword_seen = true;
+            continue;
+        }
+        if (table_keyword_seen && token_equals(tokens.values[table_definition_index], "(")) {
+            break;
+        }
+    }
+    if (table_definition_index >= tokens.count ||
+        !token_equals(tokens.values[table_definition_index], "(")) {
+        return false;
+    }
+
+    std::vector<std::string> generated_columns;
+    std::string current_column_name;
+    bool current_column_generated = false;
+    bool current_column_primary_key = false;
+    std::size_t depth = 1U;
+    bool at_clause_start = true;
+    for (std::size_t index = table_definition_index + 1U; index < tokens.count; ++index) {
+        const std::string_view token = tokens.values[index];
+        if (token_equals(token, "(")) {
+            ++depth;
+            continue;
+        }
+        if (token_equals(token, ")")) {
+            if (depth == 0U) {
+                return false;
+            }
+            --depth;
+            if (depth == 0U) {
+                if (current_column_generated) {
+                    if (current_column_primary_key) {
+                        return true;
+                    }
+                    generated_columns.push_back(current_column_name);
+                }
+                break;
+            }
+            continue;
+        }
+        if (depth != 1U) {
+            continue;
+        }
+        if (token_equals(token, ",")) {
+            if (current_column_generated) {
+                if (current_column_primary_key) {
+                    return true;
+                }
+                generated_columns.push_back(current_column_name);
+            }
+            current_column_name.clear();
+            current_column_generated = false;
+            current_column_primary_key = false;
+            at_clause_start = true;
+            continue;
+        }
+        if (at_clause_start) {
+            at_clause_start = false;
+            if (ownerless_table_identifier_token(token) &&
+                !token_in(token, "CONSTRAINT", "PRIMARY", "UNIQUE") &&
+                !token_in(token, "KEY", "INDEX", "FOREIGN", "CHECK")) {
+                current_column_name = ownerless_normalized_identifier(token);
+            }
+        }
+        if (!current_column_name.empty() && token_equals(token, "GENERATED")) {
+            current_column_generated = true;
+        }
+        if (current_column_generated && token_equals(token, "PRIMARY") &&
+            index + 1U < tokens.count && token_equals(tokens.values[index + 1U], "KEY")) {
+            current_column_primary_key = true;
+        }
+    }
+
+    if (generated_columns.empty()) {
+        return false;
+    }
+    for (std::size_t index = table_definition_index + 1U; index + 2U < tokens.count; ++index) {
+        if (!token_equals(tokens.values[index], "PRIMARY") ||
+            !token_equals(tokens.values[index + 1U], "KEY") ||
+            !token_equals(tokens.values[index + 2U], "(")) {
+            continue;
+        }
+        std::size_t key_part_index = index + 2U;
+        if (!consume_ownerless_key_part_list(tokens, key_part_index, nullptr)) {
+            return false;
+        }
+        std::size_t key_depth = 0U;
+        for (std::size_t scan = index + 2U; scan < key_part_index; ++scan) {
+            if (token_equals(tokens.values[scan], "(")) {
+                ++key_depth;
+                continue;
+            }
+            if (token_equals(tokens.values[scan], ")")) {
+                if (key_depth == 0U) {
+                    return false;
+                }
+                --key_depth;
+                continue;
+            }
+            if (key_depth != 1U || !ownerless_table_identifier_token(tokens.values[scan])) {
+                continue;
+            }
+            const std::string key_column = ownerless_normalized_identifier(tokens.values[scan]);
+            if (std::find(generated_columns.begin(), generated_columns.end(), key_column) !=
+                generated_columns.end()) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 bool ownerless_plain_create_table_recovery_statement(const SqlPolicyTokens &tokens) {
     if (!token_equals(identifier_token_at(tokens, 0), "CREATE")) {
         return false;
@@ -16009,6 +16184,9 @@ bool ownerless_plain_create_table_recovery_statement(const SqlPolicyTokens &toke
         }
     }
     if (!table_keyword_seen) {
+        return false;
+    }
+    if (ownerless_create_table_has_generated_column_recovery_disqualifier(tokens)) {
         return false;
     }
 
@@ -16467,6 +16645,48 @@ bool ownerless_column_metadata_lookup(
                             "WHERE table_schema = '" +
                             escaped_schema + "' AND table_name = '" + escaped_table +
                             "' AND column_name = '" + escaped_column + "'";
+
+    bool query_succeeded = false;
+    bool column_exists = false;
+    if (mysql_query(&db.mysql, sql.c_str()) == 0) {
+        MYSQL_RES *result = mysql_store_result(&db.mysql);
+        if (result != nullptr) {
+            MYSQL_ROW row = mysql_fetch_row(result);
+            column_exists =
+                row != nullptr && row[0] != nullptr && std::strtoull(row[0], nullptr, 10) != 0U;
+            query_succeeded = row != nullptr && row[0] != nullptr;
+            mysql_free_result(result);
+        }
+    }
+    restore_error(db, snapshot);
+    if (!query_succeeded) {
+        return false;
+    }
+    *out_exists = column_exists;
+    return true;
+}
+
+bool ownerless_generated_column_metadata_lookup(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    std::string_view column_name,
+    bool *out_exists
+) {
+    if (out_exists == nullptr || schema_name.empty() || table_name.empty() || column_name.empty()) {
+        return false;
+    }
+    *out_exists = false;
+
+    const ErrorSnapshot snapshot = capture_error(db);
+    const std::string escaped_schema = ownerless_escape_metadata_literal(db, schema_name);
+    const std::string escaped_table = ownerless_escape_metadata_literal(db, table_name);
+    const std::string escaped_column = ownerless_escape_metadata_literal(db, column_name);
+    const std::string sql =
+        "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = '" + escaped_schema +
+        "' AND table_name = '" + escaped_table + "' AND column_name = '" + escaped_column +
+        "' AND ((generation_expression IS NOT NULL AND generation_expression <> '') "
+        "OR extra LIKE '%VIRTUAL GENERATED%' OR extra LIKE '%STORED GENERATED%')";
 
     bool query_succeeded = false;
     bool column_exists = false;
@@ -17872,6 +18092,8 @@ bool consume_ownerless_alter_table_add_column_recovery_clause(
     const std::string column_name = ownerless_normalized_identifier(tokens.values[index]);
     ++index;
     bool has_definition = false;
+    bool generated_definition_uses_rejected_function = false;
+    bool saw_generated_definition = false;
     std::size_t depth = 0U;
     for (; index < tokens.count; ++index) {
         const std::string_view token = tokens.values[index];
@@ -17897,9 +18119,18 @@ bool consume_ownerless_alter_table_add_column_recovery_clause(
             token_equals(token, "REFERENCES") || token_in(token, "SPATIAL", "UNIQUE")) {
             return false;
         }
+        if (token_equals(token, "GENERATED")) {
+            saw_generated_definition = true;
+        }
+        if (saw_generated_definition &&
+            ownerless_generated_column_definition_uses_rejected_function_token(
+                identifier_token_at(tokens, index)
+            )) {
+            generated_definition_uses_rejected_function = true;
+        }
         has_definition = true;
     }
-    if (!has_definition || depth != 0U) {
+    if (!has_definition || generated_definition_uses_rejected_function || depth != 0U) {
         return false;
     }
 
@@ -17949,6 +18180,184 @@ bool consume_ownerless_plain_column_definition_tail(
         has_definition = true;
     }
     return has_definition && depth == 0U;
+}
+
+bool consume_ownerless_generated_column_definition_tail(
+    const SqlPolicyTokens &tokens,
+    std::size_t &index
+) {
+    bool has_definition = false;
+    bool saw_generated = false;
+    bool saw_rejected_function = false;
+    bool saw_storage = false;
+    std::size_t depth = 0U;
+    for (; index < tokens.count; ++index) {
+        const std::string_view token = tokens.values[index];
+        if (depth == 0U && (token_equals(token, ",") || token_equals(token, ";"))) {
+            break;
+        }
+        if (token_equals(token, "(")) {
+            ++depth;
+            has_definition = true;
+            continue;
+        }
+        if (token_equals(token, ")")) {
+            if (depth == 0U) {
+                return false;
+            }
+            --depth;
+            has_definition = true;
+            continue;
+        }
+        if (saw_generated && ownerless_generated_column_definition_uses_rejected_function_token(
+                                 identifier_token_at(tokens, index)
+                             )) {
+            saw_rejected_function = true;
+        }
+        if (depth == 0U) {
+            if (token_equals(token, "GENERATED")) {
+                saw_generated = true;
+            }
+            if (token_in(token, "STORED", "VIRTUAL", "PERSISTENT")) {
+                saw_storage = true;
+            }
+            if (token_in(token, "AFTER", "ALGORITHM", "AUTO_INCREMENT", "CHECK") ||
+                token_equals(token, "CONSTRAINT") || token_in(token, "FIRST", "FOREIGN") ||
+                token_in(token, "FULLTEXT", "INDEX", "KEY") || token_in(token, "LOCK", "PRIMARY") ||
+                token_equals(token, "REFERENCES") || token_in(token, "SPATIAL", "UNIQUE")) {
+                return false;
+            }
+        }
+        has_definition = true;
+    }
+    return has_definition && saw_generated && !saw_rejected_function && saw_storage && depth == 0U;
+}
+
+bool consume_ownerless_alter_table_drop_generated_column_recovery_clause(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::size_t &index,
+    std::string_view schema_name,
+    std::string_view table_name
+) {
+    if (index >= tokens.count || !token_equals(tokens.values[index], "DROP")) {
+        return false;
+    }
+    ++index;
+    if (index < tokens.count && token_equals(tokens.values[index], "COLUMN")) {
+        ++index;
+    }
+    if (index >= tokens.count || token_equals(tokens.values[index], "IF") ||
+        token_in(tokens.values[index], "FOREIGN", "INDEX", "KEY", "PRIMARY") ||
+        !ownerless_table_identifier_token(tokens.values[index])) {
+        return false;
+    }
+
+    const std::string column_name = ownerless_normalized_identifier(tokens.values[index]);
+    ++index;
+    if (index < tokens.count && token_in(tokens.values[index], "RESTRICT", "CASCADE")) {
+        ++index;
+    }
+    if (index < tokens.count && !token_equals(tokens.values[index], ",") &&
+        !token_equals(tokens.values[index], ";")) {
+        return false;
+    }
+
+    bool column_exists = false;
+    return ownerless_generated_column_metadata_lookup(
+               db,
+               schema_name,
+               table_name,
+               column_name,
+               &column_exists
+           ) &&
+           column_exists;
+}
+
+bool consume_ownerless_alter_table_modify_generated_column_recovery_clause(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::size_t &index,
+    std::string_view schema_name,
+    std::string_view table_name
+) {
+    if (index >= tokens.count || !token_equals(tokens.values[index], "MODIFY")) {
+        return false;
+    }
+    ++index;
+    if (index < tokens.count && token_equals(tokens.values[index], "COLUMN")) {
+        ++index;
+    }
+    if (index + 1U >= tokens.count || token_equals(tokens.values[index], "IF") ||
+        !ownerless_table_identifier_token(tokens.values[index])) {
+        return false;
+    }
+
+    const std::string column_name = ownerless_normalized_identifier(tokens.values[index]);
+    ++index;
+    if (!consume_ownerless_generated_column_definition_tail(tokens, index)) {
+        return false;
+    }
+
+    bool column_exists = false;
+    return ownerless_generated_column_metadata_lookup(
+               db,
+               schema_name,
+               table_name,
+               column_name,
+               &column_exists
+           ) &&
+           column_exists;
+}
+
+bool consume_ownerless_alter_table_change_generated_column_recovery_clause(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::size_t &index,
+    std::string_view schema_name,
+    std::string_view table_name
+) {
+    if (index >= tokens.count || !token_equals(tokens.values[index], "CHANGE")) {
+        return false;
+    }
+    ++index;
+    if (index < tokens.count && token_equals(tokens.values[index], "COLUMN")) {
+        ++index;
+    }
+    if (index + 2U >= tokens.count || token_equals(tokens.values[index], "IF") ||
+        !ownerless_table_identifier_token(tokens.values[index]) ||
+        !ownerless_table_identifier_token(tokens.values[index + 1U])) {
+        return false;
+    }
+
+    const std::string old_column_name = ownerless_normalized_identifier(tokens.values[index]);
+    const std::string new_column_name = ownerless_normalized_identifier(tokens.values[index + 1U]);
+    if (old_column_name == new_column_name) {
+        return false;
+    }
+    index += 2U;
+    if (!consume_ownerless_generated_column_definition_tail(tokens, index)) {
+        return false;
+    }
+
+    bool old_column_exists = false;
+    bool new_column_exists = true;
+    return ownerless_generated_column_metadata_lookup(
+               db,
+               schema_name,
+               table_name,
+               old_column_name,
+               &old_column_exists
+           ) &&
+           old_column_exists &&
+           ownerless_column_metadata_lookup(
+               db,
+               schema_name,
+               table_name,
+               new_column_name,
+               &new_column_exists
+           ) &&
+           !new_column_exists;
 }
 
 bool consume_ownerless_alter_table_drop_column_recovery_clause(
@@ -18437,6 +18846,132 @@ bool ownerless_alter_table_change_column_recovery_statement(
                &new_column_exists
            ) &&
            !new_column_exists;
+}
+
+bool ownerless_alter_table_drop_generated_column_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    if (tokens.count < 6U || !token_equals(tokens.values[0], "ALTER") ||
+        !token_equals(tokens.values[1], "TABLE")) {
+        return false;
+    }
+
+    std::size_t index = 2U;
+    std::string schema_name;
+    std::string table_name;
+    if (!consume_ownerless_table_identifier_parts(db, tokens, index, &schema_name, &table_name)) {
+        return false;
+    }
+
+    bool consumed_clause = false;
+    for (;;) {
+        if (!consume_ownerless_alter_table_drop_generated_column_recovery_clause(
+                db,
+                tokens,
+                index,
+                schema_name,
+                table_name
+            )) {
+            return false;
+        }
+        consumed_clause = true;
+        if (index >= tokens.count || token_equals(tokens.values[index], ";")) {
+            break;
+        }
+        if (!token_equals(tokens.values[index], ",")) {
+            return false;
+        }
+        if (index + 1U >= tokens.count || !token_equals(tokens.values[index + 1U], "DROP")) {
+            break;
+        }
+        ++index;
+    }
+    return consumed_clause && consume_ownerless_optional_copy_exclusive_alter_tail(tokens, index);
+}
+
+bool ownerless_alter_table_modify_generated_column_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    if (tokens.count < 7U || !token_equals(tokens.values[0], "ALTER") ||
+        !token_equals(tokens.values[1], "TABLE")) {
+        return false;
+    }
+
+    std::size_t index = 2U;
+    std::string schema_name;
+    std::string table_name;
+    if (!consume_ownerless_table_identifier_parts(db, tokens, index, &schema_name, &table_name)) {
+        return false;
+    }
+
+    bool consumed_clause = false;
+    for (;;) {
+        if (!consume_ownerless_alter_table_modify_generated_column_recovery_clause(
+                db,
+                tokens,
+                index,
+                schema_name,
+                table_name
+            )) {
+            return false;
+        }
+        consumed_clause = true;
+        if (index >= tokens.count || token_equals(tokens.values[index], ";")) {
+            break;
+        }
+        if (!token_equals(tokens.values[index], ",")) {
+            return false;
+        }
+        if (index + 1U >= tokens.count || !token_equals(tokens.values[index + 1U], "MODIFY")) {
+            break;
+        }
+        ++index;
+    }
+    return consumed_clause && consume_ownerless_optional_copy_exclusive_alter_tail(tokens, index);
+}
+
+bool ownerless_alter_table_change_generated_column_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    if (tokens.count < 8U || !token_equals(tokens.values[0], "ALTER") ||
+        !token_equals(tokens.values[1], "TABLE")) {
+        return false;
+    }
+
+    std::size_t index = 2U;
+    std::string schema_name;
+    std::string table_name;
+    if (!consume_ownerless_table_identifier_parts(db, tokens, index, &schema_name, &table_name)) {
+        return false;
+    }
+
+    bool consumed_clause = false;
+    for (;;) {
+        if (!consume_ownerless_alter_table_change_generated_column_recovery_clause(
+                db,
+                tokens,
+                index,
+                schema_name,
+                table_name
+            )) {
+            return false;
+        }
+        consumed_clause = true;
+        if (index >= tokens.count || token_equals(tokens.values[index], ";")) {
+            break;
+        }
+        if (!token_equals(tokens.values[index], ",")) {
+            return false;
+        }
+        if (index + 1U >= tokens.count || !token_equals(tokens.values[index + 1U], "CHANGE")) {
+            break;
+        }
+        ++index;
+    }
+    return consumed_clause && consume_ownerless_optional_copy_exclusive_alter_tail(tokens, index);
 }
 
 bool ownerless_alter_table_rename_column_recovery_statement(
