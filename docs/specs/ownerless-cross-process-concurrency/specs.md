@@ -7696,6 +7696,12 @@ subsystems that this mode needs:
   DDL-log rollback at `rename-table-after-native-file-op`, skipped-target
   absence, original or moved `SPACE` identity as appropriate, marker
   retention/drain, forced `.shm` rebuild, and ordinary native reopen.
+  The cross-schema missing-source IF EXISTS follow-up applies the same
+  missing/existing/missing matrix to an `app` to `app_archive` move, proving
+  skipped-source warnings, target schema placement, native-loop rollback to
+  the original source schema and `SPACE` id, skipped-target absence in both
+  schema directories, marker retention/drain, forced `.shm` rebuild, and
+  ordinary native reopen.
   The ALTER-table rename follow-up classifies `ALTER TABLE ... RENAME TO` as
   the same ownerless rename recovery kind, kills the writer at
   `dictionary-before-finish` with a live peer, and proves target-table
@@ -7857,10 +7863,11 @@ subsystems that this mode needs:
      `RENAME TABLE IF EXISTS` three-pair lists, plus same-schema and
      cross-schema FK native-loop rollback including existing-table
      `RENAME TABLE IF EXISTS` lists, plus a focused same-schema
-     missing-source/existing/missing-source `RENAME TABLE IF EXISTS` matrix
-     covering warning/no-op semantics, prefinish recovery, and native-loop
-     rollback, especially remaining rename variants including cross-schema,
-     FK, temporary/permanent, target-conflict, and arbitrary longer
+     and cross-schema missing-source/existing/missing-source
+     `RENAME TABLE IF EXISTS` matrices covering warning/no-op semantics,
+     prefinish recovery, and native-loop rollback, especially remaining
+     rename variants including FK, temporary/permanent, target-conflict, and
+     arbitrary longer
      missing-source `IF EXISTS` permutations,
      other rebuild variants beyond the covered
      FORCE, same-engine ENGINE including both exact copy-lock option orders,

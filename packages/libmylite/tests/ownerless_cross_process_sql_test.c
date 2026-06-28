@@ -944,6 +944,9 @@ static void test_ownerless_schema_default_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_schema_idempotent_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_cross_schema_rename_refreshes_peer_dictionary(void);
 static void test_ownerless_rename_if_exists_missing_source_noop_preserves_warnings(void);
+static void test_ownerless_cross_schema_rename_if_exists_missing_source_noop_preserves_warnings(
+    void
+);
 static void test_ownerless_multi_rename_cycle_refreshes_peer_dictionary(void);
 static void test_ownerless_view_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_view_ddl_variants_refresh_peer_dictionary(void);
@@ -1090,6 +1093,12 @@ static void test_crashed_rename_if_exists_missing_source_loop_recovers_ddl_log_r
 static void test_crashed_implicit_schema_rename_dictionary_ddl_recovers_moved_table(void);
 static void test_crashed_alter_table_rename_dictionary_ddl_recovers_moved_table(void);
 static void test_crashed_cross_schema_rename_dictionary_ddl_recovers_moved_table(void);
+static void test_crashed_cross_schema_rename_if_exists_missing_source_ddl_recovers_moved_table(
+    void
+);
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void test_crashed_cross_schema_rename_if_exists_missing_source_loop_recovers_rollback(void);
+#  endif
 static void test_crashed_multi_rename_dictionary_ddl_recovers_swapped_tables(void);
 #  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void test_crashed_multi_rename_loop_recovers_ddl_log_rollback(void);
@@ -1803,12 +1812,20 @@ static void rename_table_if_exists_missing_source_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
+static void cross_schema_rename_if_exists_missing_source_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 #  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void rename_table_if_exists_until_first_native_file_op_fault(
     open_database_paths paths,
     int ready_fd
 );
 static void rename_table_if_exists_missing_source_until_first_native_file_op_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void cross_schema_rename_if_exists_missing_source_until_first_native_file_op_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -3190,6 +3207,12 @@ static void assert_ownerless_rename_if_exists_missing_source_loop_rollback_state
     const char *database_path,
     unsigned long long expected_source_space
 );
+static void assert_ownerless_cross_schema_rename_if_exists_missing_source_loop_rollback_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path,
+    unsigned long long expected_source_space
+);
 static void assert_ownerless_multi_rename_loop_rollback_state(
     open_database_paths paths,
     unsigned flags,
@@ -4516,6 +4539,10 @@ int main(int argc, char **argv) {
         test_ownerless_rename_if_exists_missing_source_noop_preserves_warnings();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "cross-schema-rename-if-exists-missing-source-noop") == 0) {
+        test_ownerless_cross_schema_rename_if_exists_missing_source_noop_preserves_warnings();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "multi-rename-cycle") == 0) {
         test_ownerless_multi_rename_cycle_refreshes_peer_dictionary();
         return 0;
@@ -5446,6 +5473,21 @@ int main(int argc, char **argv) {
     if (argc == 2 && strcmp(argv[1], "dictionary-cross-schema-rename-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_cross_schema_rename_dictionary_ddl_recovers_moved_table();
+#endif
+        return 0;
+    }
+    if (argc == 2 &&
+        strcmp(argv[1], "dictionary-cross-schema-rename-if-exists-missing-source-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_cross_schema_rename_if_exists_missing_source_ddl_recovers_moved_table();
+#endif
+        return 0;
+    }
+    if (argc == 2 &&
+        strcmp(argv[1], "dictionary-cross-schema-rename-if-exists-missing-source-loop-crash") ==
+            0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_cross_schema_rename_if_exists_missing_source_loop_recovers_rollback();
 #endif
         return 0;
     }
@@ -6699,6 +6741,7 @@ int main(int argc, char **argv) {
             "online-ddl-options|schema-lifecycle|schema-default-ddl|"
             "schema-idempotent-ddl|cross-schema-rename|multi-rename-cycle|"
             "rename-if-exists-missing-source-noop|"
+            "cross-schema-rename-if-exists-missing-source-noop|"
             "generated-column-alter|generated-column-index-ddl|"
             "generated-column-indexed-expression|"
             "generated-column-indexed-expression-policy|"
@@ -6829,6 +6872,8 @@ int main(int argc, char **argv) {
             "dictionary-rename-if-exists-loop-crash|"
             "dictionary-rename-if-exists-missing-source-loop-crash|"
             "dictionary-cross-schema-rename-crash|"
+            "dictionary-cross-schema-rename-if-exists-missing-source-crash|"
+            "dictionary-cross-schema-rename-if-exists-missing-source-loop-crash|"
             "dictionary-multi-rename-crash|"
             "dictionary-multi-rename-loop-crash|"
             "dictionary-multi-rename-if-exists-loop-crash|"
@@ -7160,6 +7205,9 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_schema_idempotent_ddl_refreshes_peer_dictionary),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_cross_schema_rename_refreshes_peer_dictionary),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_rename_if_exists_missing_source_noop_preserves_warnings
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_ownerless_cross_schema_rename_if_exists_missing_source_noop_preserves_warnings
     ),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_multi_rename_cycle_refreshes_peer_dictionary),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_view_ddl_refreshes_peer_dictionary),
@@ -45446,6 +45494,7 @@ static void test_ownerless_rejects_non_innodb_engines(void) {
 
 typedef struct missing_source_rename_warnings {
     unsigned count;
+    const char *expected_sources[2];
 } missing_source_rename_warnings;
 
 static int capture_missing_source_rename_warning(
@@ -45462,9 +45511,9 @@ static int capture_missing_source_rename_warning(
     assert(values[0] != NULL);
     assert(values[1] != NULL);
     assert(values[2] != NULL);
-    expected_source = warnings->count == 0U ? "ownerless_rename_if_exists_missing_before"
-                                            : "ownerless_rename_if_exists_missing_after";
     assert(warnings->count < 2U);
+    expected_source = warnings->expected_sources[warnings->count];
+    assert(expected_source != NULL);
     assert(strcmp(values[0], "Note") == 0);
     assert(strtoul(values[1], NULL, 10) == MYLITE_TEST_NO_SUCH_TABLE_ERRNO);
     assert(strstr(values[2], expected_source) != NULL);
@@ -45472,8 +45521,15 @@ static int capture_missing_source_rename_warning(
     return 0;
 }
 
-static void assert_missing_source_rename_warnings(mylite_db *db) {
-    missing_source_rename_warnings warnings = {0U};
+static void assert_missing_source_rename_warnings(
+    mylite_db *db,
+    const char *first_source,
+    const char *second_source
+) {
+    missing_source_rename_warnings warnings = {
+        .count = 0U,
+        .expected_sources = {first_source, second_source},
+    };
     char *errmsg = NULL;
 
     if (mylite_exec(
@@ -45526,7 +45582,11 @@ static void test_ownerless_rename_if_exists_missing_source_noop_preserves_warnin
         "app.ownerless_rename_if_exists_missing_after "
         "TO app.ownerless_rename_if_exists_missing_after_target"
     );
-    assert_missing_source_rename_warnings(db);
+    assert_missing_source_rename_warnings(
+        db,
+        "ownerless_rename_if_exists_missing_before",
+        "ownerless_rename_if_exists_missing_after"
+    );
     assert(
         query_unsigned(
             db,
@@ -45584,6 +45644,116 @@ static void test_ownerless_rename_if_exists_missing_source_noop_preserves_warnin
         query_unsigned(
             db,
             "SELECT SUM(value) FROM app.ownerless_rename_if_exists_missing_target"
+        ) == 10U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_cross_schema_rename_if_exists_missing_source_noop_preserves_warnings(
+    void
+) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-cross-schema-rename-if-exists-missing-source.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "CREATE DATABASE app_archive");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_cross_schema_rename_if_exists_missing_source ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_cross_schema_rename_if_exists_missing_source VALUES (1, 10)"
+    );
+
+    exec_ok(
+        db,
+        "RENAME TABLE IF EXISTS "
+        "app.ownerless_cross_schema_rename_if_exists_missing_before "
+        "TO app.ownerless_cross_schema_rename_if_exists_missing_before_target, "
+        "app.ownerless_cross_schema_rename_if_exists_missing_source "
+        "TO app_archive.ownerless_cross_schema_rename_if_exists_missing_target, "
+        "app_archive.ownerless_cross_schema_rename_if_exists_missing_after "
+        "TO app_archive.ownerless_cross_schema_rename_if_exists_missing_after_target"
+    );
+    assert_missing_source_rename_warnings(
+        db,
+        "ownerless_cross_schema_rename_if_exists_missing_before",
+        "ownerless_cross_schema_rename_if_exists_missing_after"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_cross_schema_rename_if_exists_missing_source'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app_archive' "
+            "AND table_name = 'ownerless_cross_schema_rename_if_exists_missing_target'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_name IN ("
+            "'ownerless_cross_schema_rename_if_exists_missing_before_target', "
+            "'ownerless_cross_schema_rename_if_exists_missing_after_target')"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) "
+            "FROM app_archive.ownerless_cross_schema_rename_if_exists_missing_target"
+        ) == 10U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app_archive' "
+            "AND table_name = 'ownerless_cross_schema_rename_if_exists_missing_target'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) "
+            "FROM app_archive.ownerless_cross_schema_rename_if_exists_missing_target"
+        ) == 10U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) "
+            "FROM app_archive.ownerless_cross_schema_rename_if_exists_missing_target"
         ) == 10U
     );
     assert(mylite_close(db) == MYLITE_OK);
@@ -47749,6 +47919,302 @@ static void test_crashed_cross_schema_rename_dictionary_ddl_recovers_moved_table
     remove_tree(root);
     free(root);
 }
+
+static void test_crashed_cross_schema_rename_if_exists_missing_source_ddl_recovers_moved_table(
+    void
+) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-cross-schema-rename-if-exists-missing-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "CREATE DATABASE app_archive");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_cross_schema_rename_if_exists_missing_source ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_cross_schema_rename_if_exists_missing_source VALUES (1, 10)"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        cross_schema_rename_if_exists_missing_source_until_dictionary_finish_fault
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_cross_schema_rename_if_exists_missing_source'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app_archive' "
+            "AND table_name = 'ownerless_cross_schema_rename_if_exists_missing_target'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_name IN ("
+            "'ownerless_cross_schema_rename_if_exists_missing_before_target', "
+            "'ownerless_cross_schema_rename_if_exists_missing_after_target')"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) "
+            "FROM app_archive.ownerless_cross_schema_rename_if_exists_missing_target"
+        ) == 10U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app_archive.ownerless_cross_schema_rename_if_exists_missing_target "
+        "VALUES (2, 20)"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM "
+            "app_archive.ownerless_cross_schema_rename_if_exists_missing_target"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) "
+            "FROM app_archive.ownerless_cross_schema_rename_if_exists_missing_target"
+        ) == 30U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) "
+            "FROM app_archive.ownerless_cross_schema_rename_if_exists_missing_target"
+        ) == 30U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) "
+            "FROM app_archive.ownerless_cross_schema_rename_if_exists_missing_target"
+        ) == 30U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void test_crashed_cross_schema_rename_if_exists_missing_source_loop_recovers_rollback(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(
+        root,
+        "ownerless-dictionary-cross-schema-rename-if-exists-missing-loop-crash.mylite"
+    );
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    char *datadir_path;
+    char *app_path;
+    char *archive_path;
+    char *source_frm_path;
+    char *source_ibd_path;
+    char *target_frm_path;
+    char *target_ibd_path;
+    char *missing_before_target_frm_path;
+    char *missing_before_target_ibd_path;
+    char *missing_after_target_frm_path;
+    char *missing_after_target_ibd_path;
+    ownerless_live_peer_guard live_peer;
+    unsigned long long source_space_before;
+    unsigned long long source_space_after;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    datadir_path = path_join(database_path, "datadir");
+    app_path = path_join(datadir_path, "app");
+    archive_path = path_join(datadir_path, "app_archive");
+    source_frm_path =
+        path_join(app_path, "ownerless_cross_schema_rename_if_exists_missing_source.frm");
+    source_ibd_path =
+        path_join(app_path, "ownerless_cross_schema_rename_if_exists_missing_source.ibd");
+    target_frm_path =
+        path_join(archive_path, "ownerless_cross_schema_rename_if_exists_missing_target.frm");
+    target_ibd_path =
+        path_join(archive_path, "ownerless_cross_schema_rename_if_exists_missing_target.ibd");
+    missing_before_target_frm_path =
+        path_join(app_path, "ownerless_cross_schema_rename_if_exists_missing_before_target.frm");
+    missing_before_target_ibd_path =
+        path_join(app_path, "ownerless_cross_schema_rename_if_exists_missing_before_target.ibd");
+    missing_after_target_frm_path =
+        path_join(archive_path, "ownerless_cross_schema_rename_if_exists_missing_after_target.frm");
+    missing_after_target_ibd_path =
+        path_join(archive_path, "ownerless_cross_schema_rename_if_exists_missing_after_target.ibd");
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "CREATE DATABASE app_archive");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_cross_schema_rename_if_exists_missing_source ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_cross_schema_rename_if_exists_missing_source VALUES (1, 10)"
+    );
+    assert(path_exists(archive_path));
+    assert(path_exists(source_frm_path));
+    assert(path_exists(source_ibd_path));
+    assert(!path_exists(target_frm_path));
+    assert(!path_exists(target_ibd_path));
+    assert(!path_exists(missing_before_target_frm_path));
+    assert(!path_exists(missing_before_target_ibd_path));
+    assert(!path_exists(missing_after_target_frm_path));
+    assert(!path_exists(missing_after_target_ibd_path));
+    source_space_before = query_unsigned(
+        db,
+        "SELECT SPACE FROM information_schema.INNODB_SYS_TABLES "
+        "WHERE NAME = 'app/ownerless_cross_schema_rename_if_exists_missing_source'"
+    );
+    assert(source_space_before > 0U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        cross_schema_rename_if_exists_missing_source_until_first_native_file_op_fault
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_cross_schema_rename_if_exists_missing_source'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_name IN ("
+            "'ownerless_cross_schema_rename_if_exists_missing_target', "
+            "'ownerless_cross_schema_rename_if_exists_missing_before_target', "
+            "'ownerless_cross_schema_rename_if_exists_missing_after_target')"
+        ) == 0U
+    );
+    source_space_after = query_unsigned(
+        db,
+        "SELECT SPACE FROM information_schema.INNODB_SYS_TABLES "
+        "WHERE NAME = 'app/ownerless_cross_schema_rename_if_exists_missing_source'"
+    );
+    assert(source_space_after == source_space_before);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_cross_schema_rename_if_exists_missing_source"
+        ) == 10U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_cross_schema_rename_if_exists_missing_source VALUES (2, 20)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_cross_schema_rename_if_exists_missing_source"
+        ) == 30U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
+
+    assert_ownerless_cross_schema_rename_if_exists_missing_source_loop_rollback_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path,
+        source_space_before
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert_ownerless_cross_schema_rename_if_exists_missing_source_loop_rollback_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path,
+        source_space_before
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_cross_schema_rename_if_exists_missing_source_loop_rollback_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path,
+        source_space_before
+    );
+    assert_ownerless_cross_schema_rename_if_exists_missing_source_loop_rollback_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path,
+        source_space_before
+    );
+
+    free(missing_after_target_ibd_path);
+    free(missing_after_target_frm_path);
+    free(missing_before_target_ibd_path);
+    free(missing_before_target_frm_path);
+    free(target_ibd_path);
+    free(target_frm_path);
+    free(source_ibd_path);
+    free(source_frm_path);
+    free(archive_path);
+    free(app_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+#  endif
 
 static void test_crashed_multi_rename_dictionary_ddl_recovers_swapped_tables(void) {
     char *root = make_temp_root();
@@ -78072,6 +78538,24 @@ static void rename_table_if_exists_missing_source_until_dictionary_finish_fault(
     );
 }
 
+static void cross_schema_rename_if_exists_missing_source_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "RENAME TABLE IF EXISTS "
+        "app.ownerless_cross_schema_rename_if_exists_missing_before "
+        "TO app.ownerless_cross_schema_rename_if_exists_missing_before_target, "
+        "app.ownerless_cross_schema_rename_if_exists_missing_source "
+        "TO app_archive.ownerless_cross_schema_rename_if_exists_missing_target, "
+        "app_archive.ownerless_cross_schema_rename_if_exists_missing_after "
+        "TO app_archive.ownerless_cross_schema_rename_if_exists_missing_after_target"
+    );
+}
+
 #  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void rename_table_if_exists_until_first_native_file_op_fault(
     open_database_paths paths,
@@ -78101,6 +78585,24 @@ static void rename_table_if_exists_missing_source_until_first_native_file_op_fau
         "TO app.ownerless_rename_if_exists_missing_target, "
         "app.ownerless_rename_if_exists_missing_after "
         "TO app.ownerless_rename_if_exists_missing_after_target"
+    );
+}
+
+static void cross_schema_rename_if_exists_missing_source_until_first_native_file_op_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "rename-table-after-native-file-op",
+        "RENAME TABLE IF EXISTS "
+        "app.ownerless_cross_schema_rename_if_exists_missing_before "
+        "TO app.ownerless_cross_schema_rename_if_exists_missing_before_target, "
+        "app.ownerless_cross_schema_rename_if_exists_missing_source "
+        "TO app_archive.ownerless_cross_schema_rename_if_exists_missing_target, "
+        "app_archive.ownerless_cross_schema_rename_if_exists_missing_after "
+        "TO app_archive.ownerless_cross_schema_rename_if_exists_missing_after_target"
     );
 }
 #  endif
@@ -87179,6 +87681,104 @@ static void assert_ownerless_rename_if_exists_missing_source_loop_rollback_state
     free(target_frm_path);
     free(source_ibd_path);
     free(source_frm_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_cross_schema_rename_if_exists_missing_source_loop_rollback_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path,
+    unsigned long long expected_source_space
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *archive_path = path_join(datadir_path, "app_archive");
+    char *source_frm_path =
+        path_join(app_path, "ownerless_cross_schema_rename_if_exists_missing_source.frm");
+    char *source_ibd_path =
+        path_join(app_path, "ownerless_cross_schema_rename_if_exists_missing_source.ibd");
+    char *target_frm_path =
+        path_join(archive_path, "ownerless_cross_schema_rename_if_exists_missing_target.frm");
+    char *target_ibd_path =
+        path_join(archive_path, "ownerless_cross_schema_rename_if_exists_missing_target.ibd");
+    char *missing_before_target_frm_path =
+        path_join(app_path, "ownerless_cross_schema_rename_if_exists_missing_before_target.frm");
+    char *missing_before_target_ibd_path =
+        path_join(app_path, "ownerless_cross_schema_rename_if_exists_missing_before_target.ibd");
+    char *missing_after_target_frm_path =
+        path_join(archive_path, "ownerless_cross_schema_rename_if_exists_missing_after_target.frm");
+    char *missing_after_target_ibd_path =
+        path_join(archive_path, "ownerless_cross_schema_rename_if_exists_missing_after_target.ibd");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(path_exists(archive_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_cross_schema_rename_if_exists_missing_source'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_name IN ("
+            "'ownerless_cross_schema_rename_if_exists_missing_target', "
+            "'ownerless_cross_schema_rename_if_exists_missing_before_target', "
+            "'ownerless_cross_schema_rename_if_exists_missing_after_target')"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME IN ("
+            "'app_archive/ownerless_cross_schema_rename_if_exists_missing_target', "
+            "'app/ownerless_cross_schema_rename_if_exists_missing_before_target', "
+            "'app_archive/ownerless_cross_schema_rename_if_exists_missing_after_target')"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SPACE FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME = 'app/ownerless_cross_schema_rename_if_exists_missing_source'"
+        ) == expected_source_space
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_cross_schema_rename_if_exists_missing_source"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_cross_schema_rename_if_exists_missing_source"
+        ) == 30U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(path_exists(source_frm_path));
+    assert(path_exists(source_ibd_path));
+    assert(!path_exists(target_frm_path));
+    assert(!path_exists(target_ibd_path));
+    assert(!path_exists(missing_before_target_frm_path));
+    assert(!path_exists(missing_before_target_ibd_path));
+    assert(!path_exists(missing_after_target_frm_path));
+    assert(!path_exists(missing_after_target_ibd_path));
+
+    free(missing_after_target_ibd_path);
+    free(missing_after_target_frm_path);
+    free(missing_before_target_ibd_path);
+    free(missing_before_target_frm_path);
+    free(target_ibd_path);
+    free(target_frm_path);
+    free(source_ibd_path);
+    free(source_frm_path);
+    free(archive_path);
     free(app_path);
     free(datadir_path);
 }
