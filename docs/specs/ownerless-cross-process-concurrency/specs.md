@@ -5790,7 +5790,9 @@ cross-schema, same-schema multi-pair swap, and cross-schema multi-pair swap
 native file move but before ownerless dictionary finish, kills same-schema and
 cross-schema non-FK multi-rename writers after first, second, and final
 successful native rename pairs inside MariaDB's rename loop and verifies
-DDL-log rollback to the original swapped-table state, kills same-schema and
+DDL-log rollback to the original swapped-table state, kills a single-pair
+`RENAME TABLE IF EXISTS` writer after the native rename pair and verifies
+DDL-log rollback to the original source table, kills same-schema and
 cross-schema foreign-key multi-rename writers after first and later successful
 native rename pairs
 inside MariaDB's rename loop and verifies DDL-log rollback to the original FK
@@ -7666,7 +7668,11 @@ subsystems that this mode needs:
   after `RENAME TABLE`, kills an existing-table writer at the same
   `dictionary-before-finish` boundary with a live peer, and proves target-table
   recovery, native file-operation marker retention/drain, forced `.shm`
-  rebuild, and ordinary native reopen.
+  rebuild, and ordinary native reopen. The native-loop IF EXISTS follow-up
+  kills the same existing-table shape after the successful native rename pair
+  but before MariaDB advances the DDL-log phase, then proves rollback to the
+  original source table, original InnoDB `SPACE` id, target absence, marker
+  retention/drain, forced `.shm` rebuild, and ordinary native reopen.
   The ALTER-table rename follow-up classifies `ALTER TABLE ... RENAME TO` as
   the same ownerless rename recovery kind, kills the writer at
   `dictionary-before-finish` with a live peer, and proves target-table
@@ -7825,8 +7831,8 @@ subsystems that this mode needs:
      mixed rename-list prefinish boundary, plus same-schema and cross-schema
      non-FK multi-rename native-loop rollback after first, second, and final native
      rename pairs, especially
-     remaining rename variants including longer and `IF EXISTS` native
-     rename-loop permutations, other rebuild variants beyond the covered
+     remaining rename variants including longer `IF EXISTS` native
+     rename-list permutations, other rebuild variants beyond the covered
      FORCE, same-engine ENGINE including both exact copy-lock option orders,
      row-format including
      exact copy-lock, compressed row-format including exact copy-lock, charset

@@ -600,6 +600,10 @@ if(BUILD_TESTING)
         COMMAND mylite_ownerless_cross_process_sql_test dictionary-rename-if-exists-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-rename-if-exists-loop-crash
+        COMMAND mylite_ownerless_cross_process_sql_test dictionary-rename-if-exists-loop-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-implicit-rename-crash
         COMMAND mylite_ownerless_cross_process_sql_test dictionary-implicit-rename-crash
       )
@@ -1751,6 +1755,10 @@ if(BUILD_TESTING)
         TIMEOUT 120
       )
       set_tests_properties(libmylite.ownerless-dictionary-rename-if-exists-crash PROPERTIES
+        LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
+        TIMEOUT 120
+      )
+      set_tests_properties(libmylite.ownerless-dictionary-rename-if-exists-loop-crash PROPERTIES
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
         TIMEOUT 120
       )
