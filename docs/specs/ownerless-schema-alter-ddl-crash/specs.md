@@ -111,6 +111,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Risks And Follow-Up
 
 - This covers representative successful schema-default rewrite, not every
-  invalid option or warning path.
+  invalid option or warning path. The current-schema `ALTER DATABASE DEFAULT`
+  form is covered by
+  `docs/specs/ownerless-current-schema-alter-live-recovery/specs.md`.
 - Broader DDL/file lifecycle recovery and external MariaDB/RQG stress remain
   planned.

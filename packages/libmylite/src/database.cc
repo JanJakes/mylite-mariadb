@@ -18637,7 +18637,11 @@ bool ownerless_alter_schema_recovery_statement(const SqlPolicyTokens &tokens) {
 
     std::size_t index = 2U;
     if (token_equals(tokens.values[1], "DATABASE") &&
-        token_equals(tokens.values[index], "COMMENT")) {
+        (token_equals(tokens.values[index], "COMMENT") ||
+         token_equals(tokens.values[index], "DEFAULT") ||
+         token_equals(tokens.values[index], "CHARACTER") ||
+         token_equals(tokens.values[index], "CHARSET") ||
+         token_equals(tokens.values[index], "COLLATE"))) {
         return consume_ownerless_schema_default_options(tokens, index);
     }
     return consume_ownerless_schema_identifier(tokens, index) &&

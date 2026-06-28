@@ -4994,7 +4994,8 @@ Tasks:
    while multi-pair temporary rename chains,
    inside-MariaDB-loop multi-drop crash points, broader ALTER rebuild beyond
    the focused force, row-format, compressed, and charset-conversion cases,
-   broader schema option variants beyond named/current-schema comments, broader view and trigger variants, and
+   broader schema option variants beyond named/current-schema default/comment
+   boundaries, broader view and trigger variants, and
    mixed comma-separated non-rename foreign-key ALTER live-peer recovery remain
    planned.
    Final no-live close
@@ -7675,7 +7676,7 @@ subsystems that this mode needs:
      charset boundaries, broader metadata-only DDL, broader mixed temporary/permanent
      rename matrices, broader FK plus non-FK ALTER lists beyond the focused
      ADD COLUMN case, broader schema option variants beyond the focused
-     named/current-schema schema-comment boundaries, intra-loop drop cases,
+     named/current-schema schema-default/comment boundaries, intra-loop drop cases,
      and broader DDL file lifecycle while
      peers remain live. Partition truncate
      remains governed by the ownerless partition-DDL rejection policy, cyclic

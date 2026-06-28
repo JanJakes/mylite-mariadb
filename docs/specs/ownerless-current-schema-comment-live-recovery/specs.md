@@ -111,7 +111,7 @@ registration, and docs.
 
 ## Risks And Follow-Up
 
-- Current-schema charset/collation option forms remain unclaimed until a
-  separate slice proves that parser shape and recovery behavior.
+- Current-schema charset/collation option forms are covered by
+  `docs/specs/ownerless-current-schema-alter-live-recovery/specs.md`.
 - Broader schema option permutations and external randomized DDL stress remain
   planned.
