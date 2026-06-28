@@ -18198,7 +18198,7 @@ bool ownerless_alter_table_rename_column_recovery_statement(
     const std::string old_column_name = ownerless_normalized_identifier(tokens.values[index]);
     const std::string new_column_name = ownerless_normalized_identifier(tokens.values[index + 2U]);
     index += 3U;
-    if (!consume_ownerless_remaining_semicolons(tokens, index)) {
+    if (!consume_ownerless_optional_copy_exclusive_alter_tail(tokens, index)) {
         return false;
     }
     bool old_column_exists = false;

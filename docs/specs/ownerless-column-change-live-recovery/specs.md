@@ -38,5 +38,4 @@ live, marker drain after peer release, ownerless/native reopen, and forced
 
 Generated-column tables, same-name `CHANGE COLUMN` used as a `MODIFY` spelling,
 placement clauses, multi-action column ALTERs, broader online option orders,
-copy-lock rename if MariaDB accepts it, and randomized external DDL oracle
-stress remain outside this slice.
+and randomized external DDL oracle stress remain outside this slice.

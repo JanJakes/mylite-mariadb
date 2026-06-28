@@ -2,11 +2,13 @@
 
 ## Problem Statement
 
-Ownerless crash coverage already kills real `ALTER TABLE ... DROP COLUMN`,
-`ALTER TABLE ... MODIFY COLUMN`, and `ALTER TABLE ... RENAME COLUMN` writers
-after MariaDB completes the native table-definition change but before MyLite
-publishes the ownerless dictionary finish boundary. Those selectors previously
-proved only that live-peer cleanup stayed busy until no-live recovery.
+Ownerless crash coverage kills real `ALTER TABLE ... DROP COLUMN`,
+`ALTER TABLE ... MODIFY COLUMN`, `ALTER TABLE ... CHANGE COLUMN`, and
+`ALTER TABLE ... RENAME COLUMN` writers after MariaDB completes the native
+table-definition change but before MyLite publishes the ownerless dictionary
+finish boundary. The bounded stored-column forms, including exact
+`ALGORITHM=COPY, LOCK=EXCLUSIVE` ADD/DROP/MODIFY/CHANGE/RENAME spellings, now
+prove live-peer dictionary recovery with native file-operation marker retention.
 
 This slice promotes the bounded real column ALTER forms to live-peer dictionary
 recovery. A later ownerless opener may finish the dead writer's ownerless
@@ -77,9 +79,8 @@ In scope:
 
 Out of scope:
 
-- `CHANGE COLUMN` live recovery.
 - Multi-clause column ALTERs.
-- Generated-column DROP/MODIFY live recovery.
+- Generated-column DROP/MODIFY/CHANGE live recovery.
 - Placement, explicit online-option, index/constraint/FK, partition, and
   tablespace-detach/import variants.
 - SQL-level table-lock fault injection.

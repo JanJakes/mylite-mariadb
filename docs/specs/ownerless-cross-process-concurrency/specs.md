@@ -5778,8 +5778,8 @@ after native clustered-key rebuild with live-peer recovery and retained-marker
 no-live drain, plain and exact copy-lock `ALTER TABLE ... ADD COLUMN` writers
 after native stored-column metadata update or copy rebuild, exact copy-lock
 `ALTER TABLE ... DROP COLUMN`, `ALTER TABLE ... MODIFY COLUMN`, and
-`ALTER TABLE ... CHANGE COLUMN` writers after native copy rebuild, an
-`ALTER COLUMN ... SET DEFAULT`
+`ALTER TABLE ... CHANGE COLUMN`, and `ALTER TABLE ... RENAME COLUMN` writers
+after native copy rebuild, an `ALTER COLUMN ... SET DEFAULT`
 writer after native metadata update, simple view CREATE/DROP writers after native view
 definition-file creation/removal, simple trigger CREATE/DROP, trigger
 replacement, ordered trigger PRECEDES, duplicate `CREATE TRIGGER IF NOT EXISTS`,
@@ -7697,7 +7697,7 @@ subsystems that this mode needs:
      top-level and ALTER secondary-index idempotent/no-op prefinish boundaries,
      plus focused column idempotent and column `IF EXISTS` missing-column
      no-op prefinish boundaries, plus focused plain and exact copy-lock
-     ADD COLUMN, exact copy-lock DROP/MODIFY/CHANGE COLUMN, table-comment,
+     ADD COLUMN, exact copy-lock DROP/MODIFY/CHANGE/RENAME COLUMN, table-comment,
      column-default metadata ALTER, and plain, descending, composite direction,
      AUTO_INCREMENT, and AUTO_INCREMENT descending primary-key replacement
      prefinish boundaries, plus single-clause, pure multi-clause, FK-only
@@ -7713,8 +7713,8 @@ subsystems that this mode needs:
      remaining rename variants, other rebuild variants beyond the covered
      FORCE, same-engine ENGINE including exact copy-lock, row-format including
      exact copy-lock, compressed row-format including exact copy-lock, charset
-     including exact copy-lock, and focused exact copy-lock ADD/DROP/MODIFY/CHANGE
-     COLUMN boundaries,
+     including exact copy-lock, and focused exact copy-lock
+     ADD/DROP/MODIFY/CHANGE/RENAME COLUMN boundaries,
      broader metadata-only DDL, broader mixed temporary/permanent
      rename matrices, broader FK plus non-FK ALTER lists beyond the focused
      ADD COLUMN, table-comment, and column-default cases, broader schema option variants beyond the focused
