@@ -123,8 +123,8 @@ registered only for the unsafe ownerless test-hook build.
 ## Risks And Follow-Up
 
 - This closes a live-peer MyLite-owned savepoint rollback boundary, not a
-  native InnoDB mid-rollback crash. Native rollback/savepoint rollback internal
-  fault coverage remains planned.
+  native InnoDB mid-rollback crash. Native row-undo live-peer fault coverage is
+  covered by the `ownerless-native-row-undo-live-peer-crash` follow-up.
 - Longer same-table randomized schedules and external MariaDB/RQG-style stress
   remain planned after bounded recovery gates stop exposing new correctness
   issues.

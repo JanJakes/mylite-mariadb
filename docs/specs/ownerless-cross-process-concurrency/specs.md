@@ -7657,10 +7657,14 @@ subsystems that this mode needs:
   completes. No-live ownerless recovery, forced `.shm` rebuild, and ordinary
   native reopen preserve the original pre-transaction rows, keep DML and
   generic file-operation markers clear, and verify follow-up native writes.
-  This covers one deterministic native row-undo boundary; arbitrary row-undo
-  substeps, live-peer mid-rollback recovery, FK/trigger/generated-column side
-  effects, XA/prepared rollback, and longer randomized savepoint schedules
-  remain planned.
+  This covers one deterministic native row-undo boundary. The live-peer
+  native row-undo follow-up keeps another ownerless process open while killing
+  full-rollback and `ROLLBACK TO SAVEPOINT` writers at the same internal fault,
+  proves fresh ownerless read/write opens return busy until the peer exits, then
+  verifies no-live recovery, forced `.shm` rebuild, ordinary native reopen, and
+  follow-up native writes preserve the original rows. Arbitrary row-undo
+  substeps, FK/trigger/generated-column side effects, XA/prepared rollback, and
+  longer randomized savepoint schedules remain planned.
   The implicit-rename follow-up broadens `RENAME TABLE` dictionary recovery
   classification from only explicit `schema.table` rename pairs to one- or
   two-part identifiers, then kills an implicit-schema `USE app; RENAME TABLE

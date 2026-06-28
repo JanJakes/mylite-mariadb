@@ -125,7 +125,8 @@ The only MariaDB-derived source change is a narrow unsafe test-fault hook in
 
 - This covers one deterministic row-undo boundary, not every sub-operation
   inside `row_undo_ins()` or `row_undo_mod()`.
-- Live-peer recovery while a writer dies inside native rollback internals,
-  longer randomized savepoint schedules, foreign-key/trigger rollback side
-  effects, broader redo/checkpoint reconciliation, and external MariaDB/RQG
-  stress remain completion work.
+- Live-peer recovery while a writer dies at this row-undo fault is covered by
+  the `ownerless-native-row-undo-live-peer-crash` follow-up. Longer randomized
+  savepoint schedules, foreign-key/trigger rollback side effects, broader
+  redo/checkpoint reconciliation, and external MariaDB/RQG stress remain
+  completion work.

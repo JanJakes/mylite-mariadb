@@ -1,0 +1,121 @@
+# Ownerless Native Row Undo Live-Peer Crash
+
+## Problem Statement
+
+Native row-undo rollback crash coverage kills full-transaction rollback and
+`ROLLBACK TO SAVEPOINT` writers after one successful InnoDB `row_undo()` step,
+then verifies no-live ownerless recovery. The remaining live-peer boundary is
+stricter: while another ownerless process still has the directory open, a fresh
+ownerless opener must not perform no-live cleanup of the killed writer's stale
+rollback state. Once the peer exits, no-live recovery must still let
+MariaDB/InnoDB finish the uncommitted rollback and preserve the original rows.
+
+## Source Findings
+
+- MariaDB base: `mariadb-11.8.6`
+  (`9bfea48ce1214cc4470f6f6f8a4e30352cef84e7`).
+- `mariadb/storage/innobase/trx/trx0roll.cc`
+  - `trx_t::rollback_low()` builds and runs the rollback graph, then performs
+    full-rollback or savepoint cleanup after the graph completes.
+- `mariadb/storage/innobase/row/row0undo.cc`
+  - `row_undo()` fetches one undo record, applies `row_undo_ins()` or
+    `row_undo_mod()`, releases the undo page, closes the persistent cursor,
+    clears the heap, and then fires the existing unsafe
+    `rollback-after-native-row-undo` test fault when enabled.
+- `packages/libmylite/tests/ownerless_cross_process_sql_test.c`
+  - `savepoint-rollback-native-row-undo-crash` and
+    `transaction-rollback-native-row-undo-crash` already verify no-live
+    recovery after the same native row-undo fault.
+  - `savepoint-rollback-prewrite-live-peer-crash` already proves the expected
+    live-peer ownerless lifecycle for a post-native rollback boundary: a fresh
+    ownerless opener returns `MYLITE_BUSY` while the peer remains live, then
+    no-live recovery succeeds after peer release.
+
+## Design
+
+Add two hook-only selectors:
+
+- `savepoint-rollback-native-row-undo-live-peer-crash`
+- `transaction-rollback-native-row-undo-live-peer-crash`
+
+Each selector reuses the existing native row-undo writer fault function and
+data oracle, but holds an independent ownerless peer open before starting the
+writer. After the writer reaches `rollback-after-native-row-undo`, the parent
+kills it, proves a fresh ownerless read/write opener returns `MYLITE_BUSY`
+while the peer remains live, releases the peer, verifies shared read-only
+attachment is still rejected until read/write recovery runs, and then performs
+the same no-live recovery, forced `.shm` rebuild, ordinary native reopen, and
+follow-up write checks as the existing no-live selectors.
+
+No production code changes are required.
+
+## Scope And Non-Goals
+
+In scope:
+
+- Linux unsafe ownerless test-hook coverage.
+- One native row-undo crash point for full rollback and one for savepoint
+  rollback.
+- Live-peer busy behavior before no-live recovery.
+- Ownerless read/write recovery after peer release, forced `.shm` rebuild,
+  ordinary native reopen, and follow-up native writes.
+
+Out of scope:
+
+- Exhaustive faults inside every `row_undo_ins()` or `row_undo_mod()` substep.
+- Foreign-key action rollback, trigger side effects, generated-column side
+  effects, DDL rollback, XA rollback, or prepared transactions.
+- Longer randomized savepoint schedules and external MariaDB/RQG stress.
+- SQL-level table-lock fault injection.
+
+## Compatibility Impact
+
+No SQL syntax, C API, storage-format, or production behavior changes. The slice
+adds evidence that a killed writer inside native rollback internals does not
+let another opener perform no-live ownerless cleanup while a peer is still
+live, and that final no-live recovery still preserves MariaDB/InnoDB rollback
+semantics.
+
+## Directory, Lifecycle, And Native Storage Impact
+
+No durable directory-layout or native storage-format change. The tests keep all
+database files and ownerless runtime files inside the MyLite database directory,
+retain live-peer ambiguity until the peer exits, then prove recovery,
+checkpointing, forced shared-memory rebuild, and ordinary native reopen all
+observe the same original rows.
+
+## Public API, Build, Size, And License
+
+No public API, dependency, license, or binary-size-sensitive profile change.
+The selectors are registered only for the unsafe ownerless hook build.
+
+## Test And Verification Plan
+
+- Build `mylite_ownerless_cross_process_sql_test` with
+  `ownerless-test-hooks`.
+- Run the direct live-peer native row-undo selectors.
+- Run the adjacent registered rollback hook CTest subset.
+- Build the production embedded target and run adjacent production
+  transaction/savepoint smoke selectors.
+- Run production CI-build guards, format checks, and `git diff --check`.
+
+## Acceptance Criteria
+
+- The writer reaches the existing `rollback-after-native-row-undo` fault after
+  at least one native row undo succeeds.
+- A fresh ownerless read/write opener returns `MYLITE_BUSY` while another
+  ownerless peer remains live.
+- After peer release, shared read-only attachment remains busy until read/write
+  recovery runs.
+- No-live ownerless recovery preserves the original row values and payloads,
+  keeps native DML/file-operation markers clear, checkpoints ownerless WAL,
+  survives forced `.shm` rebuild, and remains writable through ordinary native
+  reopen.
+
+## Risks And Follow-Up
+
+- This covers a deterministic live-peer lifecycle around the existing row-undo
+  fault, not every native undo sub-operation.
+- FK/trigger/generated-column rollback side effects, XA/prepared rollback,
+  longer randomized savepoint schedules, broader redo/checkpoint
+  reconciliation, and external MariaDB/RQG stress remain completion work.
