@@ -1180,6 +1180,7 @@ static void test_crashed_plain_force_rebuild_dictionary_ddl_marks_file_op_checkp
 static void test_crashed_engine_rebuild_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_engine_rebuild_copy_lock_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_charset_convert_dictionary_ddl_recovers_metadata(void);
+static void test_crashed_charset_convert_copy_lock_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(void);
 static void test_crashed_row_format_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_row_format_copy_lock_dictionary_ddl_marks_file_op_checkpoint(void);
@@ -2228,6 +2229,10 @@ static void engine_rebuild_copy_lock_until_dictionary_finish_fault(
     int ready_fd
 );
 static void charset_convert_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
+static void charset_convert_copy_lock_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void row_format_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void row_format_copy_lock_until_dictionary_finish_fault(
     open_database_paths paths,
@@ -5740,6 +5745,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-charset-convert-copy-lock-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_charset_convert_copy_lock_dictionary_ddl_recovers_metadata();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-row-format-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table();
@@ -6437,6 +6448,7 @@ int main(int argc, char **argv) {
         );
         fputs(
             "dictionary-charset-convert-crash|"
+            "dictionary-charset-convert-copy-lock-crash|"
             "dictionary-row-format-crash|dictionary-row-format-file-op-marker-crash|"
             "dictionary-row-format-copy-lock-crash|"
             "dictionary-compressed-row-format-crash|"
@@ -6927,6 +6939,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
         test_crashed_engine_rebuild_copy_lock_dictionary_ddl_marks_file_op_checkpoint
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_charset_convert_dictionary_ddl_recovers_metadata),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_charset_convert_copy_lock_dictionary_ddl_recovers_metadata),
     OWNERLESS_SQL_TEST_CASE(test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table),
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_row_format_copy_lock_dictionary_ddl_marks_file_op_checkpoint
@@ -58851,10 +58864,13 @@ static void test_crashed_engine_rebuild_copy_lock_dictionary_ddl_marks_file_op_c
     );
 }
 
-static void test_crashed_charset_convert_dictionary_ddl_recovers_metadata(void) {
+static void run_crashed_charset_convert_dictionary_ddl_recovers_metadata(
+    ownerless_dictionary_fault_writer_fn fault_fn,
+    const char *database_name
+) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
-    char *database_path = path_join(root, "ownerless-dictionary-charset-convert-crash.mylite");
+    char *database_path = path_join(root, database_name);
     char *datadir_path = path_join(database_path, "datadir");
     char *app_path = path_join(datadir_path, "app");
     char *frm_path = path_join(app_path, "ownerless_charset_convert_base.frm");
@@ -58904,10 +58920,7 @@ static void test_crashed_charset_convert_dictionary_ddl_recovers_metadata(void) 
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
-        paths,
-        charset_convert_until_dictionary_finish_fault
-    );
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(paths, fault_fn);
     assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -58993,6 +59006,20 @@ static void test_crashed_charset_convert_dictionary_ddl_recovers_metadata(void) 
     free(runtime_root);
     remove_tree(root);
     free(root);
+}
+
+static void test_crashed_charset_convert_dictionary_ddl_recovers_metadata(void) {
+    run_crashed_charset_convert_dictionary_ddl_recovers_metadata(
+        charset_convert_until_dictionary_finish_fault,
+        "ownerless-dictionary-charset-convert-crash.mylite"
+    );
+}
+
+static void test_crashed_charset_convert_copy_lock_dictionary_ddl_recovers_metadata(void) {
+    run_crashed_charset_convert_dictionary_ddl_recovers_metadata(
+        charset_convert_copy_lock_until_dictionary_finish_fault,
+        "ownerless-dictionary-charset-convert-copy-lock-crash.mylite"
+    );
 }
 
 static void run_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(
@@ -74885,6 +74912,20 @@ static void charset_convert_until_dictionary_finish_fault(open_database_paths pa
         "dictionary-before-finish",
         "ALTER TABLE app.ownerless_charset_convert_base "
         "CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci"
+    );
+}
+
+static void charset_convert_copy_lock_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_charset_convert_base "
+        "CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci, "
+        "ALGORITHM=COPY, LOCK=EXCLUSIVE"
     );
 }
 

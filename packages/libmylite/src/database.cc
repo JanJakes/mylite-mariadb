@@ -18860,12 +18860,7 @@ bool ownerless_alter_table_charset_convert_recovery_statement(const SqlPolicyTok
         }
         ++index;
     }
-    for (; index < tokens.count; ++index) {
-        if (!token_equals(tokens.values[index], ";")) {
-            return false;
-        }
-    }
-    return true;
+    return consume_ownerless_optional_copy_exclusive_alter_tail(tokens, index);
 }
 
 bool ownerless_alter_table_row_format_dynamic_recovery_statement(const SqlPolicyTokens &tokens) {

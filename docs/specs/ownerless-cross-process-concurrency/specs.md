@@ -5783,8 +5783,9 @@ replacement, ordered trigger PRECEDES, duplicate `CREATE TRIGGER IF NOT EXISTS`,
 missing `DROP TRIGGER IF EXISTS`, delayed missing-dependency `CREATE TRIGGER`,
 and explicit `CREATE DEFINER=CURRENT_USER TRIGGER` writers after native
 `.TRG`/`.TRN` metadata creation/removal, rewrite, no-op preservation, delayed
-dependency acceptance, or definer metadata storage, charset-conversion, dynamic
-row-format including exact copy-lock, compressed 1 KiB/2 KiB/4 KiB/8 KiB/16 KiB
+dependency acceptance, or definer metadata storage, charset-conversion
+including exact copy-lock, dynamic row-format including exact copy-lock,
+compressed 1 KiB/2 KiB/4 KiB/8 KiB/16 KiB
 row-format including exact copy-lock, and table-comment writers
 after native table-option metadata update or rebuild, a
 `DROP TABLE` writer after native file removal, a stale-reader retained-WAL
@@ -7708,8 +7709,9 @@ subsystems that this mode needs:
      mixed rename-list prefinish boundary, especially
      remaining rename variants, other rebuild variants beyond the covered
      FORCE, same-engine ENGINE including exact copy-lock, row-format including
-     exact copy-lock, compressed row-format including exact copy-lock, charset,
-     and focused exact copy-lock ADD/DROP/MODIFY COLUMN boundaries,
+     exact copy-lock, compressed row-format including exact copy-lock, charset
+     including exact copy-lock, and focused exact copy-lock ADD/DROP/MODIFY
+     COLUMN boundaries,
      broader metadata-only DDL, broader mixed temporary/permanent
      rename matrices, broader FK plus non-FK ALTER lists beyond the focused
      ADD COLUMN, table-comment, and column-default cases, broader schema option variants beyond the focused

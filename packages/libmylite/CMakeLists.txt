@@ -610,6 +610,12 @@ if(BUILD_TESTING)
           dictionary-charset-convert-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-charset-convert-copy-lock-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-charset-convert-copy-lock-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-row-format-file-op-marker-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -1523,6 +1529,7 @@ if(BUILD_TESTING)
         libmylite.ownerless-dictionary-engine-rebuild-file-op-marker-crash
         libmylite.ownerless-dictionary-engine-rebuild-copy-lock-crash
         libmylite.ownerless-dictionary-charset-convert-crash
+        libmylite.ownerless-dictionary-charset-convert-copy-lock-crash
         libmylite.ownerless-dictionary-row-format-file-op-marker-crash
         libmylite.ownerless-dictionary-row-format-copy-lock-crash
         libmylite.ownerless-dictionary-compressed-row-format-file-op-marker-crash
