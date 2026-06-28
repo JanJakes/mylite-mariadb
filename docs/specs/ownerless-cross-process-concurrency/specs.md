@@ -4185,11 +4185,10 @@ Tasks:
    kills representative generated-function and generated-primary-key writers
    after MariaDB validation failure but before ownerless dictionary finish, then
    verifies no rejected native metadata leaks and retry errno 1901/1903 remains
-   stable. The failed generated-column crash selector and generated-column
+   stable. The failed generated-column crash selector, successful
+   generated-column CREATE/ALTER/INDEX crash selector, and generated-column
    foreign-key crash selectors are also registered as standalone hook CTests for
-   visible CI timing and failure attribution. Standalone promotion of the
-   successful generated-column CREATE/ALTER/INDEX crash selector remains
-   deferred until its pre-finish dictionary recovery contract is fixed.
+   visible CI timing and failure attribution.
    Exhaustive retained-function blocked-function replay and external oracle
    stress remain planned.
    Deterministic ownerless foreign-key graph stress now runs concurrent workers

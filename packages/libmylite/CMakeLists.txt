@@ -1150,6 +1150,12 @@ if(BUILD_TESTING)
           dictionary-generated-column-foreign-key-drop-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-generated-column-success-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-generated-column-success-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-generated-column-failed-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -1742,6 +1748,7 @@ if(BUILD_TESTING)
         libmylite.ownerless-dictionary-view-invalid-dependency-drop-crash
         libmylite.ownerless-dictionary-generated-column-foreign-key-crash
         libmylite.ownerless-dictionary-generated-column-foreign-key-drop-crash
+        libmylite.ownerless-dictionary-generated-column-success-crash
         libmylite.ownerless-dictionary-generated-column-failed-crash
         libmylite.ownerless-dictionary-trigger-definer-crash
         libmylite.ownerless-dictionary-trigger-order-crash

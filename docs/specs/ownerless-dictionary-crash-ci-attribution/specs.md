@@ -53,12 +53,12 @@ No product behavior changes in this slice. The weighted shard remains the broad
 coverage path; standalone CTests provide isolated timing, targeted reruns, and
 clear CI failure attribution.
 
-`dictionary-generated-column-success-crash` is deliberately not promoted by
-this slice. A focused re-run exposed a stale selector contract: after the first
-successful generated-column create crash, the next live-peer startup can remain
-`MYLITE_BUSY` with dead process slots and active dictionary state that has no
-recoverable kind. That needs a separate recovery slice before the selector is
-safe to run as a standalone CI job.
+`dictionary-generated-column-success-crash` was deliberately not promoted by
+this slice. A focused re-run exposed a stale selector contract: after a
+successful generated-column DDL crash, the next live-peer startup could remain
+`MYLITE_BUSY` with dead process slots and active dictionary state that had no
+recoverable kind. The follow-up generated-column success recovery slice fixed
+that classifier gap and promoted the selector as standalone CI evidence.
 
 ## Compatibility Impact
 

@@ -52949,6 +52949,7 @@ static void test_crashed_generated_column_success_dictionary_ddl_recovers_metada
     char *create_frm_path = path_join(app_path, "ownerless_generated_success_crash_create.frm");
     char *create_ibd_path = path_join(app_path, "ownerless_generated_success_crash_create.ibd");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -53012,10 +53013,11 @@ static void test_crashed_generated_column_success_dictionary_ddl_recovers_metada
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         generated_column_create_until_dictionary_finish_fault
     );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(path_exists(create_frm_path));
@@ -53052,11 +53054,28 @@ static void test_crashed_generated_column_success_dictionary_ddl_recovers_metada
         ) == 60U
     );
     assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    release_ownerless_live_peer(&live_peer);
 
-    crash_dictionary_writer_with_live_peer(
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_success_crash_create") ==
+        2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(virtual_value) FROM app.ownerless_generated_success_crash_create"
+        ) == 60U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         generated_column_alter_until_dictionary_finish_fault
     );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -53096,11 +53115,26 @@ static void test_crashed_generated_column_success_dictionary_ddl_recovers_metada
         ) == 75U
     );
     assert(mylite_close(db) == MYLITE_OK);
+    release_ownerless_live_peer(&live_peer);
 
-    crash_dictionary_writer_with_live_peer(
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_generated_success_crash_alter") == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(virtual_value) FROM app.ownerless_generated_success_crash_alter"
+        ) == 180U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         generated_column_index_until_dictionary_finish_fault
     );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -53136,6 +53170,20 @@ static void test_crashed_generated_column_success_dictionary_ddl_recovers_metada
         ) == 25U
     );
     assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    release_ownerless_live_peer(&live_peer);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(base_value) FROM app.ownerless_generated_success_crash_index "
+            "FORCE INDEX (ownerless_generated_success_crash_virtual_idx) "
+            "WHERE virtual_value >= 20"
+        ) == 25U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     assert_ownerless_generated_column_success_crash_state(
         paths,

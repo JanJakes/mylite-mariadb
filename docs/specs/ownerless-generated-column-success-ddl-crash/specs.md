@@ -14,13 +14,13 @@ publishes the ownerless dictionary generation. MyLite must recover the native
 table, generated-column metadata, generated values, and generated-column index
 metadata without requiring the crashed process to finish.
 
-Status note: the later ownerless dictionary crash CI attribution audit did not
-promote `dictionary-generated-column-success-crash` as a standalone CTest. A
-focused re-run exposed a stale selector contract: after the first successful
-generated-column create crash, a later live-peer startup can remain
-`MYLITE_BUSY` with dead process slots and active dictionary state that has no
-recoverable kind. That pre-finish dictionary recovery contract remains a
-separate follow-up before this selector can be used as standalone CI evidence.
+Status note: a later ownerless dictionary crash CI attribution audit found this
+selector was stale: successful generated-column `ALTER TABLE ... ADD COLUMN`
+was not classified as a recoverable ownerless dictionary DDL when the generated
+column definition used a comma-separated multi-ADD clause. This slice fixes
+that classifier gap, proves live recovery, verifies marker retention only for
+the native file-lifecycle cases that still need it, and registers the selector
+as a standalone hook CTest.
 
 ## Source Findings
 
@@ -50,9 +50,14 @@ Base: MariaDB 11.8 LTS import `mariadb-11.8.6`
   The unsafe `dictionary-before-finish` hook kills a writer after MariaDB has
   returned from native DDL but before MyLite marks the shared dictionary state
   idle.
+- `packages/libmylite/src/database.cc` classifies ownerless `ALTER TABLE ...
+  ADD COLUMN` recovery before executing the MariaDB statement. Generated-column
+  ADD recovery must therefore accept deterministic generated-column definition
+  tokens and comma-separated multi-ADD clauses so the pre-finish recovery kind
+  is durable before the crash hook fires.
 - Existing hook selectors for secondary-index, column, view, trigger, and
-  failed generated-column DDL use the same live-peer cleanup-busy and no-live
-  recovery pattern.
+  failed generated-column DDL use the same live-peer recovery or no-live drain
+  boundary around `dictionary-before-finish`.
 
 ## Design
 
@@ -63,14 +68,19 @@ Add a hook-only selector,
 The selector uses one ownerless database and three killed writers:
 
 1. Successful `CREATE TABLE` with stored and virtual generated columns. After
-   no-live recovery, verify `.frm` and `.ibd` files exist, generated-column
-   metadata is present, inserts omitting generated columns work, and generated
-   values are correct.
+   live recovery, verify `.frm` and `.ibd` files exist, generated-column
+   metadata is present, inserts omitting generated columns work, generated
+   values are correct, and the native file-operation marker remains until the
+   final no-live drain.
 2. Successful `ALTER TABLE ... ADD COLUMN` adding stored and virtual generated
-   columns to an existing InnoDB table. After recovery, verify existing rows
-   expose generated values and later inserts recompute them.
+   columns to an existing InnoDB table through a comma-separated multi-ADD
+   clause. After live recovery, verify existing rows expose generated values
+   and later inserts recompute them. The crash must publish the native
+   file-operation marker, but live recovery may clear it once native proof is
+   complete.
 3. Successful `CREATE INDEX` over a virtual generated column. After recovery,
-   verify `INFORMATION_SCHEMA.STATISTICS`, `FORCE INDEX` reads, and later DML.
+   verify `INFORMATION_SCHEMA.STATISTICS`, `FORCE INDEX` reads, later DML, and
+   native file-operation marker retention until the final no-live drain.
 
 Each killed writer runs with a live ownerless peer so cleanup must remain busy
 until no-live recovery. The final state is verified through ownerless reopen,
@@ -153,7 +163,10 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 - Each successful DDL writer reaches `dictionary-before-finish` and can be
   killed without hanging the test.
-- A live ownerless peer prevents cleanup until no-live recovery.
+- Live ownerless recovery succeeds while another ownerless peer remains open;
+  file-lifecycle cases retain the native file-operation marker until final
+  no-live drain, while generated-column ALTER recovery may clear it after native
+  proof completes.
 - Recovered generated-column `CREATE TABLE` metadata, native files, inserts,
   and generated values are correct.
 - Recovered generated-column `ALTER TABLE` metadata and generated values are

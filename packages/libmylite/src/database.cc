@@ -2301,6 +2301,13 @@ bool ownerless_alter_table_add_column_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 );
+bool consume_ownerless_alter_table_add_column_recovery_clause(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::size_t &index,
+    std::string_view schema_name,
+    std::string_view table_name
+);
 bool ownerless_alter_table_drop_column_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
@@ -17755,72 +17762,34 @@ bool ownerless_alter_table_add_column_recovery_statement(
         index >= tokens.count || !token_equals(tokens.values[index], "ADD")) {
         return false;
     }
-    ++index;
-    if (index < tokens.count && token_equals(tokens.values[index], "COLUMN")) {
-        ++index;
-    }
-    if (index + 1U >= tokens.count || token_equals(tokens.values[index], "IF") ||
-        token_in(tokens.values[index], "CHECK", "CONSTRAINT", "FOREIGN") ||
-        token_in(tokens.values[index], "FULLTEXT", "INDEX", "KEY") ||
-        token_in(tokens.values[index], "PRIMARY", "SPATIAL", "UNIQUE") ||
-        !ownerless_table_identifier_token(tokens.values[index])) {
-        return false;
-    }
 
-    const std::string column_name = ownerless_normalized_identifier(tokens.values[index]);
-    ++index;
-    bool has_definition = false;
-    bool saw_semicolon = false;
-    std::size_t depth = 0U;
-    for (; index < tokens.count; ++index) {
-        const std::string_view token = tokens.values[index];
-        if (token_equals(token, ";")) {
-            saw_semicolon = true;
-            continue;
-        }
-        if (saw_semicolon) {
+    bool consumed_clause = false;
+    for (;;) {
+        if (!consume_ownerless_alter_table_add_column_recovery_clause(
+                db,
+                tokens,
+                index,
+                schema_name,
+                table_name
+            )) {
             return false;
         }
-        if (token_equals(token, "(")) {
-            ++depth;
-            has_definition = true;
-            continue;
-        }
-        if (token_equals(token, ")")) {
-            if (depth == 0U) {
-                return false;
-            }
-            --depth;
-            has_definition = true;
-            continue;
-        }
-        if (depth == 0U && token_equals(token, ",")) {
+        consumed_clause = true;
+        if (index >= tokens.count || token_equals(tokens.values[index], ";")) {
             break;
         }
-        if (token_in(token, "AFTER", "ALGORITHM", "AUTO_INCREMENT", "CHECK") ||
-            token_equals(token, "CONSTRAINT") ||
-            token_in(token, "FIRST", "FOREIGN", "FULLTEXT", "GENERATED") ||
-            token_in(token, "INDEX", "KEY", "LOCK", "PRIMARY") ||
-            token_equals(token, "REFERENCES") ||
-            token_in(token, "SPATIAL", "STORED", "UNIQUE", "VIRTUAL")) {
+        if (!token_equals(tokens.values[index], ",")) {
             return false;
         }
-        has_definition = true;
+        if (index + 1U >= tokens.count || !token_equals(tokens.values[index + 1U], "ADD")) {
+            break;
+        }
+        ++index;
     }
-    if (!has_definition || depth != 0U ||
-        !consume_ownerless_optional_copy_exclusive_alter_tail(tokens, index)) {
+    if (!consumed_clause || !consume_ownerless_optional_copy_exclusive_alter_tail(tokens, index)) {
         return false;
     }
-
-    bool column_exists = false;
-    return ownerless_column_metadata_lookup(
-               db,
-               schema_name,
-               table_name,
-               column_name,
-               &column_exists
-           ) &&
-           !column_exists;
+    return true;
 }
 
 bool consume_ownerless_alter_table_add_column_recovery_clause(
@@ -17868,11 +17837,9 @@ bool consume_ownerless_alter_table_add_column_recovery_clause(
             continue;
         }
         if (token_in(token, "AFTER", "ALGORITHM", "AUTO_INCREMENT", "CHECK") ||
-            token_equals(token, "CONSTRAINT") ||
-            token_in(token, "FIRST", "FOREIGN", "FULLTEXT", "GENERATED") ||
+            token_equals(token, "CONSTRAINT") || token_in(token, "FIRST", "FOREIGN", "FULLTEXT") ||
             token_in(token, "INDEX", "KEY", "LOCK", "PRIMARY") ||
-            token_equals(token, "REFERENCES") ||
-            token_in(token, "SPATIAL", "STORED", "UNIQUE", "VIRTUAL")) {
+            token_equals(token, "REFERENCES") || token_in(token, "SPATIAL", "UNIQUE")) {
             return false;
         }
         has_definition = true;
