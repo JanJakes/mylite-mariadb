@@ -503,8 +503,13 @@ explicit DML from a second ownerless writer while the first writer remains
 live, verifies the second writer's committed row is visible while the first
 writer's uncommitted row remains hidden, and then proves final ownerless,
 forced-`.shm`, and native reopen preserve only the first writer's
-pre-savepoint row plus the second writer's row. Hook-build coverage now also
-kills a writer after
+pre-savepoint row plus the second writer's row. Adjacent same-page coverage
+now keeps the first writer open after `ROLLBACK TO SAVEPOINT`, proves a peer
+writer on another row in the same table waits on ownerless write ownership
+instead of independently publishing the page, then verifies ownerless,
+forced-`.shm`, and native reopen preserve the first writer's pre-savepoint row,
+discard the rolled-back row, and keep the peer's later row. Hook-build coverage
+now also kills a writer after
 native `ROLLBACK TO SAVEPOINT` succeeds but before MyLite updates its
 process-local savepoint state and discards rolled-back file-operation evidence,
 then verifies both file-op markers stay clear and the original row survives

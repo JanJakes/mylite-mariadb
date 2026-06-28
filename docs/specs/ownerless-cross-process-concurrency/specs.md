@@ -7719,7 +7719,8 @@ subsystems that this mode needs:
      rollback/savepoint-rollback internals and broader same-page/same-table
      concurrent-writer savepoint schedules that combine native undo,
      ownerless page-write ownership, and file-operation marker cleanup beyond
-     the covered independent-table handoff.
+     the covered independent-table handoff and focused same-page wait/commit
+     handoff.
   3. Extend active-reader pressure evidence from retained-WAL policy to crash
      and external-oracle breadth for the high-risk DML/DDL classes already
      covered by bounded pressure policy tests.
