@@ -5413,6 +5413,13 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-multi-rename-if-exists-loop-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        assert(setenv("MYLITE_OWNERLESS_TEST_RENAME_IF_EXISTS", "1", 1) == 0);
+        test_crashed_multi_rename_loop_recovers_ddl_log_rollback();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-cross-schema-multi-rename-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_cross_schema_multi_rename_dictionary_ddl_recovers_swapped_tables();
@@ -5421,6 +5428,14 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "dictionary-cross-schema-multi-rename-loop-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_cross_schema_multi_rename_loop_recovers_ddl_log_rollback();
+#endif
+        return 0;
+    }
+    if (argc == 2 &&
+        strcmp(argv[1], "dictionary-cross-schema-multi-rename-if-exists-loop-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        assert(setenv("MYLITE_OWNERLESS_TEST_RENAME_IF_EXISTS", "1", 1) == 0);
         test_crashed_cross_schema_multi_rename_loop_recovers_ddl_log_rollback();
 #endif
         return 0;
@@ -6748,8 +6763,10 @@ int main(int argc, char **argv) {
             "dictionary-cross-schema-rename-crash|"
             "dictionary-multi-rename-crash|"
             "dictionary-multi-rename-loop-crash|"
+            "dictionary-multi-rename-if-exists-loop-crash|"
             "dictionary-cross-schema-multi-rename-crash|"
             "dictionary-cross-schema-multi-rename-loop-crash|"
+            "dictionary-cross-schema-multi-rename-if-exists-loop-crash|"
             "dictionary-secondary-index-crash|"
             "dictionary-secondary-index-drop-crash|"
             "dictionary-index-idempotent-create-crash|"
@@ -77598,6 +77615,26 @@ static void rename_multi_table_until_dictionary_finish_fault(
 }
 
 #  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static const char *rename_multi_table_native_loop_sql(void) {
+    if (getenv("MYLITE_OWNERLESS_TEST_RENAME_IF_EXISTS") != NULL) {
+        return "RENAME TABLE IF EXISTS "
+               "app.ownerless_multi_rename_crash_left "
+               "TO app.ownerless_multi_rename_crash_tmp, "
+               "app.ownerless_multi_rename_crash_right "
+               "TO app.ownerless_multi_rename_crash_left, "
+               "app.ownerless_multi_rename_crash_tmp "
+               "TO app.ownerless_multi_rename_crash_right";
+    }
+
+    return "RENAME TABLE "
+           "app.ownerless_multi_rename_crash_left "
+           "TO app.ownerless_multi_rename_crash_tmp, "
+           "app.ownerless_multi_rename_crash_right "
+           "TO app.ownerless_multi_rename_crash_left, "
+           "app.ownerless_multi_rename_crash_tmp "
+           "TO app.ownerless_multi_rename_crash_right";
+}
+
 static void rename_multi_table_until_first_native_file_op_fault(
     open_database_paths paths,
     int ready_fd
@@ -77606,13 +77643,7 @@ static void rename_multi_table_until_first_native_file_op_fault(
         paths,
         ready_fd,
         "rename-table-after-native-file-op",
-        "RENAME TABLE "
-        "app.ownerless_multi_rename_crash_left "
-        "TO app.ownerless_multi_rename_crash_tmp, "
-        "app.ownerless_multi_rename_crash_right "
-        "TO app.ownerless_multi_rename_crash_left, "
-        "app.ownerless_multi_rename_crash_tmp "
-        "TO app.ownerless_multi_rename_crash_right"
+        rename_multi_table_native_loop_sql()
     );
 }
 #  endif
@@ -77640,6 +77671,34 @@ static void rename_cross_schema_multi_table_until_dictionary_finish_fault(
 }
 
 #  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static const char *rename_cross_schema_multi_table_native_loop_sql(void) {
+    if (getenv("MYLITE_OWNERLESS_TEST_RENAME_IF_EXISTS") != NULL) {
+        return "RENAME TABLE IF EXISTS "
+               "app.ownerless_cross_multi_rename_crash_left "
+               "TO ownerless_cross_multi_rename_crash_archive."
+               "ownerless_cross_multi_rename_crash_tmp, "
+               "ownerless_cross_multi_rename_crash_archive."
+               "ownerless_cross_multi_rename_crash_right "
+               "TO app.ownerless_cross_multi_rename_crash_left, "
+               "ownerless_cross_multi_rename_crash_archive."
+               "ownerless_cross_multi_rename_crash_tmp "
+               "TO ownerless_cross_multi_rename_crash_archive."
+               "ownerless_cross_multi_rename_crash_right";
+    }
+
+    return "RENAME TABLE "
+           "app.ownerless_cross_multi_rename_crash_left "
+           "TO ownerless_cross_multi_rename_crash_archive."
+           "ownerless_cross_multi_rename_crash_tmp, "
+           "ownerless_cross_multi_rename_crash_archive."
+           "ownerless_cross_multi_rename_crash_right "
+           "TO app.ownerless_cross_multi_rename_crash_left, "
+           "ownerless_cross_multi_rename_crash_archive."
+           "ownerless_cross_multi_rename_crash_tmp "
+           "TO ownerless_cross_multi_rename_crash_archive."
+           "ownerless_cross_multi_rename_crash_right";
+}
+
 static void rename_cross_schema_multi_table_until_first_native_file_op_fault(
     open_database_paths paths,
     int ready_fd
@@ -77648,17 +77707,7 @@ static void rename_cross_schema_multi_table_until_first_native_file_op_fault(
         paths,
         ready_fd,
         "rename-table-after-native-file-op",
-        "RENAME TABLE "
-        "app.ownerless_cross_multi_rename_crash_left "
-        "TO ownerless_cross_multi_rename_crash_archive."
-        "ownerless_cross_multi_rename_crash_tmp, "
-        "ownerless_cross_multi_rename_crash_archive."
-        "ownerless_cross_multi_rename_crash_right "
-        "TO app.ownerless_cross_multi_rename_crash_left, "
-        "ownerless_cross_multi_rename_crash_archive."
-        "ownerless_cross_multi_rename_crash_tmp "
-        "TO ownerless_cross_multi_rename_crash_archive."
-        "ownerless_cross_multi_rename_crash_right"
+        rename_cross_schema_multi_table_native_loop_sql()
     );
 }
 #  endif

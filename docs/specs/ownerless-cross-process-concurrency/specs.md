@@ -4951,7 +4951,9 @@ Tasks:
    multi-rename native-loop crash coverage now kills after first, second, and
    final successful native rename pairs inside MariaDB's rename loop and
    verifies MariaDB DDL-log recovery restores the original table names, schema
-   placement, and tablespace identities instead of completing the swap.
+   placement, and tablespace identities instead of completing the swap; the
+   same deterministic same-schema and cross-schema three-pair lists are also
+   covered with `RENAME TABLE IF EXISTS`.
    Same-schema and cross-schema foreign-key
    multi-rename native-loop crash coverage kills after first and later
    successful native rename pairs, verifies DDL-log recovery restores the
@@ -5793,6 +5795,9 @@ successful native rename pairs inside MariaDB's rename loop and verifies
 DDL-log rollback to the original swapped-table state, kills a single-pair
 `RENAME TABLE IF EXISTS` writer after the native rename pair and verifies
 DDL-log rollback to the original source table, kills same-schema and
+cross-schema `RENAME TABLE IF EXISTS` multi-rename writers after first, second,
+and final successful native rename pairs and verifies DDL-log rollback to the
+original swapped-table state, kills same-schema and
 cross-schema foreign-key multi-rename writers after first and later successful
 native rename pairs
 inside MariaDB's rename loop and verifies DDL-log rollback to the original FK
@@ -7825,14 +7830,16 @@ subsystems that this mode needs:
      prefinish boundaries, plus child-only,
      self-referencing, and stored generated-column child foreign-key truncate
      prefinish boundaries, plus simple temporary DDL, pure multi-pair temporary
-     rename chains, focused `RENAME TABLE IF EXISTS`, and
+     rename chains, focused single-pair `RENAME TABLE IF EXISTS`, and
      temp-first plus permanent-first mixed temporary/permanent rename-list
      prefinish boundaries, plus a focused temporary-chain/permanent/temporary-chain
      mixed rename-list prefinish boundary, plus same-schema and cross-schema
      non-FK multi-rename native-loop rollback after first, second, and final native
-     rename pairs, especially
-     remaining rename variants including longer `IF EXISTS` native
-     rename-list permutations, other rebuild variants beyond the covered
+     rename pairs, including deterministic same-schema and cross-schema
+     `RENAME TABLE IF EXISTS` three-pair lists, especially remaining rename
+     variants including foreign-key `IF EXISTS` rename lists, missing-source
+     `IF EXISTS` no-op matrices, arbitrary longer rename-list permutations,
+     other rebuild variants beyond the covered
      FORCE, same-engine ENGINE including both exact copy-lock option orders,
      row-format including
      exact copy-lock, compressed row-format including exact copy-lock, charset

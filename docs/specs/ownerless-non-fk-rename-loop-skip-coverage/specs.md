@@ -53,7 +53,9 @@ Out of scope:
 - Cross-schema non-FK later-pair rename-loop coverage, covered by the
   `ownerless-cross-schema-non-fk-rename-loop-skip-coverage` follow-up.
 - Mixed temporary/permanent rename-list loop matrices.
-- `IF EXISTS` rename-loop variants beyond the existing focused coverage.
+- Deterministic same-schema and cross-schema three-pair `IF EXISTS`
+  rename-loop variants, covered by the
+  `ownerless-rename-if-exists-list-loop-coverage` follow-up.
 - Broader DDL/file-lifecycle recovery, native redo/checkpoint reconciliation,
   active-reader pressure oracle breadth, and external MariaDB/RQG stress.
 - SQL-level local table-lock fault injection.
@@ -117,4 +119,4 @@ No binary-size, dependency, or license impact.
 - This closes only the same-schema non-FK three-pair swap. The
   `ownerless-cross-schema-non-fk-rename-loop-skip-coverage` follow-up covers
   the deterministic cross-schema three-pair swap; broader mixed rename-list
-  matrices remain completion work.
+  matrices and arbitrary longer rename lists remain completion work.

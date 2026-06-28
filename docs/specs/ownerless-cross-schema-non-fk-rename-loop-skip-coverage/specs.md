@@ -51,7 +51,9 @@ In scope:
 Out of scope:
 
 - Mixed temporary/permanent rename-list loop matrices.
-- `IF EXISTS` rename-loop variants beyond the existing focused coverage.
+- Deterministic same-schema and cross-schema three-pair `IF EXISTS`
+  rename-loop variants, covered by the
+  `ownerless-rename-if-exists-list-loop-coverage` follow-up.
 - Arbitrary longer rename lists or randomized rename permutations.
 - Broader DDL/file-lifecycle recovery, native redo/checkpoint reconciliation,
   active-reader pressure oracle breadth, and external MariaDB/RQG stress.

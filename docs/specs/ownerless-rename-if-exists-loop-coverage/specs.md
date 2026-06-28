@@ -42,7 +42,9 @@ Out of scope:
 
 - Missing-source `RENAME TABLE IF EXISTS` no-op paths that do not reach the
   native file-operation hook.
-- Longer `IF EXISTS` rename-list permutations.
+- Deterministic same-schema and cross-schema three-pair `IF EXISTS`
+  rename-list permutations, covered by the
+  `ownerless-rename-if-exists-list-loop-coverage` follow-up.
 - Mixed temporary/permanent rename-list loop matrices.
 - Broader DDL/file-lifecycle recovery, native redo/checkpoint reconciliation,
   active-reader pressure oracle breadth, and external MariaDB/RQG stress.
@@ -94,10 +96,13 @@ No binary-size, dependency, or license impact.
 - Peer writes after live recovery persist through final no-live marker drain,
   ownerless/native reopen, and forced `.shm` rebuild.
 - The CTest has a separate name and timing in CI.
-- Compatibility docs describe focused IF EXISTS native-loop coverage and keep
-  longer IF EXISTS rename-list permutations as planned.
+- Compatibility docs describe focused IF EXISTS native-loop coverage and leave
+  broader rename-list matrices to follow-up specs.
 
 ## Risks And Open Questions
 
-- This is a single existing-table IF EXISTS rename pair. Longer IF EXISTS
-  rename-list permutations remain completion work.
+- This is a single existing-table IF EXISTS rename pair. Deterministic
+  same-schema and cross-schema three-pair IF EXISTS lists are covered by the
+  `ownerless-rename-if-exists-list-loop-coverage` follow-up; broader
+  missing-source, mixed temporary/permanent, foreign-key, arbitrary longer-list,
+  and randomized DDL permutations remain completion work.
