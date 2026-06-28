@@ -4947,8 +4947,8 @@ Tasks:
    multi-pair rename file-move boundaries. Focused `RENAME TABLE IF EXISTS`
    prefinish crash coverage uses the same rename recovery lane for an
    existing-table native file move. Same-schema and cross-schema foreign-key
-   multi-rename native-loop crash coverage now kills after the first
-   successful native parent rename inside MariaDB's rename loop, verifies
+   multi-rename native-loop crash coverage now kills after first and later
+   successful native rename pairs inside MariaDB's rename loop, verifies
    MariaDB DDL-log recovery restores the original parent and child names
    instead of completing the remaining rename pairs, preserves original FK
    metadata/enforcement, retains the native file-op marker while a peer remains
@@ -5782,9 +5782,9 @@ hook-build coverage now kills same-schema,
 cross-schema, same-schema multi-pair swap, and cross-schema multi-pair swap
 `RENAME TABLE` writers after the
 native file move but before ownerless dictionary finish, kills same-schema and
-cross-schema foreign-key multi-rename writers after the first successful native
-rename inside MariaDB's rename loop and verifies DDL-log rollback to the
-original FK state with marker retention/drain, plus marker-specific
+cross-schema foreign-key multi-rename writers after first and later successful
+native rename pairs inside MariaDB's rename loop and verifies DDL-log rollback
+to the original FK state with marker retention/drain, plus marker-specific
 coverage for the same `RENAME TABLE` boundary, a `CREATE TABLE ... LIKE`
 writer after native `FILE_CREATE`, a CTAS writer after native `FILE_CREATE`
 and row population, a `TRUNCATE TABLE` writer after native truncate/recreate,

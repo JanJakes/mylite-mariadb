@@ -794,6 +794,18 @@ if(BUILD_TESTING)
           dictionary-fk-multi-rename-loop-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-fk-multi-rename-second-loop-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-fk-multi-rename-loop-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-fk-multi-rename-third-loop-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-fk-multi-rename-loop-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-fk-cross-schema-multi-rename-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -801,6 +813,12 @@ if(BUILD_TESTING)
       )
       add_test(
         NAME libmylite.ownerless-dictionary-fk-cross-schema-multi-rename-loop-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-fk-cross-schema-multi-rename-loop-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-fk-cross-schema-multi-rename-second-loop-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
           dictionary-fk-cross-schema-multi-rename-loop-crash
@@ -1730,6 +1748,21 @@ if(BUILD_TESTING)
         PROPERTIES
           LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
           TIMEOUT 120
+      )
+      set_tests_properties(
+        libmylite.ownerless-dictionary-fk-multi-rename-second-loop-crash
+        libmylite.ownerless-dictionary-fk-cross-schema-multi-rename-second-loop-crash
+        PROPERTIES
+          LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
+          TIMEOUT 120
+          ENVIRONMENT "MYLITE_OWNERLESS_TEST_FAULT_SKIP=1"
+      )
+      set_tests_properties(
+        libmylite.ownerless-dictionary-fk-multi-rename-third-loop-crash
+        PROPERTIES
+          LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
+          TIMEOUT 120
+          ENVIRONMENT "MYLITE_OWNERLESS_TEST_FAULT_SKIP=2"
       )
       set_tests_properties(
         libmylite.ownerless-dictionary-index-idempotent-create-crash
