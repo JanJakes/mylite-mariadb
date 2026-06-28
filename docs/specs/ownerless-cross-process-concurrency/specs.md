@@ -3366,16 +3366,18 @@ Tasks:
    trigger-file state, trigger firing/non-firing or no-op preservation
    behavior, `SHOW CREATE TRIGGER` rejection for the dropped trigger, and
    ownerless/native reopen before and after forced `.shm` rebuild.
-   Column-add/drop/modify/rename crash coverage now kills
+   Column-add/drop/modify/change/rename crash coverage now kills
    `ALTER TABLE ... ADD COLUMN`, `ALTER TABLE ... DROP COLUMN`,
-   `ALTER TABLE ... MODIFY COLUMN`, and `ALTER TABLE ... RENAME COLUMN` after
-   native table-definition mutation but before ownerless dictionary finish, then
-   verifies recovered added-column metadata/default values, absent
-   dropped-column metadata, modified-column width/default metadata, renamed-column
-   metadata with old-name rejection and new-name writes, generated-column and
-   CHECK expression behavior after a dependent column rename, existing-row
-   values, widened-value writes, and later inserts through ownerless/native
-   reopen before and after forced `.shm` rebuild. Force-rebuild crash coverage
+   `ALTER TABLE ... MODIFY COLUMN`, `ALTER TABLE ... CHANGE COLUMN`, and
+   `ALTER TABLE ... RENAME COLUMN` after native table-definition mutation but
+   before ownerless dictionary finish, then verifies recovered added-column
+   metadata/default values, absent dropped-column metadata, modified-column
+   width/default metadata, changed-column old-name rejection plus widened
+   new-name default/write behavior, renamed-column metadata with old-name
+   rejection and new-name writes, generated-column and CHECK expression behavior
+   after a dependent column rename, existing-row values, widened-value writes,
+   and later inserts through ownerless/native reopen before and after forced
+   `.shm` rebuild. Force-rebuild crash coverage
    now kills `ALTER TABLE ... FORCE` and
    `ALTER TABLE ... FORCE, ALGORITHM=COPY` writers after native table-copy
    rebuild but before ownerless dictionary finish, then verifies recovered
@@ -5775,8 +5777,9 @@ native high-watermark persistence, a composite direction primary-key writer
 after native clustered-key rebuild with live-peer recovery and retained-marker
 no-live drain, plain and exact copy-lock `ALTER TABLE ... ADD COLUMN` writers
 after native stored-column metadata update or copy rebuild, exact copy-lock
-`ALTER TABLE ... DROP COLUMN` and `ALTER TABLE ... MODIFY COLUMN` writers after
-native copy rebuild, an `ALTER COLUMN ... SET DEFAULT`
+`ALTER TABLE ... DROP COLUMN`, `ALTER TABLE ... MODIFY COLUMN`, and
+`ALTER TABLE ... CHANGE COLUMN` writers after native copy rebuild, an
+`ALTER COLUMN ... SET DEFAULT`
 writer after native metadata update, simple view CREATE/DROP writers after native view
 definition-file creation/removal, simple trigger CREATE/DROP, trigger
 replacement, ordered trigger PRECEDES, duplicate `CREATE TRIGGER IF NOT EXISTS`,
@@ -7694,7 +7697,7 @@ subsystems that this mode needs:
      top-level and ALTER secondary-index idempotent/no-op prefinish boundaries,
      plus focused column idempotent and column `IF EXISTS` missing-column
      no-op prefinish boundaries, plus focused plain and exact copy-lock
-     ADD COLUMN, exact copy-lock DROP/MODIFY COLUMN, table-comment,
+     ADD COLUMN, exact copy-lock DROP/MODIFY/CHANGE COLUMN, table-comment,
      column-default metadata ALTER, and plain, descending, composite direction,
      AUTO_INCREMENT, and AUTO_INCREMENT descending primary-key replacement
      prefinish boundaries, plus single-clause, pure multi-clause, FK-only
@@ -7710,7 +7713,7 @@ subsystems that this mode needs:
      remaining rename variants, other rebuild variants beyond the covered
      FORCE, same-engine ENGINE including exact copy-lock, row-format including
      exact copy-lock, compressed row-format including exact copy-lock, charset
-     including exact copy-lock, and focused exact copy-lock ADD/DROP/MODIFY
+     including exact copy-lock, and focused exact copy-lock ADD/DROP/MODIFY/CHANGE
      COLUMN boundaries,
      broader metadata-only DDL, broader mixed temporary/permanent
      rename matrices, broader FK plus non-FK ALTER lists beyond the focused

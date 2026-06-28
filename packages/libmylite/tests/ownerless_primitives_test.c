@@ -15344,6 +15344,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
     const uint32_t column_alter_recovery_kinds[] = {
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_COLUMN,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_MODIFY_COLUMN,
+        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_CHANGE_COLUMN,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_RENAME_COLUMN,
     };
     for (size_t index = 0U;
@@ -15399,6 +15400,9 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_RENAME_INDEX,
         MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_INDEX_IGNORABILITY,
     };
+    const uint64_t real_index_generation_start =
+        74U + (2U * (uint64_t)(sizeof(column_alter_recovery_kinds) /
+                               sizeof(column_alter_recovery_kinds[0])));
     for (size_t index = 0U;
          index < sizeof(real_index_recovery_kinds) / sizeof(real_index_recovery_kinds[0]);
          ++index) {
@@ -15442,7 +15446,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
                 &generation
             ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
         );
-        assert(generation == 80U + (2U * (uint64_t)index));
+        assert(generation == real_index_generation_start + (2U * (uint64_t)index));
     }
 
     assert(
@@ -15485,7 +15489,11 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
             &generation
         ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
     );
-    assert(generation == 90U);
+    assert(
+        generation ==
+        real_index_generation_start + (2U * (uint64_t)(sizeof(real_index_recovery_kinds) /
+                                                       sizeof(real_index_recovery_kinds[0])))
+    );
 }
 
 static void test_redo_state_tracks_lsn_and_owner_lifecycle(void) {
