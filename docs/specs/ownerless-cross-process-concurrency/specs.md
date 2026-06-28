@@ -7708,6 +7708,13 @@ subsystems that this mode needs:
   the original source schema and `SPACE` id, skipped-target absence in both
   schema directories, marker retention/drain, forced `.shm` rebuild, and
   ordinary native reopen.
+  The longer missing-source IF EXISTS follow-up covers a same-schema list with
+  three skipped missing sources interleaved around two existing InnoDB renames.
+  It proves all skipped-source warnings, completed live-peer recovery of both
+  moved targets at `dictionary-before-finish`, native-loop rollback to both
+  original source tables and `SPACE` ids after the second real
+  `rename-table-after-native-file-op` hook, skipped-target absence, marker
+  retention/drain, forced `.shm` rebuild, and ordinary native reopen.
   The ALTER-table rename follow-up classifies `ALTER TABLE ... RENAME TO` as
   the same ownerless rename recovery kind, kills the writer at
   `dictionary-before-finish` with a live peer, and proves target-table
@@ -7873,8 +7880,8 @@ subsystems that this mode needs:
      `RENAME TABLE IF EXISTS` matrices covering warning/no-op semantics,
      prefinish recovery, and native-loop rollback, especially remaining
      rename variants including FK, temporary/permanent, target-conflict, and
-     arbitrary longer
-     missing-source `IF EXISTS` permutations,
+     cross-schema longer missing-source `IF EXISTS` permutations beyond the
+     now-covered same-schema three-missing/two-existing list,
      other rebuild variants beyond the covered
      FORCE, same-engine ENGINE including both exact copy-lock option orders,
      row-format including

@@ -364,6 +364,13 @@ move from `app` to `app_archive`, proving skipped-source warnings, target
 schema placement, native-loop rollback to the original source schema and
 `SPACE` id, absence of skipped targets in both schema directories, marker
 retention/drain, forced `.shm` rebuild, and ordinary native reopen. Focused
+same-schema longer missing-source `RENAME TABLE IF EXISTS` coverage now
+interleaves three missing source pairs with two existing InnoDB renames,
+proves all three skipped-source warnings, completed recovery of both moved
+targets at `dictionary-before-finish`, native-loop DDL-log rollback to both
+original source tables and `SPACE` ids after the second real native rename
+hook, absence of all skipped targets, marker retention/drain, ownerless/native
+reopen, and forced `.shm` rebuild. Focused
 non-temporary `TRUNCATE TABLE schema.table` and implicit-schema `TRUNCATE
 table` now have live-peer recovery for the native truncate/recreate boundary;
 child-only foreign-key table truncate now also has live-peer recovery that
