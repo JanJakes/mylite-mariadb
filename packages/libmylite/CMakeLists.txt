@@ -788,6 +788,12 @@ if(BUILD_TESTING)
           dictionary-foreign-key-multi-rename-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-fk-multi-rename-loop-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-fk-multi-rename-loop-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-fk-cross-schema-multi-rename-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -1707,6 +1713,7 @@ if(BUILD_TESTING)
         libmylite.ownerless-dictionary-foreign-key-mixed-change-column-alter-crash
         libmylite.ownerless-dictionary-foreign-key-mixed-rename-column-alter-crash
         libmylite.ownerless-dictionary-fk-multi-rename-crash
+        libmylite.ownerless-dictionary-fk-multi-rename-loop-crash
         PROPERTIES
           LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
           TIMEOUT 120

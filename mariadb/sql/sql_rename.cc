@@ -34,6 +34,9 @@
 #include "ddl_log.h"
 #include "wsrep_mysqld.h"
 #include "debug.h"
+#include "mylite_ownerless_dictionary_hooks.h"
+
+extern "C" void mylite_ownerless_innodb_test_fault(const char *fault_name);
 
 /* used to hold table entries for as part of list of renamed temporary tables */
 struct TABLE_PAIR
@@ -398,6 +401,9 @@ do_rename(THD *thd, const rename_param *param, DDL_LOG_STATE *ddl_log_state,
                                  new_db, new_alias, &param->old_version,
                                  QRMT_DEFAULT)))
     {
+      mylite_ownerless_dictionary_native_file_op();
+      mylite_ownerless_innodb_test_fault("rename-table-after-native-file-op");
+
       /* Table rename succeded.
          It's safe to start recovery at rename trigger phase
       */
