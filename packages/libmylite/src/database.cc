@@ -16649,13 +16649,25 @@ bool consume_ownerless_optional_copy_exclusive_alter_tail(
     }
 
     ++index;
-    if (index + 6U >= tokens.count || !token_equals(tokens.values[index], "ALGORITHM") ||
-        !token_equals(tokens.values[index + 1U], "=") ||
-        !token_equals(tokens.values[index + 2U], "COPY") ||
-        !token_equals(tokens.values[index + 3U], ",") ||
-        !token_equals(tokens.values[index + 4U], "LOCK") ||
-        !token_equals(tokens.values[index + 5U], "=") ||
-        !token_equals(tokens.values[index + 6U], "EXCLUSIVE")) {
+    if (index + 6U >= tokens.count) {
+        return false;
+    }
+
+    const bool algorithm_then_lock = token_equals(tokens.values[index], "ALGORITHM") &&
+                                     token_equals(tokens.values[index + 1U], "=") &&
+                                     token_equals(tokens.values[index + 2U], "COPY") &&
+                                     token_equals(tokens.values[index + 3U], ",") &&
+                                     token_equals(tokens.values[index + 4U], "LOCK") &&
+                                     token_equals(tokens.values[index + 5U], "=") &&
+                                     token_equals(tokens.values[index + 6U], "EXCLUSIVE");
+    const bool lock_then_algorithm = token_equals(tokens.values[index], "LOCK") &&
+                                     token_equals(tokens.values[index + 1U], "=") &&
+                                     token_equals(tokens.values[index + 2U], "EXCLUSIVE") &&
+                                     token_equals(tokens.values[index + 3U], ",") &&
+                                     token_equals(tokens.values[index + 4U], "ALGORITHM") &&
+                                     token_equals(tokens.values[index + 5U], "=") &&
+                                     token_equals(tokens.values[index + 6U], "COPY");
+    if (!algorithm_then_lock && !lock_then_algorithm) {
         return false;
     }
 

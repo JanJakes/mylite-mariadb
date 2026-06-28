@@ -4913,7 +4913,8 @@ Tasks:
    truncate/recreate, `DROP TABLE` `FILE_DELETE`, and replacement-copy
    `CREATE OR REPLACE TABLE ... LIKE`/`CREATE OR REPLACE TABLE ... AS SELECT`
    marker coverage plus representative `ALTER TABLE ... FORCE` and plain plus
-   explicit copy-lock `ALTER TABLE ... ENGINE=InnoDB` forms and
+   both exact explicit copy-lock option orders for
+   `ALTER TABLE ... ENGINE=InnoDB` forms and
    plain plus explicit copy-lock `ALTER TABLE ... ROW_FORMAT=DYNAMIC` rebuild
    marker coverage, plus
    plain plus explicit copy-lock compressed
@@ -5591,8 +5592,9 @@ Minimum suites before support can be claimed:
     recovered charset/collation metadata, retained rows, post-recovery DML,
     ownerless/native reopen, and forced `.shm` rebuild remain correct,
   - after representative same-engine `ALTER TABLE ... ENGINE=InnoDB` native
-    rebuild, now including the exact
-    `ENGINE=InnoDB, ALGORITHM=COPY, LOCK=EXCLUSIVE` spelling, but before
+    rebuild, now including both exact
+    `ENGINE=InnoDB, ALGORITHM=COPY, LOCK=EXCLUSIVE` and
+    `ENGINE=InnoDB, LOCK=EXCLUSIVE, ALGORITHM=COPY` spellings, but before
     ownerless dictionary finish; hook coverage proves live-peer recovery after
     pre-execution metadata proves the source table is an InnoDB base table,
     retains the native file-operation marker while the peer remains open,
@@ -5791,8 +5793,10 @@ and row population, a `TRUNCATE TABLE` writer after native truncate/recreate,
 and a `DROP TABLE` writer after native `FILE_DELETE`, replacement-copy
 `CREATE OR REPLACE TABLE ... LIKE` and `CREATE OR REPLACE TABLE ... AS SELECT`
 writers after native replacement-copy completion, marker-specific coverage for
-representative `ALTER TABLE ... FORCE` and plain plus explicit copy-lock
-`ALTER TABLE ... ROW_FORMAT=DYNAMIC` rebuild writers after native rebuild
+representative `ALTER TABLE ... FORCE`, plain plus both exact explicit
+copy-lock option orders for same-engine `ALTER TABLE ... ENGINE=InnoDB`, and
+plain plus explicit copy-lock `ALTER TABLE ... ROW_FORMAT=DYNAMIC` rebuild
+writers after native rebuild
 completion, focused post-checkpoint DML observation of the native
 `FILE_MODIFY` redo flag, plain `ALTER TABLE ... FORCE` and explicit
 `ALTER TABLE ... FORCE, ALGORITHM=COPY, LOCK=EXCLUSIVE` writers after native
@@ -7812,7 +7816,8 @@ subsystems that this mode needs:
      prefinish boundaries, plus a focused temporary-chain/permanent/temporary-chain
      mixed rename-list prefinish boundary, especially
      remaining rename variants, other rebuild variants beyond the covered
-     FORCE, same-engine ENGINE including exact copy-lock, row-format including
+     FORCE, same-engine ENGINE including both exact copy-lock option orders,
+     row-format including
      exact copy-lock, compressed row-format including exact copy-lock, charset
      including exact copy-lock, and focused exact copy-lock
      ADD/DROP/MODIFY/CHANGE/RENAME COLUMN boundaries,

@@ -1217,6 +1217,7 @@ static void test_crashed_force_rebuild_dictionary_ddl_marks_file_op_checkpoint(v
 static void test_crashed_plain_force_rebuild_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_engine_rebuild_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_engine_rebuild_copy_lock_dictionary_ddl_marks_file_op_checkpoint(void);
+static void test_crashed_engine_rebuild_lock_copy_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_charset_convert_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_charset_convert_copy_lock_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(void);
@@ -2336,6 +2337,10 @@ static void plain_force_rebuild_until_dictionary_finish_fault(
 );
 static void engine_rebuild_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void engine_rebuild_copy_lock_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void engine_rebuild_lock_copy_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -6057,6 +6062,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-engine-rebuild-lock-copy-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_engine_rebuild_lock_copy_dictionary_ddl_marks_file_op_checkpoint();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-charset-convert-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_charset_convert_dictionary_ddl_recovers_metadata();
@@ -6779,7 +6790,8 @@ int main(int argc, char **argv) {
             "dictionary-force-rebuild-file-op-marker-crash|"
             "dictionary-force-rebuild-plain-crash|"
             "dictionary-engine-rebuild-file-op-marker-crash|"
-            "dictionary-engine-rebuild-copy-lock-crash|",
+            "dictionary-engine-rebuild-copy-lock-crash|"
+            "dictionary-engine-rebuild-lock-copy-crash|",
             stderr
         );
         fputs(
@@ -7291,6 +7303,9 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_crashed_engine_rebuild_dictionary_ddl_marks_file_op_checkpoint),
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_engine_rebuild_copy_lock_dictionary_ddl_marks_file_op_checkpoint
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_engine_rebuild_lock_copy_dictionary_ddl_marks_file_op_checkpoint
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_charset_convert_dictionary_ddl_recovers_metadata),
     OWNERLESS_SQL_TEST_CASE(test_crashed_charset_convert_copy_lock_dictionary_ddl_recovers_metadata),
@@ -61948,6 +61963,14 @@ static void test_crashed_engine_rebuild_copy_lock_dictionary_ddl_marks_file_op_c
     );
 }
 
+static void test_crashed_engine_rebuild_lock_copy_dictionary_ddl_marks_file_op_checkpoint(void) {
+    run_crashed_rebuild_dictionary_ddl_recovers_rebuilt_table(
+        engine_rebuild_lock_copy_until_dictionary_finish_fault,
+        "ownerless-dictionary-engine-rebuild-lock-copy-crash.mylite",
+        1
+    );
+}
+
 static void run_crashed_charset_convert_dictionary_ddl_recovers_metadata(
     ownerless_dictionary_fault_writer_fn fault_fn,
     const char *database_name
@@ -78850,6 +78873,19 @@ static void engine_rebuild_copy_lock_until_dictionary_finish_fault(
         "dictionary-before-finish",
         "ALTER TABLE app.ownerless_force_rebuild_crash_base "
         "ENGINE=InnoDB, ALGORITHM=COPY, LOCK=EXCLUSIVE"
+    );
+}
+
+static void engine_rebuild_lock_copy_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_force_rebuild_crash_base "
+        "ENGINE=InnoDB, LOCK=EXCLUSIVE, ALGORITHM=COPY"
     );
 }
 
