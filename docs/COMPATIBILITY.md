@@ -514,7 +514,11 @@ now keeps the first writer open after `ROLLBACK TO SAVEPOINT`, proves a peer
 writer on another row in the same table waits on ownerless write ownership
 instead of independently publishing the page, then verifies ownerless,
 forced-`.shm`, and native reopen preserve the first writer's pre-savepoint row,
-discard the rolled-back row, and keep the peer's later row. Hook-build coverage
+discard the rolled-back row, and keep the peer's later row. Same-table large-row
+handoff coverage now also proves a peer updating a large row in the same table
+waits behind the savepoint writer's ownerless write ownership, then commits
+after release while final reopen keeps the pre-savepoint row and peer row.
+Hook-build coverage
 now also kills a writer after
 native `ROLLBACK TO SAVEPOINT` succeeds but before MyLite updates its
 process-local savepoint state and discards rolled-back file-operation evidence,

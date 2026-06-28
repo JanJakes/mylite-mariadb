@@ -7529,7 +7529,12 @@ subsystems that this mode needs:
   from a second ownerless writer, verifies live visibility and marker/WAL
   retention, and preserves only the first writer's pre-savepoint row plus the
   second writer's row through ownerless, forced-`.shm`, and native reopen.
-  Broader same-page/same-table concurrent-writer savepoint schedules remain
+  The same-page savepoint follow-up then proves an overlapping page writer
+  waits until the savepoint writer commits. The same-table large-row follow-up
+  proves a peer updating a large row in the same table also waits behind the
+  savepoint writer's ownerless write ownership, then commits after release and
+  preserves final row state through reopen. Broader native rollback internals,
+  same-row conflicts, and randomized same-table savepoint schedules remain
   planned.
   The savepoint-rollback-before-state hook follow-up kills a writer after
   native `ROLLBACK TO SAVEPOINT` succeeds but before MyLite updates
@@ -7735,8 +7740,8 @@ subsystems that this mode needs:
      rollback/savepoint-rollback internals and broader same-page/same-table
      concurrent-writer savepoint schedules that combine native undo,
      ownerless page-write ownership, and file-operation marker cleanup beyond
-     the covered independent-table handoff and focused same-page wait/commit
-     handoff.
+     the covered independent-table handoff, focused same-page wait/commit
+     handoff, and focused same-table large-row handoff.
   3. Extend active-reader pressure evidence from retained-WAL policy to crash
      and external-oracle breadth for the high-risk DML/DDL classes already
      covered by bounded pressure policy tests.
