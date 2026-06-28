@@ -394,6 +394,10 @@ file-operation marker clear; the same metadata-only lane covers a focused
 mixed `DROP FOREIGN KEY`, `ALTER COLUMN ... SET DEFAULT`, and
 `ADD CONSTRAINT ... FOREIGN KEY` ALTER list, including recovered default
 metadata and post-recovery implicit default inserts.
+Focused mixed `DROP FOREIGN KEY`, real column `DROP`/`MODIFY`/`CHANGE`/
+`RENAME COLUMN`, and `ADD CONSTRAINT ... FOREIGN KEY` ALTER lists now use
+the existing column live-recovery lanes while retaining the native
+file-operation marker until final no-live drain.
 Simple temporary-table `RENAME TABLE` and `ALTER TABLE ... RENAME TO`
 tracking now preserves conservative handling for the renamed temp table and
 restores normal ownerless refresh for a previously shadowed permanent table;
@@ -409,12 +413,12 @@ Schema-drop internal table-loop recovery now kills a two-table
 `DROP DATABASE` after the first native table file operation and before the
 schema-drop entry is logged, then proves exactly one table remains usable in the
 still-present schema while the native file-operation marker drains only after
-no-live recovery; exact copy-lock ADD, DROP, and MODIFY COLUMN plus exact
-copy-lock charset conversion now have focused live-recovery coverage for native
-table-copy rebuild boundaries;
+no-live recovery; exact copy-lock ADD, DROP, MODIFY, CHANGE, and RENAME COLUMN
+plus exact copy-lock charset conversion now have focused live-recovery coverage
+for native table-copy rebuild boundaries;
 broader ALTER rebuild, broader schema option variants beyond the focused
 schema-default/comment boundaries, broader view and
-trigger variants, and mixed FK plus non-FK ALTER live-peer recovery remain
+trigger variants, and broader mixed FK plus non-FK ALTER live-peer recovery remain
 partial/planned. Cyclic foreign-key truncate is covered as MariaDB's
 native pre-truncate error path with clear ownerless file-operation markers
 under default FK checks, while `FOREIGN_KEY_CHECKS=0` cyclic FK truncate now

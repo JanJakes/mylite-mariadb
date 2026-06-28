@@ -1029,6 +1029,13 @@ static void test_crashed_temporary_mixed_rename_reverse_recovers_permanent_table
 static void test_crashed_temporary_mixed_chain_rename_recovers_permanent_table(void);
 #endif
 static void test_ownerless_rejects_non_innodb_engines(void);
+
+typedef enum ownerless_mixed_fk_column_mutation_variant {
+    OWNERLESS_MIXED_FK_COLUMN_DROP,
+    OWNERLESS_MIXED_FK_COLUMN_MODIFY,
+    OWNERLESS_MIXED_FK_COLUMN_CHANGE,
+    OWNERLESS_MIXED_FK_COLUMN_RENAME
+} ownerless_mixed_fk_column_mutation_variant;
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void test_crashed_page_publish_before_append_rebuilds_ownerless_state(void);
 static void test_crashed_page_publish_rebuilds_ownerless_state(void);
@@ -1088,6 +1095,10 @@ static void test_crashed_foreign_key_mixed_alter_dictionary_ddl_recovers_constra
 static void test_crashed_foreign_key_mixed_comment_alter_recovers_state(void);
 static void test_crashed_foreign_key_mixed_default_alter_recovers_state(void);
 static void test_crashed_foreign_key_mixed_column_alter_recovers_state(void);
+static void test_crashed_foreign_key_mixed_drop_column_alter_recovers_state(void);
+static void test_crashed_foreign_key_mixed_modify_column_alter_recovers_state(void);
+static void test_crashed_foreign_key_mixed_change_column_alter_recovers_state(void);
+static void test_crashed_foreign_key_mixed_rename_column_alter_recovers_state(void);
 static void test_crashed_foreign_key_multi_rename_dictionary_ddl_recovers_constraints(void);
 static void test_crashed_foreign_key_cross_schema_multi_rename_dictionary_ddl_recovers_constraints(
     void
@@ -1860,6 +1871,22 @@ static void foreign_key_mixed_default_alter_until_dictionary_finish_fault(
     int ready_fd
 );
 static void foreign_key_mixed_column_alter_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void foreign_key_mixed_drop_column_alter_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void foreign_key_mixed_modify_column_alter_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void foreign_key_mixed_change_column_alter_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void foreign_key_mixed_rename_column_alter_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -3335,6 +3362,13 @@ static void assert_ownerless_foreign_key_mixed_default_alter_crash_state(
 static void assert_ownerless_foreign_key_mixed_column_alter_crash_state(
     open_database_paths paths,
     unsigned flags
+);
+static void assert_ownerless_foreign_key_mixed_column_mutation_alter_crash_state(
+    open_database_paths paths,
+    unsigned flags,
+    ownerless_mixed_fk_column_mutation_variant variant,
+    unsigned long long expected_count,
+    unsigned long long expected_value_sum
 );
 static void assert_ownerless_foreign_key_action_matching_rows_crash_state(
     open_database_paths paths,
@@ -5275,6 +5309,33 @@ int main(int argc, char **argv) {
     if (argc == 2 && strcmp(argv[1], "dictionary-foreign-key-mixed-column-alter-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_foreign_key_mixed_column_alter_recovers_state();
+#endif
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "dictionary-foreign-key-mixed-drop-column-alter-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_foreign_key_mixed_drop_column_alter_recovers_state();
+#endif
+        return 0;
+    }
+    if (argc == 2 &&
+        strcmp(argv[1], "dictionary-foreign-key-mixed-modify-column-alter-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_foreign_key_mixed_modify_column_alter_recovers_state();
+#endif
+        return 0;
+    }
+    if (argc == 2 &&
+        strcmp(argv[1], "dictionary-foreign-key-mixed-change-column-alter-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_foreign_key_mixed_change_column_alter_recovers_state();
+#endif
+        return 0;
+    }
+    if (argc == 2 &&
+        strcmp(argv[1], "dictionary-foreign-key-mixed-rename-column-alter-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_foreign_key_mixed_rename_column_alter_recovers_state();
 #endif
         return 0;
     }
@@ -49262,6 +49323,245 @@ static void test_crashed_foreign_key_mixed_column_alter_recovers_state(void) {
     free(root);
 }
 
+static void run_crashed_foreign_key_mixed_column_mutation_alter_recovers_state(
+    ownerless_mixed_fk_column_mutation_variant variant,
+    ownerless_dictionary_fault_writer_fn writer_fn,
+    const char *database_basename
+) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, database_basename);
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
+    mylite_db *db;
+    unsigned mariadb_errno = 0U;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_mixed_column_mutation_parent_a ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_mixed_column_mutation_parent_b ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_mixed_column_mutation_parent_c ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_mixed_column_mutation_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_a_id INT NOT NULL, "
+        "parent_b_id INT NOT NULL, "
+        "parent_c_id INT NOT NULL, "
+        "note VARCHAR(16) NOT NULL DEFAULT 'stable', "
+        "value INT NOT NULL, "
+        "INDEX ownerless_fk_mixed_column_mutation_parent_a_idx (parent_a_id), "
+        "INDEX ownerless_fk_mixed_column_mutation_parent_b_idx (parent_b_id), "
+        "INDEX ownerless_fk_mixed_column_mutation_parent_c_idx (parent_c_id), "
+        "CONSTRAINT ownerless_fk_mixed_column_mutation_child_parent_a "
+        "FOREIGN KEY (parent_a_id) "
+        "REFERENCES app.ownerless_fk_mixed_column_mutation_parent_a (id), "
+        "CONSTRAINT ownerless_fk_mixed_column_mutation_child_parent_b "
+        "FOREIGN KEY (parent_b_id) "
+        "REFERENCES app.ownerless_fk_mixed_column_mutation_parent_b (id)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_fk_mixed_column_mutation_parent_a "
+        "VALUES (1, 10), (2, 20)"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_fk_mixed_column_mutation_parent_b "
+        "VALUES (10, 100), (20, 200)"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_fk_mixed_column_mutation_parent_c "
+        "VALUES (100, 1000), (200, 2000)"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_fk_mixed_column_mutation_child "
+        "(id, parent_a_id, parent_b_id, parent_c_id, value) "
+        "VALUES (1, 1, 10, 100, 100)"
+    );
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_fk_mixed_column_mutation_child' "
+            "AND column_name = 'note' "
+            "AND character_maximum_length = 16 "
+            "AND column_default = '''stable'''"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_fk_mixed_column_mutation_child' "
+            "AND constraint_name IN ("
+            "'ownerless_fk_mixed_column_mutation_child_parent_a', "
+            "'ownerless_fk_mixed_column_mutation_child_parent_b')"
+        ) == 2U
+    );
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_fk_mixed_column_mutation_child "
+            "(id, parent_a_id, parent_b_id, parent_c_id, value) "
+            "VALUES (2, 99, 10, 100, 990)",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_NO_REFERENCED_ROW_ERRNO);
+    exec_ok(db, "COMMIT");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(paths, writer_fn);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_fk_mixed_column_mutation_child "
+        "(id, parent_a_id, parent_b_id, parent_c_id, value) "
+        "VALUES (2, 99, 10, 100, 990)"
+    );
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_fk_mixed_column_mutation_child "
+            "(id, parent_a_id, parent_b_id, parent_c_id, value) "
+            "VALUES (3, 1, 10, 999, 990)",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_NO_REFERENCED_ROW_ERRNO);
+    exec_ok(db, "COMMIT");
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_fk_mixed_column_mutation_child "
+            "(id, parent_a_id, parent_b_id, parent_c_id, value) "
+            "VALUES (3, 1, 99, 100, 990)",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_NO_REFERENCED_ROW_ERRNO);
+    exec_ok(db, "COMMIT");
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_fk_mixed_column_mutation_child "
+        "(id, parent_a_id, parent_b_id, parent_c_id, value) "
+        "VALUES (3, 2, 20, 200, 200)"
+    );
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_mixed_column_mutation_child") ==
+        3U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_mixed_column_mutation_child") ==
+        1290U
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
+
+    assert_ownerless_foreign_key_mixed_column_mutation_alter_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        variant,
+        3U,
+        1290U
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert_ownerless_foreign_key_mixed_column_mutation_alter_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        variant,
+        3U,
+        1290U
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_foreign_key_mixed_column_mutation_alter_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        variant,
+        3U,
+        1290U
+    );
+    assert_ownerless_foreign_key_mixed_column_mutation_alter_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        variant,
+        3U,
+        1290U
+    );
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_crashed_foreign_key_mixed_drop_column_alter_recovers_state(void) {
+    run_crashed_foreign_key_mixed_column_mutation_alter_recovers_state(
+        OWNERLESS_MIXED_FK_COLUMN_DROP,
+        foreign_key_mixed_drop_column_alter_until_dictionary_finish_fault,
+        "ownerless-dictionary-fk-mixed-drop-column-alter-crash.mylite"
+    );
+}
+
+static void test_crashed_foreign_key_mixed_modify_column_alter_recovers_state(void) {
+    run_crashed_foreign_key_mixed_column_mutation_alter_recovers_state(
+        OWNERLESS_MIXED_FK_COLUMN_MODIFY,
+        foreign_key_mixed_modify_column_alter_until_dictionary_finish_fault,
+        "ownerless-dictionary-fk-mixed-modify-column-alter-crash.mylite"
+    );
+}
+
+static void test_crashed_foreign_key_mixed_change_column_alter_recovers_state(void) {
+    run_crashed_foreign_key_mixed_column_mutation_alter_recovers_state(
+        OWNERLESS_MIXED_FK_COLUMN_CHANGE,
+        foreign_key_mixed_change_column_alter_until_dictionary_finish_fault,
+        "ownerless-dictionary-fk-mixed-change-column-alter-crash.mylite"
+    );
+}
+
+static void test_crashed_foreign_key_mixed_rename_column_alter_recovers_state(void) {
+    run_crashed_foreign_key_mixed_column_mutation_alter_recovers_state(
+        OWNERLESS_MIXED_FK_COLUMN_RENAME,
+        foreign_key_mixed_rename_column_alter_until_dictionary_finish_fault,
+        "ownerless-dictionary-fk-mixed-rename-column-alter-crash.mylite"
+    );
+}
+
 static void test_crashed_foreign_key_multi_rename_dictionary_ddl_recovers_constraints(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -74024,6 +74324,78 @@ static void foreign_key_mixed_column_alter_until_dictionary_finish_fault(
     );
 }
 
+static void foreign_key_mixed_drop_column_alter_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_fk_mixed_column_mutation_child "
+        "DROP FOREIGN KEY ownerless_fk_mixed_column_mutation_child_parent_a, "
+        "DROP COLUMN note, "
+        "ADD CONSTRAINT ownerless_fk_mixed_column_mutation_child_parent_c "
+        "FOREIGN KEY (parent_c_id) "
+        "REFERENCES app.ownerless_fk_mixed_column_mutation_parent_c (id) "
+        "ON DELETE RESTRICT"
+    );
+}
+
+static void foreign_key_mixed_modify_column_alter_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_fk_mixed_column_mutation_child "
+        "DROP FOREIGN KEY ownerless_fk_mixed_column_mutation_child_parent_a, "
+        "MODIFY COLUMN note VARCHAR(32) NOT NULL DEFAULT 'changed', "
+        "ADD CONSTRAINT ownerless_fk_mixed_column_mutation_child_parent_c "
+        "FOREIGN KEY (parent_c_id) "
+        "REFERENCES app.ownerless_fk_mixed_column_mutation_parent_c (id) "
+        "ON DELETE RESTRICT"
+    );
+}
+
+static void foreign_key_mixed_change_column_alter_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_fk_mixed_column_mutation_child "
+        "DROP FOREIGN KEY ownerless_fk_mixed_column_mutation_child_parent_a, "
+        "CHANGE COLUMN note changed_note VARCHAR(32) NOT NULL DEFAULT 'changed', "
+        "ADD CONSTRAINT ownerless_fk_mixed_column_mutation_child_parent_c "
+        "FOREIGN KEY (parent_c_id) "
+        "REFERENCES app.ownerless_fk_mixed_column_mutation_parent_c (id) "
+        "ON DELETE RESTRICT"
+    );
+}
+
+static void foreign_key_mixed_rename_column_alter_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_fk_mixed_column_mutation_child "
+        "DROP FOREIGN KEY ownerless_fk_mixed_column_mutation_child_parent_a, "
+        "RENAME COLUMN note TO renamed_note, "
+        "ADD CONSTRAINT ownerless_fk_mixed_column_mutation_child_parent_c "
+        "FOREIGN KEY (parent_c_id) "
+        "REFERENCES app.ownerless_fk_mixed_column_mutation_parent_c (id) "
+        "ON DELETE RESTRICT"
+    );
+}
+
 static void foreign_key_multi_rename_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -87996,6 +88368,298 @@ static void assert_ownerless_foreign_key_mixed_column_alter_crash_state(
     assert(mylite_errcode(db) == MYLITE_ERROR);
     assert(mariadb_errno == MYLITE_TEST_NO_REFERENCED_ROW_ERRNO);
     exec_ok(db, "COMMIT");
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_foreign_key_mixed_column_mutation_alter_crash_state(
+    open_database_paths paths,
+    unsigned flags,
+    ownerless_mixed_fk_column_mutation_variant variant,
+    unsigned long long expected_count,
+    unsigned long long expected_value_sum
+) {
+    mylite_db *db = open_database(paths, flags);
+    unsigned mariadb_errno = 0U;
+    unsigned long long expected_note_length_sum = 0U;
+
+    switch (variant) {
+    case OWNERLESS_MIXED_FK_COLUMN_DROP:
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_fk_mixed_column_mutation_child' "
+                "AND column_name = 'note'"
+            ) == 0U
+        );
+        assert(
+            exec_status(
+                db,
+                "SELECT SUM(note) FROM app.ownerless_fk_mixed_column_mutation_child",
+                NULL
+            ) != MYLITE_OK
+        );
+        break;
+    case OWNERLESS_MIXED_FK_COLUMN_MODIFY:
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_fk_mixed_column_mutation_child' "
+                "AND column_name = 'note' "
+                "AND character_maximum_length = 32 "
+                "AND column_default = '''changed'''"
+            ) == 1U
+        );
+        expected_note_length_sum = 6U + ((expected_count - 1U) * 7U);
+        assert(
+            query_unsigned(
+                db,
+                "SELECT SUM(CHAR_LENGTH(note)) "
+                "FROM app.ownerless_fk_mixed_column_mutation_child"
+            ) == expected_note_length_sum
+        );
+        break;
+    case OWNERLESS_MIXED_FK_COLUMN_CHANGE:
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_fk_mixed_column_mutation_child' "
+                "AND column_name = 'note'"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_fk_mixed_column_mutation_child' "
+                "AND column_name = 'changed_note' "
+                "AND character_maximum_length = 32 "
+                "AND column_default = '''changed'''"
+            ) == 1U
+        );
+        assert(
+            exec_status(
+                db,
+                "SELECT SUM(note) FROM app.ownerless_fk_mixed_column_mutation_child",
+                NULL
+            ) != MYLITE_OK
+        );
+        expected_note_length_sum = 6U + ((expected_count - 1U) * 7U);
+        assert(
+            query_unsigned(
+                db,
+                "SELECT SUM(CHAR_LENGTH(changed_note)) "
+                "FROM app.ownerless_fk_mixed_column_mutation_child"
+            ) == expected_note_length_sum
+        );
+        break;
+    case OWNERLESS_MIXED_FK_COLUMN_RENAME:
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_fk_mixed_column_mutation_child' "
+                "AND column_name = 'note'"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_fk_mixed_column_mutation_child' "
+                "AND column_name = 'renamed_note' "
+                "AND character_maximum_length = 16 "
+                "AND column_default = '''stable'''"
+            ) == 1U
+        );
+        assert(
+            exec_status(
+                db,
+                "SELECT SUM(note) FROM app.ownerless_fk_mixed_column_mutation_child",
+                NULL
+            ) != MYLITE_OK
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT SUM(CHAR_LENGTH(renamed_note)) "
+                "FROM app.ownerless_fk_mixed_column_mutation_child"
+            ) == expected_count * 6U
+        );
+        break;
+    }
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_fk_mixed_column_mutation_child' "
+            "AND constraint_name IN ("
+            "'ownerless_fk_mixed_column_mutation_child_parent_b', "
+            "'ownerless_fk_mixed_column_mutation_child_parent_c')"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_fk_mixed_column_mutation_child' "
+            "AND constraint_name = 'ownerless_fk_mixed_column_mutation_child_parent_a'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.key_column_usage "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_fk_mixed_column_mutation_child' "
+            "AND ((constraint_name = 'ownerless_fk_mixed_column_mutation_child_parent_b' "
+            "AND column_name = 'parent_b_id' "
+            "AND referenced_table_name = 'ownerless_fk_mixed_column_mutation_parent_b' "
+            "AND referenced_column_name = 'id') "
+            "OR (constraint_name = 'ownerless_fk_mixed_column_mutation_child_parent_c' "
+            "AND column_name = 'parent_c_id' "
+            "AND referenced_table_name = 'ownerless_fk_mixed_column_mutation_parent_c' "
+            "AND referenced_column_name = 'id'))"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_mixed_column_mutation_child") ==
+        expected_count
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_mixed_column_mutation_child") ==
+        expected_value_sum
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_mixed_column_mutation_child "
+            "FORCE INDEX (ownerless_fk_mixed_column_mutation_parent_a_idx)"
+        ) == expected_count
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_mixed_column_mutation_child "
+            "FORCE INDEX (ownerless_fk_mixed_column_mutation_parent_b_idx)"
+        ) == expected_count
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_mixed_column_mutation_child "
+            "FORCE INDEX (ownerless_fk_mixed_column_mutation_parent_c_idx)"
+        ) == expected_count
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_mixed_column_mutation_parent_a"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_fk_mixed_column_mutation_parent_a"
+        ) == 30U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_mixed_column_mutation_parent_b"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_fk_mixed_column_mutation_parent_b"
+        ) == 300U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_mixed_column_mutation_parent_c"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_fk_mixed_column_mutation_parent_c"
+        ) == 3000U
+    );
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_fk_mixed_column_mutation_child "
+            "(id, parent_a_id, parent_b_id, parent_c_id, value) "
+            "VALUES (90, 1, 10, 999, 400)",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_NO_REFERENCED_ROW_ERRNO);
+    exec_ok(db, "COMMIT");
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_fk_mixed_column_mutation_child "
+            "(id, parent_a_id, parent_b_id, parent_c_id, value) "
+            "VALUES (90, 1, 99, 100, 400)",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_NO_REFERENCED_ROW_ERRNO);
+    exec_ok(db, "COMMIT");
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_fk_mixed_column_mutation_child "
+        "(id, parent_a_id, parent_b_id, parent_c_id, value) "
+        "VALUES (90, 999, 10, 100, 400)"
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_mixed_column_mutation_child") ==
+        expected_count + 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_mixed_column_mutation_child") ==
+        expected_value_sum + 400U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_fk_mixed_column_mutation_parent_a WHERE id = 1");
+    exec_ok(db, "INSERT INTO app.ownerless_fk_mixed_column_mutation_parent_a VALUES (1, 10)");
+    exec_ok(db, "DELETE FROM app.ownerless_fk_mixed_column_mutation_child WHERE id = 90");
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_mixed_column_mutation_child") ==
+        expected_count
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_mixed_column_mutation_child") ==
+        expected_value_sum
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_mixed_column_mutation_parent_a"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_fk_mixed_column_mutation_parent_a"
+        ) == 30U
+    );
     assert(mylite_close(db) == MYLITE_OK);
 }
 

@@ -132,6 +132,6 @@ CTest registration, and documentation.
 ## Risks And Follow-Up
 
 - This is a focused exact-shape classifier, not a full MariaDB ALTER parser.
-- Broader FK plus non-FK ALTER lists, other column mutations, index/check
-  combinations, schema option variants, and external randomized oracle stress
-  remain ownerless completion work.
+- Broader FK plus non-FK ALTER lists with multiple non-FK clauses,
+  generated-column tables, index/check combinations, schema option variants,
+  and external randomized oracle stress remain ownerless completion work.

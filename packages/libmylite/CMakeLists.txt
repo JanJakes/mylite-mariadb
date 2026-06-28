@@ -718,6 +718,30 @@ if(BUILD_TESTING)
           dictionary-foreign-key-mixed-column-alter-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-foreign-key-mixed-drop-column-alter-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-foreign-key-mixed-drop-column-alter-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-foreign-key-mixed-modify-column-alter-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-foreign-key-mixed-modify-column-alter-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-foreign-key-mixed-change-column-alter-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-foreign-key-mixed-change-column-alter-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-foreign-key-mixed-rename-column-alter-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-foreign-key-mixed-rename-column-alter-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-fk-multi-rename-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -1573,6 +1597,10 @@ if(BUILD_TESTING)
         libmylite.ownerless-dictionary-foreign-key-mixed-comment-alter-crash
         libmylite.ownerless-dictionary-foreign-key-mixed-default-alter-crash
         libmylite.ownerless-dictionary-foreign-key-mixed-column-alter-crash
+        libmylite.ownerless-dictionary-foreign-key-mixed-drop-column-alter-crash
+        libmylite.ownerless-dictionary-foreign-key-mixed-modify-column-alter-crash
+        libmylite.ownerless-dictionary-foreign-key-mixed-change-column-alter-crash
+        libmylite.ownerless-dictionary-foreign-key-mixed-rename-column-alter-crash
         libmylite.ownerless-dictionary-fk-multi-rename-crash
         PROPERTIES
           LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
