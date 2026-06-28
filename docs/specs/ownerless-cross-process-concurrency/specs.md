@@ -7689,6 +7689,13 @@ subsystems that this mode needs:
   but before MariaDB advances the DDL-log phase, then proves rollback to the
   original source table, original InnoDB `SPACE` id, target absence, marker
   retention/drain, forced `.shm` rebuild, and ordinary native reopen.
+  The missing-source IF EXISTS follow-up covers a same-schema mixed list with
+  skipped missing sources before and after one existing InnoDB rename. It
+  proves MariaDB note `1146` warning/no-op semantics for the skipped pairs,
+  completed live-peer recovery at `dictionary-before-finish`, native-loop
+  DDL-log rollback at `rename-table-after-native-file-op`, skipped-target
+  absence, original or moved `SPACE` identity as appropriate, marker
+  retention/drain, forced `.shm` rebuild, and ordinary native reopen.
   The ALTER-table rename follow-up classifies `ALTER TABLE ... RENAME TO` as
   the same ownerless rename recovery kind, kills the writer at
   `dictionary-before-finish` with a live peer, and proves target-table
@@ -7849,9 +7856,12 @@ subsystems that this mode needs:
      rename pairs, including deterministic same-schema and cross-schema
      `RENAME TABLE IF EXISTS` three-pair lists, plus same-schema and
      cross-schema FK native-loop rollback including existing-table
-     `RENAME TABLE IF EXISTS` lists, especially remaining rename variants
-     including missing-source `IF EXISTS` no-op matrices, arbitrary longer
-     rename-list permutations,
+     `RENAME TABLE IF EXISTS` lists, plus a focused same-schema
+     missing-source/existing/missing-source `RENAME TABLE IF EXISTS` matrix
+     covering warning/no-op semantics, prefinish recovery, and native-loop
+     rollback, especially remaining rename variants including cross-schema,
+     FK, temporary/permanent, target-conflict, and arbitrary longer
+     missing-source `IF EXISTS` permutations,
      other rebuild variants beyond the covered
      FORCE, same-engine ENGINE including both exact copy-lock option orders,
      row-format including

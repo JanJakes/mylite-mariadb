@@ -351,7 +351,14 @@ foreign-key multi-rename native-loop crash
 coverage now kills after first and later native rename pairs, verifies MariaDB
 DDL-log recovery restores the original parent/child names and FK enforcement
 instead of completing the remaining rename pairs, and retains the native
-file-operation marker until final no-live drain. Focused
+file-operation marker until final no-live drain. Focused same-schema
+`RENAME TABLE IF EXISTS` missing-source mixed-list coverage now proves MariaDB
+note `1146` warning/no-op behavior for skipped source pairs surrounding one
+existing InnoDB rename, live-peer recovery of the completed moved table at
+`dictionary-before-finish`, native-loop DDL-log rollback to the original
+source table and `SPACE` id at `rename-table-after-native-file-op`, absence of
+skipped targets, marker retention, marker drain, ownerless/native reopen, and
+forced `.shm` rebuild. Focused
 non-temporary `TRUNCATE TABLE schema.table` and implicit-schema `TRUNCATE
 table` now have live-peer recovery for the native truncate/recreate boundary;
 child-only foreign-key table truncate now also has live-peer recovery that
