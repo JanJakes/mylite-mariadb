@@ -3484,10 +3484,10 @@ Tasks:
    crash coverage preserves completed `ALTER TABLE ... ADD COLUMN`,
    `ALTER TABLE ... DROP COLUMN`, `ALTER TABLE ... MODIFY COLUMN`, and
    `ALTER TABLE ... RENAME COLUMN` boundaries before ownerless dictionary
-   finish. The plain stored-column ADD, exact copy-lock stored-column ADD,
-   and bounded real DROP, MODIFY, and RENAME cases now verify native
-   file-operation live recovery while another ownerless peer remains open,
-   with the marker retained until no-live drain.
+   finish. The plain stored-column ADD, exact copy-lock stored-column ADD, exact
+   copy-lock DROP, exact copy-lock MODIFY, and bounded real DROP, MODIFY, and
+   RENAME cases now verify native file-operation live recovery while another
+   ownerless peer remains open, with the marker retained until no-live drain.
    The selectors verify recovered added-column/default
    metadata, absent dropped-column metadata, modified-column width/default
    metadata, renamed-column metadata, dependent generated-column and CHECK
@@ -4993,8 +4993,8 @@ Tasks:
    file-operation marker until final no-live drain and preserving the shadowed
    permanent table through ownerless/native reopen and forced `.shm` rebuild,
    while multi-pair temporary rename chains, broader
-   ALTER rebuild beyond the focused force, exact copy-lock ADD COLUMN,
-   row-format, compressed, and charset-conversion cases,
+   ALTER rebuild variants beyond the focused force, exact copy-lock
+   ADD/DROP/MODIFY COLUMN, row-format, compressed, and charset-conversion cases,
    broader schema option variants beyond named/current-schema default/comment
    boundaries, broader view and trigger variants, and
    mixed comma-separated non-rename foreign-key ALTER live-peer recovery remain
@@ -5452,9 +5452,10 @@ Minimum suites before support can be claimed:
     states remain correct,
   - after ordinary column-add, column-drop, column-modify, and column-rename
     ALTER but before ownerless dictionary finish; hook coverage proves the
-    focused plain and exact copy-lock stored-column ADD cases plus bounded real
-    DROP, MODIFY, and RENAME cases can recover while another ownerless peer
-    remains live with the native file-operation marker retained until no-live drain, and the
+    focused plain and exact copy-lock stored-column ADD cases, exact copy-lock
+    DROP/MODIFY cases, plus bounded real DROP, MODIFY, and RENAME cases can
+    recover while another ownerless peer remains live with the native
+    file-operation marker retained until no-live drain, and the
     recovered added/default,
     absent-column, modified-column,
     renamed-column, or dependent-expression rename state remains correct,
@@ -5772,9 +5773,10 @@ MariaDB success, including generated-column/CHECK expression-table missing
 rename, change, and default no-ops, an `ALTER TABLE ... AUTO_INCREMENT` writer after
 native high-watermark persistence, a composite direction primary-key writer
 after native clustered-key rebuild with live-peer recovery and retained-marker
-no-live drain, plain and exact copy-lock
-`ALTER TABLE ... ADD COLUMN` writers after native stored-column metadata update
-or copy rebuild, an `ALTER COLUMN ... SET DEFAULT`
+no-live drain, plain and exact copy-lock `ALTER TABLE ... ADD COLUMN` writers
+after native stored-column metadata update or copy rebuild, exact copy-lock
+`ALTER TABLE ... DROP COLUMN` and `ALTER TABLE ... MODIFY COLUMN` writers after
+native copy rebuild, an `ALTER COLUMN ... SET DEFAULT`
 writer after native metadata update, simple view CREATE/DROP writers after native view
 definition-file creation/removal, simple trigger CREATE/DROP, trigger
 replacement, ordered trigger PRECEDES, duplicate `CREATE TRIGGER IF NOT EXISTS`,
@@ -7691,7 +7693,7 @@ subsystems that this mode needs:
      top-level and ALTER secondary-index idempotent/no-op prefinish boundaries,
      plus focused column idempotent and column `IF EXISTS` missing-column
      no-op prefinish boundaries, plus focused plain and exact copy-lock
-     ADD COLUMN, table-comment,
+     ADD COLUMN, exact copy-lock DROP/MODIFY COLUMN, table-comment,
      column-default metadata ALTER, and plain, descending, composite direction,
      AUTO_INCREMENT, and AUTO_INCREMENT descending primary-key replacement
      prefinish boundaries, plus single-clause, pure multi-clause, FK-only
@@ -7706,8 +7708,8 @@ subsystems that this mode needs:
      mixed rename-list prefinish boundary, especially
      remaining rename variants, other rebuild variants beyond the covered
      FORCE, same-engine ENGINE including exact copy-lock, row-format including
-     exact copy-lock, compressed row-format including exact copy-lock, and
-     charset plus focused exact copy-lock ADD COLUMN boundaries,
+     exact copy-lock, compressed row-format including exact copy-lock, charset,
+     and focused exact copy-lock ADD/DROP/MODIFY COLUMN boundaries,
      broader metadata-only DDL, broader mixed temporary/permanent
      rename matrices, broader FK plus non-FK ALTER lists beyond the focused
      ADD COLUMN, table-comment, and column-default cases, broader schema option variants beyond the focused

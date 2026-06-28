@@ -17944,7 +17944,7 @@ bool ownerless_alter_table_drop_column_recovery_statement(
     if (index < tokens.count && token_in(tokens.values[index], "RESTRICT", "CASCADE")) {
         ++index;
     }
-    if (!consume_ownerless_remaining_semicolons(tokens, index)) {
+    if (!consume_ownerless_optional_copy_exclusive_alter_tail(tokens, index)) {
         return false;
     }
     bool has_generated_columns = true;
@@ -18019,7 +18019,7 @@ bool ownerless_alter_table_modify_column_recovery_statement(
             continue;
         }
         if (depth == 0U && token_equals(token, ",")) {
-            return false;
+            break;
         }
         if (token_in(token, "AFTER", "ALGORITHM", "AUTO_INCREMENT", "CHECK") ||
             token_equals(token, "CONSTRAINT") ||
@@ -18031,7 +18031,8 @@ bool ownerless_alter_table_modify_column_recovery_statement(
         }
         has_definition = true;
     }
-    if (!has_definition || depth != 0U) {
+    if (!has_definition || depth != 0U ||
+        !consume_ownerless_optional_copy_exclusive_alter_tail(tokens, index)) {
         return false;
     }
 
