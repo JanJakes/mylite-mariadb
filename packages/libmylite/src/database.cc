@@ -2378,6 +2378,7 @@ bool consume_ownerless_optional_view_if_not_exists(
     std::size_t &index
 );
 bool consume_ownerless_optional_view_if_exists(const SqlPolicyTokens &tokens, std::size_t &index);
+bool consume_ownerless_optional_if_exists(const SqlPolicyTokens &tokens, std::size_t &index);
 bool consume_ownerless_schema_identifier(const SqlPolicyTokens &tokens, std::size_t &index);
 bool consume_ownerless_schema_default_options(const SqlPolicyTokens &tokens, std::size_t &index);
 bool ownerless_sql_string_literal_token(std::string_view token);
@@ -16752,6 +16753,10 @@ bool consume_ownerless_optional_view_if_not_exists(
 }
 
 bool consume_ownerless_optional_view_if_exists(const SqlPolicyTokens &tokens, std::size_t &index) {
+    return consume_ownerless_optional_if_exists(tokens, index);
+}
+
+bool consume_ownerless_optional_if_exists(const SqlPolicyTokens &tokens, std::size_t &index) {
     if (index + 1U >= tokens.count || !token_equals(tokens.values[index], "IF")) {
         return true;
     }
@@ -16798,6 +16803,9 @@ bool ownerless_rename_table_recovery_statement(const SqlPolicyTokens &tokens) {
     }
 
     std::size_t index = 2U;
+    if (!consume_ownerless_optional_if_exists(tokens, index)) {
+        return false;
+    }
     bool saw_pair = false;
     for (;;) {
         if (!consume_ownerless_table_identifier(tokens, index) || index >= tokens.count ||
@@ -16833,6 +16841,9 @@ bool ownerless_rename_table_sources_are_views(mylite_db &db, const SqlPolicyToke
 
     std::vector<std::pair<std::string, std::string>> sources;
     std::size_t index = 2U;
+    if (!consume_ownerless_optional_if_exists(tokens, index)) {
+        return false;
+    }
     for (;;) {
         if (index >= tokens.count || !ownerless_table_identifier_token(tokens.values[index])) {
             return false;

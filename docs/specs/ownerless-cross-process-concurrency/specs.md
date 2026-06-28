@@ -4915,7 +4915,9 @@ Tasks:
    prefinish crash coverage now uses the rename recoverable dictionary marker
    to provide live-peer recovery for single-pair same-schema, cross-schema,
    multi-pair swap, cross-schema multi-pair swap, and foreign-key parent/child
-   multi-pair rename file-move boundaries. Focused `TRUNCATE TABLE
+   multi-pair rename file-move boundaries. Focused `RENAME TABLE IF EXISTS`
+   prefinish crash coverage uses the same rename recovery lane for an
+   existing-table native file move. Focused `TRUNCATE TABLE
    schema.table` prefinish crash
    coverage now uses a separate recoverable dictionary marker to provide
    live-peer recovery for the native truncate/recreate boundary. Child-only
@@ -7563,6 +7565,11 @@ subsystems that this mode needs:
   while the peer remains live, drains it after final no-live checkpoint proof,
   and preserves the rename through forced `.shm` rebuild and ordinary native
   reopen.
+  The rename IF EXISTS follow-up accepts MariaDB's optional `IF EXISTS` tokens
+  after `RENAME TABLE`, kills an existing-table writer at the same
+  `dictionary-before-finish` boundary with a live peer, and proves target-table
+  recovery, native file-operation marker retention/drain, forced `.shm`
+  rebuild, and ordinary native reopen.
   The ALTER-table rename follow-up classifies `ALTER TABLE ... RENAME TO` as
   the same ownerless rename recovery kind, kills the writer at
   `dictionary-before-finish` with a live peer, and proves target-table
@@ -7714,7 +7721,7 @@ subsystems that this mode needs:
      prefinish boundaries, plus child-only,
      self-referencing, and stored generated-column child foreign-key truncate
      prefinish boundaries, plus simple temporary DDL, pure multi-pair temporary
-     rename chains, and
+     rename chains, focused `RENAME TABLE IF EXISTS`, and
      temp-first plus permanent-first mixed temporary/permanent rename-list
      prefinish boundaries, plus a focused temporary-chain/permanent/temporary-chain
      mixed rename-list prefinish boundary, especially

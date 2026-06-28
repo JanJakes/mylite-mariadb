@@ -326,7 +326,8 @@ Explicit schema-qualified `RENAME TABLE schema.table TO schema.table [, ...]`
 lists now have live-peer recovery for the native file-move boundary, including
 same-schema, cross-schema, multi-pair swap, cross-schema multi-pair swap, and
 foreign-key parent/child multi-pair rename coverage, plus implicit-schema
-`RENAME TABLE` and native-loop `ALTER TABLE ... RENAME TO` forms. Focused
+`RENAME TABLE`, `RENAME TABLE IF EXISTS`, and native-loop
+`ALTER TABLE ... RENAME TO` forms. Focused
 non-temporary `TRUNCATE TABLE schema.table` and implicit-schema `TRUNCATE
 table` now have live-peer recovery for the native truncate/recreate boundary;
 child-only foreign-key table truncate now also has live-peer recovery that

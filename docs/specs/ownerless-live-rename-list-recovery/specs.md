@@ -58,7 +58,9 @@ In scope:
 
 Out of scope:
 
-- `RENAME TABLE IF EXISTS`, temporary-table rename, and malformed rename lists.
+- Temporary-table rename and malformed rename lists. `RENAME TABLE IF EXISTS`
+  is covered separately by
+  `docs/specs/ownerless-rename-if-exists-live-recovery/specs.md`.
   Implicit-schema rename is covered separately by
   `docs/specs/ownerless-implicit-rename-recovery/specs.md`, and view-only
   rename is covered separately by
@@ -158,8 +160,9 @@ and hook-test coverage only.
 - The classifier is intentionally syntactic. It admits explicit
   schema-qualified native rename lists only when InnoDB file-op redo evidence
   exists, but it does not prove crashes inside MariaDB's rename loop.
-- `IF EXISTS` and temporary-table rename forms remain planned until they have
-  focused recovery coverage.
+- Temporary-table rename forms remain planned until they have focused recovery
+  coverage. The `IF EXISTS` rename syntax is covered separately by
+  `docs/specs/ownerless-rename-if-exists-live-recovery/specs.md`.
 - Broader DDL/file-lifecycle recovery, transaction crash windows,
   active-reader pressure crash/oracle breadth, and randomized external
   MariaDB/RQG stress remain open ownerless-concurrency completion work.
