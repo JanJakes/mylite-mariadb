@@ -73813,23 +73813,34 @@ static mylite_db *open_database_with_page_log_limit(
 }
 
 static mylite_db *open_database_allowing_failure(open_database_paths paths, unsigned flags) {
-    mylite_db *db = NULL;
-    const int result = open_database_result(paths, flags, &db);
+    const uint64_t deadline_ms =
+        monotonic_milliseconds() + MYLITE_TEST_OWNERLESS_OPEN_RETRY_TIMEOUT_MS;
+    int result = MYLITE_OK;
 
-    if (result != MYLITE_OK || db == NULL) {
-        fprintf(
-            stderr,
-            "mylite_open failed: pid=%ld path=%s flags=%u result=%d db=%p\n",
-            (long)getpid(),
-            paths.database_path,
-            flags,
-            result,
-            (void *)db
-        );
-        fflush(stderr);
-        return NULL;
+    for (;;) {
+        mylite_db *db = NULL;
+        result = open_database_result(paths, flags, &db);
+        if (result == MYLITE_OK && db != NULL) {
+            return db;
+        }
+        if (db != NULL) {
+            (void)mylite_close(db);
+        }
+        if (result != MYLITE_BUSY || monotonic_milliseconds() >= deadline_ms) {
+            fprintf(
+                stderr,
+                "mylite_open failed: pid=%ld path=%s flags=%u result=%d db=%p\n",
+                (long)getpid(),
+                paths.database_path,
+                flags,
+                result,
+                (void *)db
+            );
+            fflush(stderr);
+            return NULL;
+        }
+        sleep_microseconds(MYLITE_TEST_WAIT_POLL_INTERVAL_US);
     }
-    return db;
 }
 
 static mylite_db *open_database_eventually(

@@ -728,17 +728,20 @@ require_literal "Tests_Theme::test_default_themes_are_included_in_new_files"
 require_literal "Mark WordPress setup Docker image build start"
 require_literal "Set up WordPress setup Docker Buildx"
 require_literal "Build WordPress setup Docker image"
+require_literal "Retry WordPress setup Docker image build"
 require_literal "Record WordPress setup Docker image timing"
 require_literal "wordpress-phpunit-runtime-image:"
 require_literal "name: wordpress-phpunit-mysqli-mylite-runtime-image"
 require_literal "Mark WordPress runtime Docker image build start"
 require_literal "Set up WordPress runtime Docker Buildx"
 require_literal "Build WordPress runtime Docker image"
+require_literal "Retry WordPress runtime Docker image build"
 require_literal "Record WordPress runtime Docker image timing"
 require_literal "Upload WordPress runtime Docker image timing summary"
 require_literal "Mark WordPress shard Docker image build start"
 require_literal "Set up WordPress shard Docker Buildx"
 require_literal "Build WordPress shard runtime Docker image"
+require_literal "Retry WordPress shard runtime Docker image build"
 require_literal "Record WordPress shard Docker image timing"
 require_literal "docker/setup-buildx-action@v4"
 require_literal "docker/build-push-action@v7"
@@ -1268,6 +1271,21 @@ require_step_literal \
   "cache-to: type=gha,mode=max,scope=wordpress-phpunit-php83"
 require_step_literal \
   "Build WordPress setup Docker image" \
+  "continue-on-error: true"
+require_step_literal \
+  "Build WordPress setup Docker image" \
+  "id: build-wordpress-setup-docker-image"
+require_step_literal \
+  "Retry WordPress setup Docker image build" \
+  "steps.build-wordpress-setup-docker-image.outcome == 'failure'"
+require_step_literal \
+  "Retry WordPress setup Docker image build" \
+  "file: ./tools/wordpress-phpunit.Dockerfile"
+require_step_literal \
+  "Retry WordPress setup Docker image build" \
+  "cache-to: type=gha,mode=max,scope=wordpress-phpunit-php83"
+require_step_literal \
+  "Build WordPress setup Docker image" \
   "load: true"
 require_step_literal \
   "Record WordPress setup Docker image timing" \
@@ -1283,6 +1301,9 @@ require_step_order \
   "Build WordPress setup Docker image"
 require_step_order \
   "Build WordPress setup Docker image" \
+  "Retry WordPress setup Docker image build"
+require_step_order \
+  "Retry WordPress setup Docker image build" \
   "Record WordPress setup Docker image timing"
 require_step_literal \
   "Pack WordPress PHPUnit runtime artifact" \
@@ -1305,6 +1326,21 @@ require_step_literal \
 require_step_literal \
   "Mark WordPress runtime Docker image build start" \
   "wordpress-runtime-docker-image-build-start.txt"
+require_step_literal \
+  "Build WordPress runtime Docker image" \
+  "continue-on-error: true"
+require_step_literal \
+  "Build WordPress runtime Docker image" \
+  "id: build-wordpress-runtime-docker-image"
+require_step_literal \
+  "Retry WordPress runtime Docker image build" \
+  "steps.build-wordpress-runtime-docker-image.outcome == 'failure'"
+require_step_literal \
+  "Retry WordPress runtime Docker image build" \
+  "file: ./tools/wordpress-phpunit-runtime.Dockerfile"
+require_step_literal \
+  "Retry WordPress runtime Docker image build" \
+  "cache-to: type=gha,mode=max,scope=wordpress-phpunit-runtime-php83"
 require_step_literal \
   "Build WordPress runtime Docker image" \
   "cache-from: |"
@@ -1331,6 +1367,9 @@ require_step_order \
   "Build WordPress runtime Docker image"
 require_step_order \
   "Build WordPress runtime Docker image" \
+  "Retry WordPress runtime Docker image build"
+require_step_order \
+  "Retry WordPress runtime Docker image build" \
   "Record WordPress runtime Docker image timing"
 require_step_order \
   "Record WordPress runtime Docker image timing" \
@@ -1409,6 +1448,21 @@ require_step_literal \
   "wordpress-docker-image-build-start.txt"
 require_step_literal \
   "Build WordPress shard runtime Docker image" \
+  "continue-on-error: true"
+require_step_literal \
+  "Build WordPress shard runtime Docker image" \
+  "id: build-wordpress-shard-runtime-docker-image"
+require_step_literal \
+  "Retry WordPress shard runtime Docker image build" \
+  "steps.build-wordpress-shard-runtime-docker-image.outcome == 'failure'"
+require_step_literal \
+  "Retry WordPress shard runtime Docker image build" \
+  "file: ./tools/wordpress-phpunit-runtime.Dockerfile"
+require_step_literal \
+  "Retry WordPress shard runtime Docker image build" \
+  "tags: mylite-wordpress-phpunit:php83"
+require_step_literal \
+  "Build WordPress shard runtime Docker image" \
   "file: ./tools/wordpress-phpunit-runtime.Dockerfile"
 require_step_literal \
   "Build WordPress shard runtime Docker image" \
@@ -1436,6 +1490,9 @@ require_step_order \
   "Build WordPress shard runtime Docker image"
 require_step_order \
   "Build WordPress shard runtime Docker image" \
+  "Retry WordPress shard runtime Docker image build"
+require_step_order \
+  "Retry WordPress shard runtime Docker image build" \
   "Record WordPress shard Docker image timing"
 require_step_order \
   "Record WordPress shard Docker image timing" \

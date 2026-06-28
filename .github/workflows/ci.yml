@@ -317,6 +317,21 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Build WordPress setup Docker image
+        id: build-wordpress-setup-docker-image
+        uses: docker/build-push-action@v7
+        continue-on-error: true
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
+        with:
+          context: ./tools
+          file: ./tools/wordpress-phpunit.Dockerfile
+          load: true
+          tags: mylite-wordpress-phpunit:php83
+          cache-from: type=gha,scope=wordpress-phpunit-php83
+          cache-to: type=gha,mode=max,scope=wordpress-phpunit-php83
+
+      - name: Retry WordPress setup Docker image build
+        if: steps.build-wordpress-setup-docker-image.outcome == 'failure'
         uses: docker/build-push-action@v7
         env:
           DOCKER_BUILD_RECORD_UPLOAD: "false"
@@ -597,6 +612,23 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Build WordPress runtime Docker image
+        id: build-wordpress-runtime-docker-image
+        uses: docker/build-push-action@v7
+        continue-on-error: true
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
+        with:
+          context: ./tools
+          file: ./tools/wordpress-phpunit-runtime.Dockerfile
+          load: true
+          tags: mylite-wordpress-phpunit-runtime:php83
+          cache-from: |
+            type=gha,scope=wordpress-phpunit-runtime-php83
+            type=gha,scope=wordpress-phpunit-php83
+          cache-to: type=gha,mode=max,scope=wordpress-phpunit-runtime-php83
+
+      - name: Retry WordPress runtime Docker image build
+        if: steps.build-wordpress-runtime-docker-image.outcome == 'failure'
         uses: docker/build-push-action@v7
         env:
           DOCKER_BUILD_RECORD_UPLOAD: "false"
@@ -998,6 +1030,23 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Build WordPress shard runtime Docker image
+        id: build-wordpress-shard-runtime-docker-image
+        uses: docker/build-push-action@v7
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
+        with:
+          context: ./tools
+          file: ./tools/wordpress-phpunit-runtime.Dockerfile
+          load: true
+          tags: mylite-wordpress-phpunit:php83
+          cache-from: |
+            type=gha,scope=wordpress-phpunit-runtime-php83
+            type=gha,scope=wordpress-phpunit-php83
+
+      - name: Retry WordPress shard runtime Docker image build
+        if: steps.build-wordpress-shard-runtime-docker-image.outcome == 'failure'
         uses: docker/build-push-action@v7
         timeout-minutes: 10
         env:
