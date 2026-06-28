@@ -946,6 +946,12 @@ if(BUILD_TESTING)
           dictionary-foreign-key-multi-rename-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-fk-rename-if-exists-missing-source-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-fk-rename-if-exists-missing-source-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-fk-multi-rename-loop-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -968,6 +974,12 @@ if(BUILD_TESTING)
         COMMAND
           mylite_ownerless_cross_process_sql_test
           dictionary-fk-multi-rename-if-exists-loop-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-fk-rename-if-exists-missing-source-loop-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-fk-rename-if-exists-missing-source-loop-crash
       )
       add_test(
         NAME libmylite.ownerless-dictionary-fk-multi-rename-third-loop-crash
@@ -1994,6 +2006,7 @@ if(BUILD_TESTING)
         libmylite.ownerless-dictionary-foreign-key-mixed-change-column-alter-crash
         libmylite.ownerless-dictionary-foreign-key-mixed-rename-column-alter-crash
         libmylite.ownerless-dictionary-fk-multi-rename-crash
+        libmylite.ownerless-dictionary-fk-rename-if-exists-missing-source-crash
         libmylite.ownerless-dictionary-multi-rename-loop-crash
         libmylite.ownerless-dictionary-multi-rename-if-exists-loop-crash
         libmylite.ownerless-dictionary-fk-multi-rename-loop-crash
@@ -2019,6 +2032,7 @@ if(BUILD_TESTING)
         libmylite.ownerless-dictionary-cross-schema-multi-rename-if-exists-second-loop-crash
         libmylite.ownerless-dictionary-fk-multi-rename-second-loop-crash
         libmylite.ownerless-dictionary-fk-multi-rename-if-exists-second-loop-crash
+        libmylite.ownerless-dictionary-fk-rename-if-exists-missing-source-loop-crash
         libmylite.ownerless-dictionary-fk-cross-schema-multi-rename-second-loop-crash
         libmylite.ownerless-dictionary-fk-cross-schema-multi-rename-if-exists-second-loop-crash
         PROPERTIES

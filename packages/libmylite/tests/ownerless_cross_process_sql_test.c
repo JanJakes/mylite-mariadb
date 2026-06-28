@@ -1024,6 +1024,7 @@ static void test_ownerless_foreign_key_child_rename_refreshes_peer_dictionary(vo
 static void test_ownerless_foreign_key_cross_schema_rename_refreshes_peer_dictionary(void);
 static void test_ownerless_foreign_key_cross_schema_child_rename_refreshes_peer_dictionary(void);
 static void test_ownerless_foreign_key_multi_rename_refreshes_peer_dictionary(void);
+static void test_ownerless_foreign_key_rename_if_exists_missing_source(void);
 static void test_ownerless_foreign_key_cross_schema_multi_rename_refreshes_peer_dictionary(void);
 static void test_ownerless_check_constraint_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_field_generated_check_ddl_refreshes_peer_dictionary(void);
@@ -1143,8 +1144,10 @@ static void test_crashed_foreign_key_mixed_modify_column_alter_recovers_state(vo
 static void test_crashed_foreign_key_mixed_change_column_alter_recovers_state(void);
 static void test_crashed_foreign_key_mixed_rename_column_alter_recovers_state(void);
 static void test_crashed_foreign_key_multi_rename_dictionary_ddl_recovers_constraints(void);
+static void test_crashed_fk_rename_if_exists_missing_source_recovers_constraints(void);
 #  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void test_crashed_foreign_key_multi_rename_loop_recovers_ddl_log_rollback(void);
+static void test_crashed_fk_rename_if_exists_missing_source_loop_rollback(void);
 #  endif
 static void test_crashed_foreign_key_cross_schema_multi_rename_dictionary_ddl_recovers_constraints(
     void
@@ -2026,8 +2029,16 @@ static void foreign_key_multi_rename_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
+static void foreign_key_rename_if_exists_missing_source_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 #  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void foreign_key_multi_rename_until_first_native_file_op_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void foreign_key_rename_if_exists_missing_source_until_native_file_op_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -3929,6 +3940,12 @@ static void assert_ownerless_foreign_key_cross_schema_child_rename_state(
     unsigned flags,
     const char *database_path
 );
+static void assert_missing_source_rename_warnings3(
+    mylite_db *db,
+    const char *first_source,
+    const char *second_source,
+    const char *third_source
+);
 static void assert_ownerless_foreign_key_multi_rename_state(
     open_database_paths paths,
     unsigned flags,
@@ -4872,6 +4889,10 @@ int main(int argc, char **argv) {
         test_ownerless_foreign_key_multi_rename_refreshes_peer_dictionary();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "foreign-key-rename-if-exists-missing-source") == 0) {
+        test_ownerless_foreign_key_rename_if_exists_missing_source();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "foreign-key-cross-schema-multi-rename") == 0) {
         test_ownerless_foreign_key_cross_schema_multi_rename_refreshes_peer_dictionary();
         return 0;
@@ -5780,6 +5801,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-fk-rename-if-exists-missing-source-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_fk_rename_if_exists_missing_source_recovers_constraints();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-fk-multi-rename-loop-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_foreign_key_multi_rename_loop_recovers_ddl_log_rollback();
@@ -5790,6 +5817,13 @@ int main(int argc, char **argv) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         assert(setenv("MYLITE_OWNERLESS_TEST_RENAME_IF_EXISTS", "1", 1) == 0);
         test_crashed_foreign_key_multi_rename_loop_recovers_ddl_log_rollback();
+#endif
+        return 0;
+    }
+    if (argc == 2 &&
+        strcmp(argv[1], "dictionary-fk-rename-if-exists-missing-source-loop-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_fk_rename_if_exists_missing_source_loop_rollback();
 #endif
         return 0;
     }
@@ -6658,7 +6692,9 @@ int main(int argc, char **argv) {
             test_crashed_foreign_key_dictionary_ddl_recovers_constraint,
             test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constraint,
             test_crashed_foreign_key_multi_rename_dictionary_ddl_recovers_constraints,
+            test_crashed_fk_rename_if_exists_missing_source_recovers_constraints,
             test_crashed_foreign_key_multi_rename_loop_recovers_ddl_log_rollback,
+            test_crashed_fk_rename_if_exists_missing_source_loop_rollback,
             test_crashed_foreign_key_cross_schema_multi_rename_dictionary_ddl_recovers_constraints,
             test_crashed_fk_cross_schema_rename_loop_recovers_ddl_log_rollback,
             test_crashed_foreign_key_action_before_execute_recovers_retryable_state,
@@ -6841,7 +6877,8 @@ int main(int argc, char **argv) {
             "cyclic-foreign-key-variants|cyclic-foreign-key-truncate-policy|"
             "foreign-key-rename|foreign-key-child-rename|"
             "foreign-key-cross-schema-rename|foreign-key-cross-schema-child-rename|"
-            "foreign-key-multi-rename|foreign-key-cross-schema-multi-rename|"
+            "foreign-key-multi-rename|foreign-key-rename-if-exists-missing-source|"
+            "foreign-key-cross-schema-multi-rename|"
             "check-constraint-ddl|field-generated-check-ddl|"
             "table-admin-policy|lock-tables-policy|flush-table-lock-policy|"
             "read-uncommitted-policy|sequence-policy|event-policy|table-directory-policy|"
@@ -6968,7 +7005,9 @@ int main(int argc, char **argv) {
             "dictionary-foreign-key-mixed-default-alter-crash|"
             "dictionary-foreign-key-mixed-column-alter-crash|"
             "dictionary-foreign-key-multi-rename-crash|"
+            "dictionary-fk-rename-if-exists-missing-source-crash|"
             "dictionary-fk-multi-rename-if-exists-loop-crash|"
+            "dictionary-fk-rename-if-exists-missing-source-loop-crash|"
             "dictionary-foreign-key-cross-schema-multi-rename-crash|"
             "dictionary-fk-cross-schema-multi-rename-if-exists-loop-crash|"
             "dictionary-check-constraint-crash|"
@@ -7342,6 +7381,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
         test_ownerless_foreign_key_cross_schema_child_rename_refreshes_peer_dictionary
     ),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_foreign_key_multi_rename_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_foreign_key_rename_if_exists_missing_source),
     OWNERLESS_SQL_TEST_CASE(
         test_ownerless_foreign_key_cross_schema_multi_rename_refreshes_peer_dictionary
     ),
@@ -43361,6 +43401,287 @@ static void test_ownerless_foreign_key_cross_schema_child_rename_refreshes_peer_
     free(root);
 }
 
+static const char *foreign_key_rename_if_exists_missing_source_sql(void) {
+    return "RENAME TABLE IF EXISTS "
+           "app.ownerless_fk_multi_rename_missing_before "
+           "TO app.ownerless_fk_multi_rename_missing_before_dst, "
+           "app.ownerless_fk_multi_rename_parent "
+           "TO app.ownerless_fk_multi_rename_parent_tmp, "
+           "app.ownerless_fk_multi_rename_missing_middle "
+           "TO app.ownerless_fk_multi_rename_missing_middle_dst, "
+           "app.ownerless_fk_multi_rename_child "
+           "TO app.ownerless_fk_multi_rename_child_moved, "
+           "app.ownerless_fk_multi_rename_parent_tmp "
+           "TO app.ownerless_fk_multi_rename_parent_moved, "
+           "app.ownerless_fk_multi_rename_missing_after "
+           "TO app.ownerless_fk_multi_rename_missing_after_dst";
+}
+
+static void create_ownerless_fk_multi_rename_base(mylite_db *db) {
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_multi_rename_parent ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_multi_rename_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_id INT NOT NULL, "
+        "value INT NOT NULL, "
+        "INDEX ownerless_fk_multi_rename_parent_idx (parent_id), "
+        "FOREIGN KEY (parent_id) "
+        "REFERENCES app.ownerless_fk_multi_rename_parent (id) "
+        "ON DELETE RESTRICT"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_fk_multi_rename_parent VALUES (1, 10), (2, 20)");
+    exec_ok(db, "INSERT INTO app.ownerless_fk_multi_rename_child VALUES (1, 1, 100)");
+    exec_ok(db, "COMMIT");
+}
+
+static void assert_fk_rename_if_exists_missing_targets_absent(
+    mylite_db *db,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *before_frm_path = path_join(app_path, "ownerless_fk_multi_rename_missing_before_dst.frm");
+    char *before_ibd_path = path_join(app_path, "ownerless_fk_multi_rename_missing_before_dst.ibd");
+    char *middle_frm_path = path_join(app_path, "ownerless_fk_multi_rename_missing_middle_dst.frm");
+    char *middle_ibd_path = path_join(app_path, "ownerless_fk_multi_rename_missing_middle_dst.ibd");
+    char *after_frm_path = path_join(app_path, "ownerless_fk_multi_rename_missing_after_dst.frm");
+    char *after_ibd_path = path_join(app_path, "ownerless_fk_multi_rename_missing_after_dst.ibd");
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name IN ("
+            "'ownerless_fk_multi_rename_missing_before_dst', "
+            "'ownerless_fk_multi_rename_missing_middle_dst', "
+            "'ownerless_fk_multi_rename_missing_after_dst')"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME IN ("
+            "'app/ownerless_fk_multi_rename_missing_before_dst', "
+            "'app/ownerless_fk_multi_rename_missing_middle_dst', "
+            "'app/ownerless_fk_multi_rename_missing_after_dst')"
+        ) == 0U
+    );
+    assert(!path_exists(before_frm_path));
+    assert(!path_exists(before_ibd_path));
+    assert(!path_exists(middle_frm_path));
+    assert(!path_exists(middle_ibd_path));
+    assert(!path_exists(after_frm_path));
+    assert(!path_exists(after_ibd_path));
+
+    free(after_ibd_path);
+    free(after_frm_path);
+    free(middle_ibd_path);
+    free(middle_frm_path);
+    free(before_ibd_path);
+    free(before_frm_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void assert_fk_rename_if_exists_missing_source_moved_read_only_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path,
+    unsigned expected_child_count,
+    unsigned expected_child_parent_sum,
+    unsigned expected_child_value_sum
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *parent_frm_path = path_join(app_path, "ownerless_fk_multi_rename_parent.frm");
+    char *parent_ibd_path = path_join(app_path, "ownerless_fk_multi_rename_parent.ibd");
+    char *parent_tmp_frm_path = path_join(app_path, "ownerless_fk_multi_rename_parent_tmp.frm");
+    char *parent_tmp_ibd_path = path_join(app_path, "ownerless_fk_multi_rename_parent_tmp.ibd");
+    char *parent_moved_frm_path = path_join(app_path, "ownerless_fk_multi_rename_parent_moved.frm");
+    char *parent_moved_ibd_path = path_join(app_path, "ownerless_fk_multi_rename_parent_moved.ibd");
+    char *child_frm_path = path_join(app_path, "ownerless_fk_multi_rename_child.frm");
+    char *child_ibd_path = path_join(app_path, "ownerless_fk_multi_rename_child.ibd");
+    char *child_moved_frm_path = path_join(app_path, "ownerless_fk_multi_rename_child_moved.frm");
+    char *child_moved_ibd_path = path_join(app_path, "ownerless_fk_multi_rename_child_moved.ibd");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name IN ("
+            "'ownerless_fk_multi_rename_parent', "
+            "'ownerless_fk_multi_rename_parent_tmp', "
+            "'ownerless_fk_multi_rename_child')"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name IN ("
+            "'ownerless_fk_multi_rename_parent_moved', "
+            "'ownerless_fk_multi_rename_child_moved')"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME IN ("
+            "'app/ownerless_fk_multi_rename_parent', "
+            "'app/ownerless_fk_multi_rename_parent_tmp', "
+            "'app/ownerless_fk_multi_rename_child')"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
+            "WHERE NAME IN ("
+            "'app/ownerless_fk_multi_rename_parent_moved', "
+            "'app/ownerless_fk_multi_rename_child_moved')"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND constraint_name = 'ownerless_fk_multi_rename_child_ibfk_1'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND unique_constraint_schema = 'app' "
+            "AND constraint_name = 'ownerless_fk_multi_rename_child_moved_ibfk_1' "
+            "AND table_name = 'ownerless_fk_multi_rename_child_moved' "
+            "AND referenced_table_name = 'ownerless_fk_multi_rename_parent_moved' "
+            "AND delete_rule = 'RESTRICT'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_fk_multi_rename_child_moved' "
+            "AND index_name = 'ownerless_fk_multi_rename_parent_idx' "
+            "AND column_name = 'parent_id'"
+        ) == 1U
+    );
+    assert(
+        exec_status(db, "SELECT COUNT(*) FROM app.ownerless_fk_multi_rename_parent", NULL) !=
+        MYLITE_OK
+    );
+    assert(
+        exec_status(db, "SELECT COUNT(*) FROM app.ownerless_fk_multi_rename_parent_tmp", NULL) !=
+        MYLITE_OK
+    );
+    assert(
+        exec_status(db, "SELECT COUNT(*) FROM app.ownerless_fk_multi_rename_child", NULL) !=
+        MYLITE_OK
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_multi_rename_parent_moved") == 2U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_multi_rename_parent_moved") ==
+        30U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_multi_rename_child_moved") ==
+        expected_child_count
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(parent_id) FROM app.ownerless_fk_multi_rename_child_moved"
+        ) == expected_child_parent_sum
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_multi_rename_child_moved") ==
+        expected_child_value_sum
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_multi_rename_child_moved "
+            "FORCE INDEX (ownerless_fk_multi_rename_parent_idx)"
+        ) == expected_child_count
+    );
+    assert_fk_rename_if_exists_missing_targets_absent(db, database_path);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!path_exists(parent_frm_path));
+    assert(!path_exists(parent_ibd_path));
+    assert(!path_exists(parent_tmp_frm_path));
+    assert(!path_exists(parent_tmp_ibd_path));
+    assert(path_exists(parent_moved_frm_path));
+    assert(path_exists(parent_moved_ibd_path));
+    assert(!path_exists(child_frm_path));
+    assert(!path_exists(child_ibd_path));
+    assert(path_exists(child_moved_frm_path));
+    assert(path_exists(child_moved_ibd_path));
+
+    free(child_moved_ibd_path);
+    free(child_moved_frm_path);
+    free(child_ibd_path);
+    free(child_frm_path);
+    free(parent_moved_ibd_path);
+    free(parent_moved_frm_path);
+    free(parent_tmp_ibd_path);
+    free(parent_tmp_frm_path);
+    free(parent_ibd_path);
+    free(parent_frm_path);
+    free(app_path);
+    free(datadir_path);
+}
+
+static void assert_fk_rename_if_exists_missing_source_moved_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    assert_fk_rename_if_exists_missing_source_moved_read_only_state(
+        paths,
+        flags,
+        database_path,
+        2U,
+        3U,
+        300U
+    );
+}
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void assert_fk_rename_if_exists_missing_source_loop_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    mylite_db *db;
+
+    assert_ownerless_foreign_key_multi_rename_loop_state(paths, flags, database_path);
+    db = open_database(paths, flags);
+    assert_fk_rename_if_exists_missing_targets_absent(db, database_path);
+    assert(mylite_close(db) == MYLITE_OK);
+}
+#endif
+
 static void test_ownerless_foreign_key_multi_rename_refreshes_peer_dictionary(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -43586,6 +43907,79 @@ static void test_ownerless_foreign_key_multi_rename_refreshes_peer_dictionary(vo
     free(parent_frm_path);
     free(app_path);
     free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_foreign_key_rename_if_exists_missing_source(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-fk-rename-if-exists-missing-source.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    unsigned mariadb_errno = 0U;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    create_ownerless_fk_multi_rename_base(db);
+
+    exec_ok(db, foreign_key_rename_if_exists_missing_source_sql());
+    assert_missing_source_rename_warnings3(
+        db,
+        "ownerless_fk_multi_rename_missing_before",
+        "ownerless_fk_multi_rename_missing_middle",
+        "ownerless_fk_multi_rename_missing_after"
+    );
+    assert_fk_rename_if_exists_missing_targets_absent(db, database_path);
+    exec_ok(db, "INSERT INTO app.ownerless_fk_multi_rename_child_moved VALUES (2, 2, 200)");
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_fk_multi_rename_child_moved VALUES (3, 99, 300)",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_NO_REFERENCED_ROW_ERRNO);
+    exec_ok(db, "COMMIT");
+    mariadb_errno = 0U;
+    assert(
+        exec_status(
+            db,
+            "DELETE FROM app.ownerless_fk_multi_rename_parent_moved WHERE id = 1",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_ROW_IS_REFERENCED_ERRNO);
+    exec_ok(db, "COMMIT");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_fk_rename_if_exists_missing_source_moved_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_fk_rename_if_exists_missing_source_moved_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+    remove_concurrency_shm(database_path);
+    assert_fk_rename_if_exists_missing_source_moved_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_fk_rename_if_exists_missing_source_moved_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+
     free(database_path);
     free(runtime_root);
     remove_tree(root);
@@ -54833,6 +55227,100 @@ static void test_crashed_foreign_key_multi_rename_dictionary_ddl_recovers_constr
     free(root);
 }
 
+static void test_crashed_fk_rename_if_exists_missing_source_recovers_constraints(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-fk-rename-if-exists-missing-source-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
+    mylite_db *db;
+    unsigned mariadb_errno = 0U;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    create_ownerless_fk_multi_rename_base(db);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        foreign_key_rename_if_exists_missing_source_until_dictionary_finish_fault
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert_fk_rename_if_exists_missing_source_moved_read_only_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path,
+        1U,
+        1U,
+        100U
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert_fk_rename_if_exists_missing_targets_absent(db, database_path);
+    exec_ok(db, "INSERT INTO app.ownerless_fk_multi_rename_child_moved VALUES (2, 2, 200)");
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_fk_multi_rename_child_moved VALUES (3, 99, 300)",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_NO_REFERENCED_ROW_ERRNO);
+    exec_ok(db, "COMMIT");
+    mariadb_errno = 0U;
+    assert(
+        exec_status(
+            db,
+            "DELETE FROM app.ownerless_fk_multi_rename_parent_moved WHERE id = 1",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_ROW_IS_REFERENCED_ERRNO);
+    exec_ok(db, "COMMIT");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_fk_rename_if_exists_missing_source_moved_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+
+    release_ownerless_live_peer(&live_peer);
+
+    assert_fk_rename_if_exists_missing_source_moved_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert_fk_rename_if_exists_missing_source_moved_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+    remove_concurrency_shm(database_path);
+    assert_fk_rename_if_exists_missing_source_moved_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_fk_rename_if_exists_missing_source_moved_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 #  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void test_crashed_foreign_key_multi_rename_loop_recovers_ddl_log_rollback(void) {
     char *root = make_temp_root();
@@ -54991,7 +55479,6 @@ static void test_crashed_foreign_key_multi_rename_loop_recovers_ddl_log_rollback
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_multi_rename_child") == 300U
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     release_ownerless_live_peer(&live_peer);
 
@@ -55030,6 +55517,86 @@ static void test_crashed_foreign_key_multi_rename_loop_recovers_ddl_log_rollback
     free(parent_frm_path);
     free(app_path);
     free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_crashed_fk_rename_if_exists_missing_source_loop_rollback(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-fk-rename-if-exists-missing-loop-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
+    mylite_db *db;
+    unsigned mariadb_errno = 0U;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    create_ownerless_fk_multi_rename_base(db);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        foreign_key_rename_if_exists_missing_source_until_native_file_op_fault
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert_fk_rename_if_exists_missing_targets_absent(db, database_path);
+    exec_ok(db, "INSERT INTO app.ownerless_fk_multi_rename_child VALUES (2, 2, 200)");
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_fk_multi_rename_child VALUES (3, 99, 300)",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_NO_REFERENCED_ROW_ERRNO);
+    exec_ok(db, "COMMIT");
+    mariadb_errno = 0U;
+    assert(
+        exec_status(
+            db,
+            "DELETE FROM app.ownerless_fk_multi_rename_parent WHERE id = 1",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_ROW_IS_REFERENCED_ERRNO);
+    exec_ok(db, "COMMIT");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
+
+    assert_fk_rename_if_exists_missing_source_loop_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert_fk_rename_if_exists_missing_source_loop_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+    remove_concurrency_shm(database_path);
+    assert_fk_rename_if_exists_missing_source_loop_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_fk_rename_if_exists_missing_source_loop_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+
     free(database_path);
     free(runtime_root);
     remove_tree(root);
@@ -80924,6 +81491,18 @@ static void foreign_key_multi_rename_until_dictionary_finish_fault(
     );
 }
 
+static void foreign_key_rename_if_exists_missing_source_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        foreign_key_rename_if_exists_missing_source_sql()
+    );
+}
+
 #  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static const char *foreign_key_multi_rename_native_loop_sql(void) {
     if (getenv("MYLITE_OWNERLESS_TEST_RENAME_IF_EXISTS") != NULL) {
@@ -80954,6 +81533,18 @@ static void foreign_key_multi_rename_until_first_native_file_op_fault(
         ready_fd,
         "rename-table-after-native-file-op",
         foreign_key_multi_rename_native_loop_sql()
+    );
+}
+
+static void foreign_key_rename_if_exists_missing_source_until_native_file_op_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "rename-table-after-native-file-op",
+        foreign_key_rename_if_exists_missing_source_sql()
     );
 }
 #  endif

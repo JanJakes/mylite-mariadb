@@ -370,7 +370,15 @@ proves all three skipped-source warnings, completed recovery of both moved
 targets at `dictionary-before-finish`, native-loop DDL-log rollback to both
 original source tables and `SPACE` ids after the second real native rename
 hook, absence of all skipped targets, marker retention/drain, ownerless/native
-reopen, and forced `.shm` rebuild. Hook-build target-conflict coverage now
+reopen, and forced `.shm` rebuild. Focused same-schema foreign-key
+`RENAME TABLE IF EXISTS` missing-source coverage now interleaves three skipped
+source pairs around a real parent-through-temporary FK rename chain, proves all
+three skipped-source warnings, completed moved parent/child FK recovery at
+`dictionary-before-finish`, native-loop DDL-log rollback to the original FK
+state after the second real native rename hook, skipped target absence from SQL
+metadata, InnoDB dictionary metadata, and native files, marker
+retention/drain, ownerless/native reopen, and forced `.shm` rebuild.
+Hook-build target-conflict coverage now
 kills a same-schema missing/target-conflict/missing `RENAME TABLE IF EXISTS`
 writer at `dictionary-before-finish` after MariaDB returns errno `1050`, uses
 a metadata-only failed-DDL recovery kind when no native file-operation redo was
