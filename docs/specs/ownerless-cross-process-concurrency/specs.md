@@ -7723,6 +7723,14 @@ subsystems that this mode needs:
   after the second real native rename hook, skipped-target absence from SQL
   metadata, InnoDB dictionary metadata, and native files, marker
   retention/drain, forced `.shm` rebuild, and ordinary native reopen.
+  The cross-schema foreign-key missing-source IF EXISTS follow-up interleaves
+  the same three skipped missing sources around real parent/child moves from
+  `app` into a target schema. It proves all skipped-source warnings, completed
+  target-schema FK metadata and enforcement at `dictionary-before-finish`,
+  native-loop rollback to the original `app` FK state after the second real
+  native rename hook, skipped-target absence from SQL metadata, InnoDB
+  dictionary metadata, and source/target schema native files, marker
+  retention/drain, forced `.shm` rebuild, and ordinary native reopen.
   The target-conflict IF EXISTS follow-up classifies a
   missing/target-conflict/missing same-schema `RENAME TABLE IF EXISTS` list as
   a failed-DDL ownerless dictionary boundary with no native file operation:
@@ -7896,13 +7904,13 @@ subsystems that this mode needs:
      `RENAME TABLE IF EXISTS` lists, plus a focused same-schema
      and cross-schema missing-source/existing/missing-source
      `RENAME TABLE IF EXISTS` matrices covering warning/no-op semantics,
-     prefinish recovery, and native-loop rollback, plus same-schema
-     foreign-key missing-source `RENAME TABLE IF EXISTS` prefinish and
-     native-loop rollback coverage, plus target-conflict
+     prefinish recovery, and native-loop rollback, plus same-schema and
+     cross-schema foreign-key missing-source `RENAME TABLE IF EXISTS`
+     prefinish and native-loop rollback coverage, plus target-conflict
      `IF EXISTS` failed-DDL dictionary recovery and native file-op negative proof, especially
      remaining rename variants including temporary/permanent and cross-schema
      longer missing-source `IF EXISTS` permutations beyond the now-covered
-     same-schema non-FK and FK missing-source lists,
+     deterministic non-FK and FK missing-source lists,
      other rebuild variants beyond the covered
      FORCE, same-engine ENGINE including both exact copy-lock option orders,
      row-format including
