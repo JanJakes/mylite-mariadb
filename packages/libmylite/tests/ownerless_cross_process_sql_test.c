@@ -807,6 +807,7 @@ static void test_ownerless_random_transaction_stress(void);
 static void test_ownerless_foreign_key_graph_stress(void);
 static void test_ownerless_child_failure_cleanup(void);
 static void test_ownerless_active_reader_pressure_reclaims_after_release(void);
+static void test_ownerless_active_reader_pressure_killed_pin_reclaims_live_peer(void);
 static void test_ownerless_active_reader_pressure_limit_blocks_writes(void);
 static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(void);
 static void test_ownerless_active_reader_pressure_diagnostics(void);
@@ -4233,6 +4234,10 @@ int main(int argc, char **argv) {
         test_ownerless_active_reader_pressure_reclaims_after_release();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "active-reader-pressure-killed-pin") == 0) {
+        test_ownerless_active_reader_pressure_killed_pin_reclaims_live_peer();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "active-reader-pressure-limit") == 0) {
         test_ownerless_active_reader_pressure_limit_blocks_writes();
         return 0;
@@ -6446,7 +6451,8 @@ int main(int argc, char **argv) {
             "checksum-stress|"
             "tx-stress|random-tx-stress|fk-graph-stress|"
             "child-failure-cleanup|"
-            "active-reader-pressure|active-reader-pressure-limit|"
+            "active-reader-pressure|active-reader-pressure-killed-pin|"
+            "active-reader-pressure-limit|"
             "active-reader-pressure-write-policy|"
             "active-reader-pressure-diagnostics|"
             "expanding-page-pressure|blob-page-pressure|blob-page-size-matrix|"
@@ -6828,6 +6834,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_live_snapshot_pin_synthesizes_page_boundary),
     OWNERLESS_SQL_TEST_CASE(test_killed_ownerless_snapshot_pin_allows_live_page_log_reclaim),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_active_reader_pressure_reclaims_after_release),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_active_reader_pressure_killed_pin_reclaims_live_peer),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_active_reader_pressure_limit_blocks_writes),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_active_reader_pressure_limit_blocks_write_classes),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_active_reader_pressure_diagnostics),
@@ -19413,6 +19420,150 @@ static void test_ownerless_active_reader_pressure_reclaims_after_release(void) {
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U + rounds);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_active_reader_pressure_killed_pin_reclaims_live_peer(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-active-reader-pressure-killed-pin.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int peer_ready_pipe[2];
+    int peer_release_pipe[2];
+    int reader_ready_pipe[2];
+    int reader_release_pipe[2];
+    pid_t peer_child;
+    pid_t reader_child;
+    const unsigned rounds =
+        ownerless_unsigned_env("MYLITE_OWNERLESS_ACTIVE_READER_PRESSURE_KILLED_ROUNDS", 6U, 100U);
+    const unsigned expected_after_pressure = 30U + rounds;
+    const unsigned expected_after_dead_pin_write = expected_after_pressure + 1U;
+    off_t retained_wal_size;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(concurrency_wal_is_checkpointed(database_path));
+    assert(pipe(peer_ready_pipe) == 0);
+    assert(pipe(peer_release_pipe) == 0);
+    assert(pipe(reader_ready_pipe) == 0);
+    assert(pipe(reader_release_pipe) == 0);
+
+    peer_child = fork();
+    assert(peer_child >= 0);
+    if (peer_child == 0) {
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        close(reader_ready_pipe[0]);
+        close(reader_ready_pipe[1]);
+        close(reader_release_pipe[0]);
+        close(reader_release_pipe[1]);
+        hold_ownerless_open_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = peer_ready_pipe[1],
+                .release_read_fd = peer_release_pipe[0],
+            }
+        );
+    }
+
+    close(peer_ready_pipe[1]);
+    close(peer_release_pipe[0]);
+    wait_for_pipe(peer_ready_pipe[0]);
+
+    reader_child = fork();
+    assert(reader_child >= 0);
+    if (reader_child == 0) {
+        close(reader_ready_pipe[0]);
+        close(reader_release_pipe[1]);
+        close(peer_release_pipe[1]);
+        hold_repeatable_read_snapshot_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = reader_ready_pipe[1],
+                .release_read_fd = reader_release_pipe[0],
+            }
+        );
+    }
+
+    close(reader_ready_pipe[1]);
+    close(reader_release_pipe[0]);
+    wait_for_pipe(reader_ready_pipe[0]);
+    assert(read_concurrency_process_active_count(database_path) == 2U);
+    assert(read_concurrency_read_view_active_count(database_path) == 1U);
+
+    for (unsigned round = 0U; round < rounds; ++round) {
+        const unsigned expected_sum = 31U + round;
+
+        db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+        exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1");
+        assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == expected_sum);
+        assert(mylite_close(db) == MYLITE_OK);
+        assert(!concurrency_wal_is_checkpointed(database_path));
+        assert(count_concurrency_wal_records_at_or_before(database_path, UINT64_MAX) > 0U);
+    }
+
+    retained_wal_size = concurrency_wal_size(database_path);
+    assert(retained_wal_size > 0);
+    db = open_database_with_page_log_limit(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        (unsigned long long)retained_wal_size
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == expected_after_pressure
+    );
+    expect_exec_busy(
+        db,
+        "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 2",
+        "pressure limit"
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == expected_after_pressure
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert(kill(reader_child, SIGKILL) == 0);
+    wait_for_signaled_child(reader_child, SIGKILL);
+    assert(close(reader_release_pipe[1]) == 0);
+
+    db = open_database_with_page_log_limit(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        (unsigned long long)retained_wal_size
+    );
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 2");
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") ==
+        expected_after_dead_pin_write
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_read_view_active_count(database_path) == 0U);
+    assert_concurrency_wal_has_page_versions_or_checkpoint(database_path);
+
+    signal_pipe(peer_release_pipe[1]);
+    wait_for_child(peer_child);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") ==
+        expected_after_dead_pin_write
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_concurrency_wal_checkpointed_eventually(database_path);
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") ==
+        expected_after_dead_pin_write
+    );
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 

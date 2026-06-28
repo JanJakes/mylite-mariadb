@@ -5186,7 +5186,15 @@ Tasks:
    `MYLITE_OWNERLESS_COMPRESSED_BLOB_PAGE_PRESSURE_ROWS=8`. The
    compressed BLOB key-block matrix covers the same active-reader retention and
    post-release checkpoint lifecycle for `KEY_BLOCK_SIZE=1`, `2`, `4`, `8`, and
-   `16`, with native `ZBLOB`/`ZBLOB2` page evidence for each table. The
+   `16`, with native `ZBLOB`/`ZBLOB2` page evidence for each table. The killed
+   active-reader pressure-pin follow-up keeps an idle live ownerless peer open,
+   commits multiple writer updates retained by a repeatable-read snapshot pin,
+   proves a configured `ownerless_page_log_limit_bytes` writer returns busy
+   while the pin is live, kills the reader, then proves the same pressure limit
+   no longer blocks a fresh writer after dead-pin cleanup while the idle peer
+   remains live. Final ownerless recovery checkpoints the retained WAL and
+   forced `.shm` rebuild plus ordinary native reopen preserve the final row
+   state. The
    `ownerless-active-reader-pressure-trace-export` slice adds
    `tools/ownerless-active-reader-pressure-trace`, which emits a
    repeatable-read snapshot reader, a deterministic large-row writer schedule,
@@ -7790,9 +7798,10 @@ subsystems that this mode needs:
      handoff, focused same-table large-row handoff, focused same-row conflict
      handoff, bounded randomized same-table schedule, and live-peer
      post-native/pre-state savepoint rollback cleanup boundary.
-  3. Extend active-reader pressure evidence from retained-WAL policy to crash
-     and external-oracle breadth for the high-risk DML/DDL classes already
-     covered by bounded pressure policy tests.
+  3. Extend active-reader pressure evidence from retained-WAL policy and the
+     covered killed-reader pressure-pin boundary to crash and external-oracle
+     breadth for the high-risk DML/DDL classes already covered by bounded
+     pressure policy tests.
   4. Continue deterministic external MariaDB seed/replay expansion and graduate
      to longer randomized MariaDB/RQG-style runs once the bounded recovery
      gates above stop producing new correctness issues.
