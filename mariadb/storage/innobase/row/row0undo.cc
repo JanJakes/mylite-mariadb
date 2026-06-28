@@ -41,6 +41,7 @@ Created 1/8/1997 Heikki Tuuri
 #include "row0mysql.h"
 #include "srv0srv.h"
 #include "srv0start.h"
+#include "mylite_ownerless_innodb_lock_hooks.h"
 
 /* How to undo row operations?
 (1) For an insert, we have stored a prefix of the clustered index record
@@ -403,6 +404,12 @@ row_undo(
 	btr_pcur_close(&(node->pcur));
 
 	mem_heap_empty(node->heap);
+
+	if (err == DB_SUCCESS
+	    && UNIV_UNLIKELY(mylite_ownerless_innodb_test_faults_enabled_fast())) {
+		mylite_ownerless_innodb_test_fault(
+			"rollback-after-native-row-undo");
+	}
 
 	thr->run_node = node;
 

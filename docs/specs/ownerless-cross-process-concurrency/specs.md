@@ -7631,6 +7631,17 @@ subsystems that this mode needs:
   `.shm` rebuild, and ordinary native reopen preserve the original row while
   both native file-operation markers remain clear; native rollback internals
   remain out of scope.
+  The native row-undo rollback crash follow-up adds the first focused InnoDB
+  internal rollback fault. Hook-build coverage kills full-transaction rollback
+  and `ROLLBACK TO SAVEPOINT` writers after the shared `row_undo()` path has
+  successfully applied one native row undo record but before the rollback graph
+  completes. No-live ownerless recovery, forced `.shm` rebuild, and ordinary
+  native reopen preserve the original pre-transaction rows, keep DML and
+  generic file-operation markers clear, and verify follow-up native writes.
+  This covers one deterministic native row-undo boundary; arbitrary row-undo
+  substeps, live-peer mid-rollback recovery, FK/trigger/generated-column side
+  effects, XA/prepared rollback, and longer randomized savepoint schedules
+  remain planned.
   The implicit-rename follow-up broadens `RENAME TABLE` dictionary recovery
   classification from only explicit `schema.table` rename pairs to one- or
   two-part identifiers, then kills an implicit-schema `USE app; RENAME TABLE
@@ -7819,13 +7830,14 @@ subsystems that this mode needs:
      truncate remains MariaDB's pre-truncate error path rather than a positive
      recovery boundary.
   2. Close remaining transaction crash windows, especially native
-     rollback/savepoint-rollback internals and longer same-page/same-table
-     concurrent-writer savepoint schedules that combine native undo,
-     ownerless page-write ownership, and file-operation marker cleanup beyond
-     the covered independent-table handoff, focused same-page wait/commit
-     handoff, focused same-table large-row handoff, focused same-row conflict
-     handoff, bounded randomized same-table schedule, and live-peer
-     post-native/pre-state savepoint rollback cleanup boundary.
+     rollback/savepoint-rollback internals beyond the covered focused native
+     row-undo boundary, plus longer same-page/same-table concurrent-writer
+     savepoint schedules that combine native undo, ownerless page-write
+     ownership, and file-operation marker cleanup beyond the covered
+     independent-table handoff, focused same-page wait/commit handoff, focused
+     same-table large-row handoff, focused same-row conflict handoff, bounded
+     randomized same-table schedule, and live-peer post-native/pre-state
+     savepoint rollback cleanup boundary.
   3. Extend active-reader pressure evidence from retained-WAL policy and the
      covered killed-reader pressure-pin boundary to crash and external-oracle
      breadth for the high-risk DML/DDL classes already covered by bounded
