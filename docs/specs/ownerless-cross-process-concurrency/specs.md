@@ -7715,6 +7715,14 @@ subsystems that this mode needs:
   original source tables and `SPACE` ids after the second real
   `rename-table-after-native-file-op` hook, skipped-target absence, marker
   retention/drain, forced `.shm` rebuild, and ordinary native reopen.
+  The cross-schema longer missing-source IF EXISTS follow-up uses the same
+  three skipped missing sources around two opposite-direction schema moves
+  between `app` and `app_archive`. It proves all skipped-source warnings,
+  completed live-peer recovery of both moved targets at
+  `dictionary-before-finish`, native-loop rollback to both original schema
+  placements and `SPACE` ids after the second real native rename hook,
+  skipped-target absence in both schema directories, marker retention/drain,
+  forced `.shm` rebuild, and ordinary native reopen.
   The same-schema foreign-key missing-source IF EXISTS follow-up interleaves
   three skipped missing sources around a real parent-through-temporary FK
   rename chain. It proves all skipped-source warnings, completed live-peer
@@ -7908,9 +7916,9 @@ subsystems that this mode needs:
      cross-schema foreign-key missing-source `RENAME TABLE IF EXISTS`
      prefinish and native-loop rollback coverage, plus target-conflict
      `IF EXISTS` failed-DDL dictionary recovery and native file-op negative proof, especially
-     remaining rename variants including temporary/permanent and cross-schema
-     longer missing-source `IF EXISTS` permutations beyond the now-covered
-     deterministic non-FK and FK missing-source lists,
+     remaining rename variants including temporary/permanent mixed
+     `IF EXISTS` lists and randomized missing-source permutations beyond the
+     now-covered deterministic non-FK and FK missing-source lists,
      other rebuild variants beyond the covered
      FORCE, same-engine ENGINE including both exact copy-lock option orders,
      row-format including
