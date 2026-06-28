@@ -809,6 +809,7 @@ static void test_ownerless_foreign_key_graph_stress(void);
 static void test_ownerless_child_failure_cleanup(void);
 static void test_ownerless_active_reader_pressure_reclaims_after_release(void);
 static void test_ownerless_active_reader_pressure_killed_pin_reclaims_live_peer(void);
+static void test_ownerless_active_reader_pressure_dead_writer_cleanup(void);
 static void test_ownerless_active_reader_pressure_limit_blocks_writes(void);
 static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(void);
 static void test_ownerless_active_reader_pressure_diagnostics(void);
@@ -944,9 +945,7 @@ static void test_ownerless_schema_default_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_schema_idempotent_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_cross_schema_rename_refreshes_peer_dictionary(void);
 static void test_ownerless_rename_if_exists_missing_source_noop_preserves_warnings(void);
-static void test_ownerless_cross_schema_rename_if_exists_missing_source_noop_preserves_warnings(
-    void
-);
+static void test_ownerless_cross_schema_rename_if_exists_noop_warnings(void);
 static void test_ownerless_multi_rename_cycle_refreshes_peer_dictionary(void);
 static void test_ownerless_view_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_view_ddl_variants_refresh_peer_dictionary(void);
@@ -1093,9 +1092,7 @@ static void test_crashed_rename_if_exists_missing_source_loop_recovers_ddl_log_r
 static void test_crashed_implicit_schema_rename_dictionary_ddl_recovers_moved_table(void);
 static void test_crashed_alter_table_rename_dictionary_ddl_recovers_moved_table(void);
 static void test_crashed_cross_schema_rename_dictionary_ddl_recovers_moved_table(void);
-static void test_crashed_cross_schema_rename_if_exists_missing_source_ddl_recovers_moved_table(
-    void
-);
+static void test_crashed_cross_schema_rename_if_exists_recovers_moved_table(void);
 #  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void test_crashed_cross_schema_rename_if_exists_missing_source_loop_recovers_rollback(void);
 #  endif
@@ -4387,6 +4384,10 @@ int main(int argc, char **argv) {
         test_ownerless_active_reader_pressure_killed_pin_reclaims_live_peer();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "active-reader-pressure-dead-writer") == 0) {
+        test_ownerless_active_reader_pressure_dead_writer_cleanup();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "active-reader-pressure-limit") == 0) {
         test_ownerless_active_reader_pressure_limit_blocks_writes();
         return 0;
@@ -4540,7 +4541,7 @@ int main(int argc, char **argv) {
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "cross-schema-rename-if-exists-missing-source-noop") == 0) {
-        test_ownerless_cross_schema_rename_if_exists_missing_source_noop_preserves_warnings();
+        test_ownerless_cross_schema_rename_if_exists_noop_warnings();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "multi-rename-cycle") == 0) {
@@ -5479,7 +5480,7 @@ int main(int argc, char **argv) {
     if (argc == 2 &&
         strcmp(argv[1], "dictionary-cross-schema-rename-if-exists-missing-source-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-        test_crashed_cross_schema_rename_if_exists_missing_source_ddl_recovers_moved_table();
+        test_crashed_cross_schema_rename_if_exists_recovers_moved_table();
 #endif
         return 0;
     }
@@ -6731,6 +6732,7 @@ int main(int argc, char **argv) {
             "tx-stress|random-tx-stress|fk-graph-stress|"
             "child-failure-cleanup|"
             "active-reader-pressure|active-reader-pressure-killed-pin|"
+            "active-reader-pressure-dead-writer|"
             "active-reader-pressure-limit|"
             "active-reader-pressure-write-policy|"
             "active-reader-pressure-diagnostics|"
@@ -7133,6 +7135,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_killed_ownerless_snapshot_pin_allows_live_page_log_reclaim),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_active_reader_pressure_reclaims_after_release),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_active_reader_pressure_killed_pin_reclaims_live_peer),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_active_reader_pressure_dead_writer_cleanup),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_active_reader_pressure_limit_blocks_writes),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_active_reader_pressure_limit_blocks_write_classes),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_active_reader_pressure_diagnostics),
@@ -7207,7 +7210,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_rename_if_exists_missing_source_noop_preserves_warnings
     ),
     OWNERLESS_SQL_TEST_CASE(
-        test_ownerless_cross_schema_rename_if_exists_missing_source_noop_preserves_warnings
+        test_ownerless_cross_schema_rename_if_exists_noop_warnings
     ),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_multi_rename_cycle_refreshes_peer_dictionary),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_view_ddl_refreshes_peer_dictionary),
@@ -20372,6 +20375,318 @@ static void test_ownerless_active_reader_pressure_killed_pin_reclaims_live_peer(
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") ==
         expected_after_dead_pin_write
     );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void hold_pressure_busy_writer_until_killed(
+    open_database_paths paths,
+    unsigned long long limit_bytes,
+    child_pipes pipes
+) {
+    mylite_db *db = open_database_with_page_log_limit(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        limit_bytes
+    );
+    mylite_stmt *stmt = NULL;
+    const char *tail = NULL;
+
+    exec_ok(db, "USE app");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
+    expect_exec_busy(
+        db,
+        "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 2",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "ALTER TABLE app.ownerless_pressure_dead_writer_ddl "
+        "ADD COLUMN note INT NOT NULL DEFAULT 7",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "RENAME TABLE app.ownerless_pressure_dead_writer_rename "
+        "TO app.ownerless_pressure_dead_writer_renamed",
+        "pressure limit"
+    );
+    assert(
+        mylite_prepare(
+            db,
+            "INSERT INTO app.ownerless_sql SELECT 3, 30",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            &tail
+        ) == MYLITE_OK
+    );
+    assert(stmt != NULL);
+    assert(tail != NULL && *tail == '\0');
+    assert(mylite_step(stmt) == MYLITE_BUSY);
+    assert(mylite_errcode(db) == MYLITE_BUSY);
+    assert(mylite_mariadb_errno(db) == 0U);
+
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+    _exit(MYLITE_TEST_CHILD_OK);
+}
+
+static void assert_pressure_dead_writer_schema_before(mylite_db *db) {
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_dead_writer_ddl' "
+            "AND column_name = 'note'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_dead_writer_rename'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_dead_writer_renamed'"
+        ) == 0U
+    );
+}
+
+static void assert_pressure_dead_writer_schema_after(mylite_db *db) {
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_dead_writer_ddl' "
+            "AND column_name = 'note' "
+            "AND column_default = '7'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_dead_writer_rename'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_dead_writer_renamed'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_dead_writer_renamed") ==
+        10U
+    );
+}
+
+static void test_ownerless_active_reader_pressure_dead_writer_cleanup(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-active-reader-pressure-dead-writer.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int peer_ready_pipe[2];
+    int peer_release_pipe[2];
+    int reader_ready_pipe[2];
+    int reader_release_pipe[2];
+    int writer_ready_pipe[2];
+    int writer_release_pipe[2];
+    pid_t peer_child;
+    pid_t reader_child;
+    pid_t writer_child;
+    mylite_db *db;
+    off_t retained_wal_size;
+    mylite_ownerless_pressure_info info = {
+        .size = sizeof(info),
+    };
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_dead_writer_ddl ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_dead_writer_ddl VALUES (1, 10)");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_dead_writer_rename ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_dead_writer_rename VALUES (1, 10)");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    assert(pipe(peer_ready_pipe) == 0);
+    assert(pipe(peer_release_pipe) == 0);
+    assert(pipe(reader_ready_pipe) == 0);
+    assert(pipe(reader_release_pipe) == 0);
+
+    peer_child = fork();
+    assert(peer_child >= 0);
+    if (peer_child == 0) {
+        close(peer_ready_pipe[0]);
+        close(peer_release_pipe[1]);
+        close(reader_ready_pipe[0]);
+        close(reader_ready_pipe[1]);
+        close(reader_release_pipe[0]);
+        close(reader_release_pipe[1]);
+        hold_ownerless_open_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = peer_ready_pipe[1],
+                .release_read_fd = peer_release_pipe[0],
+            }
+        );
+    }
+
+    close(peer_ready_pipe[1]);
+    close(peer_release_pipe[0]);
+    wait_for_pipe(peer_ready_pipe[0]);
+
+    reader_child = fork();
+    assert(reader_child >= 0);
+    if (reader_child == 0) {
+        close(reader_ready_pipe[0]);
+        close(reader_release_pipe[1]);
+        close(peer_release_pipe[1]);
+        hold_repeatable_read_snapshot_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = reader_ready_pipe[1],
+                .release_read_fd = reader_release_pipe[0],
+            }
+        );
+    }
+
+    close(reader_ready_pipe[1]);
+    close(reader_release_pipe[0]);
+    wait_for_pipe(reader_ready_pipe[0]);
+    assert(read_concurrency_process_active_count(database_path) == 2U);
+    assert(read_concurrency_read_view_active_count(database_path) == 1U);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
+    assert_pressure_dead_writer_schema_before(db);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!concurrency_wal_is_checkpointed(database_path));
+    retained_wal_size = concurrency_wal_size(database_path);
+    assert(retained_wal_size > 0);
+
+    assert(pipe(writer_ready_pipe) == 0);
+    assert(pipe(writer_release_pipe) == 0);
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(writer_ready_pipe[0]);
+        close(writer_release_pipe[1]);
+        close(peer_release_pipe[1]);
+        close(reader_release_pipe[1]);
+        hold_pressure_busy_writer_until_killed(
+            paths,
+            (unsigned long long)retained_wal_size,
+            (child_pipes){
+                .ready_write_fd = writer_ready_pipe[1],
+                .release_read_fd = writer_release_pipe[0],
+            }
+        );
+    }
+
+    close(writer_ready_pipe[1]);
+    close(writer_release_pipe[0]);
+    wait_for_pipe(writer_ready_pipe[0]);
+    assert(read_concurrency_process_active_count(database_path) == 3U);
+    assert(kill(writer_child, SIGKILL) == 0);
+    wait_for_signaled_child(writer_child, SIGKILL);
+    assert(close(writer_release_pipe[1]) == 0);
+
+    db = open_database_with_page_log_limit(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        (unsigned long long)retained_wal_size
+    );
+    info.size = sizeof(info);
+    assert(mylite_ownerless_pressure_status(db, &info) == MYLITE_OK);
+    assert(info.active_page_version_pin_count == 1U);
+    assert(info.page_version_wal_limit_reached == 1);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
+    assert_pressure_dead_writer_schema_before(db);
+    expect_exec_busy(
+        db,
+        "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 2",
+        "pressure limit"
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_process_active_count(database_path) == 2U);
+
+    signal_pipe(reader_release_pipe[1]);
+    wait_for_child(reader_child);
+    assert(read_concurrency_read_view_active_count(database_path) == 0U);
+
+    db = open_database_with_page_log_limit(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        (unsigned long long)retained_wal_size
+    );
+    info.size = sizeof(info);
+    assert(mylite_ownerless_pressure_status(db, &info) == MYLITE_OK);
+    assert(info.active_page_version_pin_count == 0U);
+    assert(info.page_version_wal_limit_reached == 0);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 2");
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_pressure_dead_writer_ddl "
+        "ADD COLUMN note INT NOT NULL DEFAULT 7"
+    );
+    exec_ok(
+        db,
+        "RENAME TABLE app.ownerless_pressure_dead_writer_rename "
+        "TO app.ownerless_pressure_dead_writer_renamed"
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 32U);
+    assert_pressure_dead_writer_schema_after(db);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_read_view_active_count(database_path) == 0U);
+    assert_concurrency_wal_has_page_versions_or_checkpoint(database_path);
+
+    signal_pipe(peer_release_pipe[1]);
+    wait_for_child(peer_child);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 32U);
+    assert_pressure_dead_writer_schema_after(db);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_concurrency_wal_checkpointed_eventually(database_path);
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 32U);
+    assert_pressure_dead_writer_schema_after(db);
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 
@@ -45654,9 +45969,7 @@ static void test_ownerless_rename_if_exists_missing_source_noop_preserves_warnin
     free(root);
 }
 
-static void test_ownerless_cross_schema_rename_if_exists_missing_source_noop_preserves_warnings(
-    void
-) {
+static void test_ownerless_cross_schema_rename_if_exists_noop_warnings(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
     char *database_path =
@@ -47920,9 +48233,7 @@ static void test_crashed_cross_schema_rename_dictionary_ddl_recovers_moved_table
     free(root);
 }
 
-static void test_crashed_cross_schema_rename_if_exists_missing_source_ddl_recovers_moved_table(
-    void
-) {
+static void test_crashed_cross_schema_rename_if_exists_recovers_moved_table(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
     char *database_path =

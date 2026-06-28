@@ -2495,6 +2495,12 @@ Tasks:
    active pins retain page-version WAL at or above the configured limit,
    including focused prepared `UPDATE` and prepared `INSERT ... SELECT`
    dispatch coverage.
+   Dead pressure-writer cleanup coverage now kills a pressure-limited writer
+   after rejected direct DML, representative table/rename DDL, and prepared DML
+   with its handle and prepared statement still open, then verifies a later
+   writer cleans the stale process slot, remains throttled while the real
+   reader pin is live, and can execute the same DML/DDL after reader release
+   while an idle peer remains live.
    The `ownerless-pressure-write-class-policy` slice broadens this evidence to
    representative direct `INSERT`, `UPDATE`, `DELETE`, `CREATE TABLE`,
    `ALTER TABLE`, and `DROP TABLE` statements, while confirming `SELECT` and
@@ -7897,8 +7903,9 @@ subsystems that this mode needs:
      same-table large-row handoff, focused same-row conflict handoff, bounded
      randomized same-table schedule, and live-peer post-native/pre-state
      savepoint rollback cleanup boundary.
-  3. Extend active-reader pressure evidence from retained-WAL policy and the
-     covered killed-reader pressure-pin boundary to crash and external-oracle
+  3. Extend active-reader pressure evidence from retained-WAL policy, the
+     covered killed-reader pressure-pin boundary, and the covered killed
+     pressure-writer cleanup boundary to broader crash and external-oracle
      breadth for the high-risk DML/DDL classes already covered by bounded
      pressure policy tests.
   4. Continue deterministic external MariaDB seed/replay expansion and graduate
