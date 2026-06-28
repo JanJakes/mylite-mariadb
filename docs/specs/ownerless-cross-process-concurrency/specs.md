@@ -5132,7 +5132,10 @@ Tasks:
    `MYLITE_OWNERLESS_TX_STRESS_ROUNDS=80`, covering concurrent independent-table
    transactions, savepoint rollback inside every transaction, final aggregate
    oracles, and forced `.shm` rebuild plus native exclusive reopen after the
-   workers finish. The `ownerless-transaction-stress-trace-export` slice adds
+   workers finish; retryable `1205` lock-wait and `1213` deadlock outcomes now
+   roll back and retry the deterministic transaction attempt so expected
+   aggregates remain stable under load. The
+   `ownerless-transaction-stress-trace-export` slice adds
    `tools/ownerless-transaction-stress-trace`, which emits schema, per-worker
    SQL, an expected aggregate/rollback oracle, and a manifest for external
    MariaDB/RQG-style runners using the same deterministic transaction/savepoint
@@ -7538,8 +7541,12 @@ subsystems that this mode needs:
   preserves final row state through reopen. The same-row savepoint follow-up
   proves a peer updating the savepoint writer's pre-savepoint row waits until
   the writer commits and then applies on top of that committed row, while the
-  rolled-back row remains discarded. Broader native rollback internals and
-  randomized same-table savepoint schedules remain planned.
+  rolled-back row remains discarded. The randomized same-table savepoint
+  schedule follow-up runs three ownerless writers over one five-row InnoDB
+  table with deterministic overlapping row orders, retryable `1205`/`1213`
+  handling, savepoint rollback, full transaction rollback, and final
+  ownerless/native reopen oracles. Broader native rollback internals and
+  longer randomized savepoint schedules remain planned.
   The savepoint-rollback-before-state hook follow-up kills a writer after
   native `ROLLBACK TO SAVEPOINT` succeeds but before MyLite updates
   process-local savepoint state and discards rolled-back file-operation
@@ -7746,12 +7753,12 @@ subsystems that this mode needs:
      truncate remains MariaDB's pre-truncate error path rather than a positive
      recovery boundary.
   2. Close remaining transaction crash windows, especially native
-     rollback/savepoint-rollback internals and broader same-page/same-table
+     rollback/savepoint-rollback internals and longer same-page/same-table
      concurrent-writer savepoint schedules that combine native undo,
      ownerless page-write ownership, and file-operation marker cleanup beyond
      the covered independent-table handoff, focused same-page wait/commit
-     handoff, focused same-table large-row handoff, and focused same-row
-     conflict handoff.
+     handoff, focused same-table large-row handoff, focused same-row conflict
+     handoff, and bounded randomized same-table schedule.
   3. Extend active-reader pressure evidence from retained-WAL policy to crash
      and external-oracle breadth for the high-risk DML/DDL classes already
      covered by bounded pressure policy tests.

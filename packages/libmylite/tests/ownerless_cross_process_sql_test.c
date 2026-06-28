@@ -166,6 +166,7 @@ extern uint32_t my_crc32c(uint32_t crc, const void *buf, size_t len);
 #define MYLITE_TEST_TX_STRESS_WORKER_COUNT 3U
 #define MYLITE_TEST_TX_STRESS_ROUNDS 12U
 #define MYLITE_TEST_TX_STRESS_ROUNDS_MAX 5000U
+#define MYLITE_TEST_TX_STRESS_MAX_ATTEMPTS 200U
 #define MYLITE_TEST_CHECKSUM_STRESS_WORKER_COUNT 4U
 #define MYLITE_TEST_CHECKSUM_STRESS_PREPARED_WRITER_COUNT                                          \
     (MYLITE_TEST_CHECKSUM_STRESS_WORKER_COUNT / 2U)
@@ -179,6 +180,12 @@ extern uint32_t my_crc32c(uint32_t crc, const void *buf, size_t len);
 #define MYLITE_TEST_RANDOM_TX_STRESS_ROUNDS_MAX 5000U
 #define MYLITE_TEST_RANDOM_TX_STRESS_PAD_BYTES 3600U
 #define MYLITE_TEST_RANDOM_TX_STRESS_MAX_ATTEMPTS 200U
+#define MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_WORKER_COUNT 3U
+#define MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_ROW_COUNT 5U
+#define MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_ROUNDS 6U
+#define MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_PAD_BYTES 1024U
+#define MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_MAX_ATTEMPTS 200U
+#define MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_LOCK_HOLD_US 5000U
 #define MYLITE_TEST_FK_GRAPH_STRESS_WORKER_COUNT 3U
 #define MYLITE_TEST_FK_GRAPH_STRESS_ROUNDS 12U
 #define MYLITE_TEST_FK_GRAPH_STRESS_ROUNDS_MAX 2000U
@@ -783,6 +790,7 @@ static void test_ownerless_concurrent_savepoint_rollback_handoff(void);
 static void test_ownerless_concurrent_savepoint_same_page_rollback_handoff(void);
 static void test_ownerless_concurrent_savepoint_same_table_rollback_handoff(void);
 static void test_ownerless_concurrent_savepoint_same_row_rollback_handoff(void);
+static void test_ownerless_random_savepoint_same_table_schedule(void);
 static void test_ownerless_serializable_read_blocks_peer_update(void);
 static void test_ownerless_serializable_prevents_write_skew(void);
 static void test_ownerless_auto_increment_assigns_distinct_ids(void);
@@ -1410,6 +1418,15 @@ static void run_ownerless_random_tx_stress_worker(
     child_pipes pipes
 );
 static void run_ownerless_random_tx_stress_reader(open_database_paths paths, child_pipes pipes);
+static void run_ownerless_random_savepoint_schedule_worker(
+    open_database_paths paths,
+    unsigned worker_id,
+    child_pipes pipes
+);
+static void run_ownerless_random_savepoint_schedule_reader(
+    open_database_paths paths,
+    child_pipes pipes
+);
 static void run_ownerless_fk_graph_stress_worker(
     open_database_paths paths,
     unsigned worker_id,
@@ -2729,6 +2746,15 @@ static unsigned ownerless_random_tx_stress_rounds(void);
 static unsigned ownerless_fk_graph_stress_rounds(void);
 static unsigned long long ownerless_tx_stress_delta(unsigned worker_id, unsigned round);
 static unsigned long long ownerless_tx_stress_delta_sum(unsigned worker_id, unsigned rounds);
+static int ownerless_tx_stress_exec_retryable(
+    mylite_db *db,
+    const char *sql,
+    unsigned worker_id,
+    unsigned round,
+    unsigned attempt,
+    const char *phase
+);
+static void ownerless_tx_stress_retry_pause(unsigned worker_id, unsigned round, unsigned attempt);
 static unsigned ownerless_checksum_stress_row_id(unsigned worker_id, unsigned round);
 static unsigned long long ownerless_checksum_stress_delta(unsigned worker_id, unsigned round);
 static int ownerless_checksum_stress_error_retryable(mylite_db *db, unsigned mariadb_errno);
@@ -2815,6 +2841,42 @@ static void ownerless_checksum_stress_expected(
 );
 static void ownerless_random_tx_stress_expected(
     unsigned rounds,
+    unsigned long long *out_sum,
+    unsigned long long *out_versions,
+    unsigned long long *out_weighted_sum
+);
+static void ownerless_random_savepoint_schedule_rows(
+    unsigned worker_id,
+    unsigned round,
+    unsigned rows[3]
+);
+static unsigned long long ownerless_random_savepoint_schedule_delta(
+    unsigned worker_id,
+    unsigned round,
+    unsigned phase
+);
+static int ownerless_random_savepoint_schedule_rolls_back_transaction(
+    unsigned worker_id,
+    unsigned round
+);
+static int ownerless_random_savepoint_schedule_rolls_back_savepoint(
+    unsigned worker_id,
+    unsigned round
+);
+static int ownerless_random_savepoint_schedule_exec_retryable(
+    mylite_db *db,
+    const char *sql,
+    unsigned worker_id,
+    unsigned round,
+    unsigned attempt,
+    unsigned phase
+);
+static void ownerless_random_savepoint_schedule_retry_pause(
+    unsigned worker_id,
+    unsigned round,
+    unsigned attempt
+);
+static void ownerless_random_savepoint_schedule_expected(
     unsigned long long *out_sum,
     unsigned long long *out_versions,
     unsigned long long *out_weighted_sum
@@ -3755,6 +3817,13 @@ static void assert_ownerless_checksum_stress_totals(
     unsigned long long expected_weighted_sum
 );
 static void assert_ownerless_random_tx_stress_totals(
+    open_database_paths paths,
+    unsigned flags,
+    unsigned long long expected_sum,
+    unsigned long long expected_versions,
+    unsigned long long expected_weighted_sum
+);
+static void assert_ownerless_random_savepoint_schedule_totals(
     open_database_paths paths,
     unsigned flags,
     unsigned long long expected_sum,
@@ -4994,6 +5063,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "concurrent-savepoint-same-row-handoff") == 0) {
         test_ownerless_concurrent_savepoint_same_row_rollback_handoff();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "random-savepoint-same-table-schedule") == 0) {
+        test_ownerless_random_savepoint_same_table_schedule();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "serializable") == 0) {
@@ -6455,6 +6528,7 @@ int main(int argc, char **argv) {
             "concurrent-savepoint-same-page-handoff|"
             "concurrent-savepoint-same-table-handoff|"
             "concurrent-savepoint-same-row-handoff|"
+            "random-savepoint-same-table-schedule|"
             "serializable|write-skew|auto-inc|auto-inc-ddl|"
             "auto-inc-column-ddl|engine-policy|"
             "engine-policy-page-publish|"
@@ -6659,6 +6733,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_concurrent_savepoint_same_page_rollback_handoff),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_concurrent_savepoint_same_table_rollback_handoff),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_concurrent_savepoint_same_row_rollback_handoff),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_random_savepoint_same_table_schedule),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_serializable_read_blocks_peer_update),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_serializable_prevents_write_skew),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_auto_increment_assigns_distinct_ids),
@@ -9191,6 +9266,160 @@ static void test_ownerless_concurrent_savepoint_same_row_rollback_handoff(void) 
         63U
     );
     assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+#endif
+}
+
+static void test_ownerless_random_savepoint_same_table_schedule(void) {
+#if defined(__linux__)
+    enum {
+        reader_index = MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_WORKER_COUNT,
+        child_count = MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_WORKER_COUNT + 1U
+    };
+
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-random-savepoint-schedule.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[child_count][2];
+    int release_pipe[child_count][2];
+    pid_t children[child_count];
+    mylite_db *db;
+    char sql[256];
+    unsigned long long expected_sum = 0U;
+    unsigned long long expected_versions = 0U;
+    unsigned long long expected_weighted_sum = 0U;
+
+    ownerless_random_savepoint_schedule_expected(
+        &expected_sum,
+        &expected_versions,
+        &expected_weighted_sum
+    );
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_random_savepoint_schedule ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value BIGINT UNSIGNED NOT NULL DEFAULT 0, "
+        "version INT UNSIGNED NOT NULL DEFAULT 0, "
+        "payload VARBINARY(1024) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    for (unsigned row_id = 1U; row_id <= MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_ROW_COUNT;
+         ++row_id) {
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "INSERT INTO app.ownerless_random_savepoint_schedule VALUES "
+                "(%u, 0, 0, REPEAT('a', %u))",
+                row_id,
+                MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_PAD_BYTES
+            ) > 0
+        );
+        exec_ok(db, sql);
+    }
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(mylite_ownerless_innodb_make_checkpoint() == MYLITE_TEST_OWNERLESS_INNODB_LOCK_OK);
+    (void)mylite_ownerless_innodb_take_file_op_redo();
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(database_path));
+
+    for (unsigned index = 0U; index < child_count; ++index) {
+        assert(pipe(ready_pipe[index]) == 0);
+        assert(pipe(release_pipe[index]) == 0);
+    }
+
+    for (unsigned index = 0U; index < MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_WORKER_COUNT; ++index) {
+        children[index] = fork();
+        assert(children[index] >= 0);
+        if (children[index] == 0) {
+            close(ready_pipe[index][0]);
+            close(release_pipe[index][1]);
+            run_ownerless_random_savepoint_schedule_worker(
+                paths,
+                index + 1U,
+                (child_pipes){
+                    .ready_write_fd = ready_pipe[index][1],
+                    .release_read_fd = release_pipe[index][0],
+                }
+            );
+        }
+    }
+
+    children[reader_index] = fork();
+    assert(children[reader_index] >= 0);
+    if (children[reader_index] == 0) {
+        close(ready_pipe[reader_index][0]);
+        close(release_pipe[reader_index][1]);
+        run_ownerless_random_savepoint_schedule_reader(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[reader_index][1],
+                .release_read_fd = release_pipe[reader_index][0],
+            }
+        );
+    }
+
+    for (unsigned index = 0U; index < child_count; ++index) {
+        close(ready_pipe[index][1]);
+        close(release_pipe[index][0]);
+        wait_for_pipe(ready_pipe[index][0]);
+    }
+    for (unsigned index = 0U; index < child_count; ++index) {
+        signal_pipe(release_pipe[index][1]);
+    }
+    wait_for_children("ownerless-random-savepoint-schedule", children, child_count);
+
+    assert_ownerless_random_savepoint_schedule_totals(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        expected_sum,
+        expected_versions,
+        expected_weighted_sum
+    );
+    assert_ownerless_random_savepoint_schedule_totals(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        expected_sum,
+        expected_versions,
+        expected_weighted_sum
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_random_savepoint_schedule_totals(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        expected_sum,
+        expected_versions,
+        expected_weighted_sum
+    );
+    assert_ownerless_random_savepoint_schedule_totals(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        expected_sum,
+        expected_versions,
+        expected_weighted_sum
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+#  if !MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert_concurrency_wal_checkpointed_eventually(database_path);
+#  endif
 
     free(database_path);
     free(runtime_root);
@@ -67011,73 +67240,58 @@ static void run_ownerless_tx_stress_worker(
 
     for (unsigned round = 1U; round <= rounds; ++round) {
         const unsigned long long delta = ownerless_tx_stress_delta(worker_id, round);
+        int round_finished = 0;
 
-        exec_ok(db, "START TRANSACTION");
-        assert(
-            snprintf(
-                sql,
-                sizeof(sql),
-                "UPDATE app.ownerless_tx_stress_%u "
-                "SET value = value + %llu, version = version + 1 "
-                "WHERE id = 1",
-                worker_id,
-                delta
-            ) > 0
-        );
-        exec_ok(db, sql);
-        exec_ok(db, "SAVEPOINT ownerless_tx_stress_sp");
-        assert(
-            snprintf(
-                sql,
-                sizeof(sql),
-                "UPDATE app.ownerless_tx_stress_%u "
-                "SET value = value + %llu, version = version + 1 "
-                "WHERE id = 2",
-                worker_id,
-                delta * 101ULL
-            ) > 0
-        );
-        exec_ok(db, sql);
-        exec_ok(db, "ROLLBACK TO SAVEPOINT ownerless_tx_stress_sp");
-        assert(
-            snprintf(
-                sql,
-                sizeof(sql),
-                "SELECT value FROM app.ownerless_tx_stress_%u WHERE id = 2",
-                worker_id
-            ) > 0
-        );
-        {
-            const unsigned long long observed_after_rollback = query_unsigned(db, sql);
-            if (observed_after_rollback != 0U) {
-                fprintf(
-                    stderr,
-                    "ownerless tx stress rollback mismatch after rollback: "
-                    "worker=%u round=%u value=%llu\n",
+        for (unsigned attempt = 1U; attempt <= MYLITE_TEST_TX_STRESS_MAX_ATTEMPTS; ++attempt) {
+            exec_ok(db, "START TRANSACTION");
+            assert(
+                snprintf(
+                    sql,
+                    sizeof(sql),
+                    "UPDATE app.ownerless_tx_stress_%u "
+                    "SET value = value + %llu, version = version + 1 "
+                    "WHERE id = 1",
+                    worker_id,
+                    delta
+                ) > 0
+            );
+            if (!ownerless_tx_stress_exec_retryable(
+                    db,
+                    sql,
                     worker_id,
                     round,
-                    observed_after_rollback
-                );
-                fflush(stderr);
+                    attempt,
+                    "pre-savepoint-update"
+                )) {
+                exec_ok(db, "ROLLBACK");
+                ownerless_tx_stress_retry_pause(worker_id, round, attempt);
+                continue;
             }
-            assert(observed_after_rollback == 0U);
-        }
-        assert(
-            snprintf(
-                sql,
-                sizeof(sql),
-                "UPDATE app.ownerless_tx_stress_%u "
-                "SET value = value + %llu, version = version + 1 "
-                "WHERE id = 3",
-                worker_id,
-                delta * 2ULL
-            ) > 0
-        );
-        exec_ok(db, sql);
-        exec_ok(db, "RELEASE SAVEPOINT ownerless_tx_stress_sp");
-        if (round % 5U == 0U || round == rounds) {
-            unsigned long long observed_rolled_back_value;
-
+            exec_ok(db, "SAVEPOINT ownerless_tx_stress_sp");
+            assert(
+                snprintf(
+                    sql,
+                    sizeof(sql),
+                    "UPDATE app.ownerless_tx_stress_%u "
+                    "SET value = value + %llu, version = version + 1 "
+                    "WHERE id = 2",
+                    worker_id,
+                    delta * 101ULL
+                ) > 0
+            );
+            if (!ownerless_tx_stress_exec_retryable(
+                    db,
+                    sql,
+                    worker_id,
+                    round,
+                    attempt,
+                    "post-savepoint-update"
+                )) {
+                exec_ok(db, "ROLLBACK");
+                ownerless_tx_stress_retry_pause(worker_id, round, attempt);
+                continue;
+            }
+            exec_ok(db, "ROLLBACK TO SAVEPOINT ownerless_tx_stress_sp");
             assert(
                 snprintf(
                     sql,
@@ -67086,21 +67300,87 @@ static void run_ownerless_tx_stress_worker(
                     worker_id
                 ) > 0
             );
-            observed_rolled_back_value = query_unsigned(db, sql);
-            if (observed_rolled_back_value != 0U) {
-                fprintf(
-                    stderr,
-                    "ownerless tx stress rollback mismatch before commit: "
-                    "worker=%u round=%u value=%llu\n",
+            {
+                const unsigned long long observed_after_rollback = query_unsigned(db, sql);
+                if (observed_after_rollback != 0U) {
+                    fprintf(
+                        stderr,
+                        "ownerless tx stress rollback mismatch after rollback: "
+                        "worker=%u round=%u attempt=%u value=%llu\n",
+                        worker_id,
+                        round,
+                        attempt,
+                        observed_after_rollback
+                    );
+                    fflush(stderr);
+                }
+                assert(observed_after_rollback == 0U);
+            }
+            assert(
+                snprintf(
+                    sql,
+                    sizeof(sql),
+                    "UPDATE app.ownerless_tx_stress_%u "
+                    "SET value = value + %llu, version = version + 1 "
+                    "WHERE id = 3",
+                    worker_id,
+                    delta * 2ULL
+                ) > 0
+            );
+            if (!ownerless_tx_stress_exec_retryable(
+                    db,
+                    sql,
                     worker_id,
                     round,
-                    observed_rolled_back_value
-                );
-                fflush(stderr);
+                    attempt,
+                    "post-rollback-update"
+                )) {
+                exec_ok(db, "ROLLBACK");
+                ownerless_tx_stress_retry_pause(worker_id, round, attempt);
+                continue;
             }
-            assert(observed_rolled_back_value == 0U);
+            exec_ok(db, "RELEASE SAVEPOINT ownerless_tx_stress_sp");
+            if (round % 5U == 0U || round == rounds) {
+                unsigned long long observed_rolled_back_value;
+
+                assert(
+                    snprintf(
+                        sql,
+                        sizeof(sql),
+                        "SELECT value FROM app.ownerless_tx_stress_%u WHERE id = 2",
+                        worker_id
+                    ) > 0
+                );
+                observed_rolled_back_value = query_unsigned(db, sql);
+                if (observed_rolled_back_value != 0U) {
+                    fprintf(
+                        stderr,
+                        "ownerless tx stress rollback mismatch before commit: "
+                        "worker=%u round=%u attempt=%u value=%llu\n",
+                        worker_id,
+                        round,
+                        attempt,
+                        observed_rolled_back_value
+                    );
+                    fflush(stderr);
+                }
+                assert(observed_rolled_back_value == 0U);
+            }
+            exec_ok(db, "COMMIT");
+            round_finished = 1;
+            break;
         }
-        exec_ok(db, "COMMIT");
+
+        if (!round_finished) {
+            fprintf(
+                stderr,
+                "ownerless tx stress exhausted retries: worker=%u round=%u\n",
+                worker_id,
+                round
+            );
+            fflush(stderr);
+        }
+        assert(round_finished);
     }
 
     assert(mylite_close(db) == MYLITE_OK);
@@ -67617,6 +67897,177 @@ static void run_ownerless_random_tx_stress_reader(open_database_paths paths, chi
     _exit(0);
 }
 
+static void run_ownerless_random_savepoint_schedule_worker(
+    open_database_paths paths,
+    unsigned worker_id,
+    child_pipes pipes
+) {
+    mylite_db *db;
+    char sql[256];
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 1");
+    exec_ok(db, "SET SESSION lock_wait_timeout = 1");
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+
+    for (unsigned round = 1U; round <= MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_ROUNDS; ++round) {
+        int round_finished = 0;
+
+        for (unsigned attempt = 1U; attempt <= MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_MAX_ATTEMPTS;
+             ++attempt) {
+            unsigned rows[3];
+            const int rollback_transaction =
+                ownerless_random_savepoint_schedule_rolls_back_transaction(worker_id, round);
+            const int rollback_savepoint =
+                ownerless_random_savepoint_schedule_rolls_back_savepoint(worker_id, round);
+
+            ownerless_random_savepoint_schedule_rows(worker_id, round, rows);
+            exec_ok(db, "START TRANSACTION");
+            for (unsigned phase = 0U; phase < 3U; ++phase) {
+                const char payload_byte = (char)('b' + (char)phase);
+
+                if (phase == 1U) {
+                    exec_ok(db, "SAVEPOINT ownerless_random_savepoint_schedule_sp");
+                }
+                assert(
+                    snprintf(
+                        sql,
+                        sizeof(sql),
+                        "UPDATE app.ownerless_random_savepoint_schedule "
+                        "SET value = value + %llu, version = version + 1, "
+                        "payload = REPEAT('%c', %u) "
+                        "WHERE id = %u",
+                        ownerless_random_savepoint_schedule_delta(worker_id, round, phase),
+                        payload_byte,
+                        MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_PAD_BYTES,
+                        rows[phase]
+                    ) > 0
+                );
+                if (!ownerless_random_savepoint_schedule_exec_retryable(
+                        db,
+                        sql,
+                        worker_id,
+                        round,
+                        attempt,
+                        phase
+                    )) {
+                    exec_ok(db, "ROLLBACK");
+                    ownerless_random_savepoint_schedule_retry_pause(worker_id, round, attempt);
+                    goto retry_round;
+                }
+                assert(mylite_changes(db) == 1);
+                if (phase == 0U || phase == 1U) {
+                    sleep_microseconds(MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_LOCK_HOLD_US);
+                }
+                if (phase == 1U && rollback_savepoint) {
+                    exec_ok(db, "ROLLBACK TO SAVEPOINT ownerless_random_savepoint_schedule_sp");
+                }
+                if (phase == 1U) {
+                    exec_ok(db, "RELEASE SAVEPOINT ownerless_random_savepoint_schedule_sp");
+                }
+            }
+
+            exec_ok(db, rollback_transaction ? "ROLLBACK" : "COMMIT");
+            round_finished = 1;
+            break;
+
+        retry_round:
+            assert(query_unsigned(db, "SELECT @@in_transaction") == 0U);
+            continue;
+        }
+
+        if (!round_finished) {
+            fprintf(
+                stderr,
+                "ownerless random savepoint schedule exhausted retries: worker=%u round=%u\n",
+                worker_id,
+                round
+            );
+            fflush(stderr);
+        }
+        assert(round_finished);
+    }
+
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
+static void run_ownerless_random_savepoint_schedule_reader(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+    unsigned long long previous_sum = 0U;
+    unsigned long long previous_versions = 0U;
+    unsigned long long expected_sum = 0U;
+    unsigned long long expected_versions = 0U;
+    unsigned long long expected_weighted_sum = 0U;
+
+    ownerless_random_savepoint_schedule_expected(
+        &expected_sum,
+        &expected_versions,
+        &expected_weighted_sum
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
+    exec_ok(db, "SET SESSION lock_wait_timeout = 30");
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+
+    for (unsigned iteration = 0U;
+         iteration < MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_ROUNDS *
+                         MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_WORKER_COUNT * 3U;
+         ++iteration) {
+        const unsigned long long row_count =
+            query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_random_savepoint_schedule");
+        const unsigned long long sum =
+            query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_random_savepoint_schedule");
+        const unsigned long long versions =
+            query_unsigned(db, "SELECT SUM(version) FROM app.ownerless_random_savepoint_schedule");
+        const unsigned long long weighted_sum = query_unsigned(
+            db,
+            "SELECT SUM(id * value) FROM app.ownerless_random_savepoint_schedule"
+        );
+
+        if (row_count != MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_ROW_COUNT || sum < previous_sum ||
+            sum > expected_sum || versions < previous_versions || versions > expected_versions ||
+            weighted_sum > expected_weighted_sum) {
+            fprintf(
+                stderr,
+                "ownerless random savepoint reader mismatch: iteration=%u "
+                "count=%llu sum=%llu previous_sum=%llu expected_sum=%llu "
+                "versions=%llu previous_versions=%llu expected_versions=%llu "
+                "weighted=%llu/%llu\n",
+                iteration,
+                row_count,
+                sum,
+                previous_sum,
+                expected_sum,
+                versions,
+                previous_versions,
+                expected_versions,
+                weighted_sum,
+                expected_weighted_sum
+            );
+            fflush(stderr);
+        }
+        assert(row_count == MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_ROW_COUNT);
+        assert(sum >= previous_sum);
+        assert(sum <= expected_sum);
+        assert(versions >= previous_versions);
+        assert(versions <= expected_versions);
+        assert(weighted_sum <= expected_weighted_sum);
+        previous_sum = sum;
+        previous_versions = versions;
+        sleep_microseconds(1000U);
+    }
+
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void run_ownerless_fk_graph_stress_worker(
     open_database_paths paths,
     unsigned worker_id,
@@ -68060,6 +68511,49 @@ static unsigned long long ownerless_tx_stress_delta_sum(unsigned worker_id, unsi
         sum += ownerless_tx_stress_delta(worker_id, round);
     }
     return sum;
+}
+
+static int ownerless_tx_stress_exec_retryable(
+    mylite_db *db,
+    const char *sql,
+    unsigned worker_id,
+    unsigned round,
+    unsigned attempt,
+    const char *phase
+) {
+    unsigned mariadb_errno = 0U;
+    const int result = exec_status(db, sql, &mariadb_errno);
+
+    if (result == MYLITE_OK) {
+        return 1;
+    }
+    if (mariadb_errno == MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO ||
+        mariadb_errno == MYLITE_TEST_DEADLOCK_ERRNO) {
+        return 0;
+    }
+
+    fprintf(
+        stderr,
+        "ownerless tx stress unexpected error: worker=%u round=%u attempt=%u "
+        "phase=%s sql=%s errcode=%d mariadb_errno=%u message=%s\n",
+        worker_id,
+        round,
+        attempt,
+        phase,
+        sql,
+        mylite_errcode(db),
+        mariadb_errno,
+        mylite_errmsg(db) != NULL ? mylite_errmsg(db) : "(null)"
+    );
+    fflush(stderr);
+    assert(0);
+    return 0;
+}
+
+static void ownerless_tx_stress_retry_pause(unsigned worker_id, unsigned round, unsigned attempt) {
+    const unsigned delay = 1000U * (1U + ((worker_id * 13U + round * 11U + attempt * 7U) % 30U));
+
+    sleep_microseconds(delay);
 }
 
 static unsigned ownerless_checksum_stress_row_id(unsigned worker_id, unsigned round) {
@@ -68514,6 +69008,159 @@ static void ownerless_random_tx_stress_expected(
                     ownerless_random_tx_stress_delta(worker_id, round, phase);
 
                 if (phase == 1U && rollback_savepoint) {
+                    continue;
+                }
+                expected_sum += delta;
+                ++expected_versions;
+                expected_weighted_sum += ((unsigned long long)rows[phase]) * delta;
+            }
+        }
+    }
+
+    *out_sum = expected_sum;
+    *out_versions = expected_versions;
+    *out_weighted_sum = expected_weighted_sum;
+}
+
+static void ownerless_random_savepoint_schedule_rows(
+    unsigned worker_id,
+    unsigned round,
+    unsigned rows[3]
+) {
+    static const unsigned schedule[MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_WORKER_COUNT]
+                                  [MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_ROUNDS][3] = {
+                                      {
+                                          {1U, 2U, 3U},
+                                          {2U, 3U, 4U},
+                                          {3U, 4U, 5U},
+                                          {4U, 5U, 1U},
+                                          {5U, 1U, 2U},
+                                          {1U, 3U, 5U},
+                                      },
+                                      {
+                                          {3U, 2U, 1U},
+                                          {4U, 3U, 2U},
+                                          {5U, 4U, 3U},
+                                          {1U, 5U, 4U},
+                                          {2U, 1U, 5U},
+                                          {5U, 3U, 1U},
+                                      },
+                                      {
+                                          {2U, 4U, 5U},
+                                          {3U, 5U, 1U},
+                                          {4U, 1U, 2U},
+                                          {5U, 2U, 3U},
+                                          {1U, 3U, 4U},
+                                          {2U, 5U, 4U},
+                                      },
+                                  };
+
+    assert(rows != NULL);
+    assert(worker_id >= 1U && worker_id <= MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_WORKER_COUNT);
+    assert(round >= 1U && round <= MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_ROUNDS);
+    for (unsigned index = 0U; index < 3U; ++index) {
+        rows[index] = schedule[worker_id - 1U][round - 1U][index];
+        assert(rows[index] >= 1U && rows[index] <= MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_ROW_COUNT);
+    }
+}
+
+static unsigned long long ownerless_random_savepoint_schedule_delta(
+    unsigned worker_id,
+    unsigned round,
+    unsigned phase
+) {
+    return (worker_id * 100000ULL) + (round * 1000ULL) + ((phase + 1U) * 37ULL);
+}
+
+static int ownerless_random_savepoint_schedule_rolls_back_transaction(
+    unsigned worker_id,
+    unsigned round
+) {
+    return ((worker_id * 5U) + round) % 7U == 0U;
+}
+
+static int ownerless_random_savepoint_schedule_rolls_back_savepoint(
+    unsigned worker_id,
+    unsigned round
+) {
+    return ((worker_id + round) % 2U) == 0U;
+}
+
+static int ownerless_random_savepoint_schedule_exec_retryable(
+    mylite_db *db,
+    const char *sql,
+    unsigned worker_id,
+    unsigned round,
+    unsigned attempt,
+    unsigned phase
+) {
+    unsigned mariadb_errno = 0U;
+    const int result = exec_status(db, sql, &mariadb_errno);
+
+    if (result == MYLITE_OK) {
+        return 1;
+    }
+    if (mariadb_errno == MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO ||
+        mariadb_errno == MYLITE_TEST_DEADLOCK_ERRNO) {
+        return 0;
+    }
+
+    fprintf(
+        stderr,
+        "ownerless random savepoint schedule unexpected error: worker=%u round=%u "
+        "attempt=%u phase=%u sql=%s errcode=%d mariadb_errno=%u message=%s\n",
+        worker_id,
+        round,
+        attempt,
+        phase,
+        sql,
+        mylite_errcode(db),
+        mariadb_errno,
+        mylite_errmsg(db) != NULL ? mylite_errmsg(db) : "(null)"
+    );
+    fflush(stderr);
+    assert(0);
+    return 0;
+}
+
+static void ownerless_random_savepoint_schedule_retry_pause(
+    unsigned worker_id,
+    unsigned round,
+    unsigned attempt
+) {
+    const unsigned delay = 1000U * (1U + ((worker_id * 29U + round * 17U + attempt * 11U) % 30U));
+
+    sleep_microseconds(delay);
+}
+
+static void ownerless_random_savepoint_schedule_expected(
+    unsigned long long *out_sum,
+    unsigned long long *out_versions,
+    unsigned long long *out_weighted_sum
+) {
+    unsigned long long expected_sum = 0U;
+    unsigned long long expected_versions = 0U;
+    unsigned long long expected_weighted_sum = 0U;
+
+    assert(out_sum != NULL);
+    assert(out_versions != NULL);
+    assert(out_weighted_sum != NULL);
+
+    for (unsigned worker_id = 1U; worker_id <= MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_WORKER_COUNT;
+         ++worker_id) {
+        for (unsigned round = 1U; round <= MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_ROUNDS; ++round) {
+            unsigned rows[3];
+
+            if (ownerless_random_savepoint_schedule_rolls_back_transaction(worker_id, round)) {
+                continue;
+            }
+            ownerless_random_savepoint_schedule_rows(worker_id, round, rows);
+            for (unsigned phase = 0U; phase < 3U; ++phase) {
+                const unsigned long long delta =
+                    ownerless_random_savepoint_schedule_delta(worker_id, round, phase);
+
+                if (phase == 1U &&
+                    ownerless_random_savepoint_schedule_rolls_back_savepoint(worker_id, round)) {
                     continue;
                 }
                 expected_sum += delta;
@@ -96314,6 +96961,83 @@ static void assert_ownerless_random_tx_stress_totals(
         assert(0);
     }
     assert(observed_count == MYLITE_TEST_RANDOM_TX_STRESS_ROW_COUNT);
+    assert(observed_sum == expected_sum);
+    assert(observed_versions == expected_versions);
+    assert(observed_weighted_sum == expected_weighted_sum);
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_random_savepoint_schedule_totals(
+    open_database_paths paths,
+    unsigned flags,
+    unsigned long long expected_sum,
+    unsigned long long expected_versions,
+    unsigned long long expected_weighted_sum
+) {
+    mylite_db *db = open_database(paths, flags);
+    const unsigned long long observed_count =
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_random_savepoint_schedule");
+    const unsigned long long observed_sum =
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_random_savepoint_schedule");
+    const unsigned long long observed_versions =
+        query_unsigned(db, "SELECT SUM(version) FROM app.ownerless_random_savepoint_schedule");
+    const unsigned long long observed_weighted_sum =
+        query_unsigned(db, "SELECT SUM(id * value) FROM app.ownerless_random_savepoint_schedule");
+
+    if (observed_count != MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_ROW_COUNT ||
+        observed_sum != expected_sum || observed_versions != expected_versions ||
+        observed_weighted_sum != expected_weighted_sum) {
+        fprintf(
+            stderr,
+            "ownerless random savepoint schedule mismatch: flags=%u "
+            "count=%llu/%u sum=%llu/%llu versions=%llu/%llu weighted=%llu/%llu\n",
+            flags,
+            observed_count,
+            MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_ROW_COUNT,
+            observed_sum,
+            expected_sum,
+            observed_versions,
+            expected_versions,
+            observed_weighted_sum,
+            expected_weighted_sum
+        );
+        for (unsigned row_id = 1U; row_id <= MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_ROW_COUNT;
+             ++row_id) {
+            char sql[128];
+            unsigned long long value;
+            unsigned long long version;
+
+            assert(
+                snprintf(
+                    sql,
+                    sizeof(sql),
+                    "SELECT value FROM app.ownerless_random_savepoint_schedule WHERE id = %u",
+                    row_id
+                ) > 0
+            );
+            value = query_unsigned(db, sql);
+            assert(
+                snprintf(
+                    sql,
+                    sizeof(sql),
+                    "SELECT version FROM app.ownerless_random_savepoint_schedule WHERE id = %u",
+                    row_id
+                ) > 0
+            );
+            version = query_unsigned(db, sql);
+            fprintf(
+                stderr,
+                "ownerless random savepoint schedule row: id=%u value=%llu version=%llu\n",
+                row_id,
+                value,
+                version
+            );
+        }
+        fflush(stderr);
+        assert(0);
+    }
+
+    assert(observed_count == MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_ROW_COUNT);
     assert(observed_sum == expected_sum);
     assert(observed_versions == expected_versions);
     assert(observed_weighted_sum == expected_weighted_sum);
