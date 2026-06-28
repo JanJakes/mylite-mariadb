@@ -4820,6 +4820,13 @@ Tasks:
    same explicit FK graph whole-seed retry budget of `10` so seeds `1280` and
    `1285` can recover on attempt `2`, and seeds `1286` and `1299` can recover
    on attempt `3` after transient raw MariaDB `1213` deadlock exits.
+   The `ownerless-external-seed-1312-1343-replay` follow-up advances the next
+   dependency-free seed-sweep CTest window to seeds `1312` through `1343` and
+   records Docker-backed replay for the same window at rounds `2`, using the
+   same explicit FK graph whole-seed retry budget of `10` so seeds `1316`,
+   `1323`, `1326`, and `1330` can recover on attempt `2`, seeds `1322` and
+   `1332` can recover on attempt `3`, and seed `1338` can recover on attempt
+   `4` after transient raw MariaDB `1213` deadlock exits.
    Separate foreign-key graph stress
    coverage runs with
    `MYLITE_OWNERLESS_FK_GRAPH_STRESS_ROUNDS=48`, concurrent ownerless workers
@@ -5326,7 +5333,7 @@ Tasks:
    transaction, DDL stress, and FK graph generated traces for deterministic
    external stress probes, including focused Docker-backed replay for the
    default DDL seed set and contiguous combined random transaction plus DDL
-   seed-sweep replay windows through seed `1311`; the `16` through `31`,
+   seed-sweep replay windows through seed `1343`; the `16` through `31`,
    `32` through `63`, `64` through `95`, `96` through `127`, and `128`
    through `159`, `160` through `191`, `192` through `223`, and `224` through
    `255`, `256` through `287`, `288` through `319`, `320` through `351`,
@@ -5339,11 +5346,11 @@ Tasks:
    `960` through `991`, `992` through `1023`, `1024` through `1055`,
    `1056` through `1087`, `1088` through `1119`, `1120` through `1151`,
    `1152` through `1183`, `1184` through `1215`, `1216` through `1247`,
-   `1248` through `1279`, and `1280` through `1311`
+   `1248` through `1279`, `1280` through `1311`, and `1312` through `1343`
    replays also cover FK graph seeds at rounds `2`. FK
    graph now
    participates in the
-   dependency-free combined seed-sweep command-plan windows through seed `1311`,
+   dependency-free combined seed-sweep command-plan windows through seed `1343`,
    and focused Docker-backed FK graph seed
    replay has passed the default seed set plus the `16` through `31`, `32`
    through `63`, `64` through `95`, `96` through `127`, `128` through `159`,
@@ -5357,8 +5364,8 @@ Tasks:
    `896` through `927`, `928` through `959`, `960` through `991`,
    `992` through `1023`, `1024` through `1055`, `1056` through `1087`,
    `1088` through `1119`, `1120` through `1151`, `1152` through `1183`,
-   `1184` through `1215`, `1216` through `1247`, `1248` through `1279`, and
-   `1280` through `1311`
+   `1184` through `1215`, `1216` through `1247`, `1248` through `1279`,
+   `1280` through `1311`, and `1312` through `1343`
    windows with bounded whole-seed retries for transient raw MariaDB deadlock
    exits.
 
