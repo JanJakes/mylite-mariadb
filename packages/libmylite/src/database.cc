@@ -2437,7 +2437,7 @@ bool ownerless_alter_table_engine_innodb_rebuild_recovery_statement(
 );
 bool ownerless_alter_table_force_rebuild_recovery_statement(const SqlPolicyTokens &tokens);
 bool ownerless_alter_table_charset_convert_recovery_statement(const SqlPolicyTokens &tokens);
-bool ownerless_alter_table_row_format_dynamic_recovery_statement(const SqlPolicyTokens &tokens);
+bool ownerless_alter_table_row_format_rebuild_recovery_statement(const SqlPolicyTokens &tokens);
 std::uint32_t ownerless_alter_table_compressed_row_format_key_block_recovery_kind(
     const SqlPolicyTokens &tokens
 );
@@ -16004,7 +16004,7 @@ std::uint32_t ownerless_dictionary_recovery_kind_for_statement(
     if (ownerless_alter_table_charset_convert_recovery_statement(tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_CHARSET_CONVERT;
     }
-    if (ownerless_alter_table_row_format_dynamic_recovery_statement(tokens)) {
+    if (ownerless_alter_table_row_format_rebuild_recovery_statement(tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_ROW_FORMAT_DYNAMIC;
     }
     const std::uint32_t compressed_key_block_recovery_kind =
@@ -20931,7 +20931,7 @@ bool ownerless_alter_table_charset_convert_recovery_statement(const SqlPolicyTok
     return consume_ownerless_optional_copy_exclusive_alter_tail(tokens, index);
 }
 
-bool ownerless_alter_table_row_format_dynamic_recovery_statement(const SqlPolicyTokens &tokens) {
+bool ownerless_alter_table_row_format_rebuild_recovery_statement(const SqlPolicyTokens &tokens) {
     if (tokens.count < 8U || !token_equals(tokens.values[0], "ALTER") ||
         !token_equals(tokens.values[1], "TABLE")) {
         return false;
@@ -20940,7 +20940,7 @@ bool ownerless_alter_table_row_format_dynamic_recovery_statement(const SqlPolicy
         !token_equals(tokens.values[3], ".") ||
         !ownerless_table_identifier_token(tokens.values[4]) ||
         !token_equals(tokens.values[5], "ROW_FORMAT") || !token_equals(tokens.values[6], "=") ||
-        !token_equals(tokens.values[7], "DYNAMIC")) {
+        !token_in(tokens.values[7], "DYNAMIC", "COMPACT")) {
         return false;
     }
     std::size_t index = 8U;

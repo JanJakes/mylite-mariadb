@@ -123,3 +123,9 @@ CTest registration, and documentation.
   spelling, not a general ALTER parser.
 - Compressed key-block and broader algorithm/lock option matrices remain
   planned separately.
+
+## Supersession Notes
+
+- The later `ownerless-compact-row-format-live-recovery` slice adds focused
+  live-peer crash recovery for `ROW_FORMAT=COMPACT`; `ROW_FORMAT=REDUNDANT`
+  remains planned separately.

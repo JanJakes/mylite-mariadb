@@ -1287,6 +1287,7 @@ static void test_crashed_charset_convert_copy_lock_dictionary_ddl_recovers_metad
 static void test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(void);
 static void test_crashed_row_format_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_row_format_copy_lock_dictionary_ddl_marks_file_op_checkpoint(void);
+static void test_crashed_row_format_compact_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table(void);
 static void test_crashed_compressed_row_format_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_compressed_key_block_1_dictionary_ddl_recovers_rebuilt_table(void);
@@ -2556,6 +2557,10 @@ static void row_format_copy_lock_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
+static void row_format_compact_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void compressed_row_format_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -3262,6 +3267,11 @@ static void assert_ownerless_charset_convert_crash_ddl_state(
     const char *database_path
 );
 #endif
+static void assert_ownerless_row_format_ddl_state_with_format(
+    open_database_paths paths,
+    unsigned flags,
+    const char *expected_row_format
+);
 static void assert_ownerless_row_format_ddl_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_compressed_row_format_ddl_state(
     open_database_paths paths,
@@ -6707,6 +6717,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-row-format-compact-file-op-marker-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_row_format_compact_dictionary_ddl_marks_file_op_checkpoint();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-compressed-row-format-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table();
@@ -7473,6 +7489,7 @@ int main(int argc, char **argv) {
             "dictionary-charset-convert-copy-lock-crash|"
             "dictionary-row-format-crash|dictionary-row-format-file-op-marker-crash|"
             "dictionary-row-format-copy-lock-crash|"
+            "dictionary-row-format-compact-file-op-marker-crash|"
             "dictionary-compressed-row-format-crash|"
             "dictionary-compressed-row-format-file-op-marker-crash|"
             "dictionary-compressed-row-format-key-block-1-crash|"
@@ -8021,6 +8038,9 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table),
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_row_format_copy_lock_dictionary_ddl_marks_file_op_checkpoint
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_row_format_compact_dictionary_ddl_marks_file_op_checkpoint
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table
     ),
@@ -70301,6 +70321,9 @@ static void test_crashed_charset_convert_copy_lock_dictionary_ddl_recovers_metad
 static void run_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(
     ownerless_dictionary_fault_writer_fn fault_fn,
     const char *database_name,
+    const char *initial_row_format,
+    const char *initial_info_schema_row_format,
+    const char *expected_info_schema_row_format,
     int assert_marker
 ) {
     char *root = make_temp_root();
@@ -70313,19 +70336,25 @@ static void run_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(
     pid_t writer_child;
     pid_t peer_child;
     mylite_db *db;
+    char sql[512];
 
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(paths);
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
-    exec_ok(
-        db,
-        "CREATE TABLE app.ownerless_row_format_base ("
-        "id INT NOT NULL PRIMARY KEY, "
-        "value INT NOT NULL, "
-        "note VARCHAR(16) NOT NULL, "
-        "payload TEXT NOT NULL"
-        ") ENGINE=InnoDB ROW_FORMAT=COMPACT"
+    assert(
+        snprintf(
+            sql,
+            sizeof(sql),
+            "CREATE TABLE app.ownerless_row_format_base ("
+            "id INT NOT NULL PRIMARY KEY, "
+            "value INT NOT NULL, "
+            "note VARCHAR(16) NOT NULL, "
+            "payload TEXT NOT NULL"
+            ") ENGINE=InnoDB ROW_FORMAT=%s",
+            initial_row_format
+        ) > 0
     );
+    exec_ok(db, sql);
     exec_ok(
         db,
         "INSERT INTO app.ownerless_row_format_base VALUES "
@@ -70333,22 +70362,28 @@ static void run_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(
         "(2, 20, 'before-b', REPEAT('b', 256))"
     );
     assert(
-        query_unsigned(
-            db,
+        snprintf(
+            sql,
+            sizeof(sql),
             "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
             "WHERE NAME = 'app/ownerless_row_format_base' "
-            "AND ROW_FORMAT = 'Compact'"
-        ) == 1U
+            "AND ROW_FORMAT = '%s'",
+            initial_info_schema_row_format
+        ) > 0
     );
+    assert(query_unsigned(db, sql) == 1U);
     assert(
-        query_unsigned(
-            db,
+        snprintf(
+            sql,
+            sizeof(sql),
             "SELECT COUNT(*) FROM information_schema.tables "
             "WHERE table_schema = 'app' "
             "AND table_name = 'ownerless_row_format_base' "
-            "AND row_format = 'Compact'"
-        ) == 1U
+            "AND row_format = '%s'",
+            initial_info_schema_row_format
+        ) > 0
     );
+    assert(query_unsigned(db, sql) == 1U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_row_format_base") == 2U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_row_format_base") == 30U);
     assert(
@@ -70400,22 +70435,28 @@ static void run_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
-        query_unsigned(
-            db,
+        snprintf(
+            sql,
+            sizeof(sql),
             "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
             "WHERE NAME = 'app/ownerless_row_format_base' "
-            "AND ROW_FORMAT = 'Dynamic'"
-        ) == 1U
+            "AND ROW_FORMAT = '%s'",
+            expected_info_schema_row_format
+        ) > 0
     );
+    assert(query_unsigned(db, sql) == 1U);
     assert(
-        query_unsigned(
-            db,
+        snprintf(
+            sql,
+            sizeof(sql),
             "SELECT COUNT(*) FROM information_schema.tables "
             "WHERE table_schema = 'app' "
             "AND table_name = 'ownerless_row_format_base' "
-            "AND row_format = 'Dynamic'"
-        ) == 1U
+            "AND row_format = '%s'",
+            expected_info_schema_row_format
+        ) > 0
     );
+    assert(query_unsigned(db, sql) == 1U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_row_format_base") == 2U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_row_format_base") == 30U);
     assert(
@@ -70430,22 +70471,28 @@ static void run_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
-        query_unsigned(
-            db,
+        snprintf(
+            sql,
+            sizeof(sql),
             "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
             "WHERE NAME = 'app/ownerless_row_format_base' "
-            "AND ROW_FORMAT = 'Dynamic'"
-        ) == 1U
+            "AND ROW_FORMAT = '%s'",
+            expected_info_schema_row_format
+        ) > 0
     );
+    assert(query_unsigned(db, sql) == 1U);
     assert(
-        query_unsigned(
-            db,
+        snprintf(
+            sql,
+            sizeof(sql),
             "SELECT COUNT(*) FROM information_schema.tables "
             "WHERE table_schema = 'app' "
             "AND table_name = 'ownerless_row_format_base' "
-            "AND row_format = 'Dynamic'"
-        ) == 1U
+            "AND row_format = '%s'",
+            expected_info_schema_row_format
+        ) > 0
     );
+    assert(query_unsigned(db, sql) == 1U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_row_format_base") == 2U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_row_format_base") == 30U);
     assert(
@@ -70466,11 +70513,27 @@ static void run_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(
     assert(mylite_close(db) == MYLITE_OK);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
-    assert_ownerless_row_format_ddl_state(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
-    assert_ownerless_row_format_ddl_state(paths, MYLITE_OPEN_READWRITE);
+    assert_ownerless_row_format_ddl_state_with_format(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        expected_info_schema_row_format
+    );
+    assert_ownerless_row_format_ddl_state_with_format(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        expected_info_schema_row_format
+    );
     remove_concurrency_shm(database_path);
-    assert_ownerless_row_format_ddl_state(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
-    assert_ownerless_row_format_ddl_state(paths, MYLITE_OPEN_READWRITE);
+    assert_ownerless_row_format_ddl_state_with_format(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        expected_info_schema_row_format
+    );
+    assert_ownerless_row_format_ddl_state_with_format(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        expected_info_schema_row_format
+    );
 
     free(database_path);
     free(runtime_root);
@@ -70482,6 +70545,9 @@ static void test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(void) 
     run_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(
         row_format_until_dictionary_finish_fault,
         "ownerless-dictionary-row-format-crash.mylite",
+        "COMPACT",
+        "Compact",
+        "Dynamic",
         0
     );
 }
@@ -70490,6 +70556,9 @@ static void test_crashed_row_format_dictionary_ddl_marks_file_op_checkpoint(void
     run_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(
         row_format_until_dictionary_finish_fault,
         "ownerless-dictionary-row-format-marker-crash.mylite",
+        "COMPACT",
+        "Compact",
+        "Dynamic",
         1
     );
 }
@@ -70498,6 +70567,20 @@ static void test_crashed_row_format_copy_lock_dictionary_ddl_marks_file_op_check
     run_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(
         row_format_copy_lock_until_dictionary_finish_fault,
         "ownerless-dictionary-row-format-copy-lock-crash.mylite",
+        "COMPACT",
+        "Compact",
+        "Dynamic",
+        1
+    );
+}
+
+static void test_crashed_row_format_compact_dictionary_ddl_marks_file_op_checkpoint(void) {
+    run_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(
+        row_format_compact_until_dictionary_finish_fault,
+        "ownerless-dictionary-row-format-compact-marker-crash.mylite",
+        "DYNAMIC",
+        "Dynamic",
+        "Compact",
         1
     );
 }
@@ -87847,6 +87930,18 @@ static void row_format_copy_lock_until_dictionary_finish_fault(
     );
 }
 
+static void row_format_compact_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_row_format_base ROW_FORMAT=COMPACT"
+    );
+}
+
 static void compressed_row_format_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -93458,26 +93553,37 @@ static void assert_ownerless_charset_convert_crash_ddl_state(
 }
 #endif
 
-static void assert_ownerless_row_format_ddl_state(open_database_paths paths, unsigned flags) {
+static void assert_ownerless_row_format_ddl_state_with_format(
+    open_database_paths paths,
+    unsigned flags,
+    const char *expected_row_format
+) {
     mylite_db *db = open_database(paths, flags);
+    char sql[512];
 
     assert(
-        query_unsigned(
-            db,
+        snprintf(
+            sql,
+            sizeof(sql),
             "SELECT COUNT(*) FROM information_schema.INNODB_SYS_TABLES "
             "WHERE NAME = 'app/ownerless_row_format_base' "
-            "AND ROW_FORMAT = 'Dynamic'"
-        ) == 1U
+            "AND ROW_FORMAT = '%s'",
+            expected_row_format
+        ) > 0
     );
+    assert(query_unsigned(db, sql) == 1U);
     assert(
-        query_unsigned(
-            db,
+        snprintf(
+            sql,
+            sizeof(sql),
             "SELECT COUNT(*) FROM information_schema.tables "
             "WHERE table_schema = 'app' "
             "AND table_name = 'ownerless_row_format_base' "
-            "AND row_format = 'Dynamic'"
-        ) == 1U
+            "AND row_format = '%s'",
+            expected_row_format
+        ) > 0
     );
+    assert(query_unsigned(db, sql) == 1U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_row_format_base") == 3U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_row_format_base") == 60U);
     assert(
@@ -93491,6 +93597,10 @@ static void assert_ownerless_row_format_ddl_state(open_database_paths paths, uns
         ) == 2U
     );
     assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_row_format_ddl_state(open_database_paths paths, unsigned flags) {
+    assert_ownerless_row_format_ddl_state_with_format(paths, flags, "Dynamic");
 }
 
 static void assert_ownerless_compressed_row_format_ddl_state(
