@@ -866,6 +866,8 @@ static void test_crashed_savepoint_native_row_undo_with_live_peer_blocks_recover
 static void test_crashed_transaction_rollback_before_state_recovers_original_row(void);
 static void test_crashed_transaction_native_row_undo_recovers_rows(void);
 static void test_crashed_transaction_native_row_undo_with_live_peer_blocks_recovery(void);
+static void test_crashed_generated_column_native_row_undo_recovers_indexes(void);
+static void test_crashed_generated_column_native_row_undo_with_live_peer_blocks_recovery(void);
 #endif
 static void test_ownerless_native_file_op_marker_drains_after_single_owner_explicit_transaction_dml(
     void
@@ -1359,6 +1361,10 @@ static void rollback_transaction_dml_marker_row_until_ownerless_state_fault(
     int ready_fd
 );
 static void rollback_transaction_until_native_row_undo_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void rollback_generated_column_transaction_until_native_row_undo_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -5227,6 +5233,19 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "transaction-rollback-generated-row-undo-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_generated_column_native_row_undo_recovers_indexes();
+#endif
+        return 0;
+    }
+    if (argc == 2 &&
+        strcmp(argv[1], "transaction-rollback-generated-row-undo-live-peer-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_generated_column_native_row_undo_with_live_peer_blocks_recovery();
+#endif
+        return 0;
+    }
     if (argc == 2 &&
         strcmp(argv[1], "native-single-owner-explicit-dml-file-op-marker-drain") == 0) {
         test_ownerless_native_file_op_marker_drains_after_single_owner_explicit_transaction_dml();
@@ -7175,6 +7194,8 @@ int main(int argc, char **argv) {
             "transaction-rollback-before-state-crash|"
             "transaction-rollback-native-row-undo-crash|"
             "transaction-rollback-native-row-undo-live-peer-crash|"
+            "transaction-rollback-generated-row-undo-crash|"
+            "transaction-rollback-generated-row-undo-live-peer-crash|"
             "redo-header-backup-validation|"
             "runtime-startup-retry-budget|"
 #endif
@@ -8008,6 +8029,10 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_crashed_transaction_native_row_undo_recovers_rows),
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_transaction_native_row_undo_with_live_peer_blocks_recovery
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_generated_column_native_row_undo_recovers_indexes),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_generated_column_native_row_undo_with_live_peer_blocks_recovery
     ),
 #endif
     OWNERLESS_SQL_TEST_CASE(
@@ -14657,6 +14682,288 @@ static void test_crashed_transaction_native_row_undo_with_live_peer_blocks_recov
         32U
     );
     assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+#  endif
+}
+
+static void assert_ownerless_generated_row_undo_original_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_native_row_undo_generated") == 3U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(base_value) FROM app.ownerless_native_row_undo_generated") ==
+        60U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(adjust_value) FROM app.ownerless_native_row_undo_generated"
+        ) == 6U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(stored_sum) FROM app.ownerless_native_row_undo_generated") ==
+        66U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(virtual_product) FROM app.ownerless_native_row_undo_generated"
+        ) == 140U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.ownerless_native_row_undo_generated"
+        ) == (unsigned)'a' * 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) "
+            "FROM app.ownerless_native_row_undo_generated "
+            "FORCE INDEX (ownerless_native_row_undo_generated_stored_idx) "
+            "WHERE stored_sum IN (11, 22, 33)"
+        ) == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) "
+            "FROM app.ownerless_native_row_undo_generated "
+            "FORCE INDEX (ownerless_native_row_undo_generated_virtual_idx) "
+            "WHERE virtual_product IN (10, 40, 90)"
+        ) == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_native_row_undo_generated "
+            "WHERE base_value >= 100"
+        ) == 0U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void create_ownerless_generated_row_undo_table(open_database_paths paths) {
+    mylite_db *db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_native_row_undo_generated ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "base_value INT NOT NULL, "
+        "adjust_value INT NOT NULL, "
+        "stored_sum INT GENERATED ALWAYS AS (base_value + adjust_value) STORED, "
+        "virtual_product INT GENERATED ALWAYS AS (base_value * adjust_value) VIRTUAL, "
+        "payload VARBINARY(256) NOT NULL, "
+        "INDEX ownerless_native_row_undo_generated_stored_idx (stored_sum), "
+        "INDEX ownerless_native_row_undo_generated_virtual_idx (virtual_product)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_native_row_undo_generated "
+        "(id, base_value, adjust_value, payload) VALUES "
+        "(1, 10, 1, REPEAT('a', 256)), "
+        "(2, 20, 2, REPEAT('a', 256)), "
+        "(3, 30, 3, REPEAT('a', 256))"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void force_ownerless_generated_row_undo_checkpoint(open_database_paths paths) {
+    mylite_db *db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+
+    assert(mylite_ownerless_innodb_make_checkpoint() == MYLITE_TEST_OWNERLESS_INNODB_LOCK_OK);
+    (void)mylite_ownerless_innodb_take_file_op_redo();
+    assert(!read_concurrency_native_file_op_checkpoint_needed(paths.database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(paths.database_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(concurrency_wal_is_checkpointed(paths.database_path));
+}
+
+static void assert_ownerless_generated_row_undo_follow_up_native_write(open_database_paths paths) {
+    mylite_db *db = open_database(paths, MYLITE_OPEN_READWRITE);
+
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_native_row_undo_generated "
+        "SET base_value = 31, adjust_value = 4, payload = REPEAT('e', 256) "
+        "WHERE id = 3"
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(base_value) FROM app.ownerless_native_row_undo_generated") ==
+        61U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(stored_sum) FROM app.ownerless_native_row_undo_generated") ==
+        68U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) "
+            "FROM app.ownerless_native_row_undo_generated "
+            "FORCE INDEX (ownerless_native_row_undo_generated_stored_idx) "
+            "WHERE stored_sum = 35"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) "
+            "FROM app.ownerless_native_row_undo_generated "
+            "FORCE INDEX (ownerless_native_row_undo_generated_virtual_idx) "
+            "WHERE virtual_product = 124"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void test_crashed_generated_column_native_row_undo_recovers_indexes(void) {
+#  if defined(__linux__)
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-generated-native-row-undo.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int writer_ready_pipe[2];
+    pid_t writer_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    create_ownerless_generated_row_undo_table(paths);
+    assert_ownerless_generated_row_undo_original_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(concurrency_wal_is_checkpointed(database_path));
+    force_ownerless_generated_row_undo_checkpoint(paths);
+
+    assert(pipe(writer_ready_pipe) == 0);
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(writer_ready_pipe[0]);
+        rollback_generated_column_transaction_until_native_row_undo_fault(
+            paths,
+            writer_ready_pipe[1]
+        );
+    }
+
+    close(writer_ready_pipe[1]);
+    wait_for_pipe(writer_ready_pipe[0]);
+    close(writer_ready_pipe[0]);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(kill(writer_child, SIGKILL) == 0);
+    wait_for_signaled_child(writer_child, SIGKILL);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+
+    assert_ownerless_generated_row_undo_original_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert_concurrency_wal_checkpointed_eventually(database_path);
+
+    remove_concurrency_shm(database_path);
+    assert_ownerless_generated_row_undo_original_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_generated_row_undo_follow_up_native_write(paths);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+#  endif
+}
+
+static void test_crashed_generated_column_native_row_undo_with_live_peer_blocks_recovery(void) {
+#  if defined(__linux__)
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-generated-native-row-undo-live-peer.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int writer_ready_pipe[2];
+    ownerless_live_peer_guard live_peer;
+    pid_t writer_child;
+    pid_t probe_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    create_ownerless_generated_row_undo_table(paths);
+    assert_ownerless_generated_row_undo_original_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(concurrency_wal_is_checkpointed(database_path));
+    force_ownerless_generated_row_undo_checkpoint(paths);
+
+    live_peer = start_ownerless_live_peer(paths);
+    assert(pipe(writer_ready_pipe) == 0);
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(writer_ready_pipe[0]);
+        close(live_peer.release_write_fd);
+        rollback_generated_column_transaction_until_native_row_undo_fault(
+            paths,
+            writer_ready_pipe[1]
+        );
+    }
+
+    close(writer_ready_pipe[1]);
+    wait_for_pipe(writer_ready_pipe[0]);
+    close(writer_ready_pipe[0]);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(kill(writer_child, SIGKILL) == 0);
+    wait_for_signaled_child(writer_child, SIGKILL);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+
+    probe_child = fork();
+    assert(probe_child >= 0);
+    if (probe_child == 0) {
+        assert_ownerless_open_returns_busy(paths);
+    }
+    wait_for_child(probe_child);
+
+    release_ownerless_live_peer(&live_peer);
+    assert_shared_readonly_open_returns_busy(paths);
+
+    assert_ownerless_generated_row_undo_original_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert_concurrency_wal_checkpointed_eventually(database_path);
+
+    remove_concurrency_shm(database_path);
+    assert_ownerless_generated_row_undo_original_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_generated_row_undo_follow_up_native_write(paths);
 
     free(database_path);
     free(runtime_root);
@@ -74773,6 +75080,78 @@ static void rollback_transaction_until_native_row_undo_fault(
     assert(
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_native_row_undo_transaction") ==
         32U
+    );
+
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "rollback-after-native-row-undo", 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
+    exec_ok(db, "ROLLBACK");
+    (void)mylite_close(db);
+    _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
+}
+
+static void rollback_generated_column_transaction_until_native_row_undo_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    mylite_db *db;
+    char ready_fd_value[32];
+
+    assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", ready_fd) > 0);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "START TRANSACTION");
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_native_row_undo_generated "
+        "SET base_value = 100, adjust_value = 4, payload = REPEAT('b', 256) "
+        "WHERE id = 1"
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(paths.database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(paths.database_path));
+    assert(mylite_ownerless_innodb_take_file_op_redo());
+    mylite_ownerless_innodb_note_file_op_redo();
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_native_row_undo_generated "
+        "SET base_value = 200, adjust_value = 5, payload = REPEAT('c', 256) "
+        "WHERE id = 2"
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(paths.database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(paths.database_path));
+    assert(mylite_ownerless_innodb_take_file_op_redo());
+    mylite_ownerless_innodb_note_file_op_redo();
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_native_row_undo_generated "
+        "SET base_value = 300, adjust_value = 6, payload = REPEAT('d', 256) "
+        "WHERE id = 3"
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(paths.database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(paths.database_path));
+    assert(mylite_ownerless_innodb_take_file_op_redo());
+    mylite_ownerless_innodb_note_file_op_redo();
+    assert(
+        query_unsigned(db, "SELECT SUM(base_value) FROM app.ownerless_native_row_undo_generated") ==
+        600U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(stored_sum) FROM app.ownerless_native_row_undo_generated") ==
+        615U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(virtual_product) FROM app.ownerless_native_row_undo_generated"
+        ) == 3200U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) "
+            "FROM app.ownerless_native_row_undo_generated "
+            "FORCE INDEX (ownerless_native_row_undo_generated_virtual_idx) "
+            "WHERE virtual_product IN (400, 1000, 1800)"
+        ) == 3U
     );
 
     assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "rollback-after-native-row-undo", 1) == 0);

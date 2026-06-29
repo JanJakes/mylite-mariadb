@@ -590,6 +590,18 @@ if(BUILD_TESTING)
           transaction-rollback-native-row-undo-live-peer-crash
       )
       add_test(
+        NAME libmylite.ownerless-transaction-rollback-generated-row-undo-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          transaction-rollback-generated-row-undo-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-transaction-rollback-generated-row-undo-live-peer-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          transaction-rollback-generated-row-undo-live-peer-crash
+      )
+      add_test(
         NAME libmylite.ownerless-temporary-drop-crash
         COMMAND mylite_ownerless_cross_process_sql_test temporary-drop-crash
       )
@@ -1996,6 +2008,8 @@ if(BUILD_TESTING)
       set_tests_properties(
         libmylite.ownerless-transaction-rollback-native-row-undo-crash
         libmylite.ownerless-transaction-rollback-native-row-undo-live-peer-crash
+        libmylite.ownerless-transaction-rollback-generated-row-undo-crash
+        libmylite.ownerless-transaction-rollback-generated-row-undo-live-peer-crash
         PROPERTIES
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
         TIMEOUT 90
