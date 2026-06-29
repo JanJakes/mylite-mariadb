@@ -3064,6 +3064,8 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_space_write_enter(
   if (UNIV_LIKELY(!ownerless_hooks_enabled()) || space == nullptr ||
       space->id >= SRV_TMP_SPACE_ID || space->is_temporary())
     return;
+  if (ownerless_page_write_in_startup_or_recovery())
+    return;
   if (mylite_ownerless_innodb_page_write_refresh_bypass() != 0)
     return;
 
@@ -3450,10 +3452,9 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
         ownerless_page_publish_count_trx_system_diff(source, bpage.physical_size());
     }
     const uint32_t publish_flags=
-        MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_PROOF_ONLY |
-        ((history_proof_roles & ownerless_page_write_history_proof_role_rseg)
-             ? MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_HISTORY_RSEG
-             : 0U);
+        (history_proof_roles & ownerless_page_write_history_proof_role_rseg)
+            ? MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_HISTORY_RSEG
+            : 0U;
     uint64_t proof_start_ns= page_write_perf_enabled ?
         ownerless_page_write_perf_now_ns() :
         0;

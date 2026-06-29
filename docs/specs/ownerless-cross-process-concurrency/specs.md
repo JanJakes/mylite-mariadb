@@ -325,15 +325,20 @@ Roles:
   rollback-segment proof page may use a hinted history-rseg page-log delta
   payload after a standalone base record exists, but that optimization does not
   elide the proof page and does not enable broad SYS-page delta encoding.
-  The native-support proof-only WAL shape keeps the rollback-segment and
-  undo-header proof records durable but stores them as page-log metadata with
-  zero payload bytes. Page-image reads, latest scans, replay, and checkpoint
-  retained-record callbacks skip those records so a `.shm` page-version index
-  rebuild never points at unreadable proof metadata. No-live native reclaim
-  uses a dedicated proof-including scan for those records, forces the owning
-  native tablespace to flush through the proof page LSN, and keeps the DML
-  marker/WAL until disk page-LSN proof shows the rollback-segment and undo
-  history obligations are native-durable.
+  The native-support proof-only WAL shape keeps metadata-only rollback-segment
+  and undo-header proof records durable but stores them as page-log metadata
+  with zero payload bytes. Page-image reads, latest scans, replay, and
+  checkpoint retained-record callbacks skip those records so a `.shm`
+  page-version index rebuild never points at unreadable proof metadata. The
+  later DDL-stress stability slice keeps this proof-only format as primitive
+  WAL machinery, but restores payload-bearing native-support records for
+  startup-critical rollback-history publication on both the pair and per-page
+  paths. No-live native reclaim uses a dedicated proof-including scan for
+  proof-only metadata and payload-bearing startup-critical history records.
+  Proof-only metadata lacks exact page bytes and therefore fails closed; payload
+  records force the owning native tablespace to flush through the proof page LSN
+  and keep the DML marker/WAL until exact native page proof shows the
+  rollback-segment and undo history obligations are native-durable.
   Same-runtime reads covered by the handle's local-native autocommit write
   boundary do not publish a page-version pin or enable the file-read overlay
   while the runtime remains in a continuous single-owner epoch and has not
@@ -401,10 +406,12 @@ Roles:
   policy. Live-peer reclaim keeps checkpointable user data/index page records
   in WAL until no-live reclaim can make the native data file authoritative.
   Focused production coverage now combines ordinary user page-version payload
-  and proof-only rollback-segment/undo history records in one explicit
-  transaction, closes the last ownerless handle, checkpoints the WAL, removes
-  `.wal` and `.shm`, and proves ordinary native reopen from the native
-  checkpoint boundary.
+  and rollback-segment/undo history evidence in one explicit transaction,
+  closes the last ownerless handle, and proves both outcomes: a fully
+  checkpointed native-only boundary can remove `.wal` and `.shm` before
+  ordinary native reopen, while native file-operation, DML checkpoint, or
+  rollback-history obligations can retain `.wal` without waiting for shutdown
+  purge and still verify ordinary reopen through the retained evidence.
   Focused Linux coverage now also commits post-checkpoint file-per-table DML in
   a child process that exits with `_exit(0)` before `mylite_close()`, verifies
   the durable DML marker/WAL while that child is still an unreaped zombie, and
@@ -419,9 +426,10 @@ Roles:
   checkpoint-visible LSN, the still-existing volatile redo state is reseeded
   from that checkpoint so readers do not observe `.shm` metadata behind `.ckpt`
   before a later `.shm` rebuild. Focused no-live cutover coverage now binds a
-  reclaimed bulk-insert visible LSN to native InnoDB checkpoint coverage,
-  removes both `.wal` and `.shm`, and verifies ordinary native reopen without
-  page-version WAL overlay.
+  reclaimed bulk-insert visible LSN to native InnoDB checkpoint coverage when
+  exact proof is complete, removes both `.wal` and `.shm` for that native-only
+  path, and otherwise removes only `.shm` while verifying ordinary reopen with
+  retained WAL and native checkpoint-obligation evidence.
   Same-process embedded restarts also reset MariaDB's static purge queue,
   purge page map, purge iterators, and purge coordinator running/task state
   before startup. When no live peer exists and no retained page-version payloads
@@ -4943,11 +4951,26 @@ Tasks:
    the checksummed native file-op checkpoint marker, or a valid
    `mylite-redo-header.bin` backup proves prior ownerless redo/checkpoint
    suppression. The `ownerless-startup-retry-budget` slice raises that
-   failure-path budget without changing successful-open behavior and adds
-   hook-only coverage that forces four post-`mysql_server_init()` failures
-   before ownerless open, ordinary native reopen after ownerless activity, and
-   forced-`.shm` ownerless reopen all succeed through the same cleanup and
-   redo-prefix restore path. Hook-only SQL coverage also corrupts redo-header
+   failure-path budget without changing successful-open behavior. The
+   `ownerless-ddl-stress-retry-stability` follow-up raises the same bounded
+   startup cleanup-and-retry path to sixty attempts with the existing 100 ms
+   delay. It also lets no-live ownerless startup keep InnoDB checkpoint
+   suppression disabled while the current native redo header is authoritative,
+   then enables suppression after startup reconciliation before ownerless
+   writes can run. The same slice restores payload-bearing rollback-history
+   proof records for startup-critical native-support pages on both the pair and
+   per-page paths, and makes reclaim require exact native page proof for those
+   records before treating an empty page-version WAL plus native redo header as
+   authoritative. Ordinary native opens that consumed retained page-version WAL
+   now force a native checkpoint and discard those consumed records on close
+   once current native redo covers native page LSNs and rollback-history
+   headers remain structurally consistent, preventing a later forced `.shm`
+   rebuild from replaying stale ownerless images over newer native writes. The
+   hook-only coverage now forces twelve total post-`mysql_server_init()`
+   failures: four before ownerless open, four before ordinary native reopen
+   after ownerless activity, and four before forced-`.shm` ownerless reopen,
+   all succeeding through the same cleanup and redo-prefix restore path.
+   Hook-only SQL coverage also corrupts redo-header
    backup magic, format, header size, payload size, recorded redo size, saved
    prefix, and truncation boundaries and proves those files do not arm the
    ordinary-open recovery bridge. Final no-live ownerless read/write shutdown
@@ -6520,12 +6543,15 @@ subsystems that this mode needs:
   counted as blocked from blind native-support elision by the active
   history-proof gate. A future optimization must replace or compress that proof
   evidence rather than simply eliding these page images. A bounded follow-up
-  kept proof-only native-support metadata durable in the page-version WAL while
+  introduced proof-only native-support metadata in the page-version WAL while
   skipping live shared page-index publication for records that have no page
-  payload. A later read-path performance slice re-indexed full native-support
-  page images so single-owner readers can trust absent index entries for
-  materializable pages without treating proof-only metadata as readable page
-  images. Direct indexed hits also skip appended-tail validation in the
+  payload; a later DDL-stress stability slice restores payload-bearing records
+  for startup-critical history publication on both production paths. A later
+  read-path performance slice re-indexed full native-support page images so
+  single-owner readers can trust absent index entries for materializable pages
+  without treating proof-only metadata as readable page images. Direct indexed
+  hits also skip
+  appended-tail validation in the
   single-owner one-statement epoch, including the local visible-fast writer,
   while the narrower single-owner absent-index case can avoid repeated WAL scans
   only when active ownerless native write state is absent. Peer/startup WAL
@@ -7142,12 +7168,15 @@ subsystems that this mode needs:
   marker survives retained-record checkpoint rewrites and does not change
   payload bytes, checksums, page-version ordering, or the remaining
   rollback-segment/undo history-proof requirement.
-  A follow-up proof-only native-support WAL slice uses that metadata class for
+  A follow-up proof-only native-support WAL slice used that metadata class for
   active history-proof rollback-segment and undo records. It keeps page
   identity, page LSN, commit LSN, native-support metadata, and retention
   ordering, but writes no page payload and forbids page-image reads from those
   records. Replay and checkpoint retained-record callbacks skip them for the
   same reason the live page-index path skips proof-only native-support records.
+  The later DDL-stress stability slice keeps that format as primitive WAL
+  machinery while restoring payload-bearing records for startup-critical history
+  proof on both production paths.
   The append-batch fault-guard slice then narrowed unsafe-hook checks to
   actual configured ownerless fault names. Hook builds still enable fault
   infrastructure globally, but visible-fast correctness selectors and
@@ -7455,6 +7484,17 @@ subsystems that this mode needs:
   visible LSN rules, redo/checkpoint ordering, or DDL/file-lifecycle recovery.
   Larger row lists, broad DML/DDL, and unbounded append-lock hold times remain
   out of scope.
+  The later DDL-stress retry stability slice partially reverses this production
+  shortcut for startup-critical rollback history: both the normal stats-off
+  rollback-segment plus undo proof pair and the per-page history-proof fallback
+  again write payload-bearing native-support page-log records with real page
+  checksums, while the proof-only record format remains covered as primitive
+  WAL machinery.
+  Reclaim now treats payload-bearing `FIL_PAGE_UNDO_LOG`, `FIL_PAGE_TYPE_SYS`,
+  and `FIL_PAGE_TYPE_TRX_SYS` native-support records as exact native-page proof
+  obligations before WAL truncation, and proof-only metadata fails closed, so an
+  empty WAL plus matching redo header is not claimed until rollback-history
+  startup state is also proven.
   The proof-only readable-WAL scan follow-up keeps uncheckpointed-record
   detection file-size based, but changes open/close retained-payload decisions
   to scan complete page-log records and ignore proof-only metadata records.
@@ -7932,9 +7972,10 @@ subsystems that this mode needs:
   lock-timeout, deadlock, metadata, and storage errors fatal. A focused
   short-timeout stress selector forces immediate ownerless statement-lock
   misses to exercise that retry path, then relaxes each affected worker session
-  to a `1` second statement-lock wait after the first forced miss so the
-  remaining run does not spend the full harness deadline in nonblocking retry
-  loops. The regular ownerless-stress DDL CTest also caps its statement-lock
+  to the harness default `30` second statement-lock wait after the first forced
+  miss so the remaining run proves the ordinary DDL/DML workload instead of
+  relying on repeated outer retry loops. The regular ownerless-stress DDL CTest
+  also caps its statement-lock
   wait at `1` second so the same eight-round workload uses repeated short
   retries inside the harness deadline instead of six long `30` second waits.
   This stabilizes evidence collection for the existing DDL/DML stress

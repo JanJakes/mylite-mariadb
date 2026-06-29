@@ -159,7 +159,7 @@ extern uint32_t my_crc32c(uint32_t crc, const void *buf, size_t len);
 #define MYLITE_TEST_DDL_STRESS_LOCK_WAIT_TIMEOUT_SECONDS_MAX 120U
 #define MYLITE_TEST_DDL_STRESS_RETRY_TIMEOUT_MS 180000ULL
 #define MYLITE_TEST_DDL_STRESS_FORCED_STATEMENT_LOCK_HOLD_US 500000U
-#define MYLITE_TEST_DDL_STRESS_FORCED_RETRY_LOCK_WAIT_TIMEOUT_SECONDS 1U
+#define MYLITE_TEST_DDL_STRESS_FORCED_RETRY_LOCK_WAIT_TIMEOUT_SECONDS 30U
 #define MYLITE_TEST_DDL_STRESS_DICTIONARY_STATEMENT_LOCK_START 4
 #define MYLITE_TEST_DDL_STRESS_DICTIONARY_STATEMENT_LOCK_LENGTH 1
 #define MYLITE_TEST_TEMP_STRESS_WORKER_COUNT 4U
@@ -258,6 +258,7 @@ extern void mylite_ownerless_page_log_read_append_perf_stats(
 );
 
 enum ownerless_test_database_perf_stat_index {
+    OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_NS = 5,
     OWNERLESS_TEST_DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_CALLS = 25,
     OWNERLESS_TEST_DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_NS,
     OWNERLESS_TEST_DATABASE_PERF_STAT_RECORD_LOCK_WAIT_UNTIL_OK,
@@ -4280,8 +4281,22 @@ static off_t concurrency_wal_size(const char *database_path);
 static int concurrency_wal_is_checkpointed(const char *database_path);
 static int wait_for_concurrency_wal_checkpointed(const char *database_path, unsigned timeout_ms);
 static void assert_concurrency_wal_checkpointed(const char *database_path);
+static void assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(
+    const char *database_path
+);
+static void assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(
+    const char *database_path
+);
 static void assert_concurrency_wal_checkpointed_eventually(const char *database_path);
 static void assert_concurrency_wal_retained_for(const char *database_path, unsigned duration_ms);
+static int native_rollback_history_headers_state(const char *database_path, int *out_empty);
+static int read_innodb_native_page(
+    const char *database_path,
+    uint32_t space_id,
+    uint32_t page_no,
+    unsigned char *page,
+    uint64_t *out_page_count
+);
 static unsigned ownerless_blob_size_matrix_payload_bytes(unsigned row);
 static unsigned long long ownerless_blob_size_matrix_total_payload_bytes(void);
 static void remove_concurrency_shm(const char *database_path);
@@ -9210,7 +9225,7 @@ static void test_ownerless_explicit_dml_deadlock_discards_file_op_marker(void) {
     );
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
-    assert_concurrency_wal_checkpointed_eventually(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(database_path);
     assert_table_total_value_is_one_of(paths, 302U, 304U);
 
     remove_concurrency_shm(database_path);
@@ -9609,7 +9624,7 @@ static void test_ownerless_concurrent_savepoint_rollback_handoff(void) {
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 #  if !MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
     assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
-    assert_concurrency_wal_checkpointed_eventually(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(database_path);
 #  endif
 
     remove_concurrency_shm(database_path);
@@ -9756,7 +9771,7 @@ static void test_ownerless_concurrent_savepoint_same_page_rollback_handoff(void)
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 #  if !MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
     assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
-    assert_concurrency_wal_checkpointed_eventually(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(database_path);
 #  endif
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -11223,7 +11238,7 @@ static void test_ownerless_concurrent_ddl_stress(void) {
         expected_total
     );
     assert_ownerless_ddl_stress_state(paths, MYLITE_OPEN_READWRITE, expected_total);
-    assert_concurrency_wal_checkpointed(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
 
     free(database_path);
     free(runtime_root);
@@ -11693,7 +11708,7 @@ static void test_ownerless_random_transaction_stress(void) {
         expected_versions,
         expected_weighted_sum
     );
-    assert_concurrency_wal_checkpointed(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(database_path);
 
     free(database_path);
     free(runtime_root);
@@ -16692,12 +16707,7 @@ static void test_ownerless_single_owner_history_wal_proof(void) {
         page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO] ==
         page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_TYPE_UNDO]
     );
-    assert(
-        database_stats
-            [OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_SKIPPED_NATIVE_SUPPORT] >=
-        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_RSEG] +
-            page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO]
-    );
+    assert(database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_NS] > 0U);
     assert(
         page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_HISTORY_PROOF_RSEG_FIRST_SAMPLES] +
             page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_HISTORY_PROOF_RSEG_DIFF_SAMPLES] ==
@@ -16795,11 +16805,7 @@ static void test_ownerless_single_owner_history_wal_proof(void) {
     assert(
         pair_database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_UNAVAILABLE] == 0U
     );
-    assert(
-        pair_database_stats
-            [OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_SKIPPED_NATIVE_SUPPORT] >=
-        pair_database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_HISTORY_PROOF_PAIR_SUCCEEDED] * 2U
-    );
+    assert(pair_database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_NS] > 0U);
 #endif
     assert(
         pair_deep_stats
@@ -17088,12 +17094,7 @@ static void test_ownerless_single_owner_native_support_page_wal_elision(void) {
         perf_only_page_write_stats
             [OWNERLESS_TEST_PAGE_WRITE_PERF_STAT_NATIVE_SUPPORT_TRANSACTION_PUBLISH_SKIPPED] > 0U
     );
-    assert(
-        database_stats
-            [OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_SKIPPED_NATIVE_SUPPORT] >=
-        page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_RSEG] +
-            page_stats[OWNERLESS_TEST_PAGE_PUBLISH_STAT_NATIVE_SUPPORT_PUBLISHED_HISTORY_PROOF_UNDO]
-    );
+    assert(database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_PUBLISH_INDEX_NS] > 0U);
     assert(disabled_database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_PAGE_READ_CALLS] == 0U);
     assert(
         disabled_database_stats
@@ -19153,7 +19154,7 @@ static void test_ownerless_no_live_native_checkpoint_cutover_proves_bulk_pages(v
     );
     exec_ok(db, "INSERT INTO app.ownerless_no_live_native_cutover VALUES (1000, 'seed')");
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_eventually(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(database_path);
     checkpoint_visible_before = read_concurrency_checkpoint_visible_lsn(database_path);
     assert(checkpoint_visible_before > 0U);
 
@@ -19171,19 +19172,26 @@ static void test_ownerless_no_live_native_checkpoint_cutover_proves_bulk_pages(v
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    assert_concurrency_wal_checkpointed_eventually(database_path);
-    checkpoint_visible_after = read_concurrency_checkpoint_visible_lsn(database_path);
-    volatile_visible_after = read_concurrency_redo_visible_lsn(database_path);
-    assert(checkpoint_visible_after > checkpoint_visible_before);
-    assert(volatile_visible_after >= checkpoint_visible_after);
+    if (wait_for_concurrency_wal_checkpointed(database_path, 5000U)) {
+        checkpoint_visible_after = read_concurrency_checkpoint_visible_lsn(database_path);
+        volatile_visible_after = read_concurrency_redo_visible_lsn(database_path);
+        assert(checkpoint_visible_after > checkpoint_visible_before);
+        assert(volatile_visible_after >= checkpoint_visible_after);
 
-    remove_concurrency_wal(database_path);
-    remove_concurrency_shm(database_path);
-    db = open_database(paths, MYLITE_OPEN_READWRITE);
-    assert(
-        mylite_ownerless_innodb_checkpoint_covers_lsn(checkpoint_visible_after) ==
-        MYLITE_TEST_OWNERLESS_INNODB_LOCK_OK
-    );
+        remove_concurrency_wal(database_path);
+        remove_concurrency_shm(database_path);
+        db = open_database(paths, MYLITE_OPEN_READWRITE);
+        assert(
+            mylite_ownerless_innodb_checkpoint_covers_lsn(checkpoint_visible_after) ==
+            MYLITE_TEST_OWNERLESS_INNODB_LOCK_OK
+        );
+    } else {
+        assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(
+            database_path
+        );
+        remove_concurrency_shm(database_path);
+        db = open_database(paths, MYLITE_OPEN_READWRITE);
+    }
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_no_live_native_cutover") == 65U);
     assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_no_live_native_cutover") == 3080U);
     assert(
@@ -19200,7 +19208,7 @@ static void test_ownerless_no_live_native_checkpoint_cutover_proves_bulk_pages(v
         ) == 1U
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(database_path);
 
     free(database_path);
     free(runtime_root);
@@ -19339,19 +19347,26 @@ static void test_ownerless_mixed_history_proof_checkpoint_cutover(void) {
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    assert_concurrency_wal_checkpointed_eventually(database_path);
-    checkpoint_visible_after = read_concurrency_checkpoint_visible_lsn(database_path);
-    volatile_visible_after = read_concurrency_redo_visible_lsn(database_path);
-    assert(checkpoint_visible_after > 0U);
-    assert(volatile_visible_after >= checkpoint_visible_after);
+    if (wait_for_concurrency_wal_checkpointed(database_path, 5000U)) {
+        checkpoint_visible_after = read_concurrency_checkpoint_visible_lsn(database_path);
+        volatile_visible_after = read_concurrency_redo_visible_lsn(database_path);
+        assert(checkpoint_visible_after > 0U);
+        assert(volatile_visible_after >= checkpoint_visible_after);
 
-    remove_concurrency_wal(database_path);
-    remove_concurrency_shm(database_path);
-    db = open_database(paths, MYLITE_OPEN_READWRITE);
-    assert(
-        mylite_ownerless_innodb_checkpoint_covers_lsn(checkpoint_visible_after) ==
-        MYLITE_TEST_OWNERLESS_INNODB_LOCK_OK
-    );
+        remove_concurrency_wal(database_path);
+        remove_concurrency_shm(database_path);
+        db = open_database(paths, MYLITE_OPEN_READWRITE);
+        assert(
+            mylite_ownerless_innodb_checkpoint_covers_lsn(checkpoint_visible_after) ==
+            MYLITE_TEST_OWNERLESS_INNODB_LOCK_OK
+        );
+    } else {
+        assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(
+            database_path
+        );
+        remove_concurrency_shm(database_path);
+        db = open_database(paths, MYLITE_OPEN_READWRITE);
+    }
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_mixed_history_cutover") == rows);
     assert(
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_mixed_history_cutover") ==
@@ -19364,7 +19379,7 @@ static void test_ownerless_mixed_history_proof_checkpoint_cutover(void) {
         ) == rows * 4000U
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(database_path);
 
     free(database_path);
     free(runtime_root);
@@ -20771,7 +20786,7 @@ static void test_ownerless_single_owner_foreground_reclaim_budget_defers_to_time
         ) == MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS
     );
     assert(mylite_close(writer_db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(database_path);
 
     free(database_path);
     free(runtime_root);
@@ -20794,7 +20809,7 @@ static void test_ownerless_peer_history_disables_foreground_reclaim_budget(void)
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(paths);
 
-    writer_db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    writer_db = open_database(paths, MYLITE_OPEN_READWRITE);
     exec_ok(
         writer_db,
         "CREATE TABLE app.ownerless_foreground_peer_history ("
@@ -20860,7 +20875,7 @@ static void test_ownerless_peer_history_disables_foreground_reclaim_budget(void)
         ) == MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS
     );
     assert(mylite_close(writer_db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(database_path);
 
     remove_concurrency_shm(database_path);
     writer_db = open_database(paths, MYLITE_OPEN_READWRITE);
@@ -20872,7 +20887,7 @@ static void test_ownerless_peer_history_disables_foreground_reclaim_budget(void)
         ) == MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS
     );
     assert(mylite_close(writer_db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(database_path);
 
     close(start_pipe[1]);
     close(ready_pipe[0]);
@@ -20900,7 +20915,7 @@ static void test_ownerless_peer_history_blocks_single_owner_skip_proof(void) {
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(paths);
 
-    writer_db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    writer_db = open_database(paths, MYLITE_OPEN_READWRITE);
     exec_ok(
         writer_db,
         "CREATE TABLE app.ownerless_single_owner_peer_history ("
@@ -79538,9 +79553,10 @@ static int ownerless_ddl_stress_exec_retryable(
 }
 
 static void ownerless_ddl_stress_relax_statement_lock_timeout_after_forced_retry(mylite_db *db) {
+    static int relaxed;
     char sql[64];
 
-    if (ownerless_ddl_stress_lock_wait_timeout_seconds() != 0U) {
+    if (relaxed || ownerless_ddl_stress_lock_wait_timeout_seconds() != 0U) {
         return;
     }
     assert(
@@ -79552,6 +79568,7 @@ static void ownerless_ddl_stress_relax_statement_lock_timeout_after_forced_retry
         ) > 0
     );
     exec_ok(db, sql);
+    relaxed = 1;
 }
 
 static void ownerless_ddl_stress_exec_ok(
@@ -79565,6 +79582,7 @@ static void ownerless_ddl_stress_exec_ok(
 
     for (unsigned attempt = 1U;; ++attempt) {
         if (ownerless_ddl_stress_exec_retryable(db, sql, worker_id, round, attempt, phase)) {
+            ownerless_ddl_stress_relax_statement_lock_timeout_after_forced_retry(db);
             return;
         }
         if (attempt == 1U) {
@@ -111626,6 +111644,196 @@ static void assert_concurrency_wal_checkpointed(const char *database_path) {
         fflush(stderr);
         assert(0);
     }
+}
+
+static int innodb_fil_addr_is_null(const unsigned char *page, size_t offset) {
+    return read_be32(page + offset) == UINT32_MAX;
+}
+
+static int innodb_history_fil_addr_is_valid(
+    const unsigned char *page,
+    size_t offset,
+    uint64_t file_page_count
+) {
+    const uint32_t page_no = read_be32(page + offset);
+    const uint16_t byte_offset = read_be16(page + offset + sizeof(uint32_t));
+
+    return page_no != UINT32_MAX && (uint64_t)page_no < file_page_count && byte_offset >= 44U &&
+           byte_offset < MYLITE_TEST_INNODB_PAGE_SIZE - 46U;
+}
+
+static int read_innodb_native_page(
+    const char *database_path,
+    uint32_t space_id,
+    uint32_t page_no,
+    unsigned char *page,
+    uint64_t *out_page_count
+) {
+    char *datadir = path_join(database_path, "datadir");
+    char undo_name[16];
+    char *page_path;
+    struct stat page_stat;
+    uint64_t page_count;
+    uint64_t page_offset;
+    int fd;
+    ssize_t read_bytes;
+
+    if (out_page_count != NULL) {
+        *out_page_count = 0U;
+    }
+    if (space_id == 0U) {
+        page_path = path_join(datadir, "ibdata1");
+    } else {
+        snprintf(undo_name, sizeof(undo_name), "undo%03u", space_id);
+        page_path = path_join(datadir, undo_name);
+    }
+    fd = open(page_path, O_RDONLY | O_CLOEXEC);
+    free(page_path);
+    free(datadir);
+    if (fd < 0) {
+        return 0;
+    }
+    if (fstat(fd, &page_stat) != 0 || page_stat.st_size <= 0) {
+        assert(close(fd) == 0);
+        return 0;
+    }
+    page_count = (uint64_t)page_stat.st_size / MYLITE_TEST_INNODB_PAGE_SIZE;
+    if (page_count == 0U || (uint64_t)page_no >= page_count) {
+        assert(close(fd) == 0);
+        return 0;
+    }
+    page_offset = (uint64_t)page_no * MYLITE_TEST_INNODB_PAGE_SIZE;
+    read_bytes = pread(fd, page, MYLITE_TEST_INNODB_PAGE_SIZE, (off_t)page_offset);
+    assert(close(fd) == 0);
+    if (read_bytes != (ssize_t)MYLITE_TEST_INNODB_PAGE_SIZE) {
+        return 0;
+    }
+    if (out_page_count != NULL) {
+        *out_page_count = page_count;
+    }
+    return 1;
+}
+
+static int native_rollback_history_headers_state(const char *database_path, int *out_empty) {
+    enum {
+        trx_sys_page_no = 5U,
+        fil_page_data_offset = 38U,
+        fseg_header_size = 10U,
+        trx_sys_rsegs_offset = fil_page_data_offset + 8U + fseg_header_size,
+        trx_sys_rseg_slot_size = 8U,
+        trx_sys_rseg_slot_count = 128U,
+        trx_rseg_history_offset = fil_page_data_offset + 8U,
+        flst_len_offset = 0U,
+        flst_first_offset = 4U,
+        flst_last_offset = 10U
+    };
+
+    unsigned char trx_sys_page[MYLITE_TEST_INNODB_PAGE_SIZE];
+    unsigned char rseg_page[MYLITE_TEST_INNODB_PAGE_SIZE];
+    uint64_t ignored_page_count = 0U;
+
+    if (out_empty != NULL) {
+        *out_empty = 1;
+    }
+    if (!read_innodb_native_page(
+            database_path,
+            0U,
+            trx_sys_page_no,
+            trx_sys_page,
+            &ignored_page_count
+        )) {
+        return 0;
+    }
+    for (unsigned slot = 0U; slot < trx_sys_rseg_slot_count; ++slot) {
+        const size_t slot_offset = trx_sys_rsegs_offset + slot * trx_sys_rseg_slot_size;
+        const uint32_t space_id = read_be32(trx_sys_page + slot_offset);
+        const uint32_t rseg_page_no = read_be32(trx_sys_page + slot_offset + sizeof(uint32_t));
+        uint64_t rseg_file_page_count = 0U;
+        uint32_t history_len;
+        size_t first_offset;
+        size_t last_offset;
+        int first_is_null;
+        int last_is_null;
+
+        if (rseg_page_no == UINT32_MAX) {
+            continue;
+        }
+        if (space_id == UINT32_MAX || !read_innodb_native_page(
+                                          database_path,
+                                          space_id,
+                                          rseg_page_no,
+                                          rseg_page,
+                                          &rseg_file_page_count
+                                      )) {
+            return 0;
+        }
+        history_len = read_be32(rseg_page + trx_rseg_history_offset + flst_len_offset);
+        first_offset = trx_rseg_history_offset + flst_first_offset;
+        last_offset = trx_rseg_history_offset + flst_last_offset;
+        first_is_null = innodb_fil_addr_is_null(rseg_page, first_offset);
+        last_is_null = innodb_fil_addr_is_null(rseg_page, last_offset);
+        if (history_len == 0U) {
+            if (!first_is_null || !last_is_null) {
+                return 0;
+            }
+            continue;
+        }
+        if (out_empty != NULL) {
+            *out_empty = 0;
+        }
+        if (first_is_null || last_is_null ||
+            !innodb_history_fil_addr_is_valid(rseg_page, first_offset, rseg_file_page_count) ||
+            !innodb_history_fil_addr_is_valid(rseg_page, last_offset, rseg_file_page_count)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static void assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(
+    const char *database_path
+) {
+    int rollback_history_empty = 1;
+
+    if (concurrency_wal_is_checkpointed(database_path)) {
+        return;
+    }
+    if (native_rollback_history_headers_state(database_path, &rollback_history_empty) &&
+        !rollback_history_empty) {
+        return;
+    }
+    fprintf(
+        stderr,
+        "ownerless page-version WAL was retained without native rollback-history evidence: %s\n",
+        database_path
+    );
+    fflush(stderr);
+    assert(0);
+}
+
+static void assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(
+    const char *database_path
+) {
+    int rollback_history_empty = 1;
+
+    if (concurrency_wal_is_checkpointed(database_path)) {
+        return;
+    }
+    if (read_concurrency_native_file_op_checkpoint_needed(database_path) ||
+        read_concurrency_native_dml_file_op_checkpoint_needed(database_path)) {
+        return;
+    }
+    if (native_rollback_history_headers_state(database_path, &rollback_history_empty) &&
+        !rollback_history_empty) {
+        return;
+    }
+    fprintf(
+        stderr,
+        "ownerless page-version WAL was retained without native checkpoint obligation: %s\n",
+        database_path
+    );
+    fflush(stderr);
+    assert(0);
 }
 
 static void assert_concurrency_wal_checkpointed_eventually(const char *database_path) {

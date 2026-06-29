@@ -529,6 +529,7 @@ uint64_t mylite_ownerless_innodb_checkpoint_lsn(void);
 int mylite_ownerless_innodb_make_checkpoint(void);
 int mylite_ownerless_innodb_checkpoint_covers_lsn(uint64_t lsn);
 int mylite_ownerless_innodb_settle_purge_before_hooks(unsigned int timeout_ms);
+int mylite_ownerless_innodb_has_recovered_active_transactions(int *out_has_recovered);
 int mylite_ownerless_innodb_redo_is_active(void);
 int mylite_ownerless_innodb_redo_enter(uint64_t *out_latest_lsn);
 int mylite_ownerless_innodb_redo_observe(uint64_t *out_latest_lsn);

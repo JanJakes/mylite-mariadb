@@ -768,10 +768,17 @@ static struct
       }
     }
 
-    char *fil_path= fil_make_filepath(nullptr, {filename, strlen(filename)},
-                                      IBD, false);
-    const item defer{lsn, fil_path, false};
-    ut_free(fil_path);
+    std::string file_name;
+    if (mylite_ownerless_absolute_file_name(filename))
+      file_name= filename;
+    else
+    {
+      char *fil_path= fil_make_filepath(nullptr, {filename, strlen(filename)},
+                                        IBD, false);
+      file_name= fil_path;
+      ut_free(fil_path);
+    }
+    const item defer{lsn, file_name, false};
 
     /* The file name must be unique. Keep the one with the latest LSN. */
     auto d= defers.begin();

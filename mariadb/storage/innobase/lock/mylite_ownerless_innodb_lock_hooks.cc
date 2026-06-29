@@ -3002,6 +3002,29 @@ extern "C" int mylite_ownerless_innodb_checkpoint_covers_lsn(uint64_t lsn)
   return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
 }
 
+extern "C" int mylite_ownerless_innodb_has_recovered_active_transactions(
+    int *out_has_recovered)
+{
+  if (out_has_recovered == nullptr)
+    return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+  *out_has_recovered= 0;
+  if (recv_recovery_is_on() || !srv_was_started)
+    return MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+
+  const bool has_recovered= trx_sys.trx_list.find_first([&](trx_t &trx) {
+    if (trx.state != TRX_STATE_ACTIVE)
+      return false;
+
+    bool found= false;
+    trx.mutex_lock();
+    found= trx.is_recovered;
+    trx.mutex_unlock();
+    return found;
+  });
+  *out_has_recovered= has_recovered ? 1 : 0;
+  return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
 extern "C" int mylite_ownerless_innodb_redo_is_active(void)
 {
   return ownerless_lock_hooks_enabled() && redo_depth != 0;
