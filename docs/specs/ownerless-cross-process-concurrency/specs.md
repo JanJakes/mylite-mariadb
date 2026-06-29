@@ -5074,8 +5074,11 @@ Tasks:
    Pure multi-pair temporary rename chains use the same temporary recovery
    lane, while mixed temporary/permanent rename lists, including same-schema and
    cross-schema `RENAME TABLE IF EXISTS` lists with skipped missing sources,
-   use the durable native file-operation marker lane and keep only the
-   permanent target durable after crash. Broader
+   use the durable native file-operation marker lane. Completed-prefinish
+   recovery keeps only the permanent target durable after crash; cross-schema
+   native-loop recovery kills after the permanent native file move and verifies
+   MariaDB DDL-log rollback restores the original permanent source while the
+   temporary and skipped targets remain absent. Broader
    ALTER rebuild variants beyond the focused force, exact copy-lock
    ADD/DROP/MODIFY COLUMN, row-format, compressed, and charset-conversion cases,
    broader schema option variants beyond named/current-schema default/comment
@@ -7938,7 +7941,9 @@ subsystems that this mode needs:
      rename chains, focused single-pair `RENAME TABLE IF EXISTS`, and
      temp-first plus permanent-first mixed temporary/permanent rename-list
      prefinish boundaries, plus focused temporary-chain/permanent/temporary-chain
-     and same-schema plus cross-schema IF EXISTS missing-source mixed rename-list prefinish boundaries, plus same-schema and cross-schema
+     and same-schema plus cross-schema IF EXISTS missing-source mixed rename-list prefinish
+     boundaries plus cross-schema mixed temporary/permanent IF EXISTS native-loop
+     rollback, plus same-schema and cross-schema
      non-FK multi-rename native-loop rollback after first, second, and final native
      rename pairs, including deterministic same-schema and cross-schema
      `RENAME TABLE IF EXISTS` three-pair lists, plus same-schema and

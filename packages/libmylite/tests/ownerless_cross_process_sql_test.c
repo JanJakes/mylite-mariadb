@@ -1064,6 +1064,8 @@ static void test_crashed_temporary_mixed_if_exists_rename_recovers_perm(void);
 static void test_crashed_temporary_mixed_if_exists_reverse_recovers_perm(void);
 static void test_crashed_temporary_cross_schema_mixed_if_exists_rename_recovers_perm(void);
 static void test_crashed_temporary_cross_schema_mixed_if_exists_reverse_recovers_perm(void);
+static void test_crashed_temporary_cross_schema_mixed_if_exists_rename_loop_recovers_perm(void);
+static void test_crashed_temporary_cross_schema_mixed_if_exists_reverse_loop_recovers_perm(void);
 #endif
 static void test_ownerless_rejects_non_innodb_engines(void);
 
@@ -1932,6 +1934,14 @@ static void temporary_cross_schema_mixed_if_exists_rename_until_dictionary_finis
     int ready_fd
 );
 static void temporary_cross_schema_mixed_if_exists_rename_reverse_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void temporary_cross_schema_mixed_if_exists_rename_until_native_file_op_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void temporary_cross_schema_mixed_if_exists_rename_reverse_until_native_file_op_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -4095,6 +4105,15 @@ static void assert_temporary_cross_schema_mixed_if_exists_durable_state(
     unsigned expected_shadow_sum,
     unsigned expected_perm_sum
 );
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void assert_temporary_cross_schema_mixed_if_exists_loop_rollback_state(
+    open_database_paths paths,
+    unsigned flags,
+    unsigned expected_shadow_sum,
+    unsigned expected_perm_sum,
+    unsigned long long expected_perm_space
+);
+#endif
 static void assert_ownerless_foreign_key_multi_rename_state(
     open_database_paths paths,
     unsigned flags,
@@ -4576,6 +4595,20 @@ int main(int argc, char **argv) {
         strcmp(argv[1], "temporary-cross-schema-mixed-if-exists-rename-reverse-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_temporary_cross_schema_mixed_if_exists_reverse_recovers_perm();
+#endif
+        return 0;
+    }
+    if (argc == 2 &&
+        strcmp(argv[1], "temporary-cross-schema-mixed-if-exists-rename-loop-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_temporary_cross_schema_mixed_if_exists_rename_loop_recovers_perm();
+#endif
+        return 0;
+    }
+    if (argc == 2 &&
+        strcmp(argv[1], "temporary-cross-schema-mixed-if-exists-rename-reverse-loop-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_temporary_cross_schema_mixed_if_exists_reverse_loop_recovers_perm();
 #endif
         return 0;
     }
@@ -7135,6 +7168,8 @@ int main(int argc, char **argv) {
             "temporary-mixed-if-exists-rename-reverse-crash|"
             "temporary-cross-schema-mixed-if-exists-rename-crash|"
             "temporary-cross-schema-mixed-if-exists-rename-reverse-crash|"
+            "temporary-cross-schema-mixed-if-exists-rename-loop-crash|"
+            "temporary-cross-schema-mixed-if-exists-rename-reverse-loop-crash|"
             "checksum-stress|",
             stderr
         );
@@ -48130,6 +48165,100 @@ static void test_crashed_temporary_cross_schema_mixed_if_exists_reverse_recovers
         "ownerless-temporary-cross-schema-mixed-if-exists-reverse-rn-crash.mylite"
     );
 }
+
+static void run_crashed_temporary_cross_schema_mixed_if_exists_rename_loop_recovers_perm(
+    ownerless_dictionary_fault_writer_fn writer_fn,
+    const char *database_basename
+) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, database_basename);
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
+    unsigned long long perm_space_before;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    create_temporary_cross_schema_mixed_if_exists_durable_base(db);
+    perm_space_before = query_unsigned(
+        db,
+        "SELECT SPACE FROM information_schema.INNODB_SYS_TABLES "
+        "WHERE NAME = 'app/ownerless_tmp_cross_if_exists_perm_src'"
+    );
+    assert(perm_space_before > 0U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(paths, writer_fn);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert_temporary_cross_schema_mixed_if_exists_loop_rollback_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        10U,
+        20U,
+        perm_space_before
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "UPDATE app.ownerless_tmp_cross_if_exists_shadow SET value = 15 WHERE id = 1");
+    exec_ok(db, "UPDATE app.ownerless_tmp_cross_if_exists_perm_src SET value = 30 WHERE id = 1");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
+
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert_temporary_cross_schema_mixed_if_exists_loop_rollback_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        15U,
+        30U,
+        perm_space_before
+    );
+    assert_temporary_cross_schema_mixed_if_exists_loop_rollback_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        15U,
+        30U,
+        perm_space_before
+    );
+    remove_concurrency_shm(database_path);
+    assert_temporary_cross_schema_mixed_if_exists_loop_rollback_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        15U,
+        30U,
+        perm_space_before
+    );
+    assert_temporary_cross_schema_mixed_if_exists_loop_rollback_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        15U,
+        30U,
+        perm_space_before
+    );
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_crashed_temporary_cross_schema_mixed_if_exists_rename_loop_recovers_perm(void) {
+    run_crashed_temporary_cross_schema_mixed_if_exists_rename_loop_recovers_perm(
+        temporary_cross_schema_mixed_if_exists_rename_until_native_file_op_fault,
+        "ownerless-temporary-cross-schema-mixed-if-exists-rn-loop-crash.mylite"
+    );
+}
+
+static void test_crashed_temporary_cross_schema_mixed_if_exists_reverse_loop_recovers_perm(void) {
+    run_crashed_temporary_cross_schema_mixed_if_exists_rename_loop_recovers_perm(
+        temporary_cross_schema_mixed_if_exists_rename_reverse_until_native_file_op_fault,
+        "ownerless-temporary-cross-schema-mixed-if-exists-reverse-rn-loop-crash.mylite"
+    );
+}
 #endif
 
 static void test_ownerless_rejects_non_innodb_engines(void) {
@@ -48523,6 +48652,94 @@ static void assert_temporary_cross_schema_mixed_if_exists_durable_state(
     free(app_path);
     free(datadir_path);
 }
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void assert_temporary_cross_schema_mixed_if_exists_loop_rollback_state(
+    open_database_paths paths,
+    unsigned flags,
+    unsigned expected_shadow_sum,
+    unsigned expected_perm_sum,
+    unsigned long long expected_perm_space
+) {
+    mylite_db *db = open_database(paths, flags);
+    char *datadir_path = path_join(paths.database_path, "datadir");
+    char *app_path = path_join(datadir_path, "app");
+    char *archive_path = path_join(datadir_path, "app_archive");
+    char *perm_src_frm_path = path_join(app_path, "ownerless_tmp_cross_if_exists_perm_src.frm");
+    char *perm_src_ibd_path = path_join(app_path, "ownerless_tmp_cross_if_exists_perm_src.ibd");
+    char *perm_dst_frm_path = path_join(archive_path, "ownerless_tmp_cross_if_exists_perm_dst.frm");
+    char *perm_dst_ibd_path = path_join(archive_path, "ownerless_tmp_cross_if_exists_perm_dst.ibd");
+    char *temp_dst_frm_path = path_join(app_path, "ownerless_tmp_cross_if_exists_shadow_moved.frm");
+    char *temp_dst_ibd_path = path_join(app_path, "ownerless_tmp_cross_if_exists_shadow_moved.ibd");
+    char *missing_before_dst_frm_path =
+        path_join(archive_path, "ownerless_tmp_cross_if_exists_missing_before_dst.frm");
+    char *missing_before_dst_ibd_path =
+        path_join(archive_path, "ownerless_tmp_cross_if_exists_missing_before_dst.ibd");
+    char *missing_after_dst_frm_path =
+        path_join(app_path, "ownerless_tmp_cross_if_exists_missing_after_dst.frm");
+    char *missing_after_dst_ibd_path =
+        path_join(app_path, "ownerless_tmp_cross_if_exists_missing_after_dst.ibd");
+    unsigned long long perm_space_after;
+
+    assert(path_exists(archive_path));
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_tmp_cross_if_exists_shadow") ==
+        expected_shadow_sum
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_tmp_cross_if_exists_perm_src") ==
+        expected_perm_sum
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_tmp_cross_if_exists_shadow_moved'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app_archive' "
+            "AND table_name = 'ownerless_tmp_cross_if_exists_perm_dst'"
+        ) == 0U
+    );
+    assert_temporary_cross_schema_mixed_if_exists_missing_targets_absent(db);
+    perm_space_after = query_unsigned(
+        db,
+        "SELECT SPACE FROM information_schema.INNODB_SYS_TABLES "
+        "WHERE NAME = 'app/ownerless_tmp_cross_if_exists_perm_src'"
+    );
+    assert(perm_space_after == expected_perm_space);
+    assert(!path_exists(perm_dst_frm_path));
+    assert(!path_exists(perm_dst_ibd_path));
+    assert(path_exists(perm_src_frm_path));
+    assert(path_exists(perm_src_ibd_path));
+    assert(!path_exists(temp_dst_frm_path));
+    assert(!path_exists(temp_dst_ibd_path));
+    assert(!path_exists(missing_before_dst_frm_path));
+    assert(!path_exists(missing_before_dst_ibd_path));
+    assert(!path_exists(missing_after_dst_frm_path));
+    assert(!path_exists(missing_after_dst_ibd_path));
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(missing_after_dst_ibd_path);
+    free(missing_after_dst_frm_path);
+    free(missing_before_dst_ibd_path);
+    free(missing_before_dst_frm_path);
+    free(temp_dst_ibd_path);
+    free(temp_dst_frm_path);
+    free(perm_dst_ibd_path);
+    free(perm_dst_frm_path);
+    free(perm_src_ibd_path);
+    free(perm_src_frm_path);
+    free(archive_path);
+    free(app_path);
+    free(datadir_path);
+}
+#endif
 
 static void create_temporary_cross_schema_mixed_if_exists_durable_base(mylite_db *db) {
     exec_ok(db, "CREATE DATABASE app_archive");
@@ -85175,6 +85392,60 @@ static void temporary_cross_schema_mixed_if_exists_rename_reverse_until_dictiona
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_tmp_cross_if_exists_shadow") == 99U
     );
     assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "dictionary-before-finish", 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
+    exec_ok(db, temporary_cross_schema_mixed_if_exists_rename_reverse_sql());
+    (void)mylite_close(db);
+    _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
+}
+
+static void temporary_cross_schema_mixed_if_exists_rename_until_native_file_op_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    mylite_db *db;
+    char ready_fd_value[32];
+
+    assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", ready_fd) > 0);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TEMPORARY TABLE app.ownerless_tmp_cross_if_exists_shadow ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_tmp_cross_if_exists_shadow VALUES (1, 99)");
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_tmp_cross_if_exists_shadow") == 99U
+    );
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "rename-table-after-native-file-op", 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
+    exec_ok(db, temporary_cross_schema_mixed_if_exists_rename_sql());
+    (void)mylite_close(db);
+    _exit(MYLITE_TEST_CHILD_EXEC_FAILED);
+}
+
+static void temporary_cross_schema_mixed_if_exists_rename_reverse_until_native_file_op_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    mylite_db *db;
+    char ready_fd_value[32];
+
+    assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", ready_fd) > 0);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TEMPORARY TABLE app.ownerless_tmp_cross_if_exists_shadow ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_tmp_cross_if_exists_shadow VALUES (1, 99)");
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_tmp_cross_if_exists_shadow") == 99U
+    );
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "rename-table-after-native-file-op", 1) == 0);
     assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
     exec_ok(db, temporary_cross_schema_mixed_if_exists_rename_reverse_sql());
     (void)mylite_close(db);

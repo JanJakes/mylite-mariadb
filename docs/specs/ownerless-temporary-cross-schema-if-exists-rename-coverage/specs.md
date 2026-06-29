@@ -46,9 +46,8 @@ In scope:
 
 Out of scope:
 
-- Native-loop rollback for this mixed temporary/permanent shape. The focused
-  prefinish boundary is the remaining reachable durable marker lane for this
-  slice.
+- Native-loop rollback for this mixed temporary/permanent shape is covered by
+  `docs/specs/ownerless-temporary-cross-schema-if-exists-rename-loop-coverage/specs.md`.
 - Arbitrary randomized temporary/permanent permutations.
 - Foreign-key mixed temporary/permanent rename lists.
 - SQL-level local table-lock fault injection.
@@ -154,6 +153,5 @@ behavior.
 
 - This is a deterministic cross-schema mixed rename-list slice, not randomized
   temporary/permanent permutation coverage.
-- Broader randomized DDL/RQG stress, FK mixed rename variants, native-loop
-  rollback subpoints for mixed temporary/permanent lists, and active-reader
-  pressure breadth remain completion work.
+- Broader randomized DDL/RQG stress, FK mixed rename variants, and
+  active-reader pressure breadth remain completion work.
