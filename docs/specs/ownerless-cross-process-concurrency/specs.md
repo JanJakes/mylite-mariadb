@@ -7734,8 +7734,13 @@ subsystems that this mode needs:
   generated columns with generated-column secondary indexes, proving original
   base values, generated values, forced-index reads, live-peer busy behavior,
   forced `.shm` rebuild, native reopen, and follow-up writes after recovery.
-  Arbitrary row-undo substeps, FK/trigger side effects, XA/prepared rollback,
-  and longer randomized savepoint schedules remain planned.
+  The FK/trigger row-undo follow-up repeats the full-transaction boundary on
+  FK `ON UPDATE CASCADE` child-row changes and trigger-written audit rows,
+  proving those side effects roll back through no-live recovery, live-peer busy
+  behavior, forced `.shm` rebuild, native reopen, and follow-up writes after
+  recovery. Arbitrary row-undo substeps, broader FK/trigger side-effect
+  matrices, XA/prepared rollback, and longer randomized savepoint schedules
+  remain planned.
   The implicit-rename follow-up broadens `RENAME TABLE` dictionary recovery
   classification from only explicit `schema.table` rename pairs to one- or
   two-part identifiers, then kills an implicit-schema `USE app; RENAME TABLE
@@ -8016,8 +8021,9 @@ subsystems that this mode needs:
      same-table large-row handoff, focused same-row conflict handoff, bounded
      randomized same-table schedule, and live-peer post-native/pre-state
      savepoint rollback cleanup boundary; generated-column row-undo side
-     effects now have focused full-rollback no-live and live-peer coverage,
-     while FK/trigger rollback side effects remain open.
+     effects and FK/trigger DML side effects now have focused full-rollback
+     no-live and live-peer coverage, while broader FK/trigger rollback crash
+     matrices remain open.
   3. Extend active-reader pressure evidence from retained-WAL policy, the
      covered killed-reader pressure-pin boundary, and the covered killed
      pressure-writer cleanup boundary to broader crash and external-oracle
