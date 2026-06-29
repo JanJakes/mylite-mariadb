@@ -481,6 +481,12 @@ index live-recovery lane while retaining the native file-operation marker
 until final no-live drain; the covered shape proves recovered FK enforcement,
 dropped-index absence, and new unique-index metadata/usage after live-peer
 recovery, ordinary native reopen, and forced `.shm` rebuild.
+Focused mixed `DROP FOREIGN KEY`, `RENAME INDEX`, and
+`ADD CONSTRAINT ... FOREIGN KEY` ALTER lists now use the existing metadata-only
+secondary-index rename recovery lane while retaining the native file-operation
+marker until final no-live drain; the covered shape proves recovered FK
+enforcement, old-index absence, renamed-index metadata/usage, ownerless/native
+reopen, and forced `.shm` rebuild.
 Simple temporary-table `RENAME TABLE` and `ALTER TABLE ... RENAME TO`
 tracking now preserves conservative handling for the renamed temp table and
 restores normal ownerless refresh for a previously shadowed permanent table;

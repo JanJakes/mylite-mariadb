@@ -1155,6 +1155,7 @@ static void test_crashed_foreign_key_mixed_comment_alter_recovers_state(void);
 static void test_crashed_foreign_key_mixed_default_alter_recovers_state(void);
 static void test_crashed_foreign_key_mixed_check_alter_recovers_state(void);
 static void test_crashed_foreign_key_mixed_index_alter_recovers_state(void);
+static void test_crashed_foreign_key_mixed_rename_index_alter_recovers_state(void);
 static void test_crashed_foreign_key_mixed_column_alter_recovers_state(void);
 static void test_crashed_foreign_key_mixed_drop_column_alter_recovers_state(void);
 static void test_crashed_foreign_key_mixed_modify_column_alter_recovers_state(void);
@@ -2048,6 +2049,10 @@ static void foreign_key_mixed_check_alter_until_dictionary_finish_fault(
     int ready_fd
 );
 static void foreign_key_mixed_index_alter_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void foreign_key_mixed_rename_index_alter_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -3685,6 +3690,10 @@ static void assert_ownerless_foreign_key_mixed_check_alter_crash_state(
     unsigned flags
 );
 static void assert_ownerless_foreign_key_mixed_index_alter_crash_state(
+    open_database_paths paths,
+    unsigned flags
+);
+static void assert_ownerless_foreign_key_mixed_rename_index_alter_crash_state(
     open_database_paths paths,
     unsigned flags
 );
@@ -5903,6 +5912,13 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 &&
+        strcmp(argv[1], "dictionary-foreign-key-mixed-rename-index-alter-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_foreign_key_mixed_rename_index_alter_recovers_state();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-foreign-key-mixed-column-alter-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_foreign_key_mixed_column_alter_recovers_state();
@@ -7193,6 +7209,7 @@ int main(int argc, char **argv) {
             "dictionary-foreign-key-mixed-default-alter-crash|"
             "dictionary-foreign-key-mixed-check-alter-crash|"
             "dictionary-foreign-key-mixed-index-alter-crash|"
+            "dictionary-foreign-key-mixed-rename-index-alter-crash|"
             "dictionary-foreign-key-mixed-column-alter-crash|"
             "dictionary-foreign-key-multi-rename-crash|"
             "dictionary-fk-rename-if-exists-missing-source-crash|"
@@ -56522,6 +56539,206 @@ static void test_crashed_foreign_key_mixed_index_alter_recovers_state(void) {
     free(root);
 }
 
+static void test_crashed_foreign_key_mixed_rename_index_alter_recovers_state(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-fk-mixed-rename-index-alter-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
+    mylite_db *db;
+    unsigned mariadb_errno = 0U;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_mixed_rename_idx_pa ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_mixed_rename_idx_pb ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_mixed_rename_idx_pc ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_fk_mixed_rename_idx_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_a_id INT NOT NULL, "
+        "parent_b_id INT NOT NULL, "
+        "parent_c_id INT NOT NULL, "
+        "value INT NOT NULL, "
+        "INDEX ownerless_fk_mixed_rename_idx_parent_a (parent_a_id), "
+        "INDEX ownerless_fk_mixed_rename_idx_parent_b (parent_b_id), "
+        "INDEX ownerless_fk_mixed_rename_idx_parent_c (parent_c_id), "
+        "INDEX ownerless_fk_mixed_rename_idx_old_value (value), "
+        "CONSTRAINT ownerless_fk_mixed_rename_idx_child_pa "
+        "FOREIGN KEY (parent_a_id) "
+        "REFERENCES app.ownerless_fk_mixed_rename_idx_pa (id), "
+        "CONSTRAINT ownerless_fk_mixed_rename_idx_child_pb "
+        "FOREIGN KEY (parent_b_id) "
+        "REFERENCES app.ownerless_fk_mixed_rename_idx_pb (id)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_fk_mixed_rename_idx_pa VALUES (1, 10), (2, 20)");
+    exec_ok(db, "INSERT INTO app.ownerless_fk_mixed_rename_idx_pb VALUES (10, 100), (20, 200)");
+    exec_ok(db, "INSERT INTO app.ownerless_fk_mixed_rename_idx_pc VALUES (100, 1000), (200, 2000)");
+    exec_ok(db, "INSERT INTO app.ownerless_fk_mixed_rename_idx_child VALUES (1, 1, 10, 100, 100)");
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_fk_mixed_rename_idx_child' "
+            "AND index_name = 'ownerless_fk_mixed_rename_idx_old_value' "
+            "AND column_name = 'value'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_fk_mixed_rename_idx_child' "
+            "AND index_name = 'ownerless_fk_mixed_rename_idx_new_value'"
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_fk_mixed_rename_idx_child VALUES (2, 99, 10, 100, 990)",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_NO_REFERENCED_ROW_ERRNO);
+    exec_ok(db, "COMMIT");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        foreign_key_mixed_rename_index_alter_until_dictionary_finish_fault
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_fk_mixed_rename_idx_child' "
+            "AND index_name = 'ownerless_fk_mixed_rename_idx_old_value'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_fk_mixed_rename_idx_child' "
+            "AND index_name = 'ownerless_fk_mixed_rename_idx_new_value' "
+            "AND column_name = 'value' "
+            "AND seq_in_index = 1 "
+            "AND non_unique = 1"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_fk_mixed_rename_idx_child' "
+            "AND constraint_name IN ("
+            "'ownerless_fk_mixed_rename_idx_child_pb', "
+            "'ownerless_fk_mixed_rename_idx_child_pc')"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_fk_mixed_rename_idx_child' "
+            "AND constraint_name = 'ownerless_fk_mixed_rename_idx_child_pa'"
+        ) == 0U
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_fk_mixed_rename_idx_child VALUES (2, 99, 10, 100, 990)");
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_fk_mixed_rename_idx_child VALUES (3, 1, 10, 999, 991)",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_NO_REFERENCED_ROW_ERRNO);
+    exec_ok(db, "COMMIT");
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_fk_mixed_rename_idx_child VALUES (3, 1, 99, 100, 992)",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_NO_REFERENCED_ROW_ERRNO);
+    exec_ok(db, "COMMIT");
+    exec_ok(db, "INSERT INTO app.ownerless_fk_mixed_rename_idx_child VALUES (3, 2, 20, 200, 200)");
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_mixed_rename_idx_child") == 3U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_mixed_rename_idx_child") ==
+        1290U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_mixed_rename_idx_child "
+            "FORCE INDEX (ownerless_fk_mixed_rename_idx_new_value)"
+        ) == 3U
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
+
+    assert_ownerless_foreign_key_mixed_rename_index_alter_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert_ownerless_foreign_key_mixed_rename_index_alter_crash_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_foreign_key_mixed_rename_index_alter_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_foreign_key_mixed_rename_index_alter_crash_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_foreign_key_mixed_column_alter_recovers_state(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -84061,6 +84278,25 @@ static void foreign_key_mixed_index_alter_until_dictionary_finish_fault(
     );
 }
 
+static void foreign_key_mixed_rename_index_alter_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_fk_mixed_rename_idx_child "
+        "DROP FOREIGN KEY ownerless_fk_mixed_rename_idx_child_pa, "
+        "RENAME INDEX ownerless_fk_mixed_rename_idx_old_value "
+        "TO ownerless_fk_mixed_rename_idx_new_value, "
+        "ADD CONSTRAINT ownerless_fk_mixed_rename_idx_child_pc "
+        "FOREIGN KEY (parent_c_id) "
+        "REFERENCES app.ownerless_fk_mixed_rename_idx_pc (id) "
+        "ON DELETE RESTRICT"
+    );
+}
+
 static void foreign_key_mixed_column_alter_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -99227,6 +99463,167 @@ static void assert_ownerless_foreign_key_mixed_index_alter_crash_state(
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_mixed_index_parent_a") == 2U);
     assert(
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_mixed_index_parent_a") == 30U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_foreign_key_mixed_rename_index_alter_crash_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+    unsigned mariadb_errno = 0U;
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_fk_mixed_rename_idx_child' "
+            "AND index_name = 'ownerless_fk_mixed_rename_idx_old_value'"
+        ) == 0U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_mixed_rename_idx_child "
+            "FORCE INDEX (ownerless_fk_mixed_rename_idx_old_value)",
+            NULL
+        ) != MYLITE_OK
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_fk_mixed_rename_idx_child' "
+            "AND index_name = 'ownerless_fk_mixed_rename_idx_new_value' "
+            "AND column_name = 'value' "
+            "AND seq_in_index = 1 "
+            "AND non_unique = 1"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_fk_mixed_rename_idx_child' "
+            "AND constraint_name IN ("
+            "'ownerless_fk_mixed_rename_idx_child_pb', "
+            "'ownerless_fk_mixed_rename_idx_child_pc')"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_fk_mixed_rename_idx_child' "
+            "AND constraint_name = 'ownerless_fk_mixed_rename_idx_child_pa'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.key_column_usage "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_fk_mixed_rename_idx_child' "
+            "AND ((constraint_name = 'ownerless_fk_mixed_rename_idx_child_pb' "
+            "AND column_name = 'parent_b_id' "
+            "AND referenced_table_name = 'ownerless_fk_mixed_rename_idx_pb' "
+            "AND referenced_column_name = 'id') "
+            "OR (constraint_name = 'ownerless_fk_mixed_rename_idx_child_pc' "
+            "AND column_name = 'parent_c_id' "
+            "AND referenced_table_name = 'ownerless_fk_mixed_rename_idx_pc' "
+            "AND referenced_column_name = 'id'))"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_mixed_rename_idx_child") == 3U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_mixed_rename_idx_child") ==
+        1290U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_mixed_rename_idx_child "
+            "FORCE INDEX (ownerless_fk_mixed_rename_idx_new_value)"
+        ) == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_mixed_rename_idx_child "
+            "FORCE INDEX (ownerless_fk_mixed_rename_idx_parent_a)"
+        ) == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_mixed_rename_idx_child "
+            "FORCE INDEX (ownerless_fk_mixed_rename_idx_parent_b)"
+        ) == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_fk_mixed_rename_idx_child "
+            "FORCE INDEX (ownerless_fk_mixed_rename_idx_parent_c)"
+        ) == 3U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_mixed_rename_idx_pa") == 2U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_mixed_rename_idx_pa") == 30U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_mixed_rename_idx_pb") == 2U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_mixed_rename_idx_pb") == 300U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_mixed_rename_idx_pc") == 2U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_mixed_rename_idx_pc") == 3000U
+    );
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_fk_mixed_rename_idx_child VALUES (4, 1, 10, 999, 400)",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_NO_REFERENCED_ROW_ERRNO);
+    exec_ok(db, "COMMIT");
+    assert(
+        exec_status(
+            db,
+            "INSERT INTO app.ownerless_fk_mixed_rename_idx_child VALUES (4, 1, 99, 100, 401)",
+            &mariadb_errno
+        ) != MYLITE_OK
+    );
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_NO_REFERENCED_ROW_ERRNO);
+    exec_ok(db, "COMMIT");
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_fk_mixed_rename_idx_child VALUES (4, 999, 10, 100, 400)"
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_fk_mixed_rename_idx_pa WHERE id = 1");
+    exec_ok(db, "INSERT INTO app.ownerless_fk_mixed_rename_idx_pa VALUES (1, 10)");
+    exec_ok(db, "DELETE FROM app.ownerless_fk_mixed_rename_idx_child WHERE id = 4");
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_mixed_rename_idx_child") == 3U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_mixed_rename_idx_child") ==
+        1290U
+    );
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_mixed_rename_idx_pa") == 2U);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_mixed_rename_idx_pa") == 30U
     );
     assert(mylite_close(db) == MYLITE_OK);
 }

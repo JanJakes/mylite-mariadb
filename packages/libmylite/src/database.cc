@@ -2307,6 +2307,13 @@ bool ownerless_alter_table_rename_index_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 );
+bool consume_ownerless_alter_table_rename_index_recovery_clause(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::size_t &index,
+    std::string_view schema_name,
+    std::string_view table_name
+);
 bool ownerless_alter_table_alter_index_ignorability_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
@@ -18069,6 +18076,49 @@ bool ownerless_alter_table_rename_index_recovery_statement(
            !new_index_exists;
 }
 
+bool consume_ownerless_alter_table_rename_index_recovery_clause(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::size_t &index,
+    std::string_view schema_name,
+    std::string_view table_name
+) {
+    if (index + 4U >= tokens.count || !token_equals(tokens.values[index], "RENAME") ||
+        !token_in(tokens.values[index + 1U], "INDEX", "KEY") ||
+        !ownerless_table_identifier_token(tokens.values[index + 2U]) ||
+        !token_equals(tokens.values[index + 3U], "TO") ||
+        !ownerless_table_identifier_token(tokens.values[index + 4U])) {
+        return false;
+    }
+    const std::size_t start_index = index;
+    const std::string old_index_name = ownerless_normalized_identifier(tokens.values[index + 2U]);
+    const std::string new_index_name = ownerless_normalized_identifier(tokens.values[index + 4U]);
+    index += 5U;
+
+    bool old_index_exists = false;
+    bool new_index_exists = true;
+    if (!ownerless_index_metadata_lookup(
+            db,
+            schema_name,
+            table_name,
+            old_index_name,
+            &old_index_exists
+        ) ||
+        !old_index_exists ||
+        !ownerless_index_metadata_lookup(
+            db,
+            schema_name,
+            table_name,
+            new_index_name,
+            &new_index_exists
+        ) ||
+        new_index_exists) {
+        index = start_index;
+        return false;
+    }
+    return true;
+}
+
 bool ownerless_alter_table_alter_index_ignorability_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
@@ -19905,17 +19955,31 @@ bool ownerless_alter_table_mixed_foreign_key_recovery_statement(
             }
             mixed_recovery_kind = MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_CHANGE_COLUMN;
         } else if (index < tokens.count && token_equals(tokens.values[index], "RENAME")) {
-            if (mixed_recovery_kind != MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE ||
-                !consume_ownerless_alter_table_rename_column_recovery_clause(
+            const std::size_t rename_index = index;
+            if (mixed_recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE &&
+                consume_ownerless_alter_table_rename_index_recovery_clause(
                     db,
                     tokens,
                     index,
                     child_schema_name,
                     child_table_name
                 )) {
-                return false;
+                mixed_recovery_kind = MYLITE_OWNERLESS_DICTIONARY_RECOVERY_RENAME_INDEX;
+            } else {
+                index = rename_index;
+                if (mixed_recovery_kind != MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE ||
+                    !consume_ownerless_alter_table_rename_column_recovery_clause(
+                        db,
+                        tokens,
+                        index,
+                        child_schema_name,
+                        child_table_name
+                    )) {
+                    return false;
+                }
+                mixed_recovery_kind =
+                    MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_RENAME_COLUMN;
             }
-            mixed_recovery_kind = MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_RENAME_COLUMN;
         } else if (consume_ownerless_alter_table_comment_recovery_clause(tokens, index)) {
             /* Table comments are metadata-only and share FK live-recovery semantics. */
         } else if (consume_ownerless_alter_column_set_default_recovery_clause(tokens, index)) {
