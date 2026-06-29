@@ -58160,8 +58160,7 @@ static void test_crashed_foreign_key_cross_schema_multi_rename_dictionary_ddl_re
     free(root);
 }
 
-static void test_crashed_fk_cross_schema_rename_if_exists_missing_source_recovers_constraints(
-    void
+static void test_crashed_fk_cross_schema_rename_if_exists_missing_source_recovers_constraints(void
 ) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");

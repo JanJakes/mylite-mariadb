@@ -16062,8 +16062,7 @@ bool ownerless_generated_column_definition_uses_rejected_function_token(std::str
            token_equals(token, "SELECT");
 }
 
-bool ownerless_create_table_has_generated_column_recovery_disqualifier(
-    const SqlPolicyTokens &tokens
+bool ownerless_create_table_has_generated_column_recovery_disqualifier(const SqlPolicyTokens &tokens
 ) {
     bool has_generated_column = false;
     for (std::size_t index = 0U; index < tokens.count; ++index) {
