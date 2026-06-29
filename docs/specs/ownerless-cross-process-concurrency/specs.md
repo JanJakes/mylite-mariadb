@@ -2451,8 +2451,10 @@ Tasks:
    only when no active page-version pins remain. If retained payload still
    exists after a final no-live ownerless shutdown, MyLite replays visible
    tablespace images after `mysql_server_end()` and checkpoints the WAL at the
-   ownerless visible LSN, avoiding a running-buffer-pool race while preserving
-   ordinary native reopen semantics. Page-version publication now
+   ownerless visible LSN when native rollback history is empty; otherwise it
+   keeps native-support WAL retained as rollback-history evidence, avoiding a
+   running-buffer-pool race while preserving ordinary native reopen semantics.
+   Page-version publication now
    opportunistically synthesizes a boundary record from the native tablespace
    page when an older snapshot pin is active, no WAL boundary exists, and the
    native page LSN is at or below the oldest pin; if that proof is unavailable,
@@ -2498,7 +2500,9 @@ Tasks:
    row/table locks provide the wait and release semantics for those reads.
    Product close-time reclaim does not use the single-active-pin primitive while
    a live pin remains; it retains the WAL until release, then uses native
-   checkpoint proof through the existing zero-pin or no-live reclaim path.
+   checkpoint proof through the existing zero-pin or no-live reclaim path to
+   remove user page-version records; native-support records may remain when
+   rollback history still requires them.
    Bounded SQL-level repeated same-row pressure and
    distinct large-row expanding-page pressure are now covered while a live
    repeatable-read snapshot pin remains active. The
@@ -2589,11 +2593,12 @@ Tasks:
    same-process statement, prepared result cursor, or explicit transaction is
    open, the WAL threshold is reached, and page-version pins have drained.
    Focused SQL coverage keeps a writer handle open, releases a shared read-only
-   snapshot pin, executes no further writer SQL, and requires WAL checkpointing
-   before close; the `ownerless-timer-prepared-result-gating` follow-up leaves
+   snapshot pin, executes no further writer SQL, and requires user page-version
+   WAL reclamation before close while allowing rollback-history native-support
+   WAL to remain; the `ownerless-timer-prepared-result-gating` follow-up leaves
    an ownerless prepared `SELECT` result cursor active across the snapshot-pin
    release, proves the timer keeps WAL retained while the cursor is live, then
-   finalizes the cursor and requires timer checkpointing without another writer
+   finalizes the cursor and requires the same reclamation without another writer
    SQL statement. Live-reclaim gating mirrors a process-local
    explicit-transaction count into each ownerless process slot so idle peers
    that are between SQL statements inside an explicit transaction still block
@@ -2614,8 +2619,10 @@ Tasks:
    `ownerless-blob-page-pressure` slice adds focused SQL evidence for
    `ROW_FORMAT=DYNAMIC` `LONGBLOB` off-page native BLOB pages under a live
    snapshot pin, including `.ibd` page-type evidence, WAL retention during the
-   pin, checkpoint after release, and ownerless/native reopen before and after
-   forced `.shm` rebuild. The `ownerless-blob-page-size-matrix` slice broadens
+   pin, user page-version WAL reclamation after release with
+   rollback-history-backed native-support WAL allowed to remain, and
+   ownerless/native reopen before and after forced `.shm` rebuild. The
+   `ownerless-blob-page-size-matrix` slice broadens
    the same dynamic-row-format lifecycle evidence to bounded 12 KiB, 24 KiB,
    48 KiB, 96 KiB, and 192 KiB `LONGBLOB` payload sizes under one live snapshot
    pin. The `ownerless-blob-page-wide-size-matrix` slice records the widened
@@ -5310,8 +5317,9 @@ Tasks:
    KEY_BLOCK_SIZE=8` off-page `LONGBLOB` payloads with
    `MYLITE_OWNERLESS_COMPRESSED_BLOB_PAGE_PRESSURE_ROWS=8`. The
    compressed BLOB key-block matrix covers the same active-reader retention and
-   post-release checkpoint lifecycle for `KEY_BLOCK_SIZE=1`, `2`, `4`, `8`, and
-   `16`, with native `ZBLOB`/`ZBLOB2` page evidence for each table. The killed
+   post-release user-WAL reclamation lifecycle for `KEY_BLOCK_SIZE=1`, `2`,
+   `4`, `8`, and `16`, with native `ZBLOB`/`ZBLOB2` page evidence for each
+   table. The killed
    active-reader pressure-pin follow-up keeps an idle live ownerless peer open,
    commits multiple writer updates retained by a repeatable-read snapshot pin,
    proves a configured `ownerless_page_log_limit_bytes` writer returns busy
@@ -5542,7 +5550,9 @@ Minimum suites before support can be claimed:
     retention and multi-pin newer-record retention separate from
     single-snapshot post-snapshot compaction, while product close-time reclaim
     retains WAL whenever an active pin remains and no-live close forces native
-    checkpoint proof before truncating retained WAL after the pin releases,
+    checkpoint proof before truncating retained WAL after the pin releases or
+    leaves native-support WAL retained when rollback-history evidence requires
+    it,
   - consistent-snapshot start pin with deterministic pause; unsafe-hook SQL
     coverage proves the shared pin is published before SQL execution and blocks
     concurrent live-peer close-time reclamation,
@@ -7697,7 +7707,8 @@ subsystems that this mode needs:
   opened. Focused live snapshot reader-close coverage, including the
   synthesized native-boundary variant, now proves that the live pin retains peer
   WAL until release and that post-release no-live reclaim checkpoints it once
-  native boundary proof is available.
+  native boundary proof is available and rollback history is drained, or keeps
+  native-support WAL retained with rollback-history evidence.
   Focused record-lock-grant crash coverage now also proves stale-reader rebuild
   does not discard retained committed page images, and that final no-live close
   drains retained WAL through post-shutdown tablespace replay and checkpoint.

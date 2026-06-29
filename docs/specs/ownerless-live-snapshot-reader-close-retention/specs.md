@@ -6,10 +6,12 @@ The live snapshot-pin reclaim SQL cases must prove two distinct boundaries:
 while a repeatable-read reader owns a snapshot pin, peer page-version WAL must
 remain retained; after the reader releases the pin, no-live reclaim may
 checkpoint retained WAL if the native checkpoint proof can make the visible
-boundary durable. Older reader-close coverage assumed the released reader must
-always leave peer WAL for a later opener, but later native snapshot-boundary and
-native checkpoint proof work made immediate no-live reader-close drain safe for
-these focused cases.
+boundary durable, or may keep native-support WAL when native rollback history
+still makes that retention the conservative proof. Older reader-close coverage
+assumed the released reader must always leave peer WAL for a later opener, but
+later native snapshot-boundary and native checkpoint proof work made immediate
+no-live reader-close drain safe for the focused cases that have no rollback
+history obligation.
 
 ## Source Findings
 
@@ -20,8 +22,9 @@ these focused cases.
   reclaim while page-version pins are active and requires native checkpoint
   proof before truncating retained WAL.
 - Native snapshot-boundary synthesis can leave compact boundary/native-support
-  records that the final no-live reader close can prove and checkpoint after the
-  snapshot releases.
+  records that the final no-live reader close can prove and either checkpoint
+  after the snapshot releases or retain while native rollback history is still
+  non-empty.
 - `docs/specs/ownerless-random-tx-rollback-handoff/specs.md` and
   `docs/specs/ownerless-cross-process-concurrency/specs.md` document the
   conservative rollback and handoff rules for cases that still cannot prove a
@@ -36,11 +39,13 @@ contract:
 1. Keep the live reader pin while a peer writer appends page-version WAL.
 2. Verify the writer close leaves WAL retained while the pin is active.
 3. Release and reap the reader, then require retained WAL to checkpoint once no
-   live pin remains and native proof succeeds.
+   live pin remains and native proof succeeds, or to remain retained only when
+   native rollback-history evidence justifies it.
 4. Open a fresh ownerless read/write handle, verify the committed aggregate,
-   and keep the final checkpoint assertion.
+   and keep the final checkpoint-or-rollback-retention assertion.
 5. Force `.shm` rebuild and ordinary native reopen to prove the native boundary
-   is durable without retained WAL.
+   is durable with checkpointed WAL or rollback-history-retained native-support
+   WAL.
 
 No new file formats or SQL behavior are required for this adjustment.
 
@@ -65,14 +70,17 @@ SQL behavior and public API behavior are unchanged. Repeatable-read and
 serializable readers still see the snapshot they pinned. The clarified contract
 is lifecycle timing: a stale reader-only process that consumed peer WAL may
 checkpoint it only after the pin releases and exact native page proof covers the
-retained records; otherwise it leaves the WAL for the next safe recovery owner.
+retained records; otherwise it leaves the WAL for the next safe recovery owner,
+including the case where native rollback history still requires retained
+native-support evidence.
 
 ## Directory And Lifecycle Impact
 
 No files or formats are added. Retained `concurrency/mylite-concurrency.wal`
 records remain inside the MyLite database directory until a no-live ownerless
 close or a later fresh ownerless opener can prove and checkpoint the visible
-boundary.
+boundary, or until native rollback history drains enough for those retained
+native-support records to be removed.
 
 ## Native Storage Impact
 
@@ -81,7 +89,8 @@ has replayed/refreshed the retained page-version boundary and closed through the
 existing native checkpoint path. The stale reader does not use newer native page
 LSNs as successor proof for peer-written WAL; it checkpoints only when retained
 payloads exactly match native pages or otherwise remain proven by the native
-checkpoint proof scan.
+checkpoint proof scan, and it may leave native-support WAL retained while
+native rollback history is non-empty.
 
 ## Test Plan
 
@@ -102,11 +111,14 @@ checkpoint proof scan.
 
 - The live snapshot pin retains peer WAL until the pin releases.
 - After reader release, no-live reclaim checkpoints retained WAL before or by
-  the next ownerless close.
+  the next ownerless close, or retains native-support WAL only with native
+  rollback-history evidence.
 - A fresh ownerless opener reads the committed data with the WAL already
-  checkpointed or checkpoints it again as a no-op.
+  checkpointed, checkpoints it again as a no-op, or observes retained
+  rollback-history-backed native-support WAL.
 - Forced `.shm` rebuild plus ordinary native reopen still preserve the final
-  committed rows without retained WAL.
+  committed rows with checkpointed WAL or rollback-history-backed native-support
+  WAL.
 - Existing live idle-peer, live writer, synthesized-boundary, active-pin
   boundary, and killed-pin reclaim cases continue to pass.
 

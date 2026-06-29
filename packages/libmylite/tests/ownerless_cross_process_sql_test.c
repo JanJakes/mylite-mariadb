@@ -4262,12 +4262,10 @@ static unsigned count_concurrency_wal_records_with_flags(
     const char *database_path,
     uint32_t required_flags
 );
-#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static unsigned count_concurrency_wal_records_without_flags(
     const char *database_path,
     uint32_t excluded_flags
 );
-#endif
 static unsigned count_ownerless_blob_pressure_blob_pages(const char *database_path);
 static unsigned count_ownerless_blob_size_matrix_blob_pages(const char *database_path);
 static unsigned count_ownerless_compressed_blob_pressure_zblob_pages(const char *database_path);
@@ -4292,6 +4290,12 @@ static int concurrency_wal_is_checkpointed(const char *database_path);
 static int wait_for_concurrency_wal_checkpointed(const char *database_path, unsigned timeout_ms);
 static void assert_concurrency_wal_checkpointed(const char *database_path);
 static void assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(
+    const char *database_path
+);
+static void assert_concurrency_wal_checkpointed_or_retained_native_support_only(
+    const char *database_path
+);
+static void assert_concurrency_wal_checkpointed_or_retained_native_support_only_eventually(
     const char *database_path
 );
 static void assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(
@@ -12984,7 +12988,13 @@ static void test_ownerless_checkpoint_generation_cache_hits_single_owner(void) {
         database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_CHECKPOINT_UPDATE_FILE_READ_ELIDED]
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_eventually(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
+    assert(
+        count_concurrency_wal_records_without_flags(
+            database_path,
+            MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+        ) == 0U
+    );
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -13213,7 +13223,7 @@ static void test_ownerless_native_file_op_marker_drains_after_real_sql_ddl(void)
     exec_ok(db, "INSERT INTO app.ownerless_native_file_op_marker_sql (value) VALUES (10)");
     assert(query_unsigned(db, "SELECT MAX(id) FROM app.ownerless_native_file_op_marker_sql") == 1U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     assert(pipe(ready_pipe) == 0);
@@ -13246,7 +13256,7 @@ static void test_ownerless_native_file_op_marker_drains_after_real_sql_ddl(void)
     signal_pipe(release_pipe[1]);
     wait_for_child(peer_child);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -16468,7 +16478,13 @@ static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close
         MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_eventually(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
+    assert(
+        count_concurrency_wal_records_without_flags(
+            database_path,
+            MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+        ) == 0U
+    );
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
@@ -20712,7 +20728,7 @@ static void test_ownerless_single_owner_foreground_reclaim_budget_defers_to_time
         exec_ok(writer_db, sql);
     }
     assert(mylite_close(writer_db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
     writer_db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     cursor_db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -21119,7 +21135,13 @@ static void test_ownerless_timer_checkpoint_scheduling_reclaims_idle_runtime(voi
         192000U
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
+    assert(
+        count_concurrency_wal_records_without_flags(
+            database_path,
+            MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+        ) == 0U
+    );
 
     assert(pipe(ready_pipe) == 0);
     assert(pipe(release_pipe) == 0);
@@ -21173,7 +21195,13 @@ static void test_ownerless_timer_checkpoint_scheduling_reclaims_idle_runtime(voi
         ) == 48U
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
+    assert(
+        count_concurrency_wal_records_without_flags(
+            database_path,
+            MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+        ) == 0U
+    );
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
@@ -21185,7 +21213,13 @@ static void test_ownerless_timer_checkpoint_scheduling_reclaims_idle_runtime(voi
         ) == 48U
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
+    assert(
+        count_concurrency_wal_records_without_flags(
+            database_path,
+            MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+        ) == 0U
+    );
 
     free(database_path);
     free(runtime_root);
@@ -21229,7 +21263,7 @@ static void test_ownerless_timer_checkpoint_scheduling_waits_for_prepared_result
         exec_ok(writer_db, sql);
     }
     assert(mylite_close(writer_db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
     assert(pipe(ready_pipe) == 0);
     assert(pipe(release_pipe) == 0);
@@ -21281,7 +21315,7 @@ static void test_ownerless_timer_checkpoint_scheduling_waits_for_prepared_result
 
     assert(mylite_finalize(stmt) == MYLITE_OK);
     stmt = NULL;
-    assert_concurrency_wal_checkpointed_eventually(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only_eventually(database_path);
     assert(
         query_unsigned(
             writer_db,
@@ -21291,7 +21325,7 @@ static void test_ownerless_timer_checkpoint_scheduling_waits_for_prepared_result
     );
     assert(mylite_close(cursor_db) == MYLITE_OK);
     assert(mylite_close(writer_db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
     remove_concurrency_shm(database_path);
     writer_db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -21303,7 +21337,7 @@ static void test_ownerless_timer_checkpoint_scheduling_waits_for_prepared_result
         ) == 48U
     );
     assert(mylite_close(writer_db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
     remove_concurrency_shm(database_path);
     writer_db = open_database(paths, MYLITE_OPEN_READWRITE);
@@ -21315,7 +21349,7 @@ static void test_ownerless_timer_checkpoint_scheduling_waits_for_prepared_result
         ) == 48U
     );
     assert(mylite_close(writer_db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
     close(ready_pipe[0]);
     close(release_pipe[1]);
@@ -21444,18 +21478,18 @@ static void test_ownerless_live_snapshot_pin_blocks_page_log_reclaim(void) {
 
     signal_pipe(release_pipe[1]);
     wait_for_child(reader_child);
-    assert_concurrency_wal_checkpointed_eventually(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 35U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_eventually(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 35U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
 
     free(database_path);
     free(runtime_root);
@@ -21514,18 +21548,18 @@ static void test_ownerless_live_snapshot_pin_synthesizes_page_boundary(void) {
 
     signal_pipe(release_pipe[1]);
     wait_for_child(reader_child);
-    assert_concurrency_wal_checkpointed_eventually(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 35U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_eventually(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 35U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
 
     free(database_path);
     free(runtime_root);
@@ -21750,7 +21784,13 @@ static void test_ownerless_active_reader_pressure_killed_pin_reclaims_live_peer(
         expected_after_dead_pin_write
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_eventually(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
+    assert(
+        count_concurrency_wal_records_without_flags(
+            database_path,
+            MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+        ) == 0U
+    );
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
@@ -22555,14 +22595,14 @@ static void test_ownerless_active_reader_pressure_limit_blocks_writes(void) {
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 3U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 62U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_eventually(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only_eventually(database_path);
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_sql") == 3U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 62U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
     free(database_path);
     free(runtime_root);
@@ -25239,7 +25279,13 @@ static void test_ownerless_expanding_page_pressure_reclaims_after_release(void) 
         rows * 4000ULL
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
+    assert(
+        count_concurrency_wal_records_without_flags(
+            database_path,
+            MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+        ) == 0U
+    );
 
     assert(pipe(ready_pipe) == 0);
     assert(pipe(release_pipe) == 0);
@@ -25284,7 +25330,12 @@ static void test_ownerless_expanding_page_pressure_reclaims_after_release(void) 
         );
         assert(mylite_close(db) == MYLITE_OK);
         assert(!concurrency_wal_is_checkpointed(database_path));
-        assert(count_concurrency_wal_records_at_or_before(database_path, UINT64_MAX) > 0U);
+        assert(
+            count_concurrency_wal_records_without_flags(
+                database_path,
+                MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+            ) > 0U
+        );
     }
 
     signal_pipe(release_pipe[1]);
@@ -25300,7 +25351,13 @@ static void test_ownerless_expanding_page_pressure_reclaims_after_release(void) 
         rows * 4000ULL
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_eventually(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
+    assert(
+        count_concurrency_wal_records_without_flags(
+            database_path,
+            MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+        ) == 0U
+    );
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
@@ -25313,7 +25370,13 @@ static void test_ownerless_expanding_page_pressure_reclaims_after_release(void) 
         rows * 4000ULL
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
+    assert(
+        count_concurrency_wal_records_without_flags(
+            database_path,
+            MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+        ) == 0U
+    );
 
     free(database_path);
     free(runtime_root);
@@ -25367,7 +25430,13 @@ static void test_ownerless_blob_page_pressure_reclaims_after_release(void) {
         rows * MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
+    assert(
+        count_concurrency_wal_records_without_flags(
+            database_path,
+            MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+        ) == 0U
+    );
     assert(count_ownerless_blob_pressure_blob_pages(database_path) > 0U);
 
     assert(pipe(ready_pipe) == 0);
@@ -25418,7 +25487,12 @@ static void test_ownerless_blob_page_pressure_reclaims_after_release(void) {
         );
         assert(mylite_close(db) == MYLITE_OK);
         assert(!concurrency_wal_is_checkpointed(database_path));
-        assert(count_concurrency_wal_records_at_or_before(database_path, UINT64_MAX) > 0U);
+        assert(
+            count_concurrency_wal_records_without_flags(
+                database_path,
+                MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+            ) > 0U
+        );
     }
 
     signal_pipe(release_pipe[1]);
@@ -25508,7 +25582,13 @@ static void test_ownerless_blob_page_size_matrix_reclaims_after_release(void) {
         expected_payload_bytes
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
+    assert(
+        count_concurrency_wal_records_without_flags(
+            database_path,
+            MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+        ) == 0U
+    );
     assert(count_ownerless_blob_size_matrix_blob_pages(database_path) > 0U);
 
     assert(pipe(ready_pipe) == 0);
@@ -25560,7 +25640,12 @@ static void test_ownerless_blob_page_size_matrix_reclaims_after_release(void) {
         );
         assert(mylite_close(db) == MYLITE_OK);
         assert(!concurrency_wal_is_checkpointed(database_path));
-        assert(count_concurrency_wal_records_at_or_before(database_path, UINT64_MAX) > 0U);
+        assert(
+            count_concurrency_wal_records_without_flags(
+                database_path,
+                MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+            ) > 0U
+        );
     }
 
     signal_pipe(release_pipe[1]);
@@ -25627,7 +25712,13 @@ static void test_ownerless_compressed_blob_page_pressure_reclaims_after_release(
         ) == rows * MYLITE_TEST_BLOB_PAGE_PRESSURE_PAYLOAD_BYTES
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
+    assert(
+        count_concurrency_wal_records_without_flags(
+            database_path,
+            MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+        ) == 0U
+    );
     assert(count_ownerless_compressed_blob_pressure_zblob_pages(database_path) > 0U);
 
     assert(pipe(ready_pipe) == 0);
@@ -25670,7 +25761,12 @@ static void test_ownerless_compressed_blob_page_pressure_reclaims_after_release(
         );
         assert(mylite_close(db) == MYLITE_OK);
         assert(!concurrency_wal_is_checkpointed(database_path));
-        assert(count_concurrency_wal_records_at_or_before(database_path, UINT64_MAX) > 0U);
+        assert(
+            count_concurrency_wal_records_without_flags(
+                database_path,
+                MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+            ) > 0U
+        );
     }
 
     signal_pipe(release_pipe[1]);
@@ -25751,7 +25847,13 @@ static void test_ownerless_compressed_blob_page_size_matrix_reclaims_after_relea
         ) == expected_payload_bytes
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
+    assert(
+        count_concurrency_wal_records_without_flags(
+            database_path,
+            MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+        ) == 0U
+    );
     assert(count_ownerless_compressed_blob_size_matrix_zblob_pages(database_path) > 0U);
 
     assert(pipe(ready_pipe) == 0);
@@ -25796,7 +25898,12 @@ static void test_ownerless_compressed_blob_page_size_matrix_reclaims_after_relea
         );
         assert(mylite_close(db) == MYLITE_OK);
         assert(!concurrency_wal_is_checkpointed(database_path));
-        assert(count_concurrency_wal_records_at_or_before(database_path, UINT64_MAX) > 0U);
+        assert(
+            count_concurrency_wal_records_without_flags(
+                database_path,
+                MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+            ) > 0U
+        );
     }
 
     signal_pipe(release_pipe[1]);
@@ -25889,7 +25996,13 @@ static void test_ownerless_compressed_blob_key_block_matrix_reclaims_after_relea
         expected_payload_bytes
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
+    assert(
+        count_concurrency_wal_records_without_flags(
+            database_path,
+            MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+        ) == 0U
+    );
     assert_ownerless_zblob_pages(database_path);
 
     assert(pipe(ready_pipe) == 0);
@@ -25941,7 +26054,12 @@ static void test_ownerless_compressed_blob_key_block_matrix_reclaims_after_relea
             );
             assert(mylite_close(db) == MYLITE_OK);
             assert(!concurrency_wal_is_checkpointed(database_path));
-            assert(count_concurrency_wal_records_at_or_before(database_path, UINT64_MAX) > 0U);
+            assert(
+                count_concurrency_wal_records_without_flags(
+                    database_path,
+                    MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+                ) > 0U
+            );
         }
     }
 
@@ -28245,7 +28363,7 @@ static void test_ownerless_created_tablespace_replay_keeps_created_space(void) {
         410U
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
     assert(path_exists(source_frm_path));
     assert(path_exists(source_ibd_path));
     assert(!path_exists(frm_path));
@@ -73952,7 +74070,7 @@ static void assert_ownerless_drop_crash_absent_state(
     mylite_db *db = open_database(paths, flags);
 
     if ((flags & MYLITE_OPEN_OWNERLESS_RW) != 0U) {
-        assert_concurrency_wal_checkpointed(database_path);
+        assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
     }
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
     assert(
@@ -90994,7 +91112,15 @@ static void assert_ownerless_blob_page_pressure_state(
         ) == 1U
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(paths.database_path));
+    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(
+        paths.database_path
+    );
+    assert(
+        count_concurrency_wal_records_without_flags(
+            paths.database_path,
+            MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+        ) == 0U
+    );
     assert(count_ownerless_blob_pressure_blob_pages(paths.database_path) > 0U);
 }
 
@@ -91036,7 +91162,15 @@ static void assert_ownerless_blob_size_matrix_state(
         ) == 1U
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(paths.database_path));
+    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(
+        paths.database_path
+    );
+    assert(
+        count_concurrency_wal_records_without_flags(
+            paths.database_path,
+            MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+        ) == 0U
+    );
     assert(count_ownerless_blob_size_matrix_blob_pages(paths.database_path) > 0U);
 }
 
@@ -91078,7 +91212,15 @@ static void assert_ownerless_compressed_blob_page_pressure_state(
         ) == 1U
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(paths.database_path));
+    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(
+        paths.database_path
+    );
+    assert(
+        count_concurrency_wal_records_without_flags(
+            paths.database_path,
+            MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+        ) == 0U
+    );
     assert(count_ownerless_compressed_blob_pressure_zblob_pages(paths.database_path) > 0U);
 }
 
@@ -91122,7 +91264,15 @@ static void assert_ownerless_compressed_blob_size_matrix_state(
         ) == 1U
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(paths.database_path));
+    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(
+        paths.database_path
+    );
+    assert(
+        count_concurrency_wal_records_without_flags(
+            paths.database_path,
+            MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+        ) == 0U
+    );
     assert(count_ownerless_compressed_blob_size_matrix_zblob_pages(paths.database_path) > 0U);
 }
 
@@ -91171,7 +91321,15 @@ static void assert_ownerless_compressed_blob_key_block_matrix_state(
         assert(query_unsigned(db, sql) == 1U);
     }
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(paths.database_path));
+    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(
+        paths.database_path
+    );
+    assert(
+        count_concurrency_wal_records_without_flags(
+            paths.database_path,
+            MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+        ) == 0U
+    );
     assert_ownerless_zblob_pages(paths.database_path);
 }
 
@@ -92243,7 +92401,7 @@ static void assert_ownerless_created_tablespace_replay_state(
     assert(path_exists(ctas_frm_path));
     assert(path_exists(ctas_ibd_path));
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
     free(ctas_ibd_path);
     free(ctas_frm_path);
@@ -111350,7 +111508,6 @@ static unsigned count_concurrency_wal_records_with_flags(
     return count;
 }
 
-#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static unsigned count_concurrency_wal_records_without_flags(
     const char *database_path,
     uint32_t excluded_flags
@@ -111401,7 +111558,6 @@ static unsigned count_concurrency_wal_records_without_flags(
     free(concurrency_path);
     return count;
 }
-#endif
 
 static unsigned count_ownerless_blob_pressure_blob_pages(const char *database_path) {
     char *datadir_path = path_join(database_path, "datadir");
@@ -112106,6 +112262,40 @@ static void assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_
     );
     fflush(stderr);
     assert(0);
+}
+
+static void assert_concurrency_wal_checkpointed_or_retained_native_support_only(
+    const char *database_path
+) {
+    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
+    assert(
+        count_concurrency_wal_records_without_flags(
+            database_path,
+            MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+        ) == 0U
+    );
+}
+
+static void assert_concurrency_wal_checkpointed_or_retained_native_support_only_eventually(
+    const char *database_path
+) {
+    for (unsigned attempt = 0U; attempt < 50U; ++attempt) {
+        int rollback_history_empty = 1;
+
+        if (concurrency_wal_is_checkpointed(database_path)) {
+            return;
+        }
+        if (native_rollback_history_headers_state(database_path, &rollback_history_empty) &&
+            !rollback_history_empty &&
+            count_concurrency_wal_records_without_flags(
+                database_path,
+                MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+            ) == 0U) {
+            return;
+        }
+        sleep_microseconds(MYLITE_TEST_WAIT_POLL_INTERVAL_US);
+    }
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 }
 
 static void assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(
