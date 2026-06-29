@@ -5096,11 +5096,13 @@ Tasks:
    crash coverage now uses metadata-only recoverable dictionary markers to
    recover native schema directory/`db.opt` creation or rewrite while a peer
    remains live and the native file-operation marker stays clear. Focused
-   combined schema option-order coverage now kills
-   `ALTER DATABASE ... COMMENT ... DEFAULT CHARACTER SET ... COLLATE ...`
-   after MariaDB rewrites native `db.opt` but before ownerless dictionary
-   finish, then recovers both the schema comment and default charset/collation
-   while a peer remains live and the native file-operation marker stays clear.
+   combined schema option-order coverage now kills named
+   `ALTER DATABASE ... COMMENT ... DEFAULT CHARACTER SET ... COLLATE ...` and
+   current-schema `USE schema; ALTER DATABASE COMMENT ... DEFAULT CHARACTER
+   SET ... COLLATE ...` writers after MariaDB rewrites native `db.opt` but
+   before ownerless dictionary finish, then recovers both the schema comment
+   and default charset/collation while a peer remains live and the native
+   file-operation marker stays clear.
    Focused
    table-bearing `DROP DATABASE|SCHEMA` prefinish crash coverage now recovers
    while a peer remains live and keeps the native file-operation marker set
@@ -5135,7 +5137,8 @@ Tasks:
    ALTER rebuild variants beyond the focused force, exact copy-lock
    ADD/DROP/MODIFY COLUMN, row-format, compressed, and charset-conversion cases,
    broader schema option variants beyond named/current-schema default/comment
-   and combined option-order boundaries, broader view and trigger variants,
+   and named/current-schema combined option-order boundaries, broader view and
+   trigger variants,
    randomized temporary/
    permanent rename permutations, and mixed comma-separated non-rename
    foreign-key ALTER live-peer recovery remain planned.
@@ -8052,8 +8055,8 @@ subsystems that this mode needs:
      named CHECK, secondary-index drop/add, secondary-index rename,
      secondary-index ignorability, and primary-key replacement cases, broader
      schema option variants beyond the focused
-     named/current-schema schema-default/comment and combined option-order
-     boundaries,
+     named/current-schema schema-default/comment and named/current-schema
+     combined option-order boundaries,
      and broader DDL file lifecycle while
      peers remain live. Partition truncate
      remains governed by the ownerless partition-DDL rejection policy, cyclic

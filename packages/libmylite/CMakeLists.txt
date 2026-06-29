@@ -1713,6 +1713,12 @@ if(BUILD_TESTING)
         COMMAND mylite_ownerless_cross_process_sql_test dictionary-current-schema-comment-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-current-schema-option-order-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-current-schema-option-order-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-current-schema-alter-crash
         COMMAND mylite_ownerless_cross_process_sql_test dictionary-current-schema-alter-crash
       )
@@ -2421,6 +2427,7 @@ if(BUILD_TESTING)
         libmylite.ownerless-dictionary-schema-comment-crash
         libmylite.ownerless-dictionary-schema-option-order-crash
         libmylite.ownerless-dictionary-current-schema-comment-crash
+        libmylite.ownerless-dictionary-current-schema-option-order-crash
         libmylite.ownerless-dictionary-current-schema-alter-crash
         PROPERTIES
           LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
