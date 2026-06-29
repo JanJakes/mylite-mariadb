@@ -2318,6 +2318,13 @@ bool ownerless_alter_table_alter_index_ignorability_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 );
+bool consume_ownerless_alter_table_alter_index_ignorability_recovery_clause(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::size_t &index,
+    std::string_view schema_name,
+    std::string_view table_name
+);
 bool ownerless_alter_table_add_column_if_not_exists_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
@@ -16055,7 +16062,8 @@ bool ownerless_generated_column_definition_uses_rejected_function_token(std::str
            token_equals(token, "SELECT");
 }
 
-bool ownerless_create_table_has_generated_column_recovery_disqualifier(const SqlPolicyTokens &tokens
+bool ownerless_create_table_has_generated_column_recovery_disqualifier(
+    const SqlPolicyTokens &tokens
 ) {
     bool has_generated_column = false;
     for (std::size_t index = 0U; index < tokens.count; ++index) {
@@ -18161,6 +18169,40 @@ bool ownerless_alter_table_alter_index_ignorability_recovery_statement(
            index_exists;
 }
 
+bool consume_ownerless_alter_table_alter_index_ignorability_recovery_clause(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::size_t &index,
+    std::string_view schema_name,
+    std::string_view table_name
+) {
+    const std::size_t start_index = index;
+    if (index + 3U >= tokens.count || !token_equals(tokens.values[index], "ALTER") ||
+        !token_equals(tokens.values[index + 1U], "INDEX") ||
+        !ownerless_table_identifier_token(tokens.values[index + 2U])) {
+        return false;
+    }
+
+    const std::string index_name = ownerless_normalized_identifier(tokens.values[index + 2U]);
+    index += 3U;
+    if (index < tokens.count && token_equals(tokens.values[index], "NOT")) {
+        ++index;
+    }
+    if (index >= tokens.count || !token_equals(tokens.values[index], "IGNORED")) {
+        index = start_index;
+        return false;
+    }
+    ++index;
+
+    bool index_exists = false;
+    if (!ownerless_index_metadata_lookup(db, schema_name, table_name, index_name, &index_exists) ||
+        !index_exists) {
+        index = start_index;
+        return false;
+    }
+    return true;
+}
+
 bool ownerless_alter_table_add_column_if_not_exists_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
@@ -19982,8 +20024,23 @@ bool ownerless_alter_table_mixed_foreign_key_recovery_statement(
             }
         } else if (consume_ownerless_alter_table_comment_recovery_clause(tokens, index)) {
             /* Table comments are metadata-only and share FK live-recovery semantics. */
-        } else if (consume_ownerless_alter_column_set_default_recovery_clause(tokens, index)) {
-            /* Column defaults are metadata-only and share FK live-recovery semantics. */
+        } else if (index < tokens.count && token_equals(tokens.values[index], "ALTER")) {
+            const std::size_t alter_index = index;
+            if (mixed_recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE &&
+                consume_ownerless_alter_table_alter_index_ignorability_recovery_clause(
+                    db,
+                    tokens,
+                    index,
+                    child_schema_name,
+                    child_table_name
+                )) {
+                mixed_recovery_kind = MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_INDEX_IGNORABILITY;
+            } else {
+                index = alter_index;
+                if (!consume_ownerless_alter_column_set_default_recovery_clause(tokens, index)) {
+                    return false;
+                }
+            }
         } else {
             return false;
         }
