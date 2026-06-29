@@ -475,6 +475,12 @@ Focused mixed `DROP FOREIGN KEY`, real column `DROP`/`MODIFY`/`CHANGE`/
 `RENAME COLUMN`, and `ADD CONSTRAINT ... FOREIGN KEY` ALTER lists now use
 the existing column live-recovery lanes while retaining the native
 file-operation marker until final no-live drain.
+Focused mixed `DROP FOREIGN KEY`, `DROP INDEX`, `ADD UNIQUE INDEX`, and
+`ADD CONSTRAINT ... FOREIGN KEY` ALTER lists now use the existing secondary
+index live-recovery lane while retaining the native file-operation marker
+until final no-live drain; the covered shape proves recovered FK enforcement,
+dropped-index absence, and new unique-index metadata/usage after live-peer
+recovery, ordinary native reopen, and forced `.shm` rebuild.
 Simple temporary-table `RENAME TABLE` and `ALTER TABLE ... RENAME TO`
 tracking now preserves conservative handling for the renamed temp table and
 restores normal ownerless refresh for a previously shadowed permanent table;
@@ -505,7 +511,8 @@ plus exact copy-lock charset conversion now have focused live-recovery coverage
 for native table-copy rebuild boundaries;
 broader ALTER rebuild, broader schema option variants beyond the focused
 schema-default/comment boundaries, broader view and
-trigger variants, and broader mixed FK plus non-FK ALTER live-peer recovery remain
+trigger variants, and broader mixed FK plus non-FK ALTER live-peer recovery beyond
+the focused column, metadata, CHECK, and secondary-index cases remain
 partial/planned. Cyclic foreign-key truncate is covered as MariaDB's
 native pre-truncate error path with clear ownerless file-operation markers
 under default FK checks, while `FOREIGN_KEY_CHECKS=0` cyclic FK truncate now
