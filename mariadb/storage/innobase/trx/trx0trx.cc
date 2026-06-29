@@ -61,6 +61,7 @@ Created 3/26/1996 Heikki Tuuri
 #include <chrono>
 #include <limits>
 #include <new>
+#include <utility>
 
 /** The bit pattern corresponding to TRX_ID_MAX */
 const byte trx_id_max_bytes[8] = {
@@ -525,6 +526,7 @@ trx_init(
 	trx->mylite_ownerless_dirty_page_last_hit_valid = false;
 	trx->mylite_ownerless_native_support_page_write_last_hit_valid = false;
 	trx->mylite_ownerless_page_image_last_hit_valid = false;
+	trx->mylite_ownerless_page_image_savepoints = nullptr;
 	trx->mylite_ownerless_page_write_waited_before_preread = false;
 	trx->mylite_ownerless_page_refreshed_after_wait = false;
 
@@ -620,6 +622,107 @@ trx_t::mylite_ownerless_page_images_for_write() noexcept
     mylite_ownerless_page_image_last_hit_valid= false;
   }
   return *mylite_ownerless_page_images;
+}
+
+static trx_t::mylite_ownerless_page_image_savepoint_vector::iterator
+mylite_ownerless_find_page_image_savepoint(
+    trx_t::mylite_ownerless_page_image_savepoint_vector &savepoints,
+    const void *token, undo_no_t undo_no) noexcept
+{
+  if (token != nullptr)
+  {
+    for (auto it= savepoints.end(); it != savepoints.begin(); )
+    {
+      --it;
+      if (it->token == token)
+        return it;
+    }
+  }
+
+  for (auto it= savepoints.end(); it != savepoints.begin(); )
+  {
+    --it;
+    if (it->undo_no == undo_no)
+      return it;
+  }
+
+  return savepoints.end();
+}
+
+void trx_t::mylite_ownerless_page_image_savepoint_take(
+    const void *token, undo_no_t undo_no) noexcept
+{
+  const bool has_page_images= mylite_ownerless_page_images != nullptr &&
+                              !mylite_ownerless_page_images->empty();
+  if (!has_page_images && mylite_ownerless_modified_pages_empty() &&
+      mylite_ownerless_dirty_pages_empty())
+    return;
+
+  if (mylite_ownerless_page_image_savepoints == nullptr)
+  {
+    mylite_ownerless_page_image_savepoints=
+      UT_NEW_NOKEY(mylite_ownerless_page_image_savepoint_vector());
+    ut_a(mylite_ownerless_page_image_savepoints != nullptr);
+  }
+
+  mylite_ownerless_page_image_savepoint_vector &savepoints=
+      *mylite_ownerless_page_image_savepoints;
+  for (auto it= savepoints.begin(); it != savepoints.end(); )
+  {
+    if (token != nullptr && it->token == token)
+      it= savepoints.erase(it);
+    else
+      ++it;
+  }
+
+  mylite_ownerless_page_image_savepoint savepoint;
+  savepoint.token= token;
+  savepoint.undo_no= undo_no;
+  if (has_page_images)
+    savepoint.images= *mylite_ownerless_page_images;
+  savepoints.push_back(std::move(savepoint));
+}
+
+void trx_t::mylite_ownerless_page_image_savepoint_restore(
+    const void *token, undo_no_t undo_no) noexcept
+{
+  mylite_ownerless_page_images_clear();
+  if (mylite_ownerless_page_image_savepoints == nullptr)
+    return;
+
+  mylite_ownerless_page_image_savepoint_vector &savepoints=
+      *mylite_ownerless_page_image_savepoints;
+  auto it= mylite_ownerless_find_page_image_savepoint(
+      savepoints, token, undo_no);
+  if (it == savepoints.end())
+    return;
+
+  if (!it->images.empty())
+    mylite_ownerless_page_images_for_write()= it->images;
+  savepoints.erase(it + 1, savepoints.end());
+}
+
+void trx_t::mylite_ownerless_page_image_savepoint_release(
+    const void *token) noexcept
+{
+  if (token == nullptr || mylite_ownerless_page_image_savepoints == nullptr)
+    return;
+
+  mylite_ownerless_page_image_savepoint_vector &savepoints=
+      *mylite_ownerless_page_image_savepoints;
+  for (auto it= savepoints.begin(); it != savepoints.end(); )
+  {
+    if (it->token == token)
+      it= savepoints.erase(it);
+    else
+      ++it;
+  }
+}
+
+void trx_t::mylite_ownerless_page_image_savepoints_clear() noexcept
+{
+  if (mylite_ownerless_page_image_savepoints != nullptr)
+    mylite_ownerless_page_image_savepoints->clear();
 }
 
 trx_t::mylite_ownerless_page_vector &
@@ -831,6 +934,10 @@ struct TrxFactory {
 			if (trx->mylite_ownerless_page_images != nullptr) {
 				UT_DELETE(trx->mylite_ownerless_page_images);
 				trx->mylite_ownerless_page_images = nullptr;
+			}
+			if (trx->mylite_ownerless_page_image_savepoints != nullptr) {
+				UT_DELETE(trx->mylite_ownerless_page_image_savepoints);
+				trx->mylite_ownerless_page_image_savepoints = nullptr;
 			}
 			if (trx->mylite_ownerless_native_support_page_write_pages != nullptr) {
 				UT_DELETE(trx->mylite_ownerless_native_support_page_write_pages);
@@ -1076,6 +1183,8 @@ void trx_t::free() noexcept
 	               sizeof mylite_ownerless_dirty_page_set);
 	  MEM_NOACCESS(&mylite_ownerless_page_images,
 	               sizeof mylite_ownerless_page_images);
+	  MEM_NOACCESS(&mylite_ownerless_page_image_savepoints,
+	               sizeof mylite_ownerless_page_image_savepoints);
 	  MEM_NOACCESS(&mylite_ownerless_native_support_page_write_pages,
 	               sizeof mylite_ownerless_native_support_page_write_pages);
 	  MEM_NOACCESS(&mylite_ownerless_native_support_page_write_page_set,

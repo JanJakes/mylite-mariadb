@@ -176,10 +176,11 @@ dberr_t trx_t::rollback_low(const undo_no_t *savept) noexcept
     {
       /*
       ROLLBACK TO SAVEPOINT rewrites pages through native undo without ending
-      the transaction. Any transaction-deferred images captured before the
-      savepoint are no longer a proof for the later COMMIT boundary. Do not
-      flush user pages here: the transaction can still roll back in full, and a
-      savepoint boundary is not a committed durable page image.
+      the transaction. Clear current transaction-deferred images here; the
+      handler-level savepoint callback restores the image snapshot captured at
+      the target savepoint when rollback succeeds. Do not flush user pages
+      here: the transaction can still roll back in full, and a savepoint
+      boundary is not a committed durable page image.
       */
       mylite_ownerless_page_write_publish_failed= true;
       mylite_ownerless_page_images_clear();

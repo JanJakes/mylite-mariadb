@@ -657,6 +657,16 @@ public:
       mylite_ownerless_page_image,
       ut_allocator<mylite_ownerless_page_image> >
       mylite_ownerless_page_image_vector;
+  struct mylite_ownerless_page_image_savepoint
+  {
+    const void *token;
+    undo_no_t undo_no;
+    mylite_ownerless_page_image_vector images;
+  };
+  typedef std::vector<
+      mylite_ownerless_page_image_savepoint,
+      ut_allocator<mylite_ownerless_page_image_savepoint> >
+      mylite_ownerless_page_image_savepoint_vector;
   /** Persistent page-write locks owned by this transaction, packed as space:page. */
   mylite_ownerless_page_vector *mylite_ownerless_modified_pages;
   /** Persistent pages dirtied by this transaction, packed as space:page. */
@@ -667,6 +677,9 @@ public:
   mylite_ownerless_page_set *mylite_ownerless_dirty_page_set;
   /** Latest transaction-deferred page images captured while mtr pages are latched. */
   mylite_ownerless_page_image_vector *mylite_ownerless_page_images;
+  /** Page-image snapshots at SQL savepoint boundaries. */
+  mylite_ownerless_page_image_savepoint_vector
+      *mylite_ownerless_page_image_savepoints;
   /** Native-support page-write locks held until transaction cleanup. */
   mylite_ownerless_page_vector *mylite_ownerless_native_support_page_write_pages;
   /** Exact membership cache for native-support page-write locks. */
@@ -732,6 +745,17 @@ public:
   /** @return ownerless page images, allocating storage on first use. */
   mylite_ownerless_page_image_vector &mylite_ownerless_page_images_for_write()
       noexcept;
+  /** Record transaction-deferred page images at a savepoint boundary. */
+  void mylite_ownerless_page_image_savepoint_take(const void *token,
+                                                  undo_no_t undo_no) noexcept;
+  /** Restore transaction-deferred page images after rollback to a savepoint. */
+  void mylite_ownerless_page_image_savepoint_restore(const void *token,
+                                                     undo_no_t undo_no)
+      noexcept;
+  /** Release a transaction-deferred page-image savepoint snapshot. */
+  void mylite_ownerless_page_image_savepoint_release(const void *token) noexcept;
+  /** Clear transaction-deferred page-image savepoints if allocated. */
+  void mylite_ownerless_page_image_savepoints_clear() noexcept;
   /** @return native-support held page-write pages if they have been allocated. */
   const mylite_ownerless_page_vector *
   mylite_ownerless_native_support_page_write_pages_for_read() const noexcept
@@ -807,6 +831,7 @@ public:
     if (mylite_ownerless_dirty_page_set != nullptr)
       mylite_ownerless_dirty_page_set->clear();
     mylite_ownerless_page_images_clear();
+    mylite_ownerless_page_image_savepoints_clear();
     mylite_ownerless_modified_page_last_hit= 0;
     mylite_ownerless_dirty_page_last_hit= 0;
     mylite_ownerless_modified_page_last_hit_valid= false;

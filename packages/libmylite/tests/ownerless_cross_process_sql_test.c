@@ -62816,6 +62816,7 @@ static void test_crashed_generated_column_foreign_key_dictionary_ddl_recovers_co
     char *database_path =
         path_join(root, "ownerless-dictionary-generated-column-foreign-key-crash.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
     unsigned mariadb_errno = 0U;
 
@@ -62891,10 +62892,11 @@ static void test_crashed_generated_column_foreign_key_dictionary_ddl_recovers_co
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         generated_column_child_foreign_key_until_dictionary_finish_fault
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -62963,11 +62965,15 @@ static void test_crashed_generated_column_foreign_key_dictionary_ddl_recovers_co
         204U
     );
     assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    release_ownerless_live_peer(&live_peer);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
-    crash_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         generated_column_referenced_foreign_key_until_dictionary_finish_fault
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -63033,6 +63039,9 @@ static void test_crashed_generated_column_foreign_key_dictionary_ddl_recovers_co
         ) == 404U
     );
     assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    release_ownerless_live_peer(&live_peer);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     assert_ownerless_generated_column_foreign_key_crash_state(
         paths,
@@ -63060,6 +63069,7 @@ static void test_crashed_generated_column_foreign_key_drop_dictionary_ddl_recove
     char *database_path =
         path_join(root, "ownerless-dictionary-generated-column-foreign-key-drop-crash.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
     unsigned mariadb_errno = 0U;
 
@@ -63192,10 +63202,11 @@ static void test_crashed_generated_column_foreign_key_drop_dictionary_ddl_recove
     exec_ok(db, "COMMIT");
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         generated_column_child_foreign_key_drop_until_dictionary_finish_fault
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -63237,11 +63248,15 @@ static void test_crashed_generated_column_foreign_key_drop_dictionary_ddl_recove
         ) == 505U
     );
     assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    release_ownerless_live_peer(&live_peer);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
-    crash_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         generated_column_referenced_foreign_key_drop_until_dictionary_finish_fault
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -63289,6 +63304,9 @@ static void test_crashed_generated_column_foreign_key_drop_dictionary_ddl_recove
         ) == 905U
     );
     assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    release_ownerless_live_peer(&live_peer);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     assert_ownerless_generated_column_foreign_key_drop_crash_state(
         paths,

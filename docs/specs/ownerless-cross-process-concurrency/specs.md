@@ -5173,9 +5173,9 @@ Tasks:
    That closes the focused checkpointed representative DML commit marker and
    rollback/deadlock/savepoint classification gaps, including one
    independent-table concurrent savepoint handoff, not the broader DML-origin
-   `FILE_MODIFY`, native mid-rollback crash, same-page/same-table savepoint
-   contention, killed-transaction, or concurrent-writer explicit-transaction
-   matrices.
+   `FILE_MODIFY`, native mid-rollback crash, broader same-page/same-table
+   savepoint contention, killed-transaction, or concurrent-writer
+   explicit-transaction matrices.
    The no-argument
    aggregate harness remains
    available for manual runs, while CTest registers the normal ownerless SQL
@@ -5934,14 +5934,14 @@ native `db.opt` rewrite but before ownerless dictionary finish, and
 successful generated-column CREATE TABLE, generated-column ALTER TABLE ...
 ADD COLUMN, generated-column secondary-index, and generated-column
 child/referenced-column FK ADD/DROP writers after native metadata completion or
-removal but before ownerless dictionary finish, and verifies no-live
-ownerless/native reopen of the recovered table, generated-column, index,
-foreign-key, or schema states, including recovered old/new index-name and
-ignored/not-ignored metadata, but MyLite still lacks durable file lifecycle
-metadata for broader DDL recovery. Ordinary non-generated FK ADD/DROP is
-separately classified as metadata-only live recoverable; generated-column FK
-ADD/DROP deliberately remains conservative until native table identity effects
-are reconciled.
+removal but before ownerless dictionary finish, and verifies live-peer recovery
+for the generated-column FK ADD/DROP metadata-only lane with the native
+file-operation marker clear plus no-live ownerless/native reopen of the
+recovered table, generated-column, index, foreign-key, or schema states,
+including recovered old/new index-name and ignored/not-ignored metadata, but
+MyLite still lacks durable file lifecycle metadata for broader DDL recovery.
+Ordinary and generated-column FK ADD/DROP are classified as metadata-only live
+recoverable.
 
 ## Binary Size Impact
 
@@ -7661,11 +7661,15 @@ subsystems that this mode needs:
   from a second ownerless writer, verifies live visibility and marker/WAL
   retention, and preserves only the first writer's pre-savepoint row plus the
   second writer's row through ownerless, forced-`.shm`, and native reopen.
-  The same-page savepoint follow-up then proves an overlapping page writer
-  waits until the savepoint writer commits. The same-table large-row follow-up
-  proves a peer updating a large row in the same table also waits behind the
-  savepoint writer's ownerless write ownership, then commits after release and
-  preserves final row state through reopen. The same-row savepoint follow-up
+  The same-page savepoint follow-up snapshots transaction-deferred page images
+  at InnoDB savepoint boundaries, restores the target snapshot after successful
+  native `ROLLBACK TO SAVEPOINT`, then proves an overlapping page writer waits
+  until the savepoint writer commits while the final state preserves the
+  pre-savepoint row image and discards the rolled-back row. The same-table
+  large-row follow-up proves a peer updating a large row in the same table also
+  waits behind the savepoint writer's ownerless write ownership, then commits
+  after release and preserves final row state through reopen. The same-row
+  savepoint follow-up
   proves a peer updating the savepoint writer's pre-savepoint row waits until
   the writer commits and then applies on top of that committed row, while the
   rolled-back row remains discarded. The randomized same-table savepoint

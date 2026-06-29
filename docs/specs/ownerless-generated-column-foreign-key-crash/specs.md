@@ -41,6 +41,12 @@ Base: MariaDB 11.8 LTS import `mariadb-11.8.6`
 - `packages/libmylite/src/database.cc:9299-9308` runs the unsafe
   `dictionary-before-finish` hook after native SQL succeeds and before MyLite
   marks ownerless dictionary DDL complete.
+- `packages/libmylite/src/database.cc:19650-19820` classifies bounded
+  generated-column FK ADD statements by parsing the child and referenced
+  column lists and proving at least one participating column is generated.
+- `packages/libmylite/src/database.cc:13096-13118` skips the native
+  file-operation checkpoint marker for FK metadata recovery, so generated-column
+  FK ADD recovery must prove the metadata-only live-recovery lane.
 
 ## Design
 
@@ -59,8 +65,10 @@ two representative accepted shapes:
    from the regular child column to the stored generated referenced column.
 
 Each writer runs with a live ownerless peer and is killed at
-`dictionary-before-finish`. Cleanup must remain busy until the live peer is
-released, then no-live recovery must expose the completed native metadata.
+`dictionary-before-finish`. Recovery now opens and validates the completed
+native metadata while that peer remains open. The selector also asserts the
+native file-operation checkpoint marker stays clear before and after live
+recovery.
 
 After recovery, verify:
 
@@ -78,8 +86,8 @@ In scope:
 
 - crash-at-`dictionary-before-finish` recovery for a generated child-column FK,
 - crash-at-`dictionary-before-finish` recovery for a generated referenced-column FK,
-- live-peer cleanup-busy behavior,
-- generated values and referential enforcement after no-live recovery,
+- metadata-only live-peer recovery with the native file-operation marker clear,
+- generated values and referential enforcement while the peer remains live,
 - ownerless/native reopen before and after forced shared-memory rebuild.
 
 Out of scope:
@@ -140,7 +148,10 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - Each killed writer reaches `dictionary-before-finish` without hanging.
-- A live ownerless peer prevents cleanup until no-live recovery.
+- A live ownerless peer remains open while recovery exposes each completed FK
+  ADD.
+- The native file-operation checkpoint marker remains clear for both generated
+  child-column and generated referenced-column FK ADD recovery boundaries.
 - Recovered generated child-column FK metadata is present and enforced.
 - Recovered generated referenced-column FK metadata is present and enforced.
 - Generated values remain correct before and after cascaded deletes and valid

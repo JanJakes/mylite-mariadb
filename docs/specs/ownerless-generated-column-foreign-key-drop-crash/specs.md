@@ -45,6 +45,12 @@ Base: MariaDB 11.8 LTS import `mariadb-11.8.6`
   `packages/libmylite/src/database.cc:9299-9308` runs the unsafe
   `dictionary-before-finish` hook after native SQL succeeds and before MyLite
   marks ownerless dictionary DDL complete.
+- `packages/libmylite/src/database.cc:20080-20160` classifies bounded
+  generated-column FK DROP statements by proving the existing named FK metadata
+  involves a generated child or referenced column.
+- `packages/libmylite/src/database.cc:13096-13118` skips the native
+  file-operation checkpoint marker for FK metadata recovery, so generated-column
+  FK DROP recovery must prove the metadata-only live-recovery lane.
 
 ## Design
 
@@ -63,8 +69,10 @@ generated-column FK shapes:
 For each shape, the selector first proves the constraint is present and
 enforced. It then runs an ownerless writer under the existing
 `dictionary-before-finish` hook, kills the writer after native DROP FOREIGN KEY
-completion, proves live-peer cleanup remains busy, releases the peer, and
-reopens with no live owners to rebuild volatile coordination.
+completion, opens recovery while the live peer remains open, and verifies the
+completed native metadata removal before releasing the peer. The selector also
+asserts the native file-operation checkpoint marker stays clear before and
+after live recovery.
 
 After recovery, verify:
 
@@ -85,7 +93,7 @@ In scope:
   DROP,
 - crash-at-`dictionary-before-finish` recovery for a generated referenced-column
   FK DROP,
-- live-peer cleanup-busy behavior,
+- metadata-only live-peer recovery with the native file-operation marker clear,
 - recovered absence of generated-column FK metadata and enforcement,
 - ownerless/native reopen before and after forced shared-memory rebuild.
 
@@ -145,7 +153,10 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - Each killed DROP writer reaches `dictionary-before-finish` without hanging.
-- A live ownerless peer prevents cleanup until no-live recovery.
+- A live ownerless peer remains open while recovery exposes each completed FK
+  DROP.
+- The native file-operation checkpoint marker remains clear for both generated
+  child-column and generated referenced-column FK DROP recovery boundaries.
 - Recovered generated child-column FK metadata is absent and orphan writes are
   accepted.
 - Recovered generated referenced-column FK metadata is absent and parent deletes

@@ -2941,6 +2941,7 @@ static int innobase_savepoint(THD *thd, void *savepoint) noexcept
     *static_cast<undo_no_t*>(savepoint)= savept;
     trx->last_stmt_start= savept;
     trx->end_bulk_insert();
+    trx->mylite_ownerless_page_image_savepoint_take(savepoint, savept);
 
     if (trx->fts_trx)
       fts_savepoint_take(trx->fts_trx, savepoint);
@@ -2962,6 +2963,7 @@ static int innobase_release_savepoint(THD *thd, void *savepoint) noexcept
   DBUG_ENTER("innobase_release_savepoint");
   trx_t *trx= check_trx_exists(thd);
   ut_ad(trx->mysql_thd == thd);
+  trx->mylite_ownerless_page_image_savepoint_release(savepoint);
   if (trx->fts_trx)
     fts_savepoint_release(trx, savepoint);
   DBUG_RETURN(0);
@@ -5052,6 +5054,8 @@ innobase_rollback_to_savepoint(
     DBUG_RETURN(HA_ERR_NO_SAVEPOINT);
 
   dberr_t error= trx->rollback(savept);
+  if (error == DB_SUCCESS)
+    trx->mylite_ownerless_page_image_savepoint_restore(savepoint, *savept);
   /* Store the position for rolling back the next SQL statement */
   if (trx->fts_trx)
   {

@@ -2396,7 +2396,15 @@ bool ownerless_alter_table_add_foreign_key_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 );
+bool ownerless_alter_table_add_generated_foreign_key_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
 bool ownerless_alter_table_drop_foreign_key_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
+bool ownerless_alter_table_drop_generated_foreign_key_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 );
@@ -2527,6 +2535,20 @@ bool ownerless_generated_column_metadata_lookup(
     std::string_view table_name,
     std::string_view column_name,
     bool *out_exists
+);
+bool ownerless_column_list_uses_generated_column(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    const std::vector<std::string> &column_names,
+    bool *out_uses_generated_column
+);
+bool ownerless_foreign_key_metadata_uses_generated_column_lookup(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    std::string_view constraint_name,
+    bool *out_uses_generated_column
 );
 bool ownerless_table_has_generated_columns(
     mylite_db &db,
@@ -15949,6 +15971,12 @@ std::uint32_t ownerless_dictionary_recovery_kind_for_statement(
     if (ownerless_alter_column_set_default_recovery_statement(db, tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_COLUMN_SET_DEFAULT;
     }
+    if (ownerless_alter_table_add_generated_foreign_key_recovery_statement(db, tokens)) {
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_ADD_FOREIGN_KEY;
+    }
+    if (ownerless_alter_table_drop_generated_foreign_key_recovery_statement(db, tokens)) {
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_FOREIGN_KEY;
+    }
     if (ownerless_alter_table_add_foreign_key_recovery_statement(db, tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_ADD_FOREIGN_KEY;
     }
@@ -16838,6 +16866,111 @@ bool ownerless_generated_column_metadata_lookup(
         return false;
     }
     *out_exists = column_exists;
+    return true;
+}
+
+bool ownerless_column_list_uses_generated_column(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    const std::vector<std::string> &column_names,
+    bool *out_uses_generated_column
+) {
+    if (out_uses_generated_column == nullptr || column_names.empty()) {
+        return false;
+    }
+    *out_uses_generated_column = false;
+
+    bool uses_generated_column = false;
+    for (const std::string &column_name : column_names) {
+        bool column_exists = false;
+        bool generated_column_exists = false;
+        if (!ownerless_column_metadata_lookup(
+                db,
+                schema_name,
+                table_name,
+                column_name,
+                &column_exists
+            ) ||
+            !column_exists ||
+            !ownerless_generated_column_metadata_lookup(
+                db,
+                schema_name,
+                table_name,
+                column_name,
+                &generated_column_exists
+            )) {
+            return false;
+        }
+        uses_generated_column = uses_generated_column || generated_column_exists;
+    }
+
+    *out_uses_generated_column = uses_generated_column;
+    return true;
+}
+
+bool ownerless_foreign_key_metadata_uses_generated_column_lookup(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    std::string_view constraint_name,
+    bool *out_uses_generated_column
+) {
+    if (out_uses_generated_column == nullptr || schema_name.empty() || table_name.empty() ||
+        constraint_name.empty()) {
+        return false;
+    }
+    *out_uses_generated_column = false;
+
+    const ErrorSnapshot snapshot = capture_error(db);
+    const std::string escaped_schema = ownerless_escape_metadata_literal(db, schema_name);
+    const std::string escaped_table = ownerless_escape_metadata_literal(db, table_name);
+    const std::string escaped_constraint = ownerless_escape_metadata_literal(db, constraint_name);
+    const std::string child_generated_column_predicate =
+        "((child_col.generation_expression IS NOT NULL AND "
+        "child_col.generation_expression <> '') "
+        "OR child_col.extra LIKE '%VIRTUAL GENERATED%' "
+        "OR child_col.extra LIKE '%STORED GENERATED%')";
+    const std::string referenced_generated_column_predicate =
+        "((ref_col.generation_expression IS NOT NULL AND ref_col.generation_expression <> '') "
+        "OR ref_col.extra LIKE '%VIRTUAL GENERATED%' "
+        "OR ref_col.extra LIKE '%STORED GENERATED%')";
+    const std::string sql = "SELECT COUNT(*) FROM information_schema.key_column_usage k "
+                            "JOIN information_schema.columns child_col "
+                            "ON child_col.table_schema = k.table_schema "
+                            "AND child_col.table_name = k.table_name "
+                            "AND child_col.column_name = k.column_name "
+                            "JOIN information_schema.columns ref_col "
+                            "ON ref_col.table_schema = k.referenced_table_schema "
+                            "AND ref_col.table_name = k.referenced_table_name "
+                            "AND ref_col.column_name = k.referenced_column_name "
+                            "WHERE k.constraint_schema = '" +
+                            escaped_schema + "' AND k.table_schema = '" + escaped_schema +
+                            "' "
+                            "AND k.table_name = '" +
+                            escaped_table + "' AND k.constraint_name = '" + escaped_constraint +
+                            "' "
+                            "AND (" +
+                            child_generated_column_predicate + " OR " +
+                            referenced_generated_column_predicate + ")";
+
+    bool query_succeeded = false;
+    bool uses_generated_column = false;
+    if (mysql_query(&db.mysql, sql.c_str()) == 0) {
+        MYSQL_RES *result = mysql_store_result(&db.mysql);
+        if (result != nullptr) {
+            MYSQL_ROW row = mysql_fetch_row(result);
+            uses_generated_column =
+                row != nullptr && row[0] != nullptr && std::strtoull(row[0], nullptr, 10) != 0U;
+            query_succeeded = row != nullptr && row[0] != nullptr;
+            mysql_free_result(result);
+        }
+    }
+    restore_error(db, snapshot);
+    if (!query_succeeded) {
+        return false;
+    }
+    *out_uses_generated_column = uses_generated_column;
     return true;
 }
 
@@ -19755,6 +19888,127 @@ bool ownerless_alter_table_add_foreign_key_recovery_statement(
     }
 }
 
+bool consume_ownerless_alter_table_add_generated_foreign_key_recovery_clause(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::size_t &index,
+    std::string_view child_schema_name,
+    std::string_view child_table_name
+) {
+    if (index >= tokens.count || !token_equals(tokens.values[index], "ADD")) {
+        return false;
+    }
+    ++index;
+    if (index < tokens.count && token_equals(tokens.values[index], "CONSTRAINT")) {
+        ++index;
+        if (index >= tokens.count || !ownerless_table_identifier_token(tokens.values[index])) {
+            return false;
+        }
+        ++index;
+    }
+    if (index + 1U >= tokens.count || !token_equals(tokens.values[index], "FOREIGN") ||
+        !token_equals(tokens.values[index + 1U], "KEY")) {
+        return false;
+    }
+    index += 2U;
+
+    std::vector<std::string> child_column_names;
+    if (!consume_ownerless_key_part_list(tokens, index, &child_column_names) ||
+        index >= tokens.count || !token_equals(tokens.values[index], "REFERENCES")) {
+        return false;
+    }
+    ++index;
+
+    std::string referenced_schema_name;
+    std::string referenced_table_name;
+    std::vector<std::string> referenced_column_names;
+    if (!consume_ownerless_table_identifier_parts(
+            db,
+            tokens,
+            index,
+            &referenced_schema_name,
+            &referenced_table_name
+        ) ||
+        !consume_ownerless_key_part_list(tokens, index, &referenced_column_names) ||
+        child_column_names.size() != referenced_column_names.size()) {
+        return false;
+    }
+
+    bool child_uses_generated_column = false;
+    bool referenced_uses_generated_column = false;
+    if (!ownerless_column_list_uses_generated_column(
+            db,
+            child_schema_name,
+            child_table_name,
+            child_column_names,
+            &child_uses_generated_column
+        ) ||
+        !ownerless_column_list_uses_generated_column(
+            db,
+            referenced_schema_name,
+            referenced_table_name,
+            referenced_column_names,
+            &referenced_uses_generated_column
+        ) ||
+        (!child_uses_generated_column && !referenced_uses_generated_column)) {
+        return false;
+    }
+
+    while (index < tokens.count && !token_equals(tokens.values[index], ",") &&
+           !token_equals(tokens.values[index], ";")) {
+        ++index;
+    }
+    return true;
+}
+
+bool ownerless_alter_table_add_generated_foreign_key_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    if (tokens.count < 11U || !token_equals(tokens.values[0], "ALTER") ||
+        !token_equals(tokens.values[1], "TABLE")) {
+        return false;
+    }
+
+    std::size_t index = 2U;
+    std::string child_schema_name;
+    std::string child_table_name;
+    if (!consume_ownerless_table_identifier_parts(
+            db,
+            tokens,
+            index,
+            &child_schema_name,
+            &child_table_name
+        )) {
+        return false;
+    }
+
+    bool saw_clause = false;
+    for (;;) {
+        if (!consume_ownerless_alter_table_add_generated_foreign_key_recovery_clause(
+                db,
+                tokens,
+                index,
+                child_schema_name,
+                child_table_name
+            )) {
+            return false;
+        }
+        saw_clause = true;
+        if (index >= tokens.count) {
+            return saw_clause;
+        }
+        if (token_equals(tokens.values[index], ",")) {
+            ++index;
+            continue;
+        }
+        if (token_equals(tokens.values[index], ";")) {
+            return consume_ownerless_remaining_semicolons(tokens, index);
+        }
+        return false;
+    }
+}
+
 bool consume_ownerless_alter_table_drop_foreign_key_recovery_clause(
     mylite_db &db,
     const SqlPolicyTokens &tokens,
@@ -20068,6 +20322,92 @@ bool ownerless_alter_table_drop_foreign_key_recovery_statement(
     bool saw_clause = false;
     for (;;) {
         if (!consume_ownerless_alter_table_drop_foreign_key_recovery_clause(
+                db,
+                tokens,
+                index,
+                child_schema_name,
+                child_table_name
+            )) {
+            return false;
+        }
+        saw_clause = true;
+        if (index >= tokens.count) {
+            return saw_clause;
+        }
+        if (token_equals(tokens.values[index], ",")) {
+            ++index;
+            continue;
+        }
+        if (token_equals(tokens.values[index], ";")) {
+            return consume_ownerless_remaining_semicolons(tokens, index);
+        }
+        return false;
+    }
+}
+
+bool consume_ownerless_alter_table_drop_generated_foreign_key_recovery_clause(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::size_t &index,
+    std::string_view child_schema_name,
+    std::string_view child_table_name
+) {
+    if (index + 2U >= tokens.count || !token_equals(tokens.values[index], "DROP") ||
+        !token_equals(tokens.values[index + 1U], "FOREIGN") ||
+        !token_equals(tokens.values[index + 2U], "KEY")) {
+        return false;
+    }
+    index += 3U;
+    if (index >= tokens.count || !ownerless_table_identifier_token(tokens.values[index])) {
+        return false;
+    }
+    const std::string constraint_name = ownerless_normalized_identifier(tokens.values[index]);
+    ++index;
+
+    bool uses_generated_column = false;
+    if (!ownerless_foreign_key_metadata_uses_generated_column_lookup(
+            db,
+            child_schema_name,
+            child_table_name,
+            constraint_name,
+            &uses_generated_column
+        ) ||
+        !uses_generated_column) {
+        return false;
+    }
+
+    while (index < tokens.count && !token_equals(tokens.values[index], ",") &&
+           !token_equals(tokens.values[index], ";")) {
+        ++index;
+    }
+    return true;
+}
+
+bool ownerless_alter_table_drop_generated_foreign_key_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    if (tokens.count < 7U || !token_equals(tokens.values[0], "ALTER") ||
+        !token_equals(tokens.values[1], "TABLE")) {
+        return false;
+    }
+
+    std::size_t index = 2U;
+    std::string child_schema_name;
+    std::string child_table_name;
+    if (!consume_ownerless_table_identifier_parts(
+            db,
+            tokens,
+            index,
+            &child_schema_name,
+            &child_table_name
+        )) {
+        return false;
+    }
+
+    bool saw_clause = false;
+    for (;;) {
+        if (!consume_ownerless_alter_table_drop_generated_foreign_key_recovery_clause(
                 db,
                 tokens,
                 index,
