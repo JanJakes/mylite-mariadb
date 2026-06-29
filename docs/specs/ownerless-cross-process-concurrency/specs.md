@@ -5070,14 +5070,18 @@ Tasks:
    `RENAME TABLE`, and `ALTER TABLE ... RENAME TO` prefinish crash coverage now
    uses metadata-only live-peer recovery while retaining the native
    file-operation marker until final no-live drain and preserving the shadowed
-   permanent table through ownerless/native reopen and forced `.shm` rebuild,
-   while multi-pair temporary rename chains, broader
+   permanent table through ownerless/native reopen and forced `.shm` rebuild.
+   Pure multi-pair temporary rename chains use the same temporary recovery
+   lane, while mixed temporary/permanent rename lists, including same-schema and
+   cross-schema `RENAME TABLE IF EXISTS` lists with skipped missing sources,
+   use the durable native file-operation marker lane and keep only the
+   permanent target durable after crash. Broader
    ALTER rebuild variants beyond the focused force, exact copy-lock
    ADD/DROP/MODIFY COLUMN, row-format, compressed, and charset-conversion cases,
    broader schema option variants beyond named/current-schema default/comment
-   boundaries, broader view and trigger variants, and
-   mixed comma-separated non-rename foreign-key ALTER live-peer recovery remain
-   planned.
+   boundaries, broader view and trigger variants, randomized temporary/
+   permanent rename permutations, and mixed comma-separated non-rename
+   foreign-key ALTER live-peer recovery remain planned.
    Final no-live close
    forces native checkpoint
    proof for retained page-version WAL
@@ -7934,7 +7938,7 @@ subsystems that this mode needs:
      rename chains, focused single-pair `RENAME TABLE IF EXISTS`, and
      temp-first plus permanent-first mixed temporary/permanent rename-list
      prefinish boundaries, plus focused temporary-chain/permanent/temporary-chain
-     and IF EXISTS missing-source mixed rename-list prefinish boundaries, plus same-schema and cross-schema
+     and same-schema plus cross-schema IF EXISTS missing-source mixed rename-list prefinish boundaries, plus same-schema and cross-schema
      non-FK multi-rename native-loop rollback after first, second, and final native
      rename pairs, including deterministic same-schema and cross-schema
      `RENAME TABLE IF EXISTS` three-pair lists, plus same-schema and
@@ -7948,7 +7952,7 @@ subsystems that this mode needs:
      `IF EXISTS` failed-DDL dictionary recovery and native file-op negative proof, especially
      remaining rename variants including randomized temporary/permanent and
      missing-source permutations beyond the now-covered deterministic non-FK,
-     FK, and focused temporary/permanent IF EXISTS lists,
+     FK, and focused same-schema/cross-schema temporary/permanent IF EXISTS lists,
      other rebuild variants beyond the covered
      FORCE, same-engine ENGINE including both exact copy-lock option orders,
      row-format including
