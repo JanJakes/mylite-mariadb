@@ -2400,6 +2400,10 @@ bool ownerless_alter_table_drop_foreign_key_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 );
+bool ownerless_alter_table_check_constraint_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+);
 bool ownerless_alter_table_mixed_foreign_key_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens,
@@ -15936,6 +15940,9 @@ std::uint32_t ownerless_dictionary_recovery_kind_for_statement(
     if (ownerless_alter_table_drop_foreign_key_recovery_statement(db, tokens)) {
         return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_FOREIGN_KEY;
     }
+    if (ownerless_alter_table_check_constraint_recovery_statement(db, tokens)) {
+        return MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_CHECK_CONSTRAINT;
+    }
     std::uint32_t mixed_foreign_key_recovery_kind = MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE;
     if (ownerless_alter_table_mixed_foreign_key_recovery_statement(
             db,
@@ -19842,6 +19849,59 @@ bool consume_ownerless_alter_table_drop_check_constraint_recovery_clause(
         ++index;
     }
     return true;
+}
+
+bool ownerless_alter_table_check_constraint_recovery_statement(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens
+) {
+    if (tokens.count < 8U || !token_equals(tokens.values[0], "ALTER") ||
+        !token_equals(tokens.values[1], "TABLE")) {
+        return false;
+    }
+
+    std::size_t index = 2U;
+    std::string schema_name;
+    std::string table_name;
+    if (!consume_ownerless_table_identifier_parts(db, tokens, index, &schema_name, &table_name)) {
+        return false;
+    }
+
+    bool saw_clause = false;
+    for (;;) {
+        const std::size_t clause_index = index;
+        if (consume_ownerless_alter_table_add_check_constraint_recovery_clause(
+                db,
+                tokens,
+                index,
+                schema_name,
+                table_name
+            ) ||
+            consume_ownerless_alter_table_drop_check_constraint_recovery_clause(
+                db,
+                tokens,
+                index,
+                schema_name,
+                table_name
+            )) {
+            saw_clause = true;
+        } else {
+            index = clause_index;
+            return false;
+        }
+
+        if (index >= tokens.count) {
+            return saw_clause;
+        }
+        if (token_equals(tokens.values[index], ",")) {
+            ++index;
+            continue;
+        }
+        if (token_equals(tokens.values[index], ";")) {
+            return saw_clause && consume_ownerless_remaining_semicolons(tokens, index);
+        }
+        return false;
+    }
 }
 
 bool ownerless_alter_table_drop_foreign_key_recovery_statement(

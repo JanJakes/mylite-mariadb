@@ -50,16 +50,17 @@ Add one unsafe-hook selector:
   constraints, and two CHECK-satisfying rows,
 - verify the table starts with both target CHECK constraints and rejects an
   invalid row with MariaDB errno 4025,
-- keep a live ownerless peer open so crashed-writer cleanup remains busy,
+- keep a live ownerless peer open while a later ownerless opener finishes
+  dictionary recovery,
 - start a writer that executes
   `ALTER TABLE app.ownerless_check_drop_crash_base DROP CONSTRAINT ...` for
   both named table-level CHECK constraints under the existing
   `dictionary-before-finish` hook,
 - kill the writer after MariaDB DDL completes but before ownerless dictionary
   finish,
-- prove ownerless open returns `MYLITE_BUSY` while the live peer remains,
-- release the peer and reopen ownerless read/write to rebuild volatile
-  coordination,
+- prove ownerless recovery succeeds while the live peer remains open and the
+  native file-operation marker stays retained,
+- release the peer and prove final no-live recovery drains the marker,
 - verify recovered `information_schema.check_constraints` metadata no longer
   contains either CHECK constraint,
 - verify the formerly invalid row shape now succeeds,
@@ -72,7 +73,8 @@ In scope:
 
 - crash-at-dictionary-before-finish coverage for completed table-level CHECK
   constraint DROP DDL,
-- live-peer cleanup-busy behavior and no-live rebuild,
+- live-peer recovery with native file-operation marker retention until final
+  no-live drain,
 - recovered absent CHECK metadata and post-drop writes through ownerless/native
   reopen before and after forced `.shm` rebuild.
 
@@ -121,7 +123,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selector reaches the dictionary fault hook and does not hang.
-- A live peer prevents cleanup until no-live recovery.
+- Live-peer recovery succeeds while the native file-operation marker remains
+  retained until final no-live recovery.
 - Recovered metadata excludes both named CHECK constraints from
   `information_schema.check_constraints`.
 - Formerly invalid rows succeed after recovery.
@@ -132,6 +135,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 - This is deterministic CHECK DROP crash coverage; CHECK ADD crash recovery is
   covered separately by `docs/specs/ownerless-check-constraint-ddl-crash/specs.md`.
+- Live-peer recovery for standalone CHECK ADD/DROP is covered by
+  `docs/specs/ownerless-check-constraint-live-recovery/specs.md`.
 - Field-level and generated-expression CHECK ADD crash coverage is covered by
   `docs/specs/ownerless-field-generated-check-ddl-crash/specs.md`.
 - Field-level/generated-expression CHECK DROP crash coverage is covered by

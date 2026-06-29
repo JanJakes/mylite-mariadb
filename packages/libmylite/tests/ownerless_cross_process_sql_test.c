@@ -59995,12 +59995,7 @@ static void test_crashed_check_constraint_dictionary_ddl_recovers_constraints(vo
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(root, "ownerless-dictionary-check-constraint-crash.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
-    int writer_ready_pipe[2];
-    int peer_ready_pipe[2];
-    int peer_release_pipe[2];
-    pid_t writer_child;
-    pid_t peer_child;
-    pid_t probe_child;
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -60036,53 +60031,11 @@ static void test_crashed_check_constraint_dictionary_ddl_recovers_constraints(vo
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_check_crash_base") == 30U);
     assert(mylite_close(db) == MYLITE_OK);
 
-    assert(pipe(writer_ready_pipe) == 0);
-    assert(pipe(peer_ready_pipe) == 0);
-    assert(pipe(peer_release_pipe) == 0);
-
-    peer_child = fork();
-    assert(peer_child >= 0);
-    if (peer_child == 0) {
-        close(peer_ready_pipe[0]);
-        close(peer_release_pipe[1]);
-        close(writer_ready_pipe[0]);
-        close(writer_ready_pipe[1]);
-        hold_ownerless_open_until_released(
-            paths,
-            (child_pipes){
-                .ready_write_fd = peer_ready_pipe[1],
-                .release_read_fd = peer_release_pipe[0],
-            }
-        );
-    }
-
-    close(peer_ready_pipe[1]);
-    close(peer_release_pipe[0]);
-    wait_for_pipe(peer_ready_pipe[0]);
-
-    writer_child = fork();
-    assert(writer_child >= 0);
-    if (writer_child == 0) {
-        close(writer_ready_pipe[0]);
-        close(peer_ready_pipe[0]);
-        close(peer_release_pipe[1]);
-        check_constraint_until_dictionary_finish_fault(paths, writer_ready_pipe[1]);
-    }
-
-    close(writer_ready_pipe[1]);
-    wait_for_pipe(writer_ready_pipe[0]);
-    assert(kill(writer_child, SIGKILL) == 0);
-    wait_for_signaled_child(writer_child, SIGKILL);
-
-    probe_child = fork();
-    assert(probe_child >= 0);
-    if (probe_child == 0) {
-        assert_ownerless_open_returns_busy(paths);
-    }
-    wait_for_child(probe_child);
-
-    signal_pipe(peer_release_pipe[1]);
-    wait_for_child(peer_child);
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        check_constraint_until_dictionary_finish_fault
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -60115,6 +60068,11 @@ static void test_crashed_check_constraint_dictionary_ddl_recovers_constraints(vo
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_check_crash_base") == 3U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_check_crash_base") == 60U);
     assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
+
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     assert_ownerless_check_constraint_crash_ddl_state(
         paths,
@@ -60140,12 +60098,7 @@ static void test_crashed_check_constraint_drop_dictionary_ddl_recovers_absent_co
     char *database_path =
         path_join(root, "ownerless-dictionary-check-constraint-drop-crash.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
-    int writer_ready_pipe[2];
-    int peer_ready_pipe[2];
-    int peer_release_pipe[2];
-    pid_t writer_child;
-    pid_t peer_child;
-    pid_t probe_child;
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -60190,53 +60143,11 @@ static void test_crashed_check_constraint_drop_dictionary_ddl_recovers_absent_co
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_check_drop_crash_base") == 30U);
     assert(mylite_close(db) == MYLITE_OK);
 
-    assert(pipe(writer_ready_pipe) == 0);
-    assert(pipe(peer_ready_pipe) == 0);
-    assert(pipe(peer_release_pipe) == 0);
-
-    peer_child = fork();
-    assert(peer_child >= 0);
-    if (peer_child == 0) {
-        close(peer_ready_pipe[0]);
-        close(peer_release_pipe[1]);
-        close(writer_ready_pipe[0]);
-        close(writer_ready_pipe[1]);
-        hold_ownerless_open_until_released(
-            paths,
-            (child_pipes){
-                .ready_write_fd = peer_ready_pipe[1],
-                .release_read_fd = peer_release_pipe[0],
-            }
-        );
-    }
-
-    close(peer_ready_pipe[1]);
-    close(peer_release_pipe[0]);
-    wait_for_pipe(peer_ready_pipe[0]);
-
-    writer_child = fork();
-    assert(writer_child >= 0);
-    if (writer_child == 0) {
-        close(writer_ready_pipe[0]);
-        close(peer_ready_pipe[0]);
-        close(peer_release_pipe[1]);
-        check_constraint_drop_until_dictionary_finish_fault(paths, writer_ready_pipe[1]);
-    }
-
-    close(writer_ready_pipe[1]);
-    wait_for_pipe(writer_ready_pipe[0]);
-    assert(kill(writer_child, SIGKILL) == 0);
-    wait_for_signaled_child(writer_child, SIGKILL);
-
-    probe_child = fork();
-    assert(probe_child >= 0);
-    if (probe_child == 0) {
-        assert_ownerless_open_returns_busy(paths);
-    }
-    wait_for_child(probe_child);
-
-    signal_pipe(peer_release_pipe[1]);
-    wait_for_child(peer_child);
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        check_constraint_drop_until_dictionary_finish_fault
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -60256,6 +60167,11 @@ static void test_crashed_check_constraint_drop_dictionary_ddl_recovers_absent_co
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_check_drop_crash_base") == 3U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_check_drop_crash_base") == 30U);
     assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
+
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     assert_ownerless_check_constraint_drop_crash_ddl_state(
         paths,

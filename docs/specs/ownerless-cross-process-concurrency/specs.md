@@ -3336,13 +3336,15 @@ Tasks:
    `ALTER TABLE ... ADD CONSTRAINT ... CHECK` writer after native
    table-definition mutation but before ownerless dictionary finish, then
    verifies recovered table-level CHECK metadata, errno 4025 enforcement, valid
-   post-recovery writes, and ownerless/native reopen before and after forced
-   `.shm` rebuild.
+   post-recovery writes, live-peer recovery with the native file-operation
+   marker retained until final no-live drain, and ownerless/native reopen
+   before and after forced `.shm` rebuild.
    CHECK constraint DROP crash coverage now kills an
    `ALTER TABLE ... DROP CONSTRAINT` writer after native CHECK metadata removal
    but before ownerless dictionary finish, then verifies recovered CHECK
-   metadata absence, formerly invalid writes, and ownerless/native reopen before
-   and after forced `.shm` rebuild.
+   metadata absence, formerly invalid writes, live-peer recovery with the
+   native file-operation marker retained until final no-live drain, and
+   ownerless/native reopen before and after forced `.shm` rebuild.
    View crash coverage now kills simple `CREATE VIEW` and `DROP VIEW` writers
    after native view definition-file creation/removal but before ownerless
    dictionary finish, then verifies recovered present/absent view metadata,
@@ -3651,12 +3653,15 @@ Tasks:
    verifies metadata-only live-peer recovery with the native file-operation
    marker clear, recovered FK metadata absence plus post-drop orphan child
    writes and parent deletes through ownerless and native reopen. Hook-build crash coverage
-   also kills `ALTER TABLE ... ADD CONSTRAINT ... CHECK` before ownerless
-   dictionary finish and verifies recovered CHECK metadata plus errno 4025
-   enforcement through ownerless and native reopen. Hook-build crash coverage
-   also kills `ALTER TABLE ... DROP CONSTRAINT` for CHECK constraints before
-   ownerless dictionary finish and verifies recovered CHECK metadata absence
-   plus formerly invalid writes through ownerless and native reopen. Hook-build
+   also kills standalone `ALTER TABLE ... ADD CONSTRAINT ... CHECK` before
+   ownerless dictionary finish and verifies live-peer recovery with recovered
+   CHECK metadata, errno 4025 enforcement, native file-operation marker
+   retention, final marker drain, and ownerless/native reopen. Hook-build crash
+   coverage also kills standalone `ALTER TABLE ... DROP CONSTRAINT` for CHECK
+   constraints before ownerless dictionary finish and verifies live-peer
+   recovery with recovered CHECK metadata absence, formerly invalid writes,
+   native file-operation marker retention, final marker drain, and
+   ownerless/native reopen. Hook-build
    crash coverage also kills representative `CREATE TABLE ... LIKE` and
    `CREATE TABLE ... SELECT` writers after native destination table creation
    but before ownerless dictionary finish. The LIKE and focused

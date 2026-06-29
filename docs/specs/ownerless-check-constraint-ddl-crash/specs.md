@@ -52,16 +52,17 @@ Add one unsafe-hook selector:
 - initialize an ownerless database with
   `app.ownerless_check_crash_base` and two CHECK-satisfying rows,
 - verify the table starts without the target CHECK metadata,
-- keep a live ownerless peer open so crashed-writer cleanup remains busy,
+- keep a live ownerless peer open while a later ownerless opener finishes
+  dictionary recovery,
 - start a writer that executes
   `ALTER TABLE app.ownerless_check_crash_base ADD CONSTRAINT ... CHECK ...`
   for two named table-level CHECK constraints under the existing
   `dictionary-before-finish` hook,
 - kill the writer after MariaDB DDL completes but before ownerless dictionary
   finish,
-- prove ownerless open returns `MYLITE_BUSY` while the live peer remains,
-- release the peer and reopen ownerless read/write to rebuild volatile
-  coordination,
+- prove ownerless recovery succeeds while the live peer remains open and the
+  native file-operation marker stays retained,
+- release the peer and prove final no-live recovery drains the marker,
 - verify recovered `information_schema.check_constraints` metadata contains
   both table-level CHECK constraints,
 - verify CHECK enforcement rejects invalid rows with errno 4025 and accepts a
@@ -124,7 +125,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selector reaches the dictionary fault hook and does not hang.
-- A live peer prevents cleanup until no-live recovery.
+- Live-peer recovery succeeds while the native file-operation marker remains
+  retained until final no-live recovery.
 - Recovered metadata includes both named CHECK constraints in
   `information_schema.check_constraints` with table-level scope.
 - Invalid rows fail with MariaDB errno 4025 after recovery, while valid writes
@@ -137,6 +139,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - This is deterministic CHECK ADD crash coverage; DROP CHECK crash recovery is
   covered separately by
   `docs/specs/ownerless-check-constraint-drop-ddl-crash/specs.md`.
+- Live-peer recovery for standalone CHECK ADD/DROP is covered by
+  `docs/specs/ownerless-check-constraint-live-recovery/specs.md`.
 - Field-level and generated-expression CHECK ADD crash coverage is covered
   separately by
   `docs/specs/ownerless-field-generated-check-ddl-crash/specs.md`.

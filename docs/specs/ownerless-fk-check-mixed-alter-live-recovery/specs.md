@@ -43,12 +43,14 @@ mutations continue to select their stricter file-operation kind, and CHECK
 clauses select a CHECK-specific file-operation recovery kind when no stricter
 column kind is present.
 
-This slice does not enable standalone CHECK live-peer recovery; it only accepts
-CHECK clauses in the already-FK-classified mixed list where dictionary refresh
-is already required for FK metadata. MariaDB's native table-definition work for
-the focused CHECK shape can leave native file-operation evidence, so MyLite
-retains the native file-operation checkpoint-needed marker while a peer remains
-live and drains it during final no-live recovery.
+This slice originally left standalone CHECK live-peer recovery out of scope; a
+later standalone CHECK live-recovery slice now covers pure CHECK ADD/DROP
+ALTER lists. Mixed FK/CHECK statements still use the already-FK-classified
+mixed list where dictionary refresh is required for FK metadata. MariaDB's
+native table-definition work for the focused CHECK shape can leave native
+file-operation evidence, so MyLite retains the native file-operation
+checkpoint-needed marker while a peer remains live and drains it during final
+no-live recovery.
 
 ## Compatibility Impact
 
@@ -92,8 +94,8 @@ the native state.
 
 ## Risks And Follow-Up
 
-- Standalone CHECK live-peer recovery remains a separate broader
-  metadata-only DDL slice.
+- Standalone CHECK live-peer recovery is covered by
+  `docs/specs/ownerless-check-constraint-live-recovery/specs.md`.
 - Generated-column FK tables remain excluded by the existing mixed FK guards.
 - Broader arbitrary mixed ALTER permutations and external randomized DDL stress
   remain planned.
