@@ -77,6 +77,9 @@ temporary indexes are absent after every reopen path.
 This slice does not add a new SQL feature. It strengthens the evidence for
 accepted MariaDB online DDL option combinations in ownerless read/write mode.
 Unsupported ownerless DDL classes remain explicitly rejected and unchanged.
+Crash recovery for the stress-used
+`ALTER TABLE ... ADD/DROP INDEX ..., ALGORITHM=INPLACE, LOCK=NONE` boundary is
+covered by `docs/specs/ownerless-online-index-ddl-crash-recovery/specs.md`.
 
 ## Directory And Lifecycle Impact
 

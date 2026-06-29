@@ -19,6 +19,9 @@ live-peer recovery.
 
 Completed unique secondary-index drop crash recovery is covered separately by
 `ownerless-unique-index-drop-ddl-crash`.
+Online `ALTER TABLE ... ADD/DROP INDEX ..., ALGORITHM=INPLACE, LOCK=NONE`
+crash recovery is covered separately by
+`docs/specs/ownerless-online-index-ddl-crash-recovery/specs.md`.
 
 ## Source Findings
 

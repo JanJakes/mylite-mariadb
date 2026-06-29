@@ -2445,6 +2445,10 @@ bool consume_ownerless_schema_identifier(const SqlPolicyTokens &tokens, std::siz
 bool consume_ownerless_schema_default_options(const SqlPolicyTokens &tokens, std::size_t &index);
 bool ownerless_sql_string_literal_token(std::string_view token);
 bool consume_ownerless_remaining_semicolons(const SqlPolicyTokens &tokens, std::size_t &index);
+bool consume_ownerless_optional_online_index_alter_tail(
+    const SqlPolicyTokens &tokens,
+    std::size_t &index
+);
 bool consume_ownerless_single_clause_alter_tail(const SqlPolicyTokens &tokens, std::size_t &index);
 bool consume_ownerless_table_identifier(const SqlPolicyTokens &tokens, std::size_t &index);
 bool consume_ownerless_table_identifier_parts(
@@ -16989,6 +16993,54 @@ bool consume_ownerless_remaining_semicolons(const SqlPolicyTokens &tokens, std::
     return true;
 }
 
+bool ownerless_online_index_algorithm_token(std::string_view token) {
+    return token_in(token, "INPLACE", "NOCOPY", "DEFAULT");
+}
+
+bool ownerless_online_index_lock_token(std::string_view token) {
+    return token_in(token, "NONE", "SHARED", "EXCLUSIVE", "DEFAULT");
+}
+
+bool consume_ownerless_optional_online_index_alter_tail(
+    const SqlPolicyTokens &tokens,
+    std::size_t &index
+) {
+    if (index >= tokens.count || token_equals(tokens.values[index], ";")) {
+        return consume_ownerless_remaining_semicolons(tokens, index);
+    }
+    if (!token_equals(tokens.values[index], ",")) {
+        return false;
+    }
+
+    ++index;
+    if (index + 6U >= tokens.count) {
+        return false;
+    }
+
+    const bool algorithm_then_lock =
+        token_equals(tokens.values[index], "ALGORITHM") &&
+        token_equals(tokens.values[index + 1U], "=") &&
+        ownerless_online_index_algorithm_token(tokens.values[index + 2U]) &&
+        token_equals(tokens.values[index + 3U], ",") &&
+        token_equals(tokens.values[index + 4U], "LOCK") &&
+        token_equals(tokens.values[index + 5U], "=") &&
+        ownerless_online_index_lock_token(tokens.values[index + 6U]);
+    const bool lock_then_algorithm =
+        token_equals(tokens.values[index], "LOCK") &&
+        token_equals(tokens.values[index + 1U], "=") &&
+        ownerless_online_index_lock_token(tokens.values[index + 2U]) &&
+        token_equals(tokens.values[index + 3U], ",") &&
+        token_equals(tokens.values[index + 4U], "ALGORITHM") &&
+        token_equals(tokens.values[index + 5U], "=") &&
+        ownerless_online_index_algorithm_token(tokens.values[index + 6U]);
+    if (!algorithm_then_lock && !lock_then_algorithm) {
+        return false;
+    }
+
+    index += 7U;
+    return consume_ownerless_remaining_semicolons(tokens, index);
+}
+
 bool consume_ownerless_optional_copy_exclusive_alter_tail(
     const SqlPolicyTokens &tokens,
     std::size_t &index
@@ -17710,7 +17762,7 @@ bool ownerless_alter_table_add_index_recovery_statement(
     ++index;
     std::vector<std::string> column_names;
     if (!consume_ownerless_key_part_list(tokens, index, &column_names) ||
-        !consume_ownerless_remaining_semicolons(tokens, index)) {
+        !consume_ownerless_optional_online_index_alter_tail(tokens, index)) {
         return false;
     }
     bool index_exists = false;
@@ -18050,7 +18102,7 @@ bool ownerless_alter_table_drop_index_recovery_statement(
 
     const std::string index_name = ownerless_normalized_identifier(tokens.values[index]);
     ++index;
-    if (!consume_ownerless_remaining_semicolons(tokens, index)) {
+    if (!consume_ownerless_optional_online_index_alter_tail(tokens, index)) {
         return false;
     }
     bool index_exists = false;

@@ -1189,6 +1189,18 @@ if(BUILD_TESTING)
           dictionary-secondary-index-drop-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-online-index-option-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-online-index-option-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-online-index-option-drop-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-online-index-option-drop-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-index-idempotent-drop-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -2178,6 +2190,8 @@ if(BUILD_TESTING)
         libmylite.ownerless-dictionary-index-idempotent-create-crash
         libmylite.ownerless-dictionary-secondary-index-crash
         libmylite.ownerless-dictionary-secondary-index-drop-crash
+        libmylite.ownerless-dictionary-online-index-option-crash
+        libmylite.ownerless-dictionary-online-index-option-drop-crash
         libmylite.ownerless-dictionary-index-idempotent-drop-crash
         libmylite.ownerless-dictionary-alter-index-idempotent-create-crash
         libmylite.ownerless-dictionary-alter-index-idempotent-drop-crash

@@ -3420,7 +3420,7 @@ Tasks:
    `ALGORITHM=NOCOPY, LOCK=SHARED` secondary-index creation and drop,
    `ALGORITHM=NOCOPY, LOCK=EXCLUSIVE` secondary-index creation and drop,
    `ALGORITHM=INPLACE, LOCK=NONE` secondary-index creation, standalone drop,
-   and re-add,
+   re-add, and hook-build crash recovery before ownerless dictionary finish,
    `ALGORITHM=INPLACE, LOCK=SHARED` secondary-index creation, standalone drop,
    and re-add,
    `ALGORITHM=INPLACE, LOCK=DEFAULT` secondary-index creation,
@@ -3488,8 +3488,10 @@ Tasks:
    schema/table metadata plus removed directory and table files for multiple
    schema-owned InnoDB tables. Focused
    secondary-index crash coverage preserves completed standalone `CREATE INDEX`
-   and `DROP INDEX` boundaries before ownerless dictionary finish, and focused
-   unique replacement crash coverage preserves completed
+   and `DROP INDEX` boundaries plus online
+   `ALTER TABLE ... ADD/DROP INDEX ..., ALGORITHM=INPLACE, LOCK=NONE`
+   boundaries before ownerless dictionary finish, and focused unique
+   replacement crash coverage preserves completed
    `CREATE OR REPLACE UNIQUE INDEX` metadata/enforcement movement, then verifies
    recovered present-index metadata and forced-index reads, absent-index
    metadata and forced-index rejection, and replacement unique-key enforcement;
@@ -4891,6 +4893,9 @@ Tasks:
    and reopen coverage for accepted ordinary secondary-index
    `NOCOPY`/`LOCK=SHARED`, `NOCOPY`/`LOCK=EXCLUSIVE`, and
    `INPLACE`/`LOCK=EXCLUSIVE` add/drop option combinations. The
+   `ownerless-online-index-ddl-crash-recovery` slice adds hook-build
+   live-peer recovery for the stress-used ordinary secondary-index
+   `INPLACE`/`LOCK=NONE` add/drop crash boundary. The
    `ownerless-online-unique-index-ddl-options` slice adds matching focused
    coverage for a unique secondary-index `INPLACE`/`LOCK=SHARED` add/drop
    pair with duplicate-key enforcement through an already-open peer. The
@@ -5527,15 +5532,16 @@ Minimum suites before support can be claimed:
     can clean up the dead creator, finish the marked dictionary generation, see
     the created `.frm`/`.ibd`, insert rows, and keep the native file-op marker
     durable until the final no-live checkpoint drain,
-  - after standalone secondary-index creation/removal, unique-index
+  - after standalone secondary-index creation/removal, online
+    `ALGORITHM=INPLACE, LOCK=NONE` secondary-index add/drop, unique-index
     replacement/drop, secondary-index rename, and secondary-index
     ignored/not-ignored metadata changes but before ownerless dictionary
     finish; hook coverage proves live-peer recovery for physical index
-    create/drop/replacement with the native file-operation marker retained
-    until no-live drain, metadata-only live recovery for index rename and
-    ignored/not-ignored changes with that marker clear, and the recovered
-    present/absent, unique-enforced, renamed, and ignored/not-ignored index
-    states remain correct,
+    create/drop/online add/drop/replacement with the native file-operation
+    marker retained until no-live drain, metadata-only live recovery for index
+    rename and ignored/not-ignored changes with that marker clear, and the
+    recovered present/absent, unique-enforced, renamed, and ignored/not-ignored
+    index states remain correct,
   - after ordinary column-add, column-drop, column-modify, and column-rename
     ALTER but before ownerless dictionary finish; hook coverage proves the
     focused plain and exact copy-lock stored-column ADD cases, exact copy-lock
