@@ -1303,6 +1303,18 @@ if(BUILD_TESTING)
           dictionary-check-constraint-drop-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-field-generated-check-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-field-generated-check-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-field-generated-check-drop-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-field-generated-check-drop-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-primary-key-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -2257,6 +2269,8 @@ if(BUILD_TESTING)
         libmylite.ownerless-dictionary-secondary-index-ignorability-crash
         libmylite.ownerless-dictionary-check-constraint-crash
         libmylite.ownerless-dictionary-check-constraint-drop-crash
+        libmylite.ownerless-dictionary-field-generated-check-crash
+        libmylite.ownerless-dictionary-field-generated-check-drop-crash
         libmylite.ownerless-dictionary-primary-key-crash
         libmylite.ownerless-dictionary-descending-primary-key-crash
         libmylite.ownerless-dictionary-composite-direction-primary-key-crash

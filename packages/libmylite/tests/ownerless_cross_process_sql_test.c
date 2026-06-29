@@ -59550,7 +59550,8 @@ static void test_crashed_foreign_key_cross_schema_multi_rename_dictionary_ddl_re
     free(root);
 }
 
-static void test_crashed_fk_cross_schema_rename_if_exists_missing_source_recovers_constraints(void
+static void test_crashed_fk_cross_schema_rename_if_exists_missing_source_recovers_constraints(
+    void
 ) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -60196,6 +60197,7 @@ static void test_crashed_field_generated_check_dictionary_ddl_recovers_constrain
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(root, "ownerless-dictionary-field-check-crash.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -60238,10 +60240,11 @@ static void test_crashed_field_generated_check_dictionary_ddl_recovers_constrain
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         field_generated_check_until_dictionary_finish_fault
     );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -60295,6 +60298,11 @@ static void test_crashed_field_generated_check_dictionary_ddl_recovers_constrain
         ) == 73U
     );
     assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
+
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     assert_ownerless_field_generated_check_crash_ddl_state(
         paths,
@@ -60319,6 +60327,7 @@ static void test_crashed_field_generated_check_drop_ddl_absent_constraints(void)
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(root, "ownerless-dictionary-field-check-drop-crash.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -60385,10 +60394,11 @@ static void test_crashed_field_generated_check_drop_ddl_absent_constraints(void)
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         field_generated_check_drop_until_dictionary_finish_fault
     );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -60425,6 +60435,11 @@ static void test_crashed_field_generated_check_drop_ddl_absent_constraints(void)
         ) == 28U
     );
     assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
+
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     assert_ownerless_field_generated_check_drop_crash_ddl_state(
         paths,

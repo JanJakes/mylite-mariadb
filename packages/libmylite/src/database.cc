@@ -2404,6 +2404,13 @@ bool ownerless_alter_table_check_constraint_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 );
+bool consume_ownerless_alter_table_modify_field_check_recovery_clause(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::size_t &index,
+    std::string_view schema_name,
+    std::string_view table_name
+);
 bool ownerless_alter_table_mixed_foreign_key_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens,
@@ -2504,6 +2511,14 @@ bool ownerless_check_constraint_metadata_lookup(
     std::string_view schema_name,
     std::string_view table_name,
     std::string_view constraint_name,
+    bool *out_exists
+);
+bool ownerless_check_constraint_metadata_lookup_with_level(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    std::string_view constraint_name,
+    std::string_view level,
     bool *out_exists
 );
 bool ownerless_generated_column_metadata_lookup(
@@ -16081,7 +16096,8 @@ bool ownerless_generated_column_definition_uses_rejected_function_token(std::str
            token_equals(token, "SELECT");
 }
 
-bool ownerless_create_table_has_generated_column_recovery_disqualifier(const SqlPolicyTokens &tokens
+bool ownerless_create_table_has_generated_column_recovery_disqualifier(
+    const SqlPolicyTokens &tokens
 ) {
     bool has_generated_column = false;
     for (std::size_t index = 0U; index < tokens.count; ++index) {
@@ -16730,8 +16746,26 @@ bool ownerless_check_constraint_metadata_lookup(
     std::string_view constraint_name,
     bool *out_exists
 ) {
+    return ownerless_check_constraint_metadata_lookup_with_level(
+        db,
+        schema_name,
+        table_name,
+        constraint_name,
+        "Table",
+        out_exists
+    );
+}
+
+bool ownerless_check_constraint_metadata_lookup_with_level(
+    mylite_db &db,
+    std::string_view schema_name,
+    std::string_view table_name,
+    std::string_view constraint_name,
+    std::string_view level,
+    bool *out_exists
+) {
     if (out_exists == nullptr || schema_name.empty() || table_name.empty() ||
-        constraint_name.empty()) {
+        constraint_name.empty() || level.empty()) {
         return false;
     }
     *out_exists = false;
@@ -16740,11 +16774,12 @@ bool ownerless_check_constraint_metadata_lookup(
     const std::string escaped_schema = ownerless_escape_metadata_literal(db, schema_name);
     const std::string escaped_table = ownerless_escape_metadata_literal(db, table_name);
     const std::string escaped_constraint = ownerless_escape_metadata_literal(db, constraint_name);
+    const std::string escaped_level = ownerless_escape_metadata_literal(db, level);
     const std::string sql = "SELECT COUNT(*) FROM information_schema.check_constraints "
                             "WHERE constraint_schema = '" +
                             escaped_schema + "' AND table_name = '" + escaped_table +
-                            "' AND constraint_name = '" + escaped_constraint +
-                            "' AND level = 'Table'";
+                            "' AND constraint_name = '" + escaped_constraint + "' AND level = '" +
+                            escaped_level + "'";
 
     bool query_succeeded = false;
     bool constraint_exists = false;
@@ -19851,6 +19886,91 @@ bool consume_ownerless_alter_table_drop_check_constraint_recovery_clause(
     return true;
 }
 
+bool consume_ownerless_alter_table_modify_field_check_recovery_clause(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::size_t &index,
+    std::string_view schema_name,
+    std::string_view table_name
+) {
+    if (index >= tokens.count || !token_equals(tokens.values[index], "MODIFY")) {
+        return false;
+    }
+    ++index;
+    if (index < tokens.count && token_equals(tokens.values[index], "COLUMN")) {
+        ++index;
+    }
+    if (index + 1U >= tokens.count || token_equals(tokens.values[index], "IF") ||
+        !ownerless_table_identifier_token(tokens.values[index])) {
+        return false;
+    }
+
+    const std::string column_name = ownerless_normalized_identifier(tokens.values[index]);
+    ++index;
+    bool has_definition = false;
+    bool saw_check = false;
+    std::size_t depth = 0U;
+    for (; index < tokens.count; ++index) {
+        const std::string_view token = tokens.values[index];
+        if (depth == 0U && (token_equals(token, ",") || token_equals(token, ";"))) {
+            break;
+        }
+        if (token_equals(token, "(")) {
+            ++depth;
+            has_definition = true;
+            continue;
+        }
+        if (token_equals(token, ")")) {
+            if (depth == 0U) {
+                return false;
+            }
+            --depth;
+            has_definition = true;
+            continue;
+        }
+        if (depth == 0U) {
+            if (token_equals(token, "CHECK")) {
+                saw_check = true;
+            } else if (
+                token_in(token, "AFTER", "ALGORITHM", "AUTO_INCREMENT") ||
+                token_equals(token, "CONSTRAINT") ||
+                token_in(token, "FIRST", "FOREIGN", "FULLTEXT", "GENERATED") ||
+                token_in(token, "INDEX", "KEY", "LOCK", "PRIMARY") ||
+                token_equals(token, "REFERENCES") ||
+                token_in(token, "SPATIAL", "STORED", "UNIQUE", "VIRTUAL")
+            ) {
+                return false;
+            }
+        }
+        has_definition = true;
+    }
+    if (!has_definition || depth != 0U) {
+        return false;
+    }
+
+    bool column_exists = false;
+    bool column_check_exists = false;
+    if (!ownerless_column_metadata_lookup(
+            db,
+            schema_name,
+            table_name,
+            column_name,
+            &column_exists
+        ) ||
+        !column_exists ||
+        !ownerless_check_constraint_metadata_lookup_with_level(
+            db,
+            schema_name,
+            table_name,
+            column_name,
+            "Column",
+            &column_check_exists
+        )) {
+        return false;
+    }
+    return saw_check ? !column_check_exists : column_check_exists;
+}
+
 bool ownerless_alter_table_check_constraint_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
@@ -19887,7 +20007,16 @@ bool ownerless_alter_table_check_constraint_recovery_statement(
             saw_clause = true;
         } else {
             index = clause_index;
-            return false;
+            if (!consume_ownerless_alter_table_modify_field_check_recovery_clause(
+                    db,
+                    tokens,
+                    index,
+                    schema_name,
+                    table_name
+                )) {
+                return false;
+            }
+            saw_clause = true;
         }
 
         if (index >= tokens.count) {

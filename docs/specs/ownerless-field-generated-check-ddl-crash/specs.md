@@ -58,9 +58,11 @@ Add one unsafe-hook selector:
   CONSTRAINT ownerless_check_generated_total CHECK (generated_total >= value)`
   under the existing `dictionary-before-finish` hook,
 - kill the writer after MariaDB DDL completes but before ownerless dictionary
-  finish while a live ownerless peer keeps cleanup busy,
-- release the peer and reopen ownerless read/write to rebuild volatile
-  coordination,
+  finish while a live ownerless peer remains open,
+- open a new ownerless read/write handle and recover the dictionary state while
+  the peer remains live,
+- verify the native file-operation marker remains set until the live peer is
+  released and final no-live drain runs,
 - verify recovered `INFORMATION_SCHEMA.CHECK_CONSTRAINTS` contains the
   column-level `value` CHECK and the table-level generated-column CHECK,
 - verify CHECK enforcement rejects invalid field-level and generated-column
@@ -76,7 +78,7 @@ In scope:
   ADD metadata,
 - crash-at-dictionary-before-finish coverage for completed table-level CHECK
   ADD metadata that references an existing virtual generated column,
-- live-peer cleanup-busy behavior and no-live rebuild,
+- live-peer recovery plus final no-live marker drain,
 - recovered CHECK metadata and enforcement through ownerless/native reopen
   before and after forced `.shm` rebuild.
 
@@ -130,7 +132,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selector reaches the dictionary fault hook and does not hang.
-- A live peer prevents cleanup until no-live recovery.
+- A new ownerless opener recovers the dictionary state while a live peer
+  remains open, and the marker drains only after final peer release.
 - Recovered metadata includes one column-level `value` CHECK and one
   table-level `ownerless_check_generated_total` CHECK in
   `INFORMATION_SCHEMA.CHECK_CONSTRAINTS`.

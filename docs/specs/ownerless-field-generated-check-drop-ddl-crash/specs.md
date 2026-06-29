@@ -58,8 +58,11 @@ Add one unsafe-hook selector:
   ownerless_check_generated_drop_total` under the existing
   `dictionary-before-finish` hook,
 - kill the writer after MariaDB DDL completes but before ownerless dictionary
-  finish while a live peer keeps cleanup busy,
-- reopen ownerless read/write after no-live recovery,
+  finish while a live peer remains open,
+- open a new ownerless read/write handle and recover the dictionary state while
+  the peer remains live,
+- verify the native file-operation marker remains set until the live peer is
+  released and final no-live drain runs,
 - verify both CHECK metadata entries are absent,
 - verify formerly invalid field-level and generated-column values now insert
   successfully,
@@ -74,7 +77,7 @@ In scope:
   DROP metadata,
 - crash-at-dictionary-before-finish coverage for completed generated-column
   table CHECK DROP metadata,
-- live-peer cleanup-busy behavior and no-live rebuild,
+- live-peer recovery plus final no-live marker drain,
 - recovered absent CHECK metadata and post-drop writes through
   ownerless/native reopen before and after forced `.shm` rebuild.
 
@@ -125,7 +128,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The focused selector reaches the dictionary fault hook and does not hang.
-- A live peer prevents cleanup until no-live recovery.
+- A new ownerless opener recovers the dictionary state while a live peer
+  remains open, and the marker drains only after final peer release.
 - Recovered metadata excludes both the column-level `value` CHECK and the
   table-level `ownerless_check_generated_drop_total` CHECK from
   `INFORMATION_SCHEMA.CHECK_CONSTRAINTS`.
