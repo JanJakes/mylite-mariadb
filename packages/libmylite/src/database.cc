@@ -2053,16 +2053,12 @@ bool clear_ownerless_autoinc_checkpoint_pending(RuntimeState &runtime);
 bool ownerless_native_rollback_history_headers_look_consistent(
     const std::filesystem::path &database_path
 );
-bool ownerless_native_rollback_history_headers_are_empty(
-    const std::filesystem::path &database_path
-);
+bool ownerless_native_rollback_history_empty(const std::filesystem::path &database_path);
 bool ownerless_native_data_files_max_page_lsn(
     const std::filesystem::path &database_path,
     std::uint64_t *out_max_page_lsn
 );
-bool ownerless_current_redo_file_covers_native_page_lsns(
-    const std::filesystem::path &database_path
-);
+bool ownerless_current_redo_covers_native_pages(const std::filesystem::path &database_path);
 bool ownerless_native_has_recovered_active_transactions(void);
 bool ownerless_native_rollback_history_headers_state(
     const std::filesystem::path &database_path,
@@ -12400,8 +12396,7 @@ void reclaim_ownerless_page_log_after_native_checkpoint(RuntimeState &runtime) {
         )) {
         return;
     }
-    if (no_live_peers &&
-        !ownerless_current_redo_file_covers_native_page_lsns(runtime.database_path)) {
+    if (no_live_peers && !ownerless_current_redo_covers_native_pages(runtime.database_path)) {
         return;
     }
     if (no_live_peers) {
@@ -12753,7 +12748,7 @@ bool clear_ownerless_native_file_op_checkpoint_without_page_log(RuntimeState &ru
     if (mylite_ownerless_innodb_make_checkpoint() != MYLITE_OWNERLESS_INNODB_LOCK_OK) {
         return false;
     }
-    if (!ownerless_current_redo_file_covers_native_page_lsns(runtime.database_path)) {
+    if (!ownerless_current_redo_covers_native_pages(runtime.database_path)) {
         return false;
     }
     if (!ownerless_native_rollback_history_headers_look_consistent(runtime.database_path)) {
@@ -13308,9 +13303,7 @@ bool ownerless_native_rollback_history_headers_look_consistent(
     return ownerless_native_rollback_history_headers_state(database_path, &empty);
 }
 
-bool ownerless_native_rollback_history_headers_are_empty(
-    const std::filesystem::path &database_path
-) {
+bool ownerless_native_rollback_history_empty(const std::filesystem::path &database_path) {
     bool empty = false;
     return ownerless_native_rollback_history_headers_state(database_path, &empty) && empty;
 }
@@ -29007,9 +29000,7 @@ bool ownerless_redo_snapshot_covers_native_page_lsns(
     return ownerless_redo_prefix_covers_native_page_lsns(database_path, snapshot.prefix.data());
 }
 
-bool ownerless_current_redo_file_covers_native_page_lsns(
-    const std::filesystem::path &database_path
-) {
+bool ownerless_current_redo_covers_native_pages(const std::filesystem::path &database_path) {
     OwnerlessRedoStartupPrefixSnapshot snapshot = {};
     return capture_ownerless_redo_startup_prefix(database_path, snapshot, false, false) ==
                MYLITE_OK &&
@@ -29623,7 +29614,7 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
                 ownerless_runtime_open && !db.readonly_open &&
                 ownerless_runtime_has_no_live_peers(g_runtime) &&
                 !ownerless_page_log_has_payload_records(g_runtime) &&
-                ownerless_current_redo_file_covers_native_page_lsns(db.database_path);
+                ownerless_current_redo_covers_native_pages(db.database_path);
             const bool ownerless_startup_current_native_redo_is_authoritative =
                 ownerless_startup_current_native_redo_header_is_authoritative &&
                 !native_checkpoint_marker_needed;
@@ -30438,7 +30429,7 @@ void release_runtime(void) {
         g_runtime.ownerless_rw_mode && ownerless_native_has_recovered_active_transactions();
     const bool native_rollback_history_empty_before_shutdown =
         g_runtime.ownerless_rw_mode &&
-        ownerless_native_rollback_history_headers_are_empty(g_runtime.database_path);
+        ownerless_native_rollback_history_empty(g_runtime.database_path);
     bool native_file_op_checkpoint_needed_before_shutdown = false;
     bool native_dml_file_op_checkpoint_needed_before_shutdown = false;
     if (g_runtime.ownerless_rw_mode) {
@@ -30496,7 +30487,7 @@ void release_runtime(void) {
         ordinary_native_consumed_page_version_wal_shutdown &&
         ownerless_page_log_has_payload_records(g_runtime);
     if (retained_ordinary_native_page_log_payload_after_shutdown &&
-        ownerless_current_redo_file_covers_native_page_lsns(g_runtime.database_path) &&
+        ownerless_current_redo_covers_native_pages(g_runtime.database_path) &&
         ownerless_native_rollback_history_headers_look_consistent(g_runtime.database_path)) {
         static_cast<void>(mylite_ownerless_page_log_checkpoint_at(
             g_runtime.concurrency_wal_fd,
@@ -30532,8 +30523,8 @@ void release_runtime(void) {
         );
         if (post_shutdown_replay_result == MYLITE_OK && post_shutdown_checkpoint_read &&
             post_shutdown_visible_lsn != 0U &&
-            ownerless_current_redo_file_covers_native_page_lsns(g_runtime.database_path) &&
-            ownerless_native_rollback_history_headers_are_empty(g_runtime.database_path)) {
+            ownerless_current_redo_covers_native_pages(g_runtime.database_path) &&
+            ownerless_native_rollback_history_empty(g_runtime.database_path)) {
             static_cast<void>(mylite_ownerless_page_log_checkpoint_at(
                 g_runtime.concurrency_wal_fd,
                 k_concurrency_recovery_header_size,
