@@ -91112,15 +91112,7 @@ static void assert_ownerless_blob_page_pressure_state(
         ) == 1U
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(
-        paths.database_path
-    );
-    assert(
-        count_concurrency_wal_records_without_flags(
-            paths.database_path,
-            MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
-        ) == 0U
-    );
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(paths.database_path);
     assert(count_ownerless_blob_pressure_blob_pages(paths.database_path) > 0U);
 }
 
@@ -91162,15 +91154,7 @@ static void assert_ownerless_blob_size_matrix_state(
         ) == 1U
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(
-        paths.database_path
-    );
-    assert(
-        count_concurrency_wal_records_without_flags(
-            paths.database_path,
-            MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
-        ) == 0U
-    );
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(paths.database_path);
     assert(count_ownerless_blob_size_matrix_blob_pages(paths.database_path) > 0U);
 }
 
@@ -91212,15 +91196,7 @@ static void assert_ownerless_compressed_blob_page_pressure_state(
         ) == 1U
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(
-        paths.database_path
-    );
-    assert(
-        count_concurrency_wal_records_without_flags(
-            paths.database_path,
-            MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
-        ) == 0U
-    );
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(paths.database_path);
     assert(count_ownerless_compressed_blob_pressure_zblob_pages(paths.database_path) > 0U);
 }
 
@@ -91264,15 +91240,7 @@ static void assert_ownerless_compressed_blob_size_matrix_state(
         ) == 1U
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(
-        paths.database_path
-    );
-    assert(
-        count_concurrency_wal_records_without_flags(
-            paths.database_path,
-            MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
-        ) == 0U
-    );
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(paths.database_path);
     assert(count_ownerless_compressed_blob_size_matrix_zblob_pages(paths.database_path) > 0U);
 }
 
@@ -91321,15 +91289,7 @@ static void assert_ownerless_compressed_blob_key_block_matrix_state(
         assert(query_unsigned(db, sql) == 1U);
     }
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(
-        paths.database_path
-    );
-    assert(
-        count_concurrency_wal_records_without_flags(
-            paths.database_path,
-            MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
-        ) == 0U
-    );
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(paths.database_path);
     assert_ownerless_zblob_pages(paths.database_path);
 }
 
