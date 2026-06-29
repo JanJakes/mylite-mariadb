@@ -21745,6 +21745,41 @@ static void hold_pressure_busy_writer_until_killed(
         "TO app.ownerless_pressure_dead_writer_renamed",
         "pressure limit"
     );
+    expect_exec_busy(
+        db,
+        "ALTER TABLE app.ownerless_pressure_dead_writer_fk_child "
+        "ADD CONSTRAINT ownerless_pressure_dead_writer_fk_child_parent "
+        "FOREIGN KEY (parent_id) "
+        "REFERENCES app.ownerless_pressure_dead_writer_fk_parent (id)",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "ALTER TABLE app.ownerless_pressure_dead_writer_fk_drop_child "
+        "DROP FOREIGN KEY ownerless_pressure_dead_writer_fk_drop_child_parent",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "CREATE OR REPLACE TABLE app.ownerless_pressure_dead_writer_replace_like "
+        "LIKE app.ownerless_pressure_dead_writer_replace_like_source",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "CREATE OR REPLACE VIEW app.ownerless_pressure_dead_writer_view AS "
+        "SELECT id, value, value + 5 AS adjusted "
+        "FROM app.ownerless_pressure_dead_writer_view_base "
+        "WHERE value >= 20",
+        "pressure limit"
+    );
+    expect_exec_busy(
+        db,
+        "CREATE OR REPLACE TRIGGER app.ownerless_pressure_dead_writer_trigger_bu "
+        "BEFORE UPDATE ON app.ownerless_pressure_dead_writer_trigger_base "
+        "FOR EACH ROW SET NEW.value = NEW.value + 2",
+        "pressure limit"
+    );
     assert(
         mylite_prepare(
             db,
@@ -21791,6 +21826,95 @@ static void assert_pressure_dead_writer_schema_before(mylite_db *db) {
             "AND table_name = 'ownerless_pressure_dead_writer_renamed'"
         ) == 0U
     );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_dead_writer_fk_child' "
+            "AND constraint_name = 'ownerless_pressure_dead_writer_fk_child_parent'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_dead_writer_fk_drop_child' "
+            "AND constraint_name = 'ownerless_pressure_dead_writer_fk_drop_child_parent'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_dead_writer_replace_like' "
+            "AND column_name = 'old_value'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_dead_writer_replace_like' "
+            "AND column_name = 'value'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_dead_writer_replace_like' "
+            "AND index_name = 'ownerless_pressure_dead_writer_replace_like_old_idx'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_dead_writer_replace_like' "
+            "AND index_name = 'ownerless_pressure_dead_writer_replace_like_value_idx'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(old_value) FROM app.ownerless_pressure_dead_writer_replace_like"
+        ) == 9U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(doubled) FROM app.ownerless_pressure_dead_writer_view") ==
+        60U
+    );
+    assert(
+        exec_status(
+            db,
+            "SELECT SUM(adjusted) FROM app.ownerless_pressure_dead_writer_view",
+            NULL
+        ) != MYLITE_OK
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_pressure_dead_writer_trigger_bu' "
+            "AND action_statement LIKE '%+ 1%'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_pressure_dead_writer_trigger_bu' "
+            "AND action_statement LIKE '%+ 2%'"
+        ) == 0U
+    );
 }
 
 static void assert_pressure_dead_writer_schema_after(mylite_db *db) {
@@ -21823,6 +21947,116 @@ static void assert_pressure_dead_writer_schema_after(mylite_db *db) {
     assert(
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_dead_writer_renamed") ==
         10U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_dead_writer_fk_child' "
+            "AND constraint_name = 'ownerless_pressure_dead_writer_fk_child_parent'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+            "WHERE constraint_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_dead_writer_fk_drop_child' "
+            "AND constraint_name = 'ownerless_pressure_dead_writer_fk_drop_child_parent'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_dead_writer_fk_child") == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(parent_id) FROM app.ownerless_pressure_dead_writer_fk_child"
+        ) == 3U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_pressure_dead_writer_fk_drop_child"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(parent_id) FROM app.ownerless_pressure_dead_writer_fk_drop_child"
+        ) == 1000U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_dead_writer_replace_like' "
+            "AND column_name = 'old_value'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_dead_writer_replace_like' "
+            "AND column_name = 'value'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_dead_writer_replace_like' "
+            "AND index_name = 'ownerless_pressure_dead_writer_replace_like_old_idx'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_pressure_dead_writer_replace_like' "
+            "AND index_name = 'ownerless_pressure_dead_writer_replace_like_value_idx'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_pressure_dead_writer_replace_like"
+        ) == 2U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_pressure_dead_writer_replace_like"
+        ) == 30U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(adjusted) FROM app.ownerless_pressure_dead_writer_view") ==
+        25U
+    );
+    assert(
+        exec_status(db, "SELECT SUM(doubled) FROM app.ownerless_pressure_dead_writer_view", NULL) !=
+        MYLITE_OK
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_pressure_dead_writer_trigger_base"
+        ) == 22U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.triggers "
+            "WHERE trigger_schema = 'app' "
+            "AND trigger_name = 'ownerless_pressure_dead_writer_trigger_bu' "
+            "AND action_statement LIKE '%+ 2%'"
+        ) == 1U
     );
 }
 
@@ -21866,6 +22100,94 @@ static void test_ownerless_active_reader_pressure_dead_writer_cleanup(void) {
         ") ENGINE=InnoDB"
     );
     exec_ok(db, "INSERT INTO app.ownerless_pressure_dead_writer_rename VALUES (1, 10)");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_dead_writer_fk_parent ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_dead_writer_fk_parent VALUES (1), (2)");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_dead_writer_fk_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_id INT NOT NULL, "
+        "INDEX ownerless_pressure_dead_writer_fk_child_parent_idx (parent_id)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_dead_writer_fk_child VALUES (1, 1)");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_dead_writer_fk_drop_parent ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_dead_writer_fk_drop_parent VALUES (1)");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_dead_writer_fk_drop_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_id INT NOT NULL, "
+        "INDEX ownerless_pressure_dead_writer_fk_drop_child_parent_idx (parent_id), "
+        "CONSTRAINT ownerless_pressure_dead_writer_fk_drop_child_parent "
+        "FOREIGN KEY (parent_id) "
+        "REFERENCES app.ownerless_pressure_dead_writer_fk_drop_parent (id)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_dead_writer_fk_drop_child VALUES (1, 1)");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_dead_writer_replace_like_source ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "note VARCHAR(16) NOT NULL, "
+        "INDEX ownerless_pressure_dead_writer_replace_like_value_idx (value)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_pressure_dead_writer_replace_like_source VALUES "
+        "(1, 10, 'alpha'), (2, 20, 'beta')"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_dead_writer_replace_like ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "old_value INT NOT NULL, "
+        "stale_note VARCHAR(16) NOT NULL, "
+        "INDEX ownerless_pressure_dead_writer_replace_like_old_idx (old_value)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_dead_writer_replace_like VALUES (1, 9, 'old')");
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_dead_writer_view_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_dead_writer_view_base VALUES (1, 10), (2, 20)");
+    exec_ok(
+        db,
+        "CREATE VIEW app.ownerless_pressure_dead_writer_view AS "
+        "SELECT id, value, value * 2 AS doubled "
+        "FROM app.ownerless_pressure_dead_writer_view_base "
+        "WHERE value >= 10"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_pressure_dead_writer_trigger_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_dead_writer_trigger_base VALUES (1, 10)");
+    exec_ok(
+        db,
+        "CREATE TRIGGER app.ownerless_pressure_dead_writer_trigger_bu "
+        "BEFORE UPDATE ON app.ownerless_pressure_dead_writer_trigger_base "
+        "FOR EACH ROW SET NEW.value = NEW.value + 1"
+    );
     assert(mylite_close(db) == MYLITE_OK);
     assert(concurrency_wal_is_checkpointed(database_path));
 
@@ -21996,6 +22318,54 @@ static void test_ownerless_active_reader_pressure_dead_writer_cleanup(void) {
         db,
         "RENAME TABLE app.ownerless_pressure_dead_writer_rename "
         "TO app.ownerless_pressure_dead_writer_renamed"
+    );
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_pressure_dead_writer_fk_child "
+        "ADD CONSTRAINT ownerless_pressure_dead_writer_fk_child_parent "
+        "FOREIGN KEY (parent_id) "
+        "REFERENCES app.ownerless_pressure_dead_writer_fk_parent (id)"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_dead_writer_fk_child VALUES (2, 2)");
+    expect_exec_mariadb_error(
+        db,
+        "INSERT INTO app.ownerless_pressure_dead_writer_fk_child VALUES (3, 999)",
+        MYLITE_TEST_NO_REFERENCED_ROW_ERRNO
+    );
+    exec_ok(
+        db,
+        "ALTER TABLE app.ownerless_pressure_dead_writer_fk_drop_child "
+        "DROP FOREIGN KEY ownerless_pressure_dead_writer_fk_drop_child_parent"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_pressure_dead_writer_fk_drop_child VALUES (2, 999)");
+    exec_ok(
+        db,
+        "CREATE OR REPLACE TABLE app.ownerless_pressure_dead_writer_replace_like "
+        "LIKE app.ownerless_pressure_dead_writer_replace_like_source"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_pressure_dead_writer_replace_like "
+        "SELECT id, value, note "
+        "FROM app.ownerless_pressure_dead_writer_replace_like_source"
+    );
+    exec_ok(
+        db,
+        "CREATE OR REPLACE VIEW app.ownerless_pressure_dead_writer_view AS "
+        "SELECT id, value, value + 5 AS adjusted "
+        "FROM app.ownerless_pressure_dead_writer_view_base "
+        "WHERE value >= 20"
+    );
+    exec_ok(
+        db,
+        "CREATE OR REPLACE TRIGGER app.ownerless_pressure_dead_writer_trigger_bu "
+        "BEFORE UPDATE ON app.ownerless_pressure_dead_writer_trigger_base "
+        "FOR EACH ROW SET NEW.value = NEW.value + 2"
+    );
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_pressure_dead_writer_trigger_base "
+        "SET value = 20 WHERE id = 1"
     );
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 32U);
     assert_pressure_dead_writer_schema_after(db);

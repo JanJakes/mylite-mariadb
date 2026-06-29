@@ -30,6 +30,14 @@ without changing production behavior.
   statement steps. If retained WAL is at the configured limit and an active
   page-version pin exists, the statement returns `MYLITE_BUSY` with no MariaDB
   errno.
+- `mariadb/sql/sql_parse.cc` marks view and trigger DDL as
+  `CF_CHANGES_DATA`, and routes `CREATE OR REPLACE VIEW`/`ALTER VIEW` through
+  `mysql_create_view()` and trigger DDL through
+  `mysql_create_or_drop_trigger()`.
+- `mariadb/sql/sql_table.cc` and `mariadb/storage/innobase/row/row0mysql.cc`
+  route `CREATE OR REPLACE TABLE ... LIKE`, FK ADD, and FK DROP through native
+  table and InnoDB dictionary metadata paths that must not be reached by a
+  pressure-rejected writer.
 - `packages/libmylite/tests/ownerless_cross_process_sql_test.c` already
   contains active-reader pressure, killed-pin, write-policy, and diagnostics
   selectors. The new selector can reuse those helpers and add process death
@@ -43,8 +51,10 @@ In scope:
 - Commit an ownerless update that leaves page-version WAL retained by the
   reader pin.
 - Start a pressure-limited writer that receives `MYLITE_BUSY` for direct DML,
-  representative table DDL, representative rename DDL, and a prepared DML
-  step, then kill it without `mylite_close()` or statement finalization.
+  representative table DDL, representative rename DDL, FK ADD/DROP,
+  replacement-copy table DDL, view replacement, trigger replacement, and a
+  prepared DML step, then kill it without `mylite_close()` or statement
+  finalization.
 - Verify a later writer cleans the dead process state, still sees pressure
   while the reader pin is live, and observes no DML or DDL side effects from
   the killed writer.
@@ -72,15 +82,22 @@ the pressure gate rejects:
 
 - direct `UPDATE`,
 - `ALTER TABLE ... ADD COLUMN`,
-- `RENAME TABLE`, and
+- `RENAME TABLE`,
+- `ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY`,
+- `ALTER TABLE ... DROP FOREIGN KEY`,
+- `CREATE OR REPLACE TABLE ... LIKE`,
+- `CREATE OR REPLACE VIEW`,
+- `CREATE OR REPLACE TRIGGER`, and
 - prepared `INSERT ... SELECT` at `mylite_step()`.
 
 The child then waits with its database handle and prepared statement still
 open. The parent kills it with `SIGKILL`, opens another pressure-limited writer
 to trigger stale process cleanup, and verifies pressure remains active because
 the real reader pin is still live. After the reader releases, the same writer
-can update rows and execute the DDL while the idle peer is still live. Final
-ownerless and native reopens verify durable state after `.shm` rebuild.
+can update rows and execute the DDL while the idle peer is still live, including
+FK enforcement/release, replacement-copy metadata, view projection, and trigger
+body effects. Final ownerless and native reopens verify durable state after
+`.shm` rebuild.
 
 ## Compatibility Impact
 
@@ -122,12 +139,13 @@ No production binary-size impact. The slice adds tests and documentation only.
 
 ## Acceptance Criteria
 
-- A pressure-limited writer killed after pressure-rejected DML, DDL, and
-  prepared DML leaves no SQL side effects.
+- A pressure-limited writer killed after pressure-rejected DML, representative
+  table/rename DDL, FK ADD/DROP, replacement-copy, view, trigger, and prepared
+  DML leaves no SQL side effects.
 - A later writer cleans the dead writer slot but remains pressure-throttled
   while the original reader pin is live.
-- After the reader releases, DML and the representative DDL succeed even while
-  another idle ownerless peer remains live.
+- After the reader releases, DML and the representative DDL families succeed
+  even while another idle ownerless peer remains live.
 - Final state survives ownerless reopen, native read/write reopen, and forced
   `.shm` rebuild.
 
