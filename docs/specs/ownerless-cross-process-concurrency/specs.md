@@ -7911,7 +7911,8 @@ subsystems that this mode needs:
      focused mixed FK/non-FK DROP/MODIFY/CHANGE/RENAME COLUMN, focused mixed
      FK/non-FK table-comment, focused mixed FK/non-FK column-default, and
      focused mixed FK/non-FK named CHECK drop/add, and focused mixed
-     FK/non-FK secondary-index drop/add, rename-index, and ignored-index
+     FK/non-FK secondary-index drop/add, rename-index, ignored-index, and
+     primary-key replacement
      prefinish boundaries, plus child-only,
      self-referencing, and stored generated-column child foreign-key truncate
      prefinish boundaries, plus simple temporary DDL, pure multi-pair temporary
@@ -7942,8 +7943,9 @@ subsystems that this mode needs:
      broader metadata-only DDL, broader mixed temporary/permanent
      rename matrices, broader FK plus non-FK ALTER lists beyond the focused
      ADD COLUMN, DROP/MODIFY/CHANGE/RENAME COLUMN, table-comment, column-default,
-     named CHECK, secondary-index drop/add, secondary-index rename, and
-     secondary-index ignorability cases, broader schema option variants beyond the focused
+     named CHECK, secondary-index drop/add, secondary-index rename,
+     secondary-index ignorability, and primary-key replacement cases, broader
+     schema option variants beyond the focused
      named/current-schema schema-default/comment boundaries,
      and broader DDL file lifecycle while
      peers remain live. Partition truncate

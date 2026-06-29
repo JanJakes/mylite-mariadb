@@ -493,6 +493,12 @@ secondary-index ignorability recovery lane while retaining the native
 file-operation marker until final no-live drain; the covered shape proves
 recovered FK enforcement, ignored-index metadata, ownerless/native reopen, and
 forced `.shm` rebuild.
+Focused mixed `DROP FOREIGN KEY`, primary-key replacement, and
+`ADD CONSTRAINT ... FOREIGN KEY` ALTER lists now use the existing clustered
+primary-key replacement recovery lane while retaining the native file-operation
+marker until final no-live drain; the covered shape proves recovered FK
+enforcement, replacement `PRIMARY` metadata/enforcement, ownerless/native
+reopen, and forced `.shm` rebuild.
 Simple temporary-table `RENAME TABLE` and `ALTER TABLE ... RENAME TO`
 tracking now preserves conservative handling for the renamed temp table and
 restores normal ownerless refresh for a previously shadowed permanent table;

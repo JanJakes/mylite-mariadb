@@ -2288,6 +2288,13 @@ bool ownerless_alter_table_replace_primary_key_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
 );
+bool consume_ownerless_alter_table_replace_primary_key_recovery_clause(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::size_t &index,
+    std::string_view schema_name,
+    std::string_view table_name
+);
 bool ownerless_alter_table_drop_index_if_exists_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
@@ -17922,6 +17929,59 @@ bool ownerless_alter_table_replace_primary_key_recovery_statement(
     return true;
 }
 
+bool consume_ownerless_alter_table_replace_primary_key_recovery_clause(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::size_t &index,
+    std::string_view schema_name,
+    std::string_view table_name
+) {
+    const std::size_t start_index = index;
+    if (index + 3U >= tokens.count || !token_equals(tokens.values[index], "DROP") ||
+        !token_equals(tokens.values[index + 1U], "PRIMARY") ||
+        !token_equals(tokens.values[index + 2U], "KEY") ||
+        !token_equals(tokens.values[index + 3U], ",")) {
+        return false;
+    }
+
+    index += 4U;
+    if (index + 2U >= tokens.count || !token_equals(tokens.values[index], "ADD") ||
+        !token_equals(tokens.values[index + 1U], "PRIMARY") ||
+        !token_equals(tokens.values[index + 2U], "KEY")) {
+        index = start_index;
+        return false;
+    }
+    index += 3U;
+
+    std::vector<std::string> column_names;
+    if (!consume_ownerless_key_part_list(tokens, index, &column_names)) {
+        index = start_index;
+        return false;
+    }
+
+    bool primary_exists = false;
+    if (!ownerless_index_metadata_lookup(db, schema_name, table_name, "PRIMARY", &primary_exists) ||
+        !primary_exists) {
+        index = start_index;
+        return false;
+    }
+    for (const std::string &column_name : column_names) {
+        bool column_exists = false;
+        if (!ownerless_column_metadata_lookup(
+                db,
+                schema_name,
+                table_name,
+                column_name,
+                &column_exists
+            ) ||
+            !column_exists) {
+            index = start_index;
+            return false;
+        }
+    }
+    return true;
+}
+
 bool ownerless_alter_table_drop_index_if_exists_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
@@ -19952,6 +20012,21 @@ bool ownerless_alter_table_mixed_foreign_key_recovery_statement(
                         )) {
                         return false;
                     }
+                    consumed_clause = true;
+                }
+            }
+            if (!consumed_clause) {
+                index = drop_index;
+                if (mixed_recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE &&
+                    consume_ownerless_alter_table_replace_primary_key_recovery_clause(
+                        db,
+                        tokens,
+                        index,
+                        child_schema_name,
+                        child_table_name
+                    )) {
+                    mixed_recovery_kind =
+                        MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_REPLACE_PRIMARY_KEY;
                     consumed_clause = true;
                 }
             }
