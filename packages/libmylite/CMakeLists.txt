@@ -828,6 +828,12 @@ if(BUILD_TESTING)
           dictionary-row-format-compact-file-op-marker-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-row-format-redundant-file-op-marker-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-row-format-redundant-file-op-marker-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-compressed-row-format-file-op-marker-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -2178,6 +2184,7 @@ if(BUILD_TESTING)
         libmylite.ownerless-dictionary-row-format-file-op-marker-crash
         libmylite.ownerless-dictionary-row-format-copy-lock-crash
         libmylite.ownerless-dictionary-row-format-compact-file-op-marker-crash
+        libmylite.ownerless-dictionary-row-format-redundant-file-op-marker-crash
         libmylite.ownerless-dictionary-compressed-row-format-file-op-marker-crash
         libmylite.ownerless-dictionary-compressed-row-format-key-block-1-file-op-marker-crash
         libmylite.ownerless-dictionary-compressed-row-format-key-block-2-file-op-marker-crash

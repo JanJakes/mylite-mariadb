@@ -20940,7 +20940,7 @@ bool ownerless_alter_table_row_format_rebuild_recovery_statement(const SqlPolicy
         !token_equals(tokens.values[3], ".") ||
         !ownerless_table_identifier_token(tokens.values[4]) ||
         !token_equals(tokens.values[5], "ROW_FORMAT") || !token_equals(tokens.values[6], "=") ||
-        !token_in(tokens.values[7], "DYNAMIC", "COMPACT")) {
+        !token_in(tokens.values[7], "DYNAMIC", "COMPACT", "REDUNDANT")) {
         return false;
     }
     std::size_t index = 8U;

@@ -3411,6 +3411,12 @@ Tasks:
    recovered compact row-format metadata, retained row payloads, marker
    retention while a peer is live, final no-live marker drain, and later
    writes through ownerless/native reopen before and after forced `.shm`
+   rebuild. Redundant row-format crash coverage now kills
+   `ALTER TABLE ... ROW_FORMAT=REDUNDANT` after a native row-format rebuild
+   from a dynamic source table but before ownerless dictionary finish, then
+   verifies recovered redundant row-format metadata, retained row payloads,
+   marker retention while a peer is live, final no-live marker drain, and later
+   writes through ownerless/native reopen before and after forced `.shm`
    rebuild.
    Compressed row-format crash coverage now kills plain and explicit copy-lock
    `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=1`,
@@ -7933,7 +7939,7 @@ subsystems that this mode needs:
      `DROP TABLE IF EXISTS`,
      and same-schema/cross-schema two-table drop, plus focused force rebuild,
      dynamic row-format rebuild including exact copy-lock, compact row-format
-     rebuild, focused compressed
+     rebuild, redundant row-format rebuild, focused compressed
      key-block row-format rebuild including exact copy-lock, and focused
      charset-conversion rebuild
      prefinish boundaries, plus simple CREATE/DROP VIEW, focused CREATE OR
@@ -7982,8 +7988,8 @@ subsystems that this mode needs:
      FK, and focused same-schema/cross-schema temporary/permanent IF EXISTS lists,
      other rebuild variants beyond the covered
      FORCE, same-engine ENGINE including both exact copy-lock option orders,
-     dynamic row-format including exact copy-lock, compact row-format,
-     compressed row-format including exact copy-lock, charset including exact
+     dynamic row-format including exact copy-lock, compact and redundant
+     row-format, compressed row-format including exact copy-lock, charset including exact
      copy-lock, and focused exact copy-lock
      ADD/DROP/MODIFY/CHANGE/RENAME COLUMN boundaries,
      broader metadata-only DDL, broader mixed temporary/permanent

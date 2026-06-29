@@ -118,5 +118,5 @@ test coverage and docs.
 - The recovery kind name still says `DYNAMIC`; renaming it would be a cosmetic
   durable-state compatibility risk because the numeric value is already
   persisted. A later cleanup can add an alias if the naming becomes confusing.
-- `ROW_FORMAT=REDUNDANT` remains a separate candidate because it uses another
-  native record-format flag combination and deserves its own evidence.
+- `ROW_FORMAT=REDUNDANT` is covered by the later
+  `ownerless-redundant-row-format-live-recovery` slice.

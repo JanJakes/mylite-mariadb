@@ -126,6 +126,6 @@ CTest registration, and documentation.
 
 ## Supersession Notes
 
-- The later `ownerless-compact-row-format-live-recovery` slice adds focused
-  live-peer crash recovery for `ROW_FORMAT=COMPACT`; `ROW_FORMAT=REDUNDANT`
-  remains planned separately.
+- The later `ownerless-compact-row-format-live-recovery` and
+  `ownerless-redundant-row-format-live-recovery` slices add focused live-peer
+  crash recovery for `ROW_FORMAT=COMPACT` and `ROW_FORMAT=REDUNDANT`.
