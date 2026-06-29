@@ -733,8 +733,8 @@ constexpr unsigned k_lock_poll_initial_interval_ms = 1;
 constexpr unsigned k_lock_poll_max_interval_ms = 10;
 constexpr unsigned k_concurrency_lock_wait_timeout_ms = 5000;
 constexpr unsigned k_system_tables_lock_wait_timeout_ms = 60000;
-constexpr unsigned k_ownerless_runtime_startup_attempts = 3;
-constexpr unsigned k_ownerless_runtime_startup_retry_delay_ms = 50;
+constexpr unsigned k_ownerless_runtime_startup_attempts = 8;
+constexpr unsigned k_ownerless_runtime_startup_retry_delay_ms = 100;
 constexpr std::size_t k_ownerless_redo_header_prefix_size = 4096;
 constexpr std::size_t k_ownerless_redo_startup_prefix_size = 12288;
 constexpr std::size_t k_ownerless_redo_header_checksum_offset = 508;
@@ -2916,6 +2916,7 @@ int append_ownerless_page_version(
     std::uint64_t *out_record_offset
 );
 void pause_for_ownerless_test_fault(const char *fault_name);
+bool ownerless_test_consumes_runtime_startup_failure_after_init_fault(void);
 int ownerless_innodb_page_publish_hook(
     std::uint32_t space_id,
     std::uint32_t page_no,
@@ -28287,7 +28288,7 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
             );
             ownerless_startup_lsn_advance_enabled = true;
         }
-        const int init_result = mysql_server_init(
+        int init_result = mysql_server_init(
             static_cast<int>(g_runtime.argv.size()),
             g_runtime.argv.data(),
             groups
@@ -28301,6 +28302,10 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
             EMBEDDED_OPEN_PERF_START_MYSQL_SERVER_INIT_NS,
             stage_start_ns
         );
+        if (init_result == 0 &&
+            ownerless_test_consumes_runtime_startup_failure_after_init_fault()) {
+            init_result = 1;
+        }
         if (init_result != 0) {
             int failure_result = MYLITE_ERROR;
             const char *failure_message = "MariaDB embedded runtime initialization failed";
@@ -29336,6 +29341,37 @@ void pause_for_ownerless_test_fault(const char *fault_name) {
     }
 #  else
     (void)fault_name;
+#  endif
+}
+
+bool ownerless_test_consumes_runtime_startup_failure_after_init_fault(void) {
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    constexpr const char *k_fault_name = "runtime-startup-after-mysql-server-init";
+    const char *configured_fault = std::getenv("MYLITE_OWNERLESS_TEST_FAULT");
+    if (configured_fault == nullptr || std::strcmp(configured_fault, k_fault_name) != 0) {
+        return false;
+    }
+
+    const char *remaining_value = std::getenv("MYLITE_OWNERLESS_TEST_FAULT_COUNT");
+    if (remaining_value == nullptr) {
+        return false;
+    }
+
+    char *end = nullptr;
+    errno = 0;
+    const unsigned long remaining = std::strtoul(remaining_value, &end, k_decimal_base);
+    if (end == remaining_value || *end != '\0' || errno == ERANGE || remaining == 0UL) {
+        return false;
+    }
+
+    std::array<char, 32> buffer = {};
+    const int written = std::snprintf(buffer.data(), buffer.size(), "%lu", remaining - 1UL);
+    if (written <= 0 || static_cast<std::size_t>(written) >= buffer.size()) {
+        return false;
+    }
+    return ::setenv("MYLITE_OWNERLESS_TEST_FAULT_COUNT", buffer.data(), 1) == 0;
+#  else
+    return false;
 #  endif
 }
 

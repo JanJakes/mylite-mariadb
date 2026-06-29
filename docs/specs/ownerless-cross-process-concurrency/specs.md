@@ -4913,10 +4913,15 @@ Tasks:
    file-operation recovery mode during native startup when retained page WAL,
    the checksummed native file-op checkpoint marker, or a valid
    `mylite-redo-header.bin` backup proves prior ownerless redo/checkpoint
-   suppression; hook-only SQL coverage corrupts redo-header backup magic,
-   format, header size, payload size, recorded redo size, saved prefix, and
-   truncation boundaries and proves those files do not arm the ordinary-open
-   recovery bridge. Final no-live ownerless read/write shutdown
+   suppression. The `ownerless-startup-retry-budget` slice raises that
+   failure-path budget without changing successful-open behavior and adds
+   hook-only coverage that forces four post-`mysql_server_init()` failures
+   before ownerless open, ordinary native reopen after ownerless activity, and
+   forced-`.shm` ownerless reopen all succeed through the same cleanup and
+   redo-prefix restore path. Hook-only SQL coverage also corrupts redo-header
+   backup magic, format, header size, payload size, recorded redo size, saved
+   prefix, and truncation boundaries and proves those files do not arm the
+   ordinary-open recovery bridge. Final no-live ownerless read/write shutdown
    uses the same startup lock to publish native `FILE_CHECKPOINT` evidence for
    completed DDL file-operation redo, and focused SQL coverage proves
    `ALTER TABLE ... AUTO_INCREMENT` sets the native file-op checkpoint marker

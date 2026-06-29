@@ -121,6 +121,7 @@ extern uint32_t my_crc32c(uint32_t crc, const void *buf, size_t len);
 #define MYLITE_TEST_REDO_HEADER_BACKUP_PAYLOAD_OFFSET 32U
 #define MYLITE_TEST_REDO_HEADER_BACKUP_FILE_SIZE_TOLERANCE 4096U
 #define MYLITE_TEST_REDO_HEADER_BACKUP_ARM_FAULT "redo-header-backup-recovery-armed"
+#define MYLITE_TEST_RUNTIME_STARTUP_FAILURE_FAULT "runtime-startup-after-mysql-server-init"
 #define MYLITE_TEST_REDO_HEADER_BACKUP_OPEN_TIMEOUT_MS 60000U
 #define MYLITE_TEST_INNODB_PAGE_SIZE 16384U
 #define MYLITE_TEST_INNODB_COMPRESSED_PAGE_SIZE 8192U
@@ -876,6 +877,7 @@ static void test_ownerless_multi_peer_explicit_dml_marker_drain(void);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void test_ownerless_file_modify_redo_observed_after_checkpointed_dml(void);
 static void test_ownerless_redo_header_backup_validation_boundaries(void);
+static void test_ownerless_runtime_startup_retry_budget(void);
 #endif
 static void test_ownerless_live_idle_peer_reclaims_checkpointable_page_log(void);
 static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close(void);
@@ -5249,6 +5251,10 @@ int main(int argc, char **argv) {
         test_ownerless_redo_header_backup_validation_boundaries();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "runtime-startup-retry-budget") == 0) {
+        test_ownerless_runtime_startup_retry_budget();
+        return 0;
+    }
 #endif
     if (argc == 2 && strcmp(argv[1], "statement-checkpoint-scheduling") == 0) {
         test_ownerless_statement_checkpoint_scheduling_reclaims_before_close();
@@ -7146,6 +7152,7 @@ int main(int argc, char **argv) {
             "transaction-rollback-native-row-undo-crash|"
             "transaction-rollback-native-row-undo-live-peer-crash|"
             "redo-header-backup-validation|"
+            "runtime-startup-retry-budget|"
 #endif
             "statement-checkpoint-scheduling|single-owner-page-write-refresh-skip|"
             "single-owner-external-refresh-skip|single-owner-history-wal-proof|"
@@ -15373,6 +15380,66 @@ static void test_ownerless_redo_header_backup_validation_boundaries(void) {
 
     free(mutated);
     free(backup);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void arm_ownerless_runtime_startup_failure_fault(unsigned count) {
+    char count_value[32];
+
+    assert(
+        snprintf(count_value, sizeof(count_value), "%u", count) > 0 &&
+        strlen(count_value) < sizeof(count_value)
+    );
+    assert(
+        setenv("MYLITE_OWNERLESS_TEST_FAULT", MYLITE_TEST_RUNTIME_STARTUP_FAILURE_FAULT, 1) == 0
+    );
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_COUNT", count_value, 1) == 0);
+}
+
+static void assert_ownerless_runtime_startup_failure_fault_consumed(void) {
+    const char *remaining = getenv("MYLITE_OWNERLESS_TEST_FAULT_COUNT");
+
+    assert(remaining != NULL);
+    assert(strcmp(remaining, "0") == 0);
+    assert(unsetenv("MYLITE_OWNERLESS_TEST_FAULT") == 0);
+    assert(unsetenv("MYLITE_OWNERLESS_TEST_FAULT_COUNT") == 0);
+}
+
+static void test_ownerless_runtime_startup_retry_budget(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-runtime-startup-retry-budget.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    arm_ownerless_runtime_startup_failure_fault(4U);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert_ownerless_runtime_startup_failure_fault_consumed();
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 5 WHERE id = 1");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 35U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    arm_ownerless_runtime_startup_failure_fault(4U);
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert_ownerless_runtime_startup_failure_fault_consumed();
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 35U);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 2 WHERE id = 2");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 37U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    remove_concurrency_shm(database_path);
+    arm_ownerless_runtime_startup_failure_fault(4U);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert_ownerless_runtime_startup_failure_fault_consumed();
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 37U);
+    assert(mylite_close(db) == MYLITE_OK);
+
     free(database_path);
     free(runtime_root);
     remove_tree(root);

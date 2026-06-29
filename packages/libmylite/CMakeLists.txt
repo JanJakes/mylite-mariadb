@@ -536,6 +536,12 @@ if(BUILD_TESTING)
           native-file-modify-redo-observation
       )
       add_test(
+        NAME libmylite.ownerless-runtime-startup-retry-budget
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          runtime-startup-retry-budget
+      )
+      add_test(
         NAME libmylite.ownerless-savepoint-rollback-before-state-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -1943,6 +1949,10 @@ if(BUILD_TESTING)
       set_tests_properties(libmylite.ownerless-native-file-modify-redo-observation PROPERTIES
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
         TIMEOUT 90
+      )
+      set_tests_properties(libmylite.ownerless-runtime-startup-retry-budget PROPERTIES
+        LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
+        TIMEOUT 120
       )
       set_tests_properties(libmylite.ownerless-savepoint-rollback-before-state-crash PROPERTIES
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
