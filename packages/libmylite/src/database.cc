@@ -16096,9 +16096,7 @@ bool ownerless_generated_column_definition_uses_rejected_function_token(std::str
            token_equals(token, "SELECT");
 }
 
-bool ownerless_create_table_has_generated_column_recovery_disqualifier(
-    const SqlPolicyTokens &tokens
-) {
+bool ownerless_create_table_generated_column_recovery_disqualifier(const SqlPolicyTokens &tokens) {
     bool has_generated_column = false;
     for (std::size_t index = 0U; index < tokens.count; ++index) {
         if (token_equals(tokens.values[index], "GENERATED")) {
@@ -16259,7 +16257,7 @@ bool ownerless_plain_create_table_recovery_statement(const SqlPolicyTokens &toke
     if (!table_keyword_seen) {
         return false;
     }
-    if (ownerless_create_table_has_generated_column_recovery_disqualifier(tokens)) {
+    if (ownerless_create_table_generated_column_recovery_disqualifier(tokens)) {
         return false;
     }
 
@@ -19931,15 +19929,17 @@ bool consume_ownerless_alter_table_modify_field_check_recovery_clause(
         if (depth == 0U) {
             if (token_equals(token, "CHECK")) {
                 saw_check = true;
-            } else if (
-                token_in(token, "AFTER", "ALGORITHM", "AUTO_INCREMENT") ||
-                token_equals(token, "CONSTRAINT") ||
-                token_in(token, "FIRST", "FOREIGN", "FULLTEXT", "GENERATED") ||
-                token_in(token, "INDEX", "KEY", "LOCK", "PRIMARY") ||
-                token_equals(token, "REFERENCES") ||
-                token_in(token, "SPATIAL", "STORED", "UNIQUE", "VIRTUAL")
-            ) {
-                return false;
+            } else {
+                const bool disallowed_clause_token =
+                    token_in(token, "AFTER", "ALGORITHM", "AUTO_INCREMENT") ||
+                    token_equals(token, "CONSTRAINT") ||
+                    token_in(token, "FIRST", "FOREIGN", "FULLTEXT", "GENERATED") ||
+                    token_in(token, "INDEX", "KEY", "LOCK", "PRIMARY") ||
+                    token_equals(token, "REFERENCES") ||
+                    token_in(token, "SPATIAL", "STORED", "UNIQUE", "VIRTUAL");
+                if (disallowed_clause_token) {
+                    return false;
+                }
             }
         }
         has_definition = true;

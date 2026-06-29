@@ -1183,7 +1183,7 @@ static void test_crashed_fk_rename_if_exists_missing_source_loop_rollback(void);
 static void test_crashed_foreign_key_cross_schema_multi_rename_dictionary_ddl_recovers_constraints(
     void
 );
-static void test_crashed_fk_cross_schema_rename_if_exists_missing_source_recovers_constraints(void);
+static void test_crashed_fk_xschema_missing_source_recovers_constraints(void);
 #  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void test_crashed_fk_cross_schema_rename_loop_recovers_ddl_log_rollback(void);
 static void test_crashed_fk_cross_schema_rename_if_exists_missing_source_loop_rollback(void);
@@ -6140,7 +6140,7 @@ int main(int argc, char **argv) {
     if (argc == 2 &&
         strcmp(argv[1], "dictionary-fk-cross-schema-rename-if-exists-missing-source-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-        test_crashed_fk_cross_schema_rename_if_exists_missing_source_recovers_constraints();
+        test_crashed_fk_xschema_missing_source_recovers_constraints();
 #endif
         return 0;
     }
@@ -7036,7 +7036,7 @@ int main(int argc, char **argv) {
             test_crashed_foreign_key_multi_rename_loop_recovers_ddl_log_rollback,
             test_crashed_fk_rename_if_exists_missing_source_loop_rollback,
             test_crashed_foreign_key_cross_schema_multi_rename_dictionary_ddl_recovers_constraints,
-            test_crashed_fk_cross_schema_rename_if_exists_missing_source_recovers_constraints,
+            test_crashed_fk_xschema_missing_source_recovers_constraints,
             test_crashed_fk_cross_schema_rename_loop_recovers_ddl_log_rollback,
             test_crashed_fk_cross_schema_rename_if_exists_missing_source_loop_rollback,
             test_crashed_foreign_key_action_before_execute_recovers_retryable_state,
@@ -59550,9 +59550,7 @@ static void test_crashed_foreign_key_cross_schema_multi_rename_dictionary_ddl_re
     free(root);
 }
 
-static void test_crashed_fk_cross_schema_rename_if_exists_missing_source_recovers_constraints(
-    void
-) {
+static void test_crashed_fk_xschema_missing_source_recovers_constraints(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(
