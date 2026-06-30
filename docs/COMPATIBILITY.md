@@ -554,7 +554,13 @@ while a peer is live, drain it after no-live recovery, and survive
 ownerless/native reopen plus forced `.shm` rebuild; cross-schema native-loop
 coverage now also kills after the permanent native file move and verifies
 MariaDB DDL-log rollback restores the original permanent source while the
-temporary and skipped targets remain absent.
+temporary and skipped targets remain absent. A focused cross-schema
+two-permanent-rename matrix now interleaves missing-source no-ops and a
+session-local temporary rename, then kills after the first and second durable
+native file operations to prove both permanent sources roll back with their
+original InnoDB `SPACE` identities while all temporary, skipped, and durable
+targets remain absent through ownerless/native reopen and forced `.shm`
+rebuild.
 Schema-drop internal table-loop recovery now kills a two-table
 `DROP DATABASE` after the first native table file operation and before the
 schema-drop entry is logged, then proves exactly one table remains usable in the

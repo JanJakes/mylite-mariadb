@@ -8097,7 +8097,9 @@ subsystems that this mode needs:
      prefinish boundaries, plus focused temporary-chain/permanent/temporary-chain
      and same-schema plus cross-schema IF EXISTS missing-source mixed rename-list prefinish
      boundaries plus cross-schema mixed temporary/permanent IF EXISTS native-loop
-     rollback, plus same-schema and cross-schema
+     rollback and a two-permanent-rename cross-schema mixed
+     temporary/permanent/missing-source matrix killed after the first and
+     second durable native file operation, plus same-schema and cross-schema
      non-FK multi-rename native-loop rollback after first, second, and final native
      rename pairs, including deterministic same-schema and cross-schema
      `RENAME TABLE IF EXISTS` three-pair lists, plus same-schema and
@@ -8111,7 +8113,8 @@ subsystems that this mode needs:
      `IF EXISTS` failed-DDL dictionary recovery and native file-op negative proof, especially
      remaining rename variants including randomized temporary/permanent and
      missing-source permutations beyond the now-covered deterministic non-FK,
-     FK, and focused same-schema/cross-schema temporary/permanent IF EXISTS lists,
+     FK, focused same-schema/cross-schema temporary/permanent IF EXISTS lists,
+     and focused two-permanent-rename matrix,
      other rebuild variants beyond the covered
      FORCE including both exact copy-lock option orders, same-engine ENGINE
      including both exact copy-lock option orders,

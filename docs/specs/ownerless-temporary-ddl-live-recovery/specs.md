@@ -58,8 +58,10 @@ Out of scope:
 
 - Pure multi-pair temporary rename chains and one representative mixed
   permanent/temporary rename list are covered by
-  `ownerless-temporary-multi-rename-live-recovery`; broader mixed rename
-  orderings remain out of scope here.
+  `ownerless-temporary-multi-rename-live-recovery`; the later
+  `ownerless-temporary-mixed-rename-matrix-recovery` slice broadens
+  deterministic mixed temporary/permanent `IF EXISTS` native-loop order
+  coverage. Randomized mixed rename orderings remain out of scope here.
 - Temporary table DDL that also creates or drops durable permanent objects.
 - Reworking ownerless statement-lock policy to avoid dictionary generations for
   temporary-only DDL entirely.
