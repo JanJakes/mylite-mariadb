@@ -5001,6 +5001,8 @@ Tasks:
    marker coverage plus representative `ALTER TABLE ... FORCE` and plain plus
    both exact explicit copy-lock option orders for
    `ALTER TABLE ... ENGINE=InnoDB` forms and
+   both exact explicit copy-lock option orders for unplaced
+   `ALTER TABLE ... ADD COLUMN` forms and
    plain plus explicit copy-lock `ALTER TABLE ... ROW_FORMAT=DYNAMIC` rebuild
    marker coverage, plus
    plain plus explicit copy-lock compressed
@@ -8097,7 +8099,7 @@ subsystems that this mode needs:
      dynamic row-format including exact copy-lock, compact and redundant
      row-format, compressed row-format including exact copy-lock, charset including exact
      copy-lock, and focused exact copy-lock
-     unplaced ADD, placed ADD, DROP, MODIFY, CHANGE, and RENAME COLUMN
+     unplaced ADD in both option orders, placed ADD, DROP, MODIFY, CHANGE, and RENAME COLUMN
      boundaries,
      broader metadata-only DDL beyond the focused view algorithm boundaries,
      broader mixed temporary/permanent

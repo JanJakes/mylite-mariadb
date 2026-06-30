@@ -1419,6 +1419,12 @@ if(BUILD_TESTING)
           dictionary-column-add-copy-lock-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-column-add-lock-copy-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-column-add-lock-copy-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-column-add-placement-copy-lock-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -2383,6 +2389,7 @@ if(BUILD_TESTING)
         libmylite.ownerless-dictionary-primary-key-idempotent-crash
         libmylite.ownerless-dictionary-column-add-crash
         libmylite.ownerless-dictionary-column-add-copy-lock-crash
+        libmylite.ownerless-dictionary-column-add-lock-copy-crash
         libmylite.ownerless-dictionary-column-add-placement-copy-lock-crash
         libmylite.ownerless-dictionary-column-drop-crash
         libmylite.ownerless-dictionary-column-drop-copy-lock-crash
