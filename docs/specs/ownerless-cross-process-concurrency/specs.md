@@ -6090,9 +6090,11 @@ subsystems that this mode needs:
   No-live writer reclaim still requires native page proof before truncating
   retained WAL. A newer native file-per-table page can prove a retained record
   only when the record carries the external-snapshot lineage marker from a
-  runtime that consumed WAL retained for another owner's reader snapshot; plain
-  concurrent-writer records, including commit-race records, still require exact
-  native proof or replay. When `pages_visible` skips shared visible-boundary
+  runtime that consumed WAL retained for another owner's reader snapshot and
+  the MyLite-owned `.ibd` file still proves the successor page identity and
+  page LSN at the retained record's expected offset; plain concurrent-writer
+  records, including commit-race records, still require exact native proof or
+  replay. When `pages_visible` skips shared visible-boundary
   publication because another writer transaction is still active, it first
   releases any deferred page-log append batch; later no-live reclaim must still
   retain plain user-page WAL unless exact native image proof succeeds, so an

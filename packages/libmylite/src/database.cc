@@ -2209,6 +2209,11 @@ bool ownerless_file_per_table_page_is_discarded(
     RuntimeState &runtime,
     const OwnerlessNativePageCheckpointRecord &record
 );
+bool ownerless_file_per_table_page_has_lsn(
+    RuntimeState &runtime,
+    const OwnerlessNativePageCheckpointRecord &record,
+    std::uint64_t expected_page_lsn
+);
 bool ownerless_file_per_table_space_is_absent(RuntimeState &runtime, std::uint32_t space_id);
 int collect_ownerless_native_page_checkpoint_record(
     std::uint32_t space_id,
@@ -14480,6 +14485,115 @@ bool ownerless_file_per_table_page_is_discarded(
     return false;
 }
 
+bool ownerless_file_per_table_page_has_lsn(
+    RuntimeState &runtime,
+    const OwnerlessNativePageCheckpointRecord &record,
+    std::uint64_t expected_page_lsn
+) {
+    if (record.space_id <= 3U || expected_page_lsn == 0U || runtime.database_path.empty() ||
+        runtime.concurrency_wal_fd < 0) {
+        return false;
+    }
+
+    std::vector<unsigned char> page(k_ownerless_native_page_proof_capacity);
+    std::uint32_t page_size = 0;
+    std::uint64_t record_page_lsn = 0;
+    std::uint64_t record_commit_lsn = 0;
+    const int record_result = mylite_ownerless_page_log_read_page_under_read_lock_at(
+        runtime.concurrency_wal_fd,
+        k_concurrency_recovery_header_size,
+        record.record_offset,
+        record.space_id,
+        record.page_no,
+        page.data(),
+        static_cast<std::uint32_t>(page.size()),
+        &page_size,
+        &record_page_lsn,
+        &record_commit_lsn
+    );
+    if (record_result != MYLITE_OWNERLESS_PAGE_LOG_OK || record_page_lsn != record.page_lsn ||
+        record_commit_lsn != record.commit_lsn ||
+        page_size < k_innodb_fil_page_space_id_offset + sizeof(std::uint32_t) ||
+        page_size > k_innodb_page_size_max) {
+        return false;
+    }
+
+    const std::filesystem::path datadir =
+        std::filesystem::path(runtime.database_path) / k_datadir_name;
+    std::error_code error;
+    if (!std::filesystem::is_directory(datadir, error) || error) {
+        return false;
+    }
+
+    const auto options = std::filesystem::directory_options::skip_permission_denied;
+    std::filesystem::recursive_directory_iterator it(datadir, options, error);
+    const std::filesystem::recursive_directory_iterator end;
+    if (error) {
+        return false;
+    }
+
+    for (; it != end; it.increment(error)) {
+        if (error) {
+            return false;
+        }
+        std::error_code entry_error;
+        if (!it->is_regular_file(entry_error) || entry_error || it->path().extension() != ".ibd") {
+            continue;
+        }
+
+        std::ifstream file(it->path(), std::ios::binary);
+        if (!file) {
+            return false;
+        }
+
+        std::array<unsigned char, k_innodb_fil_page_space_id_offset + sizeof(std::uint32_t)>
+            page_header = {};
+        file.read(
+            reinterpret_cast<char *>(page_header.data()),
+            static_cast<std::streamsize>(page_header.size())
+        );
+        if (file.gcount() != static_cast<std::streamsize>(page_header.size())) {
+            return false;
+        }
+        if (load_be32(page_header.data(), k_innodb_fil_page_space_id_offset) != record.space_id) {
+            continue;
+        }
+
+        const std::uint64_t page_offset =
+            static_cast<std::uint64_t>(record.page_no) * static_cast<std::uint64_t>(page_size);
+        if (record.page_no != 0U && page_offset / record.page_no != page_size) {
+            return false;
+        }
+        std::error_code size_error;
+        const auto file_size_value = std::filesystem::file_size(it->path(), size_error);
+        if (size_error) {
+            return false;
+        }
+        const std::uint64_t file_size = static_cast<std::uint64_t>(file_size_value);
+        if (page_offset > file_size || file_size - page_offset < page_size) {
+            return false;
+        }
+
+        std::vector<unsigned char> disk_page(page_size);
+        file.seekg(static_cast<std::streamoff>(page_offset), std::ios::beg);
+        if (!file) {
+            return false;
+        }
+        file.read(
+            reinterpret_cast<char *>(disk_page.data()),
+            static_cast<std::streamsize>(disk_page.size())
+        );
+        if (file.gcount() != static_cast<std::streamsize>(disk_page.size())) {
+            return false;
+        }
+        return load_be32(disk_page.data(), k_innodb_fil_page_space_id_offset) == record.space_id &&
+               load_be32(disk_page.data(), k_innodb_fil_page_offset_offset) == record.page_no &&
+               load_be64(disk_page.data(), k_innodb_fil_page_lsn_offset) == expected_page_lsn;
+    }
+
+    return false;
+}
+
 bool ownerless_file_per_table_space_is_absent(RuntimeState &runtime, std::uint32_t space_id) {
     if (space_id <= 3U || runtime.database_path.empty()) {
         return false;
@@ -14607,7 +14721,8 @@ bool verify_ownerless_native_page_checkpoint_latest_record(
         }
         if (allow_no_live_consumed_native_successor && record.external_snapshot_lineage_record &&
             record.space_id > 3U && disk_page_lsn > record.page_lsn &&
-            disk_page_lsn <= visible_lsn) {
+            disk_page_lsn <= visible_lsn &&
+            ownerless_file_per_table_page_has_lsn(runtime, record, disk_page_lsn)) {
             return true;
         }
     }

@@ -49,6 +49,10 @@ native file-per-table page as proof only when all of these are true:
 - the record is for a user file-per-table page, and
 - the native disk page LSN is greater than the record page LSN and no greater
   than the visible reclaim LSN.
+- MyLite can also prove the successor through the database-directory file:
+  scanning the MyLite `datadir/` finds the owning `.ibd`, and the page at the
+  record's expected offset still carries the same space id, page number, and
+  successor page LSN.
 
 This makes the active-reader post-release catch-up path reclaimable without
 weakening commit-race records that were produced by concurrent writers rather
@@ -70,8 +74,9 @@ checkpoint rewrites retained delta records.
 ## Native Storage Impact
 
 No native file format changes. The newer-native-page acceptance is limited to
-proved file-per-table pages and only after no live peer can need the older
-snapshot image.
+proved file-per-table pages, requires both the InnoDB disk-page hook and the
+MyLite-directory `.ibd` identity/LSN check, and only runs after no live peer can
+need the older snapshot image.
 
 ## Test Plan
 
@@ -92,6 +97,8 @@ snapshot image.
 - Commit-race still preserves every worker commit before and after forced
   shared-memory rebuild.
 - Unmarked records do not receive the newer-native-page proof relaxation.
+- Marked records do not receive the relaxation unless the MyLite-owned
+  file-per-table page carries the successor LSN at the expected page identity.
 - Page-log metadata survives checkpoint rewrite.
 
 ## Risks And Follow-Up
