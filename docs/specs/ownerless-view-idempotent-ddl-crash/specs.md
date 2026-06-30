@@ -13,6 +13,9 @@ create and missing idempotent view drop. The follow-up
 [ownerless-view-idempotent-live-recovery](../ownerless-view-idempotent-live-recovery/specs.md)
 promotes these focused idempotent/no-op view forms to metadata-only live-peer
 recovery.
+The later
+[ownerless-view-idempotent-existing-drop-crash](../ownerless-view-idempotent-existing-drop-crash/specs.md)
+slice covers the mutating existing-view `DROP VIEW IF EXISTS` branch.
 
 ## Source Findings
 
@@ -65,6 +68,8 @@ Out of scope:
 
 - `CREATE OR REPLACE VIEW` and `ALTER VIEW` crash recovery, which is covered
   by `docs/specs/ownerless-view-replacement-ddl-crash/specs.md`.
+- Existing-view `DROP VIEW IF EXISTS` removal, which is covered separately by
+  `docs/specs/ownerless-view-idempotent-existing-drop-crash/specs.md`.
 - Nested-view, security/definer, and updatable-view crash variants.
 - Invalid-dependency view drop crash recovery, which is covered separately by
   `docs/specs/ownerless-view-invalid-dependency-drop-live-recovery/specs.md`.

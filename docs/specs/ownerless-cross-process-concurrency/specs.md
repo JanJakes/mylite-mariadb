@@ -7987,7 +7987,9 @@ subsystems that this mode needs:
   and missing `DROP VIEW IF EXISTS` crash selectors to the same metadata-only
   live-recovery lane, proving original definition preservation and missing-view
   absence while a peer remains live and the native file-operation marker stays
-  clear.
+  clear. The existing-drop follow-up adds the mutating
+  `DROP VIEW IF EXISTS` branch, proving the real view is removed while its base
+  table stays durable and the native file-operation marker stays clear.
   The simple trigger create/drop follow-up promotes focused `CREATE TRIGGER`
   and `DROP TRIGGER` crash selectors to the same metadata-only live-recovery
   lane, proving native `.TRG`/`.TRN` creation or removal, trigger
@@ -8042,8 +8044,8 @@ subsystems that this mode needs:
      prefinish boundaries, plus simple CREATE/DROP VIEW, focused CREATE OR
      REPLACE/ALTER VIEW, and focused explicit column-list, check-option,
      nested check-option, security/definer, algorithm create/replacement/alter,
-     and idempotent/no-op view metadata-only prefinish boundaries, plus simple
-     CREATE/DROP TRIGGER
+     idempotent/no-op, and existing `DROP VIEW IF EXISTS` view metadata-only
+     prefinish boundaries, plus simple CREATE/DROP TRIGGER
      metadata-only prefinish boundaries, plus focused CREATE/ALTER/DROP
      DATABASE, named ALTER DATABASE schema-comment, focused collation-first
      `CHARSET` alias schema option, and schema idempotent/no-op prefinish

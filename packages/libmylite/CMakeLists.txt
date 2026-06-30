@@ -1591,6 +1591,12 @@ if(BUILD_TESTING)
           dictionary-view-idempotent-drop-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-view-idempotent-existing-drop-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-view-idempotent-existing-drop-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-view-invalid-dependency-drop-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -2409,6 +2415,7 @@ if(BUILD_TESTING)
         libmylite.ownerless-dictionary-view-security-alter-crash
         libmylite.ownerless-dictionary-view-idempotent-create-crash
         libmylite.ownerless-dictionary-view-idempotent-drop-crash
+        libmylite.ownerless-dictionary-view-idempotent-existing-drop-crash
         libmylite.ownerless-dictionary-view-invalid-dependency-drop-crash
         libmylite.ownerless-dictionary-generated-column-foreign-key-crash
         libmylite.ownerless-dictionary-generated-column-foreign-key-drop-crash
