@@ -30547,63 +30547,33 @@ void release_runtime(void) {
     embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_RELEASE_RESET_HOOKS_NS, stage_start_ns);
     const bool retained_ownerless_page_log_payload_before_shutdown =
         g_runtime.ownerless_rw_mode && ownerless_page_log_has_payload_records(g_runtime);
-    bool retained_ownerless_user_page_log_records_before_shutdown = false;
-    bool retained_ownerless_user_page_log_scan_ok = true;
-    if (retained_ownerless_page_log_payload_before_shutdown) {
-        retained_ownerless_user_page_log_scan_ok = ownerless_page_log_has_user_page_records(
-            g_runtime.concurrency_wal_fd,
-            &retained_ownerless_user_page_log_records_before_shutdown
-        );
-    }
     const bool native_recovered_transactions_before_shutdown =
         g_runtime.ownerless_rw_mode && ownerless_native_has_recovered_active_transactions();
     const bool native_rollback_history_empty_before_shutdown =
         g_runtime.ownerless_rw_mode &&
         ownerless_native_rollback_history_empty(g_runtime.database_path);
-    bool native_file_op_checkpoint_needed_before_shutdown = false;
-    bool native_dml_file_op_checkpoint_needed_before_shutdown = false;
-    if (g_runtime.ownerless_rw_mode) {
-        static_cast<void>(read_ownerless_native_file_op_checkpoint_needed(
-            g_runtime,
-            &native_file_op_checkpoint_needed_before_shutdown
-        ));
-        static_cast<void>(read_ownerless_native_dml_file_op_checkpoint_needed(
-            g_runtime,
-            &native_dml_file_op_checkpoint_needed_before_shutdown
-        ));
-    }
     const bool clean_final_ownerless_shutdown =
         g_runtime.ownerless_rw_mode && no_live_ownerless_shutdown &&
         !retained_ownerless_page_log_payload_before_shutdown &&
         !native_recovered_transactions_before_shutdown &&
         native_rollback_history_empty_before_shutdown;
-    const bool retained_wal_final_ownerless_shutdown =
-        g_runtime.ownerless_rw_mode && no_live_ownerless_shutdown &&
-        retained_ownerless_page_log_payload_before_shutdown;
-    const bool retained_wal_ownerless_shutdown =
-        g_runtime.ownerless_rw_mode && retained_ownerless_page_log_payload_before_shutdown;
-    const bool retained_wal_needs_native_file_op_shutdown =
-        native_file_op_checkpoint_needed_before_shutdown ||
-        native_dml_file_op_checkpoint_needed_before_shutdown;
-    const bool retained_wal_needs_native_checkpoint_shutdown =
-        retained_wal_needs_native_file_op_shutdown ||
-        retained_ownerless_user_page_log_records_before_shutdown ||
-        !retained_ownerless_user_page_log_scan_ok;
-    const bool retained_wal_requires_native_checkpoint =
-        retained_wal_ownerless_shutdown && retained_wal_needs_native_checkpoint_shutdown;
+    const bool retained_wal_history_empty_ownerless_shutdown =
+        g_runtime.ownerless_rw_mode && retained_ownerless_page_log_payload_before_shutdown &&
+        native_rollback_history_empty_before_shutdown;
+    /*
+     * Retained ownerless WAL remains the recovery proof when native rollback
+     * history is still present. Do not lower MariaDB's configured
+     * fast-shutdown mode for that path; embedded slow shutdown can wait
+     * indefinitely for native background work while the WAL still must be
+     * retained. When rollback history is already empty, a native checkpoint is
+     * bounded and keeps following ownerless readers on the native fast path.
+     */
     unsigned int saved_srv_fast_shutdown = 0U;
     bool changed_srv_fast_shutdown = false;
-    if (clean_final_ownerless_shutdown && srv_fast_shutdown == 2U) {
+    if ((clean_final_ownerless_shutdown || retained_wal_history_empty_ownerless_shutdown) &&
+        srv_fast_shutdown == 2U) {
         saved_srv_fast_shutdown = srv_fast_shutdown;
         srv_fast_shutdown = 1U;
-        changed_srv_fast_shutdown = true;
-    } else if (retained_wal_requires_native_checkpoint && srv_fast_shutdown == 2U) {
-        saved_srv_fast_shutdown = srv_fast_shutdown;
-        srv_fast_shutdown = 1U;
-        changed_srv_fast_shutdown = true;
-    } else if (retained_wal_final_ownerless_shutdown && srv_fast_shutdown == 2U) {
-        saved_srv_fast_shutdown = srv_fast_shutdown;
-        srv_fast_shutdown = retained_wal_needs_native_checkpoint_shutdown ? 1U : 3U;
         changed_srv_fast_shutdown = true;
     }
     if (changed_srv_fast_shutdown && srv_fast_shutdown == 1U) {

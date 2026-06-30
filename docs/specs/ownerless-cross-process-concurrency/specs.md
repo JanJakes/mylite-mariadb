@@ -7711,6 +7711,12 @@ subsystems that this mode needs:
   WAL until release and that post-release no-live reclaim checkpoints it once
   native boundary proof is available and rollback history is drained, or keeps
   native-support WAL retained with rollback-history evidence.
+  Retained-WAL ownerless shutdown now follows the same recovery boundary:
+  rollback-history-empty closes may temporarily lower MariaDB's fast shutdown to
+  run a bounded native checkpoint, while retained WAL with rollback-history
+  obligations keeps the configured crash-style fast shutdown and relies on the
+  retained WAL/recovery proof instead of waiting for embedded native shutdown to
+  drain rollback-history background work.
   Focused record-lock-grant crash coverage now also proves stale-reader rebuild
   does not discard retained committed page images, and that final no-live close
   drains retained WAL through post-shutdown tablespace replay and checkpoint.
