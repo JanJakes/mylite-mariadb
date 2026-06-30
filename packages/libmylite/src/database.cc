@@ -30474,16 +30474,15 @@ void release_runtime(void) {
         retained_wal_needs_native_file_op_shutdown ||
         retained_ownerless_user_page_log_records_before_shutdown ||
         !retained_ownerless_user_page_log_scan_ok;
+    const bool retained_wal_requires_native_checkpoint =
+        retained_wal_ownerless_shutdown && retained_wal_needs_native_checkpoint_shutdown;
     unsigned int saved_srv_fast_shutdown = 0U;
     bool changed_srv_fast_shutdown = false;
     if (clean_final_ownerless_shutdown && srv_fast_shutdown == 2U) {
         saved_srv_fast_shutdown = srv_fast_shutdown;
         srv_fast_shutdown = 1U;
         changed_srv_fast_shutdown = true;
-    } else if (
-        retained_wal_ownerless_shutdown && retained_wal_needs_native_checkpoint_shutdown &&
-        srv_fast_shutdown == 2U
-    ) {
+    } else if (retained_wal_requires_native_checkpoint && srv_fast_shutdown == 2U) {
         saved_srv_fast_shutdown = srv_fast_shutdown;
         srv_fast_shutdown = 1U;
         changed_srv_fast_shutdown = true;
