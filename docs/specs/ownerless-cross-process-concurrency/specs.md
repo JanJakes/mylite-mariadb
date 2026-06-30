@@ -3438,7 +3438,8 @@ Tasks:
    marker retention while a peer is live, final no-live marker drain, and later
    writes through ownerless/native reopen before and after forced `.shm`
    rebuild.
-   Compressed row-format crash coverage now kills plain and explicit copy-lock
+   Compressed row-format crash coverage now kills plain plus both exact
+   explicit copy-lock option orders for
    `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=1`,
    `KEY_BLOCK_SIZE=2`, `KEY_BLOCK_SIZE=4`, `KEY_BLOCK_SIZE=8`, and
    `KEY_BLOCK_SIZE=16` writers after
@@ -5008,7 +5009,7 @@ Tasks:
    plain plus both exact explicit copy-lock option orders for
    `ALTER TABLE ... ROW_FORMAT=DYNAMIC`, `ALTER TABLE ... ROW_FORMAT=COMPACT`,
    and `ALTER TABLE ... ROW_FORMAT=REDUNDANT` rebuild marker coverage, plus
-   plain plus explicit copy-lock compressed
+   plain plus both exact explicit copy-lock option orders for compressed
    `ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=<n>` rebuild marker coverage at the
    same prefinish crash boundary, now extended to the existing
    compressed key-block `1`/`2`/`4`/`8`/`16` crash variants so every focused
@@ -5076,7 +5077,7 @@ Tasks:
    uses separate recoverable dictionary markers to provide live-peer recovery
    for the native compact and redundant row-format copy rebuild boundaries.
    Focused
-   plain and explicit copy-lock
+   plain plus both exact explicit copy-lock option orders for
    `ALTER TABLE schema.table ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=<n>`
    prefinish crash coverage now uses separate recoverable dictionary markers to
    provide live-peer recovery for the native compressed copy rebuild boundary
@@ -5940,7 +5941,8 @@ and a `DROP TABLE` writer after native `FILE_DELETE`, replacement-copy
 writers after native replacement-copy completion, marker-specific coverage for
 representative `ALTER TABLE ... FORCE`, plain plus both exact explicit
 copy-lock option orders for same-engine `ALTER TABLE ... ENGINE=InnoDB`, and
-plain plus explicit copy-lock `ALTER TABLE ... ROW_FORMAT=DYNAMIC` rebuild
+plain plus both exact explicit copy-lock option orders for
+`ALTER TABLE ... ROW_FORMAT=DYNAMIC` rebuild
 writers after native rebuild
 completion, focused post-checkpoint DML observation of the native
 `FILE_MODIFY` redo flag, plain `ALTER TABLE ... FORCE` and explicit
@@ -6008,7 +6010,7 @@ dependency acceptance, or definer metadata storage, charset-conversion
 including both exact copy-lock option orders, dynamic, compact, and redundant
 row-format including both exact copy-lock option orders, compressed
 1 KiB/2 KiB/4 KiB/8 KiB/16 KiB
-row-format including exact copy-lock, and table-comment writers
+row-format including both exact copy-lock option orders, and table-comment writers
 after native table-option metadata update or rebuild, a
 `DROP TABLE` writer after native file removal, a stale-reader retained-WAL
 `DROP TABLE` writer after native file removal before ownerless dictionary
@@ -8107,7 +8109,8 @@ subsystems that this mode needs:
      other rebuild variants beyond the covered
      FORCE, same-engine ENGINE including both exact copy-lock option orders,
      dynamic, compact, and redundant row-format including both exact copy-lock
-     option orders, compressed row-format including exact copy-lock, charset
+     option orders, compressed row-format including both exact copy-lock
+     option orders, charset
      including both exact copy-lock option orders, and focused exact copy-lock
      unplaced ADD in both option orders, placed ADD, DROP, MODIFY, CHANGE, and RENAME COLUMN
      boundaries,

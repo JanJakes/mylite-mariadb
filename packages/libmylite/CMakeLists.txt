@@ -938,6 +938,12 @@ if(BUILD_TESTING)
           dictionary-compressed-row-format-key-block-copy-lock-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-compressed-row-format-key-block-lock-copy-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-compressed-row-format-key-block-lock-copy-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-multi-rename-loop-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -2327,6 +2333,7 @@ if(BUILD_TESTING)
         libmylite.ownerless-dictionary-compressed-row-format-key-block-file-op-marker-crash
         libmylite.ownerless-dictionary-compressed-row-format-key-block-16-file-op-marker-crash
         libmylite.ownerless-dictionary-compressed-row-format-key-block-copy-lock-crash
+        libmylite.ownerless-dictionary-compressed-row-format-key-block-lock-copy-crash
         PROPERTIES
           LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
           TIMEOUT 120
