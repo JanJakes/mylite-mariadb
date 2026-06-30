@@ -33,13 +33,13 @@ from update-side effects to delete-side effects.
     ownerless opener returns `MYLITE_BUSY` while the peer remains live, then
     no-live recovery succeeds after peer release.
   - Existing FK/trigger native row-undo coverage exercises `ON UPDATE CASCADE`
-    plus `AFTER UPDATE` trigger audit rows at a deterministic later rollback
-    boundary. Direct local reproduction and adjacent sequence coverage of
-    update-side skip values through `8` drain native recovered rollback but can
-    leave parent or cascade child state partially applied; the registered
-    selector therefore uses skip `9`, and
-    earlier FK/trigger undo hits remain open work. Delete-side FK actions and
-    delete trigger row images need separate evidence.
+    plus `AFTER UPDATE` trigger audit rows. Earlier local reproduction showed
+    that ownerless page-write flushing could expose a partially rolled-back
+    native page image when native undo progress had not yet been flushed. The
+    row-undo path now truncates the native undo tail and flushes redo before
+    the hook boundary, so the FK/trigger selectors can run at the first
+    successful row-undo hit. Delete-side FK actions and delete trigger row
+    images need separate evidence.
 
 ## Design
 
@@ -57,10 +57,9 @@ attachment is still rejected until read/write recovery runs, and then performs
 the same no-live recovery, forced `.shm` rebuild, ordinary native reopen, and
 follow-up write checks as the existing no-live selectors.
 
-The FK/trigger update-side and delete-side follow-ups use deterministic later
-rollback boundaries. The update-side selector reaches its proven boundary after
-skipping nine native `rollback-after-native-row-undo` hits and covers
-`ON UPDATE CASCADE` child-row changes plus `AFTER UPDATE` trigger audit rows.
+The FK/trigger update-side and delete-side follow-ups use the first durable
+native row-undo boundary. The update-side selector covers `ON UPDATE CASCADE`
+child-row changes plus `AFTER UPDATE` trigger audit rows.
 The FK/trigger delete-side follow-up adds one ownerless SQL hook case:
 
 - `test_crashed_fk_trigger_delete_native_row_undo_with_live_peer_blocks_recovery`
@@ -68,10 +67,11 @@ The FK/trigger delete-side follow-up adds one ownerless SQL hook case:
 It deletes a parent row with one `ON DELETE CASCADE` child table and one
 `ON DELETE SET NULL` child table, deletes two trigger base rows with an
 `AFTER DELETE` audit trigger, then kills the rollback writer at
-`rollback-after-native-row-undo` after skipping five native `row_undo()` hits.
-Those selectors target deterministic later rollback boundaries for FK/trigger
-side effects rather than claiming every native FK/trigger undo substep is safe.
-A fresh ownerless opener must remain busy while the peer is live; after peer
+`rollback-after-native-row-undo` after the first successful row undo has been
+durably recorded. Those selectors target the shared post-`row_undo()` boundary
+for FK/trigger side effects rather than claiming every internal native
+FK/trigger undo substep is safe. A fresh ownerless opener must remain busy
+while the peer is live; after peer
 release, no-live recovery must restore the deleted parent, cascade child row,
 set-null child key, trigger base rows, and remove the rolled-back audit rows.
 
@@ -96,8 +96,8 @@ Out of scope:
 - FK actions beyond the covered update-cascade and delete cascade/set-null
   shapes, trigger variants beyond the covered update/delete audit rows,
   generated-column side effects beyond the existing focused case, DDL rollback,
-  XA rollback, prepared transactions, or earlier native FK/trigger row-undo
-  hits before the update-side skip-9 and delete-side skip-5 boundaries.
+  XA rollback, prepared transactions, or faults inside individual
+  `row_undo_ins()`/`row_undo_mod()` substeps.
 - Longer randomized savepoint schedules and external MariaDB/RQG stress.
 - SQL-level table-lock fault injection.
 
@@ -139,10 +139,9 @@ The selectors are registered only for the unsafe ownerless hook build.
 
 - The writer reaches the existing `rollback-after-native-row-undo` fault after
   at least one native row undo succeeds.
-- The FK/trigger update-side case reaches the same fault after nine skipped
-  native row-undo hits, and the delete-side case reaches it after five skipped
-  native row-undo hits, after FK and trigger side-effect undo records have made
-  progress.
+- The FK/trigger update-side and delete-side cases reach the same fault after
+  the first successful native row undo has durably recorded FK or trigger
+  side-effect rollback progress.
 - A fresh ownerless read/write opener returns `MYLITE_BUSY` while another
   ownerless peer remains live.
 - After peer release, shared read-only attachment remains busy until read/write

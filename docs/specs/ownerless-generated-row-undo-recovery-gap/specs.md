@@ -115,8 +115,9 @@ selector proves a production recovery bug that can be fixed narrowly.
 
 - Generated-column setup no longer fails solely because native-support-only
   rollback history is retained.
-- The focused selector passes its original-state oracle at the committed
-  deterministic skip-1 boundary after native recovered transactions drain.
+- The focused selector passes its original-state oracle at the first
+  `rollback-after-native-row-undo` hit after native recovered transactions
+  drain.
 - Compatibility and slice docs no longer claim stale passing coverage.
 - No ownerless test processes or `/tmp/mylite-ownerless-*` directories remain
   after verification.
@@ -129,25 +130,23 @@ selector proves a production recovery bug that can be fixed narrowly.
   `ctest --preset ownerless-test-hooks -R '^libmylite\.ownerless-transaction-rollback-generated-row-undo(-live-peer)?-crash$' --output-on-failure`.
 - The earliest generated-column rollback hit reproduced a stable partial
   native state after drain (`base_sum=330`, `stored_sum=342`,
-  `mutated_base_count=2`), while generated skip `1` passed for both no-live and
-  live-peer selectors.
-- The adjacent rollback subset then exposed FK/trigger early row-undo gaps.
-  Update-side skip values through `8` left parent or cascade child state
-  partially applied in at least one focused or sequence run, while update-side
-  skip `9` passed for both no-live and live-peer selectors. Delete-side skip
-  `3` and later sequence coverage at skip `4` reproduced partially restored
-  child-side state, while delete-side skip `5` passed for both no-live and
-  live-peer selectors. The generated, update-side, and delete-side selectors
-  are therefore classified to those deterministic later boundaries; earlier
-  generated-column and FK/trigger row-undo substeps remain completion work.
+  `mutated_base_count=2`) before ownerless row-undo progress was made durable
+  at the hook boundary.
+- The adjacent rollback subset then exposed FK/trigger early row-undo gaps:
+  update-side skip values through `8` and delete-side skip values through `4`
+  could leave parent or child-side state partially applied before the same
+  durability fix.
+- After `row_undo()` truncates native undo progress and flushes redo in
+  ownerless mode, the generated-column, FK/trigger update-side, and FK/trigger
+  delete-side no-live/live-peer selectors pass at the first hook hit.
 
 ## Risks And Unresolved Questions
 
-- A final-state mismatch with a header-sized ownerless WAL points toward native
-  InnoDB recovered rollback or MyLite's native shutdown/reopen boundary, not
-  ownerless page-version replay. The generated-column selector did not require
-  a production recovery-code fix once native recovered transactions were
-  allowed to drain.
+- A final-state mismatch with a header-sized ownerless WAL pointed toward
+  native InnoDB recovered rollback progress durability, not ownerless
+  page-version replay. The production fix is to make each ownerless row-undo
+  step a durable native restart point before page-write hooks can expose the
+  undone page image.
 - Generated-column secondary indexes and virtual-column undo have more
-  metadata dependencies than ordinary-row rollback; a dictionary/cache timing
-  gap may appear only under recovered rollback.
+  metadata dependencies than ordinary-row rollback; faults inside individual
+  `row_undo_ins()`/`row_undo_mod()` substeps remain separate work.

@@ -27,8 +27,7 @@ read/write opener can recover a writer killed during native rollback of
   `rollback_fk_trigger_delete_transaction_until_native_row_undo_fault()` deletes
   a parent row with `ON DELETE CASCADE` and `ON DELETE SET NULL` children,
   deletes trigger base rows with an `AFTER DELETE` audit trigger, then rolls
-  back with `MYLITE_OWNERLESS_TEST_FAULT_SKIP=5` so the fault hits a later
-  deterministic native row-undo step.
+  back so the fault hits the first durable native row-undo step.
 - The existing live-peer selector proves `MYLITE_BUSY` gating while a peer is
   live, then no-live recovery after peer release. It does not separately prove
   immediate no-live recovery when the killed writer is the last ownerless
@@ -59,7 +58,7 @@ No production code change is required.
 In scope:
 
 - Linux unsafe ownerless hook-build coverage.
-- Standalone no-live recovery after the existing later delete-side native
+- Standalone no-live recovery after the existing delete-side native
   `row_undo()` fault.
 - FK `ON DELETE CASCADE`, FK `ON DELETE SET NULL`, and `AFTER DELETE` trigger
   audit rows.
@@ -70,17 +69,16 @@ In scope:
 Out of scope:
 
 - Faults inside every `row_undo_ins()` or `row_undo_mod()` substep.
-- Earlier FK-delete row-undo hits before the existing skip-5 deterministic
-  point.
 - Additional FK action shapes, trigger variants, XA/prepared rollback, DDL
   rollback, randomized fault selection, or external MariaDB/RQG stress.
 - SQL-level table-lock fault injection.
 
 ## Compatibility Impact
 
-No SQL syntax, public C API, storage format, or production runtime behavior
-changes. The slice adds crash-recovery evidence for MariaDB-supported
-delete-side referential actions and triggers under ownerless mode.
+No SQL syntax, public C API, or storage format changes. Ownerless native
+rollback now truncates native undo progress and flushes redo after each
+successful row-undo step so delete-side referential actions and triggers recover
+from the first post-row-undo crash boundary under ownerless mode.
 
 ## Directory, Lifecycle, And Native Storage Impact
 
@@ -113,8 +111,8 @@ The new selector is registered only in the unsafe ownerless hook build.
 
 ## Acceptance Criteria
 
-- The writer reaches `rollback-after-native-row-undo` after skipping five
-  earlier native row-undo hits.
+- The writer reaches `rollback-after-native-row-undo` after the first native
+  row-undo step has durably recorded rollback progress.
 - No-live ownerless recovery waits for MariaDB's recovered transaction rollback
   to drain, restores the deleted parent row, cascade child row, set-null child
   key, trigger base rows, and removes rolled-back audit rows.
@@ -128,8 +126,8 @@ The new selector is registered only in the unsafe ownerless hook build.
 
 ## Risks And Follow-Up
 
-- The slice covers the stable later delete-side row-undo boundary, not every
-  earlier FK-delete undo substep.
+- The slice covers the shared post-`row_undo()` boundary, not every internal
+  FK-delete `row_undo_ins()` or `row_undo_mod()` substep.
 - Broader FK/trigger rollback crash matrices, XA/prepared rollback, longer
   randomized savepoint schedules, broader redo/checkpoint reconciliation,
   DDL/file lifecycle recovery, and external MariaDB/RQG stress remain planned.

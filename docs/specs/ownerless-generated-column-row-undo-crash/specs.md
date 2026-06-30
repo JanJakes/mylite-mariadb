@@ -67,9 +67,9 @@ CREATE TABLE app.ownerless_native_row_undo_generated (
 
 The writer updates all base columns and payloads inside one explicit
 transaction, verifies the mutated generated values, arms
-`rollback-after-native-row-undo` with one skipped hook hit, and executes
-`ROLLBACK`. The parent kills the writer at the second successful native undo
-step, after the earlier hit has been skipped.
+`rollback-after-native-row-undo`, and executes `ROLLBACK`. The parent kills the
+writer after the first successful native undo step has also truncated and
+flushed native undo progress.
 
 The no-live selector verifies the next ownerless opener lets native recovery
 finish rollback, waits for recovered active transactions to drain, and
@@ -84,9 +84,11 @@ recovery runs, and then verifies the same final generated-column/index state.
 
 ## Compatibility Impact
 
-No SQL syntax, C API, PHP API, storage format, or production behavior changes.
-The slice strengthens the ownerless rollback claim for existing MariaDB
-generated-column semantics.
+No SQL syntax, C API, PHP API, or storage format changes. Ownerless native
+rollback now makes each successful row-undo step a durable crash boundary by
+truncating the native undo tail and flushing redo before the unsafe test fault
+can pause. The slice strengthens the ownerless rollback claim for existing
+MariaDB generated-column semantics.
 
 ## Directory, Lifecycle, And Native Storage Impact
 
@@ -96,8 +98,10 @@ existing MyLite database directory/runtime-root test shape.
 
 ## Public API, Build, Size, License
 
-No public API, dependency, license, or production binary-size impact. The new
-selectors are registered only in the unsafe ownerless hook build.
+No public API, dependency, license, or production binary-size impact. The
+rollback durability change can add redo flush work to large ownerless
+rollbacks; the new selectors are registered only in the unsafe ownerless hook
+build.
 
 ## Test And Verification Plan
 
@@ -116,7 +120,7 @@ selectors are registered only in the unsafe ownerless hook build.
 ## Acceptance Criteria
 
 - The generated-column writer reaches the existing native row-undo fault after
-  skipping one earlier successful native undo step.
+  the first successful native undo step has been durably recorded.
 - No-live ownerless recovery preserves original base values, stored generated
   values, virtual generated values, payloads, and generated-column secondary
   index usability.
@@ -157,11 +161,12 @@ selectors are registered only in the unsafe ownerless hook build.
   native-support-only checkpoint predicate as adjacent row-undo tests and waits
   for MariaDB recovered active transactions to drain before asserting the final
   generated-column state.
-- The earliest generated-column rollback hit can drain to a stable partial
-  native state with rows 1 and 2 still mutated, so the committed selector uses
-  the later skip-1 boundary. Earlier generated-column row-undo substeps remain
-  completion work.
+- Before ownerless row-undo progress was truncated and flushed at the hook
+  boundary, the earliest generated-column rollback hit could drain to a stable
+  partial native state with rows 1 and 2 still mutated. The selector now runs at
+  that first hit and verifies the original generated-column state.
 - This covers generated-column side effects at one deterministic row-undo
-  boundary. FK action rollback, trigger side effects, XA/prepared rollback,
+  boundary. Faults inside individual `row_undo_ins()`/`row_undo_mod()`
+  substeps, FK action rollback, trigger side effects, XA/prepared rollback,
   longer randomized savepoint schedules, broader redo/checkpoint
   reconciliation, and full external MariaDB/RQG stress remain completion work.

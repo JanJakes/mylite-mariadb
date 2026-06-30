@@ -406,6 +406,16 @@ row_undo(
 	mem_heap_empty(node->heap);
 
 	if (err == DB_SUCCESS
+	    && UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks())) {
+		/* Make each ownerless row-undo step a durable crash boundary
+		before page-write hooks can expose the undone page image. */
+		err = trx_undo_try_truncate(node->trx);
+		if (err == DB_SUCCESS) {
+			log_buffer_flush_to_disk();
+		}
+	}
+
+	if (err == DB_SUCCESS
 	    && UNIV_UNLIKELY(mylite_ownerless_innodb_test_faults_enabled_fast())) {
 		mylite_ownerless_innodb_test_fault(
 			"rollback-after-native-row-undo");

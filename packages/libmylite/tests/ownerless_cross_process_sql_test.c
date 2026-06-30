@@ -15692,7 +15692,7 @@ static void run_crashed_fk_trigger_native_row_undo_recovery(
         rollback_fk_trigger_transaction_until_native_row_undo_fault(
             paths,
             writer_ready_pipe[1],
-            "9"
+            "0"
         );
     }
 
@@ -16132,7 +16132,7 @@ static void run_crashed_fk_trigger_delete_native_row_undo_recovery(
         rollback_fk_trigger_delete_transaction_until_native_row_undo_fault(
             paths,
             writer_ready_pipe[1],
-            "5"
+            "0"
         );
     }
 
@@ -78842,7 +78842,6 @@ static void rollback_generated_column_transaction_until_native_row_undo_fault(
         ) == 3U
     );
 
-    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_SKIP", "1", 1) == 0);
     assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "rollback-after-native-row-undo", 1) == 0);
     assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
     exec_ok(db, "ROLLBACK");
