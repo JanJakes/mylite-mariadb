@@ -152,7 +152,7 @@ if(BUILD_TESTING)
       --ddl-rounds 2
       --fk-graph-rounds 2
       --fk-graph-replay-attempts 10
-      --seed-range 1312:1343
+      --seed-range 1344:1375
       --check
   )
   set_tests_properties(tools.ownerless-external-mariadb-seed-sweep-next-check PROPERTIES
