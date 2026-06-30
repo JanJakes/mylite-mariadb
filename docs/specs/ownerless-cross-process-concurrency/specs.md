@@ -3423,19 +3423,19 @@ Tasks:
    but before ownerless dictionary finish, then verifies recovered dynamic
    row-format metadata, retained row payloads, and later writes through
    ownerless/native reopen before and after forced `.shm` rebuild. Compact
-   row-format crash coverage now kills
-   `ALTER TABLE ... ROW_FORMAT=COMPACT` after a native row-format rebuild from
-   a dynamic source table but before ownerless dictionary finish, then verifies
-   recovered compact row-format metadata, retained row payloads, marker
-   retention while a peer is live, final no-live marker drain, and later
-   writes through ownerless/native reopen before and after forced `.shm`
-   rebuild. Redundant row-format crash coverage now kills
-   `ALTER TABLE ... ROW_FORMAT=REDUNDANT` after a native row-format rebuild
-   from a dynamic source table but before ownerless dictionary finish, then
-   verifies recovered redundant row-format metadata, retained row payloads,
+   row-format crash coverage now kills plain and explicit copy-lock
+   `ALTER TABLE ... ROW_FORMAT=COMPACT` writers after a native row-format
+   rebuild from a dynamic source table but before ownerless dictionary finish,
+   then verifies recovered compact row-format metadata, retained row payloads,
    marker retention while a peer is live, final no-live marker drain, and later
    writes through ownerless/native reopen before and after forced `.shm`
-   rebuild.
+   rebuild. Redundant row-format crash coverage now kills plain and explicit
+   copy-lock `ALTER TABLE ... ROW_FORMAT=REDUNDANT` writers after a native
+   row-format rebuild from a dynamic source table but before ownerless
+   dictionary finish, then verifies recovered redundant row-format metadata,
+   retained row payloads, marker retention while a peer is live, final no-live
+   marker drain, and later writes through ownerless/native reopen before and
+   after forced `.shm` rebuild.
    Compressed row-format crash coverage now kills plain and explicit copy-lock
    `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=1`,
    `KEY_BLOCK_SIZE=2`, `KEY_BLOCK_SIZE=4`, `KEY_BLOCK_SIZE=8`, and
@@ -5005,6 +5005,8 @@ Tasks:
    `ALTER TABLE ... ADD COLUMN` forms and
    plain plus explicit copy-lock `ALTER TABLE ... ROW_FORMAT=DYNAMIC` rebuild
    marker coverage, plus
+   plain plus explicit copy-lock `ALTER TABLE ... ROW_FORMAT=COMPACT` and
+   `ALTER TABLE ... ROW_FORMAT=REDUNDANT` rebuild marker coverage, plus
    plain plus explicit copy-lock compressed
    `ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=<n>` rebuild marker coverage at the
    same prefinish crash boundary, now extended to the existing
@@ -5067,6 +5069,11 @@ Tasks:
    prefinish crash coverage now uses a separate recoverable dictionary marker to
    provide live-peer recovery for the native dynamic row-format copy rebuild
    boundary. Focused
+   plain and explicit copy-lock `ALTER TABLE schema.table ROW_FORMAT=COMPACT`
+   and `ALTER TABLE schema.table ROW_FORMAT=REDUNDANT` prefinish crash
+   coverage now uses separate recoverable dictionary markers to provide
+   live-peer recovery for the native compact and redundant row-format copy
+   rebuild boundaries. Focused
    plain and explicit copy-lock
    `ALTER TABLE schema.table ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=<n>`
    prefinish crash coverage now uses separate recoverable dictionary markers to
@@ -8096,8 +8103,8 @@ subsystems that this mode needs:
      FK, and focused same-schema/cross-schema temporary/permanent IF EXISTS lists,
      other rebuild variants beyond the covered
      FORCE, same-engine ENGINE including both exact copy-lock option orders,
-     dynamic row-format including exact copy-lock, compact and redundant
-     row-format, compressed row-format including exact copy-lock, charset including exact
+     dynamic, compact, and redundant row-format including exact copy-lock,
+     compressed row-format including exact copy-lock, charset including exact
      copy-lock, and focused exact copy-lock
      unplaced ADD in both option orders, placed ADD, DROP, MODIFY, CHANGE, and RENAME COLUMN
      boundaries,
