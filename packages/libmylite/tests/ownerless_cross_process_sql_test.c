@@ -24538,10 +24538,10 @@ static void run_ownerless_active_reader_pressure_limit_write_classes(
     signal_pipe(release_pipe[1]);
     wait_for_child(reader_child);
     if (!exercise_after_release) {
+        const char *path = database_path;
+
         assert(mylite_close(db) == MYLITE_OK);
-        assert_concurrency_wal_checkpointed_or_retained_native_support_only_eventually(
-            database_path
-        );
+        assert_concurrency_wal_checkpointed_or_retained_native_support_only_eventually(path);
 
         free(database_path);
         free(runtime_root);
