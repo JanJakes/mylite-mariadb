@@ -2848,6 +2848,8 @@ Tasks:
    hook-build column missing-`IF EXISTS` crash recovery for missing modify,
    rename, change, and default no-op branches, including generated-column/CHECK
    expression preservation for missing rename, change, and default no-ops,
+   hook-build placed `ADD COLUMN ... FIRST` and `ADD COLUMN ... AFTER
+   <existing-column>` exact copy-lock live recovery,
    an online/in-place index alter variant,
    column-shape ALTERs that add, modify, rename, and drop columns,
    explicit InnoDB instant ADD/DROP/reorder column metadata,
@@ -5142,7 +5144,8 @@ Tasks:
    MariaDB DDL-log rollback restores the original permanent source while the
    temporary and skipped targets remain absent. Broader
    ALTER rebuild variants beyond the focused force, exact copy-lock
-   ADD/DROP/MODIFY COLUMN, row-format, compressed, and charset-conversion cases,
+   unplaced ADD COLUMN, placed ADD COLUMN, DROP COLUMN, MODIFY COLUMN,
+   row-format, compressed, and charset-conversion cases,
    broader schema option variants beyond named/current-schema default/comment
    and named/current-schema combined option-order boundaries, broader view and
    trigger variants,
@@ -8075,7 +8078,8 @@ subsystems that this mode needs:
      dynamic row-format including exact copy-lock, compact and redundant
      row-format, compressed row-format including exact copy-lock, charset including exact
      copy-lock, and focused exact copy-lock
-     ADD/DROP/MODIFY/CHANGE/RENAME COLUMN boundaries,
+     unplaced ADD, placed ADD, DROP, MODIFY, CHANGE, and RENAME COLUMN
+     boundaries,
      broader metadata-only DDL, broader mixed temporary/permanent
      rename matrices, broader FK plus non-FK ALTER lists beyond the focused
      ADD COLUMN, DROP/MODIFY/CHANGE/RENAME COLUMN, table-comment, column-default,

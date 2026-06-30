@@ -2446,6 +2446,13 @@ bool consume_ownerless_alter_table_add_column_recovery_clause(
     std::string_view schema_name,
     std::string_view table_name
 );
+bool consume_ownerless_optional_column_placement_tail(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::size_t &index,
+    std::string_view schema_name,
+    std::string_view table_name
+);
 bool ownerless_alter_table_drop_column_recovery_statement(
     mylite_db &db,
     const SqlPolicyTokens &tokens
@@ -19571,7 +19578,8 @@ bool consume_ownerless_alter_table_add_column_recovery_clause(
     std::size_t depth = 0U;
     for (; index < tokens.count; ++index) {
         const std::string_view token = tokens.values[index];
-        if (depth == 0U && (token_equals(token, ",") || token_equals(token, ";"))) {
+        if (depth == 0U && (token_equals(token, ",") || token_equals(token, ";") ||
+                            token_in(token, "AFTER", "FIRST"))) {
             break;
         }
         if (token_equals(token, "(")) {
@@ -19587,8 +19595,8 @@ bool consume_ownerless_alter_table_add_column_recovery_clause(
             has_definition = true;
             continue;
         }
-        if (token_in(token, "AFTER", "ALGORITHM", "AUTO_INCREMENT", "CHECK") ||
-            token_equals(token, "CONSTRAINT") || token_in(token, "FIRST", "FOREIGN", "FULLTEXT") ||
+        if (token_in(token, "ALGORITHM", "AUTO_INCREMENT", "CHECK") ||
+            token_equals(token, "CONSTRAINT") || token_in(token, "FOREIGN", "FULLTEXT") ||
             token_in(token, "INDEX", "KEY", "LOCK", "PRIMARY") ||
             token_equals(token, "REFERENCES") || token_in(token, "SPATIAL", "UNIQUE")) {
             return false;
@@ -19607,6 +19615,15 @@ bool consume_ownerless_alter_table_add_column_recovery_clause(
     if (!has_definition || generated_definition_uses_rejected_function || depth != 0U) {
         return false;
     }
+    if (!consume_ownerless_optional_column_placement_tail(
+            db,
+            tokens,
+            index,
+            schema_name,
+            table_name
+        )) {
+        return false;
+    }
 
     bool column_exists = false;
     return ownerless_column_metadata_lookup(
@@ -19617,6 +19634,42 @@ bool consume_ownerless_alter_table_add_column_recovery_clause(
                &column_exists
            ) &&
            !column_exists;
+}
+
+bool consume_ownerless_optional_column_placement_tail(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    std::size_t &index,
+    std::string_view schema_name,
+    std::string_view table_name
+) {
+    if (index >= tokens.count || token_equals(tokens.values[index], ",") ||
+        token_equals(tokens.values[index], ";")) {
+        return true;
+    }
+    if (token_equals(tokens.values[index], "FIRST")) {
+        ++index;
+        return true;
+    }
+    if (!token_equals(tokens.values[index], "AFTER") || index + 1U >= tokens.count ||
+        !ownerless_table_identifier_token(tokens.values[index + 1U])) {
+        return false;
+    }
+
+    const std::string after_column = ownerless_normalized_identifier(tokens.values[index + 1U]);
+    bool after_column_exists = false;
+    if (!ownerless_column_metadata_lookup(
+            db,
+            schema_name,
+            table_name,
+            after_column,
+            &after_column_exists
+        ) ||
+        !after_column_exists) {
+        return false;
+    }
+    index += 2U;
+    return true;
 }
 
 bool consume_ownerless_plain_column_definition_tail(

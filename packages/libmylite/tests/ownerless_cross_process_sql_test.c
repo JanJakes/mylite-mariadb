@@ -1257,6 +1257,7 @@ static void test_crashed_auto_increment_dictionary_ddl_recovers_high_water(void)
 static void test_crashed_column_default_dictionary_ddl_recovers_defaults(void);
 static void test_crashed_column_add_dictionary_ddl_recovers_column_metadata(void);
 static void test_crashed_column_add_copy_lock_dictionary_ddl_recovers_column_metadata(void);
+static void test_crashed_column_add_placement_copy_lock_dictionary_ddl_recovers_order(void);
 static void test_crashed_column_idempotent_add_dictionary_ddl_preserves_column(void);
 static void test_crashed_column_drop_dictionary_ddl_recovers_absent_column(void);
 static void test_crashed_column_drop_copy_lock_dictionary_ddl_recovers_absent_column(void);
@@ -2488,6 +2489,14 @@ static void add_column_copy_lock_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
+static void add_column_after_copy_lock_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void add_column_first_copy_lock_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void idempotent_add_column_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -3565,6 +3574,10 @@ static void assert_ownerless_primary_key_idempotent_crash_state(
 );
 static void assert_ownerless_column_add_crash_state(open_database_paths paths, unsigned flags);
 static void assert_ownerless_column_add_copy_lock_crash_state(
+    open_database_paths paths,
+    unsigned flags
+);
+static void assert_ownerless_column_add_placement_copy_lock_crash_state(
     open_database_paths paths,
     unsigned flags
 );
@@ -6633,6 +6646,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-column-add-placement-copy-lock-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_column_add_placement_copy_lock_dictionary_ddl_recovers_order();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-column-idempotent-add-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_column_idempotent_add_dictionary_ddl_preserves_column();
@@ -7582,6 +7601,7 @@ int main(int argc, char **argv) {
             "dictionary-column-default-crash|"
             "dictionary-column-add-crash|"
             "dictionary-column-add-copy-lock-crash|"
+            "dictionary-column-add-placement-copy-lock-crash|"
             "dictionary-column-idempotent-add-crash|"
             "dictionary-column-drop-crash|"
             "dictionary-column-drop-copy-lock-crash|"
@@ -8111,6 +8131,9 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_crashed_column_add_dictionary_ddl_recovers_column_metadata),
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_column_add_copy_lock_dictionary_ddl_recovers_column_metadata
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_column_add_placement_copy_lock_dictionary_ddl_recovers_order
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_column_idempotent_add_dictionary_ddl_preserves_column),
     OWNERLESS_SQL_TEST_CASE(test_crashed_column_drop_dictionary_ddl_recovers_absent_column),
@@ -68870,6 +68893,189 @@ static void test_crashed_column_add_copy_lock_dictionary_ddl_recovers_column_met
     free(root);
 }
 
+static void test_crashed_column_add_placement_copy_lock_dictionary_ddl_recovers_order(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-column-add-placement-copy-lock-crash.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_column_add_after_copy_lock_crash_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "marker INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_column_add_first_copy_lock_crash_base ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "marker INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_column_add_after_copy_lock_crash_base VALUES "
+        "(1, 10, 100), (2, 20, 200), (3, 30, 300)"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_column_add_first_copy_lock_crash_base VALUES "
+        "(1, 10, 100), (2, 20, 200), (3, 30, 300)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name IN ("
+            "'ownerless_column_add_after_copy_lock_crash_base', "
+            "'ownerless_column_add_first_copy_lock_crash_base') "
+            "AND column_name IN ('placed_note', 'first_note')"
+        ) == 0U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        add_column_after_copy_lock_until_dictionary_finish_fault
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_add_after_copy_lock_crash_base' "
+            "AND column_name = 'placed_note' "
+            "AND ordinal_position = 3 "
+            "AND column_default = '7'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(placed_note) "
+            "FROM app.ownerless_column_add_after_copy_lock_crash_base"
+        ) == 21U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_column_add_after_copy_lock_crash_base "
+        "(id, value, marker) VALUES (4, 40, 400)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(placed_note) "
+            "FROM app.ownerless_column_add_after_copy_lock_crash_base"
+        ) == 28U
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    release_ownerless_live_peer(&live_peer);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_column_add_after_copy_lock_crash_base"
+        ) == 4U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_column_add_after_copy_lock_crash_base "
+        "(id, value, marker) VALUES (5, 50, 500)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(placed_note) "
+            "FROM app.ownerless_column_add_after_copy_lock_crash_base"
+        ) == 35U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_column_add_after_copy_lock_crash_base WHERE id = 5");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_column_add_after_copy_lock_crash_base"
+        ) == 4U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        add_column_first_copy_lock_until_dictionary_finish_fault
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_add_first_copy_lock_crash_base' "
+            "AND column_name = 'first_note' "
+            "AND ordinal_position = 1 "
+            "AND column_default = '5'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(first_note) "
+            "FROM app.ownerless_column_add_first_copy_lock_crash_base"
+        ) == 15U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_column_add_first_copy_lock_crash_base "
+        "(id, value, marker) VALUES (4, 40, 400)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(first_note) "
+            "FROM app.ownerless_column_add_first_copy_lock_crash_base"
+        ) == 20U
+    );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+    release_ownerless_live_peer(&live_peer);
+
+    assert_ownerless_column_add_placement_copy_lock_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert_ownerless_column_add_placement_copy_lock_crash_state(paths, MYLITE_OPEN_READWRITE);
+    remove_concurrency_shm(database_path);
+    assert_ownerless_column_add_placement_copy_lock_crash_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    assert_ownerless_column_add_placement_copy_lock_crash_state(paths, MYLITE_OPEN_READWRITE);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_column_idempotent_add_dictionary_ddl_preserves_column(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -89804,6 +90010,34 @@ static void add_column_copy_lock_until_dictionary_finish_fault(
     );
 }
 
+static void add_column_after_copy_lock_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_column_add_after_copy_lock_crash_base "
+        "ADD COLUMN placed_note INT NOT NULL DEFAULT 7 AFTER value, "
+        "ALGORITHM=COPY, LOCK=EXCLUSIVE"
+    );
+}
+
+static void add_column_first_copy_lock_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_column_add_first_copy_lock_crash_base "
+        "ADD COLUMN first_note INT NOT NULL DEFAULT 5 FIRST, "
+        "ALGORITHM=COPY, LOCK=EXCLUSIVE"
+    );
+}
+
 static void idempotent_add_column_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -99510,6 +99744,130 @@ static void assert_ownerless_column_add_copy_lock_crash_state(
     assert(
         query_unsigned(db, "SELECT SUM(note) FROM app.ownerless_column_add_copy_lock_crash_base") ==
         28U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_column_add_placement_copy_lock_crash_state(
+    open_database_paths paths,
+    unsigned flags
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_add_after_copy_lock_crash_base' "
+            "AND ((column_name = 'id' AND ordinal_position = 1) "
+            "OR (column_name = 'value' AND ordinal_position = 2) "
+            "OR (column_name = 'placed_note' "
+            "AND ordinal_position = 3 "
+            "AND column_default = '7') "
+            "OR (column_name = 'marker' AND ordinal_position = 4))"
+        ) == 4U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_column_add_after_copy_lock_crash_base"
+        ) == 4U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_column_add_after_copy_lock_crash_base"
+        ) == 100U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(placed_note) "
+            "FROM app.ownerless_column_add_after_copy_lock_crash_base"
+        ) == 28U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(marker) FROM app.ownerless_column_add_after_copy_lock_crash_base"
+        ) == 1000U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_column_add_after_copy_lock_crash_base "
+        "(id, value, marker) VALUES (5, 50, 500)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(placed_note) "
+            "FROM app.ownerless_column_add_after_copy_lock_crash_base"
+        ) == 35U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_column_add_after_copy_lock_crash_base WHERE id = 5");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_column_add_after_copy_lock_crash_base"
+        ) == 4U
+    );
+
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_column_add_first_copy_lock_crash_base' "
+            "AND ((column_name = 'first_note' "
+            "AND ordinal_position = 1 "
+            "AND column_default = '5') "
+            "OR (column_name = 'id' AND ordinal_position = 2) "
+            "OR (column_name = 'value' AND ordinal_position = 3) "
+            "OR (column_name = 'marker' AND ordinal_position = 4))"
+        ) == 4U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_column_add_first_copy_lock_crash_base"
+        ) == 4U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_column_add_first_copy_lock_crash_base"
+        ) == 100U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(first_note) FROM app.ownerless_column_add_first_copy_lock_crash_base"
+        ) == 20U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(marker) FROM app.ownerless_column_add_first_copy_lock_crash_base"
+        ) == 1000U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_column_add_first_copy_lock_crash_base "
+        "(id, value, marker) VALUES (5, 50, 500)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(first_note) FROM app.ownerless_column_add_first_copy_lock_crash_base"
+        ) == 25U
+    );
+    exec_ok(db, "DELETE FROM app.ownerless_column_add_first_copy_lock_crash_base WHERE id = 5");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_column_add_first_copy_lock_crash_base"
+        ) == 4U
     );
     assert(mylite_close(db) == MYLITE_OK);
 }
