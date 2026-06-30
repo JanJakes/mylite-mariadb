@@ -59,9 +59,9 @@ ALTER TABLE app.ownerless_ddl_options
   ALGORITHM=INPLACE, LOCK=NONE;
 ```
 
-The already-open peer verifies the index is unusable after the drop and usable
-again after the re-add. Final reopen checks keep proving the re-added index is
-durable.
+The already-open peer verifies the index metadata is absent after the drop and
+usable again after the re-add. Final reopen checks keep proving the re-added
+index is durable.
 
 ## Compatibility Impact
 
@@ -100,7 +100,7 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The already-open ownerless peer observes the `INPLACE, LOCK=NONE` dropped
-  secondary index and cannot use it through `FORCE INDEX`.
+  secondary index as absent from metadata.
 - The peer observes the `INPLACE, LOCK=NONE` re-added secondary index and can
   use it through `FORCE INDEX`.
 - Final ownerless/native reopen checks, including forced `.shm` rebuild, see

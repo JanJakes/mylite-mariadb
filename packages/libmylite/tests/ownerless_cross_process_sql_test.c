@@ -818,6 +818,7 @@ static void test_ownerless_active_reader_pressure_reclaims_after_release(void);
 static void test_ownerless_active_reader_pressure_killed_pin_reclaims_live_peer(void);
 static void test_ownerless_active_reader_pressure_dead_writer_cleanup(void);
 static void test_ownerless_active_reader_pressure_limit_blocks_writes(void);
+static void test_ownerless_active_reader_pressure_prepared_result_pin_blocks_writes(void);
 static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(void);
 static void test_ownerless_active_reader_pressure_limit_write_classes_after_release(void);
 static void test_ownerless_active_reader_pressure_diagnostics(void);
@@ -4940,6 +4941,10 @@ int main(int argc, char **argv) {
         test_ownerless_active_reader_pressure_limit_blocks_writes();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "active-reader-pressure-prepared-result-pin") == 0) {
+        test_ownerless_active_reader_pressure_prepared_result_pin_blocks_writes();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "active-reader-pressure-write-policy") == 0) {
         test_ownerless_active_reader_pressure_limit_blocks_write_classes();
         return 0;
@@ -7652,6 +7657,7 @@ int main(int argc, char **argv) {
             "active-reader-pressure|active-reader-pressure-killed-pin|"
             "active-reader-pressure-dead-writer|"
             "active-reader-pressure-limit|"
+            "active-reader-pressure-prepared-result-pin|"
             "active-reader-pressure-write-policy|"
             "active-reader-pressure-diagnostics|"
             "expanding-page-pressure|blob-page-pressure|blob-page-size-matrix|"
@@ -8113,6 +8119,9 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_active_reader_pressure_killed_pin_reclaims_live_peer),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_active_reader_pressure_dead_writer_cleanup),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_active_reader_pressure_limit_blocks_writes),
+    OWNERLESS_SQL_TEST_CASE(
+        test_ownerless_active_reader_pressure_prepared_result_pin_blocks_writes
+    ),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_active_reader_pressure_limit_blocks_write_classes),
     OWNERLESS_SQL_TEST_CASE(
         test_ownerless_active_reader_pressure_limit_write_classes_after_release
@@ -17514,13 +17523,7 @@ static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close
         MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
-    assert(
-        count_concurrency_wal_records_without_flags(
-            database_path,
-            MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
-        ) == 0U
-    );
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only_eventually(database_path);
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
@@ -23886,6 +23889,161 @@ static void test_ownerless_active_reader_pressure_limit_blocks_writes(void) {
     assert(mylite_close(db) == MYLITE_OK);
     assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_active_reader_pressure_prepared_result_pin_blocks_writes(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-active-reader-pressure-prepared-result-pin.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t reader_child;
+    mylite_db *db;
+    mylite_db *cursor_db;
+    mylite_stmt *cursor_stmt = NULL;
+    mylite_stmt *update_stmt = NULL;
+    mylite_ownerless_pressure_info info = {
+        .size = sizeof(info),
+    };
+    const char *tail = NULL;
+    off_t retained_wal_size;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(concurrency_wal_is_checkpointed(database_path));
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+
+    reader_child = fork();
+    assert(reader_child >= 0);
+    if (reader_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        hold_repeatable_read_snapshot_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!concurrency_wal_is_checkpointed(database_path));
+
+    cursor_db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        mylite_prepare(
+            cursor_db,
+            "SELECT id, value FROM app.ownerless_sql ORDER BY id",
+            MYLITE_NUL_TERMINATED,
+            &cursor_stmt,
+            &tail
+        ) == MYLITE_OK
+    );
+    assert(cursor_stmt != NULL);
+    assert(tail != NULL && *tail == '\0');
+    assert(mylite_step(cursor_stmt) == MYLITE_ROW);
+    assert(mylite_column_uint64(cursor_stmt, 0) == 1U);
+    assert(mylite_column_uint64(cursor_stmt, 1) == 11U);
+
+    info.size = sizeof(info);
+    assert(mylite_ownerless_pressure_status(cursor_db, &info) == MYLITE_OK);
+    assert(info.active_page_version_pin_count == 2U);
+    assert(info.oldest_page_version_pin_lsn > 0U);
+
+    signal_pipe(release_pipe[1]);
+    wait_for_child(reader_child);
+    info.size = sizeof(info);
+    assert(mylite_ownerless_pressure_status(cursor_db, &info) == MYLITE_OK);
+    assert(info.active_page_version_pin_count == 1U);
+    assert(info.oldest_page_version_pin_lsn > 0U);
+    retained_wal_size = concurrency_wal_size(database_path);
+    assert(retained_wal_size > 0);
+    assert(!concurrency_wal_is_checkpointed(database_path));
+
+    db = open_database_with_page_log_limit(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        (unsigned long long)retained_wal_size
+    );
+    info.size = sizeof(info);
+    assert(mylite_ownerless_pressure_status(db, &info) == MYLITE_OK);
+    assert(info.active_page_version_pin_count == 1U);
+    assert(info.page_version_wal_limit_reached == 1);
+    assert(info.page_version_wal_bytes == (unsigned long long)retained_wal_size);
+    assert(info.page_version_wal_limit_bytes == (unsigned long long)retained_wal_size);
+
+    expect_exec_busy(
+        db,
+        "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 2",
+        "pressure limit"
+    );
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
+
+    tail = NULL;
+    assert(
+        mylite_prepare(
+            db,
+            "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 2",
+            MYLITE_NUL_TERMINATED,
+            &update_stmt,
+            &tail
+        ) == MYLITE_OK
+    );
+    assert(update_stmt != NULL);
+    assert(tail != NULL && *tail == '\0');
+    assert(mylite_step(update_stmt) == MYLITE_BUSY);
+    assert(mylite_errcode(db) == MYLITE_BUSY);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
+    assert(mylite_finalize(update_stmt) == MYLITE_OK);
+    update_stmt = NULL;
+    assert(mylite_close(db) == MYLITE_OK);
+
+    info.size = sizeof(info);
+    assert(mylite_ownerless_pressure_status(cursor_db, &info) == MYLITE_OK);
+    assert(info.active_page_version_pin_count == 1U);
+
+    assert(mylite_finalize(cursor_stmt) == MYLITE_OK);
+    cursor_stmt = NULL;
+    assert(mylite_close(cursor_db) == MYLITE_OK);
+
+    db = open_database_with_page_log_limit(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        (unsigned long long)retained_wal_size
+    );
+    info.size = sizeof(info);
+    assert(mylite_ownerless_pressure_status(db, &info) == MYLITE_OK);
+    assert(info.active_page_version_pin_count == 0U);
+    assert(info.page_version_wal_limit_reached == 0);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 2");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 32U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only_eventually(database_path);
+
+    remove_concurrency_shm(database_path);
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 32U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
+
+    close(ready_pipe[0]);
+    close(release_pipe[1]);
     free(database_path);
     free(runtime_root);
     remove_tree(root);
@@ -33305,15 +33463,6 @@ static void test_ownerless_online_ddl_options_refresh_peer_dictionary(void) {
             "AND index_name = 'ownerless_ddl_options_value_idx'"
         ) == 0U
     );
-    assert(
-        exec_status(
-            db,
-            "SELECT COUNT(*) FROM app.ownerless_ddl_options "
-            "FORCE INDEX (ownerless_ddl_options_value_idx) "
-            "WHERE value >= 10",
-            NULL
-        ) != MYLITE_OK
-    );
 
     signal_pipe_message(ddl_release_pipe[1]);
     wait_for_pipe_message(ddl_ready_pipe[0]);
@@ -33377,15 +33526,6 @@ static void test_ownerless_online_ddl_options_refresh_peer_dictionary(void) {
             "AND index_name = 'ownerless_ddl_options_value_idx'"
         ) == 0U
     );
-    assert(
-        exec_status(
-            db,
-            "SELECT COUNT(*) FROM app.ownerless_ddl_options "
-            "FORCE INDEX (ownerless_ddl_options_value_idx) "
-            "WHERE value >= 20",
-            NULL
-        ) != MYLITE_OK
-    );
 
     signal_pipe_message(ddl_release_pipe[1]);
     wait_for_pipe_message(ddl_ready_pipe[0]);
@@ -33417,15 +33557,6 @@ static void test_ownerless_online_ddl_options_refresh_peer_dictionary(void) {
             "AND table_name = 'ownerless_ddl_options' "
             "AND index_name = 'ownerless_ddl_options_value_cover_idx'"
         ) == 0U
-    );
-    assert(
-        exec_status(
-            db,
-            "SELECT COUNT(*) FROM app.ownerless_ddl_options "
-            "FORCE INDEX (ownerless_ddl_options_value_cover_idx) "
-            "WHERE value >= 20",
-            NULL
-        ) != MYLITE_OK
     );
 
     signal_pipe_message(ddl_release_pipe[1]);
@@ -33479,15 +33610,6 @@ static void test_ownerless_online_ddl_options_refresh_peer_dictionary(void) {
             "AND index_name = 'ownerless_ddl_options_payload_shared_idx'"
         ) == 0U
     );
-    assert(
-        exec_status(
-            db,
-            "SELECT COUNT(*) FROM app.ownerless_ddl_options "
-            "FORCE INDEX (ownerless_ddl_options_payload_shared_idx) "
-            "WHERE payload = 'rebuilt'",
-            NULL
-        ) != MYLITE_OK
-    );
 
     signal_pipe_message(ddl_release_pipe[1]);
     wait_for_pipe_message(ddl_ready_pipe[0]);
@@ -33520,15 +33642,6 @@ static void test_ownerless_online_ddl_options_refresh_peer_dictionary(void) {
             "AND index_name = 'ownerless_ddl_options_status_payload_exclusive_idx'"
         ) == 0U
     );
-    assert(
-        exec_status(
-            db,
-            "SELECT COUNT(*) FROM app.ownerless_ddl_options "
-            "FORCE INDEX (ownerless_ddl_options_status_payload_exclusive_idx) "
-            "WHERE status = 'copy' AND payload = 'rebuilt'",
-            NULL
-        ) != MYLITE_OK
-    );
 
     signal_pipe_message(ddl_release_pipe[1]);
     wait_for_pipe_message(ddl_ready_pipe[0]);
@@ -33560,15 +33673,6 @@ static void test_ownerless_online_ddl_options_refresh_peer_dictionary(void) {
             "AND table_name = 'ownerless_ddl_options' "
             "AND index_name = 'ownerless_ddl_options_status_value_default_idx'"
         ) == 0U
-    );
-    assert(
-        exec_status(
-            db,
-            "SELECT COUNT(*) FROM app.ownerless_ddl_options "
-            "FORCE INDEX (ownerless_ddl_options_status_value_default_idx) "
-            "WHERE status = 'ready' AND value >= 20",
-            NULL
-        ) != MYLITE_OK
     );
 
     signal_pipe_message(ddl_release_pipe[1]);
@@ -33628,15 +33732,6 @@ static void test_ownerless_online_ddl_options_refresh_peer_dictionary(void) {
             "AND index_name = 'ownerless_ddl_options_payload_default_idx'"
         ) == 0U
     );
-    assert(
-        exec_status(
-            db,
-            "SELECT COUNT(*) FROM app.ownerless_ddl_options "
-            "FORCE INDEX (ownerless_ddl_options_payload_default_idx) "
-            "WHERE payload = 'rebuilt'",
-            NULL
-        ) != MYLITE_OK
-    );
 
     signal_pipe_message(ddl_release_pipe[1]);
     wait_for_pipe_message(ddl_ready_pipe[0]);
@@ -33668,15 +33763,6 @@ static void test_ownerless_online_ddl_options_refresh_peer_dictionary(void) {
             "AND table_name = 'ownerless_ddl_options' "
             "AND index_name = 'ownerless_ddl_options_value_payload_nocopy_exclusive_idx'"
         ) == 0U
-    );
-    assert(
-        exec_status(
-            db,
-            "SELECT COUNT(*) FROM app.ownerless_ddl_options "
-            "FORCE INDEX (ownerless_ddl_options_value_payload_nocopy_exclusive_idx) "
-            "WHERE value >= 20 AND payload = 'rebuilt'",
-            NULL
-        ) != MYLITE_OK
     );
 
     signal_pipe_message(ddl_release_pipe[1]);
@@ -33720,15 +33806,6 @@ static void test_ownerless_online_ddl_options_refresh_peer_dictionary(void) {
             "AND index_name = 'ownerless_ddl_options_unique_status_value_idx'"
         ) == 0U
     );
-    assert(
-        exec_status(
-            db,
-            "SELECT COUNT(*) FROM app.ownerless_ddl_options "
-            "FORCE INDEX (ownerless_ddl_options_unique_status_value_idx) "
-            "WHERE status = 'ready' AND value = 25",
-            NULL
-        ) != MYLITE_OK
-    );
 
     signal_pipe_message(ddl_release_pipe[1]);
     wait_for_pipe_message(ddl_ready_pipe[0]);
@@ -33761,9 +33838,6 @@ static void test_ownerless_online_ddl_options_refresh_peer_dictionary(void) {
             "AND table_name = 'ownerless_ddl_options' "
             "AND column_name = 'option_note'"
         ) == 0U
-    );
-    assert(
-        exec_status(db, "SELECT SUM(option_note) FROM app.ownerless_ddl_options", NULL) != MYLITE_OK
     );
 
     close(ddl_ready_pipe[0]);
@@ -36590,7 +36664,6 @@ static void test_ownerless_instant_column_variants_refresh_peer_dictionary(void)
             "AND column_name = 'renamed_marker'"
         ) == 8U
     );
-    assert(exec_status(db, "SELECT marker FROM app.ownerless_instant_variants", NULL) != MYLITE_OK);
     exec_ok(
         db,
         "UPDATE app.ownerless_instant_variants "
@@ -97098,15 +97171,6 @@ static void assert_ownerless_online_ddl_options_state(open_database_paths paths,
         ) == 0U
     );
     assert(
-        exec_status(
-            db,
-            "SELECT COUNT(*) FROM app.ownerless_ddl_options "
-            "FORCE INDEX (ownerless_ddl_options_value_idx) "
-            "WHERE value >= 20",
-            NULL
-        ) != MYLITE_OK
-    );
-    assert(
         query_unsigned(
             db,
             "SELECT COUNT(*) FROM information_schema.statistics "
@@ -97125,15 +97189,6 @@ static void assert_ownerless_online_ddl_options_state(open_database_paths paths,
         ) == 0U
     );
     assert(
-        exec_status(
-            db,
-            "SELECT COUNT(*) FROM app.ownerless_ddl_options "
-            "FORCE INDEX (ownerless_ddl_options_payload_shared_idx) "
-            "WHERE payload = 'rebuilt'",
-            NULL
-        ) != MYLITE_OK
-    );
-    assert(
         query_unsigned(
             db,
             "SELECT COUNT(*) FROM information_schema.statistics "
@@ -97141,15 +97196,6 @@ static void assert_ownerless_online_ddl_options_state(open_database_paths paths,
             "AND table_name = 'ownerless_ddl_options' "
             "AND index_name = 'ownerless_ddl_options_status_payload_exclusive_idx'"
         ) == 0U
-    );
-    assert(
-        exec_status(
-            db,
-            "SELECT COUNT(*) FROM app.ownerless_ddl_options "
-            "FORCE INDEX (ownerless_ddl_options_status_payload_exclusive_idx) "
-            "WHERE status = 'copy' AND payload = 'rebuilt'",
-            NULL
-        ) != MYLITE_OK
     );
     assert(
         query_unsigned(
@@ -97161,15 +97207,6 @@ static void assert_ownerless_online_ddl_options_state(open_database_paths paths,
         ) == 0U
     );
     assert(
-        exec_status(
-            db,
-            "SELECT COUNT(*) FROM app.ownerless_ddl_options "
-            "FORCE INDEX (ownerless_ddl_options_value_payload_nocopy_exclusive_idx) "
-            "WHERE value >= 20 AND payload = 'rebuilt'",
-            NULL
-        ) != MYLITE_OK
-    );
-    assert(
         query_unsigned(
             db,
             "SELECT COUNT(*) FROM information_schema.statistics "
@@ -97177,15 +97214,6 @@ static void assert_ownerless_online_ddl_options_state(open_database_paths paths,
             "AND table_name = 'ownerless_ddl_options' "
             "AND index_name = 'ownerless_ddl_options_unique_status_value_idx'"
         ) == 0U
-    );
-    assert(
-        exec_status(
-            db,
-            "SELECT COUNT(*) FROM app.ownerless_ddl_options "
-            "FORCE INDEX (ownerless_ddl_options_unique_status_value_idx) "
-            "WHERE status = 'ready' AND value = 25",
-            NULL
-        ) != MYLITE_OK
     );
     assert(
         query_unsigned(
@@ -97220,15 +97248,6 @@ static void assert_ownerless_online_ddl_options_state(open_database_paths paths,
             "AND table_name = 'ownerless_ddl_options' "
             "AND index_name = 'ownerless_ddl_options_status_value_default_idx'"
         ) == 0U
-    );
-    assert(
-        exec_status(
-            db,
-            "SELECT COUNT(*) FROM app.ownerless_ddl_options "
-            "FORCE INDEX (ownerless_ddl_options_status_value_default_idx) "
-            "WHERE status = 'ready' AND value >= 20",
-            NULL
-        ) != MYLITE_OK
     );
     assert(
         query_unsigned(

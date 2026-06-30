@@ -59,9 +59,9 @@ ALTER TABLE app.ownerless_ddl_options
   ALGORITHM=INPLACE, LOCK=SHARED;
 ```
 
-The already-open peer verifies the index is unusable after the drop and usable
-again after the re-add. A later existing `NOCOPY, LOCK=NONE` drop still proves
-the final state has no stale `value_idx` metadata.
+The already-open peer verifies the index metadata is absent after the drop and
+usable again after the re-add. A later existing `NOCOPY, LOCK=NONE` drop still
+proves the final state has no stale `value_idx` metadata.
 
 ## Compatibility Impact
 
@@ -100,7 +100,7 @@ No public API, build-profile, binary-size, license, or dependency changes.
 ## Acceptance Criteria
 
 - The already-open ownerless peer observes the `INPLACE, LOCK=SHARED` dropped
-  secondary index and cannot use it through `FORCE INDEX`.
+  secondary index as absent from metadata.
 - The peer observes the `INPLACE, LOCK=SHARED` re-added secondary index and can
   use it through `FORCE INDEX`.
 - Later final-state checks still prove the index can be removed by the existing

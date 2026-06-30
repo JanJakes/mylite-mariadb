@@ -2511,7 +2511,11 @@ Tasks:
    `MYLITE_BUSY` before direct or prepared ownerless write execution when
    active pins retain page-version WAL at or above the configured limit,
    including focused prepared `UPDATE` and prepared `INSERT ... SELECT`
-   dispatch coverage.
+   dispatch coverage. The `ownerless-prepared-result-pressure-pin` slice proves
+   a prepared `SELECT` result cursor can remain as the sole active
+   page-version pin after an older transaction reader releases, and that a
+   separate pressure-limited writer still returns `MYLITE_BUSY` for direct and
+   prepared writes until that cursor is finalized.
    Dead pressure-writer cleanup coverage now kills a pressure-limited writer
    after rejected direct DML, representative table/rename DDL, FK ADD/DROP,
    replacement-copy table DDL, view replacement, trigger replacement, and

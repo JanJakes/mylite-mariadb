@@ -414,6 +414,10 @@ if(BUILD_TESTING)
       COMMAND mylite_ownerless_cross_process_sql_test active-reader-pressure-dead-writer
     )
     add_test(
+      NAME libmylite.ownerless-active-reader-pressure-prepared-result-pin
+      COMMAND mylite_ownerless_cross_process_sql_test active-reader-pressure-prepared-result-pin
+    )
+    add_test(
       NAME libmylite.ownerless-insert-fk-fast-path-cache
       COMMAND mylite_ownerless_cross_process_sql_test insert-fk-fast-path-cache
     )
@@ -2071,6 +2075,10 @@ if(BUILD_TESTING)
       TIMEOUT 90
     )
     set_tests_properties(libmylite.ownerless-active-reader-pressure-dead-writer PROPERTIES
+      LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
+      TIMEOUT 90
+    )
+    set_tests_properties(libmylite.ownerless-active-reader-pressure-prepared-result-pin PROPERTIES
       LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
       TIMEOUT 90
     )

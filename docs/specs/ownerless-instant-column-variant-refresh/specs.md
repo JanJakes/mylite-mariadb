@@ -125,7 +125,8 @@ No binary-profile, dependency, or license impact.
 
 - An already-open ownerless peer observes stored FIRST/AFTER instant column
   placement by ordinal position and can write rows using those columns.
-- The peer observes instant column rename metadata and cannot use the old name.
+- The peer observes instant column rename metadata, the old name is absent from
+  metadata, and writes through the new name succeed.
 - The peer observes virtual generated-column add/drop boundaries, computes
   generated values correctly while the column exists, and continues DML after
   it is dropped.

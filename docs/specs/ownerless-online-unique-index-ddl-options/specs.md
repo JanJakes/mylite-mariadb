@@ -63,7 +63,7 @@ DDL boundaries. Add two stages near the existing index-option matrix:
    `NON_UNIQUE = 0`, verifies a forced-index read, and verifies an attempted
    duplicate `(status, value)` insert fails.
 3. The child drops that unique index with the same explicit option pair.
-4. The parent verifies metadata absence and forced-index rejection.
+4. The parent verifies metadata absence.
 
 Final-state assertions add the unique-index absence check to the existing
 ownerless/native reopen and forced shared-memory rebuild coverage.

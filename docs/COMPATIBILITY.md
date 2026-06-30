@@ -3242,7 +3242,10 @@ When the optional ownerless page-version WAL pressure limit rejects a write with
 `MYLITE_BUSY`, the caller's transient autocommit read pin is released so the
 blocked writer does not extend WAL retention after the external reader releases.
 Direct autocommit result reads on pressure-limited handles also release their
-transient pin after the statement result is produced.
+transient pin after the statement result is produced. Prepared result cursors
+remain independent pin owners: focused coverage now verifies a cursor can be
+the only remaining active pin that keeps a separate pressure-limited writer
+returning `MYLITE_BUSY` until the cursor is finalized.
 The ownerless page-visible commit path uses initialized page-log append and
 sync helpers for its already-open runtime WAL while the conservative public
 page-log APIs still validate headers.

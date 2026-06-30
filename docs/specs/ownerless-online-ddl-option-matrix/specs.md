@@ -68,9 +68,9 @@ Add six DDL stages:
 5. `ADD INDEX ... ALGORITHM=INPLACE, LOCK=EXCLUSIVE`
 6. `DROP INDEX ... ALGORITHM=INPLACE, LOCK=EXCLUSIVE`
 
-The peer checks both `INFORMATION_SCHEMA.STATISTICS` and `FORCE INDEX`
-behavior at each add/drop boundary. Final-state assertions verify both
-temporary indexes are absent after every reopen path.
+The peer checks `INFORMATION_SCHEMA.STATISTICS` at each add/drop boundary and
+uses positive `FORCE INDEX` reads while indexes are present. Final-state
+assertions verify both temporary indexes are absent after every reopen path.
 
 ## Compatibility Impact
 

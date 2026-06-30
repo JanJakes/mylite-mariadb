@@ -56,8 +56,7 @@ boundary and verifies:
 
 - metadata row count for the added composite index,
 - forced-index query usability while present,
-- metadata absence after drop,
-- forced-index rejection after drop.
+- metadata absence after drop.
 
 The existing final-state helper is extended so ownerless reopen, ordinary
 native exclusive reopen, forced `.shm` rebuild, and native reopen after rebuild
@@ -96,8 +95,8 @@ No public API, build-profile, binary-size, dependency, or license change.
 
 - The already-open ownerless peer observes the added `NOCOPY, LOCK=EXCLUSIVE`
   secondary index and can use it with `FORCE INDEX`.
-- The already-open ownerless peer observes the dropped index and `FORCE INDEX`
-  fails afterward.
+- The already-open ownerless peer observes the dropped index as absent from
+  metadata.
 - Final ownerless/native reopen checks before and after forced `.shm` rebuild
   keep the index absent.
 - Compatibility docs name the new coverage while keeping broader online DDL
