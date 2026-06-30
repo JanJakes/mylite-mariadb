@@ -1296,6 +1296,7 @@ static void test_crashed_column_rename_dictionary_ddl_recovers_dependent_express
 static void test_crashed_force_rebuild_dictionary_ddl_recovers_rebuilt_table(void);
 static void test_crashed_force_rebuild_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_plain_force_rebuild_dictionary_ddl_marks_file_op_checkpoint(void);
+static void test_crashed_force_rebuild_lock_copy_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_engine_rebuild_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_engine_rebuild_copy_lock_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_engine_rebuild_lock_copy_dictionary_ddl_marks_file_op_checkpoint(void);
@@ -2608,6 +2609,10 @@ static void rename_expression_column_until_dictionary_finish_fault(
     int ready_fd
 );
 static void force_rebuild_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
+static void force_rebuild_lock_copy_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void plain_force_rebuild_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -6959,6 +6964,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-force-rebuild-lock-copy-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_force_rebuild_lock_copy_dictionary_ddl_marks_file_op_checkpoint();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-engine-rebuild-file-op-marker-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_engine_rebuild_dictionary_ddl_marks_file_op_checkpoint();
@@ -7852,6 +7863,7 @@ int main(int argc, char **argv) {
             "dictionary-force-rebuild-crash|"
             "dictionary-force-rebuild-file-op-marker-crash|"
             "dictionary-force-rebuild-plain-crash|"
+            "dictionary-force-rebuild-lock-copy-crash|"
             "dictionary-engine-rebuild-file-op-marker-crash|"
             "dictionary-engine-rebuild-copy-lock-crash|"
             "dictionary-engine-rebuild-lock-copy-crash|",
@@ -8425,6 +8437,9 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_crashed_force_rebuild_dictionary_ddl_recovers_rebuilt_table),
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_plain_force_rebuild_dictionary_ddl_marks_file_op_checkpoint
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_force_rebuild_lock_copy_dictionary_ddl_marks_file_op_checkpoint
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_engine_rebuild_dictionary_ddl_marks_file_op_checkpoint),
     OWNERLESS_SQL_TEST_CASE(
@@ -73243,6 +73258,14 @@ static void test_crashed_plain_force_rebuild_dictionary_ddl_marks_file_op_checkp
     );
 }
 
+static void test_crashed_force_rebuild_lock_copy_dictionary_ddl_marks_file_op_checkpoint(void) {
+    run_crashed_rebuild_dictionary_ddl_recovers_rebuilt_table(
+        force_rebuild_lock_copy_until_dictionary_finish_fault,
+        "ownerless-dictionary-force-rebuild-lock-copy-crash.mylite",
+        1
+    );
+}
+
 static void test_crashed_engine_rebuild_dictionary_ddl_marks_file_op_checkpoint(void) {
     run_crashed_rebuild_dictionary_ddl_recovers_rebuilt_table(
         engine_rebuild_until_dictionary_finish_fault,
@@ -91782,6 +91805,19 @@ static void force_rebuild_until_dictionary_finish_fault(open_database_paths path
         "dictionary-before-finish",
         "ALTER TABLE app.ownerless_force_rebuild_crash_base "
         "FORCE, ALGORITHM=COPY, LOCK=EXCLUSIVE"
+    );
+}
+
+static void force_rebuild_lock_copy_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_force_rebuild_crash_base "
+        "FORCE, LOCK=EXCLUSIVE, ALGORITHM=COPY"
     );
 }
 

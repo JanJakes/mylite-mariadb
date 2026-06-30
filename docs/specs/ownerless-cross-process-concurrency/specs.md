@@ -3413,9 +3413,9 @@ Tasks:
    after a dependent column rename, existing-row values, widened-value writes,
    and later inserts through ownerless/native reopen before and after forced
    `.shm` rebuild. Force-rebuild crash coverage
-   now kills `ALTER TABLE ... FORCE` and
-   `ALTER TABLE ... FORCE, ALGORITHM=COPY` writers after native table-copy
-   rebuild but before ownerless dictionary finish, then verifies recovered
+   now kills `ALTER TABLE ... FORCE` plus both exact explicit copy-lock option
+   orders for force-rebuild writers after native table-copy rebuild but before
+   ownerless dictionary finish, then verifies recovered
    InnoDB table/space/index metadata, copied payload bytes, and later writes
    through ownerless/native reopen before and after forced `.shm` rebuild.
    Row-format crash coverage now kills plain plus both exact explicit
@@ -3669,8 +3669,9 @@ Tasks:
    generated-column/CHECK expression-table crash variants that prove generated
    values, real defaults, and CHECK enforcement are preserved across ownerless
    and native reopen.
-   Hook-build crash coverage also kills `ALTER TABLE ... FORCE` and
-   `ALTER TABLE ... FORCE, ALGORITHM=COPY` before ownerless dictionary finish
+   Hook-build crash coverage also kills `ALTER TABLE ... FORCE` plus both
+   exact explicit copy-lock option orders for force-rebuild before ownerless
+   dictionary finish
    and verifies recovered InnoDB table/space/index metadata, copied payloads,
    and post-recovery writes through ownerless and native reopen. Hook-build
    crash coverage also kills `ALTER TABLE ... ROW_FORMAT=DYNAMIC` before
@@ -5001,7 +5002,8 @@ Tasks:
    `FILE_CREATE`, CTAS populated `FILE_CREATE`, `TRUNCATE TABLE` native
    truncate/recreate, `DROP TABLE` `FILE_DELETE`, and replacement-copy
    `CREATE OR REPLACE TABLE ... LIKE`/`CREATE OR REPLACE TABLE ... AS SELECT`
-   marker coverage plus representative `ALTER TABLE ... FORCE` and plain plus
+   marker coverage plus representative `ALTER TABLE ... FORCE` including both
+   exact explicit copy-lock option orders and plain plus
    both exact explicit copy-lock option orders for
    `ALTER TABLE ... ENGINE=InnoDB` forms and
    both exact explicit copy-lock option orders for unplaced
@@ -5063,9 +5065,9 @@ Tasks:
    reopen, and forced `.shm` rebuild. Focused
    `DROP TABLE schema.table` prefinish crash coverage now uses a separate
    recoverable dictionary marker to provide live-peer recovery for the native
-   file-removal boundary. Focused `ALTER TABLE schema.table FORCE` and
-   `ALTER TABLE schema.table FORCE, ALGORITHM=COPY, LOCK=EXCLUSIVE` prefinish
-   crash coverage now uses a separate recoverable dictionary marker to provide
+   file-removal boundary. Focused `ALTER TABLE schema.table FORCE` plus both
+   exact explicit copy-lock option orders for force-rebuild prefinish crash
+   coverage now uses a separate recoverable dictionary marker to provide
    live-peer recovery for the native force-rebuild boundary. Focused
    plain plus both exact explicit copy-lock option orders for
    `ALTER TABLE schema.table ROW_FORMAT=DYNAMIC` prefinish crash coverage now
@@ -5945,9 +5947,8 @@ plain plus both exact explicit copy-lock option orders for
 `ALTER TABLE ... ROW_FORMAT=DYNAMIC` rebuild
 writers after native rebuild
 completion, focused post-checkpoint DML observation of the native
-`FILE_MODIFY` redo flag, plain `ALTER TABLE ... FORCE` and explicit
-`ALTER TABLE ... FORCE, ALGORITHM=COPY, LOCK=EXCLUSIVE` writers after native
-table-copy rebuild,
+`FILE_MODIFY` redo flag, plain plus both exact explicit copy-lock option
+orders for `ALTER TABLE ... FORCE` writers after native table-copy rebuild,
 a `CREATE OR REPLACE TABLE` writer
 after native old-table replacement, duplicate `CREATE TABLE IF NOT EXISTS`,
 missing single-table and multi-table-list `DROP TABLE IF EXISTS` no-op writers,
@@ -8055,10 +8056,11 @@ subsystems that this mode needs:
      lists, focused explicit and implicit truncate, focused explicit and
      implicit single-table, single-table and multi-table-list missing/existing
      `DROP TABLE IF EXISTS`,
-     and same-schema/cross-schema two-table drop, plus focused force rebuild,
+     and same-schema/cross-schema two-table drop, plus focused force rebuild
+     including both exact copy-lock option orders,
      dynamic, compact, and redundant row-format rebuilds including both exact
      copy-lock option orders, focused compressed key-block row-format rebuild
-     including exact copy-lock, and focused charset-conversion rebuild
+     including both exact copy-lock option orders, and focused charset-conversion rebuild
      including both exact copy-lock option orders
      prefinish boundaries, plus simple CREATE/DROP VIEW, focused CREATE OR
      REPLACE/ALTER VIEW, and focused explicit column-list, check-option,
@@ -8107,7 +8109,8 @@ subsystems that this mode needs:
      missing-source permutations beyond the now-covered deterministic non-FK,
      FK, and focused same-schema/cross-schema temporary/permanent IF EXISTS lists,
      other rebuild variants beyond the covered
-     FORCE, same-engine ENGINE including both exact copy-lock option orders,
+     FORCE including both exact copy-lock option orders, same-engine ENGINE
+     including both exact copy-lock option orders,
      dynamic, compact, and redundant row-format including both exact copy-lock
      option orders, compressed row-format including both exact copy-lock
      option orders, charset
