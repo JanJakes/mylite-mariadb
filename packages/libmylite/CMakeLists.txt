@@ -1018,6 +1018,12 @@ if(BUILD_TESTING)
           dictionary-foreign-key-mixed-index-alter-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-foreign-key-mixed-unique-index-alter-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-foreign-key-mixed-unique-index-alter-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-foreign-key-mixed-rename-index-alter-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -2237,6 +2243,7 @@ if(BUILD_TESTING)
         libmylite.ownerless-dictionary-foreign-key-mixed-default-alter-crash
         libmylite.ownerless-dictionary-foreign-key-mixed-check-alter-crash
         libmylite.ownerless-dictionary-foreign-key-mixed-index-alter-crash
+        libmylite.ownerless-dictionary-foreign-key-mixed-unique-index-alter-crash
         libmylite.ownerless-dictionary-foreign-key-mixed-rename-index-alter-crash
         libmylite.ownerless-dictionary-foreign-key-mixed-ignored-index-alter-crash
         libmylite.ownerless-dictionary-foreign-key-mixed-primary-key-alter-crash

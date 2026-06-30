@@ -493,9 +493,11 @@ file-operation marker until final no-live drain.
 Focused mixed `DROP FOREIGN KEY`, `DROP INDEX`, `ADD UNIQUE INDEX`, and
 `ADD CONSTRAINT ... FOREIGN KEY` ALTER lists now use the existing secondary
 index live-recovery lane while retaining the native file-operation marker
-until final no-live drain; the covered shape proves recovered FK enforcement,
-dropped-index absence, and new unique-index metadata/usage after live-peer
-recovery, ordinary native reopen, and forced `.shm` rebuild.
+until final no-live drain; the covered shapes prove recovered FK enforcement,
+old index/key-part absence, new unique-index metadata/usage/enforcement, and a
+same-name unique-key replacement from `(tenant_id, slug)` to `(tenant_id,
+value)` after live-peer recovery, ordinary native reopen, and forced `.shm`
+rebuild.
 Focused mixed `DROP FOREIGN KEY`, `RENAME INDEX`, and
 `ADD CONSTRAINT ... FOREIGN KEY` ALTER lists now use the existing metadata-only
 secondary-index rename recovery lane while retaining the native file-operation

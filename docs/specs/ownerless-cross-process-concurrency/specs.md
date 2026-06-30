@@ -5950,7 +5950,9 @@ metadata mutation, plus a focused mixed FK/non-FK named CHECK drop/add list
 after native FK and CHECK metadata mutation with native file-operation marker
 retention until final no-live drain, plus focused mixed FK/non-FK real-column
 DROP/MODIFY/CHANGE/RENAME COLUMN lists after native FK metadata and column
-definition mutation,
+definition mutation, plus focused mixed FK/non-FK secondary-index drop/add,
+same-name unique-index replacement, secondary-index rename, ignored-index, and
+primary-key replacement lists after native FK and index/key metadata mutation,
 CHECK ADD/DROP writers after native
 table-definition mutation, a cross-schema foreign-key multi-pair rename writer
 after native FK metadata rewrite and file movement, a same-schema
@@ -8037,8 +8039,8 @@ subsystems that this mode needs:
      focused mixed FK/non-FK DROP/MODIFY/CHANGE/RENAME COLUMN, focused mixed
      FK/non-FK table-comment, focused mixed FK/non-FK column-default, and
      focused mixed FK/non-FK named CHECK drop/add, and focused mixed
-     FK/non-FK secondary-index drop/add, rename-index, ignored-index, and
-     primary-key replacement
+     FK/non-FK secondary-index drop/add, unique-index replacement, rename-index,
+     ignored-index, and primary-key replacement
      prefinish boundaries, plus child-only,
      self-referencing, and stored generated-column child foreign-key truncate
      prefinish boundaries, plus simple temporary DDL, pure multi-pair temporary
@@ -8071,8 +8073,9 @@ subsystems that this mode needs:
      broader metadata-only DDL, broader mixed temporary/permanent
      rename matrices, broader FK plus non-FK ALTER lists beyond the focused
      ADD COLUMN, DROP/MODIFY/CHANGE/RENAME COLUMN, table-comment, column-default,
-     named CHECK, secondary-index drop/add, secondary-index rename,
-     secondary-index ignorability, and primary-key replacement cases, broader
+     named CHECK, secondary-index drop/add, unique-index replacement,
+     secondary-index rename, secondary-index ignorability, and primary-key
+     replacement cases, broader
      schema option variants beyond the focused
      named/current-schema schema-default/comment and named/current-schema
      combined option-order boundaries,
