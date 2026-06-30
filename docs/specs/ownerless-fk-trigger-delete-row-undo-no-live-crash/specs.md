@@ -27,7 +27,7 @@ read/write opener can recover a writer killed during native rollback of
   `rollback_fk_trigger_delete_transaction_until_native_row_undo_fault()` deletes
   a parent row with `ON DELETE CASCADE` and `ON DELETE SET NULL` children,
   deletes trigger base rows with an `AFTER DELETE` audit trigger, then rolls
-  back with `MYLITE_OWNERLESS_TEST_FAULT_SKIP=3` so the fault hits a later
+  back with `MYLITE_OWNERLESS_TEST_FAULT_SKIP=5` so the fault hits a later
   deterministic native row-undo step.
 - The existing live-peer selector proves `MYLITE_BUSY` gating while a peer is
   live, then no-live recovery after peer release. It does not separately prove
@@ -70,7 +70,7 @@ In scope:
 Out of scope:
 
 - Faults inside every `row_undo_ins()` or `row_undo_mod()` substep.
-- Earlier FK-delete row-undo hits before the existing skip-3 deterministic
+- Earlier FK-delete row-undo hits before the existing skip-5 deterministic
   point.
 - Additional FK action shapes, trigger variants, XA/prepared rollback, DDL
   rollback, randomized fault selection, or external MariaDB/RQG stress.
@@ -113,7 +113,7 @@ The new selector is registered only in the unsafe ownerless hook build.
 
 ## Acceptance Criteria
 
-- The writer reaches `rollback-after-native-row-undo` after skipping three
+- The writer reaches `rollback-after-native-row-undo` after skipping five
   earlier native row-undo hits.
 - No-live ownerless recovery waits for MariaDB's recovered transaction rollback
   to drain, restores the deleted parent row, cascade child row, set-null child

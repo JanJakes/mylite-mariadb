@@ -7810,22 +7810,21 @@ subsystems that this mode needs:
   proves fresh ownerless read/write opens return busy until the peer exits, then
   verifies no-live recovery, forced `.shm` rebuild, ordinary native reopen, and
   follow-up native writes preserve the original rows. The generated-column
-  row-undo follow-up repeats the full-transaction boundary on stored and virtual
-  generated columns with generated-column secondary indexes, proving original
-  base values, generated values, forced-index reads, live-peer busy behavior,
-  forced `.shm` rebuild, native reopen, and follow-up writes after recovery.
-  The FK/trigger row-undo follow-up repeats the full-transaction boundary on
-  FK `ON UPDATE CASCADE` child-row changes and trigger-written audit rows,
-  proving those side effects roll back through no-live recovery, live-peer busy
-  behavior, forced `.shm` rebuild, native reopen, and follow-up writes after
-  recovery. The delete-side FK/trigger follow-up covers a later deterministic
-  native row-undo boundary, reached by skipping three
-  `rollback-after-native-row-undo` hits, for `ON DELETE CASCADE`,
-  `ON DELETE SET NULL`, and `AFTER DELETE` trigger audit rows. The standalone
-  no-live selector performs immediate ownerless recovery and verifies the
-  original rows, while the live-peer selector first requires fresh ownerless
-  read/write opens to remain busy until the peer exits. Arbitrary row-undo
-  substeps, including the first native FK-delete undo hits, broader FK/trigger
+  row-undo follow-up repeats a deterministic later full-transaction boundary on
+  stored and virtual generated columns with generated-column secondary indexes,
+  reached by skipping one `rollback-after-native-row-undo` hit, waits for
+  native recovered transactions to drain, and proves original base values,
+  generated values, forced-index reads, live-peer busy behavior, forced `.shm`
+  rebuild, native reopen, and follow-up writes after recovery. The FK/trigger
+  row-undo follow-up covers deterministic later update-side and delete-side
+  native row-undo boundaries, reached by skipping nine and five
+  `rollback-after-native-row-undo` hits respectively, for `ON UPDATE CASCADE`,
+  `ON DELETE CASCADE`, `ON DELETE SET NULL`, and update/delete trigger audit
+  rows. The standalone no-live selector performs immediate ownerless recovery
+  and verifies the original rows, while the live-peer selector first requires
+  fresh ownerless read/write opens to remain busy until the peer exits.
+  Arbitrary row-undo substeps, including the earlier generated-column and
+  FK/trigger undo hits before those later boundaries, broader FK/trigger
   side-effect matrices, XA/prepared rollback, and longer randomized savepoint
   schedules remain planned.
   The implicit-rename follow-up broadens `RENAME TABLE` dictionary recovery
@@ -8122,11 +8121,13 @@ subsystems that this mode needs:
      same-table large-row handoff, focused same-row conflict handoff, bounded
      randomized same-table schedule, and live-peer post-native/pre-state
      savepoint rollback cleanup boundary; generated-column row-undo side
-     effects and FK/trigger update/delete DML side effects now have focused
-     full-rollback coverage including delete-side standalone no-live recovery
-     and live-peer busy/no-live recovery, while broader FK/trigger rollback
-     crash matrices, including earlier FK-delete row-undo substeps, remain
-     open.
+     effects now wait for native recovered transaction drain at a skip-1 later
+     boundary, and FK/trigger update/delete DML side effects now have focused
+     later-boundary full-rollback coverage including delete-side standalone
+     no-live recovery and live-peer busy/no-live recovery, while broader
+     generated-column and FK/trigger rollback crash matrices, including earlier
+     row-undo substeps before the generated skip-1, update-side skip-9, and
+     delete-side skip-5 boundaries, remain open.
   3. Extend active-reader pressure evidence from retained-WAL policy, the
      covered killed-reader pressure-pin boundary, and the widened killed
      pressure-writer cleanup boundary to broader crash and external-oracle

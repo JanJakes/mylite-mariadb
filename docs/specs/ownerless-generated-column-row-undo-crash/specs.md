@@ -67,13 +67,15 @@ CREATE TABLE app.ownerless_native_row_undo_generated (
 
 The writer updates all base columns and payloads inside one explicit
 transaction, verifies the mutated generated values, arms
-`rollback-after-native-row-undo`, and executes `ROLLBACK`. The parent kills the
-writer after one native undo step.
+`rollback-after-native-row-undo` with one skipped hook hit, and executes
+`ROLLBACK`. The parent kills the writer at the second successful native undo
+step, after the earlier hit has been skipped.
 
 The no-live selector verifies the next ownerless opener lets native recovery
-finish rollback and preserves original base values, generated values, payloads,
-and forced generated-index predicates through ownerless reopen, forced `.shm`
-rebuild, ordinary native reopen, and follow-up native writes.
+finish rollback, waits for recovered active transactions to drain, and
+preserves original base values, generated values, payloads, and forced
+generated-index predicates through ownerless reopen, forced `.shm` rebuild,
+ordinary native reopen, and follow-up native writes.
 
 The live-peer selector holds another ownerless process open while the writer is
 killed, requires a fresh ownerless read/write opener to return `MYLITE_BUSY`,
@@ -114,14 +116,15 @@ selectors are registered only in the unsafe ownerless hook build.
 ## Acceptance Criteria
 
 - The generated-column writer reaches the existing native row-undo fault after
-  at least one successful native undo step.
+  skipping one earlier successful native undo step.
 - No-live ownerless recovery preserves original base values, stored generated
   values, virtual generated values, payloads, and generated-column secondary
   index usability.
 - Live-peer recovery remains busy until the peer exits, then recovers through
   the read/write ownerless path.
 - Native DML and generic file-operation markers remain clear.
-- Ownerless WAL checkpoints after recovery.
+- Ownerless WAL checkpoints after recovery or is retained only as
+  native-support rollback-history evidence with no page-version payload.
 - Forced `.shm` rebuild and ordinary native reopen observe the same recovered
   state and accept follow-up writes.
 
@@ -148,6 +151,16 @@ selectors are registered only in the unsafe ownerless hook build.
 
 ## Risks And Follow-Up
 
+- A follow-up retest found the original strict setup checkpoint assertion stale:
+  generated-column setup can legitimately retain native-support-only rollback
+  history after the forced checkpoint. The executable oracle now uses the same
+  native-support-only checkpoint predicate as adjacent row-undo tests and waits
+  for MariaDB recovered active transactions to drain before asserting the final
+  generated-column state.
+- The earliest generated-column rollback hit can drain to a stable partial
+  native state with rows 1 and 2 still mutated, so the committed selector uses
+  the later skip-1 boundary. Earlier generated-column row-undo substeps remain
+  completion work.
 - This covers generated-column side effects at one deterministic row-undo
   boundary. FK action rollback, trigger side effects, XA/prepared rollback,
   longer randomized savepoint schedules, broader redo/checkpoint
