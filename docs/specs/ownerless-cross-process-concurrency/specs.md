@@ -5116,6 +5116,11 @@ Tasks:
    `ALTER DATABASE ... DEFAULT COLLATE ... CHARSET ... COMMENT ...` writer
    after the native `db.opt` rewrite and recovers the comment/default metadata
    through the same marker-clear live-peer lane.
+   Focused schema invalid-option cleanup now rejects invalid schema create,
+   named schema alter, charset/collation pairing, and current-schema
+   comment/default option forms without creating rejected schema directories,
+   rewriting the existing `db.opt`, changing persisted schema metadata, or
+   leaving native file-operation checkpoint evidence.
    Focused
    table-bearing `DROP DATABASE|SCHEMA` prefinish crash coverage now recovers
    while a peer remains live and keeps the native file-operation marker set
@@ -5152,7 +5157,8 @@ Tasks:
    row-format, compressed, and charset-conversion cases,
    broader schema option variants beyond named/current-schema default/comment,
    the collation-first `CHARSET` alias case,
-   and named/current-schema combined option-order boundaries, broader view and
+   named/current-schema combined option-order boundaries, and representative
+   invalid-option cleanup, broader view and
    trigger variants,
    randomized temporary/
    permanent rename permutations, and mixed comma-separated non-rename
@@ -8102,7 +8108,8 @@ subsystems that this mode needs:
      replacement cases, broader
      schema option variants beyond the focused
      named/current-schema schema-default/comment, collation-first `CHARSET`
-     alias, and named/current-schema combined option-order boundaries,
+     alias, named/current-schema combined option-order boundaries, and
+     representative invalid-option cleanup,
      and broader DDL file lifecycle while
      peers remain live. Partition truncate
      remains governed by the ownerless partition-DDL rejection policy, cyclic

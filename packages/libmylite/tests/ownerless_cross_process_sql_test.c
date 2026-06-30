@@ -957,6 +957,7 @@ static void test_ownerless_column_idempotent_ddl_refreshes_peer_dictionary(void)
 static void test_ownerless_instant_column_variants_refresh_peer_dictionary(void);
 static void test_ownerless_schema_lifecycle_refreshes_peer_dictionary(void);
 static void test_ownerless_schema_default_ddl_refreshes_peer_dictionary(void);
+static void test_ownerless_schema_invalid_options_preserve_metadata(void);
 static void test_ownerless_schema_idempotent_ddl_refreshes_peer_dictionary(void);
 static void test_ownerless_cross_schema_rename_refreshes_peer_dictionary(void);
 static void test_ownerless_rename_if_exists_missing_source_noop_preserves_warnings(void);
@@ -4941,6 +4942,10 @@ int main(int argc, char **argv) {
         test_ownerless_schema_default_ddl_refreshes_peer_dictionary();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "schema-invalid-options") == 0) {
+        test_ownerless_schema_invalid_options_preserve_metadata();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "schema-idempotent-ddl") == 0) {
         test_ownerless_schema_idempotent_ddl_refreshes_peer_dictionary();
         return 0;
@@ -7445,7 +7450,7 @@ int main(int argc, char **argv) {
             "compressed-blob-key-block-matrix|"
             "ddl-refresh|table-idempotent-ddl|ddl-allocation|ddl-truncate-refresh|ddl-broader|"
             "online-ddl-options|schema-lifecycle|schema-default-ddl|"
-            "schema-idempotent-ddl|cross-schema-rename|multi-rename-cycle|"
+            "schema-invalid-options|schema-idempotent-ddl|cross-schema-rename|multi-rename-cycle|"
             "rename-if-exists-missing-source-noop|"
             "rename-if-exists-long-missing-noop|"
             "cross-schema-rename-if-exists-missing-source-noop|"
@@ -7960,6 +7965,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_instant_column_variants_refresh_peer_dictionary),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_schema_lifecycle_refreshes_peer_dictionary),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_schema_default_ddl_refreshes_peer_dictionary),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_schema_invalid_options_preserve_metadata),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_schema_idempotent_ddl_refreshes_peer_dictionary),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_cross_schema_rename_refreshes_peer_dictionary),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_rename_if_exists_missing_source_noop_preserves_warnings
@@ -36565,6 +36571,210 @@ static void test_ownerless_schema_default_ddl_refreshes_peer_dictionary(void) {
     );
     assert_ownerless_schema_default_ddl_absent(paths, MYLITE_OPEN_READWRITE, database_path);
 
+    free(db_opt_path);
+    free(schema_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void expect_exec_mariadb_failure(mylite_db *db, const char *sql) {
+    unsigned mariadb_errno = 0U;
+
+    assert(exec_status(db, sql, &mariadb_errno) != MYLITE_OK);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mariadb_errno != 0U);
+}
+
+static void assert_ownerless_schema_invalid_options_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *schema_path,
+    const char *db_opt_path,
+    const char *rejected_schema_path
+) {
+    mylite_db *db = open_database(paths, flags);
+
+    assert(path_exists(schema_path));
+    assert(path_exists(db_opt_path));
+    assert(!path_exists(rejected_schema_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.schemata "
+            "WHERE schema_name = 'ownerless_schema_invalid_options' "
+            "AND default_character_set_name = 'latin1' "
+            "AND default_collation_name = 'latin1_swedish_ci' "
+            "AND schema_comment = 'ownerless initial invalid option guard'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.schemata "
+            "WHERE schema_name = 'ownerless_schema_invalid_create'"
+        ) == 0U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'ownerless_schema_invalid_options' "
+            "AND table_name = 'ownerless_schema_invalid_before' "
+            "AND column_name = 'name' "
+            "AND character_set_name = 'latin1' "
+            "AND collation_name = 'latin1_swedish_ci'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'ownerless_schema_invalid_options' "
+            "AND table_name = 'ownerless_schema_invalid_after' "
+            "AND column_name = 'name' "
+            "AND character_set_name = 'latin1' "
+            "AND collation_name = 'latin1_swedish_ci'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM ownerless_schema_invalid_options."
+            "ownerless_schema_invalid_before"
+        ) == 10U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM ownerless_schema_invalid_options."
+            "ownerless_schema_invalid_after"
+        ) == 20U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void test_ownerless_schema_invalid_options_preserve_metadata(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-schema-invalid-options.mylite");
+    char *datadir_path = path_join(database_path, "datadir");
+    char *schema_path = path_join(datadir_path, "ownerless_schema_invalid_options");
+    char *db_opt_path = path_join(schema_path, "db.opt");
+    char *rejected_schema_path = path_join(datadir_path, "ownerless_schema_invalid_create");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE DATABASE ownerless_schema_invalid_options "
+        "DEFAULT CHARACTER SET latin1 COLLATE latin1_swedish_ci "
+        "COMMENT = 'ownerless initial invalid option guard'"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE ownerless_schema_invalid_options.ownerless_schema_invalid_before ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "name VARCHAR(16) NOT NULL, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO ownerless_schema_invalid_options.ownerless_schema_invalid_before "
+        "VALUES (1, 'latin', 10)"
+    );
+    exec_ok(db, "COMMIT");
+    assert(path_exists(schema_path));
+    assert(path_exists(db_opt_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+
+    expect_exec_mariadb_failure(
+        db,
+        "CREATE DATABASE ownerless_schema_invalid_create "
+        "DEFAULT CHARACTER SET ownerless_no_such_charset"
+    );
+    exec_ok(db, "COMMIT");
+    assert(!path_exists(rejected_schema_path));
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    expect_exec_mariadb_failure(
+        db,
+        "ALTER DATABASE ownerless_schema_invalid_options "
+        "DEFAULT CHARACTER SET ownerless_no_such_charset"
+    );
+    exec_ok(db, "COMMIT");
+    expect_exec_mariadb_failure(
+        db,
+        "ALTER DATABASE ownerless_schema_invalid_options "
+        "DEFAULT CHARACTER SET utf8mb4 COLLATE latin1_swedish_ci"
+    );
+    exec_ok(db, "COMMIT");
+    exec_ok(db, "USE ownerless_schema_invalid_options");
+    expect_exec_mariadb_failure(
+        db,
+        "ALTER DATABASE COMMENT = 'ownerless invalid comment must not persist' "
+        "DEFAULT CHARACTER SET ownerless_no_such_charset"
+    );
+    exec_ok(db, "COMMIT");
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    exec_ok(
+        db,
+        "CREATE TABLE ownerless_schema_invalid_options.ownerless_schema_invalid_after ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "name VARCHAR(16) NOT NULL, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO ownerless_schema_invalid_options.ownerless_schema_invalid_after "
+        "VALUES (1, 'after', 20)"
+    );
+    exec_ok(db, "COMMIT");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    assert_ownerless_schema_invalid_options_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        schema_path,
+        db_opt_path,
+        rejected_schema_path
+    );
+    assert_ownerless_schema_invalid_options_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        schema_path,
+        db_opt_path,
+        rejected_schema_path
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_schema_invalid_options_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        schema_path,
+        db_opt_path,
+        rejected_schema_path
+    );
+    assert_ownerless_schema_invalid_options_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        schema_path,
+        db_opt_path,
+        rejected_schema_path
+    );
+
+    free(rejected_schema_path);
     free(db_opt_path);
     free(schema_path);
     free(datadir_path);

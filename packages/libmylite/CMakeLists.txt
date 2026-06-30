@@ -430,6 +430,10 @@ if(BUILD_TESTING)
       COMMAND mylite_ownerless_cross_process_sql_test uncommitted-peer-hidden
     )
     add_test(
+      NAME libmylite.ownerless-schema-invalid-options
+      COMMAND mylite_ownerless_cross_process_sql_test schema-invalid-options
+    )
+    add_test(
       NAME libmylite.ownerless-single-owner-foreground-reclaim-peer-history
       COMMAND mylite_ownerless_cross_process_sql_test single-owner-foreground-reclaim-peer-history
     )
