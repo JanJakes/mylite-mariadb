@@ -1333,6 +1333,7 @@ static void test_crashed_schema_synonym_alter_dictionary_ddl_recovers_defaults(v
 static void test_crashed_current_schema_alter_dictionary_ddl_recovers_defaults(void);
 static void test_crashed_schema_comment_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_schema_option_order_dictionary_ddl_recovers_metadata(void);
+static void test_crashed_schema_charset_alias_order_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_current_schema_comment_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_current_schema_option_order_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_schema_idempotent_create_dictionary_ddl_preserves_defaults(void);
@@ -2703,6 +2704,10 @@ static void alter_schema_option_order_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
+static void alter_schema_charset_alias_order_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void alter_current_schema_comment_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -3919,6 +3924,11 @@ static void assert_ownerless_schema_comment_crash_ddl_state(
     const char *database_path
 );
 static void assert_ownerless_schema_option_order_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+);
+static void assert_ownerless_schema_charset_alias_order_crash_ddl_state(
     open_database_paths paths,
     unsigned flags,
     const char *database_path
@@ -7064,6 +7074,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-schema-charset-alias-order-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_schema_charset_alias_order_dictionary_ddl_recovers_metadata();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-current-schema-comment-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_current_schema_comment_dictionary_ddl_recovers_metadata();
@@ -8239,6 +8255,9 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_crashed_current_schema_alter_dictionary_ddl_recovers_defaults),
     OWNERLESS_SQL_TEST_CASE(test_crashed_schema_comment_dictionary_ddl_recovers_metadata),
     OWNERLESS_SQL_TEST_CASE(test_crashed_schema_option_order_dictionary_ddl_recovers_metadata),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_schema_charset_alias_order_dictionary_ddl_recovers_metadata
+    ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_current_schema_comment_dictionary_ddl_recovers_metadata),
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_current_schema_option_order_dictionary_ddl_recovers_metadata
@@ -76312,6 +76331,154 @@ static void test_crashed_schema_option_order_dictionary_ddl_recovers_metadata(vo
     free(root);
 }
 
+static void test_crashed_schema_charset_alias_order_dictionary_ddl_recovers_metadata(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path =
+        path_join(root, "ownerless-dictionary-schema-charset-alias-order-crash.mylite");
+    char *datadir_path = path_join(database_path, "datadir");
+    char *schema_path = path_join(datadir_path, "ownerless_schema_charset_alias_order_crash");
+    char *db_opt_path = path_join(schema_path, "db.opt");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE DATABASE ownerless_schema_charset_alias_order_crash "
+        "DEFAULT CHARACTER SET latin1 COLLATE latin1_swedish_ci "
+        "COMMENT = 'ownerless initial charset alias order'"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE ownerless_schema_charset_alias_order_crash."
+        "ownerless_schema_charset_alias_order_before ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "name VARCHAR(16) NOT NULL, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO ownerless_schema_charset_alias_order_crash."
+        "ownerless_schema_charset_alias_order_before VALUES (1, 'latin', 10)"
+    );
+    assert(path_exists(schema_path));
+    assert(path_exists(db_opt_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.schemata "
+            "WHERE schema_name = 'ownerless_schema_charset_alias_order_crash' "
+            "AND default_character_set_name = 'latin1' "
+            "AND default_collation_name = 'latin1_swedish_ci' "
+            "AND schema_comment = 'ownerless initial charset alias order'"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
+        paths,
+        alter_schema_charset_alias_order_until_dictionary_finish_fault
+    );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(path_exists(schema_path));
+    assert(path_exists(db_opt_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.schemata "
+            "WHERE schema_name = 'ownerless_schema_charset_alias_order_crash' "
+            "AND default_character_set_name = 'utf8mb4' "
+            "AND default_collation_name = 'utf8mb4_unicode_ci' "
+            "AND schema_comment = 'ownerless recovered charset alias order'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'ownerless_schema_charset_alias_order_crash' "
+            "AND table_name = 'ownerless_schema_charset_alias_order_before' "
+            "AND column_name = 'name' "
+            "AND character_set_name = 'latin1' "
+            "AND collation_name = 'latin1_swedish_ci'"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "UPDATE ownerless_schema_charset_alias_order_crash."
+        "ownerless_schema_charset_alias_order_before SET value = value + 1 WHERE id = 1"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE ownerless_schema_charset_alias_order_crash."
+        "ownerless_schema_charset_alias_order_after ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "name VARCHAR(16) NOT NULL, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO ownerless_schema_charset_alias_order_crash."
+        "ownerless_schema_charset_alias_order_after VALUES (1, 'utf8', 20)"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'ownerless_schema_charset_alias_order_crash' "
+            "AND table_name = 'ownerless_schema_charset_alias_order_after' "
+            "AND column_name = 'name' "
+            "AND character_set_name = 'utf8mb4' "
+            "AND collation_name = 'utf8mb4_unicode_ci'"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert_ownerless_schema_charset_alias_order_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_schema_charset_alias_order_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+    remove_concurrency_shm(database_path);
+    assert_ownerless_schema_charset_alias_order_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        database_path
+    );
+    assert_ownerless_schema_charset_alias_order_crash_ddl_state(
+        paths,
+        MYLITE_OPEN_READWRITE,
+        database_path
+    );
+
+    free(db_opt_path);
+    free(schema_path);
+    free(datadir_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_crashed_current_schema_comment_dictionary_ddl_recovers_metadata(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -90809,6 +90976,21 @@ static void alter_schema_option_order_until_dictionary_finish_fault(
         "ALTER DATABASE ownerless_schema_option_order_crash "
         "COMMENT = 'ownerless recovered option order' "
         "DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    );
+}
+
+static void alter_schema_charset_alias_order_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER DATABASE ownerless_schema_charset_alias_order_crash "
+        "DEFAULT COLLATE utf8mb4_unicode_ci "
+        "CHARSET utf8mb4 "
+        "COMMENT = 'ownerless recovered charset alias order'"
     );
 }
 
@@ -106648,6 +106830,111 @@ static void assert_ownerless_schema_option_order_crash_ddl_state(
             db,
             "SELECT SUM(value) FROM ownerless_schema_option_order_crash."
             "ownerless_schema_option_order_after"
+        ) == 20U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(after_ibd_path);
+    free(after_frm_path);
+    free(before_ibd_path);
+    free(before_frm_path);
+    free(db_opt_path);
+    free(schema_path);
+    free(datadir_path);
+}
+
+static void assert_ownerless_schema_charset_alias_order_crash_ddl_state(
+    open_database_paths paths,
+    unsigned flags,
+    const char *database_path
+) {
+    char *datadir_path = path_join(database_path, "datadir");
+    char *schema_path = path_join(datadir_path, "ownerless_schema_charset_alias_order_crash");
+    char *db_opt_path = path_join(schema_path, "db.opt");
+    char *before_frm_path =
+        path_join(schema_path, "ownerless_schema_charset_alias_order_before.frm");
+    char *before_ibd_path =
+        path_join(schema_path, "ownerless_schema_charset_alias_order_before.ibd");
+    char *after_frm_path = path_join(schema_path, "ownerless_schema_charset_alias_order_after.frm");
+    char *after_ibd_path = path_join(schema_path, "ownerless_schema_charset_alias_order_after.ibd");
+    mylite_db *db = open_database(paths, flags);
+
+    assert(path_exists(schema_path));
+    assert(path_exists(db_opt_path));
+    assert(path_exists(before_frm_path));
+    assert(path_exists(before_ibd_path));
+    assert(path_exists(after_frm_path));
+    assert(path_exists(after_ibd_path));
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.schemata "
+            "WHERE schema_name = 'ownerless_schema_charset_alias_order_crash' "
+            "AND default_character_set_name = 'utf8mb4' "
+            "AND default_collation_name = 'utf8mb4_unicode_ci' "
+            "AND schema_comment = 'ownerless recovered charset alias order'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'ownerless_schema_charset_alias_order_crash' "
+            "AND table_name = 'ownerless_schema_charset_alias_order_before' "
+            "AND column_name = 'name' "
+            "AND character_set_name = 'latin1' "
+            "AND collation_name = 'latin1_swedish_ci'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'ownerless_schema_charset_alias_order_crash' "
+            "AND table_name = 'ownerless_schema_charset_alias_order_after' "
+            "AND column_name = 'name' "
+            "AND character_set_name = 'utf8mb4' "
+            "AND collation_name = 'utf8mb4_unicode_ci'"
+        ) == 1U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM ownerless_schema_charset_alias_order_crash."
+            "ownerless_schema_charset_alias_order_before"
+        ) == 11U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM ownerless_schema_charset_alias_order_crash."
+            "ownerless_schema_charset_alias_order_after"
+        ) == 20U
+    );
+    exec_ok(
+        db,
+        "INSERT INTO ownerless_schema_charset_alias_order_crash."
+        "ownerless_schema_charset_alias_order_after VALUES (2, 'probe', 30)"
+    );
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM ownerless_schema_charset_alias_order_crash."
+            "ownerless_schema_charset_alias_order_after"
+        ) == 50U
+    );
+    exec_ok(
+        db,
+        "DELETE FROM ownerless_schema_charset_alias_order_crash."
+        "ownerless_schema_charset_alias_order_after WHERE id = 2"
+    );
+    exec_ok(db, "COMMIT");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM ownerless_schema_charset_alias_order_crash."
+            "ownerless_schema_charset_alias_order_after"
         ) == 20U
     );
     assert(mylite_close(db) == MYLITE_OK);

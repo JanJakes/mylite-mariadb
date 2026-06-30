@@ -5112,6 +5112,10 @@ Tasks:
    before ownerless dictionary finish, then recovers both the schema comment
    and default charset/collation while a peer remains live and the native
    file-operation marker stays clear.
+   Focused schema charset-alias order coverage now also kills a named
+   `ALTER DATABASE ... DEFAULT COLLATE ... CHARSET ... COMMENT ...` writer
+   after the native `db.opt` rewrite and recovers the comment/default metadata
+   through the same marker-clear live-peer lane.
    Focused
    table-bearing `DROP DATABASE|SCHEMA` prefinish crash coverage now recovers
    while a peer remains live and keeps the native file-operation marker set
@@ -5146,7 +5150,8 @@ Tasks:
    ALTER rebuild variants beyond the focused force, exact copy-lock
    unplaced ADD COLUMN, placed ADD COLUMN, DROP COLUMN, MODIFY COLUMN,
    row-format, compressed, and charset-conversion cases,
-   broader schema option variants beyond named/current-schema default/comment
+   broader schema option variants beyond named/current-schema default/comment,
+   the collation-first `CHARSET` alias case,
    and named/current-schema combined option-order boundaries, broader view and
    trigger variants,
    randomized temporary/
@@ -8034,8 +8039,9 @@ subsystems that this mode needs:
      nested check-option, security/definer, and idempotent/no-op view
      metadata-only prefinish boundaries, plus simple CREATE/DROP TRIGGER
      metadata-only prefinish boundaries, plus focused CREATE/ALTER/DROP
-     DATABASE, named ALTER DATABASE schema-comment, and schema idempotent/no-op
-     prefinish boundaries, plus focused
+     DATABASE, named ALTER DATABASE schema-comment, focused collation-first
+     `CHARSET` alias schema option, and schema idempotent/no-op prefinish
+     boundaries, plus focused
      top-level and ALTER secondary-index idempotent/no-op prefinish boundaries,
      plus focused column idempotent and column `IF EXISTS` missing-column
      no-op prefinish boundaries, plus focused plain and exact copy-lock
@@ -8087,8 +8093,8 @@ subsystems that this mode needs:
      secondary-index rename, secondary-index ignorability, and primary-key
      replacement cases, broader
      schema option variants beyond the focused
-     named/current-schema schema-default/comment and named/current-schema
-     combined option-order boundaries,
+     named/current-schema schema-default/comment, collation-first `CHARSET`
+     alias, and named/current-schema combined option-order boundaries,
      and broader DDL file lifecycle while
      peers remain live. Partition truncate
      remains governed by the ownerless partition-DDL rejection policy, cyclic
