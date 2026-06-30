@@ -7819,12 +7819,13 @@ subsystems that this mode needs:
   proving those side effects roll back through no-live recovery, live-peer busy
   behavior, forced `.shm` rebuild, native reopen, and follow-up writes after
   recovery. The delete-side FK/trigger follow-up covers a later deterministic
-  native row-undo boundary in the stable live-peer variant, reached by skipping
-  three `rollback-after-native-row-undo` hits, for `ON DELETE CASCADE`,
-  `ON DELETE SET NULL`, and `AFTER DELETE` trigger audit rows. After the peer
-  exits, the case performs final no-live recovery and verifies the original
-  rows. Arbitrary row-undo substeps, including the first native FK-delete undo
-  hits and standalone delete-side no-live stabilization, broader FK/trigger
+  native row-undo boundary, reached by skipping three
+  `rollback-after-native-row-undo` hits, for `ON DELETE CASCADE`,
+  `ON DELETE SET NULL`, and `AFTER DELETE` trigger audit rows. The standalone
+  no-live selector performs immediate ownerless recovery and verifies the
+  original rows, while the live-peer selector first requires fresh ownerless
+  read/write opens to remain busy until the peer exits. Arbitrary row-undo
+  substeps, including the first native FK-delete undo hits, broader FK/trigger
   side-effect matrices, XA/prepared rollback, and longer randomized savepoint
   schedules remain planned.
   The implicit-rename follow-up broadens `RENAME TABLE` dictionary recovery
@@ -8122,10 +8123,10 @@ subsystems that this mode needs:
      randomized same-table schedule, and live-peer post-native/pre-state
      savepoint rollback cleanup boundary; generated-column row-undo side
      effects and FK/trigger update/delete DML side effects now have focused
-     full-rollback coverage including delete-side live-peer busy/no-live
-     recovery, while broader FK/trigger rollback crash matrices, including
-     earlier FK-delete row-undo substeps and standalone delete-side no-live
-     stabilization, remain open.
+     full-rollback coverage including delete-side standalone no-live recovery
+     and live-peer busy/no-live recovery, while broader FK/trigger rollback
+     crash matrices, including earlier FK-delete row-undo substeps, remain
+     open.
   3. Extend active-reader pressure evidence from retained-WAL policy, the
      covered killed-reader pressure-pin boundary, and the widened killed
      pressure-writer cleanup boundary to broader crash and external-oracle

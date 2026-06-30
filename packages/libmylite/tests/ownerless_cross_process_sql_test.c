@@ -209,6 +209,7 @@ extern uint64_t mylite_ownerless_innodb_current_lsn(void);
 extern uint64_t mylite_ownerless_innodb_checkpoint_lsn(void);
 extern int mylite_ownerless_innodb_make_checkpoint(void);
 extern int mylite_ownerless_innodb_checkpoint_covers_lsn(uint64_t lsn);
+extern int mylite_ownerless_innodb_has_recovered_active_transactions(int *out_has_recovered);
 extern void mylite_ownerless_innodb_note_file_op_redo(void);
 extern int mylite_ownerless_innodb_take_file_op_redo(void);
 extern void mylite_ownerless_innodb_refresh_buffer_pool_pages(uint64_t visible_lsn);
@@ -870,8 +871,10 @@ static void test_crashed_transaction_native_row_undo_recovers_rows(void);
 static void test_crashed_transaction_native_row_undo_with_live_peer_blocks_recovery(void);
 static void test_crashed_generated_column_native_row_undo_recovers_indexes(void);
 static void test_crashed_generated_column_native_row_undo_with_live_peer_blocks_recovery(void);
+static int ownerless_native_recovered_transactions_drained(void);
 static void test_crashed_fk_trigger_native_row_undo_recovers_side_effects(void);
 static void test_crashed_fk_trigger_native_row_undo_with_live_peer_blocks_recovery(void);
+static void test_crashed_fk_trigger_delete_native_row_undo_recovers_side_effects(void);
 static void test_crashed_fk_trigger_delete_native_row_undo_with_live_peer_blocks_recovery(void);
 #endif
 static void test_ownerless_native_file_op_marker_drains_after_single_owner_explicit_transaction_dml(
@@ -5481,6 +5484,20 @@ int main(int argc, char **argv) {
         return 0;
     }
     if (argc == 2 &&
+        strcmp(argv[1], "transaction-rollback-fk-trigger-delete-row-undo-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_fk_trigger_delete_native_row_undo_recovers_side_effects();
+#endif
+        return 0;
+    }
+    if (argc == 2 &&
+        strcmp(argv[1], "transaction-rollback-fk-trigger-delete-row-undo-live-peer-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_fk_trigger_delete_native_row_undo_with_live_peer_blocks_recovery();
+#endif
+        return 0;
+    }
+    if (argc == 2 &&
         strcmp(argv[1], "native-single-owner-explicit-dml-file-op-marker-drain") == 0) {
         test_ownerless_native_file_op_marker_drains_after_single_owner_explicit_transaction_dml();
         return 0;
@@ -7515,6 +7532,8 @@ int main(int argc, char **argv) {
             "transaction-rollback-generated-row-undo-live-peer-crash|"
             "transaction-rollback-fk-trigger-row-undo-crash|"
             "transaction-rollback-fk-trigger-row-undo-live-peer-crash|"
+            "transaction-rollback-fk-trigger-delete-row-undo-crash|"
+            "transaction-rollback-fk-trigger-delete-row-undo-live-peer-crash|"
             "redo-header-backup-validation|"
             "runtime-startup-retry-budget|"
 #endif
@@ -15024,7 +15043,7 @@ static void test_crashed_transaction_native_row_undo_with_live_peer_blocks_recov
     assert(mylite_close(db) == MYLITE_OK);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
-    assert_concurrency_wal_checkpointed_eventually(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only_eventually(database_path);
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -15832,13 +15851,26 @@ static void assert_ownerless_fk_trigger_delete_row_undo_original_state(
     assert(mylite_close(db) == MYLITE_OK);
 }
 
+static int ownerless_native_recovered_transactions_drained(void) {
+    int has_recovered = 1;
+    return mylite_ownerless_innodb_has_recovered_active_transactions(&has_recovered) ==
+               MYLITE_TEST_OWNERLESS_INNODB_LOCK_OK &&
+           has_recovered == 0;
+}
+
 static void assert_ownerless_fk_trigger_delete_row_undo_original_state_eventually(
     open_database_paths paths,
     unsigned flags
 ) {
     mylite_db *db = open_database(paths, flags);
 
-    for (unsigned attempt = 0U; attempt < 50U; ++attempt) {
+    for (unsigned attempt = 0U; attempt < (MYLITE_TEST_OWNERLESS_OPEN_RETRY_TIMEOUT_MS * 1000U) /
+                                              MYLITE_TEST_WAIT_POLL_INTERVAL_US;
+         ++attempt) {
+        if (!ownerless_native_recovered_transactions_drained()) {
+            sleep_microseconds(MYLITE_TEST_WAIT_POLL_INTERVAL_US);
+            continue;
+        }
         if (ownerless_fk_trigger_delete_row_undo_original_state_matches(db)) {
             assert(mylite_close(db) == MYLITE_OK);
             return;
@@ -15924,7 +15956,8 @@ static void assert_ownerless_fk_trigger_delete_row_undo_follow_up_native_write(
 
 static void run_crashed_fk_trigger_delete_native_row_undo_recovery(
     open_database_paths paths,
-    const char *database_path
+    const char *database_path,
+    int hold_live_peer
 ) {
     int writer_ready_pipe[2];
     ownerless_live_peer_guard live_peer = {0};
@@ -15936,13 +15969,17 @@ static void run_crashed_fk_trigger_delete_native_row_undo_recovery(
     assert_concurrency_wal_checkpointed_or_retained_native_support_only_eventually(database_path);
     force_ownerless_fk_trigger_delete_row_undo_checkpoint(paths);
 
-    live_peer = start_ownerless_live_peer(paths);
+    if (hold_live_peer) {
+        live_peer = start_ownerless_live_peer(paths);
+    }
     assert(pipe(writer_ready_pipe) == 0);
     writer_child = fork();
     assert(writer_child >= 0);
     if (writer_child == 0) {
         close(writer_ready_pipe[0]);
-        close(live_peer.release_write_fd);
+        if (hold_live_peer) {
+            close(live_peer.release_write_fd);
+        }
         rollback_fk_trigger_delete_transaction_until_native_row_undo_fault(
             paths,
             writer_ready_pipe[1],
@@ -15960,15 +15997,17 @@ static void run_crashed_fk_trigger_delete_native_row_undo_recovery(
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
 
-    probe_child = fork();
-    assert(probe_child >= 0);
-    if (probe_child == 0) {
-        assert_ownerless_open_returns_busy(paths);
-    }
-    wait_for_child(probe_child);
+    if (hold_live_peer) {
+        probe_child = fork();
+        assert(probe_child >= 0);
+        if (probe_child == 0) {
+            assert_ownerless_open_returns_busy(paths);
+        }
+        wait_for_child(probe_child);
 
-    release_ownerless_live_peer(&live_peer);
-    assert_shared_readonly_open_returns_busy(paths);
+        release_ownerless_live_peer(&live_peer);
+        assert_shared_readonly_open_returns_busy(paths);
+    }
 
     assert_ownerless_fk_trigger_delete_row_undo_original_state_eventually(
         paths,
@@ -15986,6 +16025,29 @@ static void run_crashed_fk_trigger_delete_native_row_undo_recovery(
     assert_ownerless_fk_trigger_delete_row_undo_follow_up_native_write(paths);
 }
 
+static void test_crashed_fk_trigger_delete_native_row_undo_recovers_side_effects(void) {
+#  if defined(__linux__)
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-fk-trigger-delete-native-row-undo.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    create_ownerless_fk_trigger_delete_row_undo_tables(paths);
+    assert_ownerless_fk_trigger_delete_row_undo_original_state(
+        paths,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
+    );
+    run_crashed_fk_trigger_delete_native_row_undo_recovery(paths, database_path, 0);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+#  endif
+}
+
 static void test_crashed_fk_trigger_delete_native_row_undo_with_live_peer_blocks_recovery(void) {
 #  if defined(__linux__)
     char *root = make_temp_root();
@@ -16001,7 +16063,7 @@ static void test_crashed_fk_trigger_delete_native_row_undo_with_live_peer_blocks
         paths,
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
-    run_crashed_fk_trigger_delete_native_row_undo_recovery(paths, database_path);
+    run_crashed_fk_trigger_delete_native_row_undo_recovery(paths, database_path, 1);
 
     free(database_path);
     free(runtime_root);

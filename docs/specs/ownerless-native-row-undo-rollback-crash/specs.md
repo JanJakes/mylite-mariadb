@@ -58,7 +58,8 @@ Add two focused hook-build crash selectors:
 
 Both selectors verify ownerless recovery, forced `.shm` rebuild, ordinary
 native reopen, writable follow-up DML, clear native DML/file-operation markers,
-and eventual ownerless WAL checkpointing.
+and ownerless WAL checkpointing or native-support-only retention while native
+rollback-history evidence still requires it.
 
 ## Scope And Non-Goals
 
@@ -115,8 +116,8 @@ The only MariaDB-derived source change is a narrow unsafe test-fault hook in
 - Killing the writer at that point leaves original durable rows after no-live
   ownerless recovery.
 - Native DML/file-operation markers remain clear after recovery.
-- Ownerless WAL checkpoints after recovery and stays correct after forced
-  `.shm` rebuild.
+- Ownerless WAL checkpoints after recovery or is reduced to native-support-only
+  rollback-history evidence, and stays correct after forced `.shm` rebuild.
 - Ordinary native reopen observes the same recovered state and accepts a
   follow-up write.
 - Existing rollback/savepoint hook selectors still pass.

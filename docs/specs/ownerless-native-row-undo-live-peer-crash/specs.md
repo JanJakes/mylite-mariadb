@@ -107,8 +107,8 @@ boundary.
 No durable directory-layout or native storage-format change. The tests keep all
 database files and ownerless runtime files inside the MyLite database directory,
 retain live-peer ambiguity until the peer exits, then prove recovery,
-checkpointing, forced shared-memory rebuild, and ordinary native reopen all
-observe the same original rows.
+checkpointing or native-support-only retained evidence, forced shared-memory
+rebuild, and ordinary native reopen all observe the same original rows.
 
 ## Public API, Build, Size, And License
 
@@ -138,9 +138,9 @@ The selectors are registered only for the unsafe ownerless hook build.
 - After peer release, shared read-only attachment remains busy until read/write
   recovery runs.
 - No-live ownerless recovery preserves the original row values and payloads,
-  keeps native DML/file-operation markers clear, checkpoints ownerless WAL,
-  survives forced `.shm` rebuild, and remains writable through ordinary native
-  reopen.
+  keeps native DML/file-operation markers clear, checkpoints ownerless WAL or
+  retains only native-support rollback-history evidence, survives forced
+  `.shm` rebuild, and remains writable through ordinary native reopen.
 - Delete-side FK/trigger recovery restores the parent rows, cascade child rows,
   set-null child keys, trigger base rows, and removes rolled-back audit rows
   after live-peer release and no-live recovery.
