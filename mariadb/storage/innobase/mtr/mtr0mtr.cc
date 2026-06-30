@@ -3226,10 +3226,24 @@ struct ownerless_history_proof_pair_page
 {
   const buf_page_t *bpage= nullptr;
   const byte *source= nullptr;
+  byte *page= nullptr;
   uint32_t page_no= 0;
   uint64_t page_lsn= 0;
   uint32_t page_size= 0;
+  bool retained_page= false;
 };
+
+static void ownerless_history_proof_pair_page_release(
+    ownerless_history_proof_pair_page *page) noexcept
+{
+  if (page == nullptr || page->page == nullptr)
+    return;
+  ownerless_page_publish_scratch_buffer.release(page->page,
+                                                page->retained_page);
+  page->page= nullptr;
+  page->source= nullptr;
+  page->retained_page= false;
+}
 
 static bool ownerless_history_proof_pair_prepare_page(
     trx_t *trx, buf_page_t *bpage, unsigned expected_role, lsn_t commit_lsn,
@@ -3252,24 +3266,44 @@ static bool ownerless_history_proof_pair_prepare_page(
   if (bpage->frame == nullptr)
     return false;
 
-  mach_write_to_8(bpage->frame + FIL_PAGE_LSN, commit_lsn);
-  if (UNIV_LIKELY_NULL(bpage->zip.data))
-    memcpy_aligned<8>(FIL_PAGE_LSN + bpage->zip.data,
-                      FIL_PAGE_LSN + bpage->frame, 8);
-
   const byte *source= bpage->zip.data ? bpage->zip.data : bpage->frame;
-  const lsn_t source_page_lsn= mach_read_from_8(source + FIL_PAGE_LSN);
-  if (source_page_lsn != commit_lsn)
-    return false;
   if (!ownerless_page_publish_type_has_native_support(
           fil_page_get_type(source)))
     return false;
 
+  fil_space_t *space= fil_space_t::get(id.space());
+  if (space == nullptr)
+    return false;
+  const bool full_crc32= space->full_crc32();
+  space->release();
+
+  bool retained_page= false;
+  byte *page= ownerless_page_publish_scratch_buffer.get(
+      bpage->physical_size(), nullptr, &retained_page);
+  if (page == nullptr)
+    return false;
+
+  memcpy(page, source, bpage->physical_size());
+  mach_write_to_8(page + FIL_PAGE_LSN, commit_lsn);
+  if (bpage->zip.data)
+    buf_flush_update_zip_checksum(page, bpage->physical_size());
+  else
+    buf_flush_init_for_writing(nullptr, page, nullptr, full_crc32);
+
+  const lsn_t source_page_lsn= mach_read_from_8(page + FIL_PAGE_LSN);
+  if (source_page_lsn != commit_lsn)
+  {
+    ownerless_page_publish_scratch_buffer.release(page, retained_page);
+    return false;
+  }
+
   out_page->bpage= bpage;
-  out_page->source= source;
+  out_page->source= page;
+  out_page->page= page;
   out_page->page_no= id.page_no();
   out_page->page_lsn= source_page_lsn;
   out_page->page_size= static_cast<uint32_t>(bpage->physical_size());
+  out_page->retained_page= retained_page;
   return true;
 }
 
@@ -3297,6 +3331,11 @@ bool mtr_t::ownerless_history_proof_publish_pair() noexcept
 
   ownerless_history_proof_pair_page rseg_page;
   ownerless_history_proof_pair_page undo_page;
+  const auto fail_pair_prepare= [&]() noexcept {
+    ownerless_history_proof_pair_page_release(&rseg_page);
+    ownerless_history_proof_pair_page_release(&undo_page);
+    return false;
+  };
   for (const mtr_memo_slot_t &slot : m_memo)
   {
     if (!(slot.type & MTR_MEMO_MODIFY))
@@ -3311,24 +3350,26 @@ bool mtr_t::ownerless_history_proof_publish_pair() noexcept
                    ownerless_page_write_history_proof_role_undo)) != 0 ||
         ((roles & ownerless_page_write_history_proof_role_rseg) != 0 &&
          (roles & ownerless_page_write_history_proof_role_undo) != 0))
-      return false;
+      return fail_pair_prepare();
     ownerless_history_proof_pair_page *target=
         (roles & ownerless_page_write_history_proof_role_rseg) != 0
             ? &rseg_page
             : &undo_page;
     if (!ownerless_history_proof_pair_prepare_page(
             ownerless_trx, bpage, roles, m_commit_lsn, target))
-      return false;
+      return fail_pair_prepare();
   }
 
   if (rseg_page.bpage == nullptr || undo_page.bpage == nullptr)
-    return false;
+    return fail_pair_prepare();
 
   const int result= mylite_ownerless_innodb_publish_history_proof_pair(
       ownerless_trx->mylite_ownerless_history_proof_space_id,
       rseg_page.page_no, rseg_page.page_lsn, rseg_page.source,
       rseg_page.page_size, undo_page.page_no, undo_page.page_lsn,
       undo_page.source, undo_page.page_size, m_commit_lsn);
+  ownerless_history_proof_pair_page_release(&rseg_page);
+  ownerless_history_proof_pair_page_release(&undo_page);
   if (result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
     return false;
   if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
@@ -3439,65 +3480,6 @@ ATTRIBUTE_NOINLINE void mtr_t::ownerless_page_write_publish(
     }
     return;
   }
-  if (history_proof_roles != 0 &&
-      ownerless_page_publish_type_has_native_support(source_page_type))
-  {
-    if (publish_stats_enabled)
-    {
-      ownerless_page_publish_count_page_type(source_page_type);
-      ownerless_page_publish_count_identity(
-          id.space(), id.page_no(), m_commit_lsn, source_page_type);
-      if (id.space() == TRX_SYS_SPACE && id.page_no() == TRX_SYS_PAGE_NO &&
-          source_page_type == FIL_PAGE_TYPE_TRX_SYS)
-        ownerless_page_publish_count_trx_system_diff(source, bpage.physical_size());
-    }
-    const uint32_t publish_flags=
-        (history_proof_roles & ownerless_page_write_history_proof_role_rseg)
-            ? MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_HISTORY_RSEG
-            : 0U;
-    uint64_t proof_start_ns= page_write_perf_enabled ?
-        ownerless_page_write_perf_now_ns() :
-        0;
-    const int result= mylite_ownerless_innodb_publish_page_version_with_flags(
-        id.space(), id.page_no(), source_page_lsn, m_commit_lsn, source,
-        static_cast<uint32_t>(bpage.physical_size()), publish_flags);
-    ownerless_page_write_perf_add_elapsed(
-        OWNERLESS_PAGE_WRITE_PERF_PUBLISH_HOOK_NS, proof_start_ns);
-    if (publish_stats_enabled)
-      ownerless_page_publish_count(
-          result == MYLITE_OWNERLESS_INNODB_LOCK_OK ?
-              ownerless_page_publish_published :
-              ownerless_page_publish_failed);
-    if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
-    {
-      if (publish_stats_enabled)
-      {
-        ownerless_page_publish_count(
-            ownerless_page_publish_native_support_published);
-        ownerless_page_publish_count_native_support_published_page_type(
-            source_page_type);
-        ownerless_page_publish_count_native_support_published_system_page_type(
-            source_page_type);
-        if (source_page_type == FIL_PAGE_TYPE_SYS)
-          ownerless_page_publish_count_published_sys_identity(
-              id.space(), id.page_no());
-        ownerless_page_publish_count_history_proof_roles(
-            history_proof_roles,
-            ownerless_page_publish_native_support_published_history_proof_rseg,
-            ownerless_page_publish_native_support_published_history_proof_undo);
-        ownerless_page_publish_count_history_proof_diff(
-            history_proof_roles, source, bpage.physical_size(), id.space(),
-            id.page_no());
-      }
-      ownerless_page_write_note_publish_success(ownerless_trx);
-      ownerless_page_write_note_history_proof_page(
-          ownerless_trx, id.space(), id.page_no());
-    }
-    else
-      ownerless_page_write_note_publish_failure(ownerless_trx);
-    return;
-  }
-
   fil_space_t *space= fil_space_t::get(id.space());
   uint64_t start_ns= page_write_perf_enabled ?
       ownerless_page_write_perf_now_ns() :

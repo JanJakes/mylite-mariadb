@@ -4,14 +4,15 @@
 
 Ownerless autocommit insert performance still pays per-commit overhead for the
 two native history proof records that let MyLite skip the conservative exact
-native rollback-segment and undo-page flush. Earlier slices changed those
-records to proof-only metadata records, so they no longer carry page payloads,
-but the production path still reaches the page-publish hook once for the
-rollback-segment proof page and once for the undo-header proof page.
+native rollback-segment and undo-page flush. Earlier slices experimented with
+proof-only metadata records, but later rollback-history reclaim work restored
+payload-bearing native-support records on the production history-proof path so
+startup and reclaim can validate the exact rollback-segment and undo-header page
+state.
 
 This slice reduces that production/stats-off overhead by appending the two
-existing proof-only records through one narrow pair path while preserving the
-current two-record WAL contract and native flush fallback.
+existing payload-bearing native-support records through one narrow pair path
+while preserving the current two-record WAL contract and native flush fallback.
 
 ## Source Findings
 
@@ -29,23 +30,23 @@ MariaDB base ref remains `mariadb-11.8.6`
   and then releases native MTR memo state.
 - `mtr_t::ownerless_page_write_publish()` validates the page source, commit LSN,
   native-support page type, and history-proof role before calling
-  `mylite_ownerless_innodb_publish_page_version_with_flags()` with
-  `MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_PROOF_ONLY`.
+  `mylite_ownerless_innodb_publish_page_version_with_flags()`.
 - `packages/libmylite/src/database.cc` `append_ownerless_page_version()` maps
-  proof-only native-support records onto the existing page-log append helpers
-  with zero checksum and no page-index publication.
+  rollback-history native-support records onto the existing page-log append
+  helpers with full page payloads and checksums on the current production path.
 - `packages/libmylite/src/ownerless_page_log.cc` `append_record_at_locked()`
-  already treats proof-only records as metadata records with no payload while
-  preserving the existing payload-before-header, header-last crash ordering.
+  still supports proof-only metadata records as primitive WAL machinery while
+  preserving the existing payload-before-header, header-last crash ordering for
+  payload-bearing records.
 
 ## Design
 
 Add an optional ownerless InnoDB history-proof pair callback separate from the
-existing single-page page-publish hook. The pair hook appends two ordinary
-proof-only records:
+existing single-page page-publish hook. The pair hook appends the two ordinary
+payload-bearing native-support records:
 
-- rollback-segment proof record with the existing history-rseg metadata flag;
-- undo-header proof record with the existing proof-only native-support flags.
+- rollback-segment proof record with the existing history-rseg flag;
+- undo-header proof record with the existing native-support flags.
 
 The native MTR path attempts the pair only when all of these are true:
 
@@ -67,9 +68,11 @@ uses the existing native exact history flush fallback because
 `ownerless_history_wal_proved` remains false.
 
 The pair path does not introduce a combined durable WAL format. It appends the
-same two proof-only records and keeps proof-only records unreadable as page
-images, skipped by replay, and retained according to the existing WAL retention
-rules.
+same two native-support page records through one optimized hook. The proof-only
+record primitive remains available for lower-level page-log coverage, but
+production rollback-history publication must stay payload-bearing until a
+broader native redo/checkpoint proof can replace the exact rollback/undo page
+evidence.
 
 ## Compatibility Impact
 
@@ -98,6 +101,10 @@ native exact rollback-segment/undo flush path remains the correctness fallback.
 - Keep `libmylite.ownerless-single-owner-native-support-page-wal-elision`
   asserting disabled database counters stay zero, including the new pair
   counters.
+- Add focused SQL coverage that records the setup WAL baseline, observes the
+  writer-open WAL before close-time reclaim, and proves the production pair
+  appends payload-bearing native-support records with zero native-support
+  proof-only records.
 - Build production embedded targets after rebuilding the MariaDB embedded
   archive because the slice edits InnoDB-derived files.
 - Run focused ownerless primitives/history/native-support/hook verification,
@@ -107,11 +114,13 @@ native exact rollback-segment/undo flush path remains the correctness fallback.
 ## Acceptance Criteria
 
 - Pair proof publication is optional and fails closed to existing behavior.
-- The fast proof is accepted only after both proof-only records append
+- The fast proof is accepted only after both native-support records append
   successfully.
 - Existing unsafe ownerless fault builds retain the per-page publish path.
 - The focused SQL proof shows pair activation without exact history flush
   fallback.
+- Focused WAL-shape coverage proves production retained history proof remains
+  payload-bearing and does not silently switch back to proof-only metadata.
 - No public API, SQL behavior, durable file format, or directory-layout claim
   changes.
 

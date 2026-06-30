@@ -60,7 +60,8 @@ In scope:
   the killed writer.
 - Verify DML and the blocked DDL succeed after the reader releases while the
   idle peer remains live, then survive ownerless/native reopen and forced
-  `.shm` rebuild.
+  `.shm` rebuild while allowing rollback-history native-support WAL to remain
+  when exact native proof is still pending.
 
 Out of scope:
 
@@ -110,7 +111,8 @@ process state that blocks later writers after the real reader pin is gone.
 
 No directory layout changes. The test exercises existing process registry
 cleanup, read-view registry cleanup, page-version WAL retention, checkpointing,
-and forced shared-memory rebuild inside the MyLite database directory.
+rollback-history native-support WAL retention, and forced shared-memory rebuild
+inside the MyLite database directory.
 
 ## Native Storage Impact
 
@@ -147,7 +149,8 @@ No production binary-size impact. The slice adds tests and documentation only.
 - After the reader releases, DML and the representative DDL families succeed
   even while another idle ownerless peer remains live.
 - Final state survives ownerless reopen, native read/write reopen, and forced
-  `.shm` rebuild.
+  `.shm` rebuild, with page-version WAL either checkpointed or reduced to
+  native-support-only rollback-history evidence.
 
 ## Risks And Follow-Up
 

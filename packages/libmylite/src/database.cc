@@ -10977,17 +10977,24 @@ int replay_concurrency_tablespaces(
     if (!read_concurrency_checkpoint_lsn(checkpoint_fd, &latest_lsn, &visible_lsn)) {
         return MYLITE_IOERR;
     }
-    if (visible_lsn == 0U) {
+    if (latest_lsn == 0U) {
         return MYLITE_OK;
     }
 
     const std::filesystem::path datadir = database_path / k_datadir_name;
     const std::string datadir_name = datadir.string();
+    /*
+     * This replay path runs while rebuilding directory-owned shared memory, or
+     * after the final ownerless close. There are no live readers left to
+     * protect the old visible boundary, so native tablespaces must be brought
+     * forward to the latest committed ownerless boundary before later reclaim
+     * can prove the WAL is redundant.
+     */
     const int replay_result = mylite_ownerless_tablespace_replay_apply_with_flags(
         datadir_name.c_str(),
         page_log_fd,
         k_concurrency_recovery_header_size,
-        visible_lsn,
+        latest_lsn,
         MYLITE_OWNERLESS_TABLESPACE_REPLAY_IGNORE_MISSING_TABLESPACES |
             MYLITE_OWNERLESS_TABLESPACE_REPLAY_KEEP_NATIVE_SAME_LSN_SNAPSHOT_BOUNDARY
     );
@@ -30425,6 +30432,14 @@ void release_runtime(void) {
     embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_RELEASE_RESET_HOOKS_NS, stage_start_ns);
     const bool retained_ownerless_page_log_payload_before_shutdown =
         g_runtime.ownerless_rw_mode && ownerless_page_log_has_payload_records(g_runtime);
+    bool retained_ownerless_user_page_log_records_before_shutdown = false;
+    bool retained_ownerless_user_page_log_scan_ok = true;
+    if (retained_ownerless_page_log_payload_before_shutdown) {
+        retained_ownerless_user_page_log_scan_ok = ownerless_page_log_has_user_page_records(
+            g_runtime.concurrency_wal_fd,
+            &retained_ownerless_user_page_log_records_before_shutdown
+        );
+    }
     const bool native_recovered_transactions_before_shutdown =
         g_runtime.ownerless_rw_mode && ownerless_native_has_recovered_active_transactions();
     const bool native_rollback_history_empty_before_shutdown =
@@ -30450,18 +30465,31 @@ void release_runtime(void) {
     const bool retained_wal_final_ownerless_shutdown =
         g_runtime.ownerless_rw_mode && no_live_ownerless_shutdown &&
         retained_ownerless_page_log_payload_before_shutdown;
+    const bool retained_wal_ownerless_shutdown =
+        g_runtime.ownerless_rw_mode && retained_ownerless_page_log_payload_before_shutdown;
     const bool retained_wal_needs_native_file_op_shutdown =
         native_file_op_checkpoint_needed_before_shutdown ||
         native_dml_file_op_checkpoint_needed_before_shutdown;
+    const bool retained_wal_needs_native_checkpoint_shutdown =
+        retained_wal_needs_native_file_op_shutdown ||
+        retained_ownerless_user_page_log_records_before_shutdown ||
+        !retained_ownerless_user_page_log_scan_ok;
     unsigned int saved_srv_fast_shutdown = 0U;
     bool changed_srv_fast_shutdown = false;
     if (clean_final_ownerless_shutdown && srv_fast_shutdown == 2U) {
         saved_srv_fast_shutdown = srv_fast_shutdown;
         srv_fast_shutdown = 1U;
         changed_srv_fast_shutdown = true;
+    } else if (
+        retained_wal_ownerless_shutdown && retained_wal_needs_native_checkpoint_shutdown &&
+        srv_fast_shutdown == 2U
+    ) {
+        saved_srv_fast_shutdown = srv_fast_shutdown;
+        srv_fast_shutdown = 1U;
+        changed_srv_fast_shutdown = true;
     } else if (retained_wal_final_ownerless_shutdown && srv_fast_shutdown == 2U) {
         saved_srv_fast_shutdown = srv_fast_shutdown;
-        srv_fast_shutdown = retained_wal_needs_native_file_op_shutdown ? 1U : 3U;
+        srv_fast_shutdown = retained_wal_needs_native_checkpoint_shutdown ? 1U : 3U;
         changed_srv_fast_shutdown = true;
     }
     if (changed_srv_fast_shutdown && srv_fast_shutdown == 1U) {

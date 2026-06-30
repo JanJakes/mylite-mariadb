@@ -310,6 +310,10 @@ if(BUILD_TESTING)
       COMMAND mylite_ownerless_cross_process_sql_test single-owner-history-wal-proof
     )
     add_test(
+      NAME libmylite.ownerless-history-proof-pair-payload-wal
+      COMMAND mylite_ownerless_cross_process_sql_test history-proof-pair-payload-wal
+    )
+    add_test(
       NAME libmylite.ownerless-single-owner-native-support-page-wal-elision
       COMMAND mylite_ownerless_cross_process_sql_test single-owner-native-support-page-wal-elision
     )
