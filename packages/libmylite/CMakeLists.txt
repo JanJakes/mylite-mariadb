@@ -842,6 +842,12 @@ if(BUILD_TESTING)
           dictionary-charset-convert-copy-lock-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-charset-convert-lock-copy-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-charset-convert-lock-copy-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-row-format-file-op-marker-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -852,6 +858,12 @@ if(BUILD_TESTING)
         COMMAND
           mylite_ownerless_cross_process_sql_test
           dictionary-row-format-copy-lock-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-row-format-lock-copy-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-row-format-lock-copy-crash
       )
       add_test(
         NAME libmylite.ownerless-dictionary-row-format-compact-file-op-marker-crash
@@ -866,6 +878,12 @@ if(BUILD_TESTING)
           dictionary-row-format-compact-copy-lock-crash
       )
       add_test(
+        NAME libmylite.ownerless-dictionary-row-format-compact-lock-copy-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-row-format-compact-lock-copy-crash
+      )
+      add_test(
         NAME libmylite.ownerless-dictionary-row-format-redundant-file-op-marker-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
@@ -876,6 +894,12 @@ if(BUILD_TESTING)
         COMMAND
           mylite_ownerless_cross_process_sql_test
           dictionary-row-format-redundant-copy-lock-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-row-format-redundant-lock-copy-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-row-format-redundant-lock-copy-crash
       )
       add_test(
         NAME libmylite.ownerless-dictionary-compressed-row-format-file-op-marker-crash
@@ -2287,12 +2311,16 @@ if(BUILD_TESTING)
         libmylite.ownerless-dictionary-engine-rebuild-lock-copy-crash
         libmylite.ownerless-dictionary-charset-convert-crash
         libmylite.ownerless-dictionary-charset-convert-copy-lock-crash
+        libmylite.ownerless-dictionary-charset-convert-lock-copy-crash
         libmylite.ownerless-dictionary-row-format-file-op-marker-crash
         libmylite.ownerless-dictionary-row-format-copy-lock-crash
+        libmylite.ownerless-dictionary-row-format-lock-copy-crash
         libmylite.ownerless-dictionary-row-format-compact-file-op-marker-crash
         libmylite.ownerless-dictionary-row-format-compact-copy-lock-crash
+        libmylite.ownerless-dictionary-row-format-compact-lock-copy-crash
         libmylite.ownerless-dictionary-row-format-redundant-file-op-marker-crash
         libmylite.ownerless-dictionary-row-format-redundant-copy-lock-crash
+        libmylite.ownerless-dictionary-row-format-redundant-lock-copy-crash
         libmylite.ownerless-dictionary-compressed-row-format-file-op-marker-crash
         libmylite.ownerless-dictionary-compressed-row-format-key-block-1-file-op-marker-crash
         libmylite.ownerless-dictionary-compressed-row-format-key-block-2-file-op-marker-crash

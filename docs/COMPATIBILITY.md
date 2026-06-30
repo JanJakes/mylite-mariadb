@@ -283,18 +283,17 @@ plus the reversed explicit
 `ALTER TABLE schema.table ENGINE=InnoDB, LOCK=EXCLUSIVE, ALGORITHM=COPY`
 prefinish recovery now use that same marker-retaining live-peer rebuild lane
 after pre-execution metadata proves the source is an InnoDB base table. Focused
-`ALTER TABLE schema.table ROW_FORMAT=DYNAMIC` and
-`ALTER TABLE schema.table ROW_FORMAT=DYNAMIC, ALGORITHM=COPY, LOCK=EXCLUSIVE`
-prefinish recovery now allow live-peer dictionary cleanup after the native
-dynamic row-format copy rebuild. Focused
-`ALTER TABLE schema.table ROW_FORMAT=COMPACT` and
-`ALTER TABLE schema.table ROW_FORMAT=COMPACT, ALGORITHM=COPY, LOCK=EXCLUSIVE`
-prefinish recovery now allow live-peer dictionary cleanup after a native
-compact row-format copy rebuild from a dynamic source table. Focused
-`ALTER TABLE schema.table ROW_FORMAT=REDUNDANT` and
-`ALTER TABLE schema.table ROW_FORMAT=REDUNDANT, ALGORITHM=COPY, LOCK=EXCLUSIVE`
-prefinish recovery now allow live-peer dictionary cleanup after a native
-redundant row-format copy rebuild from a dynamic source table. Focused plain and explicit copy-lock
+`ALTER TABLE schema.table ROW_FORMAT=DYNAMIC` plus both exact explicit
+copy-lock option orders for dynamic row-format prefinish recovery now allow
+live-peer dictionary cleanup after the native dynamic row-format copy rebuild.
+Focused `ALTER TABLE schema.table ROW_FORMAT=COMPACT` plus both exact explicit
+copy-lock option orders for compact row-format prefinish recovery now allow
+live-peer dictionary cleanup after a native compact row-format copy rebuild
+from a dynamic source table. Focused
+`ALTER TABLE schema.table ROW_FORMAT=REDUNDANT` plus both exact explicit
+copy-lock option orders for redundant row-format prefinish recovery now allow
+live-peer dictionary cleanup after a native redundant row-format copy rebuild
+from a dynamic source table. Focused plain and explicit copy-lock
 `ALTER TABLE schema.table ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=<n>` prefinish
 recovery for key-block sizes `1`, `2`, `4`, `8`, and `16` now allows live-peer
 dictionary cleanup after the native compressed copy rebuild; other ALTER
@@ -322,10 +321,9 @@ truncate/recreate, `DROP TABLE` `FILE_DELETE`, and replacement-copy
 boundaries plus representative `ALTER TABLE ... FORCE` and
 plain plus both exact explicit copy-lock option orders for
 `ALTER TABLE ... ENGINE=InnoDB` forms and
-plain and explicit copy-lock `ALTER TABLE ... ROW_FORMAT=DYNAMIC` rebuild
-boundaries plus plain and explicit copy-lock
-`ALTER TABLE ... ROW_FORMAT=COMPACT` rebuild boundaries plus plain and explicit
-copy-lock `ALTER TABLE ... ROW_FORMAT=REDUNDANT` rebuild
+plain plus both exact explicit copy-lock option orders for
+`ALTER TABLE ... ROW_FORMAT=DYNAMIC`, `ALTER TABLE ... ROW_FORMAT=COMPACT`,
+and `ALTER TABLE ... ROW_FORMAT=REDUNDANT` rebuild
 boundaries plus plain and explicit copy-lock compressed key-block rebuild
 boundaries, so a killed writer
 cannot lose the durable checkpoint-needed boundary before no-live recovery for
@@ -560,8 +558,8 @@ Schema-drop internal table-loop recovery now kills a two-table
 schema-drop entry is logged, then proves exactly one table remains usable in the
 still-present schema while the native file-operation marker drains only after
 no-live recovery; exact copy-lock ADD, DROP, MODIFY, CHANGE, and RENAME COLUMN
-plus exact copy-lock charset conversion now have focused live-recovery coverage
-for native table-copy rebuild boundaries;
+plus both exact explicit copy-lock option orders for charset conversion now
+have focused live-recovery coverage for native table-copy rebuild boundaries;
 broader ALTER rebuild, broader schema option variants beyond the focused
 schema-default/comment, collation-first `CHARSET` alias, and named/current-schema
 combined option-order boundaries plus representative invalid-option cleanup, broader view and

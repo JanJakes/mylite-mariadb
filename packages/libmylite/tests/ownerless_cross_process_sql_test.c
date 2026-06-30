@@ -1301,13 +1301,19 @@ static void test_crashed_engine_rebuild_copy_lock_dictionary_ddl_marks_file_op_c
 static void test_crashed_engine_rebuild_lock_copy_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_charset_convert_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_charset_convert_copy_lock_dictionary_ddl_recovers_metadata(void);
+static void test_crashed_charset_convert_lock_copy_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(void);
 static void test_crashed_row_format_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_row_format_copy_lock_dictionary_ddl_marks_file_op_checkpoint(void);
+static void test_crashed_row_format_lock_copy_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_row_format_compact_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_row_format_compact_copy_lock_dictionary_ddl_marks_file_op_checkpoint(void);
+static void test_crashed_row_format_compact_lock_copy_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_row_format_redundant_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_row_format_redundant_copy_lock_dictionary_ddl_marks_file_op_checkpoint(
+    void
+);
+static void test_crashed_row_format_redundant_lock_copy_dictionary_ddl_marks_file_op_checkpoint(
     void
 );
 static void test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table(void);
@@ -2619,8 +2625,16 @@ static void charset_convert_copy_lock_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
+static void charset_convert_lock_copy_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void row_format_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void row_format_copy_lock_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void row_format_lock_copy_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -2632,11 +2646,19 @@ static void row_format_compact_copy_lock_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
+static void row_format_compact_lock_copy_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void row_format_redundant_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
 static void row_format_redundant_copy_lock_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void row_format_redundant_lock_copy_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -6946,6 +6968,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-charset-convert-lock-copy-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_charset_convert_lock_copy_dictionary_ddl_recovers_metadata();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-row-format-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table();
@@ -6964,6 +6992,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-row-format-lock-copy-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_row_format_lock_copy_dictionary_ddl_marks_file_op_checkpoint();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-row-format-compact-file-op-marker-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_row_format_compact_dictionary_ddl_marks_file_op_checkpoint();
@@ -6976,6 +7010,12 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-row-format-compact-lock-copy-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_row_format_compact_lock_copy_dictionary_ddl_marks_file_op_checkpoint();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-row-format-redundant-file-op-marker-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_row_format_redundant_dictionary_ddl_marks_file_op_checkpoint();
@@ -6985,6 +7025,12 @@ int main(int argc, char **argv) {
     if (argc == 2 && strcmp(argv[1], "dictionary-row-format-redundant-copy-lock-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_row_format_redundant_copy_lock_dictionary_ddl_marks_file_op_checkpoint();
+#endif
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "dictionary-row-format-redundant-lock-copy-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_row_format_redundant_lock_copy_dictionary_ddl_marks_file_op_checkpoint();
 #endif
         return 0;
     }
@@ -7786,12 +7832,16 @@ int main(int argc, char **argv) {
         fputs(
             "dictionary-charset-convert-crash|"
             "dictionary-charset-convert-copy-lock-crash|"
+            "dictionary-charset-convert-lock-copy-crash|"
             "dictionary-row-format-crash|dictionary-row-format-file-op-marker-crash|"
             "dictionary-row-format-copy-lock-crash|"
+            "dictionary-row-format-lock-copy-crash|"
             "dictionary-row-format-compact-file-op-marker-crash|"
             "dictionary-row-format-compact-copy-lock-crash|"
+            "dictionary-row-format-compact-lock-copy-crash|"
             "dictionary-row-format-redundant-file-op-marker-crash|"
             "dictionary-row-format-redundant-copy-lock-crash|"
+            "dictionary-row-format-redundant-lock-copy-crash|"
             "dictionary-compressed-row-format-crash|"
             "dictionary-compressed-row-format-file-op-marker-crash|"
             "dictionary-compressed-row-format-key-block-1-crash|"
@@ -8356,9 +8406,13 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_charset_convert_dictionary_ddl_recovers_metadata),
     OWNERLESS_SQL_TEST_CASE(test_crashed_charset_convert_copy_lock_dictionary_ddl_recovers_metadata),
+    OWNERLESS_SQL_TEST_CASE(test_crashed_charset_convert_lock_copy_dictionary_ddl_recovers_metadata),
     OWNERLESS_SQL_TEST_CASE(test_crashed_row_format_dictionary_ddl_recovers_rebuilt_table),
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_row_format_copy_lock_dictionary_ddl_marks_file_op_checkpoint
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_row_format_lock_copy_dictionary_ddl_marks_file_op_checkpoint
     ),
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_row_format_compact_dictionary_ddl_marks_file_op_checkpoint
@@ -8367,10 +8421,16 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
         test_crashed_row_format_compact_copy_lock_dictionary_ddl_marks_file_op_checkpoint
     ),
     OWNERLESS_SQL_TEST_CASE(
+        test_crashed_row_format_compact_lock_copy_dictionary_ddl_marks_file_op_checkpoint
+    ),
+    OWNERLESS_SQL_TEST_CASE(
         test_crashed_row_format_redundant_dictionary_ddl_marks_file_op_checkpoint
     ),
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_row_format_redundant_copy_lock_dictionary_ddl_marks_file_op_checkpoint
+    ),
+    OWNERLESS_SQL_TEST_CASE(
+        test_crashed_row_format_redundant_lock_copy_dictionary_ddl_marks_file_op_checkpoint
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table
     ),
@@ -73333,6 +73393,13 @@ static void test_crashed_charset_convert_copy_lock_dictionary_ddl_recovers_metad
     );
 }
 
+static void test_crashed_charset_convert_lock_copy_dictionary_ddl_recovers_metadata(void) {
+    run_crashed_charset_convert_dictionary_ddl_recovers_metadata(
+        charset_convert_lock_copy_until_dictionary_finish_fault,
+        "ownerless-dictionary-charset-convert-lock-copy-crash.mylite"
+    );
+}
+
 static void run_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(
     ownerless_dictionary_fault_writer_fn fault_fn,
     const char *database_name,
@@ -73589,6 +73656,17 @@ static void test_crashed_row_format_copy_lock_dictionary_ddl_marks_file_op_check
     );
 }
 
+static void test_crashed_row_format_lock_copy_dictionary_ddl_marks_file_op_checkpoint(void) {
+    run_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(
+        row_format_lock_copy_until_dictionary_finish_fault,
+        "ownerless-dictionary-row-format-lock-copy-crash.mylite",
+        "COMPACT",
+        "Compact",
+        "Dynamic",
+        1
+    );
+}
+
 static void test_crashed_row_format_compact_dictionary_ddl_marks_file_op_checkpoint(void) {
     run_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(
         row_format_compact_until_dictionary_finish_fault,
@@ -73613,6 +73691,19 @@ static void test_crashed_row_format_compact_copy_lock_dictionary_ddl_marks_file_
     );
 }
 
+static void test_crashed_row_format_compact_lock_copy_dictionary_ddl_marks_file_op_checkpoint(
+    void
+) {
+    run_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(
+        row_format_compact_lock_copy_until_dictionary_finish_fault,
+        "ownerless-dictionary-row-format-compact-lock-copy-crash.mylite",
+        "DYNAMIC",
+        "Dynamic",
+        "Compact",
+        1
+    );
+}
+
 static void test_crashed_row_format_redundant_dictionary_ddl_marks_file_op_checkpoint(void) {
     run_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(
         row_format_redundant_until_dictionary_finish_fault,
@@ -73630,6 +73721,19 @@ static void test_crashed_row_format_redundant_copy_lock_dictionary_ddl_marks_fil
     run_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(
         row_format_redundant_copy_lock_until_dictionary_finish_fault,
         "ownerless-dictionary-row-format-redundant-copy-lock-crash.mylite",
+        "DYNAMIC",
+        "Dynamic",
+        "Redundant",
+        1
+    );
+}
+
+static void test_crashed_row_format_redundant_lock_copy_dictionary_ddl_marks_file_op_checkpoint(
+    void
+) {
+    run_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(
+        row_format_redundant_lock_copy_until_dictionary_finish_fault,
+        "ownerless-dictionary-row-format-redundant-lock-copy-crash.mylite",
         "DYNAMIC",
         "Dynamic",
         "Redundant",
@@ -91682,6 +91786,20 @@ static void charset_convert_copy_lock_until_dictionary_finish_fault(
     );
 }
 
+static void charset_convert_lock_copy_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_charset_convert_base "
+        "CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci, "
+        "LOCK=EXCLUSIVE, ALGORITHM=COPY"
+    );
+}
+
 static void row_format_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
     execute_sql_until_dictionary_fault(
         paths,
@@ -91701,6 +91819,19 @@ static void row_format_copy_lock_until_dictionary_finish_fault(
         "dictionary-before-finish",
         "ALTER TABLE app.ownerless_row_format_base "
         "ROW_FORMAT=DYNAMIC, ALGORITHM=COPY, LOCK=EXCLUSIVE"
+    );
+}
+
+static void row_format_lock_copy_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_row_format_base "
+        "ROW_FORMAT=DYNAMIC, LOCK=EXCLUSIVE, ALGORITHM=COPY"
     );
 }
 
@@ -91729,6 +91860,19 @@ static void row_format_compact_copy_lock_until_dictionary_finish_fault(
     );
 }
 
+static void row_format_compact_lock_copy_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_row_format_base "
+        "ROW_FORMAT=COMPACT, LOCK=EXCLUSIVE, ALGORITHM=COPY"
+    );
+}
+
 static void row_format_redundant_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -91751,6 +91895,19 @@ static void row_format_redundant_copy_lock_until_dictionary_finish_fault(
         "dictionary-before-finish",
         "ALTER TABLE app.ownerless_row_format_base "
         "ROW_FORMAT=REDUNDANT, ALGORITHM=COPY, LOCK=EXCLUSIVE"
+    );
+}
+
+static void row_format_redundant_lock_copy_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_row_format_base "
+        "ROW_FORMAT=REDUNDANT, LOCK=EXCLUSIVE, ALGORITHM=COPY"
     );
 }
 

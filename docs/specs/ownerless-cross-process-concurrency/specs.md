@@ -3418,24 +3418,26 @@ Tasks:
    rebuild but before ownerless dictionary finish, then verifies recovered
    InnoDB table/space/index metadata, copied payload bytes, and later writes
    through ownerless/native reopen before and after forced `.shm` rebuild.
-   Row-format crash coverage now kills plain and explicit copy-lock
-   `ALTER TABLE ... ROW_FORMAT=DYNAMIC` writers after native row-format rebuild
-   but before ownerless dictionary finish, then verifies recovered dynamic
-   row-format metadata, retained row payloads, and later writes through
-   ownerless/native reopen before and after forced `.shm` rebuild. Compact
-   row-format crash coverage now kills plain and explicit copy-lock
+   Row-format crash coverage now kills plain plus both exact explicit
+   copy-lock option orders for `ALTER TABLE ... ROW_FORMAT=DYNAMIC` writers
+   after native row-format rebuild but before ownerless dictionary finish, then
+   verifies recovered dynamic row-format metadata, retained row payloads, and
+   later writes through ownerless/native reopen before and after forced `.shm`
+   rebuild. Compact row-format crash coverage now kills plain plus both exact
+   explicit copy-lock option orders for
    `ALTER TABLE ... ROW_FORMAT=COMPACT` writers after a native row-format
    rebuild from a dynamic source table but before ownerless dictionary finish,
    then verifies recovered compact row-format metadata, retained row payloads,
    marker retention while a peer is live, final no-live marker drain, and later
    writes through ownerless/native reopen before and after forced `.shm`
-   rebuild. Redundant row-format crash coverage now kills plain and explicit
-   copy-lock `ALTER TABLE ... ROW_FORMAT=REDUNDANT` writers after a native
-   row-format rebuild from a dynamic source table but before ownerless
-   dictionary finish, then verifies recovered redundant row-format metadata,
-   retained row payloads, marker retention while a peer is live, final no-live
-   marker drain, and later writes through ownerless/native reopen before and
-   after forced `.shm` rebuild.
+   rebuild. Redundant row-format crash coverage now kills plain plus both exact
+   explicit copy-lock option orders for
+   `ALTER TABLE ... ROW_FORMAT=REDUNDANT` writers after a native row-format
+   rebuild from a dynamic source table but before ownerless dictionary finish,
+   then verifies recovered redundant row-format metadata, retained row payloads,
+   marker retention while a peer is live, final no-live marker drain, and later
+   writes through ownerless/native reopen before and after forced `.shm`
+   rebuild.
    Compressed row-format crash coverage now kills plain and explicit copy-lock
    `ALTER TABLE ... ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=1`,
    `KEY_BLOCK_SIZE=2`, `KEY_BLOCK_SIZE=4`, `KEY_BLOCK_SIZE=8`, and
@@ -5003,10 +5005,9 @@ Tasks:
    `ALTER TABLE ... ENGINE=InnoDB` forms and
    both exact explicit copy-lock option orders for unplaced
    `ALTER TABLE ... ADD COLUMN` forms and
-   plain plus explicit copy-lock `ALTER TABLE ... ROW_FORMAT=DYNAMIC` rebuild
-   marker coverage, plus
-   plain plus explicit copy-lock `ALTER TABLE ... ROW_FORMAT=COMPACT` and
-   `ALTER TABLE ... ROW_FORMAT=REDUNDANT` rebuild marker coverage, plus
+   plain plus both exact explicit copy-lock option orders for
+   `ALTER TABLE ... ROW_FORMAT=DYNAMIC`, `ALTER TABLE ... ROW_FORMAT=COMPACT`,
+   and `ALTER TABLE ... ROW_FORMAT=REDUNDANT` rebuild marker coverage, plus
    plain plus explicit copy-lock compressed
    `ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=<n>` rebuild marker coverage at the
    same prefinish crash boundary, now extended to the existing
@@ -5065,15 +5066,16 @@ Tasks:
    `ALTER TABLE schema.table FORCE, ALGORITHM=COPY, LOCK=EXCLUSIVE` prefinish
    crash coverage now uses a separate recoverable dictionary marker to provide
    live-peer recovery for the native force-rebuild boundary. Focused
-   plain and explicit copy-lock `ALTER TABLE schema.table ROW_FORMAT=DYNAMIC`
-   prefinish crash coverage now uses a separate recoverable dictionary marker to
-   provide live-peer recovery for the native dynamic row-format copy rebuild
-   boundary. Focused
-   plain and explicit copy-lock `ALTER TABLE schema.table ROW_FORMAT=COMPACT`
-   and `ALTER TABLE schema.table ROW_FORMAT=REDUNDANT` prefinish crash
-   coverage now uses separate recoverable dictionary markers to provide
-   live-peer recovery for the native compact and redundant row-format copy
-   rebuild boundaries. Focused
+   plain plus both exact explicit copy-lock option orders for
+   `ALTER TABLE schema.table ROW_FORMAT=DYNAMIC` prefinish crash coverage now
+   uses a separate recoverable dictionary marker to provide live-peer recovery
+   for the native dynamic row-format copy rebuild boundary. Focused plain plus
+   both exact explicit copy-lock option orders for
+   `ALTER TABLE schema.table ROW_FORMAT=COMPACT` and
+   `ALTER TABLE schema.table ROW_FORMAT=REDUNDANT` prefinish crash coverage now
+   uses separate recoverable dictionary markers to provide live-peer recovery
+   for the native compact and redundant row-format copy rebuild boundaries.
+   Focused
    plain and explicit copy-lock
    `ALTER TABLE schema.table ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=<n>`
    prefinish crash coverage now uses separate recoverable dictionary markers to
@@ -6003,8 +6005,9 @@ missing `DROP TRIGGER IF EXISTS`, delayed missing-dependency `CREATE TRIGGER`,
 and explicit `CREATE DEFINER=CURRENT_USER TRIGGER` writers after native
 `.TRG`/`.TRN` metadata creation/removal, rewrite, no-op preservation, delayed
 dependency acceptance, or definer metadata storage, charset-conversion
-including exact copy-lock, dynamic row-format including exact copy-lock,
-compressed 1 KiB/2 KiB/4 KiB/8 KiB/16 KiB
+including both exact copy-lock option orders, dynamic, compact, and redundant
+row-format including both exact copy-lock option orders, compressed
+1 KiB/2 KiB/4 KiB/8 KiB/16 KiB
 row-format including exact copy-lock, and table-comment writers
 after native table-option metadata update or rebuild, a
 `DROP TABLE` writer after native file removal, a stale-reader retained-WAL
@@ -8051,10 +8054,10 @@ subsystems that this mode needs:
      implicit single-table, single-table and multi-table-list missing/existing
      `DROP TABLE IF EXISTS`,
      and same-schema/cross-schema two-table drop, plus focused force rebuild,
-     dynamic row-format rebuild including exact copy-lock, compact row-format
-     rebuild, redundant row-format rebuild, focused compressed
-     key-block row-format rebuild including exact copy-lock, and focused
-     charset-conversion rebuild
+     dynamic, compact, and redundant row-format rebuilds including both exact
+     copy-lock option orders, focused compressed key-block row-format rebuild
+     including exact copy-lock, and focused charset-conversion rebuild
+     including both exact copy-lock option orders
      prefinish boundaries, plus simple CREATE/DROP VIEW, focused CREATE OR
      REPLACE/ALTER VIEW, and focused explicit column-list, check-option,
      nested check-option, security/definer, algorithm create/replacement/alter,
@@ -8103,9 +8106,9 @@ subsystems that this mode needs:
      FK, and focused same-schema/cross-schema temporary/permanent IF EXISTS lists,
      other rebuild variants beyond the covered
      FORCE, same-engine ENGINE including both exact copy-lock option orders,
-     dynamic, compact, and redundant row-format including exact copy-lock,
-     compressed row-format including exact copy-lock, charset including exact
-     copy-lock, and focused exact copy-lock
+     dynamic, compact, and redundant row-format including both exact copy-lock
+     option orders, compressed row-format including exact copy-lock, charset
+     including both exact copy-lock option orders, and focused exact copy-lock
      unplaced ADD in both option orders, placed ADD, DROP, MODIFY, CHANGE, and RENAME COLUMN
      boundaries,
      broader metadata-only DDL beyond the focused view algorithm boundaries,
