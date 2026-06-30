@@ -7978,6 +7978,10 @@ subsystems that this mode needs:
   metadata-only live-recovery lane, proving persisted `SECURITY_TYPE` and
   definer metadata while a peer remains live and the native file-operation
   marker stays clear.
+  The view algorithm follow-up promotes a focused
+  `ALTER ALGORITHM=TEMPTABLE VIEW` crash selector to the same lane, proving
+  persisted `INFORMATION_SCHEMA.VIEWS.ALGORITHM` metadata while a peer remains
+  live and the native file-operation marker stays clear.
   The idempotent/no-op follow-up promotes duplicate `CREATE VIEW IF NOT EXISTS`
   and missing `DROP VIEW IF EXISTS` crash selectors to the same metadata-only
   live-recovery lane, proving original definition preservation and missing-view
@@ -8036,8 +8040,8 @@ subsystems that this mode needs:
      charset-conversion rebuild
      prefinish boundaries, plus simple CREATE/DROP VIEW, focused CREATE OR
      REPLACE/ALTER VIEW, and focused explicit column-list, check-option,
-     nested check-option, security/definer, and idempotent/no-op view
-     metadata-only prefinish boundaries, plus simple CREATE/DROP TRIGGER
+     nested check-option, security/definer, algorithm, and idempotent/no-op
+     view metadata-only prefinish boundaries, plus simple CREATE/DROP TRIGGER
      metadata-only prefinish boundaries, plus focused CREATE/ALTER/DROP
      DATABASE, named ALTER DATABASE schema-comment, focused collation-first
      `CHARSET` alias schema option, and schema idempotent/no-op prefinish
@@ -8086,7 +8090,8 @@ subsystems that this mode needs:
      copy-lock, and focused exact copy-lock
      unplaced ADD, placed ADD, DROP, MODIFY, CHANGE, and RENAME COLUMN
      boundaries,
-     broader metadata-only DDL, broader mixed temporary/permanent
+     broader metadata-only DDL beyond the focused view algorithm boundary,
+     broader mixed temporary/permanent
      rename matrices, broader FK plus non-FK ALTER lists beyond the focused
      ADD COLUMN, DROP/MODIFY/CHANGE/RENAME COLUMN, table-comment, column-default,
      named CHECK, secondary-index drop/add, unique-index replacement,

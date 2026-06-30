@@ -2552,6 +2552,10 @@ bool ownerless_mixed_foreign_key_merge_recovery_kind(
     std::uint32_t *current_kind,
     std::uint32_t next_kind
 );
+bool consume_ownerless_optional_view_algorithm_clause(
+    const SqlPolicyTokens &tokens,
+    std::size_t &index
+);
 bool consume_ownerless_optional_view_security_clauses(
     const SqlPolicyTokens &tokens,
     std::size_t &index
@@ -16928,7 +16932,8 @@ bool ownerless_create_view_recovery_statement(const SqlPolicyTokens &tokens) {
     }
 
     std::size_t index = 1U;
-    if (!consume_ownerless_optional_view_security_clauses(tokens, index) || index >= tokens.count ||
+    if (!consume_ownerless_optional_view_algorithm_clause(tokens, index) ||
+        !consume_ownerless_optional_view_security_clauses(tokens, index) || index >= tokens.count ||
         !token_equals(tokens.values[index], "VIEW")) {
         return false;
     }
@@ -16951,7 +16956,8 @@ bool ownerless_create_or_replace_view_recovery_statement(const SqlPolicyTokens &
     }
 
     std::size_t index = 3U;
-    if (!consume_ownerless_optional_view_security_clauses(tokens, index) || index >= tokens.count ||
+    if (!consume_ownerless_optional_view_algorithm_clause(tokens, index) ||
+        !consume_ownerless_optional_view_security_clauses(tokens, index) || index >= tokens.count ||
         !token_equals(tokens.values[index], "VIEW")) {
         return false;
     }
@@ -18188,6 +18194,26 @@ bool consume_ownerless_single_clause_alter_tail(const SqlPolicyTokens &tokens, s
     return depth == 0U;
 }
 
+bool consume_ownerless_optional_view_algorithm_clause(
+    const SqlPolicyTokens &tokens,
+    std::size_t &index
+) {
+    if (index >= tokens.count || !token_equals(tokens.values[index], "ALGORITHM")) {
+        return true;
+    }
+    ++index;
+    if (index >= tokens.count || !token_equals(tokens.values[index], "=")) {
+        return false;
+    }
+    ++index;
+    if (index >= tokens.count ||
+        !token_in(tokens.values[index], "MERGE", "TEMPTABLE", "UNDEFINED")) {
+        return false;
+    }
+    ++index;
+    return true;
+}
+
 bool consume_ownerless_optional_view_security_clauses(
     const SqlPolicyTokens &tokens,
     std::size_t &index
@@ -18421,7 +18447,8 @@ bool ownerless_alter_view_recovery_statement(const SqlPolicyTokens &tokens) {
     }
 
     std::size_t index = 1U;
-    if (!consume_ownerless_optional_view_security_clauses(tokens, index) || index >= tokens.count ||
+    if (!consume_ownerless_optional_view_algorithm_clause(tokens, index) ||
+        !consume_ownerless_optional_view_security_clauses(tokens, index) || index >= tokens.count ||
         !token_equals(tokens.values[index], "VIEW")) {
         return false;
     }
