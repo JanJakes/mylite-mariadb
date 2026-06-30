@@ -815,6 +815,7 @@ static void test_ownerless_active_reader_pressure_killed_pin_reclaims_live_peer(
 static void test_ownerless_active_reader_pressure_dead_writer_cleanup(void);
 static void test_ownerless_active_reader_pressure_limit_blocks_writes(void);
 static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(void);
+static void test_ownerless_active_reader_pressure_limit_write_classes_after_release(void);
 static void test_ownerless_active_reader_pressure_diagnostics(void);
 static void test_ownerless_expanding_page_pressure_reclaims_after_release(void);
 static void test_ownerless_blob_page_pressure_reclaims_after_release(void);
@@ -4722,6 +4723,10 @@ int main(int argc, char **argv) {
         test_ownerless_active_reader_pressure_limit_blocks_write_classes();
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "active-reader-pressure-write-policy-after-release") == 0) {
+        test_ownerless_active_reader_pressure_limit_write_classes_after_release();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "active-reader-pressure-diagnostics") == 0) {
         test_ownerless_active_reader_pressure_diagnostics();
         return 0;
@@ -7730,6 +7735,9 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_active_reader_pressure_dead_writer_cleanup),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_active_reader_pressure_limit_blocks_writes),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_active_reader_pressure_limit_blocks_write_classes),
+    OWNERLESS_SQL_TEST_CASE(
+        test_ownerless_active_reader_pressure_limit_write_classes_after_release
+    ),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_active_reader_pressure_diagnostics),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_expanding_page_pressure_reclaims_after_release),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_blob_page_pressure_reclaims_after_release),
@@ -22906,7 +22914,10 @@ static void assert_ownerless_pressure_compressed_key_block_zblob_state(const cha
     }
 }
 
-static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(void) {
+static void run_ownerless_active_reader_pressure_limit_write_classes(
+    int exercise_blocked,
+    int exercise_after_release
+) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(root, "ownerless-active-reader-pressure-write-policy.mylite");
@@ -23417,1075 +23428,1127 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     exec_ok(db, "START TRANSACTION");
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_policy") == 2U);
     exec_ok(db, "ROLLBACK");
+    info.size = sizeof(info);
+    assert(mylite_ownerless_pressure_status(db, &info) == MYLITE_OK);
+    assert(info.active_page_version_pin_count == 1U);
+    assert(info.oldest_page_version_pin_lsn > 0U);
+    assert(info.page_version_wal_limit_reached == 1);
 
-    expect_exec_busy(
-        db,
-        "INSERT INTO app.ownerless_pressure_policy VALUES (3, 30)",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "UPDATE app.ownerless_pressure_policy SET value = value + 2 WHERE id = 2",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "DELETE FROM app.ownerless_pressure_policy WHERE id = 1",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "REPLACE INTO app.ownerless_pressure_policy VALUES (2, 200)",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "INSERT INTO app.ownerless_pressure_policy SELECT 4, 40",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "INSERT INTO app.ownerless_pressure_policy (id, value) VALUES (2, 200) "
-        "ON DUPLICATE KEY UPDATE value = VALUES(value)",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "REPLACE INTO app.ownerless_pressure_policy SELECT 2, 20",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "UPDATE ownerless_pressure_policy p "
-        "JOIN ownerless_pressure_join j ON j.id = p.id "
-        "SET p.value = p.value + j.bump WHERE p.id = 1",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "DELETE p FROM ownerless_pressure_policy p "
-        "JOIN ownerless_pressure_join j ON j.id = p.id "
-        "WHERE p.id = 1",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "INSERT IGNORE INTO app.ownerless_pressure_policy VALUES (5, 50)",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "UPDATE LOW_PRIORITY app.ownerless_pressure_policy "
-        "SET value = value + 11 WHERE id = 2",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "DELETE LOW_PRIORITY QUICK FROM app.ownerless_pressure_policy WHERE id = 1",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "UPDATE app.ownerless_pressure_existing_ctas "
-        "SET value = value + 5 WHERE id = 1",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "DELETE FROM app.ownerless_pressure_existing_ctas WHERE id = 2",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "INSERT INTO app.ownerless_pressure_existing_ctas "
-        "SELECT 3, value + 3 FROM app.ownerless_pressure_policy WHERE id = 2",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "CREATE TABLE app.ownerless_pressure_created ("
-        "id INT NOT NULL PRIMARY KEY, "
-        "value INT NOT NULL"
-        ") ENGINE=InnoDB",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "ALTER TABLE app.ownerless_pressure_policy "
-        "ADD COLUMN note VARCHAR(8) NOT NULL DEFAULT 'ok'",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "ALTER TABLE app.ownerless_pressure_auto_inc_ddl AUTO_INCREMENT = 100",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "ALTER TABLE app.ownerless_pressure_column_variant "
-        "MODIFY COLUMN value BIGINT NOT NULL DEFAULT 99",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "ALTER TABLE app.ownerless_pressure_column_variant "
-        "CHANGE COLUMN change_col changed_col INT NOT NULL DEFAULT 41",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "ALTER TABLE app.ownerless_pressure_column_variant DROP COLUMN transient",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "ALTER TABLE app.ownerless_pressure_column_variant RENAME COLUMN old_name TO new_name",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "ALTER TABLE app.ownerless_pressure_column_variant "
-        "ALTER COLUMN set_default_col SET DEFAULT 29",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "ALTER TABLE app.ownerless_pressure_column_variant "
-        "ALTER COLUMN drop_default_col DROP DEFAULT",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "ALTER TABLE app.ownerless_pressure_check_variant "
-        "ADD CONSTRAINT ownerless_pressure_check_added CHECK (value < 100)",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "ALTER TABLE app.ownerless_pressure_check_drop_variant "
-        "DROP CONSTRAINT ownerless_pressure_check_drop_positive",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "ALTER TABLE app.ownerless_pressure_fk_child "
-        "ADD CONSTRAINT ownerless_pressure_fk_child_parent "
-        "FOREIGN KEY (parent_id) "
-        "REFERENCES app.ownerless_pressure_fk_parent (id)",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "ALTER TABLE app.ownerless_pressure_fk_drop_child "
-        "DROP FOREIGN KEY ownerless_pressure_fk_drop_child_parent",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "ALTER TABLE app.ownerless_pressure_generated_fk_child "
-        "ADD CONSTRAINT ownerless_pressure_generated_fk_child_parent "
-        "FOREIGN KEY (parent_key) "
-        "REFERENCES app.ownerless_pressure_generated_fk_parent (id) "
-        "ON UPDATE RESTRICT ON DELETE CASCADE",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "ALTER TABLE app.ownerless_pressure_generated_fk_ref_child "
-        "DROP FOREIGN KEY ownerless_pressure_generated_fk_ref_parent",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "ALTER TABLE app.ownerless_pressure_charset_variant "
-        "CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "ALTER TABLE app.ownerless_pressure_force_variant FORCE",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "ALTER TABLE app.ownerless_pressure_row_format_variant ROW_FORMAT=DYNAMIC",
-        "pressure limit"
-    );
-    for (size_t index = 0U; index < k_ownerless_pressure_compressed_key_block_case_count; ++index) {
-        expect_ownerless_pressure_compressed_key_block_alter_busy(
+    if (exercise_blocked) {
+        expect_exec_busy(
             db,
-            &k_ownerless_pressure_compressed_key_block_cases[index]
+            "INSERT INTO app.ownerless_pressure_policy VALUES (3, 30)",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "UPDATE app.ownerless_pressure_policy SET value = value + 2 WHERE id = 2",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "DELETE FROM app.ownerless_pressure_policy WHERE id = 1",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "REPLACE INTO app.ownerless_pressure_policy VALUES (2, 200)",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "INSERT INTO app.ownerless_pressure_policy SELECT 4, 40",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "INSERT INTO app.ownerless_pressure_policy (id, value) VALUES (2, 200) "
+            "ON DUPLICATE KEY UPDATE value = VALUES(value)",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "REPLACE INTO app.ownerless_pressure_policy SELECT 2, 20",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "UPDATE ownerless_pressure_policy p "
+            "JOIN ownerless_pressure_join j ON j.id = p.id "
+            "SET p.value = p.value + j.bump WHERE p.id = 1",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "DELETE p FROM ownerless_pressure_policy p "
+            "JOIN ownerless_pressure_join j ON j.id = p.id "
+            "WHERE p.id = 1",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "INSERT IGNORE INTO app.ownerless_pressure_policy VALUES (5, 50)",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "UPDATE LOW_PRIORITY app.ownerless_pressure_policy "
+            "SET value = value + 11 WHERE id = 2",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "DELETE LOW_PRIORITY QUICK FROM app.ownerless_pressure_policy WHERE id = 1",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "UPDATE app.ownerless_pressure_existing_ctas "
+            "SET value = value + 5 WHERE id = 1",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "DELETE FROM app.ownerless_pressure_existing_ctas WHERE id = 2",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "INSERT INTO app.ownerless_pressure_existing_ctas "
+            "SELECT 3, value + 3 FROM app.ownerless_pressure_policy WHERE id = 2",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "CREATE TABLE app.ownerless_pressure_created ("
+            "id INT NOT NULL PRIMARY KEY, "
+            "value INT NOT NULL"
+            ") ENGINE=InnoDB",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "ALTER TABLE app.ownerless_pressure_policy "
+            "ADD COLUMN note VARCHAR(8) NOT NULL DEFAULT 'ok'",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "ALTER TABLE app.ownerless_pressure_auto_inc_ddl AUTO_INCREMENT = 100",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "ALTER TABLE app.ownerless_pressure_column_variant "
+            "MODIFY COLUMN value BIGINT NOT NULL DEFAULT 99",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "ALTER TABLE app.ownerless_pressure_column_variant "
+            "CHANGE COLUMN change_col changed_col INT NOT NULL DEFAULT 41",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "ALTER TABLE app.ownerless_pressure_column_variant DROP COLUMN transient",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "ALTER TABLE app.ownerless_pressure_column_variant RENAME COLUMN old_name TO new_name",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "ALTER TABLE app.ownerless_pressure_column_variant "
+            "ALTER COLUMN set_default_col SET DEFAULT 29",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "ALTER TABLE app.ownerless_pressure_column_variant "
+            "ALTER COLUMN drop_default_col DROP DEFAULT",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "ALTER TABLE app.ownerless_pressure_check_variant "
+            "ADD CONSTRAINT ownerless_pressure_check_added CHECK (value < 100)",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "ALTER TABLE app.ownerless_pressure_check_drop_variant "
+            "DROP CONSTRAINT ownerless_pressure_check_drop_positive",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "ALTER TABLE app.ownerless_pressure_fk_child "
+            "ADD CONSTRAINT ownerless_pressure_fk_child_parent "
+            "FOREIGN KEY (parent_id) "
+            "REFERENCES app.ownerless_pressure_fk_parent (id)",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "ALTER TABLE app.ownerless_pressure_fk_drop_child "
+            "DROP FOREIGN KEY ownerless_pressure_fk_drop_child_parent",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "ALTER TABLE app.ownerless_pressure_generated_fk_child "
+            "ADD CONSTRAINT ownerless_pressure_generated_fk_child_parent "
+            "FOREIGN KEY (parent_key) "
+            "REFERENCES app.ownerless_pressure_generated_fk_parent (id) "
+            "ON UPDATE RESTRICT ON DELETE CASCADE",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "ALTER TABLE app.ownerless_pressure_generated_fk_ref_child "
+            "DROP FOREIGN KEY ownerless_pressure_generated_fk_ref_parent",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "ALTER TABLE app.ownerless_pressure_charset_variant "
+            "CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "ALTER TABLE app.ownerless_pressure_force_variant FORCE",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "ALTER TABLE app.ownerless_pressure_row_format_variant ROW_FORMAT=DYNAMIC",
+            "pressure limit"
+        );
+        for (size_t index = 0U; index < k_ownerless_pressure_compressed_key_block_case_count;
+             ++index) {
+            expect_ownerless_pressure_compressed_key_block_alter_busy(
+                db,
+                &k_ownerless_pressure_compressed_key_block_cases[index]
+            );
+        }
+        expect_exec_busy(
+            db,
+            "ALTER TABLE app.ownerless_pressure_generated_variant "
+            "ADD COLUMN stored_sum INT GENERATED ALWAYS AS (base_value + adjust_value) STORED, "
+            "ADD COLUMN virtual_product INT GENERATED ALWAYS AS "
+            "(base_value * adjust_value) VIRTUAL",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "CREATE INDEX ownerless_pressure_generated_virtual_idx "
+            "ON app.ownerless_pressure_generated_index_variant (virtual_product)",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "DROP INDEX ownerless_pressure_generated_existing_idx "
+            "ON app.ownerless_pressure_generated_index_variant",
+            "pressure limit"
+        );
+        expect_exec_busy(db, "DROP TABLE app.ownerless_pressure_drop", "pressure limit");
+        expect_exec_busy(
+            db,
+            "CREATE INDEX ownerless_pressure_policy_value_idx "
+            "ON app.ownerless_pressure_policy (value)",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "DROP INDEX ownerless_pressure_existing_idx ON app.ownerless_pressure_policy",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "RENAME TABLE app.ownerless_pressure_rename "
+            "TO app.ownerless_pressure_renamed",
+            "pressure limit"
+        );
+        expect_exec_busy(db, "TRUNCATE TABLE app.ownerless_pressure_truncate", "pressure limit");
+        expect_exec_busy(db, "CREATE DATABASE ownerless_pressure_created_schema", "pressure limit");
+        expect_exec_busy(db, "DROP DATABASE ownerless_pressure_drop_schema", "pressure limit");
+        expect_exec_busy(
+            db,
+            "CREATE TABLE app.ownerless_pressure_like "
+            "LIKE app.ownerless_pressure_policy",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "CREATE TABLE app.ownerless_pressure_ctas AS "
+            "SELECT id, value FROM app.ownerless_pressure_policy",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "CREATE OR REPLACE TABLE app.ownerless_pressure_replace ("
+            "id INT NOT NULL PRIMARY KEY, "
+            "value INT NOT NULL"
+            ") ENGINE=InnoDB",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "CREATE OR REPLACE TABLE app.ownerless_pressure_replace_like "
+            "LIKE app.ownerless_pressure_replace_like_source",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "CREATE OR REPLACE TABLE app.ownerless_pressure_replace_ctas ENGINE=InnoDB AS "
+            "SELECT id, value + 200 AS value, note AS copied_note "
+            "FROM app.ownerless_pressure_replace_ctas_source",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "CREATE VIEW app.ownerless_pressure_view AS "
+            "SELECT id, value FROM app.ownerless_pressure_policy",
+            "pressure limit"
+        );
+        expect_exec_busy(db, "DROP VIEW app.ownerless_pressure_drop_view", "pressure limit");
+        expect_exec_busy(
+            db,
+            "CREATE TRIGGER app.ownerless_pressure_create_trigger "
+            "BEFORE INSERT ON app.ownerless_pressure_trigger_base "
+            "FOR EACH ROW SET NEW.value = NEW.value + 2",
+            "pressure limit"
+        );
+        expect_exec_busy(db, "DROP TRIGGER app.ownerless_pressure_drop_trigger", "pressure limit");
+        expect_exec_busy(
+            db,
+            "ALTER DATABASE ownerless_pressure_alter_schema "
+            "DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "CREATE TABLE IF NOT EXISTS app.ownerless_pressure_table_idempotent ("
+            "id INT NOT NULL PRIMARY KEY, "
+            "value INT NOT NULL, "
+            "note INT NOT NULL DEFAULT 99"
+            ") ENGINE=InnoDB",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "DROP TABLE IF EXISTS app.ownerless_pressure_table_missing",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "DROP TABLE IF EXISTS app.ownerless_pressure_table_idempotent",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "CREATE OR REPLACE VIEW app.ownerless_pressure_variant_view AS "
+            "SELECT id, value, value + 5 AS adjusted "
+            "FROM app.ownerless_pressure_policy "
+            "WHERE value >= 20",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "ALTER VIEW app.ownerless_pressure_variant_view AS "
+            "SELECT id, value, value - 1 AS adjusted "
+            "FROM app.ownerless_pressure_policy "
+            "WHERE value >= 30",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "CREATE OR REPLACE TRIGGER app.ownerless_pressure_trigger_variant_bu "
+            "BEFORE UPDATE ON app.ownerless_pressure_trigger_variant_base "
+            "FOR EACH ROW SET NEW.value = NEW.value + 2",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "CREATE TRIGGER IF NOT EXISTS app.ownerless_pressure_trigger_idempotent_ai "
+            "AFTER INSERT ON app.ownerless_pressure_trigger_idempotent_base "
+            "FOR EACH ROW "
+            "INSERT INTO app.ownerless_pressure_trigger_idempotent_audit "
+            "VALUES (NEW.id, NEW.value, 9)",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "DROP TRIGGER IF EXISTS app.ownerless_pressure_trigger_missing",
+            "pressure limit"
+        );
+        expect_exec_busy(
+            db,
+            "DROP TRIGGER IF EXISTS app.ownerless_pressure_trigger_idempotent_ai",
+            "pressure limit"
+        );
+        expect_exec_error_containing(
+            db,
+            "ANALYZE TABLE app.ownerless_pressure_policy",
+            "table admin SQL"
+        );
+        expect_exec_error_containing(
+            db,
+            "LOCK TABLES app.ownerless_pressure_policy WRITE",
+            "LOCK TABLES"
+        );
+        expect_exec_error_containing(
+            db,
+            "FLUSH TABLES app.ownerless_pressure_policy WITH READ LOCK",
+            "FLUSH TABLES locks or export"
+        );
+        expect_exec_error_containing(
+            db,
+            "SELECT * FROM app.ownerless_pressure_policy "
+            "INTO OUTFILE '/tmp/mylite-ownerless-pressure-outfile.txt'",
+            "server-owned SQL surface"
+        );
+        expect_exec_error_containing(
+            db,
+            "SELECT * FROM app.ownerless_pressure_policy "
+            "INTO DUMPFILE '/tmp/mylite-ownerless-pressure-dumpfile.txt'",
+            "server-owned SQL surface"
+        );
+        expect_exec_error_containing(
+            db,
+            "WITH pressure_export AS (SELECT id FROM app.ownerless_pressure_policy) "
+            "SELECT id FROM pressure_export "
+            "INTO OUTFILE '/tmp/mylite-ownerless-pressure-cte-outfile.txt'",
+            "server-owned SQL surface"
+        );
+        expect_prepare_error_containing(
+            db,
+            "SELECT * FROM app.ownerless_pressure_policy "
+            "INTO OUTFILE '/tmp/mylite-ownerless-pressure-prepared-outfile.txt'",
+            "server-owned SQL surface"
+        );
+        expect_prepare_error_containing(
+            db,
+            "SELECT * FROM app.ownerless_pressure_policy "
+            "INTO DUMPFILE '/tmp/mylite-ownerless-pressure-prepared-dumpfile.txt'",
+            "server-owned SQL surface"
+        );
+        expect_exec_error_containing(
+            db,
+            "LOAD DATA INFILE '/tmp/mylite-ownerless-pressure-load.csv' "
+            "INTO TABLE app.ownerless_pressure_policy",
+            "server-owned SQL surface"
+        );
+        expect_exec_error_containing(
+            db,
+            "LOAD DATA LOCAL INFILE '/tmp/mylite-ownerless-pressure-local-load.csv' "
+            "INTO TABLE app.ownerless_pressure_policy",
+            "server-owned SQL surface"
+        );
+        expect_exec_error_containing(
+            db,
+            "LOAD XML INFILE '/tmp/mylite-ownerless-pressure-load.xml' "
+            "INTO TABLE app.ownerless_pressure_policy",
+            "server-owned SQL surface"
+        );
+        expect_exec_error_containing(
+            db,
+            "ALTER TABLE app.ownerless_pressure_policy DISCARD TABLESPACE",
+            "DISCARD/IMPORT TABLESPACE"
+        );
+        expect_exec_error_containing(
+            db,
+            "CREATE TABLE app.ownerless_pressure_unsupported_storage ("
+            "id INT NOT NULL PRIMARY KEY"
+            ") ENGINE=InnoDB PAGE_COMPRESSED=1",
+            "unproven table storage options"
+        );
+        expect_exec_error_containing(
+            db,
+            "CREATE TABLE app.ownerless_pressure_partitioned ("
+            "id INT NOT NULL PRIMARY KEY, "
+            "value INT NOT NULL"
+            ") ENGINE=InnoDB "
+            "PARTITION BY HASH(id) PARTITIONS 2",
+            "partitioned table DDL"
+        );
+        expect_exec_error_containing(
+            db,
+            "ALTER TABLE app.ownerless_pressure_policy "
+            "PARTITION BY HASH(id) PARTITIONS 2",
+            "partitioned table DDL"
+        );
+        expect_exec_error_containing(
+            db,
+            "CREATE SEQUENCE app.ownerless_pressure_sequence_created "
+            "START WITH 7 INCREMENT BY 7 NOCACHE",
+            "sequence SQL"
+        );
+        expect_exec_error_containing(
+            db,
+            "ALTER SEQUENCE app.ownerless_pressure_sequence RESTART WITH 700",
+            "sequence SQL"
+        );
+        expect_exec_error_containing(
+            db,
+            "DROP SEQUENCE app.ownerless_pressure_sequence",
+            "sequence SQL"
+        );
+        expect_exec_error_containing(
+            db,
+            "SELECT NEXT VALUE FOR app.ownerless_pressure_sequence",
+            "sequence SQL"
+        );
+        expect_prepare_error_containing(
+            db,
+            "SELECT NEXTVAL(app.ownerless_pressure_sequence)",
+            "sequence SQL"
+        );
+        expect_exec_error_containing(db, "SHOW PROCESSLIST", "server-owned SQL surface");
+        expect_exec_error_containing(db, "KILL 1", "server-owned SQL surface");
+        expect_exec_error_containing(db, "SHUTDOWN", "server-owned SQL surface");
+        expect_exec_error_containing(
+            db,
+            "GRANT SELECT ON *.* TO 'mylite_pressure_user'@'localhost'",
+            "server-owned SQL surface"
+        );
+        expect_exec_error_containing(
+            db,
+            "INSTALL PLUGIN mylite_pressure_plugin SONAME 'mylite_pressure_plugin.so'",
+            "server-owned SQL surface"
+        );
+        expect_exec_error_containing(db, "BINLOG 'ZmFrZQ=='", "server-owned SQL surface");
+        expect_exec_error_containing(db, "RESET MASTER", "server-owned SQL surface");
+        expect_exec_error_containing(db, "SET GLOBAL general_log = ON", "server-owned SQL surface");
+        expect_exec_error_containing(db, "FLUSH LOGS", "server-owned SQL surface");
+        expect_exec_error_containing(db, "SET query_cache_type = ON", "server-owned SQL surface");
+        expect_exec_error_containing(db, "RESET QUERY CACHE", "server-owned SQL surface");
+        expect_prepare_error_containing(db, "KILL 1", "server-owned SQL surface");
+        expect_prepare_error_containing(db, "BINLOG 'ZmFrZQ=='", "server-owned SQL surface");
+        expect_prepare_error_containing(
+            db,
+            "SET GLOBAL general_log = ON",
+            "server-owned SQL surface"
+        );
+        expect_prepare_error_containing(
+            db,
+            "SET query_cache_type = ON",
+            "server-owned SQL surface"
+        );
+        expect_exec_error_containing(
+            db,
+            "CREATE EVENT app.ownerless_pressure_policy_event "
+            "ON SCHEDULE EVERY 1 DAY DO SELECT 1",
+            "server-owned SQL surface"
+        );
+        expect_exec_error_containing(db, "SHOW EVENTS", "server-owned SQL surface");
+        expect_exec_error_containing(
+            db,
+            "SET GLOBAL event_scheduler = ON",
+            "server-owned SQL surface"
+        );
+        expect_prepare_error_containing(
+            db,
+            "CREATE EVENT app.ownerless_pressure_policy_prepared_event "
+            "ON SCHEDULE EVERY 1 DAY DO SELECT 1",
+            "server-owned SQL surface"
+        );
+        expect_prepare_error_containing(
+            db,
+            "SHOW CREATE EVENT app.ownerless_pressure_policy_event",
+            "server-owned SQL surface"
+        );
+        assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 30U);
+        assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_policy") == 2U);
+        assert(
+            query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_auto_inc_ddl") == 2U
+        );
+        assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_pressure_auto_inc_ddl") == 3U);
+        assert(query_unsigned(db, "SELECT MAX(id) FROM app.ownerless_pressure_auto_inc_ddl") == 2U);
+        assert(
+            query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_auto_inc_ddl") == 30U
+        );
+        assert(
+            query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_policy WHERE id = 5") ==
+            0U
+        );
+        assert(
+            query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_existing_ctas") == 2U
+        );
+        assert(
+            query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_existing_ctas") == 30U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_policy' "
+                "AND column_name = 'note'"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_unsupported_storage'"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_partitioned'"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.partitions "
+                "WHERE table_schema = 'app' "
+                "AND table_name IN ("
+                "'ownerless_pressure_policy', "
+                "'ownerless_pressure_partitioned'"
+                ") "
+                "AND partition_name IS NOT NULL"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_sequence_created'"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_sequence'"
+            ) == 1U
+        );
+        assert(
+            query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_sequence_default") == 1U
+        );
+        assert(
+            query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_pressure_sequence_default") == 22U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT SUM(payload) FROM app.ownerless_pressure_sequence_default"
+            ) == 100U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.events "
+                "WHERE event_schema = 'app' "
+                "AND event_name IN ("
+                "'ownerless_pressure_policy_event', "
+                "'ownerless_pressure_policy_prepared_event'"
+                ")"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_column_variant' "
+                "AND column_name = 'value' "
+                "AND data_type = 'int' "
+                "AND column_default = '5'"
+            ) == 1U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_column_variant' "
+                "AND column_name = 'old_name'"
+            ) == 1U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_column_variant' "
+                "AND column_name = 'new_name'"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_column_variant' "
+                "AND column_name = 'change_col' "
+                "AND column_default = '21'"
+            ) == 1U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_column_variant' "
+                "AND column_name = 'changed_col'"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_column_variant' "
+                "AND column_name = 'transient'"
+            ) == 1U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_column_variant' "
+                "AND column_name = 'set_default_col' "
+                "AND column_default = '17'"
+            ) == 1U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_column_variant' "
+                "AND column_name = 'drop_default_col' "
+                "AND column_default = '19'"
+            ) == 1U
+        );
+        assert(
+            query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_column_variant") ==
+            10U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.check_constraints "
+                "WHERE constraint_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_check_variant' "
+                "AND constraint_name = 'ownerless_pressure_check_added'"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.check_constraints "
+                "WHERE constraint_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_check_drop_variant' "
+                "AND constraint_name = 'ownerless_pressure_check_drop_positive'"
+            ) == 1U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.referential_constraints "
+                "WHERE constraint_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_fk_child' "
+                "AND constraint_name = 'ownerless_pressure_fk_child_parent'"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.referential_constraints "
+                "WHERE constraint_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_fk_drop_child' "
+                "AND constraint_name = 'ownerless_pressure_fk_drop_child_parent'"
+            ) == 1U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.referential_constraints "
+                "WHERE constraint_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_generated_fk_child' "
+                "AND constraint_name = 'ownerless_pressure_generated_fk_child_parent'"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.referential_constraints "
+                "WHERE constraint_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_generated_fk_ref_child' "
+                "AND constraint_name = 'ownerless_pressure_generated_fk_ref_parent'"
+            ) == 1U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT SUM(parent_key) FROM app.ownerless_pressure_generated_fk_child"
+            ) == 101U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT SUM(parent_key) FROM app.ownerless_pressure_generated_fk_ref_parent"
+            ) == 403U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT SUM(parent_key) FROM app.ownerless_pressure_generated_fk_ref_child"
+            ) == 201U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_charset_variant' "
+                "AND column_name = 'label' "
+                "AND collation_name = 'latin1_swedish_ci'"
+            ) == 1U
+        );
+        assert(
+            query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_force_variant") == 30U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_row_format_variant' "
+                "AND row_format = 'Compact'"
+            ) == 1U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT SUM(LENGTH(payload)) FROM app.ownerless_pressure_row_format_variant"
+            ) == 2000U
+        );
+        for (size_t index = 0U; index < k_ownerless_pressure_compressed_key_block_case_count;
+             ++index) {
+            assert_ownerless_pressure_compressed_key_block_blocked_state(
+                db,
+                k_ownerless_pressure_compressed_key_block_cases[index].table_name
+            );
+        }
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_generated_variant' "
+                "AND column_name IN ('stored_sum', 'virtual_product')"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.statistics "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_generated_index_variant' "
+                "AND index_name = 'ownerless_pressure_generated_existing_idx'"
+            ) == 1U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.statistics "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_generated_index_variant' "
+                "AND index_name = 'ownerless_pressure_generated_virtual_idx'"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT SUM(stored_sum) FROM app.ownerless_pressure_generated_index_variant"
+            ) == 22U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT SUM(virtual_product) FROM app.ownerless_pressure_generated_index_variant"
+            ) == 62U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_created'"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_drop'"
+            ) == 1U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.statistics "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_policy' "
+                "AND index_name = 'ownerless_pressure_policy_value_idx'"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.statistics "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_policy' "
+                "AND index_name = 'ownerless_pressure_existing_idx'"
+            ) == 1U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_rename'"
+            ) == 1U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_renamed'"
+            ) == 0U
+        );
+        assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_truncate") == 2U);
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.schemata "
+                "WHERE schema_name = 'ownerless_pressure_created_schema'"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.schemata "
+                "WHERE schema_name = 'ownerless_pressure_drop_schema'"
+            ) == 1U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_schema = 'app' "
+                "AND table_name IN ('ownerless_pressure_like', 'ownerless_pressure_ctas')"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_replace' "
+                "AND column_name = 'old_value'"
+            ) == 1U
+        );
+        assert(
+            query_unsigned(db, "SELECT SUM(old_value) FROM app.ownerless_pressure_replace") == 9U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_replace_like' "
+                "AND column_name = 'old_value'"
+            ) == 1U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.statistics "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_replace_like' "
+                "AND index_name = 'ownerless_pressure_replace_like_old_idx'"
+            ) == 1U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.statistics "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_replace_like' "
+                "AND index_name = 'ownerless_pressure_replace_like_value_idx'"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(db, "SELECT SUM(old_value) FROM app.ownerless_pressure_replace_like") ==
+            9U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_replace_ctas' "
+                "AND column_name = 'old_value'"
+            ) == 1U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_replace_ctas' "
+                "AND column_name = 'copied_note'"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(db, "SELECT SUM(old_value) FROM app.ownerless_pressure_replace_ctas") ==
+            9U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.views "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_view'"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.views "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_drop_view'"
+            ) == 1U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.triggers "
+                "WHERE trigger_schema = 'app' "
+                "AND trigger_name = 'ownerless_pressure_create_trigger'"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.triggers "
+                "WHERE trigger_schema = 'app' "
+                "AND trigger_name = 'ownerless_pressure_drop_trigger'"
+            ) == 1U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.schemata "
+                "WHERE schema_name = 'ownerless_pressure_alter_schema' "
+                "AND default_character_set_name = 'latin1' "
+                "AND default_collation_name = 'latin1_swedish_ci'"
+            ) == 1U
+        );
+        assert(
+            query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_table_idempotent") == 1U
+        );
+        assert(
+            query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_table_idempotent") ==
+            10U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_table_idempotent' "
+                "AND column_name = 'note'"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_schema = 'app' "
+                "AND table_name = 'ownerless_pressure_table_missing'"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(db, "SELECT SUM(doubled) FROM app.ownerless_pressure_variant_view") ==
+            60U
+        );
+        assert(
+            exec_status(
+                db,
+                "SELECT SUM(adjusted) FROM app.ownerless_pressure_variant_view",
+                NULL
+            ) != MYLITE_OK
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.triggers "
+                "WHERE trigger_schema = 'app' "
+                "AND trigger_name = 'ownerless_pressure_trigger_variant_bu' "
+                "AND action_statement LIKE '%+ 1%'"
+            ) == 1U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.triggers "
+                "WHERE trigger_schema = 'app' "
+                "AND trigger_name = 'ownerless_pressure_trigger_variant_bu' "
+                "AND action_statement LIKE '%+ 2%'"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.triggers "
+                "WHERE trigger_schema = 'app' "
+                "AND trigger_name = 'ownerless_pressure_trigger_missing'"
+            ) == 0U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.triggers "
+                "WHERE trigger_schema = 'app' "
+                "AND trigger_name = 'ownerless_pressure_trigger_idempotent_ai'"
+            ) == 1U
         );
     }
-    expect_exec_busy(
-        db,
-        "ALTER TABLE app.ownerless_pressure_generated_variant "
-        "ADD COLUMN stored_sum INT GENERATED ALWAYS AS (base_value + adjust_value) STORED, "
-        "ADD COLUMN virtual_product INT GENERATED ALWAYS AS "
-        "(base_value * adjust_value) VIRTUAL",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "CREATE INDEX ownerless_pressure_generated_virtual_idx "
-        "ON app.ownerless_pressure_generated_index_variant (virtual_product)",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "DROP INDEX ownerless_pressure_generated_existing_idx "
-        "ON app.ownerless_pressure_generated_index_variant",
-        "pressure limit"
-    );
-    expect_exec_busy(db, "DROP TABLE app.ownerless_pressure_drop", "pressure limit");
-    expect_exec_busy(
-        db,
-        "CREATE INDEX ownerless_pressure_policy_value_idx "
-        "ON app.ownerless_pressure_policy (value)",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "DROP INDEX ownerless_pressure_existing_idx ON app.ownerless_pressure_policy",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "RENAME TABLE app.ownerless_pressure_rename "
-        "TO app.ownerless_pressure_renamed",
-        "pressure limit"
-    );
-    expect_exec_busy(db, "TRUNCATE TABLE app.ownerless_pressure_truncate", "pressure limit");
-    expect_exec_busy(db, "CREATE DATABASE ownerless_pressure_created_schema", "pressure limit");
-    expect_exec_busy(db, "DROP DATABASE ownerless_pressure_drop_schema", "pressure limit");
-    expect_exec_busy(
-        db,
-        "CREATE TABLE app.ownerless_pressure_like "
-        "LIKE app.ownerless_pressure_policy",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "CREATE TABLE app.ownerless_pressure_ctas AS "
-        "SELECT id, value FROM app.ownerless_pressure_policy",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "CREATE OR REPLACE TABLE app.ownerless_pressure_replace ("
-        "id INT NOT NULL PRIMARY KEY, "
-        "value INT NOT NULL"
-        ") ENGINE=InnoDB",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "CREATE OR REPLACE TABLE app.ownerless_pressure_replace_like "
-        "LIKE app.ownerless_pressure_replace_like_source",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "CREATE OR REPLACE TABLE app.ownerless_pressure_replace_ctas ENGINE=InnoDB AS "
-        "SELECT id, value + 200 AS value, note AS copied_note "
-        "FROM app.ownerless_pressure_replace_ctas_source",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "CREATE VIEW app.ownerless_pressure_view AS "
-        "SELECT id, value FROM app.ownerless_pressure_policy",
-        "pressure limit"
-    );
-    expect_exec_busy(db, "DROP VIEW app.ownerless_pressure_drop_view", "pressure limit");
-    expect_exec_busy(
-        db,
-        "CREATE TRIGGER app.ownerless_pressure_create_trigger "
-        "BEFORE INSERT ON app.ownerless_pressure_trigger_base "
-        "FOR EACH ROW SET NEW.value = NEW.value + 2",
-        "pressure limit"
-    );
-    expect_exec_busy(db, "DROP TRIGGER app.ownerless_pressure_drop_trigger", "pressure limit");
-    expect_exec_busy(
-        db,
-        "ALTER DATABASE ownerless_pressure_alter_schema "
-        "DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "CREATE TABLE IF NOT EXISTS app.ownerless_pressure_table_idempotent ("
-        "id INT NOT NULL PRIMARY KEY, "
-        "value INT NOT NULL, "
-        "note INT NOT NULL DEFAULT 99"
-        ") ENGINE=InnoDB",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "DROP TABLE IF EXISTS app.ownerless_pressure_table_missing",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "DROP TABLE IF EXISTS app.ownerless_pressure_table_idempotent",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "CREATE OR REPLACE VIEW app.ownerless_pressure_variant_view AS "
-        "SELECT id, value, value + 5 AS adjusted "
-        "FROM app.ownerless_pressure_policy "
-        "WHERE value >= 20",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "ALTER VIEW app.ownerless_pressure_variant_view AS "
-        "SELECT id, value, value - 1 AS adjusted "
-        "FROM app.ownerless_pressure_policy "
-        "WHERE value >= 30",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "CREATE OR REPLACE TRIGGER app.ownerless_pressure_trigger_variant_bu "
-        "BEFORE UPDATE ON app.ownerless_pressure_trigger_variant_base "
-        "FOR EACH ROW SET NEW.value = NEW.value + 2",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "CREATE TRIGGER IF NOT EXISTS app.ownerless_pressure_trigger_idempotent_ai "
-        "AFTER INSERT ON app.ownerless_pressure_trigger_idempotent_base "
-        "FOR EACH ROW "
-        "INSERT INTO app.ownerless_pressure_trigger_idempotent_audit "
-        "VALUES (NEW.id, NEW.value, 9)",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "DROP TRIGGER IF EXISTS app.ownerless_pressure_trigger_missing",
-        "pressure limit"
-    );
-    expect_exec_busy(
-        db,
-        "DROP TRIGGER IF EXISTS app.ownerless_pressure_trigger_idempotent_ai",
-        "pressure limit"
-    );
-    expect_exec_error_containing(
-        db,
-        "ANALYZE TABLE app.ownerless_pressure_policy",
-        "table admin SQL"
-    );
-    expect_exec_error_containing(
-        db,
-        "LOCK TABLES app.ownerless_pressure_policy WRITE",
-        "LOCK TABLES"
-    );
-    expect_exec_error_containing(
-        db,
-        "FLUSH TABLES app.ownerless_pressure_policy WITH READ LOCK",
-        "FLUSH TABLES locks or export"
-    );
-    expect_exec_error_containing(
-        db,
-        "SELECT * FROM app.ownerless_pressure_policy "
-        "INTO OUTFILE '/tmp/mylite-ownerless-pressure-outfile.txt'",
-        "server-owned SQL surface"
-    );
-    expect_exec_error_containing(
-        db,
-        "SELECT * FROM app.ownerless_pressure_policy "
-        "INTO DUMPFILE '/tmp/mylite-ownerless-pressure-dumpfile.txt'",
-        "server-owned SQL surface"
-    );
-    expect_exec_error_containing(
-        db,
-        "WITH pressure_export AS (SELECT id FROM app.ownerless_pressure_policy) "
-        "SELECT id FROM pressure_export "
-        "INTO OUTFILE '/tmp/mylite-ownerless-pressure-cte-outfile.txt'",
-        "server-owned SQL surface"
-    );
-    expect_prepare_error_containing(
-        db,
-        "SELECT * FROM app.ownerless_pressure_policy "
-        "INTO OUTFILE '/tmp/mylite-ownerless-pressure-prepared-outfile.txt'",
-        "server-owned SQL surface"
-    );
-    expect_prepare_error_containing(
-        db,
-        "SELECT * FROM app.ownerless_pressure_policy "
-        "INTO DUMPFILE '/tmp/mylite-ownerless-pressure-prepared-dumpfile.txt'",
-        "server-owned SQL surface"
-    );
-    expect_exec_error_containing(
-        db,
-        "LOAD DATA INFILE '/tmp/mylite-ownerless-pressure-load.csv' "
-        "INTO TABLE app.ownerless_pressure_policy",
-        "server-owned SQL surface"
-    );
-    expect_exec_error_containing(
-        db,
-        "LOAD DATA LOCAL INFILE '/tmp/mylite-ownerless-pressure-local-load.csv' "
-        "INTO TABLE app.ownerless_pressure_policy",
-        "server-owned SQL surface"
-    );
-    expect_exec_error_containing(
-        db,
-        "LOAD XML INFILE '/tmp/mylite-ownerless-pressure-load.xml' "
-        "INTO TABLE app.ownerless_pressure_policy",
-        "server-owned SQL surface"
-    );
-    expect_exec_error_containing(
-        db,
-        "ALTER TABLE app.ownerless_pressure_policy DISCARD TABLESPACE",
-        "DISCARD/IMPORT TABLESPACE"
-    );
-    expect_exec_error_containing(
-        db,
-        "CREATE TABLE app.ownerless_pressure_unsupported_storage ("
-        "id INT NOT NULL PRIMARY KEY"
-        ") ENGINE=InnoDB PAGE_COMPRESSED=1",
-        "unproven table storage options"
-    );
-    expect_exec_error_containing(
-        db,
-        "CREATE TABLE app.ownerless_pressure_partitioned ("
-        "id INT NOT NULL PRIMARY KEY, "
-        "value INT NOT NULL"
-        ") ENGINE=InnoDB "
-        "PARTITION BY HASH(id) PARTITIONS 2",
-        "partitioned table DDL"
-    );
-    expect_exec_error_containing(
-        db,
-        "ALTER TABLE app.ownerless_pressure_policy "
-        "PARTITION BY HASH(id) PARTITIONS 2",
-        "partitioned table DDL"
-    );
-    expect_exec_error_containing(
-        db,
-        "CREATE SEQUENCE app.ownerless_pressure_sequence_created "
-        "START WITH 7 INCREMENT BY 7 NOCACHE",
-        "sequence SQL"
-    );
-    expect_exec_error_containing(
-        db,
-        "ALTER SEQUENCE app.ownerless_pressure_sequence RESTART WITH 700",
-        "sequence SQL"
-    );
-    expect_exec_error_containing(
-        db,
-        "DROP SEQUENCE app.ownerless_pressure_sequence",
-        "sequence SQL"
-    );
-    expect_exec_error_containing(
-        db,
-        "SELECT NEXT VALUE FOR app.ownerless_pressure_sequence",
-        "sequence SQL"
-    );
-    expect_prepare_error_containing(
-        db,
-        "SELECT NEXTVAL(app.ownerless_pressure_sequence)",
-        "sequence SQL"
-    );
-    expect_exec_error_containing(db, "SHOW PROCESSLIST", "server-owned SQL surface");
-    expect_exec_error_containing(db, "KILL 1", "server-owned SQL surface");
-    expect_exec_error_containing(db, "SHUTDOWN", "server-owned SQL surface");
-    expect_exec_error_containing(
-        db,
-        "GRANT SELECT ON *.* TO 'mylite_pressure_user'@'localhost'",
-        "server-owned SQL surface"
-    );
-    expect_exec_error_containing(
-        db,
-        "INSTALL PLUGIN mylite_pressure_plugin SONAME 'mylite_pressure_plugin.so'",
-        "server-owned SQL surface"
-    );
-    expect_exec_error_containing(db, "BINLOG 'ZmFrZQ=='", "server-owned SQL surface");
-    expect_exec_error_containing(db, "RESET MASTER", "server-owned SQL surface");
-    expect_exec_error_containing(db, "SET GLOBAL general_log = ON", "server-owned SQL surface");
-    expect_exec_error_containing(db, "FLUSH LOGS", "server-owned SQL surface");
-    expect_exec_error_containing(db, "SET query_cache_type = ON", "server-owned SQL surface");
-    expect_exec_error_containing(db, "RESET QUERY CACHE", "server-owned SQL surface");
-    expect_prepare_error_containing(db, "KILL 1", "server-owned SQL surface");
-    expect_prepare_error_containing(db, "BINLOG 'ZmFrZQ=='", "server-owned SQL surface");
-    expect_prepare_error_containing(db, "SET GLOBAL general_log = ON", "server-owned SQL surface");
-    expect_prepare_error_containing(db, "SET query_cache_type = ON", "server-owned SQL surface");
-    expect_exec_error_containing(
-        db,
-        "CREATE EVENT app.ownerless_pressure_policy_event "
-        "ON SCHEDULE EVERY 1 DAY DO SELECT 1",
-        "server-owned SQL surface"
-    );
-    expect_exec_error_containing(db, "SHOW EVENTS", "server-owned SQL surface");
-    expect_exec_error_containing(db, "SET GLOBAL event_scheduler = ON", "server-owned SQL surface");
-    expect_prepare_error_containing(
-        db,
-        "CREATE EVENT app.ownerless_pressure_policy_prepared_event "
-        "ON SCHEDULE EVERY 1 DAY DO SELECT 1",
-        "server-owned SQL surface"
-    );
-    expect_prepare_error_containing(
-        db,
-        "SHOW CREATE EVENT app.ownerless_pressure_policy_event",
-        "server-owned SQL surface"
-    );
-    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_policy") == 30U);
-    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_policy") == 2U);
-    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_auto_inc_ddl") == 2U);
-    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_pressure_auto_inc_ddl") == 3U);
-    assert(query_unsigned(db, "SELECT MAX(id) FROM app.ownerless_pressure_auto_inc_ddl") == 2U);
-    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_auto_inc_ddl") == 30U);
-    assert(
-        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_policy WHERE id = 5") == 0U
-    );
-    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_existing_ctas") == 2U);
-    assert(
-        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_existing_ctas") == 30U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.columns "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_policy' "
-            "AND column_name = 'note'"
-        ) == 0U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_unsupported_storage'"
-        ) == 0U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_partitioned'"
-        ) == 0U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.partitions "
-            "WHERE table_schema = 'app' "
-            "AND table_name IN ("
-            "'ownerless_pressure_policy', "
-            "'ownerless_pressure_partitioned'"
-            ") "
-            "AND partition_name IS NOT NULL"
-        ) == 0U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_sequence_created'"
-        ) == 0U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_sequence'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_sequence_default") == 1U
-    );
-    assert(
-        query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_pressure_sequence_default") == 22U
-    );
-    assert(
-        query_unsigned(db, "SELECT SUM(payload) FROM app.ownerless_pressure_sequence_default") ==
-        100U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.events "
-            "WHERE event_schema = 'app' "
-            "AND event_name IN ("
-            "'ownerless_pressure_policy_event', "
-            "'ownerless_pressure_policy_prepared_event'"
-            ")"
-        ) == 0U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.columns "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_column_variant' "
-            "AND column_name = 'value' "
-            "AND data_type = 'int' "
-            "AND column_default = '5'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.columns "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_column_variant' "
-            "AND column_name = 'old_name'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.columns "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_column_variant' "
-            "AND column_name = 'new_name'"
-        ) == 0U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.columns "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_column_variant' "
-            "AND column_name = 'change_col' "
-            "AND column_default = '21'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.columns "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_column_variant' "
-            "AND column_name = 'changed_col'"
-        ) == 0U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.columns "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_column_variant' "
-            "AND column_name = 'transient'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.columns "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_column_variant' "
-            "AND column_name = 'set_default_col' "
-            "AND column_default = '17'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.columns "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_column_variant' "
-            "AND column_name = 'drop_default_col' "
-            "AND column_default = '19'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_column_variant") == 10U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.check_constraints "
-            "WHERE constraint_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_check_variant' "
-            "AND constraint_name = 'ownerless_pressure_check_added'"
-        ) == 0U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.check_constraints "
-            "WHERE constraint_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_check_drop_variant' "
-            "AND constraint_name = 'ownerless_pressure_check_drop_positive'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.referential_constraints "
-            "WHERE constraint_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_fk_child' "
-            "AND constraint_name = 'ownerless_pressure_fk_child_parent'"
-        ) == 0U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.referential_constraints "
-            "WHERE constraint_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_fk_drop_child' "
-            "AND constraint_name = 'ownerless_pressure_fk_drop_child_parent'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.referential_constraints "
-            "WHERE constraint_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_generated_fk_child' "
-            "AND constraint_name = 'ownerless_pressure_generated_fk_child_parent'"
-        ) == 0U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.referential_constraints "
-            "WHERE constraint_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_generated_fk_ref_child' "
-            "AND constraint_name = 'ownerless_pressure_generated_fk_ref_parent'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT SUM(parent_key) FROM app.ownerless_pressure_generated_fk_child"
-        ) == 101U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT SUM(parent_key) FROM app.ownerless_pressure_generated_fk_ref_parent"
-        ) == 403U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT SUM(parent_key) FROM app.ownerless_pressure_generated_fk_ref_child"
-        ) == 201U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.columns "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_charset_variant' "
-            "AND column_name = 'label' "
-            "AND collation_name = 'latin1_swedish_ci'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_force_variant") == 30U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_row_format_variant' "
-            "AND row_format = 'Compact'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT SUM(LENGTH(payload)) FROM app.ownerless_pressure_row_format_variant"
-        ) == 2000U
-    );
-    for (size_t index = 0U; index < k_ownerless_pressure_compressed_key_block_case_count; ++index) {
-        assert_ownerless_pressure_compressed_key_block_blocked_state(
-            db,
-            k_ownerless_pressure_compressed_key_block_cases[index].table_name
-        );
-    }
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.columns "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_generated_variant' "
-            "AND column_name IN ('stored_sum', 'virtual_product')"
-        ) == 0U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.statistics "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_generated_index_variant' "
-            "AND index_name = 'ownerless_pressure_generated_existing_idx'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.statistics "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_generated_index_variant' "
-            "AND index_name = 'ownerless_pressure_generated_virtual_idx'"
-        ) == 0U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT SUM(stored_sum) FROM app.ownerless_pressure_generated_index_variant"
-        ) == 22U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT SUM(virtual_product) FROM app.ownerless_pressure_generated_index_variant"
-        ) == 62U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_created'"
-        ) == 0U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_drop'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.statistics "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_policy' "
-            "AND index_name = 'ownerless_pressure_policy_value_idx'"
-        ) == 0U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.statistics "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_policy' "
-            "AND index_name = 'ownerless_pressure_existing_idx'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_rename'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_renamed'"
-        ) == 0U
-    );
-    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_truncate") == 2U);
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.schemata "
-            "WHERE schema_name = 'ownerless_pressure_created_schema'"
-        ) == 0U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.schemata "
-            "WHERE schema_name = 'ownerless_pressure_drop_schema'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_schema = 'app' "
-            "AND table_name IN ('ownerless_pressure_like', 'ownerless_pressure_ctas')"
-        ) == 0U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.columns "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_replace' "
-            "AND column_name = 'old_value'"
-        ) == 1U
-    );
-    assert(query_unsigned(db, "SELECT SUM(old_value) FROM app.ownerless_pressure_replace") == 9U);
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.columns "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_replace_like' "
-            "AND column_name = 'old_value'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.statistics "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_replace_like' "
-            "AND index_name = 'ownerless_pressure_replace_like_old_idx'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.statistics "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_replace_like' "
-            "AND index_name = 'ownerless_pressure_replace_like_value_idx'"
-        ) == 0U
-    );
-    assert(
-        query_unsigned(db, "SELECT SUM(old_value) FROM app.ownerless_pressure_replace_like") == 9U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.columns "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_replace_ctas' "
-            "AND column_name = 'old_value'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.columns "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_replace_ctas' "
-            "AND column_name = 'copied_note'"
-        ) == 0U
-    );
-    assert(
-        query_unsigned(db, "SELECT SUM(old_value) FROM app.ownerless_pressure_replace_ctas") == 9U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.views "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_view'"
-        ) == 0U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.views "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_drop_view'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.triggers "
-            "WHERE trigger_schema = 'app' "
-            "AND trigger_name = 'ownerless_pressure_create_trigger'"
-        ) == 0U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.triggers "
-            "WHERE trigger_schema = 'app' "
-            "AND trigger_name = 'ownerless_pressure_drop_trigger'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.schemata "
-            "WHERE schema_name = 'ownerless_pressure_alter_schema' "
-            "AND default_character_set_name = 'latin1' "
-            "AND default_collation_name = 'latin1_swedish_ci'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_pressure_table_idempotent") == 1U
-    );
-    assert(
-        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_pressure_table_idempotent") == 10U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.columns "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_table_idempotent' "
-            "AND column_name = 'note'"
-        ) == 0U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_schema = 'app' "
-            "AND table_name = 'ownerless_pressure_table_missing'"
-        ) == 0U
-    );
-    assert(
-        query_unsigned(db, "SELECT SUM(doubled) FROM app.ownerless_pressure_variant_view") == 60U
-    );
-    assert(
-        exec_status(db, "SELECT SUM(adjusted) FROM app.ownerless_pressure_variant_view", NULL) !=
-        MYLITE_OK
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.triggers "
-            "WHERE trigger_schema = 'app' "
-            "AND trigger_name = 'ownerless_pressure_trigger_variant_bu' "
-            "AND action_statement LIKE '%+ 1%'"
-        ) == 1U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.triggers "
-            "WHERE trigger_schema = 'app' "
-            "AND trigger_name = 'ownerless_pressure_trigger_variant_bu' "
-            "AND action_statement LIKE '%+ 2%'"
-        ) == 0U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.triggers "
-            "WHERE trigger_schema = 'app' "
-            "AND trigger_name = 'ownerless_pressure_trigger_missing'"
-        ) == 0U
-    );
-    assert(
-        query_unsigned(
-            db,
-            "SELECT COUNT(*) FROM information_schema.triggers "
-            "WHERE trigger_schema = 'app' "
-            "AND trigger_name = 'ownerless_pressure_trigger_idempotent_ai'"
-        ) == 1U
-    );
 
     signal_pipe(release_pipe[1]);
     wait_for_child(reader_child);
+    if (!exercise_after_release) {
+        assert(mylite_close(db) == MYLITE_OK);
+        assert_concurrency_wal_checkpointed_or_retained_native_support_only_eventually(
+            database_path
+        );
+
+        free(database_path);
+        free(runtime_root);
+        remove_tree(root);
+        free(root);
+        return;
+    }
     exec_ok(
         db,
         "UPDATE app.ownerless_pressure_retained_wal_pad "
@@ -25290,6 +25353,14 @@ static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(voi
     free(runtime_root);
     remove_tree(root);
     free(root);
+}
+
+static void test_ownerless_active_reader_pressure_limit_blocks_write_classes(void) {
+    run_ownerless_active_reader_pressure_limit_write_classes(1, 0);
+}
+
+static void test_ownerless_active_reader_pressure_limit_write_classes_after_release(void) {
+    run_ownerless_active_reader_pressure_limit_write_classes(0, 1);
 }
 
 static void test_ownerless_active_reader_pressure_diagnostics(void) {
