@@ -62088,12 +62088,13 @@ static void test_crashed_field_generated_check_dictionary_ddl_recovers_constrain
 
     release_ownerless_live_peer(&live_peer);
 
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     assert_ownerless_field_generated_check_crash_ddl_state(
         paths,
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_ownerless_field_generated_check_crash_ddl_state(paths, MYLITE_OPEN_READWRITE);
     remove_concurrency_shm(database_path);
     assert_ownerless_field_generated_check_crash_ddl_state(

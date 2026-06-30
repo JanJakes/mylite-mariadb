@@ -61,8 +61,8 @@ Add one unsafe-hook selector:
   finish while a live ownerless peer remains open,
 - open a new ownerless read/write handle and recover the dictionary state while
   the peer remains live,
-- verify the native file-operation marker remains set until the live peer is
-  released and final no-live drain runs,
+- verify the native file-operation marker remains set after the live peer is
+  released and drains only when a no-live ownerless opener completes recovery,
 - verify recovered `INFORMATION_SCHEMA.CHECK_CONSTRAINTS` contains the
   column-level `value` CHECK and the table-level generated-column CHECK,
 - verify CHECK enforcement rejects invalid field-level and generated-column
@@ -133,7 +133,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 - The focused selector reaches the dictionary fault hook and does not hang.
 - A new ownerless opener recovers the dictionary state while a live peer
-  remains open, and the marker drains only after final peer release.
+  remains open, and the marker drains only after a no-live ownerless recovery
+  pass.
 - Recovered metadata includes one column-level `value` CHECK and one
   table-level `ownerless_check_generated_total` CHECK in
   `INFORMATION_SCHEMA.CHECK_CONSTRAINTS`.
