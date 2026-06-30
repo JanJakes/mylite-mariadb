@@ -9,6 +9,8 @@ stricter: while another ownerless process still has the directory open, a fresh
 ownerless opener must not perform no-live cleanup of the killed writer's stale
 rollback state. Once the peer exits, no-live recovery must still let
 MariaDB/InnoDB finish the uncommitted rollback and preserve the original rows.
+The FK/trigger follow-up broadens that same native row-undo crash boundary
+from update-side effects to delete-side effects.
 
 ## Source Findings
 
@@ -30,6 +32,9 @@ MariaDB/InnoDB finish the uncommitted rollback and preserve the original rows.
     live-peer ownerless lifecycle for a post-native rollback boundary: a fresh
     ownerless opener returns `MYLITE_BUSY` while the peer remains live, then
     no-live recovery succeeds after peer release.
+  - Existing FK/trigger native row-undo coverage exercises `ON UPDATE CASCADE`
+    plus `AFTER UPDATE` trigger audit rows. Delete-side FK actions and delete
+    trigger row images need separate evidence.
 
 ## Design
 
@@ -47,6 +52,20 @@ attachment is still rejected until read/write recovery runs, and then performs
 the same no-live recovery, forced `.shm` rebuild, ordinary native reopen, and
 follow-up write checks as the existing no-live selectors.
 
+The FK/trigger delete-side follow-up adds one ownerless SQL hook case:
+
+- `test_crashed_fk_trigger_delete_native_row_undo_with_live_peer_blocks_recovery`
+
+It deletes a parent row with one `ON DELETE CASCADE` child table and one
+`ON DELETE SET NULL` child table, deletes two trigger base rows with an
+`AFTER DELETE` audit trigger, then kills the rollback writer at
+`rollback-after-native-row-undo` after skipping three native `row_undo()` hits.
+That targets a deterministic later rollback boundary for the delete-side side
+effects rather than claiming every native FK-delete undo substep is safe. A
+fresh ownerless opener must remain busy while the peer is live; after peer
+release, no-live recovery must restore the deleted parent, cascade child row,
+set-null child key, trigger base rows, and remove the rolled-back audit rows.
+
 No production code changes are required.
 
 ## Scope And Non-Goals
@@ -57,14 +76,19 @@ In scope:
 - One native row-undo crash point for full rollback and one for savepoint
   rollback.
 - Live-peer busy behavior before no-live recovery.
+- Delete-side FK `CASCADE`/`SET NULL` actions and `AFTER DELETE` trigger audit
+  rows at the same native row-undo fault in the live-peer busy/recovery path.
 - Ownerless read/write recovery after peer release, forced `.shm` rebuild,
   ordinary native reopen, and follow-up native writes.
 
 Out of scope:
 
 - Exhaustive faults inside every `row_undo_ins()` or `row_undo_mod()` substep.
-- Foreign-key action rollback, trigger side effects, generated-column side
-  effects, DDL rollback, XA rollback, or prepared transactions.
+- FK actions beyond the covered update-cascade and delete cascade/set-null
+  shapes, trigger variants beyond the covered update/delete audit rows,
+  generated-column side effects beyond the existing focused case, DDL rollback,
+  XA rollback, prepared transactions, or the first two native FK-delete
+  row-undo hits.
 - Longer randomized savepoint schedules and external MariaDB/RQG stress.
 - SQL-level table-lock fault injection.
 
@@ -74,7 +98,9 @@ No SQL syntax, C API, storage-format, or production behavior changes. The slice
 adds evidence that a killed writer inside native rollback internals does not
 let another opener perform no-live ownerless cleanup while a peer is still
 live, and that final no-live recovery still preserves MariaDB/InnoDB rollback
-semantics.
+semantics. The FK/trigger follow-up adds compatibility evidence for delete-side
+referential actions and trigger side effects under the same rollback crash
+boundary.
 
 ## Directory, Lifecycle, And Native Storage Impact
 
@@ -94,6 +120,7 @@ The selectors are registered only for the unsafe ownerless hook build.
 - Build `mylite_ownerless_cross_process_sql_test` with
   `ownerless-test-hooks`.
 - Run the direct live-peer native row-undo selectors.
+- Run the delete-side FK/trigger native row-undo SQL cases by name.
 - Run the adjacent registered rollback hook CTest subset.
 - Build the production embedded target and run adjacent production
   transaction/savepoint smoke selectors.
@@ -103,6 +130,9 @@ The selectors are registered only for the unsafe ownerless hook build.
 
 - The writer reaches the existing `rollback-after-native-row-undo` fault after
   at least one native row undo succeeds.
+- The delete-side FK/trigger case reaches the same fault after three skipped
+  native row-undo hits, after the FK delete and trigger side-effect undo
+  records have made progress.
 - A fresh ownerless read/write opener returns `MYLITE_BUSY` while another
   ownerless peer remains live.
 - After peer release, shared read-only attachment remains busy until read/write
@@ -111,11 +141,15 @@ The selectors are registered only for the unsafe ownerless hook build.
   keeps native DML/file-operation markers clear, checkpoints ownerless WAL,
   survives forced `.shm` rebuild, and remains writable through ordinary native
   reopen.
+- Delete-side FK/trigger recovery restores the parent rows, cascade child rows,
+  set-null child keys, trigger base rows, and removes rolled-back audit rows
+  after live-peer release and no-live recovery.
 
 ## Risks And Follow-Up
 
 - This covers a deterministic live-peer lifecycle around the existing row-undo
   fault, not every native undo sub-operation.
-- FK/trigger/generated-column rollback side effects, XA/prepared rollback,
-  longer randomized savepoint schedules, broader redo/checkpoint
-  reconciliation, and external MariaDB/RQG stress remain completion work.
+- Additional FK/trigger/generated-column rollback side-effect matrices,
+  XA/prepared rollback, longer randomized savepoint schedules, broader
+  redo/checkpoint reconciliation, and external MariaDB/RQG stress remain
+  completion work.
