@@ -3539,10 +3539,11 @@ Tasks:
    crash coverage preserves completed `ALTER TABLE ... ADD COLUMN`,
    `ALTER TABLE ... DROP COLUMN`, `ALTER TABLE ... MODIFY COLUMN`, and
    `ALTER TABLE ... RENAME COLUMN` boundaries before ownerless dictionary
-   finish. The plain stored-column ADD, exact copy-lock stored-column ADD, exact
-   copy-lock DROP, exact copy-lock MODIFY, and bounded real DROP, MODIFY, and
-   RENAME cases now verify native file-operation live recovery while another
-   ownerless peer remains open, with the marker retained until no-live drain.
+   finish. Plain stored-column ADD, both exact copy-lock option orders for
+   unplaced and placed ADD, DROP, MODIFY, CHANGE, and RENAME COLUMN, and
+   bounded real DROP, MODIFY, and RENAME cases now verify native file-operation
+   live recovery while another ownerless peer remains open, with the marker
+   retained until no-live drain.
    The selectors verify recovered added-column/default
    metadata, absent dropped-column metadata, modified-column width/default
    metadata, renamed-column metadata, dependent generated-column and CHECK
@@ -5645,11 +5646,11 @@ Minimum suites before support can be claimed:
     recovered present/absent, unique-enforced, renamed, and ignored/not-ignored
     index states remain correct,
   - after ordinary column-add, column-drop, column-modify, and column-rename
-    ALTER but before ownerless dictionary finish; hook coverage proves the
-    focused plain and exact copy-lock stored-column ADD cases, exact copy-lock
-    DROP/MODIFY cases, plus bounded real DROP, MODIFY, and RENAME cases can
-    recover while another ownerless peer remains live with the native
-    file-operation marker retained until no-live drain, and the
+    ALTER but before ownerless dictionary finish; hook coverage proves focused
+    plain ADD, both exact copy-lock option orders for unplaced and placed ADD,
+    DROP, MODIFY, CHANGE, and RENAME COLUMN, plus bounded real DROP, MODIFY,
+    and RENAME cases can recover while another ownerless peer remains live with
+    the native file-operation marker retained until no-live drain, and the
     recovered added/default,
     absent-column, modified-column,
     renamed-column, or dependent-expression rename state remains correct,
@@ -5996,9 +5997,10 @@ MariaDB success, including generated-column/CHECK expression-table missing
 rename, change, and default no-ops, an `ALTER TABLE ... AUTO_INCREMENT` writer after
 native high-watermark persistence, a composite direction primary-key writer
 after native clustered-key rebuild with live-peer recovery and retained-marker
-no-live drain, plain and exact copy-lock `ALTER TABLE ... ADD COLUMN` writers
-after native stored-column metadata update or copy rebuild, exact copy-lock
-`ALTER TABLE ... DROP COLUMN`, `ALTER TABLE ... MODIFY COLUMN`, and
+no-live drain, plain and both exact copy-lock option orders for
+`ALTER TABLE ... ADD COLUMN` writers after native stored-column metadata update
+or copy rebuild, both exact copy-lock option orders for
+`ALTER TABLE ... DROP COLUMN`, `ALTER TABLE ... MODIFY COLUMN`,
 `ALTER TABLE ... CHANGE COLUMN`, and `ALTER TABLE ... RENAME COLUMN` writers
 after native copy rebuild, an `ALTER COLUMN ... SET DEFAULT`
 writer after native metadata update, simple view CREATE/DROP writers after native view
@@ -8073,8 +8075,9 @@ subsystems that this mode needs:
      boundaries, plus focused
      top-level and ALTER secondary-index idempotent/no-op prefinish boundaries,
      plus focused column idempotent and column `IF EXISTS` missing-column
-     no-op prefinish boundaries, plus focused plain and exact copy-lock
-     ADD COLUMN, exact copy-lock DROP/MODIFY/CHANGE/RENAME COLUMN, table-comment,
+     no-op prefinish boundaries, plus focused plain ADD COLUMN, both exact
+     copy-lock option orders for unplaced and placed ADD COLUMN and for
+     DROP/MODIFY/CHANGE/RENAME COLUMN, table-comment,
      column-default metadata ALTER, and plain, descending, composite direction,
      AUTO_INCREMENT, AUTO_INCREMENT descending, and AUTO_INCREMENT composite
      primary-key replacement

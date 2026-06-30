@@ -1267,17 +1267,22 @@ static void test_crashed_column_add_dictionary_ddl_recovers_column_metadata(void
 static void test_crashed_column_add_copy_lock_dictionary_ddl_recovers_column_metadata(void);
 static void test_crashed_column_add_lock_copy_dictionary_ddl_recovers_column_metadata(void);
 static void test_crashed_column_add_placement_copy_lock_dictionary_ddl_recovers_order(void);
+static void test_crashed_column_add_placement_lock_copy_dictionary_ddl_recovers_order(void);
 static void test_crashed_column_idempotent_add_dictionary_ddl_preserves_column(void);
 static void test_crashed_column_drop_dictionary_ddl_recovers_absent_column(void);
 static void test_crashed_column_drop_copy_lock_dictionary_ddl_recovers_absent_column(void);
+static void test_crashed_column_drop_lock_copy_dictionary_ddl_recovers_absent_column(void);
 static void test_crashed_column_idempotent_drop_dictionary_ddl_preserves_column(void);
 static void test_crashed_column_modify_dictionary_ddl_recovers_column_metadata(void);
 static void test_crashed_column_modify_copy_lock_dictionary_ddl_recovers_column_metadata(void);
+static void test_crashed_column_modify_lock_copy_dictionary_ddl_recovers_column_metadata(void);
 static void test_crashed_column_idempotent_modify_dictionary_ddl_preserves_column(void);
 static void test_crashed_column_change_dictionary_ddl_recovers_column_metadata(void);
 static void test_crashed_column_change_copy_lock_dictionary_ddl_recovers_column_metadata(void);
+static void test_crashed_column_change_lock_copy_dictionary_ddl_recovers_column_metadata(void);
 static void test_crashed_column_rename_dictionary_ddl_recovers_column_metadata(void);
 static void test_crashed_column_rename_copy_lock_dictionary_ddl_recovers_column_metadata(void);
+static void test_crashed_column_rename_lock_copy_dictionary_ddl_recovers_column_metadata(void);
 static void test_crashed_column_idempotent_rename_dictionary_ddl_preserves_column(void);
 static void test_crashed_column_idempotent_rename_expression_dictionary_ddl_preserves_expression(
     void
@@ -1308,15 +1313,11 @@ static void test_crashed_row_format_dictionary_ddl_marks_file_op_checkpoint(void
 static void test_crashed_row_format_copy_lock_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_row_format_lock_copy_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_row_format_compact_dictionary_ddl_marks_file_op_checkpoint(void);
-static void test_crashed_row_format_compact_copy_lock_dictionary_ddl_marks_file_op_checkpoint(void);
-static void test_crashed_row_format_compact_lock_copy_dictionary_ddl_marks_file_op_checkpoint(void);
+static void test_crashed_compact_row_format_copy_lock_marks_file_op_checkpoint(void);
+static void test_crashed_compact_row_format_lock_copy_marks_file_op_checkpoint(void);
 static void test_crashed_row_format_redundant_dictionary_ddl_marks_file_op_checkpoint(void);
-static void test_crashed_row_format_redundant_copy_lock_dictionary_ddl_marks_file_op_checkpoint(
-    void
-);
-static void test_crashed_row_format_redundant_lock_copy_dictionary_ddl_marks_file_op_checkpoint(
-    void
-);
+static void test_crashed_redundant_row_format_copy_lock_marks_file_op_checkpoint(void);
+static void test_crashed_redundant_row_format_lock_copy_marks_file_op_checkpoint(void);
 static void test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table(void);
 static void test_crashed_compressed_row_format_dictionary_ddl_marks_file_op_checkpoint(void);
 static void test_crashed_compressed_key_block_1_dictionary_ddl_recovers_rebuilt_table(void);
@@ -2540,12 +2541,24 @@ static void add_column_first_copy_lock_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
+static void add_column_after_lock_copy_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void add_column_first_lock_copy_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void idempotent_add_column_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
 static void drop_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void drop_column_copy_lock_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void drop_column_lock_copy_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -2558,6 +2571,10 @@ static void modify_column_copy_lock_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
+static void modify_column_lock_copy_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void idempotent_modify_column_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -2567,8 +2584,16 @@ static void change_column_copy_lock_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
+static void change_column_lock_copy_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
 static void rename_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd);
 static void rename_column_copy_lock_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+);
+static void rename_column_lock_copy_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
 );
@@ -6824,6 +6849,16 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-column-copy-lock-option-order-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        test_crashed_column_add_placement_lock_copy_dictionary_ddl_recovers_order();
+        test_crashed_column_drop_lock_copy_dictionary_ddl_recovers_absent_column();
+        test_crashed_column_modify_lock_copy_dictionary_ddl_recovers_column_metadata();
+        test_crashed_column_change_lock_copy_dictionary_ddl_recovers_column_metadata();
+        test_crashed_column_rename_lock_copy_dictionary_ddl_recovers_column_metadata();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-column-idempotent-add-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_column_idempotent_add_dictionary_ddl_preserves_column();
@@ -7038,13 +7073,13 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "dictionary-row-format-compact-copy-lock-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-        test_crashed_row_format_compact_copy_lock_dictionary_ddl_marks_file_op_checkpoint();
+        test_crashed_compact_row_format_copy_lock_marks_file_op_checkpoint();
 #endif
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "dictionary-row-format-compact-lock-copy-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-        test_crashed_row_format_compact_lock_copy_dictionary_ddl_marks_file_op_checkpoint();
+        test_crashed_compact_row_format_lock_copy_marks_file_op_checkpoint();
 #endif
         return 0;
     }
@@ -7056,13 +7091,13 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "dictionary-row-format-redundant-copy-lock-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-        test_crashed_row_format_redundant_copy_lock_dictionary_ddl_marks_file_op_checkpoint();
+        test_crashed_redundant_row_format_copy_lock_marks_file_op_checkpoint();
 #endif
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "dictionary-row-format-redundant-lock-copy-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-        test_crashed_row_format_redundant_lock_copy_dictionary_ddl_marks_file_op_checkpoint();
+        test_crashed_redundant_row_format_lock_copy_marks_file_op_checkpoint();
 #endif
         return 0;
     }
@@ -7840,6 +7875,7 @@ int main(int argc, char **argv) {
             "dictionary-column-add-copy-lock-crash|"
             "dictionary-column-add-lock-copy-crash|"
             "dictionary-column-add-placement-copy-lock-crash|"
+            "dictionary-column-copy-lock-option-order-crash|"
             "dictionary-column-idempotent-add-crash|"
             "dictionary-column-drop-crash|"
             "dictionary-column-drop-copy-lock-crash|"
@@ -8462,19 +8498,19 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
         test_crashed_row_format_compact_dictionary_ddl_marks_file_op_checkpoint
     ),
     OWNERLESS_SQL_TEST_CASE(
-        test_crashed_row_format_compact_copy_lock_dictionary_ddl_marks_file_op_checkpoint
+        test_crashed_compact_row_format_copy_lock_marks_file_op_checkpoint
     ),
     OWNERLESS_SQL_TEST_CASE(
-        test_crashed_row_format_compact_lock_copy_dictionary_ddl_marks_file_op_checkpoint
+        test_crashed_compact_row_format_lock_copy_marks_file_op_checkpoint
     ),
     OWNERLESS_SQL_TEST_CASE(
         test_crashed_row_format_redundant_dictionary_ddl_marks_file_op_checkpoint
     ),
     OWNERLESS_SQL_TEST_CASE(
-        test_crashed_row_format_redundant_copy_lock_dictionary_ddl_marks_file_op_checkpoint
+        test_crashed_redundant_row_format_copy_lock_marks_file_op_checkpoint
     ),
     OWNERLESS_SQL_TEST_CASE(
-        test_crashed_row_format_redundant_lock_copy_dictionary_ddl_marks_file_op_checkpoint
+        test_crashed_redundant_row_format_lock_copy_marks_file_op_checkpoint
     ),
     OWNERLESS_SQL_TEST_CASE(test_crashed_compressed_row_format_dictionary_ddl_recovers_rebuilt_table
     ),
@@ -70064,11 +70100,14 @@ static void test_crashed_column_add_lock_copy_dictionary_ddl_recovers_column_met
     free(root);
 }
 
-static void test_crashed_column_add_placement_copy_lock_dictionary_ddl_recovers_order(void) {
+static void run_crashed_column_add_placement_copy_lock_dictionary_ddl_recovers_order(
+    const char *database_leaf,
+    void (*after_fault)(open_database_paths, int),
+    void (*first_fault)(open_database_paths, int)
+) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
-    char *database_path =
-        path_join(root, "ownerless-dictionary-column-add-placement-copy-lock-crash.mylite");
+    char *database_path = path_join(root, database_leaf);
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     ownerless_live_peer_guard live_peer;
     mylite_db *db;
@@ -70115,10 +70154,7 @@ static void test_crashed_column_add_placement_copy_lock_dictionary_ddl_recovers_
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
-        paths,
-        add_column_after_copy_lock_until_dictionary_finish_fault
-    );
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(paths, after_fault);
     assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -70186,10 +70222,7 @@ static void test_crashed_column_add_placement_copy_lock_dictionary_ddl_recovers_
     assert(mylite_close(db) == MYLITE_OK);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
-    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
-        paths,
-        add_column_first_copy_lock_until_dictionary_finish_fault
-    );
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(paths, first_fault);
     assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -70245,6 +70278,22 @@ static void test_crashed_column_add_placement_copy_lock_dictionary_ddl_recovers_
     free(runtime_root);
     remove_tree(root);
     free(root);
+}
+
+static void test_crashed_column_add_placement_copy_lock_dictionary_ddl_recovers_order(void) {
+    run_crashed_column_add_placement_copy_lock_dictionary_ddl_recovers_order(
+        "ownerless-dictionary-column-add-placement-copy-lock-crash.mylite",
+        add_column_after_copy_lock_until_dictionary_finish_fault,
+        add_column_first_copy_lock_until_dictionary_finish_fault
+    );
+}
+
+static void test_crashed_column_add_placement_lock_copy_dictionary_ddl_recovers_order(void) {
+    run_crashed_column_add_placement_copy_lock_dictionary_ddl_recovers_order(
+        "ownerless-dictionary-column-add-placement-lock-copy-crash.mylite",
+        add_column_after_lock_copy_until_dictionary_finish_fault,
+        add_column_first_lock_copy_until_dictionary_finish_fault
+    );
 }
 
 static void test_crashed_column_idempotent_add_dictionary_ddl_preserves_column(void) {
@@ -70454,11 +70503,13 @@ static void test_crashed_column_drop_dictionary_ddl_recovers_absent_column(void)
     free(root);
 }
 
-static void test_crashed_column_drop_copy_lock_dictionary_ddl_recovers_absent_column(void) {
+static void run_crashed_column_drop_copy_lock_dictionary_ddl_recovers_absent_column(
+    const char *database_leaf,
+    void (*fault)(open_database_paths, int)
+) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
-    char *database_path =
-        path_join(root, "ownerless-dictionary-column-drop-copy-lock-crash.mylite");
+    char *database_path = path_join(root, database_leaf);
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     ownerless_live_peer_guard live_peer;
     mylite_db *db;
@@ -70496,10 +70547,7 @@ static void test_crashed_column_drop_copy_lock_dictionary_ddl_recovers_absent_co
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
-        paths,
-        drop_column_copy_lock_until_dictionary_finish_fault
-    );
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(paths, fault);
     assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -70566,6 +70614,20 @@ static void test_crashed_column_drop_copy_lock_dictionary_ddl_recovers_absent_co
     free(runtime_root);
     remove_tree(root);
     free(root);
+}
+
+static void test_crashed_column_drop_copy_lock_dictionary_ddl_recovers_absent_column(void) {
+    run_crashed_column_drop_copy_lock_dictionary_ddl_recovers_absent_column(
+        "ownerless-dictionary-column-drop-copy-lock-crash.mylite",
+        drop_column_copy_lock_until_dictionary_finish_fault
+    );
+}
+
+static void test_crashed_column_drop_lock_copy_dictionary_ddl_recovers_absent_column(void) {
+    run_crashed_column_drop_copy_lock_dictionary_ddl_recovers_absent_column(
+        "ownerless-dictionary-column-drop-lock-copy-crash.mylite",
+        drop_column_lock_copy_until_dictionary_finish_fault
+    );
 }
 
 static void test_crashed_column_idempotent_drop_dictionary_ddl_preserves_column(void) {
@@ -70829,11 +70891,13 @@ static void test_crashed_column_modify_dictionary_ddl_recovers_column_metadata(v
     free(root);
 }
 
-static void test_crashed_column_modify_copy_lock_dictionary_ddl_recovers_column_metadata(void) {
+static void run_crashed_column_modify_copy_lock_dictionary_ddl_recovers_column_metadata(
+    const char *database_leaf,
+    void (*fault)(open_database_paths, int)
+) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
-    char *database_path =
-        path_join(root, "ownerless-dictionary-column-modify-copy-lock-crash.mylite");
+    char *database_path = path_join(root, database_leaf);
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     ownerless_live_peer_guard live_peer;
     mylite_db *db;
@@ -70873,10 +70937,7 @@ static void test_crashed_column_modify_copy_lock_dictionary_ddl_recovers_column_
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
-        paths,
-        modify_column_copy_lock_until_dictionary_finish_fault
-    );
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(paths, fault);
     assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -70973,6 +71034,20 @@ static void test_crashed_column_modify_copy_lock_dictionary_ddl_recovers_column_
     free(runtime_root);
     remove_tree(root);
     free(root);
+}
+
+static void test_crashed_column_modify_copy_lock_dictionary_ddl_recovers_column_metadata(void) {
+    run_crashed_column_modify_copy_lock_dictionary_ddl_recovers_column_metadata(
+        "ownerless-dictionary-column-modify-copy-lock-crash.mylite",
+        modify_column_copy_lock_until_dictionary_finish_fault
+    );
+}
+
+static void test_crashed_column_modify_lock_copy_dictionary_ddl_recovers_column_metadata(void) {
+    run_crashed_column_modify_copy_lock_dictionary_ddl_recovers_column_metadata(
+        "ownerless-dictionary-column-modify-lock-copy-crash.mylite",
+        modify_column_lock_copy_until_dictionary_finish_fault
+    );
 }
 
 static void test_crashed_column_change_dictionary_ddl_recovers_column_metadata(void) {
@@ -71122,11 +71197,13 @@ static void test_crashed_column_change_dictionary_ddl_recovers_column_metadata(v
     free(root);
 }
 
-static void test_crashed_column_change_copy_lock_dictionary_ddl_recovers_column_metadata(void) {
+static void run_crashed_column_change_copy_lock_dictionary_ddl_recovers_column_metadata(
+    const char *database_leaf,
+    void (*fault)(open_database_paths, int)
+) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
-    char *database_path =
-        path_join(root, "ownerless-dictionary-column-change-copy-lock-crash.mylite");
+    char *database_path = path_join(root, database_leaf);
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     ownerless_live_peer_guard live_peer;
     mylite_db *db;
@@ -71176,10 +71253,7 @@ static void test_crashed_column_change_copy_lock_dictionary_ddl_recovers_column_
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
-        paths,
-        change_column_copy_lock_until_dictionary_finish_fault
-    );
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(paths, fault);
     assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -71294,6 +71368,20 @@ static void test_crashed_column_change_copy_lock_dictionary_ddl_recovers_column_
     free(runtime_root);
     remove_tree(root);
     free(root);
+}
+
+static void test_crashed_column_change_copy_lock_dictionary_ddl_recovers_column_metadata(void) {
+    run_crashed_column_change_copy_lock_dictionary_ddl_recovers_column_metadata(
+        "ownerless-dictionary-column-change-copy-lock-crash.mylite",
+        change_column_copy_lock_until_dictionary_finish_fault
+    );
+}
+
+static void test_crashed_column_change_lock_copy_dictionary_ddl_recovers_column_metadata(void) {
+    run_crashed_column_change_copy_lock_dictionary_ddl_recovers_column_metadata(
+        "ownerless-dictionary-column-change-lock-copy-crash.mylite",
+        change_column_lock_copy_until_dictionary_finish_fault
+    );
 }
 
 static void test_crashed_column_idempotent_modify_dictionary_ddl_preserves_column(void) {
@@ -72640,11 +72728,13 @@ static void test_crashed_column_rename_dictionary_ddl_recovers_column_metadata(v
     free(root);
 }
 
-static void test_crashed_column_rename_copy_lock_dictionary_ddl_recovers_column_metadata(void) {
+static void run_crashed_column_rename_copy_lock_dictionary_ddl_recovers_column_metadata(
+    const char *database_leaf,
+    void (*fault)(open_database_paths, int)
+) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
-    char *database_path =
-        path_join(root, "ownerless-dictionary-column-rename-copy-lock-crash.mylite");
+    char *database_path = path_join(root, database_leaf);
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     ownerless_live_peer_guard live_peer;
     mylite_db *db;
@@ -72694,10 +72784,7 @@ static void test_crashed_column_rename_copy_lock_dictionary_ddl_recovers_column_
     );
     assert(mylite_close(db) == MYLITE_OK);
 
-    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
-        paths,
-        rename_column_copy_lock_until_dictionary_finish_fault
-    );
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(paths, fault);
     assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -72812,6 +72899,20 @@ static void test_crashed_column_rename_copy_lock_dictionary_ddl_recovers_column_
     free(runtime_root);
     remove_tree(root);
     free(root);
+}
+
+static void test_crashed_column_rename_copy_lock_dictionary_ddl_recovers_column_metadata(void) {
+    run_crashed_column_rename_copy_lock_dictionary_ddl_recovers_column_metadata(
+        "ownerless-dictionary-column-rename-copy-lock-crash.mylite",
+        rename_column_copy_lock_until_dictionary_finish_fault
+    );
+}
+
+static void test_crashed_column_rename_lock_copy_dictionary_ddl_recovers_column_metadata(void) {
+    run_crashed_column_rename_copy_lock_dictionary_ddl_recovers_column_metadata(
+        "ownerless-dictionary-column-rename-lock-copy-crash.mylite",
+        rename_column_lock_copy_until_dictionary_finish_fault
+    );
 }
 
 static void test_crashed_column_rename_dictionary_ddl_recovers_dependent_expressions(void) {
@@ -73733,9 +73834,7 @@ static void test_crashed_row_format_compact_dictionary_ddl_marks_file_op_checkpo
     );
 }
 
-static void test_crashed_row_format_compact_copy_lock_dictionary_ddl_marks_file_op_checkpoint(
-    void
-) {
+static void test_crashed_compact_row_format_copy_lock_marks_file_op_checkpoint(void) {
     run_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(
         row_format_compact_copy_lock_until_dictionary_finish_fault,
         "ownerless-dictionary-row-format-compact-copy-lock-crash.mylite",
@@ -73746,9 +73845,7 @@ static void test_crashed_row_format_compact_copy_lock_dictionary_ddl_marks_file_
     );
 }
 
-static void test_crashed_row_format_compact_lock_copy_dictionary_ddl_marks_file_op_checkpoint(
-    void
-) {
+static void test_crashed_compact_row_format_lock_copy_marks_file_op_checkpoint(void) {
     run_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(
         row_format_compact_lock_copy_until_dictionary_finish_fault,
         "ownerless-dictionary-row-format-compact-lock-copy-crash.mylite",
@@ -73770,9 +73867,7 @@ static void test_crashed_row_format_redundant_dictionary_ddl_marks_file_op_check
     );
 }
 
-static void test_crashed_row_format_redundant_copy_lock_dictionary_ddl_marks_file_op_checkpoint(
-    void
-) {
+static void test_crashed_redundant_row_format_copy_lock_marks_file_op_checkpoint(void) {
     run_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(
         row_format_redundant_copy_lock_until_dictionary_finish_fault,
         "ownerless-dictionary-row-format-redundant-copy-lock-crash.mylite",
@@ -73783,9 +73878,7 @@ static void test_crashed_row_format_redundant_copy_lock_dictionary_ddl_marks_fil
     );
 }
 
-static void test_crashed_row_format_redundant_lock_copy_dictionary_ddl_marks_file_op_checkpoint(
-    void
-) {
+static void test_crashed_redundant_row_format_lock_copy_marks_file_op_checkpoint(void) {
     run_crashed_row_format_dictionary_ddl_recovers_rebuilt_table(
         row_format_redundant_lock_copy_until_dictionary_finish_fault,
         "ownerless-dictionary-row-format-redundant-lock-copy-crash.mylite",
@@ -91548,6 +91641,34 @@ static void add_column_first_copy_lock_until_dictionary_finish_fault(
     );
 }
 
+static void add_column_after_lock_copy_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_column_add_after_copy_lock_crash_base "
+        "ADD COLUMN placed_note INT NOT NULL DEFAULT 7 AFTER value, "
+        "LOCK=EXCLUSIVE, ALGORITHM=COPY"
+    );
+}
+
+static void add_column_first_lock_copy_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_column_add_first_copy_lock_crash_base "
+        "ADD COLUMN first_note INT NOT NULL DEFAULT 5 FIRST, "
+        "LOCK=EXCLUSIVE, ALGORITHM=COPY"
+    );
+}
+
 static void idempotent_add_column_until_dictionary_finish_fault(
     open_database_paths paths,
     int ready_fd
@@ -91580,6 +91701,19 @@ static void drop_column_copy_lock_until_dictionary_finish_fault(
         "dictionary-before-finish",
         "ALTER TABLE app.ownerless_column_drop_copy_lock_crash_base "
         "DROP COLUMN note, ALGORITHM=COPY, LOCK=EXCLUSIVE"
+    );
+}
+
+static void drop_column_lock_copy_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_column_drop_copy_lock_crash_base "
+        "DROP COLUMN note, LOCK=EXCLUSIVE, ALGORITHM=COPY"
     );
 }
 
@@ -91620,6 +91754,20 @@ static void modify_column_copy_lock_until_dictionary_finish_fault(
     );
 }
 
+static void modify_column_lock_copy_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_column_modify_copy_lock_crash_base "
+        "MODIFY COLUMN note VARCHAR(32) NOT NULL DEFAULT 'changed', "
+        "LOCK=EXCLUSIVE, ALGORITHM=COPY"
+    );
+}
+
 static void change_column_until_dictionary_finish_fault(open_database_paths paths, int ready_fd) {
     execute_sql_until_dictionary_fault(
         paths,
@@ -91641,6 +91789,20 @@ static void change_column_copy_lock_until_dictionary_finish_fault(
         "ALTER TABLE app.ownerless_column_change_copy_lock_crash_base "
         "CHANGE COLUMN note changed_note VARCHAR(32) NOT NULL DEFAULT 'changed', "
         "ALGORITHM=COPY, LOCK=EXCLUSIVE"
+    );
+}
+
+static void change_column_lock_copy_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_column_change_copy_lock_crash_base "
+        "CHANGE COLUMN note changed_note VARCHAR(32) NOT NULL DEFAULT 'changed', "
+        "LOCK=EXCLUSIVE, ALGORITHM=COPY"
     );
 }
 
@@ -91677,6 +91839,19 @@ static void rename_column_copy_lock_until_dictionary_finish_fault(
         "dictionary-before-finish",
         "ALTER TABLE app.ownerless_column_rename_copy_lock_crash_base "
         "RENAME COLUMN note TO renamed_note, ALGORITHM=COPY, LOCK=EXCLUSIVE"
+    );
+}
+
+static void rename_column_lock_copy_until_dictionary_finish_fault(
+    open_database_paths paths,
+    int ready_fd
+) {
+    execute_sql_until_dictionary_fault(
+        paths,
+        ready_fd,
+        "dictionary-before-finish",
+        "ALTER TABLE app.ownerless_column_rename_copy_lock_crash_base "
+        "RENAME COLUMN note TO renamed_note, LOCK=EXCLUSIVE, ALGORITHM=COPY"
     );
 }
 
