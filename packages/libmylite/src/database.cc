@@ -2195,6 +2195,10 @@ bool ownerless_native_page_checkpoint_record_is_better(
     const OwnerlessNativePageCheckpointRecord &candidate,
     const OwnerlessNativePageCheckpointRecord &current
 );
+bool ownerless_native_page_checkpoint_record_supersedes(
+    const OwnerlessNativePageCheckpointRecord &record,
+    const OwnerlessNativePageCheckpointRecord &successor
+);
 bool verify_ownerless_native_page_checkpoint_latest_record(
     RuntimeState &runtime,
     const OwnerlessNativePageCheckpointRecord &record,
@@ -14057,7 +14061,10 @@ bool ownerless_page_log_has_native_page_lsn_proof(
         if (left.space_id != right.space_id) {
             return left.space_id < right.space_id;
         }
-        return left.page_no < right.page_no;
+        if (left.page_no != right.page_no) {
+            return left.page_no < right.page_no;
+        }
+        return left.record_offset < right.record_offset;
     });
     for (const OwnerlessNativePageCheckpointRecord &record : proof.records) {
         if (!latest_records.empty() && latest_records.back().space_id == record.space_id &&
@@ -14070,7 +14077,7 @@ bool ownerless_page_log_has_native_page_lsn_proof(
         latest_records.push_back(record);
     }
 
-    for (const OwnerlessNativePageCheckpointRecord &record : latest_records) {
+    for (const OwnerlessNativePageCheckpointRecord &record : proof.records) {
         if (!record.proof_only_native_support_record) {
             continue;
         }
@@ -14089,6 +14096,35 @@ bool ownerless_page_log_has_native_page_lsn_proof(
                 record,
                 visible_lsn,
                 allow_no_live_consumed_native_successor
+            )) {
+            return false;
+        }
+    }
+    std::size_t latest_index = 0;
+    for (const OwnerlessNativePageCheckpointRecord &record : proof.records) {
+        while (latest_index < latest_records.size() &&
+               (latest_records[latest_index].space_id < record.space_id ||
+                (latest_records[latest_index].space_id == record.space_id &&
+                 latest_records[latest_index].page_no < record.page_no))) {
+            ++latest_index;
+        }
+        if (latest_index >= latest_records.size() ||
+            latest_records[latest_index].space_id != record.space_id ||
+            latest_records[latest_index].page_no != record.page_no) {
+            return false;
+        }
+        const OwnerlessNativePageCheckpointRecord &latest_record = latest_records[latest_index];
+        if (record.record_offset == latest_record.record_offset) {
+            continue;
+        }
+        if (ownerless_native_page_checkpoint_record_supersedes(record, latest_record)) {
+            continue;
+        }
+        if (!verify_ownerless_native_page_checkpoint_latest_record(
+                runtime,
+                record,
+                visible_lsn,
+                false
             )) {
             return false;
         }
@@ -14677,6 +14713,18 @@ bool ownerless_native_page_checkpoint_record_is_better(
         return !candidate.proof_only_native_support_record;
     }
     return candidate.record_offset > current.record_offset;
+}
+
+bool ownerless_native_page_checkpoint_record_supersedes(
+    const OwnerlessNativePageCheckpointRecord &record,
+    const OwnerlessNativePageCheckpointRecord &successor
+) {
+    if (successor.proof_only_native_support_record) {
+        return false;
+    }
+    return successor.space_id == record.space_id && successor.page_no == record.page_no &&
+           successor.record_offset != record.record_offset &&
+           successor.page_lsn > record.page_lsn && successor.commit_lsn >= record.commit_lsn;
 }
 
 bool verify_ownerless_native_page_checkpoint_latest_record(

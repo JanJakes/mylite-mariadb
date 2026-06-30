@@ -398,6 +398,10 @@ if(BUILD_TESTING)
       COMMAND mylite_ownerless_cross_process_sql_test mixed-history-proof-checkpoint-cutover
     )
     add_test(
+      NAME libmylite.ownerless-duplicate-page-checkpoint-cutover
+      COMMAND mylite_ownerless_cross_process_sql_test duplicate-page-checkpoint-cutover
+    )
+    add_test(
       NAME libmylite.ownerless-no-live-pressure-reclaim-proof
       COMMAND mylite_ownerless_cross_process_sql_test no-live-pressure-reclaim
     )
@@ -2051,6 +2055,10 @@ if(BUILD_TESTING)
       TIMEOUT 90
     )
     set_tests_properties(libmylite.ownerless-mixed-history-proof-checkpoint-cutover PROPERTIES
+      LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
+      TIMEOUT 90
+    )
+    set_tests_properties(libmylite.ownerless-duplicate-page-checkpoint-cutover PROPERTIES
       LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
       TIMEOUT 90
     )

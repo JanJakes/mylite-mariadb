@@ -93,12 +93,14 @@ checkpoint proof boundary.
 - `native-reclaim-crash` keeps statement-boundary reclaim suppressed until
   final close, pauses at `native-checkpoint-before-reclaim`, can be killed,
   and ownerless plus native reopen preserve both the original small row update
-  and the larger payload-table update.
+  and the larger payload-table update while allowing rollback-history
+  native-support-only WAL retention after user-page records drain.
 - `native-reclaim-race` pauses at the same native checkpoint proof boundary
   from statement-boundary reclaim, a peer can commit a newer update, the
   paused writer can resume without growing or invalidating already reclaimed
-  WAL, may either strictly shrink the retained WAL or finish checkpointing it,
-  and ownerless plus native reopen preserve both commits.
+  user-page WAL, may either strictly shrink the retained WAL or finish
+  checkpointing it, and ownerless plus native reopen preserve both commits while
+  allowing rollback-history native-support-only WAL retention.
 - The ordinary `native-reclaim` selector still passes.
 - The fix does not lower reclaim budgets or add new production hooks.
 

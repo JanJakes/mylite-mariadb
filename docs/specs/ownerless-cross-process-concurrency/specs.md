@@ -2688,10 +2688,12 @@ Tasks:
    pauses a closing writer after native checkpoint proof, lets a peer commit a
    newer update, then verifies the older closer does not truncate past the newer
    complete page-version records and both updates survive ownerless and native
-   exclusive reopen. The no-live native checkpoint cutover selector also deletes
-   checkpointed page-version WAL after bulk DML reclaim and verifies ordinary
-   native reopen plus `mylite_ownerless_innodb_checkpoint_covers_lsn()` for the
-   reclaimed visible LSN.
+   exclusive reopen. The no-live native checkpoint cutover selectors also delete
+   checkpointed page-version WAL after bulk DML reclaim and drain duplicate-page
+   live-snapshot-pinned DML records to checkpointed or native-support-only
+   retention, then verify ordinary native reopen plus
+   `mylite_ownerless_innodb_checkpoint_covers_lsn()` for fully reclaimed visible
+   LSNs.
 
 Exit criteria:
 
@@ -6128,7 +6130,11 @@ subsystems that this mode needs:
   the MyLite-owned `.ibd` file still proves the successor page identity and
   page LSN at the retained record's expected offset; plain concurrent-writer
   records, including commit-race records, still require exact native proof or
-  replay. When `pages_visible` skips shared visible-boundary
+  replay. The proof scan now rechecks every retained record before no-live
+  truncation: an older record for a page can be discarded only when it has its
+  own exact/discard/absent native proof or is strictly superseded by an already
+  verified later retained record for the same `(space_id, page_no)`. When
+  `pages_visible` skips shared visible-boundary
   publication because another writer transaction is still active, it first
   releases any deferred page-log append batch; later no-live reclaim must still
   retain plain user-page WAL unless exact native image proof succeeds, so an

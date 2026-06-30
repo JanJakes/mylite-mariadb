@@ -95,5 +95,8 @@ no-live reclaim path.
 - The new selector passes in a production embedded build.
 - It fails if retained page-version WAL is required for ordinary native reopen
   after no-live reclaim.
+- The companion `duplicate-page-checkpoint-cutover` selector proves older
+  retained same-page WAL records are discarded only after exact proof or a
+  verified later same-page successor.
 - Docs and compatibility matrix describe the stronger evidence while keeping
   broader redo/checkpoint, DDL/file-lifecycle, and external stress gaps partial.

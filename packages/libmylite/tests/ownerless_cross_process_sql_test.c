@@ -132,7 +132,10 @@ extern uint32_t my_crc32c(uint32_t crc, const void *buf, size_t len);
 #define MYLITE_TEST_INNODB_FIL_PAGE_TYPE_ZBLOB2 12U
 #define MYLITE_TEST_PAGE_LOG_HEADER_SIZE 64
 #define MYLITE_TEST_PAGE_LOG_RECORD_HEADER_SIZE 64
+#define MYLITE_TEST_PAGE_LOG_RECORD_SPACE_ID_OFFSET 8
+#define MYLITE_TEST_PAGE_LOG_RECORD_PAGE_NO_OFFSET 12
 #define MYLITE_TEST_PAGE_LOG_RECORD_FLAGS_OFFSET 20
+#define MYLITE_TEST_PAGE_LOG_RECORD_PAGE_LSN_OFFSET 24
 #define MYLITE_TEST_PAGE_LOG_RECORD_COMMIT_LSN_OFFSET 32
 #define MYLITE_TEST_PAGE_LOG_RECORD_PAYLOAD_SIZE_OFFSET 40
 #define MYLITE_TEST_PAGE_LOG_RECORD_SNAPSHOT_BOUNDARY 128U
@@ -848,6 +851,7 @@ static void test_ownerless_native_checkpoint_evidence(void);
 static void test_ownerless_native_checkpoint_reclaims_page_log(void);
 static void test_ownerless_no_live_native_checkpoint_cutover_proves_bulk_pages(void);
 static void test_ownerless_mixed_history_proof_checkpoint_cutover(void);
+static void test_ownerless_no_live_native_checkpoint_cutover_supersedes_duplicate_pages(void);
 static void test_ownerless_checkpoint_lsn_record_recovers_from_torn_latest_slot(void);
 static void test_ownerless_checkpoint_lsn_noop_update_keeps_generation(void);
 static void test_ownerless_checkpoint_generation_cache_hits_single_owner(void);
@@ -4463,6 +4467,10 @@ static unsigned count_concurrency_wal_records_with_flags(
     const char *database_path,
     uint32_t required_flags
 );
+static unsigned count_concurrency_wal_duplicate_page_records_without_flags(
+    const char *database_path,
+    uint32_t excluded_flags
+);
 static unsigned count_concurrency_wal_records_with_flags_and_payload(
     const char *database_path,
     uint32_t required_flags,
@@ -5514,6 +5522,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "mixed-history-proof-checkpoint-cutover") == 0) {
         test_ownerless_mixed_history_proof_checkpoint_cutover();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "duplicate-page-checkpoint-cutover") == 0) {
+        test_ownerless_no_live_native_checkpoint_cutover_supersedes_duplicate_pages();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "native-file-op-marker-drain") == 0) {
@@ -7710,6 +7722,7 @@ int main(int argc, char **argv) {
             "shared-readonly|checkpoint-evidence|checkpoint-lsn-noop-elision|native-reclaim|"
             "no-live-native-checkpoint-cutover-proof|"
             "mixed-history-proof-checkpoint-cutover|"
+            "duplicate-page-checkpoint-cutover|"
             "native-file-op-marker-drain|native-dml-file-op-marker-drain|"
             "native-killed-dml-file-op-marker-recovery|"
             "native-killed-uncommitted-dml-file-op-marker-recovery|"
@@ -8057,6 +8070,9 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_native_checkpoint_reclaims_page_log),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_no_live_native_checkpoint_cutover_proves_bulk_pages),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_mixed_history_proof_checkpoint_cutover),
+    OWNERLESS_SQL_TEST_CASE(
+        test_ownerless_no_live_native_checkpoint_cutover_supersedes_duplicate_pages
+    ),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_checkpoint_lsn_record_recovers_from_torn_latest_slot),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_checkpoint_lsn_noop_update_keeps_generation),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_checkpoint_generation_cache_hits_single_owner),
@@ -20586,6 +20602,104 @@ static void test_ownerless_mixed_history_proof_checkpoint_cutover(void) {
     assert(mylite_close(db) == MYLITE_OK);
     assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(database_path);
 
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_no_live_native_checkpoint_cutover_supersedes_duplicate_pages(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-duplicate-page-cutover.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t reader_child;
+    uint64_t checkpoint_visible_after;
+    mylite_db *db;
+    int removed_checkpointed_wal = 0;
+    const uint32_t user_page_excluded_flags = MYLITE_TEST_PAGE_LOG_RECORD_SNAPSHOT_BOUNDARY |
+                                              MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE |
+                                              MYLITE_TEST_PAGE_LOG_RECORD_PROOF_ONLY;
+    unsigned duplicate_user_page_records;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only_eventually(database_path);
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+
+    reader_child = fork();
+    assert(reader_child >= 0);
+    if (reader_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        hold_repeatable_read_snapshot_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 5 WHERE id = 1");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 35U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!concurrency_wal_is_checkpointed(database_path));
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 7 WHERE id = 1");
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 42U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!concurrency_wal_is_checkpointed(database_path));
+
+    duplicate_user_page_records = count_concurrency_wal_duplicate_page_records_without_flags(
+        database_path,
+        user_page_excluded_flags
+    );
+    if (duplicate_user_page_records == 0U) {
+        fprintf(stderr, "expected duplicate user-page WAL identities before no-live cutover\n");
+        fflush(stderr);
+    }
+    assert(duplicate_user_page_records > 0U);
+
+    signal_pipe(release_pipe[1]);
+    wait_for_child(reader_child);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only_eventually(database_path);
+    assert(
+        count_concurrency_wal_records_without_flags(
+            database_path,
+            MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+        ) == 0U
+    );
+
+    remove_concurrency_shm(database_path);
+    if (concurrency_wal_is_checkpointed(database_path)) {
+        checkpoint_visible_after = read_concurrency_checkpoint_visible_lsn(database_path);
+        assert(checkpoint_visible_after > 0U);
+        remove_concurrency_wal(database_path);
+        removed_checkpointed_wal = 1;
+    }
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    if (removed_checkpointed_wal) {
+        assert(
+            mylite_ownerless_innodb_checkpoint_covers_lsn(checkpoint_visible_after) ==
+            MYLITE_TEST_OWNERLESS_INNODB_LOCK_OK
+        );
+    }
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 42U);
+    assert(query_unsigned(db, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 22U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    close(ready_pipe[0]);
+    close(release_pipe[1]);
     free(database_path);
     free(runtime_root);
     remove_tree(root);
@@ -53052,7 +53166,7 @@ static void test_crashed_native_checkpoint_reclaim_preserves_committed_update(vo
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(paths);
     initialize_native_reclaim_fault_payload(paths);
-    assert_concurrency_wal_checkpointed_eventually(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only_eventually(database_path);
     assert(pipe(ready_pipe) == 0);
 
     writer_child = fork();
@@ -53072,14 +53186,14 @@ static void test_crashed_native_checkpoint_reclaim_preserves_committed_update(vo
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 130U);
     assert_native_reclaim_fault_payload(db);
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 130U);
     assert_native_reclaim_fault_payload(db);
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
     free(database_path);
     free(runtime_root);
@@ -53103,7 +53217,7 @@ static void test_native_checkpoint_reclaim_race_preserves_newer_peer_commit(void
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(paths);
     initialize_native_reclaim_fault_payload(paths);
-    assert_concurrency_wal_checkpointed_eventually(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only_eventually(database_path);
     assert(pipe(ready_pipe) == 0);
     assert(pipe(release_pipe) == 0);
 
@@ -53149,14 +53263,14 @@ static void test_native_checkpoint_reclaim_race_preserves_newer_peer_commit(void
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 137U);
     assert_native_reclaim_fault_payload(db);
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 137U);
     assert_native_reclaim_fault_payload(db);
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
     free(database_path);
     free(runtime_root);
@@ -115849,6 +115963,134 @@ static unsigned count_concurrency_wal_records_with_flags(
     free(wal_path);
     free(concurrency_path);
     return count;
+}
+
+static unsigned count_concurrency_wal_duplicate_page_records_without_flags(
+    const char *database_path,
+    uint32_t excluded_flags
+) {
+    typedef struct wal_page_identity_count {
+        uint32_t space_id;
+        uint32_t page_no;
+        unsigned count;
+    } wal_page_identity_count;
+
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *wal_path = path_join(concurrency_path, "mylite-concurrency.wal");
+    struct stat wal_stat;
+    unsigned char u32_bytes[4];
+    unsigned char u64_bytes[8];
+    wal_page_identity_count *identities = NULL;
+    size_t identity_count = 0U;
+    size_t identity_capacity = 0U;
+    unsigned duplicate_count = 0U;
+    off_t record_offset =
+        MYLITE_TEST_CONCURRENCY_RECOVERY_HEADER_SIZE + MYLITE_TEST_PAGE_LOG_HEADER_SIZE;
+    int fd = open(wal_path, O_RDONLY | O_CLOEXEC);
+
+    if (fd < 0) {
+        assert(errno == ENOENT);
+        free(wal_path);
+        free(concurrency_path);
+        return 0U;
+    }
+    assert(fstat(fd, &wal_stat) == 0);
+    while (record_offset + MYLITE_TEST_PAGE_LOG_RECORD_HEADER_SIZE <= wal_stat.st_size) {
+        uint32_t record_space_id;
+        uint32_t record_page_no;
+        uint32_t record_flags;
+        uint64_t record_page_lsn;
+        uint64_t payload_size;
+        off_t payload_offset;
+        off_t next_record_offset;
+        size_t index;
+
+        if (!try_read_exact_at(
+                fd,
+                u32_bytes,
+                sizeof(u32_bytes),
+                record_offset + MYLITE_TEST_PAGE_LOG_RECORD_SPACE_ID_OFFSET
+            )) {
+            break;
+        }
+        record_space_id = read_le32(u32_bytes);
+        if (!try_read_exact_at(
+                fd,
+                u32_bytes,
+                sizeof(u32_bytes),
+                record_offset + MYLITE_TEST_PAGE_LOG_RECORD_PAGE_NO_OFFSET
+            )) {
+            break;
+        }
+        record_page_no = read_le32(u32_bytes);
+        if (!try_read_exact_at(
+                fd,
+                u32_bytes,
+                sizeof(u32_bytes),
+                record_offset + MYLITE_TEST_PAGE_LOG_RECORD_FLAGS_OFFSET
+            )) {
+            break;
+        }
+        record_flags = read_le32(u32_bytes);
+        if (!try_read_exact_at(
+                fd,
+                u64_bytes,
+                sizeof(u64_bytes),
+                record_offset + MYLITE_TEST_PAGE_LOG_RECORD_PAGE_LSN_OFFSET
+            )) {
+            break;
+        }
+        record_page_lsn = read_le64(u64_bytes);
+        if (!try_read_exact_at(
+                fd,
+                u64_bytes,
+                sizeof(u64_bytes),
+                record_offset + MYLITE_TEST_PAGE_LOG_RECORD_PAYLOAD_SIZE_OFFSET
+            )) {
+            break;
+        }
+        payload_size = read_le64(u64_bytes);
+        payload_offset = record_offset + MYLITE_TEST_PAGE_LOG_RECORD_HEADER_SIZE;
+        if (payload_offset > wal_stat.st_size ||
+            payload_size > (uint64_t)(wal_stat.st_size - payload_offset)) {
+            break;
+        }
+        next_record_offset = payload_offset + (off_t)payload_size;
+        if ((record_flags & excluded_flags) != 0U || record_page_lsn == 0U || record_page_no < 3U) {
+            record_offset = next_record_offset;
+            continue;
+        }
+        for (index = 0U; index < identity_count; ++index) {
+            if (identities[index].space_id == record_space_id &&
+                identities[index].page_no == record_page_no) {
+                ++identities[index].count;
+                ++duplicate_count;
+                break;
+            }
+        }
+        if (index == identity_count) {
+            if (identity_count == identity_capacity) {
+                const size_t new_capacity = identity_capacity == 0U ? 16U : identity_capacity * 2U;
+                wal_page_identity_count *new_identities = (wal_page_identity_count *)
+                    realloc(identities, new_capacity * sizeof(*new_identities));
+                assert(new_identities != NULL);
+                identities = new_identities;
+                identity_capacity = new_capacity;
+            }
+            identities[identity_count++] = (wal_page_identity_count){
+                .space_id = record_space_id,
+                .page_no = record_page_no,
+                .count = 1U,
+            };
+        }
+        record_offset = next_record_offset;
+    }
+
+    free(identities);
+    assert(close(fd) == 0);
+    free(wal_path);
+    free(concurrency_path);
+    return duplicate_count;
 }
 
 static unsigned count_concurrency_wal_records_with_flags_and_payload(
