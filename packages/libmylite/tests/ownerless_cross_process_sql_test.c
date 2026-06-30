@@ -31370,6 +31370,18 @@ static void test_ownerless_table_wait_sql_negative_proof(void) {
             .sql = "ALTER TABLE app.ownerless_sql ADD COLUMN wait_negative_note VARCHAR(32)",
         },
         {
+            .name = "alter-add-column-copy-lock",
+            .sql = "ALTER TABLE app.ownerless_sql "
+                   "ADD COLUMN wait_negative_copy_lock INT NOT NULL DEFAULT 3, "
+                   "ALGORITHM=COPY, LOCK=EXCLUSIVE",
+        },
+        {
+            .name = "alter-add-column-lock-copy",
+            .sql = "ALTER TABLE app.ownerless_sql "
+                   "ADD COLUMN wait_negative_lock_copy INT NOT NULL DEFAULT 5, "
+                   "LOCK=EXCLUSIVE, ALGORITHM=COPY",
+        },
+        {
             .name = "alter-add-column-instant-lock-none",
             .sql = "ALTER TABLE app.ownerless_sql "
                    "ADD COLUMN wait_negative_first INT NOT NULL DEFAULT 7 FIRST, "
@@ -31390,6 +31402,56 @@ static void test_ownerless_table_wait_sql_negative_proof(void) {
         {
             .name = "alter-modify-column",
             .sql = "ALTER TABLE app.ownerless_sql MODIFY COLUMN value BIGINT NOT NULL",
+        },
+        {
+            .name = "alter-drop-column-copy-lock",
+            .sql = "ALTER TABLE app.ownerless_sql "
+                   "DROP COLUMN label, ALGORITHM=COPY, LOCK=EXCLUSIVE",
+        },
+        {
+            .name = "alter-drop-column-lock-copy",
+            .sql = "ALTER TABLE app.ownerless_sql "
+                   "DROP COLUMN label, LOCK=EXCLUSIVE, ALGORITHM=COPY",
+        },
+        {
+            .name = "alter-modify-column-copy-lock",
+            .sql = "ALTER TABLE app.ownerless_sql "
+                   "MODIFY COLUMN label VARCHAR(32) CHARACTER SET latin1 "
+                   "COLLATE latin1_swedish_ci NOT NULL DEFAULT 'changed', "
+                   "ALGORITHM=COPY, LOCK=EXCLUSIVE",
+        },
+        {
+            .name = "alter-modify-column-lock-copy",
+            .sql = "ALTER TABLE app.ownerless_sql "
+                   "MODIFY COLUMN label VARCHAR(32) CHARACTER SET latin1 "
+                   "COLLATE latin1_swedish_ci NOT NULL DEFAULT 'changed', "
+                   "LOCK=EXCLUSIVE, ALGORITHM=COPY",
+        },
+        {
+            .name = "alter-change-column-copy-lock",
+            .sql = "ALTER TABLE app.ownerless_sql "
+                   "CHANGE COLUMN label wait_negative_label VARCHAR(16) CHARACTER SET latin1 "
+                   "COLLATE latin1_swedish_ci NOT NULL DEFAULT 'changed', "
+                   "ALGORITHM=COPY, LOCK=EXCLUSIVE",
+        },
+        {
+            .name = "alter-change-column-lock-copy",
+            .sql = "ALTER TABLE app.ownerless_sql "
+                   "CHANGE COLUMN label wait_negative_label VARCHAR(16) CHARACTER SET latin1 "
+                   "COLLATE latin1_swedish_ci NOT NULL DEFAULT 'changed', "
+                   "LOCK=EXCLUSIVE, ALGORITHM=COPY",
+        },
+        {
+            .name = "alter-rename-column-copy-lock",
+            .sql = "ALTER TABLE app.ownerless_sql "
+                   "RENAME COLUMN label TO wait_negative_label, "
+                   "ALGORITHM=COPY, LOCK=EXCLUSIVE",
+        },
+        {
+            .name = "alter-rename-column-lock-copy",
+            .sql = "ALTER TABLE app.ownerless_sql "
+                   "RENAME COLUMN label TO wait_negative_label, "
+                   "LOCK=EXCLUSIVE, ALGORITHM=COPY",
         },
         {
             .name = "alter-column-default",

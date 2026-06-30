@@ -2155,6 +2155,7 @@ if(BUILD_TESTING)
       )
       set_tests_properties(libmylite.ownerless-table-wait-negative-proof PROPERTIES
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-negative-proof"
+        TIMEOUT 180
       )
       set_tests_properties(libmylite.ownerless-dictionary-rename-if-exists-target-conflict-crash
         PROPERTIES

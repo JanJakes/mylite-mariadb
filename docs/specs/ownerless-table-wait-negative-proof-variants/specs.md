@@ -11,9 +11,11 @@ native table-lock wait through MyLite's ownerless table-wait callback.
 
 The existing hook SQL negative proof covers one blocked `ALTER TABLE` shape and
 an initial DDL matrix. It should continue to track representative DDL variants,
-including online option, existing-index mutations, constraint DDL, and
-storage/rebuild ALTER paths, so the support matrix does not imply a stronger
-SQL table-wait claim than the implementation can prove.
+including online option, existing-index mutations, constraint DDL,
+storage/rebuild ALTER paths, and the column table-copy spellings that ownerless
+recovery now supports in both explicit option orders, so the support matrix
+does not imply a stronger SQL table-wait claim than the implementation can
+prove.
 
 ## Source Findings
 
@@ -44,10 +46,20 @@ mark ignored, a parent table that FK-add can reference, a latin1 string column,
 and a compact row-format baseline:
 
 - `ALTER TABLE ... ADD COLUMN`
+- `ALTER TABLE ... ADD COLUMN ..., ALGORITHM=COPY, LOCK=EXCLUSIVE`
+- `ALTER TABLE ... ADD COLUMN ..., LOCK=EXCLUSIVE, ALGORITHM=COPY`
 - `ALTER TABLE ... ADD COLUMN ..., ALGORITHM=INSTANT` with `LOCK=NONE` and
   `LOCK=SHARED`
 - `ALTER TABLE ... RENAME COLUMN ..., ALGORITHM=INSTANT, LOCK=DEFAULT`
 - `ALTER TABLE ... MODIFY COLUMN`
+- `ALTER TABLE ... DROP COLUMN ..., ALGORITHM=COPY, LOCK=EXCLUSIVE`
+- `ALTER TABLE ... DROP COLUMN ..., LOCK=EXCLUSIVE, ALGORITHM=COPY`
+- `ALTER TABLE ... MODIFY COLUMN ..., ALGORITHM=COPY, LOCK=EXCLUSIVE`
+- `ALTER TABLE ... MODIFY COLUMN ..., LOCK=EXCLUSIVE, ALGORITHM=COPY`
+- `ALTER TABLE ... CHANGE COLUMN ..., ALGORITHM=COPY, LOCK=EXCLUSIVE`
+- `ALTER TABLE ... CHANGE COLUMN ..., LOCK=EXCLUSIVE, ALGORITHM=COPY`
+- `ALTER TABLE ... RENAME COLUMN ..., ALGORITHM=COPY, LOCK=EXCLUSIVE`
+- `ALTER TABLE ... RENAME COLUMN ..., LOCK=EXCLUSIVE, ALGORITHM=COPY`
 - `ALTER TABLE ... ALTER COLUMN ... SET DEFAULT`
 - `ALTER TABLE ... COMMENT`
 - `ALTER TABLE ... ADD CONSTRAINT ... CHECK`
@@ -91,7 +103,8 @@ In scope:
 
 - Hook-only SQL negative-proof variants for representative blocked DDL shapes,
   including online option, existing-index metadata mutations, constraint DDL,
-  storage/rebuild ALTER variants, and replacement-copy DDL.
+  storage/rebuild ALTER variants, explicit copy-lock column table-copy
+  variants, and replacement-copy DDL.
 - A focused hook CTest label for the table-wait SQL negative proof.
 - Compatibility/spec documentation that narrows the claim to negative evidence
   and the covered external native table-wait registry path.
@@ -155,9 +168,10 @@ are added under the existing unsafe ownerless hook build.
   the pre-existing secondary index remains present and non-ignored, attempted
   secondary indexes remain absent, the primary key remains on `id`, the
   attempted CHECK/FK constraints remain absent, the latin1 column collation
-  remains unchanged, the original `value` type/default remains unchanged, the
-  attempted `wait_negative_%` columns remain absent, the compact row-format
-  baseline remains unchanged, and the table comment remains empty.
+  remains unchanged, the original `value` type/default remains unchanged,
+  attempted column table-copy changes remain absent, the attempted
+  `wait_negative_%` columns remain absent, the compact row-format baseline
+  remains unchanged, and the table comment remains empty.
 - Docs keep positive SQL-level local table-wait fault injection unclaimed
   rather than covered.
 

@@ -5612,7 +5612,8 @@ Minimum suites before support can be claimed:
     retries the insert through ownerless/native reopen and forced `.shm`
     rebuild. Hook-build SQL negative proof arms the
     local ownerless table-wait callback while representative blocked `ALTER TABLE`,
-    instant add/rename column, column modify/default, table comment,
+    instant add/rename column, column table-copy ADD/DROP/MODIFY/CHANGE/RENAME
+    in both exact copy-lock option orders, column modify/default, table comment,
     CHECK/FK add, `CREATE INDEX`, unique and online index add, existing-index
     drop/rename/ignored, copy-force and primary-key replacement `ALTER TABLE`,
     charset conversion, row-format ALTER, `TRUNCATE TABLE`, `RENAME TABLE`,
