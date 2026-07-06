@@ -4516,6 +4516,10 @@ static void assert_concurrency_wal_checkpointed_or_retained_native_support_recor
 static void assert_concurrency_wal_checkpointed_or_retained_native_support_only_eventually(
     const char *database_path
 );
+static void assert_concurrency_wal_checkpointed_or_retained_native_support_only_within(
+    const char *database_path,
+    unsigned timeout_ms
+);
 static void assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(
     const char *database_path
 );
@@ -17415,7 +17419,10 @@ static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close
         exec_ok(db, sql);
     }
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_or_retained_native_support_only_eventually(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only_within(
+        database_path,
+        5000U
+    );
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "UPDATE app.ownerless_scheduled_reclaim SET payload = REPEAT('b', 4000)");
@@ -17427,7 +17434,10 @@ static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close
         query_unsigned(db, "SELECT SUM(LENGTH(payload)) FROM app.ownerless_scheduled_reclaim") ==
         MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS * 4000ULL
     );
-    assert_concurrency_wal_checkpointed_or_retained_native_support_only_eventually(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only_within(
+        database_path,
+        5000U
+    );
 
     exec_ok(db, "START TRANSACTION");
     exec_ok(db, "UPDATE app.ownerless_scheduled_reclaim SET payload = REPEAT('c', 4000)");
@@ -17439,7 +17449,10 @@ static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close
             "WHERE payload = REPEAT('c', 4000)"
         ) == MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS
     );
-    assert_concurrency_wal_checkpointed_or_retained_native_support_only_eventually(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only_within(
+        database_path,
+        5000U
+    );
     assert(mylite_close(db) == MYLITE_OK);
 
     assert(pipe(ready_pipe) == 0);
@@ -17515,7 +17528,10 @@ static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close
 
     signal_pipe(release_pipe[1]);
     wait_for_child(peer_child);
-    assert_concurrency_wal_checkpointed_or_retained_native_support_only_eventually(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only_within(
+        database_path,
+        5000U
+    );
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -17523,7 +17539,10 @@ static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close
         MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_or_retained_native_support_only_eventually(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only_within(
+        database_path,
+        5000U
+    );
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
@@ -17532,7 +17551,10 @@ static void test_ownerless_statement_checkpoint_scheduling_reclaims_before_close
         MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_or_retained_native_support_only_eventually(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only_within(
+        database_path,
+        5000U
+    );
 
     free(database_path);
     free(runtime_root);
@@ -80387,6 +80409,8 @@ static void test_ownerless_rejects_directory_probe_failure(void) {
     };
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     mylite_db *db = NULL;
+    struct stat database_stat;
+    FILE *probe_metadata = NULL;
 
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(primer_paths);
@@ -80395,8 +80419,34 @@ static void test_ownerless_rejects_directory_probe_failure(void) {
     assert(path_exists(primer_probe_metadata_path));
 
     initialize_database(paths);
+    assert(mkdir(concurrency_path, 0700) == 0);
+    assert(stat(database_path, &database_stat) == 0);
+    probe_metadata = fopen(probe_metadata_path, "w");
+    assert(probe_metadata != NULL);
+    assert(fputs("format=1\n", probe_metadata) >= 0);
+    assert(
+        fprintf(
+            probe_metadata,
+            "database_device=%llu\n",
+            (unsigned long long)database_stat.st_dev
+        ) > 0
+    );
+    assert(fputs("required_primitives=1\n", probe_metadata) >= 0);
+    assert(fclose(probe_metadata) == 0);
 
     assert(setenv("MYLITE_OWNERLESS_TEST_PROBE_FAIL", "required-primitives", 1) == 0);
+    assert(
+        open_database_result(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW, &db) ==
+        MYLITE_ERROR
+    );
+    assert(db == NULL);
+    assert(
+        open_database_result(paths, MYLITE_OPEN_READONLY | MYLITE_OPEN_SHARED_READONLY, &db) ==
+        MYLITE_ERROR
+    );
+    assert(db == NULL);
+
+    assert(setenv("MYLITE_OWNERLESS_TEST_PROBE_FAIL", "process-identity", 1) == 0);
     assert(
         open_database_result(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW, &db) ==
         MYLITE_ERROR
@@ -116948,13 +116998,72 @@ static void assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_
 static void assert_concurrency_wal_checkpointed_or_retained_native_support_only(
     const char *database_path
 ) {
+    unsigned retained_non_native_records;
+
     assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
-    assert(
-        count_concurrency_wal_records_without_flags(
-            database_path,
-            MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
-        ) == 0U
+    retained_non_native_records = count_concurrency_wal_records_without_flags(
+        database_path,
+        MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
     );
+    if (retained_non_native_records != 0U) {
+        fprintf(
+            stderr,
+            "ownerless page-version WAL retained %u non-native-support records: %s\n",
+            retained_non_native_records,
+            database_path
+        );
+        fflush(stderr);
+    }
+    assert(retained_non_native_records == 0U);
+}
+
+static int concurrency_wal_checkpointed_or_retained_native_support_only(const char *database_path) {
+    int rollback_history_empty = 1;
+
+    if (concurrency_wal_is_checkpointed(database_path)) {
+        return 1;
+    }
+    return native_rollback_history_headers_state(database_path, &rollback_history_empty) &&
+           !rollback_history_empty &&
+           count_concurrency_wal_records_without_flags(
+               database_path,
+               MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
+           ) == 0U;
+}
+
+static int wait_for_concurrency_wal_checkpointed_or_retained_native_support_only(
+    const char *database_path,
+    unsigned timeout_ms
+) {
+    const unsigned iterations = timeout_ms * 1000U / MYLITE_TEST_WAIT_POLL_INTERVAL_US;
+
+    for (unsigned iteration = 0U; iteration <= iterations; ++iteration) {
+        if (concurrency_wal_checkpointed_or_retained_native_support_only(database_path)) {
+            return 1;
+        }
+        sleep_microseconds(MYLITE_TEST_WAIT_POLL_INTERVAL_US);
+    }
+    return concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
+}
+
+static void assert_concurrency_wal_checkpointed_or_retained_native_support_only_within(
+    const char *database_path,
+    unsigned timeout_ms
+) {
+    if (wait_for_concurrency_wal_checkpointed_or_retained_native_support_only(
+            database_path,
+            timeout_ms
+        )) {
+        return;
+    }
+    fprintf(
+        stderr,
+        "ownerless page-version WAL did not reach native-support-only retention within %u ms: %s\n",
+        timeout_ms,
+        database_path
+    );
+    fflush(stderr);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 }
 
 static void assert_concurrency_wal_checkpointed_or_retained_native_support_records_only(
@@ -116974,23 +117083,7 @@ static void assert_concurrency_wal_checkpointed_or_retained_native_support_recor
 static void assert_concurrency_wal_checkpointed_or_retained_native_support_only_eventually(
     const char *database_path
 ) {
-    for (unsigned attempt = 0U; attempt < 50U; ++attempt) {
-        int rollback_history_empty = 1;
-
-        if (concurrency_wal_is_checkpointed(database_path)) {
-            return;
-        }
-        if (native_rollback_history_headers_state(database_path, &rollback_history_empty) &&
-            !rollback_history_empty &&
-            count_concurrency_wal_records_without_flags(
-                database_path,
-                MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
-            ) == 0U) {
-            return;
-        }
-        sleep_microseconds(MYLITE_TEST_WAIT_POLL_INTERVAL_US);
-    }
-    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only_within(database_path, 500U);
 }
 
 static void assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(

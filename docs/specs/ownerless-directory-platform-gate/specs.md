@@ -4,10 +4,10 @@
 
 Ownerless coordination depends on filesystem semantics, not just compiled
 platform support. The existing internal platform probe exercised POSIX
-`MAP_SHARED`, byte-range locks, lock release on process exit, grow/remap, and
-wait/wake behavior under `/tmp`, but ownerless opens did not prove that the
-actual database directory's backing filesystem had those semantics before
-starting the ownerless runtime.
+`MAP_SHARED`, byte-range locks, lock release on process exit, grow/remap,
+wait/wake behavior, and process-identity liveness under `/tmp`, but ownerless
+opens did not prove that the actual database directory's backing filesystem had
+those semantics before starting the ownerless runtime.
 
 That left two gaps:
 
@@ -28,8 +28,8 @@ That left two gaps:
   the database directory and explicit rejection for unsupported or unproven
   filesystems.
 - The fast wait backend is performance evidence. Correctness requires the
-  shared mapping, byte-range lock, release-on-exit, grow/remap, and wait/wake
-  primitives.
+  shared mapping, byte-range lock, release-on-exit, grow/remap, wait/wake, and
+  process-identity primitives.
 
 ## Design
 
@@ -88,6 +88,7 @@ A successful ownerless directory probe writes
 format=1
 database_device=<st_dev>
 required_primitives=1
+process_identity=1
 ```
 
 The proof is advisory and can be rebuilt. If the file is absent, unreadable,
@@ -98,7 +99,7 @@ database directory again.
 
 - Extend `mylite_ownerless_primitives_test` to call
   `mylite_ownerless_probe_directory()` against a temporary directory and assert
-  the required primitives pass.
+  the required primitives, including process identity, pass.
 - Add hook-only forced probe failure through
   `MYLITE_OWNERLESS_TEST_PROBE_FAIL`, compiled only in
   `MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS` builds.
@@ -118,6 +119,8 @@ database directory again.
   ownerless-probe failure hook.
 - Successful ownerless opens write a device-bound proof and later opens can
   skip the full probe while the database directory remains on the same device.
+- Cached ownerless platform proofs without `process_identity=1` are treated as
+  stale and reprobed before ownerless mode is accepted.
 
 ## Risks
 

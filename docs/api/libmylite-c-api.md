@@ -208,14 +208,21 @@ taking that lock, and ordinary user SQL is not covered by those bootstrap
 locks. Failed ownerless or native read/write startup is retried only after the
 partial MariaDB embedded startup state is ended and the saved 12 KiB redo
 startup prefix whose checkpoint pages pass MariaDB startup validation, or the
-captured prefix fallback, is restored. Final no-live ownerless read/write
-close also publishes a native
+captured prefix fallback, is restored. A first ownerless read/write startup
+after ordinary native shutdown leaves InnoDB checkpoint suppression disabled
+when no ownerless page-version WAL payload, native checkpoint marker, live peer,
+or usable redo-header backup exists, because native redo is then the recovery
+authority. Final no-live ownerless read/write close also publishes a native
 checkpoint for completed InnoDB DDL file-operation redo or ownerless
 `ALTER TABLE ... AUTO_INCREMENT` checkpoint markers before shutdown, then
 forces native checkpoint proof for retained ownerless page-version WAL after
 active snapshot pins release, and restores the 12 KiB redo startup prefix if
 MariaDB embedded shutdown leaves `ib_logfile0` without startup-checkpoint
-evidence.
+evidence. With no live ownerless peer and no retained page-version WAL payload,
+the close path lowers MariaDB from crash-style ownerless shutdown to clean native
+shutdown even when rollback history was not empty before close; retained
+page-version WAL keeps the crash-style policy unless rollback history is already
+empty.
 Recovery decisions read volatile process registry counters through
 `MAP_SHARED` mappings, not ordinary file reads, so peer process-slot updates
 are visible before stale state is rebuilt.

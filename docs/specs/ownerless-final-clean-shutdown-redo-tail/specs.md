@@ -60,6 +60,10 @@ records with no page image payload, do not block this clean shutdown path
 because they are not page-version recovery payloads. Retained page-image WAL
 payload records still keep the crash-like shutdown policy until a later
 native-checkpoint/reclaim slice proves the payload can be dropped.
+Rollback-history emptiness is required only for retained-WAL clean shutdown.
+When no retained page-version WAL payload remains and no live ownerless peer is
+present, MariaDB's clean shutdown redo/checkpoint state is the recovery authority
+even if rollback history was not empty before shutdown.
 
 ## Compatibility Impact
 
@@ -101,10 +105,13 @@ global and focused lifecycle tests. It adds no dependency and no public API.
 
 ## Acceptance Criteria
 
-- Final ownerless close runs clean shutdown only when no live ownerless peers
-  are present and no retained ownerless page-version WAL payload remains.
+- Final ownerless close runs clean shutdown when no live ownerless peers are
+  present, no recovered native transactions are active, and no retained
+  ownerless page-version WAL payload remains.
 - Live-peer ownerless close keeps the configured `innodb_fast_shutdown=2`
   policy.
+- Retained page-version WAL only uses clean shutdown when rollback history is
+  already empty; otherwise the retained WAL remains the recovery proof.
 - Focused ownerless lifecycle coverage asserts native redo file size remains at
   the configured size across repeated final ownerless closes for both
   ownerless-created write payload and ordinary-created metadata-only ownerless

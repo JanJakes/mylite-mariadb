@@ -18,6 +18,7 @@ typedef struct mylite_ownerless_probe_result {
     uint32_t grow_remap;
     uint32_t wait_backend;
     uint32_t fast_wait_backend;
+    uint32_t process_identity;
     uint32_t required_primitives;
     uint32_t platform_candidate;
 } mylite_ownerless_probe_result;

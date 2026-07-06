@@ -424,23 +424,32 @@ static void test_process_registry_allocates_cross_process_slots(void);
 static void test_process_registry_rejects_stale_release(void);
 static void test_process_registry_updates_heartbeat(void);
 static void test_process_registry_cleans_dead_slots(void);
+static void test_process_registry_distinguishes_reused_pid_identity(void);
 static void test_process_registry_cleanup_callback_releases_owner_locks(void);
 static void test_process_registry_cleanup_callback_can_block_cleanup(void);
 static void test_process_registry_counts_live_slots(void);
 static void test_process_registry_cleans_exited_process_slot(void);
-static int process_registry_test_pid_is_alive(uint64_t pid, void *ctx);
+static mylite_ownerless_process_identity process_registry_test_identity(uint64_t pid);
+static int process_registry_test_identity_is_alive(
+    const mylite_ownerless_process_identity *identity,
+    void *ctx
+);
+static int process_registry_identity_is_running(
+    const mylite_ownerless_process_identity *identity,
+    void *ctx
+);
 static int process_registry_pid_is_running(uint64_t pid, void *ctx);
 static int dictionary_state_pid_is_alive(uint64_t pid, void *ctx);
 static int process_registry_cleanup_owner_locks(
     uint32_t slot_index,
     uint64_t slot_generation,
-    uint64_t pid,
+    const mylite_ownerless_process_identity *identity,
     void *ctx
 );
 static int process_registry_cleanup_blocks_owner(
     uint32_t slot_index,
     uint64_t slot_generation,
-    uint64_t pid,
+    const mylite_ownerless_process_identity *identity,
     void *ctx
 );
 static int latch_test_owner_is_alive(uint32_t owner_id, uint64_t owner_generation, void *ctx);
@@ -471,6 +480,7 @@ static uint32_t innodb_lock_registry_occupied_limit(void *registry);
 static void *map_file(int fd, size_t size);
 static void signal_pipe(int pipe_fd);
 static void wait_for_pipe(int pipe_fd);
+static void wait_for_child_exited_without_reaping(pid_t child);
 static void wait_for_child(pid_t child);
 static void sleep_milliseconds(unsigned milliseconds);
 static char *make_temp_root(void);
@@ -616,6 +626,7 @@ int main(void) {
     test_process_registry_rejects_stale_release();
     test_process_registry_updates_heartbeat();
     test_process_registry_cleans_dead_slots();
+    test_process_registry_distinguishes_reused_pid_identity();
     test_process_registry_cleanup_callback_releases_owner_locks();
     test_process_registry_cleanup_callback_can_block_cleanup();
     test_process_registry_counts_live_slots();
@@ -984,6 +995,7 @@ static void test_platform_probe_records_required_primitives(void) {
     assert(probe.lock_release_on_exit == 1U);
     assert(probe.grow_remap == 1U);
     assert(probe.wait_backend == 1U);
+    assert(probe.process_identity == 1U);
     assert(probe.required_primitives == 1U);
     assert(probe.platform_candidate == (probe.fast_wait_backend != 0U ? 1U : 0U));
 }
@@ -999,6 +1011,7 @@ static void test_directory_probe_records_required_primitives(void) {
     assert(probe.lock_release_on_exit == 1U);
     assert(probe.grow_remap == 1U);
     assert(probe.wait_backend == 1U);
+    assert(probe.process_identity == 1U);
     assert(probe.required_primitives == 1U);
     assert(probe.platform_candidate == (probe.fast_wait_backend != 0U ? 1U : 0U));
 
@@ -4585,7 +4598,7 @@ static void test_page_log_falls_back_to_compact_sparse_zero_payloads(void) {
             1U,
             170U,
             out_page,
-            page_size,
+            (uint32_t)page_size,
             &out_page_size,
             &page_lsn,
             &commit_lsn
@@ -4669,7 +4682,7 @@ static void test_page_log_falls_back_to_legacy_sparse_zero_payloads(void) {
             1U,
             180U,
             out_page,
-            page_size,
+            (uint32_t)page_size,
             &out_page_size,
             &page_lsn,
             &commit_lsn
@@ -16734,7 +16747,7 @@ static void test_process_registry_allocates_cross_process_slots(void) {
         mylite_ownerless_process_registry_allocate(
             registry,
             MYLITE_TEST_PAGE_SIZE,
-            (uint64_t)getpid(),
+            process_registry_test_identity((uint64_t)getpid()),
             1U,
             0U,
             &parent_slot,
@@ -16756,7 +16769,7 @@ static void test_process_registry_allocates_cross_process_slots(void) {
             mylite_ownerless_process_registry_allocate(
                 child_registry,
                 MYLITE_TEST_PAGE_SIZE,
-                (uint64_t)getpid(),
+                process_registry_test_identity((uint64_t)getpid()),
                 1U,
                 0U,
                 &child_slot,
@@ -16823,7 +16836,7 @@ static void test_process_registry_rejects_stale_release(void) {
         mylite_ownerless_process_registry_allocate(
             registry,
             MYLITE_TEST_PAGE_SIZE,
-            (uint64_t)getpid(),
+            process_registry_test_identity((uint64_t)getpid()),
             1U,
             0U,
             &slot,
@@ -16876,7 +16889,7 @@ static void test_process_registry_updates_heartbeat(void) {
         mylite_ownerless_process_registry_allocate(
             registry,
             MYLITE_TEST_PAGE_SIZE,
-            (uint64_t)getpid(),
+            process_registry_test_identity((uint64_t)getpid()),
             1U,
             0U,
             &slot,
@@ -16927,7 +16940,8 @@ static void test_process_registry_cleans_dead_slots(void) {
     uint32_t dead_slot = 0U;
     uint64_t dead_generation = 0U;
     uint32_t cleaned_slots = 0U;
-    uint64_t live_pid = 111U;
+    mylite_ownerless_process_identity live_identity = process_registry_test_identity(111U);
+    mylite_ownerless_process_identity dead_identity = process_registry_test_identity(222U);
 
     truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
     registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
@@ -16942,7 +16956,7 @@ static void test_process_registry_cleans_dead_slots(void) {
         mylite_ownerless_process_registry_allocate(
             registry,
             MYLITE_TEST_PAGE_SIZE,
-            live_pid,
+            live_identity,
             1U,
             0U,
             &live_slot,
@@ -16953,7 +16967,7 @@ static void test_process_registry_cleans_dead_slots(void) {
         mylite_ownerless_process_registry_allocate(
             registry,
             MYLITE_TEST_PAGE_SIZE,
-            222U,
+            dead_identity,
             1U,
             0U,
             &dead_slot,
@@ -16965,8 +16979,8 @@ static void test_process_registry_cleans_dead_slots(void) {
         mylite_ownerless_process_registry_cleanup_dead(
             registry,
             MYLITE_TEST_PAGE_SIZE,
-            process_registry_test_pid_is_alive,
-            &live_pid,
+            process_registry_test_identity_is_alive,
+            &live_identity,
             &cleaned_slots
         ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
     );
@@ -16987,6 +17001,66 @@ static void test_process_registry_cleans_dead_slots(void) {
             live_slot,
             live_generation
         ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+
+    assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_process_registry_distinguishes_reused_pid_identity(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "process-registry-pid-reuse.bin");
+    int fd = open_file(shm_path);
+    void *registry;
+    uint32_t old_slot = 0U;
+    uint64_t old_generation = 0U;
+    uint32_t cleaned_slots = 0U;
+    mylite_ownerless_process_identity old_identity = process_registry_test_identity(333U);
+    mylite_ownerless_process_identity reused_identity = old_identity;
+
+    reused_identity.start_time += 1U;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_process_registry_initialize(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_PROCESS_REGISTRY_SLOT_COUNT
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_process_registry_allocate(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            old_identity,
+            1U,
+            0U,
+            &old_slot,
+            &old_generation
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_process_registry_cleanup_dead(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            process_registry_test_identity_is_alive,
+            &reused_identity,
+            &cleaned_slots
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(cleaned_slots == 1U);
+    assert(mylite_ownerless_process_registry_active_count(registry) == 0U);
+    assert(
+        mylite_ownerless_process_registry_release(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            old_slot,
+            old_generation
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_NOT_FOUND
     );
 
     assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
@@ -17033,7 +17107,7 @@ static void test_process_registry_cleanup_callback_releases_owner_locks(void) {
         mylite_ownerless_process_registry_allocate(
             registry,
             MYLITE_TEST_PAGE_SIZE,
-            222U,
+            process_registry_test_identity(222U),
             1U,
             0U,
             &dead_slot,
@@ -17054,8 +17128,8 @@ static void test_process_registry_cleanup_callback_releases_owner_locks(void) {
         mylite_ownerless_process_registry_cleanup_dead_with_callback(
             registry,
             MYLITE_TEST_PAGE_SIZE,
-            process_registry_test_pid_is_alive,
-            &(uint64_t){111U},
+            process_registry_test_identity_is_alive,
+            &(mylite_ownerless_process_identity){111U, 1111U, 2222U},
             process_registry_cleanup_owner_locks,
             &cleanup_context,
             &cleaned_slots
@@ -17105,7 +17179,7 @@ static void test_process_registry_cleanup_callback_can_block_cleanup(void) {
         mylite_ownerless_process_registry_allocate(
             registry,
             MYLITE_TEST_PAGE_SIZE,
-            222U,
+            process_registry_test_identity(222U),
             1U,
             0U,
             &dead_slot,
@@ -17116,8 +17190,8 @@ static void test_process_registry_cleanup_callback_can_block_cleanup(void) {
         mylite_ownerless_process_registry_cleanup_dead_with_callback(
             registry,
             MYLITE_TEST_PAGE_SIZE,
-            process_registry_test_pid_is_alive,
-            &(uint64_t){111U},
+            process_registry_test_identity_is_alive,
+            &(mylite_ownerless_process_identity){111U, 1111U, 2222U},
             process_registry_cleanup_blocks_owner,
             NULL,
             &cleaned_slots
@@ -17151,7 +17225,8 @@ static void test_process_registry_counts_live_slots(void) {
     uint64_t first_generation = 0U;
     uint64_t second_generation = 0U;
     uint64_t live_count = 0U;
-    const uint64_t live_pid = 111U;
+    mylite_ownerless_process_identity live_identity = process_registry_test_identity(111U);
+    mylite_ownerless_process_identity dead_identity = process_registry_test_identity(222U);
 
     truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
     registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
@@ -17166,7 +17241,7 @@ static void test_process_registry_counts_live_slots(void) {
         mylite_ownerless_process_registry_allocate(
             registry,
             MYLITE_TEST_PAGE_SIZE,
-            live_pid,
+            live_identity,
             1U,
             0U,
             &first_slot,
@@ -17177,7 +17252,7 @@ static void test_process_registry_counts_live_slots(void) {
         mylite_ownerless_process_registry_allocate(
             registry,
             MYLITE_TEST_PAGE_SIZE,
-            222U,
+            dead_identity,
             1U,
             0U,
             &second_slot,
@@ -17188,8 +17263,8 @@ static void test_process_registry_counts_live_slots(void) {
         mylite_ownerless_process_registry_live_count(
             registry,
             MYLITE_TEST_PAGE_SIZE,
-            process_registry_test_pid_is_alive,
-            (void *)&live_pid,
+            process_registry_test_identity_is_alive,
+            &live_identity,
             &live_count
         ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
     );
@@ -17245,15 +17320,20 @@ static void test_process_registry_cleans_exited_process_slot(void) {
         void *child_registry;
         uint32_t child_slot = 0U;
         uint64_t child_generation = 0U;
+        mylite_ownerless_process_identity child_identity = {0};
 
         close(child_ready[0]);
         child_fd = open_file(shm_path);
         child_registry = map_file(child_fd, MYLITE_TEST_PAGE_SIZE);
         assert(
+            mylite_ownerless_current_process_identity(&child_identity) ==
+            MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+        );
+        assert(
             mylite_ownerless_process_registry_allocate(
                 child_registry,
                 MYLITE_TEST_PAGE_SIZE,
-                (uint64_t)getpid(),
+                child_identity,
                 1U,
                 0U,
                 &child_slot,
@@ -17269,19 +17349,20 @@ static void test_process_registry_cleans_exited_process_slot(void) {
 
     close(child_ready[1]);
     wait_for_pipe(child_ready[0]);
-    wait_for_child(child);
+    wait_for_child_exited_without_reaping(child);
     assert(mylite_ownerless_process_registry_active_count(registry) == 1U);
     assert(
         mylite_ownerless_process_registry_cleanup_dead(
             registry,
             MYLITE_TEST_PAGE_SIZE,
-            process_registry_pid_is_running,
+            process_registry_identity_is_running,
             NULL,
             &cleaned_slots
         ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
     );
     assert(cleaned_slots == 1U);
     assert(mylite_ownerless_process_registry_active_count(registry) == 0U);
+    wait_for_child(child);
 
     assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
     assert(close(fd) == 0);
@@ -17290,10 +17371,35 @@ static void test_process_registry_cleans_exited_process_slot(void) {
     free(root);
 }
 
-static int process_registry_test_pid_is_alive(uint64_t pid, void *ctx) {
-    const uint64_t *live_pid = (const uint64_t *)ctx;
+static mylite_ownerless_process_identity process_registry_test_identity(uint64_t pid) {
+    mylite_ownerless_process_identity identity;
 
-    return pid == *live_pid;
+    identity.pid = pid;
+    identity.start_time = pid == UINT64_MAX ? UINT64_MAX - 1U : pid + 1000U;
+    identity.boot_id_hash = 0x4D594C495445ULL ^ pid;
+    if (identity.boot_id_hash == 0U) {
+        identity.boot_id_hash = 1U;
+    }
+    return identity;
+}
+
+static int process_registry_test_identity_is_alive(
+    const mylite_ownerless_process_identity *identity,
+    void *ctx
+) {
+    const mylite_ownerless_process_identity *live_identity =
+        (const mylite_ownerless_process_identity *)ctx;
+
+    return identity != NULL && live_identity != NULL && identity->pid == live_identity->pid &&
+           identity->start_time == live_identity->start_time &&
+           identity->boot_id_hash == live_identity->boot_id_hash;
+}
+
+static int process_registry_identity_is_running(
+    const mylite_ownerless_process_identity *identity,
+    void *ctx
+) {
+    return mylite_ownerless_process_identity_is_alive(identity, ctx);
 }
 
 static int process_registry_pid_is_running(uint64_t pid, void *ctx) {
@@ -17321,14 +17427,14 @@ static int dictionary_state_pid_is_alive(uint64_t pid, void *ctx) {
 static int process_registry_cleanup_owner_locks(
     uint32_t slot_index,
     uint64_t slot_generation,
-    uint64_t pid,
+    const mylite_ownerless_process_identity *identity,
     void *ctx
 ) {
     cleanup_owner_locks_context *cleanup_context = (cleanup_owner_locks_context *)ctx;
     uint32_t released_entries = 0U;
 
     (void)slot_generation;
-    (void)pid;
+    (void)identity;
     assert(
         mylite_ownerless_lock_table_release_owner(
             cleanup_context->lock_table,
@@ -17344,12 +17450,12 @@ static int process_registry_cleanup_owner_locks(
 static int process_registry_cleanup_blocks_owner(
     uint32_t slot_index,
     uint64_t slot_generation,
-    uint64_t pid,
+    const mylite_ownerless_process_identity *identity,
     void *ctx
 ) {
     (void)slot_index;
     (void)slot_generation;
-    (void)pid;
+    (void)identity;
     (void)ctx;
     return MYLITE_OWNERLESS_PROCESS_CLEANUP_BLOCKED;
 }
@@ -17549,6 +17655,25 @@ static void wait_for_pipe(int pipe_fd) {
     assert(read(pipe_fd, &value, sizeof(value)) == sizeof(value));
     assert(value == 'x');
     assert(close(pipe_fd) == 0);
+}
+
+static void wait_for_child_exited_without_reaping(pid_t child) {
+    for (unsigned iteration = 0U; iteration < 500U; ++iteration) {
+        siginfo_t info;
+
+        memset(&info, 0, sizeof(info));
+        if (waitid(P_PID, (id_t)child, &info, WEXITED | WNOWAIT | WNOHANG) == 0) {
+            if (info.si_pid == child) {
+                return;
+            }
+        } else {
+            assert(errno == EINTR);
+        }
+        sleep_milliseconds(10U);
+    }
+
+    fprintf(stderr, "process %ld did not exit before timeout\n", (long)child);
+    assert(0);
 }
 
 static void wait_for_child(pid_t child) {

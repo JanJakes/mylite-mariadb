@@ -1,5 +1,6 @@
 #include "ownerless_probe.h"
 
+#include "ownerless_process_registry.h"
 #include "ownerless_wait.h"
 
 #include <cerrno>
@@ -37,6 +38,7 @@ bool probe_byte_range_locks(const std::string &root);
 bool probe_lock_release_on_exit(const std::string &root);
 bool probe_grow_remap(const std::string &root);
 bool probe_wait_backend(const std::string &root);
+bool probe_process_identity();
 bool set_write_lock(int fd, off_t start, off_t length);
 int try_write_lock(int fd, off_t start, off_t length);
 bool unlock_range(int fd, off_t start, off_t length);
@@ -97,6 +99,7 @@ int run_ownerless_probe(const std::string &root, mylite_ownerless_probe_result *
     result->grow_remap = probe_grow_remap(root) ? 1U : 0U;
     result->wait_backend = probe_wait_backend(root) ? 1U : 0U;
     result->fast_wait_backend = mylite_ownerless_wait_backend_is_fast() != 0 ? 1U : 0U;
+    result->process_identity = probe_process_identity() ? 1U : 0U;
     compute_ownerless_probe_summary(*result);
     apply_ownerless_probe_test_failures(*result);
     return MYLITE_OWNERLESS_PROBE_OK;
@@ -117,6 +120,8 @@ void apply_ownerless_probe_test_failures(mylite_ownerless_probe_result &result) 
         result.grow_remap = 0U;
     } else if (std::strcmp(failure, "wait-backend") == 0) {
         result.wait_backend = 0U;
+    } else if (std::strcmp(failure, "process-identity") == 0) {
+        result.process_identity = 0U;
     } else {
         result.mmap_shared_visibility = 0U;
     }
@@ -127,12 +132,12 @@ void apply_ownerless_probe_test_failures(mylite_ownerless_probe_result &result) 
 }
 
 void compute_ownerless_probe_summary(mylite_ownerless_probe_result &result) {
-    result.required_primitives = result.mmap_shared_visibility != 0U &&
-                                         result.byte_range_locks != 0U &&
-                                         result.lock_release_on_exit != 0U &&
-                                         result.grow_remap != 0U && result.wait_backend != 0U
-                                     ? 1U
-                                     : 0U;
+    result.required_primitives =
+        result.mmap_shared_visibility != 0U && result.byte_range_locks != 0U &&
+                result.lock_release_on_exit != 0U && result.grow_remap != 0U &&
+                result.wait_backend != 0U && result.process_identity != 0U
+            ? 1U
+            : 0U;
     result.platform_candidate =
         result.required_primitives != 0U && result.fast_wait_backend != 0U ? 1U : 0U;
 }
@@ -425,6 +430,21 @@ bool probe_wait_backend(const std::string &root) {
     static_cast<void>(close(fd));
     cleanup_probe_file(path);
     return ok;
+}
+
+bool probe_process_identity() {
+    mylite_ownerless_process_identity identity = {};
+    if (mylite_ownerless_current_process_identity(&identity) !=
+        MYLITE_OWNERLESS_PROCESS_REGISTRY_OK) {
+        return false;
+    }
+    if (mylite_ownerless_process_identity_is_alive(&identity, nullptr) == 0) {
+        return false;
+    }
+
+    mylite_ownerless_process_identity stale_identity = identity;
+    stale_identity.start_time += 1U;
+    return mylite_ownerless_process_identity_is_alive(&stale_identity, nullptr) == 0;
 }
 
 bool set_write_lock(int fd, off_t start, off_t length) {

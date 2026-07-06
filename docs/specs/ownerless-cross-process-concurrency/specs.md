@@ -592,7 +592,8 @@ redo-visibility state segment, a page-version index segment, a
 dictionary-generation segment, and a separate page-write lock registry for
 internal X/SX page-latch write ownership, plus an ownerless AUTO_INCREMENT
 high-watermark registry keyed by InnoDB table ID. Current opens publish one
-active process slot for the embedded runtime process, assign that slot the
+active process slot for the embedded runtime process, record PID plus Linux
+process start-time and boot-id hash identity evidence, assign that slot the
 wait-channel range, mark `.shm` dirty while the runtime is active, and release
 the slot before returning `.shm` to clean state on final close. Clean opens
 preserve the existing segments. A later open treats dirty, rebuilding, invalid,
@@ -814,7 +815,8 @@ Each process slot must contain:
 
 - slot generation,
 - process ID,
-- optional boot ID,
+- process start-time evidence,
+- boot ID evidence,
 - executable/runtime generation,
 - open mode,
 - current state,
@@ -825,10 +827,12 @@ Each process slot must contain:
 - cleanup cursor,
 - per-process wait-channel range.
 
-PIDs are never sufficient alone because they can be reused. Any liveness check
-must compare process slot generation and boot/start evidence. Heartbeats are
-diagnostic and cleanup hints; correctness comes from byte-range locks, durable
-logs, and generation-checked recovery.
+PIDs are never sufficient alone because they can be reused. Product
+process-registry liveness checks compare the stored PID, `/proc/<pid>/stat`
+start time, and current boot ID hash; a same PID with different identity is dead
+owner state. Heartbeats are diagnostic and cleanup hints; correctness comes from
+identity-aware process-registry liveness, byte-range locks, durable logs, and
+generation-checked recovery.
 
 Wait records must be stable across processes:
 
@@ -1117,8 +1121,8 @@ The core rule is:
 Add a process registry in `mylite-concurrency.shm`:
 
 - fixed or extendable process slots,
-- process ID, boot ID where available, executable generation, start timestamp,
-  heartbeat timestamp, and open mode,
+- process ID, start timestamp, boot ID hash, executable generation, heartbeat
+  timestamp, and open mode,
 - robust recovery state for "opening", "active", "closing", "crashed",
 - per-process wait-channel ranges,
 - per-process transaction lists and cleanup cursors.
@@ -1555,18 +1559,24 @@ Tasks:
    heartbeat, oldest read-view marker, cleanup cursor, and wait-channel range.
    The current code writes those fields for the single exclusive runtime
    process and has an internal cross-process allocator/releaser with generation
-   checks, heartbeat updates, callback-driven stale-slot cleanup, and cleanup
-   evidence for a process that exits without releasing its slot. Dead-slot
-   cleanup can release an owner with no recovery-sensitive shared state. If MDL,
+   checks, heartbeat updates, PID/start-time/boot-id identity-aware liveness,
+   callback-driven stale-slot cleanup, and cleanup evidence for a process that
+   exits without releasing its slot. The process-registry segment version is
+   bumped when identity fields become required, so older PID-only volatile
+   layouts are not interpreted as current slots; active v3 PID-only slots fail
+   closed with `MYLITE_BUSY` while the legacy PID is live, and rebuild only
+   after the legacy PID is dead. Dead-slot cleanup can release an owner with no
+   recovery-sensitive shared state. If MDL,
    transaction, read-view, InnoDB lock, or redo-visibility state remains for a
    dead owner while another process is live, cleanup is blocked and open returns
    busy until the durable recovery/rebuild path can run without live peers.
 7. Add shared-memory rebuild from durable metadata and empty coordination logs.
 8. Add capability probing for mmap visibility, byte-range lock behavior,
-   release-on-death, remap after growth, and wait/wake behavior. The primitive
-   evidence exists in tests and is summarized by an internal ownerless platform
-   probe. Ownerless opens now probe the prepared database directory, persist a
-   device-bound successful proof in `concurrency/mylite-ownerless-platform.meta`,
+   release-on-death, remap after growth, wait/wake behavior, and process
+   identity. The primitive evidence exists in tests and is summarized by an
+   internal ownerless platform probe. Ownerless opens now probe the prepared
+   database directory, persist a device-bound successful proof with
+   `process_identity=1` in `concurrency/mylite-ownerless-platform.meta`,
    and reject directories whose backing filesystem cannot prove the required
    primitives. `MYLITE_OPEN_OWNERLESS_RW` now uses the product ownerless startup
    path in normal embedded builds; unsupported surfaces remain tracked
@@ -4902,6 +4912,14 @@ Tasks:
    and `1374` can recover on attempt `2`, seeds `1347`, `1356`, `1370`, and
    `1372` can recover on attempt `3`, and seed `1373` can recover on attempt
    `4` after transient raw MariaDB `1213` deadlock exits.
+   The `ownerless-external-seed-1376-1407-replay` follow-up advances the next
+   dependency-free seed-sweep CTest window to seeds `1376` through `1407` and
+   records Docker-backed replay for the same window at rounds `2`, using the
+   same explicit FK graph whole-seed retry budget of `10` so seeds `1376`,
+   `1386`, `1389`, `1393`, `1397`, `1400`, `1401`, and `1407` can recover on
+   attempt `2`, seeds `1387` and `1399` can recover on attempt `3`, seed
+   `1384` can recover on attempt `4`, and seed `1383` can recover on attempt
+   `8` after transient raw MariaDB `1213` deadlock exits.
    Separate foreign-key graph stress
    coverage runs with
    `MYLITE_OWNERLESS_FK_GRAPH_STRESS_ROUNDS=48`, concurrent ownerless workers
@@ -5471,7 +5489,7 @@ Tasks:
    transaction, DDL stress, and FK graph generated traces for deterministic
    external stress probes, including focused Docker-backed replay for the
    default DDL seed set and contiguous combined random transaction plus DDL
-   seed-sweep replay windows through seed `1375`; the `16` through `31`,
+   seed-sweep replay windows through seed `1407`; the `16` through `31`,
    `32` through `63`, `64` through `95`, `96` through `127`, and `128`
    through `159`, `160` through `191`, `192` through `223`, and `224` through
    `255`, `256` through `287`, `288` through `319`, `320` through `351`,
@@ -5484,12 +5502,12 @@ Tasks:
    `960` through `991`, `992` through `1023`, `1024` through `1055`,
    `1056` through `1087`, `1088` through `1119`, `1120` through `1151`,
    `1152` through `1183`, `1184` through `1215`, `1216` through `1247`,
-   `1248` through `1279`, `1280` through `1311`, `1312` through `1343`, and
-   `1344` through `1375`
+   `1248` through `1279`, `1280` through `1311`, `1312` through `1343`,
+   `1344` through `1375`, and `1376` through `1407`
    replays also cover FK graph seeds at rounds `2`. FK
    graph now
    participates in the
-   dependency-free combined seed-sweep command-plan windows through seed `1375`,
+   dependency-free combined seed-sweep command-plan windows through seed `1407`,
    and focused Docker-backed FK graph seed
    replay has passed the default seed set plus the `16` through `31`, `32`
    through `63`, `64` through `95`, `96` through `127`, `128` through `159`,
@@ -5504,9 +5522,9 @@ Tasks:
    `992` through `1023`, `1024` through `1055`, `1056` through `1087`,
    `1088` through `1119`, `1120` through `1151`, `1152` through `1183`,
    `1184` through `1215`, `1216` through `1247`, `1248` through `1279`,
-   `1280` through `1311`, `1312` through `1343`, and `1344` through `1375`
-   windows with bounded whole-seed retries for transient raw MariaDB deadlock
-   exits.
+   `1280` through `1311`, `1312` through `1343`, `1344` through `1375`, and
+   `1376` through `1407` windows with bounded whole-seed retries for transient
+   raw MariaDB deadlock exits.
 
 Exit criteria:
 
@@ -5545,7 +5563,7 @@ Minimum suites before support can be claimed:
     header file-identity validation,
   - dirty/rebuilding generation recovery,
   - shared-memory rebuild,
-  - process-slot reuse with PID reuse simulation where practical,
+  - process-slot reuse with same-PID/different-start-time simulation,
   - recovery lock handoff,
   - missed wakeup timeout/rescan.
 - shared-memory primitives:

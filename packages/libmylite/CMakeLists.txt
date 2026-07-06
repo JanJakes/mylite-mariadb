@@ -1941,7 +1941,7 @@ if(BUILD_TESTING)
       LABELS "compat.engine;compat.application-query;compat.directory-boundary;compat.query"
     )
     set_tests_properties(libmylite.embedded-locking-concurrency PROPERTIES
-      LABELS "compat.directory-boundary;compat.crash-reopen"
+      LABELS "compat.concurrency;compat.directory-boundary;compat.crash-reopen"
     )
     set_tests_properties(libmylite.embedded-same-process-concurrency PROPERTIES
       LABELS "compat.concurrency;compat.query"

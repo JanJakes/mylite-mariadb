@@ -185,7 +185,11 @@ app.mylite/
   startup state has been ended and a checkpoint-valid saved 12 KiB redo startup
   prefix, or the captured prefix fallback, has been restored; ordinary
   read/write native reopen uses the same failure-then-restore retry path after
-  ownerless activity.
+  ownerless activity. A first ownerless read/write startup after ordinary native
+  shutdown leaves InnoDB checkpoint suppression disabled when there is no
+  ownerless page-version WAL payload, native checkpoint marker, live peer, or
+  usable redo-header backup, because native InnoDB redo is then the only
+  recovery authority.
   Final no-live ownerless read/write shutdown also holds
   `mylite-runtime-startup.lock` while publishing a native checkpoint for
   completed DDL file-operation redo, ownerless `ALTER TABLE ... AUTO_INCREMENT`
@@ -193,7 +197,10 @@ app.mylite/
   forcing native checkpoint proof for retained page-version WAL after active
   pins release, stopping MariaDB, and restoring the 12 KiB redo startup prefix
   if embedded teardown leaves `ib_logfile0` without startup-checkpoint evidence
-  before a peer opens.
+  before a peer opens. When no live ownerless peer and no retained page-version
+  WAL payload remain, shutdown uses MariaDB's clean native checkpoint path even
+  if rollback history was not empty before close; retained page-version WAL keeps
+  the crash-style shutdown policy unless rollback history is already empty.
   Ownerless uncheckpointed file-operation recovery resolves relative FILE redo
   paths against the active datadir, synthesizes a missing checkpoint boundary
   only at a clean EOF/no-corrupt-FS recovery boundary, and releases the redo

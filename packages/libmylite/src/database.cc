@@ -970,7 +970,8 @@ constexpr std::size_t k_concurrency_shm_segment_data_offset = 8;
 constexpr std::size_t k_concurrency_shm_segment_length_offset = 16;
 constexpr std::size_t k_concurrency_shm_segment_generation_offset = 24;
 constexpr std::uint32_t k_concurrency_process_registry_segment_type = 1;
-constexpr std::uint32_t k_concurrency_process_registry_segment_version = 3;
+constexpr std::uint32_t k_concurrency_process_registry_legacy_pid_segment_version = 3;
+constexpr std::uint32_t k_concurrency_process_registry_segment_version = 4;
 constexpr std::uint32_t k_concurrency_wait_channel_segment_type = 2;
 constexpr std::uint32_t k_concurrency_wait_channel_segment_version = 1;
 constexpr std::uint32_t k_concurrency_mdl_lock_table_segment_type = 3;
@@ -1116,6 +1117,8 @@ constexpr std::size_t k_concurrency_process_slot_wait_channel_count_offset = 72;
 constexpr std::size_t k_concurrency_process_slot_state_offset = 8;
 constexpr std::size_t k_concurrency_process_slot_open_mode_offset = 12;
 constexpr std::size_t k_concurrency_process_slot_pid_offset = 16;
+constexpr std::size_t k_concurrency_process_slot_start_time_offset = 40;
+constexpr std::size_t k_concurrency_process_slot_boot_id_hash_offset = 48;
 constexpr std::size_t k_concurrency_process_slot_explicit_transaction_count_offset = 80;
 constexpr std::size_t k_concurrency_wait_header_channel_count_offset = 0;
 constexpr std::size_t k_concurrency_wait_header_channel_size_offset = 4;
@@ -1986,6 +1989,10 @@ bool concurrency_shm_header_layout_matches(
     std::string_view database_uuid
 );
 bool concurrency_shm_segments_match(int shm_fd, off_t shm_size);
+int read_concurrency_process_live_count_for_rebuild_guard(
+    int shm_fd,
+    std::uint64_t *out_live_count
+);
 bool concurrency_shm_has_stale_reader_state_without_recovery(int shm_fd, off_t shm_size);
 bool concurrency_shm_rebuild_requires_recovery(int shm_fd, off_t shm_size);
 bool concurrency_shm_header_identity_matches(
@@ -2281,6 +2288,7 @@ int replace_ownerless_page_index_after_reclaim(void *context);
 int page_log_result_from_page_index_result(int result);
 int read_concurrency_process_active_count(int shm_fd, std::uint64_t *out_active_count);
 int read_concurrency_process_live_count(int shm_fd, std::uint64_t *out_live_count);
+int read_concurrency_process_legacy_pid_live_count(int shm_fd, std::uint64_t *out_live_count);
 int validate_concurrency_shm_mapping(int shm_fd, off_t shm_size, std::string_view database_uuid);
 int map_concurrency_shared_memory_for_runtime(
     const std::filesystem::path &database_path,
@@ -3146,7 +3154,8 @@ unsigned char *runtime_redo_state(RuntimeState &runtime);
 unsigned char *runtime_page_index(RuntimeState &runtime);
 unsigned char *runtime_dictionary_state(RuntimeState &runtime);
 std::uint32_t ownerless_owner_id_from_slot_index(std::uint32_t slot_index);
-int ownerless_process_is_alive(std::uint64_t pid, void *ctx);
+mylite_ownerless_process_identity ownerless_process_identity_from_slot(const unsigned char *slot);
+int ownerless_pid_is_alive(std::uint64_t pid, void *ctx);
 bool ownerless_process_registry_has_other_live_explicit_transactions(
     const void *registry,
     std::size_t registry_size,
@@ -3156,13 +3165,13 @@ bool ownerless_trx_registry_has_other_active_transactions(OwnerlessInnoDBLockHoo
 int ownerless_process_cleanup_dead_owner_state(
     std::uint32_t slot_index,
     std::uint64_t slot_generation,
-    std::uint64_t pid,
+    const mylite_ownerless_process_identity *identity,
     void *ctx
 );
 int ownerless_process_cleanup_owner_state(
     std::uint32_t slot_index,
     std::uint64_t slot_generation,
-    std::uint64_t pid,
+    const mylite_ownerless_process_identity *identity,
     void *ctx
 );
 int ownerless_process_release_owner_page_write_locks(
@@ -5514,7 +5523,8 @@ int validate_ownerless_platform_for_database(mylite_db &db) {
         set_error(
             db,
             MYLITE_ERROR,
-            "ownerless mode requires database-directory MAP_SHARED and byte-range lock support"
+            "ownerless mode requires database-directory MAP_SHARED, byte-range lock, and "
+            "process-identity support"
         );
         return MYLITE_ERROR;
     }
@@ -5546,6 +5556,7 @@ bool ownerless_platform_probe_proof_matches(
     bool has_format = false;
     bool has_matching_device = false;
     bool has_required_primitives = false;
+    bool has_process_identity = false;
     for (std::string line; std::getline(metadata, line);) {
         if (line == k_metadata_format_line) {
             has_format = true;
@@ -5553,6 +5564,10 @@ bool ownerless_platform_probe_proof_matches(
         }
         if (line == "required_primitives=1") {
             has_required_primitives = true;
+            continue;
+        }
+        if (line == "process_identity=1") {
+            has_process_identity = true;
             continue;
         }
         if (line.rfind("database_device=", 0) == 0) {
@@ -5567,7 +5582,7 @@ bool ownerless_platform_probe_proof_matches(
         return false;
     }
 
-    return has_format && has_matching_device && has_required_primitives;
+    return has_format && has_matching_device && has_required_primitives && has_process_identity;
 }
 
 bool ownerless_platform_probe_device_cache_matches(std::uint64_t database_device) {
@@ -5612,6 +5627,7 @@ int write_ownerless_platform_probe_proof(
     metadata << k_metadata_format_line << "\n";
     metadata << "database_device=" << database_device << "\n";
     metadata << "required_primitives=1\n";
+    metadata << "process_identity=1\n";
     return metadata ? MYLITE_OK : MYLITE_IOERR;
 }
 #endif
@@ -10884,7 +10900,8 @@ int prepare_concurrency_shm_layout(
         }
         std::uint64_t live_count = active_count;
         if (active_count > 0U) {
-            const int live_count_result = read_concurrency_process_live_count(shm_fd, &live_count);
+            const int live_count_result =
+                read_concurrency_process_live_count_for_rebuild_guard(shm_fd, &live_count);
             if (live_count_result != MYLITE_OK) {
                 return MYLITE_BUSY;
             }
@@ -15010,10 +15027,9 @@ bool ownerless_runtime_has_live_shared_readonly_peer(RuntimeState &runtime) {
             k_concurrency_process_open_mode_shared_readonly) {
             continue;
         }
-        if (ownerless_process_is_alive(
-                load_le64(slot, k_concurrency_process_slot_pid_offset),
-                nullptr
-            ) != 0) {
+        const mylite_ownerless_process_identity identity =
+            ownerless_process_identity_from_slot(slot);
+        if (mylite_ownerless_process_identity_is_alive(&identity, nullptr) != 0) {
             return true;
         }
     }
@@ -15033,10 +15049,9 @@ bool ownerless_runtime_has_no_live_explicit_transactions(RuntimeState &runtime) 
             MYLITE_OWNERLESS_PROCESS_STATE_ACTIVE) {
             continue;
         }
-        if (ownerless_process_is_alive(
-                load_le64(slot, k_concurrency_process_slot_pid_offset),
-                nullptr
-            ) == 0) {
+        const mylite_ownerless_process_identity identity =
+            ownerless_process_identity_from_slot(slot);
+        if (mylite_ownerless_process_identity_is_alive(&identity, nullptr) == 0) {
             continue;
         }
         if (load_le64(slot, k_concurrency_process_slot_explicit_transaction_count_offset) > 0U) {
@@ -15072,10 +15087,9 @@ bool ownerless_process_registry_has_other_live_explicit_transactions(
         if (ownerless_owner_id_from_slot_index(index) == owner_id) {
             continue;
         }
-        if (ownerless_process_is_alive(
-                load_le64(slot, k_concurrency_process_slot_pid_offset),
-                nullptr
-            ) == 0) {
+        const mylite_ownerless_process_identity identity =
+            ownerless_process_identity_from_slot(slot);
+        if (mylite_ownerless_process_identity_is_alive(&identity, nullptr) == 0) {
             continue;
         }
         if (load_le64(slot, k_concurrency_process_slot_explicit_transaction_count_offset) > 0U) {
@@ -15471,12 +15485,122 @@ int read_concurrency_process_live_count(int shm_fd, std::uint64_t *out_live_coun
     const int registry_result = mylite_ownerless_process_registry_live_count(
         registry,
         k_concurrency_process_registry_size,
-        ownerless_process_is_alive,
+        mylite_ownerless_process_identity_is_alive,
         nullptr,
         &live_count
     );
     const int unmap_result = ::munmap(mapping, static_cast<std::size_t>(shm_stat.st_size));
     if (registry_result != MYLITE_OWNERLESS_PROCESS_REGISTRY_OK || unmap_result != 0) {
+        return MYLITE_IOERR;
+    }
+
+    *out_live_count = live_count;
+    return MYLITE_OK;
+}
+
+int read_concurrency_process_live_count_for_rebuild_guard(
+    int shm_fd,
+    std::uint64_t *out_live_count
+) {
+    if (out_live_count == nullptr) {
+        return MYLITE_IOERR;
+    }
+
+    std::array<unsigned char, k_concurrency_shm_segment_descriptor_size> process_segment = {};
+    if (!read_exact_at(
+            shm_fd,
+            process_segment.data(),
+            process_segment.size(),
+            static_cast<off_t>(k_concurrency_shm_segment_table_start)
+        )) {
+        return MYLITE_BUSY;
+    }
+
+    if (load_le32(process_segment.data(), k_concurrency_shm_segment_type_offset) !=
+            k_concurrency_process_registry_segment_type ||
+        load_le64(process_segment.data(), k_concurrency_shm_segment_data_offset) !=
+            k_concurrency_process_registry_offset ||
+        load_le64(process_segment.data(), k_concurrency_shm_segment_length_offset) !=
+            k_concurrency_process_registry_size) {
+        return MYLITE_BUSY;
+    }
+
+    const std::uint32_t process_segment_version =
+        load_le32(process_segment.data(), k_concurrency_shm_segment_version_offset);
+    if (process_segment_version == k_concurrency_process_registry_segment_version) {
+        return read_concurrency_process_live_count(shm_fd, out_live_count);
+    }
+    if (process_segment_version == k_concurrency_process_registry_legacy_pid_segment_version) {
+        return read_concurrency_process_legacy_pid_live_count(shm_fd, out_live_count);
+    }
+
+    return MYLITE_BUSY;
+}
+
+int read_concurrency_process_legacy_pid_live_count(int shm_fd, std::uint64_t *out_live_count) {
+    if (out_live_count == nullptr) {
+        return MYLITE_IOERR;
+    }
+
+    struct stat shm_stat = {};
+    if (::fstat(shm_fd, &shm_stat) != 0 ||
+        shm_stat.st_size <
+            static_cast<off_t>(
+                k_concurrency_process_registry_offset + k_concurrency_process_registry_size
+            ) ||
+        static_cast<std::uintmax_t>(shm_stat.st_size) >
+            static_cast<std::uintmax_t>(std::numeric_limits<std::size_t>::max())) {
+        return MYLITE_IOERR;
+    }
+
+    std::array<unsigned char, k_concurrency_process_registry_header_size> registry_header = {};
+    if (!read_exact_at(
+            shm_fd,
+            registry_header.data(),
+            registry_header.size(),
+            static_cast<off_t>(k_concurrency_process_registry_offset)
+        )) {
+        return MYLITE_IOERR;
+    }
+    if (load_le32(registry_header.data(), k_concurrency_registry_slot_count_offset) !=
+            k_concurrency_process_slot_count ||
+        load_le32(registry_header.data(), k_concurrency_registry_slot_size_offset) !=
+            k_concurrency_process_slot_size) {
+        return MYLITE_IOERR;
+    }
+
+    void *mapping = ::mmap(
+        nullptr,
+        static_cast<std::size_t>(shm_stat.st_size),
+        PROT_READ,
+        MAP_SHARED,
+        shm_fd,
+        0
+    );
+    if (mapping == MAP_FAILED) {
+        return MYLITE_IOERR;
+    }
+
+    const auto *registry =
+        static_cast<const unsigned char *>(mapping) + k_concurrency_process_registry_offset;
+    std::uint64_t live_count = 0;
+    for (std::uint32_t index = 0; index < k_concurrency_process_slot_count; ++index) {
+        const unsigned char *slot = registry + k_concurrency_process_registry_header_size +
+                                    (index * k_concurrency_process_slot_size);
+        if (load_le32(slot, k_concurrency_process_slot_state_offset) !=
+            MYLITE_OWNERLESS_PROCESS_STATE_ACTIVE) {
+            continue;
+        }
+        if (ownerless_pid_is_alive(
+                load_le64(slot, k_concurrency_process_slot_pid_offset),
+                nullptr
+            ) != 0) {
+            ++live_count;
+        }
+    }
+
+    const int unmap_result = ::munmap(mapping, static_cast<std::size_t>(shm_stat.st_size));
+    if (unmap_result != 0) {
         return MYLITE_IOERR;
     }
 
@@ -15683,7 +15807,7 @@ int allocate_concurrency_process_slot(RuntimeState &runtime) {
     int registry_result = mylite_ownerless_process_registry_cleanup_dead_with_callback(
         registry,
         k_concurrency_process_registry_size,
-        ownerless_process_is_alive,
+        mylite_ownerless_process_identity_is_alive,
         nullptr,
         ownerless_process_cleanup_dead_owner_state,
         &cleanup_context,
@@ -15696,12 +15820,21 @@ int allocate_concurrency_process_slot(RuntimeState &runtime) {
         return mylite_result_from_process_registry_result(registry_result);
     }
 
+    mylite_ownerless_process_identity process_identity = {};
+    if (mylite_ownerless_current_process_identity(&process_identity) !=
+        MYLITE_OWNERLESS_PROCESS_REGISTRY_OK) {
+        static_cast<void>(
+            update_concurrency_shm_state(runtime.concurrency_shm_fd, k_concurrency_shm_state_clean)
+        );
+        return MYLITE_ERROR;
+    }
+
     std::uint32_t slot_index = 0;
     std::uint64_t slot_generation = 0;
     registry_result = mylite_ownerless_process_registry_allocate(
         registry,
         k_concurrency_process_registry_size,
-        static_cast<std::uint64_t>(::getpid()),
+        process_identity,
         runtime.readonly_mode ? k_concurrency_process_open_mode_shared_readonly
                               : k_concurrency_process_open_mode_exclusive,
         load_le64(
@@ -16533,7 +16666,7 @@ int refresh_ownerless_dictionary_before_statement(mylite_db &db, bool allow_glob
     const int wait_result = mylite_ownerless_dictionary_state_wait_ready(
         dictionary_state,
         k_concurrency_dictionary_state_segment_size,
-        ownerless_process_is_alive,
+        ownerless_pid_is_alive,
         nullptr,
         k_concurrency_lock_wait_timeout_ms,
         &generation
@@ -16714,7 +16847,7 @@ void initialize_ownerless_dictionary_generation(mylite_db &db) {
     if (mylite_ownerless_dictionary_state_wait_ready(
             dictionary_state,
             k_concurrency_dictionary_state_segment_size,
-            ownerless_process_is_alive,
+            ownerless_pid_is_alive,
             nullptr,
             k_concurrency_lock_wait_timeout_ms,
             &generation
@@ -24204,7 +24337,7 @@ void release_concurrency_owner_state(RuntimeState &runtime) {
     static_cast<void>(ownerless_process_cleanup_owner_state(
         runtime.concurrency_process_slot_index,
         runtime.concurrency_process_slot_generation,
-        static_cast<std::uint64_t>(::getpid()),
+        nullptr,
         &cleanup_context
     ));
 }
@@ -27567,49 +27700,30 @@ std::uint32_t ownerless_owner_id_from_slot_index(std::uint32_t slot_index) {
     return slot_index + 1U;
 }
 
-#  if defined(__linux__)
-bool ownerless_linux_process_is_zombie(pid_t pid) {
-    char stat_path[64];
-    char stat_buffer[512];
-    const int path_length =
-        std::snprintf(stat_path, sizeof(stat_path), "/proc/%ld/stat", static_cast<long>(pid));
-    if (path_length <= 0 || static_cast<std::size_t>(path_length) >= sizeof(stat_path)) {
-        return false;
+mylite_ownerless_process_identity ownerless_process_identity_from_slot(const unsigned char *slot) {
+    mylite_ownerless_process_identity identity = {};
+    if (slot == nullptr) {
+        return identity;
     }
 
-    const int fd = ::open(stat_path, O_RDONLY | O_CLOEXEC);
-    if (fd < 0) {
-        return false;
-    }
-    const ssize_t bytes_read = ::read(fd, stat_buffer, sizeof(stat_buffer) - 1U);
-    const int saved_errno = errno;
-    static_cast<void>(::close(fd));
-    errno = saved_errno;
-    if (bytes_read <= 0) {
-        return false;
-    }
-
-    stat_buffer[bytes_read] = '\0';
-    const char *close_paren = std::strrchr(stat_buffer, ')');
-    if (close_paren == nullptr || close_paren[1] != ' ') {
-        return false;
-    }
-    return close_paren[2] == 'Z';
+    identity.pid = load_le64(slot, k_concurrency_process_slot_pid_offset);
+    identity.start_time = load_le64(slot, k_concurrency_process_slot_start_time_offset);
+    identity.boot_id_hash = load_le64(slot, k_concurrency_process_slot_boot_id_hash_offset);
+    return identity;
 }
-#  endif
 
-int ownerless_process_is_alive(std::uint64_t pid, void *ctx) {
+int ownerless_pid_is_alive(std::uint64_t pid, void *ctx) {
     (void)ctx;
     if (pid == 0U || pid > static_cast<std::uint64_t>(std::numeric_limits<pid_t>::max())) {
         return 0;
     }
+    mylite_ownerless_process_identity identity = {};
+    if (mylite_ownerless_process_identity_for_pid(pid, &identity) ==
+        MYLITE_OWNERLESS_PROCESS_REGISTRY_OK) {
+        return mylite_ownerless_process_identity_is_alive(&identity, nullptr);
+    }
     const pid_t process_id = static_cast<pid_t>(pid);
     if (::kill(process_id, 0) == 0) {
-#  if defined(__linux__)
-        if (ownerless_linux_process_is_zombie(process_id)) {
-            return 0;
-        }
-#  endif
         return 1;
     }
     return errno == EPERM ? 1 : 0;
@@ -27618,7 +27732,7 @@ int ownerless_process_is_alive(std::uint64_t pid, void *ctx) {
 int ownerless_process_cleanup_dead_owner_state(
     std::uint32_t slot_index,
     std::uint64_t slot_generation,
-    std::uint64_t pid,
+    const mylite_ownerless_process_identity *identity,
     void *ctx
 ) {
     if (ctx == nullptr) {
@@ -27635,16 +27749,16 @@ int ownerless_process_cleanup_dead_owner_state(
     if (ownerless_process_owner_state_requires_recovery(*cleanup, owner_id, slot_generation)) {
         return MYLITE_OWNERLESS_PROCESS_CLEANUP_BLOCKED;
     }
-    return ownerless_process_cleanup_owner_state(slot_index, slot_generation, pid, ctx);
+    return ownerless_process_cleanup_owner_state(slot_index, slot_generation, identity, ctx);
 }
 
 int ownerless_process_cleanup_owner_state(
     std::uint32_t slot_index,
     std::uint64_t slot_generation,
-    std::uint64_t pid,
+    const mylite_ownerless_process_identity *identity,
     void *ctx
 ) {
-    (void)pid;
+    (void)identity;
     if (ctx == nullptr) {
         return MYLITE_OWNERLESS_PROCESS_CLEANUP_ERROR;
     }
@@ -29968,8 +30082,6 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
             ownerless_startup_native_checkpoint_refresh =
                 ownerless_startup_current_native_redo_header_is_authoritative &&
                 ownerless_startup_checkpoint_visible_lsn != 0U;
-            const bool ownerless_startup_allows_native_checkpoint =
-                ownerless_startup_native_checkpoint_refresh;
             if (!ownerless_runtime_open && !db.readonly_open) {
                 std::uint64_t checkpoint_latest_lsn = 0;
                 std::uint64_t checkpoint_visible_lsn = 0;
@@ -30079,6 +30191,11 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
             stage_start_ns = embedded_open_perf_start_ns();
             const bool ownerless_redo_header_backup_available =
                 !db.readonly_open && ownerless_redo_header_backup_is_valid(db.database_path);
+            const bool ownerless_startup_no_live_native_recovery_is_authoritative =
+                ownerless_runtime_open && !db.readonly_open &&
+                ownerless_runtime_has_no_live_peers(g_runtime) &&
+                !ownerless_page_log_has_payload_records(g_runtime) &&
+                !native_checkpoint_marker_needed && !ownerless_redo_header_backup_available;
             innodb_ownerless_uncheckpointed_file_recovery_needed =
                 ownerless_runtime_open || ordinary_native_page_log_reads ||
                 native_file_op_checkpoint_needed || native_dml_file_op_checkpoint_needed ||
@@ -30088,10 +30205,14 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
              * authoritative and already has a persisted ownerless visible
              * boundary must let InnoDB perform ordinary recovery and
              * checkpoint work during mysql_server_init(). Fresh ownerless
-             * startup without an ownerless visible boundary keeps checkpoint
-             * suppression enabled so repeated startup retries cannot move
-             * native state before MyLite has published a boundary.
+             * startup without an ownerless visible boundary can also use
+             * native recovery when no ownerless WAL, native marker, live peer,
+             * or redo-header backup is available; native InnoDB redo is then
+             * the only authoritative recovery source.
              */
+            const bool ownerless_startup_allows_native_checkpoint =
+                ownerless_startup_native_checkpoint_refresh ||
+                ownerless_startup_no_live_native_recovery_is_authoritative;
             mylite_ownerless_innodb_set_checkpoint_suppression(
                 ownerless_runtime_open && !db.readonly_open &&
                         !ownerless_startup_allows_native_checkpoint
@@ -30734,6 +30855,12 @@ void release_runtime(void) {
         OwnerlessRedoStartupPrefixSnapshot startup_redo_prefix = {};
         bool have_startup_redo_prefix = false;
         stage_start_ns = embedded_open_perf_start_ns();
+        const bool current_native_redo_can_be_checkpointed =
+            !g_runtime.ownerless_rw_mode ||
+            (no_live_ownerless_shutdown && !ownerless_page_log_has_payload_records(g_runtime));
+        if (current_native_redo_can_be_checkpointed) {
+            static_cast<void>(mylite_ownerless_innodb_make_checkpoint());
+        }
         const int redo_prefix_result = capture_ownerless_redo_startup_prefix(
             g_runtime.database_path,
             shutdown_redo_prefix,
@@ -30777,18 +30904,18 @@ void release_runtime(void) {
     const bool clean_final_ownerless_shutdown =
         g_runtime.ownerless_rw_mode && no_live_ownerless_shutdown &&
         !retained_ownerless_page_log_payload_before_shutdown &&
-        !native_recovered_transactions_before_shutdown &&
-        native_rollback_history_empty_before_shutdown;
+        !native_recovered_transactions_before_shutdown;
     const bool retained_wal_history_empty_ownerless_shutdown =
         g_runtime.ownerless_rw_mode && retained_ownerless_page_log_payload_before_shutdown &&
         native_rollback_history_empty_before_shutdown;
     /*
      * Retained ownerless WAL remains the recovery proof when native rollback
      * history is still present. Do not lower MariaDB's configured
-     * fast-shutdown mode for that path; embedded slow shutdown can wait
-     * indefinitely for native background work while the WAL still must be
-     * retained. When rollback history is already empty, a native checkpoint is
-     * bounded and keeps following ownerless readers on the native fast path.
+     * fast-shutdown mode for that path unless rollback history is already
+     * empty; embedded slow shutdown can wait indefinitely for native background
+     * work while the WAL still must be retained. A final no-live ownerless close
+     * without retained page-version WAL can use the native clean shutdown path
+     * because MariaDB's redo and checkpoint state are the recovery authority.
      */
     unsigned int saved_srv_fast_shutdown = 0U;
     bool changed_srv_fast_shutdown = false;

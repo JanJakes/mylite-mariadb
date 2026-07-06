@@ -23,14 +23,32 @@ extern "C" {
 #define MYLITE_OWNERLESS_PROCESS_REGISTRY_SLOT_SIZE 128U
 #define MYLITE_OWNERLESS_PROCESS_STATE_ACTIVE 1U
 
-typedef int (*mylite_ownerless_process_alive_callback)(uint64_t pid, void *ctx);
+typedef struct mylite_ownerless_process_identity {
+    uint64_t pid;
+    uint64_t start_time;
+    uint64_t boot_id_hash;
+} mylite_ownerless_process_identity;
+
+typedef int (*mylite_ownerless_process_alive_callback)(
+    const mylite_ownerless_process_identity *identity,
+    void *ctx
+);
 typedef int (*mylite_ownerless_process_cleanup_callback)(
     uint32_t slot_index,
     uint64_t slot_generation,
-    uint64_t pid,
+    const mylite_ownerless_process_identity *identity,
     void *ctx
 );
 
+int mylite_ownerless_process_identity_for_pid(
+    uint64_t pid,
+    mylite_ownerless_process_identity *out_identity
+);
+int mylite_ownerless_current_process_identity(mylite_ownerless_process_identity *out_identity);
+int mylite_ownerless_process_identity_is_alive(
+    const mylite_ownerless_process_identity *identity,
+    void *ctx
+);
 size_t mylite_ownerless_process_registry_size(uint32_t slot_count);
 int mylite_ownerless_process_registry_initialize(
     void *mapping,
@@ -40,7 +58,7 @@ int mylite_ownerless_process_registry_initialize(
 int mylite_ownerless_process_registry_allocate(
     void *mapping,
     size_t mapping_size,
-    uint64_t pid,
+    mylite_ownerless_process_identity identity,
     uint32_t open_mode,
     uint64_t shm_generation,
     uint32_t *out_slot_index,

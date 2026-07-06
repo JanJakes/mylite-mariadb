@@ -46,10 +46,26 @@ no peer can be modifying the database while the process-local prefix snapshot is
 captured and conditionally restored. Ownerless closes keep their existing
 startup-lock and no-live-peer restore rules.
 
+Before capturing the process-local prefix, repair-eligible ordinary closes and
+no-live ownerless closes with no retained page-version WAL payload force a native
+checkpoint. That makes the saved prefix current enough to cover native page LSNs
+if MariaDB later returns from shutdown with an invalid startup header.
+
+The first ownerless read/write startup after an ordinary fast-shutdown close can
+also have no ownerless page-version WAL payload, no native checkpoint marker, no
+live peer, and no usable sidecar redo-header backup. In that state, native
+InnoDB redo is the only recovery authority, even when the current redo header's
+checkpoint does not yet cover every native page LSN. Startup therefore leaves
+checkpoint suppression disabled for that no-live/no-WAL/no-marker/no-backup
+case, lets `mysql_server_init()` perform native recovery/checkpoint work, and
+then lets the existing no-live ownerless startup reclaim path publish any needed
+ownerless boundary.
+
 The repair remains lightweight:
 
 - it captures only an in-memory prefix that MariaDB-current checkpoint
-  validation accepts before shutdown;
+  validation accepts before shutdown and whose checkpoint covers native pages at
+  restore time;
 - it skips the write when the post-shutdown prefix is already valid;
 - it creates no durable sidecar for fresh ordinary databases;
 - it does not create or map ownerless WAL, checkpoint, or shared-memory files.
@@ -88,6 +104,9 @@ coverage after the startup-gate performance optimization.
   durable ownerless evidence exists.
 - A database created and closed through an ordinary InnoDB runtime can later
   introduce ownerless metadata and reopen successfully.
+- A first ownerless read/write startup after ordinary native shutdown does not
+  suppress native InnoDB recovery when no ownerless WAL, native marker, live
+  peer, or redo-header backup exists.
 - Ordinary close-time redo guard remains cheap relative to MariaDB
   `mysql_server_end()` and does not create ownerless coordination files.
 - CI no longer fails the embedded ownerless directory lifecycle selector with
