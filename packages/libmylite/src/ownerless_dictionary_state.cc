@@ -12,12 +12,28 @@ namespace {
 
 constexpr std::size_t k_generation_offset = 0;
 constexpr std::size_t k_active_owner_id_offset = 8;
+constexpr std::size_t k_wake_word_offset = 12;
 constexpr std::size_t k_active_owner_generation_offset = 16;
 constexpr std::size_t k_active_owner_pid_offset = 24;
-constexpr std::size_t k_wake_word_offset = 32;
-constexpr std::size_t k_recoverable_kind_offset = 36;
-constexpr std::size_t k_recoverable_owner_id_offset = 40;
-constexpr std::size_t k_recoverable_owner_generation_offset = 48;
+constexpr std::size_t k_active_owner_start_time_offset = 32;
+constexpr std::size_t k_active_owner_boot_id_hash_offset = 40;
+constexpr std::size_t k_recoverable_kind_offset = 48;
+constexpr std::size_t k_recoverable_owner_id_offset = 52;
+constexpr std::size_t k_recoverable_owner_generation_offset = 56;
+
+static_assert(offsetof(mylite_ownerless_dictionary_state_snapshot, generation) == 0);
+static_assert(offsetof(mylite_ownerless_dictionary_state_snapshot, active_owner_id) == 8);
+static_assert(
+    offsetof(mylite_ownerless_dictionary_state_snapshot, active_owner_generation) == 16
+);
+static_assert(offsetof(mylite_ownerless_dictionary_state_snapshot, active_owner_pid) == 24);
+static_assert(
+    offsetof(mylite_ownerless_dictionary_state_snapshot, active_owner_start_time) == 32
+);
+static_assert(
+    offsetof(mylite_ownerless_dictionary_state_snapshot, active_owner_boot_id_hash) == 40
+);
+static_assert(sizeof(mylite_ownerless_dictionary_state_snapshot) == 48);
 
 std::chrono::steady_clock::time_point wait_deadline(unsigned timeout_ms);
 int wait_for_inactive_owner(
@@ -35,6 +51,12 @@ void store32(unsigned char *base, std::size_t offset, std::uint32_t value);
 void store64(unsigned char *base, std::size_t offset, std::uint64_t value);
 bool valid_recovery_kind(std::uint32_t recovery_kind);
 void clear_recoverable_state(unsigned char *state);
+bool clear_active_owner_state_if_current(
+    unsigned char *state,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
+    bool allow_zero_owner_generation
+);
 bool compare_exchange32(
     unsigned char *base,
     std::size_t offset,
@@ -59,12 +81,13 @@ int mylite_ownerless_dictionary_state_begin_ddl(
     std::size_t mapping_size,
     std::uint32_t owner_id,
     std::uint64_t owner_generation,
-    std::uint64_t owner_pid,
+    mylite_ownerless_process_identity owner_identity,
     unsigned timeout_ms,
     std::uint64_t *out_generation
 ) {
     if (!mapping_can_hold_state(mapping, mapping_size) || owner_id == 0U ||
-        owner_generation == 0U || owner_pid == 0U) {
+        owner_generation == 0U || owner_identity.pid == 0U ||
+        owner_identity.start_time == 0U || owner_identity.boot_id_hash == 0U) {
         return MYLITE_OWNERLESS_DICTIONARY_STATE_ERROR;
     }
 
@@ -72,7 +95,8 @@ int mylite_ownerless_dictionary_state_begin_ddl(
     const auto deadline = wait_deadline(timeout_ms);
     for (;;) {
         const std::uint64_t current_generation = load64(state, k_generation_offset);
-        if ((current_generation & 1U) != 0U || load32(state, k_active_owner_id_offset) != 0U) {
+        const std::uint32_t active_owner_id = load32(state, k_active_owner_id_offset);
+        if ((current_generation & 1U) != 0U || active_owner_id != 0U) {
             const int wait_result = wait_for_inactive_owner(state, nullptr, nullptr, deadline);
             if (wait_result != MYLITE_OWNERLESS_DICTIONARY_STATE_OK) {
                 return wait_result;
@@ -83,7 +107,9 @@ int mylite_ownerless_dictionary_state_begin_ddl(
         std::uint32_t expected_owner = 0U;
         if (compare_exchange32(state, k_active_owner_id_offset, &expected_owner, owner_id)) {
             store64(state, k_active_owner_generation_offset, owner_generation);
-            store64(state, k_active_owner_pid_offset, owner_pid);
+            store64(state, k_active_owner_start_time_offset, owner_identity.start_time);
+            store64(state, k_active_owner_boot_id_hash_offset, owner_identity.boot_id_hash);
+            store64(state, k_active_owner_pid_offset, owner_identity.pid);
             clear_recoverable_state(state);
             const std::uint64_t generation = add64(state, k_generation_offset, 1U);
             if (out_generation != nullptr) {
@@ -124,10 +150,9 @@ int mylite_ownerless_dictionary_state_finish_ddl(
     }
 
     const std::uint64_t generation = add64(state, k_generation_offset, 1U);
-    clear_recoverable_state(state);
-    store64(state, k_active_owner_pid_offset, 0U);
-    store64(state, k_active_owner_generation_offset, 0U);
-    store32(state, k_active_owner_id_offset, 0U);
+    if (!clear_active_owner_state_if_current(state, owner_id, owner_generation, false)) {
+        return MYLITE_OWNERLESS_DICTIONARY_STATE_ERROR;
+    }
     mylite_ownerless_wait_store(
         wake_word(state),
         mylite_ownerless_wait_load(wake_word(state)) + 1U
@@ -189,10 +214,9 @@ int mylite_ownerless_dictionary_state_recover_dead_owner(
     }
 
     const std::uint64_t generation = add64(state, k_generation_offset, 1U);
-    clear_recoverable_state(state);
-    store64(state, k_active_owner_pid_offset, 0U);
-    store64(state, k_active_owner_generation_offset, 0U);
-    store32(state, k_active_owner_id_offset, 0U);
+    if (!clear_active_owner_state_if_current(state, owner_id, owner_generation, false)) {
+        return MYLITE_OWNERLESS_DICTIONARY_STATE_ERROR;
+    }
     mylite_ownerless_wait_store(
         wake_word(state),
         mylite_ownerless_wait_load(wake_word(state)) + 1U
@@ -203,6 +227,41 @@ int mylite_ownerless_dictionary_state_recover_dead_owner(
     }
     return (generation & 1U) == 0U ? MYLITE_OWNERLESS_DICTIONARY_STATE_OK
                                    : MYLITE_OWNERLESS_DICTIONARY_STATE_ERROR;
+}
+
+int mylite_ownerless_dictionary_state_recover_incomplete_owner(
+    void *mapping,
+    std::size_t mapping_size,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
+    std::uint64_t *out_generation
+) {
+    if (!mapping_can_hold_state(mapping, mapping_size) || owner_id == 0U ||
+        owner_generation == 0U) {
+        return MYLITE_OWNERLESS_DICTIONARY_STATE_ERROR;
+    }
+
+    auto *state = static_cast<unsigned char *>(mapping);
+    const std::uint64_t generation = load64(state, k_generation_offset);
+    const std::uint64_t active_owner_generation =
+        load64(state, k_active_owner_generation_offset);
+    if ((generation & 1U) != 0U || load32(state, k_active_owner_id_offset) != owner_id ||
+        (active_owner_generation != 0U && active_owner_generation != owner_generation)) {
+        return MYLITE_OWNERLESS_DICTIONARY_STATE_ERROR;
+    }
+
+    if (!clear_active_owner_state_if_current(state, owner_id, owner_generation, true)) {
+        return MYLITE_OWNERLESS_DICTIONARY_STATE_ERROR;
+    }
+    mylite_ownerless_wait_store(
+        wake_word(state),
+        mylite_ownerless_wait_load(wake_word(state)) + 1U
+    );
+    static_cast<void>(mylite_ownerless_wait_wake(wake_word(state)));
+    if (out_generation != nullptr) {
+        *out_generation = generation;
+    }
+    return MYLITE_OWNERLESS_DICTIONARY_STATE_OK;
 }
 
 int mylite_ownerless_dictionary_state_wait_ready(
@@ -264,6 +323,8 @@ int mylite_ownerless_dictionary_state_read_snapshot(
     out_snapshot->active_owner_id = load32(state, k_active_owner_id_offset);
     out_snapshot->active_owner_generation = load64(state, k_active_owner_generation_offset);
     out_snapshot->active_owner_pid = load64(state, k_active_owner_pid_offset);
+    out_snapshot->active_owner_start_time = load64(state, k_active_owner_start_time_offset);
+    out_snapshot->active_owner_boot_id_hash = load64(state, k_active_owner_boot_id_hash_offset);
     return MYLITE_OWNERLESS_DICTIONARY_STATE_OK;
 }
 
@@ -280,12 +341,29 @@ int wait_for_inactive_owner(
     void *alive_ctx,
     std::chrono::steady_clock::time_point deadline
 ) {
-    const std::uint64_t pid = load64(state, k_active_owner_pid_offset);
-    if (pid != 0U && is_alive != nullptr && is_alive(pid, alive_ctx) == 0) {
+    mylite_ownerless_process_identity identity = {};
+    const std::uint32_t expected_wake = mylite_ownerless_wait_load(wake_word(state));
+    const std::uint64_t generation_before = load64(state, k_generation_offset);
+    const std::uint32_t active_owner_id = load32(state, k_active_owner_id_offset);
+    const std::uint64_t active_owner_generation =
+        load64(state, k_active_owner_generation_offset);
+    identity.pid = load64(state, k_active_owner_pid_offset);
+    identity.start_time = load64(state, k_active_owner_start_time_offset);
+    identity.boot_id_hash = load64(state, k_active_owner_boot_id_hash_offset);
+    const std::uint64_t generation_after = load64(state, k_generation_offset);
+
+    if (generation_before != generation_after ||
+        ((generation_after & 1U) == 0U && active_owner_id == 0U)) {
+        return MYLITE_OWNERLESS_DICTIONARY_STATE_OK;
+    }
+    const bool complete_active_owner_identity =
+        active_owner_id != 0U && active_owner_generation != 0U && identity.pid != 0U &&
+        identity.start_time != 0U && identity.boot_id_hash != 0U;
+    if (complete_active_owner_identity && is_alive != nullptr &&
+        is_alive(&identity, alive_ctx) == 0) {
         return MYLITE_OWNERLESS_DICTIONARY_STATE_BUSY;
     }
 
-    const std::uint32_t expected_wake = mylite_ownerless_wait_load(wake_word(state));
     const unsigned timeout_ms = remaining_timeout_ms(deadline);
     if (timeout_ms == 0U) {
         return MYLITE_OWNERLESS_DICTIONARY_STATE_TIMEOUT;
@@ -402,6 +480,29 @@ void clear_recoverable_state(unsigned char *state) {
     store32(state, k_recoverable_kind_offset, MYLITE_OWNERLESS_DICTIONARY_RECOVERY_NONE);
     store64(state, k_recoverable_owner_generation_offset, 0U);
     store32(state, k_recoverable_owner_id_offset, 0U);
+}
+
+bool clear_active_owner_state_if_current(
+    unsigned char *state,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
+    bool allow_zero_owner_generation
+) {
+    const std::uint64_t active_owner_generation =
+        load64(state, k_active_owner_generation_offset);
+    if (load32(state, k_active_owner_id_offset) != owner_id ||
+        (active_owner_generation != owner_generation &&
+         !(allow_zero_owner_generation && active_owner_generation == 0U))) {
+        return false;
+    }
+
+    clear_recoverable_state(state);
+    store64(state, k_active_owner_pid_offset, 0U);
+    store64(state, k_active_owner_boot_id_hash_offset, 0U);
+    store64(state, k_active_owner_start_time_offset, 0U);
+    store64(state, k_active_owner_generation_offset, 0U);
+    store32(state, k_active_owner_id_offset, 0U);
+    return true;
 }
 
 bool compare_exchange32(

@@ -2334,9 +2334,10 @@ static void assert_concurrency_shared_memory_file(
     assert(read_le64(page_index_segment + 24U) == 0U);
 
     assert(read_le32(dictionary_segment) == 9U);
-    assert(read_le32(dictionary_segment + 4U) == 1U);
+    assert(read_le32(dictionary_segment + 4U) == 2U);
     assert(read_le64(dictionary_segment + 8U) == MYLITE_TEST_CONCURRENCY_DICTIONARY_STATE_OFFSET);
     assert(read_le64(dictionary_segment + 16U) == MYLITE_TEST_CONCURRENCY_DICTIONARY_STATE_SIZE);
+    assert(read_le64(dictionary_segment + 16U) == 64U);
     assert(read_le64(dictionary_segment + 24U) == 0U);
 
     assert(read_le32(page_write_segment) == 10U);
@@ -2467,6 +2468,11 @@ static void assert_concurrency_shared_memory_file(
     assert(read_le32(dictionary_state + 8U) == 0U);
     assert(read_le64(dictionary_state + 16U) == 0U);
     assert(read_le64(dictionary_state + 24U) == 0U);
+    assert(read_le64(dictionary_state + 32U) == 0U);
+    assert(read_le64(dictionary_state + 40U) == 0U);
+    assert(read_le32(dictionary_state + 48U) == 0U);
+    assert(read_le32(dictionary_state + 52U) == 0U);
+    assert(read_le64(dictionary_state + 56U) == 0U);
     assert(munmap((void *)page, MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE) == 0);
     assert(close(fd) == 0);
 }

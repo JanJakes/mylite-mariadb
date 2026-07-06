@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "ownerless_process_registry.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -71,13 +73,18 @@ extern "C" {
 #define MYLITE_OWNERLESS_DICTIONARY_RECOVERY_FAILED_DDL_NOOP 53U
 #define MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_CHECK_CONSTRAINT 54U
 
-typedef int (*mylite_ownerless_dictionary_state_alive_callback)(uint64_t pid, void *ctx);
+typedef int (*mylite_ownerless_dictionary_state_alive_callback)(
+    const mylite_ownerless_process_identity *identity,
+    void *ctx
+);
 
 typedef struct mylite_ownerless_dictionary_state_snapshot {
     uint64_t generation;
     uint32_t active_owner_id;
     uint64_t active_owner_generation;
     uint64_t active_owner_pid;
+    uint64_t active_owner_start_time;
+    uint64_t active_owner_boot_id_hash;
 } mylite_ownerless_dictionary_state_snapshot;
 
 int mylite_ownerless_dictionary_state_initialize(void *mapping, size_t mapping_size);
@@ -86,7 +93,7 @@ int mylite_ownerless_dictionary_state_begin_ddl(
     size_t mapping_size,
     uint32_t owner_id,
     uint64_t owner_generation,
-    uint64_t owner_pid,
+    mylite_ownerless_process_identity owner_identity,
     unsigned int timeout_ms,
     uint64_t *out_generation
 );
@@ -110,6 +117,13 @@ int mylite_ownerless_dictionary_state_recover_dead_owner(
     uint32_t owner_id,
     uint64_t owner_generation,
     uint32_t recovery_kind,
+    uint64_t *out_generation
+);
+int mylite_ownerless_dictionary_state_recover_incomplete_owner(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t owner_id,
+    uint64_t owner_generation,
     uint64_t *out_generation
 );
 int mylite_ownerless_dictionary_state_wait_ready(

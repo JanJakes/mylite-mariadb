@@ -212,7 +212,9 @@ captured prefix fallback, is restored. A first ownerless read/write startup
 after ordinary native shutdown leaves InnoDB checkpoint suppression disabled
 when no ownerless page-version WAL payload, native checkpoint marker, live peer,
 or usable redo-header backup exists, because native redo is then the recovery
-authority. Final no-live ownerless read/write close also publishes a native
+authority. Payload-bearing native-support records count as retained WAL payload
+for this startup gate; proof-only metadata records do not. Final no-live
+ownerless read/write close also publishes a native
 checkpoint for completed InnoDB DDL file-operation redo or ownerless
 `ALTER TABLE ... AUTO_INCREMENT` checkpoint markers before shutdown, then
 forces native checkpoint proof for retained ownerless page-version WAL after

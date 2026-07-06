@@ -189,7 +189,8 @@ app.mylite/
   shutdown leaves InnoDB checkpoint suppression disabled when there is no
   ownerless page-version WAL payload, native checkpoint marker, live peer, or
   usable redo-header backup, because native InnoDB redo is then the only
-  recovery authority.
+  recovery authority. Payload-bearing native-support records count as retained
+  WAL payload for this gate; proof-only metadata records do not.
   Final no-live ownerless read/write shutdown also holds
   `mylite-runtime-startup.lock` while publishing a native checkpoint for
   completed DDL file-operation redo, ownerless `ALTER TABLE ... AUTO_INCREMENT`

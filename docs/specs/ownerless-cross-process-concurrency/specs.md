@@ -398,11 +398,16 @@ Roles:
   payload. When a DML-specific native checkpoint marker is pending with retained
   page-version records and no dictionary file-op or autoincrement marker, MyLite
   drains the marker for autocommit and single-owner explicit writers whose local
-  close can prove the checkpoint boundary. Peer-explicit DML evidence is still
-  retained while a peer is live, but final no-live close now forces native
-  checkpoint coverage and reuses the per-page native image/absence/discard
-  proof before clearing the DML-only marker and checkpointing the page-version
-  WAL. Generic dictionary/file-op and autoincrement markers keep their stricter
+  close can prove the checkpoint boundary. Peer-explicit transaction DML writes
+  a separate durable checkpoint marker. While that marker is pending, final
+  no-live ownerless close keeps retained user page-version WAL as the recovery
+  authority instead of relying on a broad multiple-user-tablespace heuristic.
+  That close still forces a native InnoDB checkpoint so the next ordinary
+  opener can start MariaDB before replaying retained page-version evidence. A
+  later no-live startup/reclaim path must force native checkpoint coverage and
+  reuse the per-page native image/absence/discard proof before clearing the
+  DML-only and peer-explicit markers and checkpointing the page-version WAL.
+  Generic dictionary/file-op and autoincrement markers keep their stricter
   policy. Live-peer reclaim keeps checkpointable user data/index page records
   in WAL until no-live reclaim can make the native data file authoritative.
   Focused production coverage now combines ordinary user page-version payload
@@ -441,13 +446,19 @@ Roles:
   during `mysql_server_init()`, capped at that persisted visible boundary, so
   native page-LSN validation can catch up to the ownerless checkpoint boundary
   without installing full ownerless lock hooks before purge drain; pending
-  native file-op or DML markers still keep hooks installed for post-start
-  checkpoint refresh while preserving the current native redo header as the
-  startup source. If a no-live ownerless startup still finds retained
-  page-version WAL or native checkpoint markers after hooks are installed, it
+  native file-op, DML, or peer-explicit DML markers still keep hooks installed
+  for post-start checkpoint refresh while preserving the current native redo
+  header as the startup source. Startup and shared-memory rebuild distinguish
+  retained user page-version records from native-support-only WAL: user records
+  force page-log read/replay handling, while nonempty native-support-only WAL is
+  preserved as durable recovery evidence instead of being replayed as user
+  payload. If a no-live ownerless startup still finds retained user WAL,
+  native-support WAL, or native checkpoint markers after hooks are installed, it
   runs the no-live reclaim path before returning from open, so killed-reader
   cleanup can drain reader-boundary/native-support WAL without waiting for
-  close. Captured transaction images that
+  close. Final no-live shutdown can checkpoint native-support-only WAL once the
+  native redo header covers native pages and rollback-history headers are
+  consistent. Captured transaction images that
   match a resident page after same-LSN flush checksum/header normalization can
   still prove the committed page image, same-LSN resident mismatches still
   reject the image after normalization fails, and different-LSN resident buffer
@@ -673,7 +684,12 @@ The dictionary-generation segment serializes ownerless DDL with an odd/even
 generation counter. Peers wait for active DDL to finish before starting a new
 statement; when the generation changes, they flush SQL table caches and evict
 unused InnoDB dictionary-cache entries before reopening tables against the
-latest shared page visibility. Generation refresh now runs before the
+latest shared page visibility. The active DDL owner is stored as the same
+PID/start-time/boot-id identity used by process-registry slots so a reused PID
+does not keep a stale dictionary generation live. Ordinary `begin_ddl()` does
+not clear an incomplete active-owner publication; incomplete-owner cleanup is
+only performed from the dead-owner recovery path after process-slot liveness
+has been proven. Generation refresh now runs before the
 statement's page-version read decision, releases any handle page-version pin,
 closes the current InnoDB read view, clears external page observations, resets
 handle page-version/native read watermarks, refreshes external space headers
@@ -2459,11 +2475,12 @@ Tasks:
    this path is gated by a nonblocking ownerless statement gate, the shared
    page-version pin registry, and native write/recovery-idle proof, and runs
    only when no active page-version pins remain. If retained payload still
-   exists after a final no-live ownerless shutdown, MyLite replays visible
+   exists after a final no-live ownerless shutdown, MyLite replays visible user
    tablespace images after `mysql_server_end()` and checkpoints the WAL at the
-   ownerless visible LSN when native rollback history is empty; otherwise it
-   keeps native-support WAL retained as rollback-history evidence, avoiding a
-   running-buffer-pool race while preserving ordinary native reopen semantics.
+   ownerless visible LSN when native proof permits it. Native-support-only WAL
+   is not replayed as user payload; it can be checkpointed after native redo
+   covers native pages and rollback-history headers are consistent, or retained
+   as rollback-history evidence when that proof is unavailable.
    Page-version publication now
    opportunistically synthesizes a boundary record from the native tablespace
    page when an older snapshot pin is active, no WAL boundary exists, and the

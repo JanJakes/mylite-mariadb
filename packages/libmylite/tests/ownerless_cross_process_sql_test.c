@@ -105,6 +105,10 @@ extern uint32_t my_crc32c(uint32_t crc, const void *buf, size_t len);
     (MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_OFFSET +                             \
      (MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_COUNT *                             \
       MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_SIZE))
+#define MYLITE_TEST_CONCURRENCY_CHECKPOINT_PEER_EXPLICIT_DML_RECORD_OFFSET                         \
+    (MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_DML_FILE_OP_RECORD_OFFSET +                         \
+     (MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_COUNT *                             \
+      MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_SIZE))
 #define MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_FORMAT 1U
 #define MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_FORMAT_OFFSET 8U
 #define MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_RESERVED_OFFSET 12U
@@ -4587,11 +4591,13 @@ static uint64_t read_concurrency_checkpoint_latest_lsn(const char *database_path
 static uint64_t read_concurrency_checkpoint_visible_lsn(const char *database_path);
 static int read_concurrency_native_file_op_checkpoint_needed(const char *database_path);
 static int read_concurrency_native_dml_file_op_checkpoint_needed(const char *database_path);
+static int read_concurrency_peer_explicit_dml_checkpoint_needed(const char *database_path);
 static void write_le32(unsigned char *bytes, uint32_t value);
 static void write_le64(unsigned char *bytes, uint64_t value);
 static off_t concurrency_checkpoint_lsn_record_offset(unsigned index);
 static off_t concurrency_native_file_op_checkpoint_record_offset(unsigned index);
 static off_t concurrency_native_dml_file_op_checkpoint_record_offset(unsigned index);
+static off_t concurrency_peer_explicit_dml_checkpoint_record_offset(unsigned index);
 static int read_concurrency_checkpoint_lsn_record(
     const char *database_path,
     unsigned index,
@@ -9707,6 +9713,7 @@ static void test_ownerless_explicit_dml_deadlock_discards_file_op_marker(void) {
     );
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_peer_explicit_dml_checkpoint_needed(database_path));
     assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(database_path);
     assert_table_total_value_is_one_of(paths, 302U, 304U);
 
@@ -10011,6 +10018,7 @@ static void test_ownerless_concurrent_savepoint_rollback_handoff(void) {
     assert(mylite_close(db) == MYLITE_OK);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_peer_explicit_dml_checkpoint_needed(database_path));
     assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -10018,6 +10026,7 @@ static void test_ownerless_concurrent_savepoint_rollback_handoff(void) {
     (void)mylite_ownerless_innodb_take_file_op_redo();
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_peer_explicit_dml_checkpoint_needed(database_path));
     assert(mylite_close(db) == MYLITE_OK);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
@@ -10187,6 +10196,7 @@ static void test_ownerless_concurrent_savepoint_same_page_rollback_handoff(void)
     assert(mylite_close(db) == MYLITE_OK);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_peer_explicit_dml_checkpoint_needed(database_path));
     assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -10194,6 +10204,7 @@ static void test_ownerless_concurrent_savepoint_same_page_rollback_handoff(void)
     (void)mylite_ownerless_innodb_take_file_op_redo();
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_peer_explicit_dml_checkpoint_needed(database_path));
     assert(mylite_close(db) == MYLITE_OK);
     assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
@@ -10252,7 +10263,14 @@ static void test_ownerless_concurrent_savepoint_same_page_rollback_handoff(void)
     assert(wait_for_concurrency_ownerless_write_waiting_count(database_path, 0U, 5000U) == 0U);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 #  if !MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    {
+        const int native_dml_marker_pending =
+            read_concurrency_native_dml_file_op_checkpoint_needed(database_path);
+        const int peer_dml_marker_pending =
+            read_concurrency_peer_explicit_dml_checkpoint_needed(database_path);
+        assert(!native_dml_marker_pending || peer_dml_marker_pending);
+        assert(peer_dml_marker_pending || !concurrency_wal_is_checkpointed(database_path));
+    }
     assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(database_path);
 #  endif
 
@@ -10296,6 +10314,10 @@ static void test_ownerless_concurrent_savepoint_same_page_rollback_handoff(void)
     assert(final_value_2 == 20U);
     assert(final_value_3 == 31U);
     assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_peer_explicit_dml_checkpoint_needed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(database_path);
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -10375,6 +10397,7 @@ static void test_ownerless_concurrent_savepoint_same_table_rollback_handoff(void
     assert(mylite_close(db) == MYLITE_OK);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_peer_explicit_dml_checkpoint_needed(database_path));
     assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -10382,6 +10405,7 @@ static void test_ownerless_concurrent_savepoint_same_table_rollback_handoff(void
     (void)mylite_ownerless_innodb_take_file_op_redo();
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_peer_explicit_dml_checkpoint_needed(database_path));
     assert(mylite_close(db) == MYLITE_OK);
     assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
@@ -10451,8 +10475,15 @@ static void test_ownerless_concurrent_savepoint_same_table_rollback_handoff(void
     assert(wait_for_concurrency_ownerless_write_waiting_count(database_path, 0U, 5000U) == 0U);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 #  if !MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
-    assert_concurrency_wal_checkpointed_or_retained_native_support_only_eventually(database_path);
+    {
+        const int native_dml_marker_pending =
+            read_concurrency_native_dml_file_op_checkpoint_needed(database_path);
+        const int peer_dml_marker_pending =
+            read_concurrency_peer_explicit_dml_checkpoint_needed(database_path);
+        assert(!native_dml_marker_pending || peer_dml_marker_pending);
+        assert(peer_dml_marker_pending || !concurrency_wal_is_checkpointed(database_path));
+    }
+    assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(database_path);
 #  endif
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -10496,6 +10527,10 @@ static void test_ownerless_concurrent_savepoint_same_table_rollback_handoff(void
     assert(final_value_2 == 20U);
     assert(final_value_4 == 41U);
     assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_peer_explicit_dml_checkpoint_needed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(database_path);
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -10649,8 +10684,9 @@ static void test_ownerless_concurrent_savepoint_same_row_rollback_handoff(void) 
     assert(wait_for_concurrency_ownerless_write_waiting_count(database_path, 0U, 5000U) == 0U);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 #  if !MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
-    assert_concurrency_wal_checkpointed_or_retained_native_support_only_eventually(database_path);
+    assert(read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_peer_explicit_dml_checkpoint_needed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(database_path);
 #  endif
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -10687,6 +10723,10 @@ static void test_ownerless_concurrent_savepoint_same_row_rollback_handoff(void) 
     assert(final_value_1 == 12U);
     assert(final_value_2 == 20U);
     assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_peer_explicit_dml_checkpoint_needed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(database_path);
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -11720,7 +11760,7 @@ static void test_ownerless_concurrent_ddl_stress(void) {
         expected_total
     );
     assert_ownerless_ddl_stress_state(paths, MYLITE_OPEN_READWRITE, expected_total);
-    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
     free(database_path);
     free(runtime_root);
@@ -12190,7 +12230,7 @@ static void test_ownerless_random_transaction_stress(void) {
         expected_versions,
         expected_weighted_sum
     );
-    assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
     free(database_path);
     free(runtime_root);
@@ -13445,7 +13485,7 @@ static void test_ownerless_checkpoint_generation_cache_hits_single_owner(void) {
         database_stats[OWNERLESS_TEST_DATABASE_PERF_STAT_CHECKPOINT_UPDATE_FILE_READ_ELIDED]
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
     assert(
         count_concurrency_wal_records_without_flags(
             database_path,
@@ -16539,6 +16579,7 @@ static void test_ownerless_native_file_op_marker_drains_after_single_owner_expli
     );
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_peer_explicit_dml_checkpoint_needed(database_path));
     assert(
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_explicit_dml_file_op_marker") ==
         11U
@@ -16546,9 +16587,11 @@ static void test_ownerless_native_file_op_marker_drains_after_single_owner_expli
     exec_ok(db, "COMMIT");
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_peer_explicit_dml_checkpoint_needed(database_path));
     assert(mylite_close(db) == MYLITE_OK);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_peer_explicit_dml_checkpoint_needed(database_path));
     assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
     remove_concurrency_shm(database_path);
@@ -16616,6 +16659,7 @@ static void test_ownerless_explicit_dml_rollback_discards_file_op_marker(void) {
     assert(mylite_close(db) == MYLITE_OK);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_peer_explicit_dml_checkpoint_needed(database_path));
     assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -16623,6 +16667,7 @@ static void test_ownerless_explicit_dml_rollback_discards_file_op_marker(void) {
     (void)mylite_ownerless_innodb_take_file_op_redo();
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_peer_explicit_dml_checkpoint_needed(database_path));
 
     exec_ok(db, "START TRANSACTION");
     exec_ok(
@@ -17012,6 +17057,7 @@ static void test_ownerless_multi_peer_explicit_dml_marker_drain(void) {
     );
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_peer_explicit_dml_checkpoint_needed(database_path));
     assert(
         query_unsigned(
             db,
@@ -17021,14 +17067,37 @@ static void test_ownerless_multi_peer_explicit_dml_marker_drain(void) {
     exec_ok(db, "COMMIT");
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_peer_explicit_dml_checkpoint_needed(database_path));
     assert(mylite_close(db) == MYLITE_OK);
     assert(read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_peer_explicit_dml_checkpoint_needed(database_path));
     assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(database_path);
 
     signal_pipe(release_pipe[1]);
     wait_for_child(peer_child);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_peer_explicit_dml_checkpoint_needed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(database_path);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_multi_peer_explicit_dml_file_op_marker"
+        ) == 11U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.ownerless_multi_peer_explicit_dml_file_op_marker"
+        ) == (unsigned)'b'
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert(!read_concurrency_peer_explicit_dml_checkpoint_needed(database_path));
     assert_concurrency_wal_checkpointed_or_retained_native_support_only_eventually(database_path);
 
     remove_concurrency_shm(database_path);
@@ -22130,7 +22199,7 @@ static void test_ownerless_single_owner_foreground_reclaim_budget_defers_to_time
         ) == MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS
     );
     assert(mylite_close(writer_db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
     free(database_path);
     free(runtime_root);
@@ -22219,7 +22288,7 @@ static void test_ownerless_peer_history_disables_foreground_reclaim_budget(void)
         ) == MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS
     );
     assert(mylite_close(writer_db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
     remove_concurrency_shm(database_path);
     writer_db = open_database(paths, MYLITE_OPEN_READWRITE);
@@ -22231,7 +22300,7 @@ static void test_ownerless_peer_history_disables_foreground_reclaim_budget(void)
         ) == MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS
     );
     assert(mylite_close(writer_db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
     close(start_pipe[1]);
     close(ready_pipe[0]);
@@ -22442,7 +22511,7 @@ static void test_ownerless_timer_checkpoint_scheduling_reclaims_idle_runtime(voi
         192000U
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
     assert(
         count_concurrency_wal_records_without_flags(
             database_path,
@@ -22502,7 +22571,7 @@ static void test_ownerless_timer_checkpoint_scheduling_reclaims_idle_runtime(voi
         ) == 48U
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
     assert(
         count_concurrency_wal_records_without_flags(
             database_path,
@@ -22520,7 +22589,7 @@ static void test_ownerless_timer_checkpoint_scheduling_reclaims_idle_runtime(voi
         ) == 48U
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
     assert(
         count_concurrency_wal_records_without_flags(
             database_path,
@@ -26743,7 +26812,7 @@ static void test_ownerless_active_reader_pressure_diagnostics(void) {
     exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 2");
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 32U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_records_only(database_path);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 32U);
@@ -26753,7 +26822,7 @@ static void test_ownerless_active_reader_pressure_diagnostics(void) {
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 32U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_records_only(database_path);
 
     free(database_path);
     free(runtime_root);
@@ -52690,7 +52759,11 @@ static void test_ownerless_active_pin_retains_page_log_until_release(void) {
     );
     exec_ok(db, "INSERT INTO app.ownerless_reclaim_boundary_aux VALUES (1, 10, REPEAT('a', 4000))");
     assert(mylite_close(db) == MYLITE_OK);
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
+#  else
     assert(concurrency_wal_is_checkpointed(database_path));
+#  endif
 
     assert(pipe(old_reader_ready_pipe) == 0);
     assert(pipe(old_reader_release_pipe) == 0);
@@ -52806,14 +52879,22 @@ static void test_ownerless_active_pin_retains_page_log_until_release(void) {
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 135U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_reclaim_boundary_aux") == 110U);
     assert(mylite_close(db) == MYLITE_OK);
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
+#  else
     assert(concurrency_wal_is_checkpointed(database_path));
+#  endif
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 135U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_reclaim_boundary_aux") == 110U);
     assert(mylite_close(db) == MYLITE_OK);
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
+#  else
     assert(concurrency_wal_is_checkpointed(database_path));
+#  endif
 
     free(database_path);
     free(runtime_root);
@@ -53746,7 +53827,11 @@ static void test_crashed_rename_dictionary_ddl_blocks_peer_cleanup_until_reopen_
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_rename_crash_target") == 2U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_rename_crash_target") == 30U);
     assert(mylite_close(db) == MYLITE_OK);
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+#  else
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+#  endif
 
     remove_concurrency_shm(database_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
@@ -117000,7 +117085,9 @@ static void assert_concurrency_wal_checkpointed_or_retained_native_support_only(
 ) {
     unsigned retained_non_native_records;
 
-    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
+    if (concurrency_wal_is_checkpointed(database_path)) {
+        return;
+    }
     retained_non_native_records = count_concurrency_wal_records_without_flags(
         database_path,
         MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
@@ -117018,14 +117105,10 @@ static void assert_concurrency_wal_checkpointed_or_retained_native_support_only(
 }
 
 static int concurrency_wal_checkpointed_or_retained_native_support_only(const char *database_path) {
-    int rollback_history_empty = 1;
-
     if (concurrency_wal_is_checkpointed(database_path)) {
         return 1;
     }
-    return native_rollback_history_headers_state(database_path, &rollback_history_empty) &&
-           !rollback_history_empty &&
-           count_concurrency_wal_records_without_flags(
+    return count_concurrency_wal_records_without_flags(
                database_path,
                MYLITE_TEST_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE
            ) == 0U;
@@ -117095,7 +117178,8 @@ static void assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoin
         return;
     }
     if (read_concurrency_native_file_op_checkpoint_needed(database_path) ||
-        read_concurrency_native_dml_file_op_checkpoint_needed(database_path)) {
+        read_concurrency_native_dml_file_op_checkpoint_needed(database_path) ||
+        read_concurrency_peer_explicit_dml_checkpoint_needed(database_path)) {
         return;
     }
     if (native_rollback_history_headers_state(database_path, &rollback_history_empty) &&
@@ -117586,6 +117670,23 @@ static int read_concurrency_native_dml_file_op_checkpoint_needed(const char *dat
     return saw_nonempty_record ? 1 : 0;
 }
 
+static int read_concurrency_peer_explicit_dml_checkpoint_needed(const char *database_path) {
+    native_file_op_checkpoint_record marker_record = {0};
+    int saw_nonempty_record = 0;
+    static const unsigned char magic[8] = {'M', 'Y', 'L', 'C', 'X', 'D', 'M', '1'};
+
+    if (read_concurrency_native_file_op_checkpoint_records_at(
+            database_path,
+            magic,
+            concurrency_peer_explicit_dml_checkpoint_record_offset,
+            &marker_record,
+            &saw_nonempty_record
+        )) {
+        return marker_record.needed;
+    }
+    return saw_nonempty_record ? 1 : 0;
+}
+
 static void write_concurrency_checkpoint_lsns(
     const char *database_path,
     uint64_t latest_lsn,
@@ -117748,6 +117849,11 @@ static off_t concurrency_native_file_op_checkpoint_record_offset(unsigned index)
 
 static off_t concurrency_native_dml_file_op_checkpoint_record_offset(unsigned index) {
     return (off_t)(MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_DML_FILE_OP_RECORD_OFFSET +
+                   (index * MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_SIZE));
+}
+
+static off_t concurrency_peer_explicit_dml_checkpoint_record_offset(unsigned index) {
+    return (off_t)(MYLITE_TEST_CONCURRENCY_CHECKPOINT_PEER_EXPLICIT_DML_RECORD_OFFSET +
                    (index * MYLITE_TEST_CONCURRENCY_CHECKPOINT_NATIVE_FILE_OP_RECORD_SIZE));
 }
 

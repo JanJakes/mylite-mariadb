@@ -50,6 +50,15 @@ PIDs allow the volatile segment rebuild. The ownerless directory platform proof
 also records `process_identity=1`; cached proofs without that field no longer
 satisfy the ownerless open gate.
 
+The dictionary-generation shared-memory segment now stores the active DDL
+owner's PID/start-time/boot-id identity and uses the same liveness callback as
+process slots while peers wait for an active DDL generation to finish. Its
+segment version is bumped so older PID-only dictionary state is treated as an
+incompatible volatile layout and rebuilt only through the existing no-live
+shared-memory rebuild path. Ordinary dictionary begin waits do not recover an
+incomplete active-owner publication; only the dead-owner cleanup path may clear
+that state after proving the owner process slot dead.
+
 ## Compatibility Impact
 
 No SQL or public MyLite C API behavior changes. The internal ownerless primitive
@@ -71,8 +80,13 @@ claiming cross-process ownerless correctness.
 - Platform probe coverage asserts both platform and directory probes publish
   `process_identity=1`, and the hook build can force `process-identity` probe
   failure.
+- Primitive coverage verifies a same-PID/different-start-time dictionary DDL
+  owner is reported as dead owner state rather than a live DDL owner.
+- Primitive coverage verifies ordinary dictionary begin waits do not clear an
+  incomplete active-owner publication before explicit dead-owner cleanup.
 - Product ownerless directory-lifecycle coverage verifies the process segment
-  version and the nonzero start-time/boot-id fields in active slots.
+  version, dictionary segment version, and the nonzero start-time/boot-id fields
+  in active process slots.
 - Product ownerless directory-lifecycle coverage seeds a v3 PID-only active
   slot with a live child PID, verifies ownerless open returns `MYLITE_BUSY`,
   then lets the child exit and verifies the opener rebuilds the segment to the
@@ -82,20 +96,15 @@ claiming cross-process ownerless correctness.
 
 - A same-PID process with a different start-time/boot-id identity does not keep
   stale ownerless process-registry slots live.
+- A same-PID process with a different start-time/boot-id identity does not keep
+  an active dictionary-generation owner live.
+- Ordinary dictionary begin waits do not clear incomplete active-owner state;
+  dead-owner cleanup remains the only recovery path for that publication race.
 - Exited zombie owners are reclaimable before parent `waitpid()`.
 - Ownerless opens reject directories when process-identity support is not proven.
 - Existing older volatile process-registry layouts rebuild only after active
   legacy PID-only slots are proven dead; live legacy PIDs fail closed with
   `MYLITE_BUSY`.
-
-## Follow-Up
-
-The dictionary-generation primitive still records only the active DDL owner's
-PID in its compact 64-byte segment. Product DDL recovery is still keyed by owner
-slot/generation and durable recovery markers, but PID reuse can conservatively
-extend dictionary wait time until timeout. A later dictionary-state format slice
-should store the same PID/start-time/boot-id identity and bump the dictionary
-segment version.
 
 ## Verification Results
 

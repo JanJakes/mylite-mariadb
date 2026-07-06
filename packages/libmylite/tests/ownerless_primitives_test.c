@@ -409,6 +409,7 @@ static void test_page_pin_registry_snapshots_cross_process_pins(void);
 static void test_page_pin_registry_releases_dead_owner_pins(void);
 static void test_dictionary_state_serializes_ddl_generations(void);
 static void test_dictionary_state_reports_dead_active_owner(void);
+static void test_dictionary_state_recovers_incomplete_active_owner(void);
 static void test_dictionary_state_recovers_marked_dead_owner(void);
 static void test_redo_state_tracks_lsn_and_owner_lifecycle(void);
 static void test_redo_state_seeds_checkpoint_monotonically(void);
@@ -438,8 +439,12 @@ static int process_registry_identity_is_running(
     const mylite_ownerless_process_identity *identity,
     void *ctx
 );
-static int process_registry_pid_is_running(uint64_t pid, void *ctx);
-static int dictionary_state_pid_is_alive(uint64_t pid, void *ctx);
+static mylite_ownerless_process_identity dictionary_state_current_identity(void);
+static mylite_ownerless_process_identity dictionary_state_dead_identity(void);
+static int dictionary_state_identity_is_alive(
+    const mylite_ownerless_process_identity *identity,
+    void *ctx
+);
 static int process_registry_cleanup_owner_locks(
     uint32_t slot_index,
     uint64_t slot_generation,
@@ -471,6 +476,7 @@ static uint64_t innodb_test_page_lsn(const uint8_t *page);
 static void store_test_be16(uint8_t *bytes, size_t offset, uint16_t value);
 static void store_test_be32(uint8_t *bytes, size_t offset, uint32_t value);
 static void store_test_be64(uint8_t *bytes, size_t offset, uint64_t value);
+static void store_test_le32(uint8_t *bytes, size_t offset, uint32_t value);
 static void store_test_le64(uint8_t *bytes, size_t offset, uint64_t value);
 static uint32_t load_test_le32(const uint8_t *bytes, size_t offset);
 static uint64_t load_test_be64(const uint8_t *bytes, size_t offset);
@@ -613,6 +619,7 @@ int main(void) {
     test_page_pin_registry_releases_dead_owner_pins();
     test_dictionary_state_serializes_ddl_generations();
     test_dictionary_state_reports_dead_active_owner();
+    test_dictionary_state_recovers_incomplete_active_owner();
     test_dictionary_state_recovers_marked_dead_owner();
     test_redo_state_tracks_lsn_and_owner_lifecycle();
     test_redo_state_seeds_checkpoint_monotonically();
@@ -14141,7 +14148,7 @@ static void test_dictionary_state_serializes_ddl_generations(void) {
         mylite_ownerless_dictionary_state_wait_ready(
             state,
             sizeof(state),
-            dictionary_state_pid_is_alive,
+            dictionary_state_identity_is_alive,
             NULL,
             MYLITE_TEST_WAIT_TIMEOUT_MS,
             &generation
@@ -14155,7 +14162,7 @@ static void test_dictionary_state_serializes_ddl_generations(void) {
             sizeof(state),
             1U,
             10U,
-            (uint64_t)getpid(),
+            dictionary_state_current_identity(),
             MYLITE_TEST_WAIT_TIMEOUT_MS,
             &generation
         ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
@@ -14176,7 +14183,7 @@ static void test_dictionary_state_serializes_ddl_generations(void) {
             sizeof(state),
             1U,
             10U,
-            (uint64_t)getpid(),
+            dictionary_state_current_identity(),
             1U,
             &generation
         ) == MYLITE_OWNERLESS_DICTIONARY_STATE_TIMEOUT
@@ -14185,7 +14192,7 @@ static void test_dictionary_state_serializes_ddl_generations(void) {
         mylite_ownerless_dictionary_state_wait_ready(
             state,
             sizeof(state),
-            dictionary_state_pid_is_alive,
+            dictionary_state_identity_is_alive,
             NULL,
             1U,
             &generation
@@ -14201,7 +14208,7 @@ static void test_dictionary_state_serializes_ddl_generations(void) {
         mylite_ownerless_dictionary_state_wait_ready(
             state,
             sizeof(state),
-            dictionary_state_pid_is_alive,
+            dictionary_state_identity_is_alive,
             NULL,
             MYLITE_TEST_WAIT_TIMEOUT_MS,
             &generation
@@ -14213,11 +14220,19 @@ static void test_dictionary_state_serializes_ddl_generations(void) {
         MYLITE_OWNERLESS_DICTIONARY_STATE_OK
     );
     assert(snapshot.active_owner_id == 0U);
+    assert(snapshot.active_owner_generation == 0U);
+    assert(snapshot.active_owner_pid == 0U);
+    assert(snapshot.active_owner_start_time == 0U);
+    assert(snapshot.active_owner_boot_id_hash == 0U);
 }
 
 static void test_dictionary_state_reports_dead_active_owner(void) {
     uint8_t state[MYLITE_OWNERLESS_DICTIONARY_STATE_SIZE];
     uint64_t generation = 0U;
+    mylite_ownerless_dictionary_state_snapshot snapshot;
+    mylite_ownerless_process_identity reused_pid_identity = dictionary_state_current_identity();
+
+    ++reused_pid_identity.start_time;
 
     assert(
         mylite_ownerless_dictionary_state_initialize(state, sizeof(state)) ==
@@ -14229,16 +14244,23 @@ static void test_dictionary_state_reports_dead_active_owner(void) {
             sizeof(state),
             1U,
             10U,
-            UINT64_MAX,
+            reused_pid_identity,
             MYLITE_TEST_WAIT_TIMEOUT_MS,
             &generation
         ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
     );
     assert(
+        mylite_ownerless_dictionary_state_read_snapshot(state, sizeof(state), &snapshot) ==
+        MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+    );
+    assert(snapshot.active_owner_pid == reused_pid_identity.pid);
+    assert(snapshot.active_owner_start_time == reused_pid_identity.start_time);
+    assert(snapshot.active_owner_boot_id_hash == reused_pid_identity.boot_id_hash);
+    assert(
         mylite_ownerless_dictionary_state_wait_ready(
             state,
             sizeof(state),
-            dictionary_state_pid_is_alive,
+            dictionary_state_identity_is_alive,
             NULL,
             MYLITE_TEST_WAIT_TIMEOUT_MS,
             &generation
@@ -14246,10 +14268,171 @@ static void test_dictionary_state_reports_dead_active_owner(void) {
     );
 }
 
+static void test_dictionary_state_recovers_incomplete_active_owner(void) {
+    uint8_t state[MYLITE_OWNERLESS_DICTIONARY_STATE_SIZE];
+    uint64_t generation = UINT64_MAX;
+    uint32_t active_count = 0U;
+    mylite_ownerless_dictionary_state_snapshot snapshot;
+    const mylite_ownerless_process_identity identity = dictionary_state_current_identity();
+
+    assert(
+        mylite_ownerless_dictionary_state_initialize(state, sizeof(state)) ==
+        MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+    );
+    assert(MYLITE_OWNERLESS_DICTIONARY_STATE_SIZE == 64U);
+    store_test_le32(state, 8U, 1U);
+    store_test_le32(state, 48U, MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE);
+    store_test_le32(state, 52U, 1U);
+    store_test_le64(state, 56U, 10U);
+    assert(
+        mylite_ownerless_dictionary_state_recover_incomplete_owner(
+            state,
+            sizeof(state),
+            1U,
+            10U,
+            &generation
+        ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+    );
+    assert(generation == 0U);
+    assert(
+        mylite_ownerless_dictionary_state_read_snapshot(state, sizeof(state), &snapshot) ==
+        MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+    );
+    assert(snapshot.active_owner_id == 0U);
+    assert(snapshot.active_owner_generation == 0U);
+    assert(snapshot.active_owner_pid == 0U);
+    assert(snapshot.active_owner_start_time == 0U);
+    assert(snapshot.active_owner_boot_id_hash == 0U);
+    assert(
+        mylite_ownerless_dictionary_state_recover_dead_owner(
+            state,
+            sizeof(state),
+            1U,
+            10U,
+            MYLITE_OWNERLESS_DICTIONARY_RECOVERY_CREATE_TABLE,
+            &generation
+        ) == MYLITE_OWNERLESS_DICTIONARY_STATE_ERROR
+    );
+    assert(
+        mylite_ownerless_dictionary_state_wait_ready(
+            state,
+            sizeof(state),
+            dictionary_state_identity_is_alive,
+            NULL,
+            MYLITE_TEST_WAIT_TIMEOUT_MS,
+            &generation
+        ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+    );
+
+    assert(
+        mylite_ownerless_dictionary_state_initialize(state, sizeof(state)) ==
+        MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+    );
+    store_test_le64(state, 0U, 2U);
+    store_test_le32(state, 8U, 1U);
+    store_test_le64(state, 16U, 10U);
+    store_test_le64(state, 24U, identity.pid);
+    store_test_le64(state, 32U, identity.start_time);
+    store_test_le64(state, 40U, identity.boot_id_hash);
+    assert(
+        mylite_ownerless_dictionary_state_recover_incomplete_owner(
+            state,
+            sizeof(state),
+            1U,
+            10U,
+            &generation
+        ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+    );
+    assert(generation == 2U);
+    assert(
+        mylite_ownerless_dictionary_state_owner_active_count(
+            state,
+            sizeof(state),
+            1U,
+            &active_count
+        ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+    );
+    assert(active_count == 0U);
+
+    assert(
+        mylite_ownerless_dictionary_state_initialize(state, sizeof(state)) ==
+        MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+    );
+    store_test_le32(state, 8U, 1U);
+    store_test_le64(state, 16U, 11U);
+    assert(
+        mylite_ownerless_dictionary_state_recover_incomplete_owner(
+            state,
+            sizeof(state),
+            1U,
+            10U,
+            &generation
+        ) == MYLITE_OWNERLESS_DICTIONARY_STATE_ERROR
+    );
+
+    assert(
+        mylite_ownerless_dictionary_state_begin_ddl(
+            state,
+            sizeof(state),
+            1U,
+            11U,
+            dictionary_state_dead_identity(),
+            1U,
+            &generation
+        ) == MYLITE_OWNERLESS_DICTIONARY_STATE_TIMEOUT
+    );
+    assert(
+        mylite_ownerless_dictionary_state_read_snapshot(state, sizeof(state), &snapshot) ==
+        MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+    );
+    assert(snapshot.active_owner_id == 1U);
+    assert(snapshot.active_owner_generation == 11U);
+    assert(
+        mylite_ownerless_dictionary_state_wait_ready(
+            state,
+            sizeof(state),
+            dictionary_state_identity_is_alive,
+            NULL,
+            1U,
+            &generation
+        ) == MYLITE_OWNERLESS_DICTIONARY_STATE_TIMEOUT
+    );
+    assert(
+        mylite_ownerless_dictionary_state_recover_incomplete_owner(
+            state,
+            sizeof(state),
+            1U,
+            11U,
+            &generation
+        ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+    );
+    assert(
+        mylite_ownerless_dictionary_state_begin_ddl(
+            state,
+            sizeof(state),
+            1U,
+            11U,
+            dictionary_state_current_identity(),
+            MYLITE_TEST_WAIT_TIMEOUT_MS,
+            &generation
+        ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+    );
+    assert(
+        mylite_ownerless_dictionary_state_recover_incomplete_owner(
+            state,
+            sizeof(state),
+            1U,
+            11U,
+            &generation
+        ) == MYLITE_OWNERLESS_DICTIONARY_STATE_ERROR
+    );
+}
+
 static void test_dictionary_state_recovers_marked_dead_owner(void) {
     uint8_t state[MYLITE_OWNERLESS_DICTIONARY_STATE_SIZE];
     uint64_t generation = 0U;
     uint32_t active_count = 0U;
+    mylite_ownerless_dictionary_state_snapshot snapshot;
 
     assert(
         mylite_ownerless_dictionary_state_initialize(state, sizeof(state)) ==
@@ -14270,7 +14453,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
             sizeof(state),
             1U,
             10U,
-            UINT64_MAX,
+            dictionary_state_dead_identity(),
             MYLITE_TEST_WAIT_TIMEOUT_MS,
             &generation
         ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
@@ -14324,10 +14507,19 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
     );
     assert(active_count == 0U);
     assert(
+        mylite_ownerless_dictionary_state_read_snapshot(state, sizeof(state), &snapshot) ==
+        MYLITE_OWNERLESS_DICTIONARY_STATE_OK
+    );
+    assert(snapshot.active_owner_id == 0U);
+    assert(snapshot.active_owner_generation == 0U);
+    assert(snapshot.active_owner_pid == 0U);
+    assert(snapshot.active_owner_start_time == 0U);
+    assert(snapshot.active_owner_boot_id_hash == 0U);
+    assert(
         mylite_ownerless_dictionary_state_wait_ready(
             state,
             sizeof(state),
-            dictionary_state_pid_is_alive,
+            dictionary_state_identity_is_alive,
             NULL,
             MYLITE_TEST_WAIT_TIMEOUT_MS,
             &generation
@@ -14341,7 +14533,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
             sizeof(state),
             2U,
             20U,
-            (uint64_t)getpid(),
+            dictionary_state_current_identity(),
             MYLITE_TEST_WAIT_TIMEOUT_MS,
             &generation
         ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
@@ -14376,7 +14568,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
             sizeof(state),
             3U,
             30U,
-            UINT64_MAX,
+            dictionary_state_dead_identity(),
             MYLITE_TEST_WAIT_TIMEOUT_MS,
             &generation
         ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
@@ -14418,7 +14610,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
             sizeof(state),
             4U,
             40U,
-            UINT64_MAX,
+            dictionary_state_dead_identity(),
             MYLITE_TEST_WAIT_TIMEOUT_MS,
             &generation
         ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
@@ -14460,7 +14652,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
             sizeof(state),
             5U,
             50U,
-            UINT64_MAX,
+            dictionary_state_dead_identity(),
             MYLITE_TEST_WAIT_TIMEOUT_MS,
             &generation
         ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
@@ -14502,7 +14694,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
             sizeof(state),
             6U,
             60U,
-            UINT64_MAX,
+            dictionary_state_dead_identity(),
             MYLITE_TEST_WAIT_TIMEOUT_MS,
             &generation
         ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
@@ -14544,7 +14736,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
             sizeof(state),
             7U,
             70U,
-            UINT64_MAX,
+            dictionary_state_dead_identity(),
             MYLITE_TEST_WAIT_TIMEOUT_MS,
             &generation
         ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
@@ -14586,7 +14778,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
             sizeof(state),
             8U,
             80U,
-            UINT64_MAX,
+            dictionary_state_dead_identity(),
             MYLITE_TEST_WAIT_TIMEOUT_MS,
             &generation
         ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
@@ -14628,7 +14820,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
             sizeof(state),
             9U,
             90U,
-            UINT64_MAX,
+            dictionary_state_dead_identity(),
             MYLITE_TEST_WAIT_TIMEOUT_MS,
             &generation
         ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
@@ -14670,7 +14862,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
             sizeof(state),
             10U,
             100U,
-            UINT64_MAX,
+            dictionary_state_dead_identity(),
             MYLITE_TEST_WAIT_TIMEOUT_MS,
             &generation
         ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
@@ -14712,7 +14904,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
             sizeof(state),
             10U,
             100U,
-            UINT64_MAX,
+            dictionary_state_dead_identity(),
             MYLITE_TEST_WAIT_TIMEOUT_MS,
             &generation
         ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
@@ -14754,7 +14946,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
             sizeof(state),
             10U,
             100U,
-            UINT64_MAX,
+            dictionary_state_dead_identity(),
             MYLITE_TEST_WAIT_TIMEOUT_MS,
             &generation
         ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
@@ -14796,7 +14988,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
             sizeof(state),
             10U,
             100U,
-            UINT64_MAX,
+            dictionary_state_dead_identity(),
             MYLITE_TEST_WAIT_TIMEOUT_MS,
             &generation
         ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
@@ -14847,7 +15039,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
                 sizeof(state),
                 10U,
                 100U,
-                UINT64_MAX,
+                dictionary_state_dead_identity(),
                 MYLITE_TEST_WAIT_TIMEOUT_MS,
                 &generation
             ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
@@ -14897,7 +15089,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
                 sizeof(state),
                 10U,
                 100U,
-                UINT64_MAX,
+                dictionary_state_dead_identity(),
                 MYLITE_TEST_WAIT_TIMEOUT_MS,
                 &generation
             ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
@@ -14940,7 +15132,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
             sizeof(state),
             10U,
             100U,
-            UINT64_MAX,
+            dictionary_state_dead_identity(),
             MYLITE_TEST_WAIT_TIMEOUT_MS,
             &generation
         ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
@@ -14982,7 +15174,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
             sizeof(state),
             10U,
             100U,
-            UINT64_MAX,
+            dictionary_state_dead_identity(),
             MYLITE_TEST_WAIT_TIMEOUT_MS,
             &generation
         ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
@@ -15034,7 +15226,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
                 sizeof(state),
                 10U,
                 100U,
-                UINT64_MAX,
+                dictionary_state_dead_identity(),
                 MYLITE_TEST_WAIT_TIMEOUT_MS,
                 &generation
             ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
@@ -15083,7 +15275,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
                 sizeof(state),
                 10U,
                 100U,
-                UINT64_MAX,
+                dictionary_state_dead_identity(),
                 MYLITE_TEST_WAIT_TIMEOUT_MS,
                 &generation
             ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
@@ -15133,7 +15325,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
                 sizeof(state),
                 10U,
                 100U,
-                UINT64_MAX,
+                dictionary_state_dead_identity(),
                 MYLITE_TEST_WAIT_TIMEOUT_MS,
                 &generation
             ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
@@ -15176,7 +15368,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
             sizeof(state),
             10U,
             100U,
-            UINT64_MAX,
+            dictionary_state_dead_identity(),
             MYLITE_TEST_WAIT_TIMEOUT_MS,
             &generation
         ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
@@ -15225,7 +15417,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
                 sizeof(state),
                 10U,
                 100U,
-                UINT64_MAX,
+                dictionary_state_dead_identity(),
                 MYLITE_TEST_WAIT_TIMEOUT_MS,
                 &generation
             ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
@@ -15268,7 +15460,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
             sizeof(state),
             10U,
             100U,
-            UINT64_MAX,
+            dictionary_state_dead_identity(),
             MYLITE_TEST_WAIT_TIMEOUT_MS,
             &generation
         ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
@@ -15317,7 +15509,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
                 sizeof(state),
                 10U,
                 100U,
-                UINT64_MAX,
+                dictionary_state_dead_identity(),
                 MYLITE_TEST_WAIT_TIMEOUT_MS,
                 &generation
             ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
@@ -15369,7 +15561,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
                 sizeof(state),
                 10U,
                 100U,
-                UINT64_MAX,
+                dictionary_state_dead_identity(),
                 MYLITE_TEST_WAIT_TIMEOUT_MS,
                 &generation
             ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
@@ -15425,7 +15617,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
                 sizeof(state),
                 10U,
                 100U,
-                UINT64_MAX,
+                dictionary_state_dead_identity(),
                 MYLITE_TEST_WAIT_TIMEOUT_MS,
                 &generation
             ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
@@ -15468,7 +15660,7 @@ static void test_dictionary_state_recovers_marked_dead_owner(void) {
             sizeof(state),
             10U,
             100U,
-            UINT64_MAX,
+            dictionary_state_dead_identity(),
             MYLITE_TEST_WAIT_TIMEOUT_MS,
             &generation
         ) == MYLITE_OWNERLESS_DICTIONARY_STATE_OK
@@ -17402,26 +17594,30 @@ static int process_registry_identity_is_running(
     return mylite_ownerless_process_identity_is_alive(identity, ctx);
 }
 
-static int process_registry_pid_is_running(uint64_t pid, void *ctx) {
-    const pid_t probe_pid = (pid_t)pid;
+static mylite_ownerless_process_identity dictionary_state_current_identity(void) {
+    mylite_ownerless_process_identity identity;
 
-    (void)ctx;
-
-    if (probe_pid <= 0 || (uint64_t)probe_pid != pid) {
-        return 0;
-    }
-    if (kill(probe_pid, 0) == 0) {
-        return 1;
-    }
-    return errno == EPERM;
+    assert(
+        mylite_ownerless_current_process_identity(&identity) ==
+        MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    return identity;
 }
 
-static int dictionary_state_pid_is_alive(uint64_t pid, void *ctx) {
-    (void)ctx;
-    if (pid > (uint64_t)INT32_MAX) {
-        return 0;
-    }
-    return process_registry_pid_is_running(pid, NULL);
+static mylite_ownerless_process_identity dictionary_state_dead_identity(void) {
+    mylite_ownerless_process_identity identity;
+
+    identity.pid = UINT64_MAX;
+    identity.start_time = UINT64_MAX - 1U;
+    identity.boot_id_hash = UINT64_MAX - 2U;
+    return identity;
+}
+
+static int dictionary_state_identity_is_alive(
+    const mylite_ownerless_process_identity *identity,
+    void *ctx
+) {
+    return mylite_ownerless_process_identity_is_alive(identity, ctx);
 }
 
 static int process_registry_cleanup_owner_locks(
@@ -17578,6 +17774,12 @@ static void store_test_be32(uint8_t *bytes, size_t offset, uint32_t value) {
 static void store_test_be64(uint8_t *bytes, size_t offset, uint64_t value) {
     for (size_t index = 0; index < 8U; ++index) {
         bytes[offset + index] = (uint8_t)((value >> ((7U - index) * 8U)) & 0xFFU);
+    }
+}
+
+static void store_test_le32(uint8_t *bytes, size_t offset, uint32_t value) {
+    for (size_t index = 0; index < 4U; ++index) {
+        bytes[offset + index] = (uint8_t)((value >> (index * 8U)) & 0xFFU);
     }
 }
 
