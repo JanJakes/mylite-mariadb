@@ -51,14 +51,18 @@ Add a focused production SQL selector for the retained-earlier-write branch:
   1 still belongs to the transaction outcome,
 - commit and require the DML-specific native file-operation checkpoint marker
   to be durable,
-- close with no live peer and require native checkpoint proof to drain the
-  marker and WAL,
+- close with no live peer and require the marker plus WAL proof to remain
+  durable while native rollback history is still present,
 - reopen ownerless after forced `.shm` rebuild and reopen ordinary native to
-  prove row 1 survived, row 2 rolled back, and the table remains writable.
+  prove row 1 survived, row 2 rolled back, the table remains writable, and the
+  retained marker/WAL proof still has native rollback-history evidence.
 
-The slice adds no product code unless the selector exposes a regression.
-MariaDB remains authoritative for savepoint row undo; MyLite only proves its
-ownerless checkpoint evidence classification matches the native outcome.
+The original slice added no product code unless the selector exposed a
+regression. Follow-up work did change product recovery and shutdown handling so
+retained ownerless WAL, DML markers, and native rollback-history proof are not
+discarded before native state is authoritative. MariaDB remains authoritative
+for savepoint row undo; MyLite only proves its ownerless checkpoint evidence
+classification matches the native outcome.
 
 ## Compatibility Impact
 
@@ -70,9 +74,10 @@ durable and recoverable after a later post-savepoint write is rolled back.
 ## Directory And Lifecycle Impact
 
 No file format or directory layout changes are introduced. The test asserts the
-DML marker exists only between the successful `COMMIT` and the final no-live
-checkpoint drain, and that ownerless plus ordinary native reopen paths need no
-manual cleanup.
+DML marker exists after the successful `COMMIT` and remains durable across
+ownerless plus ordinary native reopen paths while native rollback history is
+still present. That retained proof is intentional; dropping it before rollback
+history drains can make native undo/redo ordering unsafe.
 
 ## Native Storage Impact
 
@@ -93,6 +98,8 @@ does not add dependencies or change the embedded MariaDB profile.
 - Run adjacent DML marker selectors for savepoint discard, rollback discard,
   deadlock discard, single-owner explicit DML marker drain, multi-peer explicit
   DML marker retention/drain, and killed savepoint recovery.
+- Run hook-build savepoint rollback crash selectors covering post-native
+  before-state, live-peer busy gating, and native row-undo rollback boundaries.
 - Run the focused production CTest filter, `format-check-prod`, and
   `git diff --check`.
 
@@ -105,15 +112,19 @@ does not add dependencies or change the embedded MariaDB profile.
   checkpoint marker.
 - No generic dictionary/file-lifecycle marker is written for the DML-only
   transaction.
-- No-live close drains the DML marker and WAL after native checkpoint proof.
+- No-live close keeps the DML marker and WAL proof when native rollback history
+  is still present, with explicit rollback-history evidence for the retained
+  WAL.
 - Ownerless reopen after forced `.shm` rebuild and ordinary native reopen see
   the surviving pre-savepoint row image and not the rolled-back row image.
 
 ## Risks
 
-- This is a successful live-transaction branch proof. Killed processes or
-  injected crashes during savepoint rollback, before rollback, or amid
-  concurrent writers remain separate matrices.
+- The originally separate killed-process, savepoint rollback, live-peer, and
+  native row-undo crash matrices are now covered by focused hook-build
+  selectors. They remain bounded first-boundary coverage, not an exhaustive
+  proof of every internal InnoDB row-undo substep or every same-table
+  contention schedule.
 - A single file-per-table `UPDATE` shape represents checkpointed DML
   `FILE_MODIFY` evidence; broader DML-origin file-operation classes remain
   planned.

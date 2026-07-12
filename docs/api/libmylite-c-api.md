@@ -150,11 +150,13 @@ database directory.
 `mylite_capabilities()` reports the compiled and currently available
 concurrency modes. The embedded backend currently reports
 `MYLITE_CAP_SAME_PROCESS_CONCURRENCY`, `MYLITE_CAP_SHARED_READONLY`, and
-`MYLITE_CAP_OWNERLESS_RW` in embedded builds. Ownerless support is still partial
-and should be evaluated through the compatibility matrix before relying on
-unsupported DDL or recovery surfaces. Ownerless read/write opens currently
-accept InnoDB tables and reject explicit non-InnoDB durable engines or session
-storage-engine defaults and overrides until per-engine coordination is designed.
+`MYLITE_CAP_OWNERLESS_RW` in embedded builds. Ownerless read/write support is
+complete for the persistent InnoDB application-table surface documented in the
+compatibility matrix. Ownerless read/write opens reject explicit non-InnoDB
+durable engines, existing persistent non-InnoDB application tables, and session
+storage-engine defaults and overrides until per-engine coordination is designed;
+server/global SQL surfaces remain governed by the documented unsupported
+surface policy.
 A live embedded runtime uses one concurrency and access mode, so mixing
 ownerless/shared read-only opens with ordinary opens or ownerless read/write
 opens on the same directory in one process is rejected.
@@ -210,21 +212,22 @@ partial MariaDB embedded startup state is ended and the saved 12 KiB redo
 startup prefix whose checkpoint pages pass MariaDB startup validation, or the
 captured prefix fallback, is restored. A first ownerless read/write startup
 after ordinary native shutdown leaves InnoDB checkpoint suppression disabled
-when no ownerless page-version WAL payload, native checkpoint marker, live peer,
-or usable redo-header backup exists, because native redo is then the recovery
-authority. Payload-bearing native-support records count as retained WAL payload
-for this startup gate; proof-only metadata records do not. Final no-live
+when no uncheckpointed ownerless WAL records, native checkpoint marker, live
+peer, or usable redo-header backup exist, because native redo is then the
+recovery authority. Proof-only native-support metadata is not a readable page
+image, but it still counts as ownerless recovery evidence for startup and
+shutdown authority gates until checkpointed. Final no-live
 ownerless read/write close also publishes a native
 checkpoint for completed InnoDB DDL file-operation redo or ownerless
 `ALTER TABLE ... AUTO_INCREMENT` checkpoint markers before shutdown, then
 forces native checkpoint proof for retained ownerless page-version WAL after
 active snapshot pins release, and restores the 12 KiB redo startup prefix if
 MariaDB embedded shutdown leaves `ib_logfile0` without startup-checkpoint
-evidence. With no live ownerless peer and no retained page-version WAL payload,
-the close path lowers MariaDB from crash-style ownerless shutdown to clean native
-shutdown even when rollback history was not empty before close; retained
-page-version WAL keeps the crash-style policy unless rollback history is already
-empty.
+evidence. With no live ownerless peer and no uncheckpointed ownerless WAL
+records, the close path lowers MariaDB from crash-style ownerless shutdown to
+clean native shutdown even when rollback history was not empty before close;
+retained ownerless WAL keeps the crash-style policy unless rollback history is
+already empty.
 Recovery decisions read volatile process registry counters through
 `MAP_SHARED` mappings, not ordinary file reads, so peer process-slot updates
 are visible before stale state is rebuilt.

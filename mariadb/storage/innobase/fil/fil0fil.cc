@@ -1944,6 +1944,38 @@ static inline char *fil_make_dirpath(const char *path) noexcept
   return fil_make_filepath_low(path, fil_space_t::name_type{}, NO_EXT, true);
 }
 
+static bool mylite_ownerless_path_has_tablespace_page0(
+    const char *path, uint32_t space_id) noexcept
+{
+  bool success= false;
+  os_file_t file= os_file_create_simple_no_error_handling(
+      innodb_data_file_key, path, OS_FILE_OPEN, OS_FILE_READ_ONLY, true,
+      &success);
+  if (!success)
+    return false;
+
+  byte *page= static_cast<byte*>(
+      aligned_malloc(UNIV_PAGE_SIZE_MIN, UNIV_PAGE_SIZE_MIN));
+  if (!page)
+  {
+    os_file_close(file);
+    return false;
+  }
+
+  ulint read_bytes= 0;
+  const dberr_t err= os_file_read(IORequestReadPartial, file, page, 0,
+                                  UNIV_PAGE_SIZE_MIN, &read_bytes);
+  const bool matches=
+      err == DB_SUCCESS && read_bytes >= FIL_PAGE_DATA &&
+      mach_read_from_4(page + FIL_PAGE_OFFSET) == 0 &&
+      mach_read_from_4(page + FIL_PAGE_SPACE_ID) == space_id &&
+      mach_read_from_4(page + FSP_HEADER_OFFSET + FSP_SPACE_ID) == space_id;
+
+  aligned_free(page);
+  os_file_close(file);
+  return matches;
+}
+
 dberr_t fil_space_t::rename(const char *path, bool log, bool replace) noexcept
 {
   ut_ad(UT_LIST_GET_LEN(chain) == 1);
@@ -1976,6 +2008,23 @@ dberr_t fil_space_t::rename(const char *path, bool log, bool replace) noexcept
   the rename in the file system. */
   if (os_file_status(old_path, &exists, &ftype) && !exists)
   {
+    bool target_exists= false;
+    if (mylite_ownerless_innodb_uncheckpointed_file_rename_recovery() &&
+        os_file_status(path, &target_exists, &ftype) && target_exists &&
+        ftype == OS_FILE_TYPE_FILE &&
+        mylite_ownerless_path_has_tablespace_page0(path, id))
+    {
+      sql_print_information(
+          "InnoDB: Ownerless recovery accepted already-renamed tablespace "
+          "'%s' for missing source '%s'.",
+          path, old_path);
+      mysql_mutex_lock(&fil_system.mutex);
+      ut_free(chain.start->name);
+      chain.start->name= mem_strdup(path);
+      mysql_mutex_unlock(&fil_system.mutex);
+      return DB_SUCCESS;
+    }
+
     sql_print_error("InnoDB: Cannot rename '%s' to '%s'"
                     " because the source file does not exist.",
                     old_path, path);

@@ -116,6 +116,61 @@ struct ownerless_page_version
   std::vector<byte> page;
 };
 
+struct ownerless_page_source
+{
+  const byte *page;
+  uint32_t page_size;
+  bool compressed;
+};
+
+static bool buf_flush_ownerless_compressed_frame_page_type_stored_uncompressed(
+    uint16_t page_type) noexcept
+{
+  switch (page_type) {
+  case FIL_PAGE_TYPE_ALLOCATED:
+  case FIL_PAGE_INODE:
+  case FIL_PAGE_IBUF_BITMAP:
+  case FIL_PAGE_TYPE_FSP_HDR:
+  case FIL_PAGE_TYPE_XDES:
+    return true;
+  default:
+    return false;
+  }
+}
+
+static bool buf_flush_ownerless_page_source(
+    const buf_page_t &bpage, ownerless_page_source *out_source) noexcept
+{
+  ut_ad(out_source != nullptr);
+
+  const ulint zip_size= bpage.zip_size();
+  if (zip_size != 0)
+  {
+    if (bpage.frame != nullptr &&
+        buf_flush_ownerless_compressed_frame_page_type_stored_uncompressed(
+            fil_page_get_type(bpage.frame)))
+    {
+      out_source->page= bpage.frame;
+      out_source->page_size= static_cast<uint32_t>(zip_size);
+      out_source->compressed= true;
+      return true;
+    }
+    if (bpage.zip.data == nullptr)
+      return false;
+    out_source->page= bpage.zip.data;
+    out_source->page_size= static_cast<uint32_t>(zip_size);
+    out_source->compressed= true;
+    return true;
+  }
+
+  if (bpage.frame == nullptr)
+    return false;
+  out_source->page= bpage.frame;
+  out_source->page_size= static_cast<uint32_t>(bpage.physical_size());
+  out_source->compressed= false;
+  return true;
+}
+
 /* @} */
 
 #ifdef UNIV_DEBUG
@@ -3314,10 +3369,12 @@ void buf_flush_publish_ownerless_pages_to_lsn(lsn_t visible_lsn) noexcept
     }
 
     const lsn_t stable_oldest_modification= bpage->oldest_modification();
-    const byte *page= bpage->zip.data ? bpage->zip.data : bpage->frame;
+    ownerless_page_source page_source;
     if (stable_oldest_modification > 2 &&
-        stable_oldest_modification <= visible_lsn && page != nullptr)
+        stable_oldest_modification <= visible_lsn &&
+        buf_flush_ownerless_page_source(*bpage, &page_source))
     {
+      const byte *page= page_source.page;
       const lsn_t page_lsn=
         mach_read_from_8(my_assume_aligned<8>(FIL_PAGE_LSN + page));
       if (page_lsn != 0 && page_lsn <= visible_lsn &&
@@ -3329,8 +3386,8 @@ void buf_flush_publish_ownerless_pages_to_lsn(lsn_t visible_lsn) noexcept
         version.space_id= bpage->id().space();
         version.page_no= bpage->id().page_no();
         version.page_lsn= page_lsn;
-        version.compressed= bpage->zip.data != nullptr;
-        version.page.assign(page, page + bpage->physical_size());
+        version.compressed= page_source.compressed;
+        version.page.assign(page, page + page_source.page_size);
         versions.emplace_back(std::move(version));
       }
     }
@@ -3586,7 +3643,7 @@ static void buf_flush_ownerless_count_flushed_page_identity(
 lsn_t buf_flush_publish_ownerless_page_to_lsn(
     uint32_t space_id, uint32_t page_no, lsn_t visible_lsn,
     bool native_support_only, uint64_t *published_pages,
-    bool skip_active_page_write) noexcept
+    bool skip_active_page_write, uint32_t publish_flags) noexcept
 {
   if (visible_lsn == 0 || recv_recovery_is_on())
     return 0;
@@ -3619,18 +3676,21 @@ lsn_t buf_flush_publish_ownerless_page_to_lsn(
           BUF_GET_IF_IN_POOL, &mtr, &err))
   {
     const buf_page_t &bpage= block->page;
-    const byte *source= bpage.zip.data ? bpage.zip.data : bpage.frame;
-    if (source != nullptr && bpage.in_file() &&
-        (expected_page_size == 0 || bpage.physical_size() == expected_page_size))
+    ownerless_page_source page_source;
+    if (bpage.in_file() &&
+        buf_flush_ownerless_page_source(bpage, &page_source) &&
+        (expected_page_size == 0 ||
+         page_source.page_size == expected_page_size))
     {
-      page_size= static_cast<uint32_t>(bpage.physical_size());
+      const byte *source= page_source.page;
+      page_size= page_source.page_size;
       page= static_cast<byte*>(aligned_malloc(page_size, page_size));
       if (page == nullptr)
       {
         mtr.commit();
         return 0;
       }
-      compressed= bpage.zip.data != nullptr;
+      compressed= page_source.compressed;
       memcpy(page, source, page_size);
       copied= true;
     }
@@ -3661,8 +3721,9 @@ lsn_t buf_flush_publish_ownerless_page_to_lsn(
           aligned_free(page);
           return observed_lsn;
         }
-        const int result= mylite_ownerless_innodb_publish_page_version(
-            space_id, page_no, page_lsn, visible_lsn, page, page_size);
+        const int result= mylite_ownerless_innodb_publish_page_version_with_flags(
+            space_id, page_no, page_lsn, visible_lsn, page, page_size,
+            publish_flags);
         if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK &&
             published_pages != nullptr)
           ++*published_pages;

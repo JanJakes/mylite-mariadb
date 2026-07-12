@@ -57,6 +57,17 @@ int mylite_ownerless_page_pin_registry_snapshot_oldest(
     uint32_t *out_active_count,
     uint64_t *out_oldest_read_lsn
 );
+int mylite_ownerless_page_pin_registry_snapshot_oldest_excluding(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t latch_owner_id,
+    uint64_t latch_owner_generation,
+    uint32_t exclude_owner_id,
+    uint32_t exclude_slot_index,
+    uint64_t exclude_slot_generation,
+    uint32_t *out_active_count,
+    uint64_t *out_oldest_read_lsn
+);
 uint64_t mylite_ownerless_page_pin_registry_active_count(const void *mapping);
 int mylite_ownerless_page_pin_registry_owner_active_count(
     void *mapping,

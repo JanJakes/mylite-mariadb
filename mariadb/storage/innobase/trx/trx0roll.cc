@@ -24,11 +24,16 @@ Transaction rollback
 Created 3/26/1996 Heikki Tuuri
 *******************************************************/
 
+#ifndef MYSQL_SERVER
+#define MYSQL_SERVER
+#endif
+
 #include "trx0roll.h"
 
 #include <my_service_manager.h>
 #include <mysql/service_wsrep.h>
 
+#include "sql_class.h" // THD
 #include "fsp0fsp.h"
 #include "lock0lock.h"
 #include "mach0data.h"
@@ -174,15 +179,21 @@ dberr_t trx_t::rollback_low(const undo_no_t *savept) noexcept
     if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks()) && id != 0 &&
         !read_only)
     {
+      const bool user_savepoint_rollback=
+        mysql_thd != nullptr && mysql_thd->lex != nullptr &&
+        mysql_thd->lex->sql_command == SQLCOM_ROLLBACK_TO_SAVEPOINT;
       /*
-      ROLLBACK TO SAVEPOINT rewrites pages through native undo without ending
-      the transaction. Clear current transaction-deferred images here; the
-      handler-level savepoint callback restores the image snapshot captured at
-      the target savepoint when rollback succeeds. Do not flush user pages
-      here: the transaction can still roll back in full, and a savepoint
-      boundary is not a committed durable page image.
+      Partial rollback rewrites pages through native undo without ending the
+      transaction. Clear current transaction-deferred images here; the
+      handler-level SQL savepoint callback restores the image snapshot captured
+      at the target savepoint when user ROLLBACK TO SAVEPOINT succeeds. Do not
+      flush user pages here: the transaction can still roll back in full, and a
+      savepoint boundary is not a committed durable page image.
       */
-      mylite_ownerless_page_write_publish_failed= true;
+      if (user_savepoint_rollback)
+        mylite_ownerless_page_write_savepoint_rollback= true;
+      else
+        mylite_ownerless_page_write_publish_failed= true;
       mylite_ownerless_page_images_clear();
     }
     MONITOR_INC(MONITOR_TRX_ROLLBACK_SAVEPOINT);

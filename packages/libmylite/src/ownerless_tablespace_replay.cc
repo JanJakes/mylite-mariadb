@@ -23,7 +23,12 @@ constexpr std::size_t k_innodb_page_offset_offset = 4;
 constexpr std::size_t k_innodb_page_lsn_offset = 16;
 constexpr std::size_t k_innodb_page_type_offset = 24;
 constexpr std::size_t k_innodb_page_space_id_offset = 34;
-constexpr std::uint32_t k_innodb_page_size_min = 4096;
+/*
+ * Ownerless WAL records store physical InnoDB page images. Compressed
+ * file-per-table spaces can use 1K or 2K physical pages even though ordinary
+ * logical InnoDB pages are at least 4K.
+ */
+constexpr std::uint32_t k_innodb_physical_page_size_min = 1024;
 constexpr std::uint32_t k_innodb_page_size_max = 65536;
 constexpr std::uint16_t k_innodb_page_type_fsp_header = 8;
 
@@ -438,7 +443,8 @@ int collect_visible_record_metadata(
 }
 
 bool valid_page_size(std::uint32_t page_size) {
-    return page_size >= k_innodb_page_size_min && page_size <= k_innodb_page_size_max &&
+    return page_size >= k_innodb_physical_page_size_min &&
+           page_size <= k_innodb_page_size_max &&
            (page_size & (page_size - 1U)) == 0U;
 }
 
@@ -488,9 +494,11 @@ bool record_metadata_is_better(
     const PageRecordMetadata &candidate,
     const PageRecordMetadata &current
 ) {
-    return candidate.page_lsn() > current.page_lsn() ||
-           (candidate.page_lsn() == current.page_lsn() &&
-            candidate.commit_lsn() > current.commit_lsn());
+    return candidate.commit_lsn() > current.commit_lsn() ||
+           (candidate.commit_lsn() == current.commit_lsn() &&
+            (candidate.page_lsn() > current.page_lsn() ||
+             (candidate.page_lsn() == current.page_lsn() &&
+              candidate.record_offset() > current.record_offset())));
 }
 
 bool innodb_page_header_matches(
@@ -582,7 +590,8 @@ int mylite_ownerless_tablespace_replay_apply_with_flags(
     if (datadir == nullptr || page_log_fd < 0 ||
         (flags & ~(MYLITE_OWNERLESS_TABLESPACE_REPLAY_IGNORE_MISSING_TABLESPACES |
                    MYLITE_OWNERLESS_TABLESPACE_REPLAY_KEEP_NATIVE_SAME_LSN |
-                   MYLITE_OWNERLESS_TABLESPACE_REPLAY_KEEP_NATIVE_SAME_LSN_SNAPSHOT_BOUNDARY)) !=
+                   MYLITE_OWNERLESS_TABLESPACE_REPLAY_KEEP_NATIVE_SAME_LSN_SNAPSHOT_BOUNDARY |
+                   MYLITE_OWNERLESS_TABLESPACE_REPLAY_USER_TABLESPACES_ONLY)) !=
             0U) {
         return MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR;
     }
@@ -605,6 +614,10 @@ int mylite_ownerless_tablespace_replay_apply_with_flags(
 
     std::map<PageKey, PageRecordMetadata> latest_records;
     for (const PageRecordMetadata &metadata : context.records) {
+        if ((flags & MYLITE_OWNERLESS_TABLESPACE_REPLAY_USER_TABLESPACES_ONLY) != 0U &&
+            metadata.space_id() <= 3U) {
+            continue;
+        }
         const PageKey key{metadata.space_id(), metadata.page_no()};
         auto [existing, inserted] = latest_records.emplace(key, metadata);
         if (!inserted && record_metadata_is_better(metadata, existing->second)) {

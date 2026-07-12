@@ -138,7 +138,8 @@ lsn_t buf_flush_publish_ownerless_page_to_lsn(
     uint32_t space_id, uint32_t page_no, lsn_t visible_lsn,
     bool native_support_only= false,
     uint64_t *published_pages= nullptr,
-    bool skip_active_page_write= true) noexcept;
+    bool skip_active_page_write= true,
+    uint32_t publish_flags= 0) noexcept;
 
 /** Synchronously flush dirty blocks.
 NOTE: The calling thread is not allowed to hold any buffer page latches! */

@@ -403,15 +403,22 @@ row_undo(
 	undo_page->unfix();
 	btr_pcur_close(&(node->pcur));
 
+	const bool ownerless_hooks = UNIV_UNLIKELY(
+		mylite_ownerless_innodb_lock_has_hooks());
+
 	mem_heap_empty(node->heap);
 
-	if (err == DB_SUCCESS
-	    && UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks())) {
-		/* Make each ownerless row-undo step a durable crash boundary
-		before page-write hooks can expose the undone page image. */
-		err = trx_undo_try_truncate(node->trx);
-		if (err == DB_SUCCESS) {
-			log_buffer_flush_to_disk();
+	if (err == DB_SUCCESS && ownerless_hooks) {
+		/* Publish in-flight rollback proof without exposing partial undo pages. */
+		log_buffer_flush_to_disk();
+		const uint64_t rollback_visible_lsn =
+			mylite_ownerless_innodb_publish_rollback_proof_pages_to_lsn(
+				node->trx, mylite_ownerless_innodb_current_lsn());
+		if (rollback_visible_lsn != 0) {
+			mylite_ownerless_innodb_flush_dirty_pages_for_page_writes(
+				rollback_visible_lsn);
+			mylite_ownerless_innodb_flush_transaction_pages_for_page_writes(
+				node->trx, rollback_visible_lsn, nullptr, nullptr);
 		}
 	}
 

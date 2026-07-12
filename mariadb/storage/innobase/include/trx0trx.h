@@ -702,6 +702,8 @@ public:
   mutable bool mylite_ownerless_page_image_last_hit_valid;
   /** Whether an ownerless MTR page-write image was not published. */
   bool mylite_ownerless_page_write_publish_failed;
+  /** Whether rollback to savepoint made page-write publication conservative. */
+  bool mylite_ownerless_page_write_savepoint_rollback;
   /** Whether an ownerless MTR page-write image was published. */
   bool mylite_ownerless_page_write_published_page;
   /** Whether ownerless transaction-deferred page images were published. */

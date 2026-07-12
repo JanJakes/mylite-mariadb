@@ -762,7 +762,8 @@ private:
 
   /** Refresh an ownerless physical page before modifying it. */
   void ownerless_page_write_refresh(
-      const buf_block_t &block, bool force_page_version= false) noexcept;
+      const buf_block_t &block, bool force_page_version= false,
+      bool preserve_local_transaction_page= true) noexcept;
 
   /** Release ownerless physical-page write serialization for a modified page. */
   void ownerless_page_write_leave(const mtr_memo_slot_t &slot) noexcept;

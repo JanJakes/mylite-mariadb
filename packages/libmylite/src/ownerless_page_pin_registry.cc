@@ -53,6 +53,15 @@ int snapshot_oldest_locked(
     std::uint32_t *out_active_count,
     std::uint64_t *out_oldest_read_lsn
 );
+int snapshot_oldest_excluding_locked(
+    unsigned char *registry,
+    std::size_t mapping_size,
+    std::uint32_t exclude_owner_id,
+    std::uint32_t exclude_slot_index,
+    std::uint64_t exclude_slot_generation,
+    std::uint32_t *out_active_count,
+    std::uint64_t *out_oldest_read_lsn
+);
 std::uint32_t load32(const unsigned char *base, std::size_t offset);
 std::uint64_t load64(const unsigned char *base, std::size_t offset);
 void store32(unsigned char *base, std::size_t offset, std::uint32_t value);
@@ -267,6 +276,47 @@ int mylite_ownerless_page_pin_registry_snapshot_oldest(
     return snapshot_result;
 }
 
+int mylite_ownerless_page_pin_registry_snapshot_oldest_excluding(
+    void *mapping,
+    std::size_t mapping_size,
+    std::uint32_t latch_owner_id,
+    std::uint64_t latch_owner_generation,
+    std::uint32_t exclude_owner_id,
+    std::uint32_t exclude_slot_index,
+    std::uint64_t exclude_slot_generation,
+    std::uint32_t *out_active_count,
+    std::uint64_t *out_oldest_read_lsn
+) {
+    if (!mapping_can_hold_registry(mapping, mapping_size) || latch_owner_id == 0U ||
+        latch_owner_generation == 0U || exclude_owner_id == 0U ||
+        exclude_slot_generation == 0U || out_active_count == nullptr ||
+        out_oldest_read_lsn == nullptr) {
+        return MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_ERROR;
+    }
+
+    auto *registry = static_cast<unsigned char *>(mapping);
+    const int latch_result = acquire_registry_latch(
+        registry,
+        latch_owner_id,
+        latch_owner_generation,
+        wait_deadline(k_latch_timeout_ms)
+    );
+    if (latch_result != MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK) {
+        return latch_result;
+    }
+    const int snapshot_result = snapshot_oldest_excluding_locked(
+        registry,
+        mapping_size,
+        exclude_owner_id,
+        exclude_slot_index,
+        exclude_slot_generation,
+        out_active_count,
+        out_oldest_read_lsn
+    );
+    release_registry_latch(registry, latch_owner_id, latch_owner_generation);
+    return snapshot_result;
+}
+
 std::uint64_t mylite_ownerless_page_pin_registry_active_count(const void *mapping) {
     if (mapping == nullptr) {
         return 0U;
@@ -428,6 +478,26 @@ int snapshot_oldest_locked(
     std::uint32_t *out_active_count,
     std::uint64_t *out_oldest_read_lsn
 ) {
+    return snapshot_oldest_excluding_locked(
+        registry,
+        mapping_size,
+        0U,
+        0U,
+        0U,
+        out_active_count,
+        out_oldest_read_lsn
+    );
+}
+
+int snapshot_oldest_excluding_locked(
+    unsigned char *registry,
+    std::size_t mapping_size,
+    std::uint32_t exclude_owner_id,
+    std::uint32_t exclude_slot_index,
+    std::uint64_t exclude_slot_generation,
+    std::uint32_t *out_active_count,
+    std::uint64_t *out_oldest_read_lsn
+) {
     std::uint32_t active_count = 0U;
     std::uint64_t oldest_read_lsn = 0U;
     const std::uint32_t count = slot_count(registry);
@@ -439,6 +509,11 @@ int snapshot_oldest_locked(
             break;
         }
         if (load32(slot, k_slot_state_offset) != MYLITE_OWNERLESS_PAGE_PIN_STATE_ACTIVE) {
+            continue;
+        }
+        if (exclude_slot_generation != 0U && index == exclude_slot_index &&
+            load32(slot, k_slot_owner_id_offset) == exclude_owner_id &&
+            load64(slot, k_slot_generation_offset) == exclude_slot_generation) {
             continue;
         }
         const std::uint64_t read_lsn = load64(slot, k_slot_read_lsn_offset);

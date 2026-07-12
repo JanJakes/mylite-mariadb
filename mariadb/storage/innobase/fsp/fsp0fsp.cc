@@ -37,6 +37,7 @@ Created 11/29/1995 Heikki Tuuri
 #include "dict0load.h"
 #include "dict0mem.h"
 #include "btr0pcur.h"
+#include "mylite_ownerless_innodb_lock_hooks.h"
 #include "trx0sys.h"
 #include "log.h"
 #ifndef DBUG_OFF
@@ -188,6 +189,25 @@ inline uint32_t xdes_find_free(const xdes_t *descr, uint32_t hint= 0)
       return i;
   for (uint32_t i= 0; i < hint; i++)
     if (xdes_is_free(descr, i))
+      return i;
+  return FIL_NULL;
+}
+
+inline uint32_t xdes_find_free_for_ownerless_allocation(
+    const xdes_t *descr, uint32_t hint, uint32_t extent_offset,
+    uint32_t space_id)
+{
+  const uint32_t extent_size= FSP_EXTENT_SIZE;
+  ut_ad(hint < extent_size);
+  for (uint32_t i= hint; i < extent_size; i++)
+    if (xdes_is_free(descr, i) &&
+        !mylite_ownerless_innodb_retained_allocation_page_in_use(
+            space_id, extent_offset + i))
+      return i;
+  for (uint32_t i= 0; i < hint; i++)
+    if (xdes_is_free(descr, i) &&
+        !mylite_ownerless_innodb_retained_allocation_page_in_use(
+            space_id, extent_offset + i))
       return i;
   return FIL_NULL;
 }
@@ -1144,7 +1164,8 @@ buf_block_t *fsp_alloc_free_page(fil_space_t *space, uint32_t hint,
 
   /* Now we have in descr an extent with at least one free page. Look
   for a free page in the extent. */
-  uint32_t free= xdes_find_free(descr, hint % FSP_EXTENT_SIZE);
+  uint32_t free= xdes_find_free_for_ownerless_allocation(
+      descr, hint % FSP_EXTENT_SIZE, xdes_get_offset(descr), space->id);
   if (free == FIL_NULL)
   {
   corrupted:
@@ -2055,7 +2076,9 @@ fseg_alloc_free_page_low(
 	if (xdes_get_state(descr) == XDES_FSEG
 	    && mach_read_from_8(descr + XDES_ID) == seg_id) {
 		/* Get the page from the segment extent */
-		if (xdes_is_free(descr, hint % extent_size)) {
+		if (xdes_is_free(descr, hint % extent_size) &&
+		    !mylite_ownerless_innodb_retained_allocation_page_in_use(
+			    space->id, hint)) {
 take_hinted_page:
 			ret_page = hint;
 			goto got_hinted_page;
@@ -2063,7 +2086,9 @@ take_hinted_page:
 			/* Take the page from the same extent as the
 			hinted page (and the extent already belongs to
 			the segment) */
-			ret_page = xdes_find_free(descr, hint % extent_size);
+			ret_page = xdes_find_free_for_ownerless_allocation(
+				descr, hint % extent_size, xdes_get_offset(descr),
+				space->id);
 			if (ret_page == FIL_NULL) {
 				ut_ad(!has_done_reservation);
 				return nullptr;
@@ -2116,7 +2141,15 @@ take_hinted_page:
 		if (UNIV_UNLIKELY(*err != DB_SUCCESS)) {
 			return nullptr;
 		}
-		goto take_hinted_page;
+		ret_page = xdes_find_free_for_ownerless_allocation(
+			ret_descr, hint % extent_size, xdes_get_offset(ret_descr),
+			space->id);
+		if (ret_page == FIL_NULL) {
+			ut_ad(!has_done_reservation);
+			return nullptr;
+		}
+		ret_page += xdes_get_offset(ret_descr);
+		goto alloc_done;
 	} else if (direction != FSP_NO_DIR) {
 
 		ret_descr = fseg_alloc_free_extent(seg_inode, iblock,
@@ -2126,14 +2159,16 @@ take_hinted_page:
 			ut_ad(*err != DB_SUCCESS);
 			return nullptr;
 		}
-		/* Take any free extent (which was already assigned
-		above in the if-condition to ret_descr) and take the
-		lowest or highest page in it, depending on the direction */
-		ret_page = xdes_get_offset(ret_descr);
-
-		if (direction == FSP_DOWN) {
-			ret_page += extent_size - 1;
+		/* Take any free page in the assigned extent, preferring the
+		requested direction. */
+		ret_page = xdes_find_free_for_ownerless_allocation(
+			ret_descr, direction == FSP_DOWN ? extent_size - 1 : 0,
+			xdes_get_offset(ret_descr), space->id);
+		if (ret_page == FIL_NULL) {
+			ut_ad(!has_done_reservation);
+			return nullptr;
 		}
+		ret_page += xdes_get_offset(ret_descr);
 		goto alloc_done;
 	}
 
@@ -2164,7 +2199,8 @@ take_hinted_page:
 			return nullptr;
 		}
 
-		ret_page = xdes_find_free(ret_descr);
+		ret_page = xdes_find_free_for_ownerless_allocation(
+			ret_descr, 0, xdes_get_offset(ret_descr), space->id);
 		if (ret_page == FIL_NULL) {
 			ut_ad(!has_done_reservation);
 		} else {

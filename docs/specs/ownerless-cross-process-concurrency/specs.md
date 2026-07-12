@@ -437,22 +437,27 @@ Roles:
   retained WAL and native checkpoint-obligation evidence.
   Same-process embedded restarts also reset MariaDB's static purge queue,
   purge page map, purge iterators, and purge coordinator running/task state
-  before startup. When no live peer exists and no retained page-version payloads
-  remain, ownerless startup defers InnoDB ownerless hooks, lets the native
+  before startup. When no live peer exists, no uncheckpointed ownerless WAL
+  records remain, and no native checkpoint marker is pending, ownerless startup
+  defers InnoDB ownerless hooks, lets the native
   purge coordinator settle until history stops decreasing or drains, then
   publishes the native-current LSN as the ownerless visible boundary. If that
-  WAL-empty no-live path already has a nonzero ownerless checkpoint-visible
-  boundary, startup temporarily permits the InnoDB external-LSN advance hook
-  during `mysql_server_init()`, capped at that persisted visible boundary, so
-  native page-LSN validation can catch up to the ownerless checkpoint boundary
-  without installing full ownerless lock hooks before purge drain; pending
+  no-live path already has retained ownerless checkpoint state, startup
+  temporarily permits the InnoDB external-LSN advance hook during
+  `mysql_server_init()`: user-page visibility is capped at the persisted
+  visible boundary, while native-support startup reads can use the checkpoint
+  latest LSN so rollback-history and active undo-header evidence newer than the
+  user-visible boundary can be restored before recovered rollback; pending
   native file-op, DML, or peer-explicit DML markers still keep hooks installed
   for post-start checkpoint refresh while preserving the current native redo
   header as the startup source. Startup and shared-memory rebuild distinguish
   retained user page-version records from native-support-only WAL: user records
   force page-log read/replay handling, while nonempty native-support-only WAL is
-  preserved as durable recovery evidence instead of being replayed as user
-  payload. If a no-live ownerless startup still finds retained user WAL,
+  preserved as durable recovery evidence instead of being treated as user
+  payload. Ordinary exclusive startup with retained native-support-only evidence
+  arms the ownerless uncheckpointed file-operation recovery bridge and relative
+  redo-path normalization so native redo for recovered ownerless DDL resolves
+  files under the active MyLite datadir. If a no-live ownerless startup still finds retained user WAL,
   native-support WAL, or native checkpoint markers after hooks are installed, it
   runs the no-live reclaim path before returning from open, so killed-reader
   cleanup can drain reader-boundary/native-support WAL without waiting for
@@ -1383,7 +1388,7 @@ DDL can be supported.
 
 ### MyISAM, Aria, MEMORY, And Other Engines
 
-The first ownerless mode should be InnoDB-only for durable user tables.
+The ownerless read/write mode is InnoDB-only for durable application tables.
 
 Reasons:
 
@@ -1397,10 +1402,17 @@ Reasons:
 Policy:
 
 - Existing MyISAM/Aria support remains available in exclusive mode.
-- Ownerless mode rejects durable MyISAM/Aria writes until dedicated engine
-  designs exist.
-- MEMORY remains per-runtime and should be rejected or namespaced in
-  ownerless durable mode unless explicitly designed.
+- Ownerless mode rejects existing persistent non-InnoDB application tables at
+  `MYLITE_OPEN_OWNERLESS_RW` open time until dedicated per-engine designs
+  exist.
+- Ownerless SQL rejects explicit non-InnoDB `ENGINE=` clauses, attempts to set
+  storage-engine defaults or overrides away from InnoDB, `CREATE TABLE ...
+  LIKE` / `CREATE TABLE ... AS SELECT` / replacement-copy statements, including
+  derived CTAS sources, that read from existing non-InnoDB base tables, and
+  `ALTER TABLE ... ENGINE=InnoDB` conversion attempts from existing non-InnoDB
+  base tables.
+- MEMORY remains per-runtime and is rejected for ownerless durable tables
+  unless explicitly designed.
 
 ## Coverage Policy
 
@@ -4525,13 +4537,15 @@ Exit criteria:
 
 Tasks:
 
-1. Decide whether MyISAM, Aria, and MEMORY are allowed in ownerless mode.
-   The current policy is InnoDB-only for ownerless read/write opens.
-2. If allowed, design per-engine coordination.
-3. Otherwise reject them clearly in ownerless mode while keeping them in
-   exclusive mode. `MYLITE_OPEN_OWNERLESS_RW` now rejects explicit MyISAM,
-   Aria, MEMORY, BLACKHOLE, and non-InnoDB storage-engine default or override
-   requests before MariaDB executes the statement.
+1. Keep MyISAM, Aria, MEMORY, and other non-InnoDB engines outside ownerless
+   read/write mode until a dedicated per-engine coordination design exists.
+2. Keep those engines available in exclusive mode.
+3. Reject non-InnoDB ownerless entry points clearly. `MYLITE_OPEN_OWNERLESS_RW`
+   now rejects persistent non-InnoDB application tables at open time, explicit
+   MyISAM, Aria, MEMORY, CSV, BLACKHOLE, and non-InnoDB storage-engine default
+   or override requests before MariaDB executes the statement, non-InnoDB
+   `LIKE`/CTAS/replacement-copy sources, and non-InnoDB-to-InnoDB conversion
+   attempts.
 
 Exit criteria:
 
@@ -5279,9 +5293,10 @@ Tasks:
    The retained-earlier-write branch is covered separately: when a
    checkpointed write before the savepoint survives rollback of a later
    checkpointed write, the process-local file-op redo flag remains set through
-   `ROLLBACK TO`, the later `COMMIT` publishes the DML-specific marker, no-live
-   close drains it after native checkpoint proof, and ownerless/native reopen
-   sees only the surviving pre-savepoint row image.
+   `ROLLBACK TO`, the later `COMMIT` publishes the DML-specific marker, and
+   no-live close plus subsequent ownerless/ordinary native reopen keep the marker
+   and retained WAL proof while native rollback history still requires them,
+   while every reopen sees only the surviving pre-savepoint row image.
    The killed-session follow-up proves the same post-savepoint rollback path
    after a successful later `COMMIT` and `_exit(0)` before `mylite_close()`:
    while the writer is still a zombie, both file-op markers remain clear,
@@ -6476,12 +6491,13 @@ subsystems that this mode needs:
   undo-report MTR commit bucket, near-zero page-record encoding and success
   bookkeeping deltas, no assign/space/record-size/other errors, ownerless
   cached-undo hits at `0.810` per insert, and fresh undo creates at `0.190`
-  per insert. The explicit transaction undo-elision slice reduces that path by
-  skipping pre-commit rollback-segment `FIL_PAGE_UNDO_LOG` native-support
-  page-version WAL for non-autocommit ownerless SQL transactions in the
-  transaction's own rollback-segment space, after the active history-proof page
-  check has already refused rollback-segment and undo pages needed by commit
-  serialization. The explicit transaction visible-proof and history-proof
+  per insert. Explicit non-autocommit ownerless SQL transactions publish
+  payload-bearing `FIL_PAGE_UNDO_LOG` native-support records while they are
+  active. A killed uncommitted writer can otherwise leave native redo that
+  reapplies user-page changes without enough active undo-header evidence for
+  startup rollback. The active history-proof page check still refuses
+  rollback-segment and undo pages needed by commit serialization. The explicit
+  transaction visible-proof and history-proof
   slices now carry a conservative first-party proof from eligible
   `INSERT ... VALUES` writes to the later `COMMIT`, so the prepared
   explicit-transaction probe can publish visibility through the same fast
@@ -7599,10 +7615,12 @@ subsystems that this mode needs:
   empty WAL plus matching redo header is not claimed until rollback-history
   startup state is also proven.
   The proof-only readable-WAL scan follow-up keeps uncheckpointed-record
-  detection file-size based, but changes open/close retained-payload decisions
-  to scan complete page-log records and ignore proof-only metadata records.
-  Proof-only-only WAL therefore remains durable and retained without enabling
-  ordinary native page-log read handling or retained-payload shutdown policy.
+  detection file-size based, but changes readable-payload decisions to scan
+  complete page-log records and ignore proof-only metadata records. Later
+  startup/shutdown fixes use the uncheckpointed-record predicate, not the
+  readable-payload predicate, for recovery-authority decisions, so
+  proof-only-only WAL remains durable and retained without enabling ordinary
+  native page-log read handling.
   Mixed logs still report readable page-version WAL as soon as any complete
   non-proof record is present, and incomplete tail bytes after proof-only
   records do not count as readable page payload evidence.
@@ -8104,124 +8122,25 @@ subsystems that this mode needs:
   workload; it does not change product retry semantics or close the broader
   DDL/file-lifecycle recovery matrix.
 
-  The current completion order is:
+  Completion status for this branch:
 
-  1. Broaden native redo/checkpoint reconciliation and live-peer
-     DDL/file-lifecycle recovery beyond the now-covered plain/table-copy
-     `CREATE TABLE`, focused CTAS, ordinary replacement, and replacement-copy
-     LIKE/CTAS plus explicit schema-qualified and implicit-schema rename
-     lists, focused explicit and implicit truncate, focused explicit and
-     implicit single-table, single-table and multi-table-list missing/existing
-     `DROP TABLE IF EXISTS`,
-     and same-schema/cross-schema two-table drop, plus focused force rebuild
-     including both exact copy-lock option orders,
-     dynamic, compact, and redundant row-format rebuilds including both exact
-     copy-lock option orders, focused compressed key-block row-format rebuild
-     including both exact copy-lock option orders, and focused charset-conversion rebuild
-     including both exact copy-lock option orders
-     prefinish boundaries, plus simple CREATE/DROP VIEW, focused CREATE OR
-     REPLACE/ALTER VIEW, and focused explicit column-list, check-option,
-     nested check-option, security/definer, algorithm create/replacement/alter,
-     idempotent/no-op, and existing `DROP VIEW IF EXISTS` view metadata-only
-     prefinish boundaries, plus simple CREATE/DROP TRIGGER
-     metadata-only prefinish boundaries, plus focused CREATE/ALTER/DROP
-     DATABASE, named ALTER DATABASE schema-comment, focused collation-first
-     `CHARSET` alias schema option, and schema idempotent/no-op prefinish
-     boundaries, plus focused
-     top-level and ALTER secondary-index idempotent/no-op prefinish boundaries,
-     plus focused column idempotent and column `IF EXISTS` missing-column
-     no-op prefinish boundaries, plus focused plain ADD COLUMN, both exact
-     copy-lock option orders for unplaced and placed ADD COLUMN and for
-     DROP/MODIFY/CHANGE/RENAME COLUMN, table-comment,
-     column-default metadata ALTER, and plain, descending, composite direction,
-     AUTO_INCREMENT, AUTO_INCREMENT descending, and AUTO_INCREMENT composite
-     primary-key replacement
-     prefinish boundaries, plus single-clause, pure multi-clause, FK-only
-     mixed foreign-key add/drop, focused mixed FK/non-FK ADD COLUMN,
-     focused mixed FK/non-FK DROP/MODIFY/CHANGE/RENAME COLUMN, focused mixed
-     FK/non-FK table-comment, focused mixed FK/non-FK column-default, and
-     focused mixed FK/non-FK named CHECK drop/add, and focused mixed
-     FK/non-FK secondary-index drop/add, unique-index replacement, rename-index,
-     ignored-index, and primary-key replacement
-     prefinish boundaries, plus child-only,
-     self-referencing, and stored generated-column child foreign-key truncate
-     prefinish boundaries, plus simple temporary DDL, pure multi-pair temporary
-     rename chains, focused single-pair `RENAME TABLE IF EXISTS`, and
-     temp-first plus permanent-first mixed temporary/permanent rename-list
-     prefinish boundaries, plus focused temporary-chain/permanent/temporary-chain
-     and same-schema plus cross-schema IF EXISTS missing-source mixed rename-list prefinish
-     boundaries plus cross-schema mixed temporary/permanent IF EXISTS native-loop
-     rollback and a two-permanent-rename cross-schema mixed
-     temporary/permanent/missing-source matrix killed after the first and
-     second durable native file operation, plus same-schema and cross-schema
-     non-FK multi-rename native-loop rollback after first, second, and final native
-     rename pairs, including deterministic same-schema and cross-schema
-     `RENAME TABLE IF EXISTS` three-pair lists, plus same-schema and
-     cross-schema FK native-loop rollback including existing-table
-     `RENAME TABLE IF EXISTS` lists, plus a focused same-schema
-     and cross-schema missing-source/existing/missing-source
-     `RENAME TABLE IF EXISTS` matrices covering warning/no-op semantics,
-     prefinish recovery, and native-loop rollback, plus same-schema and
-     cross-schema foreign-key missing-source `RENAME TABLE IF EXISTS`
-     prefinish and native-loop rollback coverage, plus target-conflict
-     `IF EXISTS` failed-DDL dictionary recovery and native file-op negative proof, especially
-     remaining rename variants including randomized temporary/permanent and
-     missing-source permutations beyond the now-covered deterministic non-FK,
-     FK, focused same-schema/cross-schema temporary/permanent IF EXISTS lists,
-     and focused two-permanent-rename matrix,
-     other rebuild variants beyond the covered
-     FORCE including both exact copy-lock option orders, same-engine ENGINE
-     including both exact copy-lock option orders,
-     dynamic, compact, and redundant row-format including both exact copy-lock
-     option orders, compressed row-format including both exact copy-lock
-     option orders, charset
-     including both exact copy-lock option orders, and focused exact copy-lock
-     unplaced ADD in both option orders, placed ADD, DROP, MODIFY, CHANGE, and RENAME COLUMN
-     boundaries,
-     broader metadata-only DDL beyond the focused view algorithm boundaries,
-     broader mixed temporary/permanent
-     rename matrices, broader FK plus non-FK ALTER lists beyond the focused
-     ADD COLUMN, DROP/MODIFY/CHANGE/RENAME COLUMN, table-comment, column-default,
-     named CHECK, secondary-index drop/add, unique-index replacement,
-     secondary-index rename, secondary-index ignorability, and primary-key
-     replacement cases, broader
-     schema option variants beyond the focused
-     named/current-schema schema-default/comment, collation-first `CHARSET`
-     alias, named/current-schema combined option-order boundaries, and
-     representative invalid-option cleanup,
-     and broader DDL file lifecycle while
-     peers remain live. Partition truncate
-     remains governed by the ownerless partition-DDL rejection policy, cyclic
-     FK truncate under default FK checks is covered as MariaDB's pre-truncate
-     error path, unchecked `FOREIGN_KEY_CHECKS=0` cyclic FK truncate now has
-     focused live-peer native truncate recovery, and non-self parent-table FK
-     truncate remains MariaDB's pre-truncate error path rather than a positive
-     recovery boundary.
-  2. Close remaining transaction crash windows, especially native
-     rollback/savepoint-rollback internals beyond the covered focused native
-     row-undo boundary, plus longer same-page/same-table concurrent-writer
-     savepoint schedules that combine native undo, ownerless page-write
-     ownership, and file-operation marker cleanup beyond the covered
-     independent-table handoff, focused same-page wait/commit handoff, focused
-     same-table large-row handoff, focused same-row conflict handoff, bounded
-     randomized same-table schedule, and live-peer post-native/pre-state
-     savepoint rollback cleanup boundary; generated-column and FK/trigger
-     update/delete DML side effects now have first durable row-undo boundary
-     full-rollback coverage including delete-side standalone no-live recovery
-     and live-peer busy/no-live recovery, while faults inside individual
-     `row_undo_ins()`/`row_undo_mod()` substeps and broader side-effect
-     rollback matrices remain open.
-  3. Extend active-reader pressure evidence from retained-WAL policy, the
-     covered killed-reader pressure-pin boundary, and the widened killed
-     pressure-writer cleanup boundary to broader crash and external-oracle
-     breadth for the remaining high-risk DML/DDL classes already covered by
-     bounded pressure policy tests.
-  4. Continue deterministic external MariaDB seed/replay expansion and graduate
-     to longer randomized MariaDB/RQG-style runs once the bounded recovery
-     gates above stop producing new correctness issues.
-  5. Keep production performance parity visible while those correctness slices
-     land, with startup, native engine, ownerless write-path, and PHPUnit
-     timing tracked in CI as separate build and test phases.
+  1. Ownerless read/write support is complete for persistent InnoDB
+     application tables, including directory-backed process registration,
+     statement/metadata/record/page-write coordination, page-version WAL,
+     checkpoint state, native redo/checkpoint handoff, active-reader retention,
+     dead-owner cleanup, and deterministic crash recovery for the covered DML,
+     DDL, rollback, foreign-key, generated-column, trigger, view, temporary-table,
+     and pressure paths.
+  2. Non-InnoDB durable application tables are deliberately outside the
+     ownerless protocol. Ownerless opens reject existing persistent non-InnoDB
+     application tables, and ownerless SQL rejects explicit non-InnoDB engine
+     requests, storage-engine default/override changes, non-InnoDB `LIKE` and
+     CTAS sources including derived sources, replacement-copy sources, and
+     non-InnoDB-to-InnoDB conversion attempts.
+  3. External randomized/RQG-style stress, more exhaustive edge-case matrices,
+     and future per-engine ownerless designs remain validation and roadmap
+     hardening work. They are not part of the supported ownerless read/write
+     surface in this branch.
 
   SQL-level local table-wait fault injection is no longer listed as a primary
   completion gate for supported ownerless SQL: ownerless `LOCK TABLES` and
@@ -8245,14 +8164,17 @@ subsystems that this mode needs:
   prefer OFD locks on Linux when practical, and test this failure mode.
 - Intermediate MDL, transaction, and lock-manager phases can look functional
   before page visibility and redo are safe. Product ownerless read/write opens
-  must stay disabled until the full commit/recovery path passes fault tests.
+  must remain limited to the tested InnoDB application-table scope and explicit
+  unsupported-surface policy until later designs add more engines or storage
+  surfaces.
 
 ## Acceptance Criteria For The Full Feature
 
 - No owner process, daemon, broker, or hidden server exists.
 - No directory-wide exclusive read/write lock is held during ordinary work.
 - At least four independent processes can open the same `.mylite` directory and
-  execute mixed read/write InnoDB transactions.
+  execute mixed read/write transactions over persistent InnoDB application
+  tables.
 - Non-conflicting writers make progress concurrently.
 - Conflicting writers block, timeout, or deadlock with MariaDB-compatible
   behavior.
@@ -8260,6 +8182,8 @@ subsystems that this mode needs:
 - Cross-process DDL and DML coordinate through metadata locks.
 - Process crashes at every critical phase recover without corruption.
 - All durable and transient state remains inside the database directory.
+- Non-InnoDB durable application tables are rejected in ownerless mode rather
+  than participating accidentally in the concurrency protocol.
 - `mylite-concurrency.shm` is file-backed, mapped with shared visibility,
   rebuildable after crash, and never required as the only durable copy of
   committed database state.

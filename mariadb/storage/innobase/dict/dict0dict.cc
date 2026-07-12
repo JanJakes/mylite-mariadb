@@ -51,6 +51,7 @@ Created 1/8/1996 Heikki Tuuri
 #include "dict0crea.h"
 #include "dict0mem.h"
 #include "dict0stats.h"
+#include "mylite_ownerless_innodb_lock_hooks.h"
 #include "fts0fts.h"
 #include "fts0types.h"
 #include "lock0lock.h"
@@ -1196,8 +1197,23 @@ inline void dict_sys_t::add(dict_table_t *table) noexcept
       ut_ad(t->cached);
       ut_a(strcmp(t->name.m_name, name));
       return false;
-    });
+  });
   *prev= table;
+  if (mylite_ownerless_innodb_lock_hooks_ever_enabled_fast())
+  {
+    dict_table_t **stale_prev= (table->is_temporary()
+      ? temp_id_hash : table_id_hash).cell_get(ut_fold_ull(table->id))->
+      search(&dict_table_t::id_hash, [table](const dict_table_t *t)
+      {
+        return t == nullptr || t->id == table->id;
+      });
+    if (*stale_prev != nullptr && *stale_prev != table &&
+        strcmp((*stale_prev)->name.m_name, table->name.m_name))
+    {
+      dict_table_t *stale= *stale_prev;
+      dict_sys.remove(stale, stale->can_be_evicted);
+    }
+  }
   prev= (table->is_temporary() ? temp_id_hash : table_id_hash).
     cell_get(ut_fold_ull(table->id))->
     search(&dict_table_t::id_hash, [table](const dict_table_t *t)

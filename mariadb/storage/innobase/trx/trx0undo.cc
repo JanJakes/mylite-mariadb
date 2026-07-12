@@ -822,6 +822,11 @@ static dberr_t trx_undo_truncate_end(trx_undo_t &undo, mtr_t &mtr)
   for (const auto limit= mtr.trx->undo_no;;)
   {
     mtr.start();
+    if (UNIV_UNLIKELY(mtr.trx->mylite_ownerless_history_proof_active))
+    {
+      mtr.trx->mylite_ownerless_history_proof_rseg_published= false;
+      mtr.trx->mylite_ownerless_history_proof_undo_published= false;
+    }
     if (!undo.rseg->is_persistent())
       mtr.set_log_mode(MTR_LOG_NO_REDO);
 
@@ -865,9 +870,58 @@ func_exit:
                    undo_block->page.frame,
                    ulint(trunc_here - undo_block->page.frame));
 
-    mtr.commit();
-    return err;
-  }
+	    mtr.commit();
+	    if (UNIV_UNLIKELY(mtr.trx->mylite_ownerless_history_proof_active &&
+			      !(mtr.trx->mylite_ownerless_history_proof_rseg_published &&
+				mtr.trx->mylite_ownerless_history_proof_undo_published) &&
+			      mtr.commit_lsn() != 0))
+	    {
+	      const lsn_t flush_lsn= mtr.commit_lsn() < LSN_MAX - 1
+		? mtr.commit_lsn() + 1
+		: LSN_MAX - 1;
+	      uint64_t exact_flushed_pages= 0;
+	      uint64_t fallback_rounds= 0;
+	      mylite_ownerless_innodb_flush_history_pages_to_lsn(
+		undo.rseg->space->id, undo.rseg->page_no, undo.hdr_page_no,
+		flush_lsn, &exact_flushed_pages, &fallback_rounds);
+	    }
+	    return err;
+	  }
+	}
+
+static bool mylite_ownerless_rollback_history_proof_begin(
+    trx_t *trx, trx_undo_t *undo)
+{
+  if (!mylite_ownerless_innodb_lock_has_hooks() || trx == nullptr ||
+      undo == nullptr || undo->rseg == nullptr ||
+      undo->rseg->space == nullptr ||
+      trx->mylite_ownerless_history_proof_active ||
+      undo->rseg->space->id >= SRV_TMP_SPACE_ID ||
+      undo->rseg->page_no == FIL_NULL || undo->hdr_page_no == FIL_NULL ||
+      undo->rseg->page_no == undo->hdr_page_no)
+    return false;
+
+  trx->mylite_ownerless_history_proof_active= true;
+  trx->mylite_ownerless_history_proof_rseg_published= false;
+  trx->mylite_ownerless_history_proof_undo_published= false;
+  trx->mylite_ownerless_history_proof_space_id= undo->rseg->space->id;
+  trx->mylite_ownerless_history_proof_rseg_page_no= undo->rseg->page_no;
+  trx->mylite_ownerless_history_proof_undo_page_no= undo->hdr_page_no;
+  return true;
+}
+
+static void mylite_ownerless_rollback_history_proof_end(
+    trx_t *trx, bool armed)
+{
+  if (!armed || trx == nullptr)
+    return;
+
+  trx->mylite_ownerless_history_proof_active= false;
+  trx->mylite_ownerless_history_proof_rseg_published= false;
+  trx->mylite_ownerless_history_proof_undo_published= false;
+  trx->mylite_ownerless_history_proof_space_id= 0;
+  trx->mylite_ownerless_history_proof_rseg_page_no= 0;
+  trx->mylite_ownerless_history_proof_undo_page_no= 0;
 }
 
 /** Try to truncate the undo logs.
@@ -880,14 +934,24 @@ dberr_t trx_undo_try_truncate(trx_t *trx)
   if (trx_undo_t *undo= trx->rsegs.m_redo.undo)
   {
     ut_ad(undo->rseg == trx->rsegs.m_redo.rseg);
-    if (dberr_t err= trx_undo_truncate_end(*undo, mtr))
+    const bool ownerless_history_proof=
+      mylite_ownerless_rollback_history_proof_begin(trx, undo);
+    const dberr_t err= trx_undo_truncate_end(*undo, mtr);
+    mylite_ownerless_rollback_history_proof_end(
+      trx, ownerless_history_proof);
+    if (err)
       return err;
   }
 
   if (trx_undo_t *undo = trx->rsegs.m_noredo.undo)
   {
     ut_ad(undo->rseg == trx->rsegs.m_noredo.rseg);
-    if (dberr_t err= trx_undo_truncate_end(*undo, mtr))
+    const bool ownerless_history_proof=
+      mylite_ownerless_rollback_history_proof_begin(trx, undo);
+    const dberr_t err= trx_undo_truncate_end(*undo, mtr);
+    mylite_ownerless_rollback_history_proof_end(
+      trx, ownerless_history_proof);
+    if (err)
       return err;
   }
 
@@ -964,6 +1028,159 @@ done:
 
 /*========== UNDO LOG MEMORY COPY INITIALIZATION =====================*/
 
+static bool
+mylite_ownerless_startup_undo_header_base_is_valid(
+	trx_rseg_t *rseg, const page_id_t &page_id, const byte *frame)
+{
+	const page_id_t native_id{mach_read_from_4(frame + FIL_PAGE_SPACE_ID),
+				  mach_read_from_4(frame + FIL_PAGE_OFFSET)};
+	if (native_id != page_id ||
+	    mach_read_from_2(frame + FIL_PAGE_TYPE) != FIL_PAGE_UNDO_LOG ||
+	    buf_page_is_corrupted(false, frame, rseg->space->flags) !=
+	    NOT_CORRUPTED) {
+		return false;
+	}
+
+	const uint16_t type = mach_read_from_2(
+		TRX_UNDO_PAGE_HDR + TRX_UNDO_PAGE_TYPE + frame);
+	if (type > 2) {
+		return false;
+	}
+
+	const uint16_t offset = mach_read_from_2(
+		TRX_UNDO_SEG_HDR + TRX_UNDO_LAST_LOG + frame);
+	if (offset < TRX_UNDO_SEG_HDR + TRX_UNDO_SEG_HDR_SIZE ||
+	    offset >= srv_page_size - TRX_UNDO_LOG_OLD_HDR_SIZE) {
+		return false;
+	}
+
+	const trx_ulogf_t* const undo_header = frame + offset;
+	const uint16_t state = mach_read_from_2(
+		TRX_UNDO_SEG_HDR + TRX_UNDO_STATE + frame);
+	const trx_id_t trx_id = mach_read_from_8(
+		undo_header + TRX_UNDO_TRX_ID);
+	if (trx_id >> 48) {
+		return false;
+	}
+
+	switch (state) {
+	case TRX_UNDO_ACTIVE:
+	case TRX_UNDO_PREPARED:
+		if (type == 1) {
+			return false;
+		}
+		{
+			const uint16_t prev_offset = mach_read_from_2(
+				undo_header + TRX_UNDO_PREV_LOG);
+			if (!prev_offset) {
+				break;
+			}
+			if (prev_offset < TRX_UNDO_SEG_HDR + TRX_UNDO_SEG_HDR_SIZE ||
+			    prev_offset >= srv_page_size - TRX_UNDO_LOG_OLD_HDR_SIZE) {
+				return false;
+			}
+			const trx_ulogf_t* const prev_undo_header =
+				frame + prev_offset;
+			const trx_id_t trx_no_prev = mach_read_from_8(
+				prev_undo_header + TRX_UNDO_TRX_NO);
+			if (trx_no_prev >> 48) {
+				return false;
+			}
+		}
+		break;
+	case TRX_UNDO_CACHED:
+		if (type != 0) {
+			break;
+		}
+		if (mach_read_from_8(TRX_UNDO_TRX_NO + undo_header) >> 48) {
+			return false;
+		}
+		break;
+	case TRX_UNDO_TO_PURGE:
+		if (type == 1) {
+			return false;
+		}
+		if (mach_read_from_8(TRX_UNDO_TRX_NO + undo_header) >> 48) {
+			return false;
+		}
+		break;
+	default:
+		return false;
+	}
+
+	const fil_addr_t last_addr = flst_get_last(
+		TRX_UNDO_SEG_HDR + TRX_UNDO_PAGE_LIST + frame);
+	return last_addr.page < rseg->space->free_limit &&
+	       last_addr.boffset >= TRX_UNDO_PAGE_HDR + TRX_UNDO_PAGE_NODE &&
+	       last_addr.boffset < srv_page_size - TRX_UNDO_LOG_OLD_HDR_SIZE;
+}
+
+static bool
+mylite_ownerless_startup_refresh_undo_header_page(
+	trx_rseg_t *rseg, const page_id_t &page_id, const buf_block_t *block)
+{
+	uint64_t max_commit_lsn =
+		mylite_ownerless_innodb_startup_native_support_page_visibility();
+	if (!max_commit_lsn) {
+		return false;
+	}
+
+	byte *page = static_cast<byte*>(ut_malloc_nokey(UNIV_PAGE_SIZE_MAX));
+	if (!page) {
+		return false;
+	}
+
+	uint32_t page_size = 0;
+	uint64_t page_lsn = 0;
+	uint64_t commit_lsn = 0;
+	uint32_t record_flags = 0;
+	const uint64_t native_page_lsn =
+		mach_read_from_8(block->page.frame + FIL_PAGE_LSN);
+	const bool native_header_valid =
+		mylite_ownerless_startup_undo_header_base_is_valid(
+			rseg, page_id, block->page.frame);
+	bool refreshed = false;
+	for (;;) {
+		const uint64_t requested_max_commit_lsn = max_commit_lsn;
+		const int read_result =
+			mylite_ownerless_innodb_read_startup_native_support_page_version_with_metadata(
+				page_id.space(), page_id.page_no(), max_commit_lsn, page,
+				UNIV_PAGE_SIZE_MAX, &page_size, &page_lsn, &commit_lsn,
+				&record_flags);
+		if (read_result != MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+			break;
+		}
+		if (commit_lsn > requested_max_commit_lsn) {
+			break;
+		}
+
+		const page_id_t ownerless_id{mach_read_from_4(page + FIL_PAGE_SPACE_ID),
+					     mach_read_from_4(page + FIL_PAGE_OFFSET)};
+		const bool native_support_record =
+			(record_flags &
+			 MYLITE_OWNERLESS_INNODB_PAGE_VERSION_NATIVE_SUPPORT_STATE) != 0;
+		const bool retained_header_valid =
+			mylite_ownerless_startup_undo_header_base_is_valid(
+				rseg, page_id, page);
+		if (ownerless_id == page_id && page_lsn && commit_lsn &&
+		    page_size == srv_page_size &&
+		    (!native_header_valid || page_lsn > native_page_lsn) &&
+		    native_support_record && retained_header_valid) {
+			memcpy(const_cast<byte*>(block->page.frame), page, page_size);
+			refreshed = true;
+			break;
+		}
+
+		if (commit_lsn <= 1) {
+			break;
+		}
+		max_commit_lsn = commit_lsn - 1;
+	}
+
+	ut_free(page);
+	return refreshed;
+}
+
 /** Read an undo log when starting up the database.
 @param[in,out]	rseg		rollback segment
 @param[in]	id		rollback segment slot
@@ -971,20 +1188,39 @@ done:
 @return	the undo log
 @retval nullptr on error */
 trx_undo_t *
-trx_undo_mem_create_at_db_start(trx_rseg_t *rseg, ulint id, uint32_t page_no)
+trx_undo_mem_create_at_db_start(
+	trx_rseg_t *rseg, ulint id, uint32_t page_no,
+	bool *ownerless_stale_slot)
 {
 	mtr_t		mtr{nullptr};
 	XID		xid;
 
 	ut_ad(id < TRX_RSEG_N_SLOTS);
+	if (ownerless_stale_slot) {
+		*ownerless_stale_slot = false;
+	}
 
 	mtr.start();
 	const page_id_t page_id{rseg->space->id, page_no};
-	const buf_block_t* block = recv_sys.recover(page_id, &mtr, nullptr);
+	dberr_t recover_err = DB_SUCCESS;
+	const buf_block_t* block = recv_sys.recover(page_id, &mtr, &recover_err);
 	if (UNIV_UNLIKELY(!block)) {
 corrupted:
 		mtr.commit();
 		return nullptr;
+	}
+	const bool ownerless_startup_reconcile_stale_slots =
+		mylite_ownerless_innodb_startup_undo_slot_reconciliation() != 0 ||
+		mylite_ownerless_innodb_startup_native_support_page_visibility() != 0;
+	static_cast<void>(mylite_ownerless_startup_refresh_undo_header_page(
+		rseg, page_id, block));
+	if (UNIV_UNLIKELY(ownerless_startup_reconcile_stale_slots &&
+			  !mylite_ownerless_startup_undo_header_base_is_valid(
+				  rseg, page_id, block->page.frame))) {
+		if (ownerless_stale_slot) {
+			*ownerless_stale_slot = true;
+		}
+		goto corrupted;
 	}
 
 	const uint16_t type = mach_read_from_2(TRX_UNDO_PAGE_HDR

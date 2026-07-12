@@ -679,6 +679,26 @@ static recv_spaces_t	recv_spaces;
 /** The last parsed FILE_RENAME records */
 static std::map<uint32_t,std::string> renamed_spaces;
 
+extern "C" int mylite_ownerless_innodb_pending_file_rename_target(
+    const char *path)
+{
+  if (path == nullptr || !*path)
+    return 0;
+
+  mysql_mutex_lock(&recv_sys.mutex);
+  bool found= false;
+  for (const auto &rename : renamed_spaces)
+  {
+    if (rename.second == path)
+    {
+      found= true;
+      break;
+    }
+  }
+  mysql_mutex_unlock(&recv_sys.mutex);
+  return found ? 1 : 0;
+}
+
 static bool mylite_ownerless_path_separator(char c) noexcept
 {
   return c == '/'

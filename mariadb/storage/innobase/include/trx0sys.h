@@ -1032,7 +1032,13 @@ public:
         &ownerless_min_trx_no);
       if (ownerless_result == MYLITE_OWNERLESS_TRX_OK ||
           ownerless_result == MYLITE_OWNERLESS_TRX_FULL)
-        return static_cast<trx_id_t>(ownerless_max_trx_id);
+      {
+        const trx_id_t local_max_trx_id= m_max_trx_id;
+        const trx_id_t ownerless_max=
+          static_cast<trx_id_t>(ownerless_max_trx_id);
+        return ownerless_max > local_max_trx_id ? ownerless_max
+                                                : local_max_trx_id;
+      }
       if (ownerless_result != MYLITE_OWNERLESS_TRX_UNAVAILABLE)
         ut_error;
     }
@@ -1163,11 +1169,24 @@ public:
         }
 
         ids->clear();
-        ids->reserve(ownerless_count);
+        ids->reserve(ownerless_count + rw_trx_hash.size() + 32);
         for (unsigned int i= 0; i < ownerless_count; ++i)
           ids->push_back(static_cast<trx_id_t>(ownerless_ids[i]));
-        *max_trx_id= static_cast<trx_id_t>(ownerless_max_trx_id);
-        *min_trx_no= static_cast<trx_id_t>(ownerless_min_trx_no);
+
+        snapshot_ids_arg local_arg(ids);
+        local_arg.m_id= m_max_trx_id;
+        local_arg.m_no= local_arg.m_id;
+        rw_trx_hash.iterate(caller_trx, copy_one_id_extend_max, &local_arg);
+
+        const trx_id_t ownerless_max=
+          static_cast<trx_id_t>(ownerless_max_trx_id);
+        *max_trx_id= ownerless_max > local_arg.m_id ? ownerless_max
+                                                    : local_arg.m_id;
+        trx_id_t ownerless_min= static_cast<trx_id_t>(ownerless_min_trx_no);
+        if (ownerless_count == 0 ||
+            (local_arg.m_no != local_arg.m_id && local_arg.m_no < ownerless_min))
+          ownerless_min= local_arg.m_no;
+        *min_trx_no= ownerless_min;
         return;
       }
       if (ownerless_result != MYLITE_OWNERLESS_TRX_UNAVAILABLE)
@@ -1199,11 +1218,12 @@ public:
   /** Advance local transaction visibility after observing ownerless IDs. */
   void advance_max_trx_id_at_least(trx_id_t value)
   {
-    while (m_max_trx_id < value)
-    {
-      get_new_trx_id_no_refresh();
-      refresh_rw_trx_hash_version();
-    }
+    const trx_id_t current= m_max_trx_id;
+    if (current >= value)
+      return;
+
+    m_max_trx_id+= value - current;
+    m_rw_trx_hash_version.store(m_max_trx_id, std::memory_order_release);
   }
 
 
@@ -1406,6 +1426,20 @@ private:
       if (no < arg->m_no)
         arg->m_no= no;
     }
+    return 0;
+  }
+
+
+  static my_bool copy_one_id_extend_max(void* el, void *a)
+  {
+    auto element= static_cast<const rw_trx_hash_element_t *>(el);
+    auto arg= static_cast<snapshot_ids_arg*>(a);
+    if (element->id >= arg->m_id)
+      arg->m_id= element->id + 1;
+    trx_id_t no= element->no;
+    arg->m_ids->push_back(element->id);
+    if (no < arg->m_no)
+      arg->m_no= no;
     return 0;
   }
 

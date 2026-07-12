@@ -94,7 +94,9 @@ row_sel_ownerless_current_read_refresh_needed(
 
 	if (mylite_ownerless_innodb_statement_plain_read() != 0) {
 		return(mylite_ownerless_innodb_statement_plain_read_preserves_local_pages()
-		       == 0);
+		       == 0 ||
+		       mylite_ownerless_innodb_retained_external_page_visibility()
+		       != 0);
 	}
 
 	return(prebuilt->select_lock_type != LOCK_NONE

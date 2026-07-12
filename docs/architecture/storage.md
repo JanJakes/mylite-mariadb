@@ -186,11 +186,12 @@ app.mylite/
   prefix, or the captured prefix fallback, has been restored; ordinary
   read/write native reopen uses the same failure-then-restore retry path after
   ownerless activity. A first ownerless read/write startup after ordinary native
-  shutdown leaves InnoDB checkpoint suppression disabled when there is no
-  ownerless page-version WAL payload, native checkpoint marker, live peer, or
-  usable redo-header backup, because native InnoDB redo is then the only
-  recovery authority. Payload-bearing native-support records count as retained
-  WAL payload for this gate; proof-only metadata records do not.
+  shutdown leaves InnoDB checkpoint suppression disabled when there are no
+  uncheckpointed ownerless WAL records, no native checkpoint marker, no live
+  peer, and no usable redo-header backup, because native InnoDB redo is then
+  the only recovery authority. Proof-only native-support metadata is not a
+  readable page image, but it still counts as ownerless recovery evidence for
+  startup and shutdown authority gates until checkpointed.
   Final no-live ownerless read/write shutdown also holds
   `mylite-runtime-startup.lock` while publishing a native checkpoint for
   completed DDL file-operation redo, ownerless `ALTER TABLE ... AUTO_INCREMENT`
@@ -198,10 +199,11 @@ app.mylite/
   forcing native checkpoint proof for retained page-version WAL after active
   pins release, stopping MariaDB, and restoring the 12 KiB redo startup prefix
   if embedded teardown leaves `ib_logfile0` without startup-checkpoint evidence
-  before a peer opens. When no live ownerless peer and no retained page-version
-  WAL payload remain, shutdown uses MariaDB's clean native checkpoint path even
-  if rollback history was not empty before close; retained page-version WAL keeps
-  the crash-style shutdown policy unless rollback history is already empty.
+  before a peer opens. When no live ownerless peer and no uncheckpointed
+  ownerless WAL records remain, shutdown uses MariaDB's clean native checkpoint
+  path even if rollback history was not empty before close; retained ownerless
+  WAL keeps the crash-style shutdown policy unless rollback history is already
+  empty.
   Ownerless uncheckpointed file-operation recovery resolves relative FILE redo
   paths against the active datadir, synthesizes a missing checkpoint boundary
   only at a clean EOF/no-corrupt-FS recovery boundary, and releases the redo
@@ -215,10 +217,10 @@ app.mylite/
   The embedded runtime disables InnoDB buffer-pool dump/load so concurrent
   processes do not race on the advisory `ib_buffer_pool` file in `datadir/`.
   Ownerless read/write is available through `MYLITE_OPEN_OWNERLESS_RW` for the
-  tested InnoDB concurrency subset, while broader DDL invalidation,
-  transaction-aware page-version reads, no-live-process checkpoint/replay,
-  background active-reader checkpoint scheduling, and external-oracle
-  long-running stress remain planned.
+  supported persistent InnoDB application-table surface. Non-InnoDB ownerless
+  durable tables, server/global SQL surfaces, network-filesystem semantics, and
+  broader external-oracle long-running stress remain outside that supported
+  surface until separately designed and validated.
 - `concurrency/mylite-concurrency.wal` and
   `concurrency/mylite-concurrency.ckpt` are durable coordination-log and
   checkpoint anchors for future ownerless recovery. They contain fixed headers

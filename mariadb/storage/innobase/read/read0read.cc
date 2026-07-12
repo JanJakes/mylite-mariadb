@@ -235,7 +235,8 @@ void ReadView::open(trx_t *trx)
   else if (likely(!srv_read_only_mode))
   {
     m_creator_trx_id= trx->id;
-    if (trx->is_autocommit_non_locking() && empty() &&
+    if (!mylite_ownerless_trx_hooks_enabled_fast() &&
+        trx->is_autocommit_non_locking() && empty() &&
         low_limit_id() == trx_sys.get_max_trx_id())
     {
       m_mutex.wr_lock();

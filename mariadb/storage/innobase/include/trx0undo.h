@@ -212,10 +212,14 @@ trx_undo_free_at_shutdown(trx_t *trx);
 @param[in,out]	rseg		rollback segment
 @param[in]	id		rollback segment slot
 @param[in]	page_no		undo log segment page number
+@param[out]	ownerless_stale_slot	whether ownerless retained startup
+			identified a stale rollback-segment slot
 @return	the undo log
 @retval nullptr on error */
 trx_undo_t *
-trx_undo_mem_create_at_db_start(trx_rseg_t *rseg, ulint id, uint32_t page_no);
+trx_undo_mem_create_at_db_start(
+	trx_rseg_t *rseg, ulint id, uint32_t page_no,
+	bool *ownerless_stale_slot);
 
 #endif /* !UNIV_INNOCHECKSUM */
 

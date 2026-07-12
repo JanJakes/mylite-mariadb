@@ -368,20 +368,22 @@ void trx_rseg_t::destroy()
 {
   latch.destroy();
 
-  /* Ownerless hook callbacks are reset before rollback segments are destroyed,
-  but ownerless commits may still have suppressed local purge descriptors. */
-  if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_hooks_ever_enabled_fast()))
+#ifdef EMBEDDED_LIBRARY
+  /* The embedded runtime can reopen InnoDB inside one process after a
+  crash-style close.  Ownerless retained native undo is recovered from the
+  persistent rollback-segment slots on the next open; any descriptors still in
+  this in-memory list are stale lifetime state. */
+  if (UNIV_UNLIKELY(UT_LIST_GET_LEN(undo_list)))
   {
     for (trx_undo_t *next, *undo= UT_LIST_GET_FIRST(undo_list); undo;
          undo= next)
     {
       next= UT_LIST_GET_NEXT(undo_list, undo);
-      if (undo->state != TRX_UNDO_TO_PURGE)
-        continue;
       UT_LIST_REMOVE(undo_list, undo);
       ut_free(undo);
     }
   }
+#endif
 
   /* There can't be any active transactions. */
   ut_a(!UT_LIST_GET_LEN(undo_list));
@@ -439,7 +441,8 @@ void trx_rseg_t::reinit(uint32_t page)
 @param[in]      rseg_header     rollback segment header
 @return error code */
 static dberr_t trx_undo_lists_init(trx_rseg_t *rseg,
-                                   const buf_block_t *rseg_header)
+                                   const buf_block_t *rseg_header,
+                                   mtr_t *mtr)
 {
   ut_ad(srv_force_recovery < SRV_FORCE_NO_UNDO_LOG_SCAN);
   bool is_undo_empty= true;
@@ -449,10 +452,21 @@ static dberr_t trx_undo_lists_init(trx_rseg_t *rseg,
     uint32_t page_no= trx_rsegf_get_nth_undo(rseg_header, i);
     if (page_no != FIL_NULL)
     {
+      bool ownerless_stale_slot= false;
       const trx_undo_t *undo=
-        trx_undo_mem_create_at_db_start(rseg, i, page_no);
-      if (!undo)
-        return DB_CORRUPTION;
+        trx_undo_mem_create_at_db_start(
+          rseg, i, page_no, &ownerless_stale_slot);
+      if (!undo && ownerless_stale_slot)
+      {
+        static_assert(FIL_NULL == 0xffffffff, "compatibility");
+        mtr->memset(rseg_header, TRX_RSEG + TRX_RSEG_UNDO_SLOTS +
+                    i * TRX_RSEG_SLOT_SIZE, 4, 0xff);
+        continue;
+	      }
+	      if (!undo)
+	      {
+	        return DB_CORRUPTION;
+	      }
       mylite_embedded_startup_perf_count(
         MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_UNDO_SLOT_COUNT);
       switch (undo->state) {
@@ -481,6 +495,123 @@ static dberr_t trx_undo_lists_init(trx_rseg_t *rseg,
   return DB_SUCCESS;
 }
 
+static bool trx_rseg_history_node_is_valid(const trx_rseg_t *rseg,
+                                           fil_addr_t node_addr)
+{
+  return node_addr.page < rseg->space->free_limit &&
+         node_addr.boffset >= TRX_UNDO_PAGE_HDR + TRX_UNDO_PAGE_NODE &&
+         node_addr.boffset < srv_page_size - TRX_UNDO_LOG_OLD_HDR_SIZE;
+}
+
+static bool trx_rseg_history_node_is_null(fil_addr_t node_addr)
+{
+  return node_addr.page == FIL_NULL && node_addr.boffset == 0;
+}
+
+static bool trx_rseg_history_base_is_valid(const trx_rseg_t *rseg,
+                                           const byte *page)
+{
+  const auto len= flst_get_len(TRX_RSEG + TRX_RSEG_HISTORY + page);
+  const fil_addr_t first= flst_get_first(TRX_RSEG + TRX_RSEG_HISTORY + page);
+  const fil_addr_t last= flst_get_last(TRX_RSEG + TRX_RSEG_HISTORY + page);
+
+  if (len == 0)
+    return trx_rseg_history_node_is_null(first) &&
+           trx_rseg_history_node_is_null(last);
+
+  return trx_rseg_history_node_is_valid(rseg, first) &&
+         trx_rseg_history_node_is_valid(rseg, last);
+}
+
+static bool trx_rseg_header_base_is_valid(const trx_rseg_t *rseg,
+                                          const byte *page)
+{
+  const page_id_t page_id{mach_read_from_4(page + FIL_PAGE_SPACE_ID),
+                          mach_read_from_4(page + FIL_PAGE_OFFSET)};
+  return page_id == rseg->page_id() &&
+         mach_read_from_2(page + FIL_PAGE_TYPE) == FIL_PAGE_TYPE_SYS &&
+         buf_page_is_corrupted(false, page, rseg->space->flags) ==
+           NOT_CORRUPTED &&
+         trx_rseg_history_base_is_valid(rseg, page);
+}
+
+static bool mylite_ownerless_startup_refresh_rseg_header(
+    trx_rseg_t *rseg, const buf_block_t *rseg_hdr, bool force,
+    bool include_history_rseg_delta)
+{
+  uint64_t max_commit_lsn=
+      mylite_ownerless_innodb_startup_native_support_page_visibility();
+  if (max_commit_lsn == 0)
+    return false;
+
+  byte *page= static_cast<byte*>(ut_malloc_nokey(UNIV_PAGE_SIZE_MAX));
+  if (page == nullptr)
+    return false;
+
+  const uint64_t native_page_lsn=
+      mach_read_from_8(rseg_hdr->page.frame + FIL_PAGE_LSN);
+  const bool native_header_valid=
+      trx_rseg_header_base_is_valid(rseg, rseg_hdr->page.frame);
+  uint32_t page_size= 0;
+  uint64_t page_lsn= 0;
+  uint64_t commit_lsn= 0;
+  uint32_t record_flags= 0;
+  bool refreshed= false;
+  for (;;)
+  {
+    const uint64_t requested_max_commit_lsn= max_commit_lsn;
+    const int read_result=
+        include_history_rseg_delta
+            ? mylite_ownerless_innodb_read_startup_native_support_page_version_with_history_rseg_delta(
+                  rseg->space->id, rseg->page_no, max_commit_lsn, page,
+                  UNIV_PAGE_SIZE_MAX, &page_size, &page_lsn, &commit_lsn,
+                  &record_flags)
+            : mylite_ownerless_innodb_read_startup_native_support_page_version_with_metadata(
+                  rseg->space->id, rseg->page_no, max_commit_lsn, page,
+                  UNIV_PAGE_SIZE_MAX, &page_size, &page_lsn, &commit_lsn,
+                  &record_flags);
+    if (read_result != MYLITE_OWNERLESS_INNODB_LOCK_OK)
+    {
+      (void) read_result;
+      break;
+    }
+    if (commit_lsn > requested_max_commit_lsn)
+      break;
+
+    page_id_t ownerless_id{mach_read_from_4(page + FIL_PAGE_SPACE_ID),
+                           mach_read_from_4(page + FIL_PAGE_OFFSET)};
+    const bool native_support_record=
+        (record_flags &
+         MYLITE_OWNERLESS_INNODB_PAGE_VERSION_NATIVE_SUPPORT_STATE) != 0;
+    const bool retained_record_is_current=
+        !native_header_valid || page_lsn > native_page_lsn;
+    if (page_size != srv_page_size)
+    {
+      if (commit_lsn <= 1 || !force)
+        break;
+      max_commit_lsn= commit_lsn - 1;
+      continue;
+    }
+
+    const bool header_valid= trx_rseg_header_base_is_valid(rseg, page);
+    if (ownerless_id == rseg->page_id() && page_lsn != 0 &&
+        commit_lsn != 0 && retained_record_is_current && header_valid &&
+        native_support_record)
+    {
+      memcpy(const_cast<byte*>(rseg_hdr->page.frame), page, page_size);
+      refreshed= true;
+      break;
+    }
+
+    if (commit_lsn <= 1 || !force)
+      break;
+    max_commit_lsn= commit_lsn - 1;
+  }
+
+  ut_free(page);
+  return refreshed;
+}
+
 /** Restore the state of a persistent rollback segment.
 @param[in,out]	rseg		persistent rollback segment
 @param[in,out]	mtr		mini-transaction
@@ -502,6 +633,11 @@ static dberr_t trx_rseg_mem_restore(trx_rseg_t *rseg, mtr_t *mtr)
                      &err);
   if (!rseg_hdr)
     return err;
+
+  static_cast<void>(mylite_ownerless_startup_refresh_rseg_header(
+      rseg, rseg_hdr,
+      mylite_ownerless_innodb_startup_native_support_page_visibility() != 0,
+      true));
 
   if (!mach_read_from_4(TRX_RSEG + TRX_RSEG_FORMAT + rseg_hdr->page.frame))
   {
@@ -564,45 +700,57 @@ static dberr_t trx_rseg_mem_restore(trx_rseg_t *rseg, mtr_t *mtr)
 
   rseg->curr_size = mach_read_from_4(TRX_RSEG + TRX_RSEG_HISTORY_SIZE +
                                      rseg_hdr->page.frame) + 1;
-  err= trx_undo_lists_init(rseg, rseg_hdr);
-  if (err != DB_SUCCESS);
-  else if (auto len= flst_get_len(TRX_RSEG + TRX_RSEG_HISTORY +
-                                  rseg_hdr->page.frame))
+  err= trx_undo_lists_init(rseg, rseg_hdr, mtr);
+  if (err == DB_SUCCESS)
   {
-    rseg->history_size+= len;
+    if (auto len= flst_get_len(TRX_RSEG + TRX_RSEG_HISTORY +
+                               rseg_hdr->page.frame))
+    {
+      fil_addr_t node_addr= flst_get_last(TRX_RSEG + TRX_RSEG_HISTORY +
+                                          rseg_hdr->page.frame);
+      if (!trx_rseg_history_node_is_valid(rseg, node_addr) &&
+          mylite_ownerless_startup_refresh_rseg_header(rseg, rseg_hdr, true, true))
+      {
+        len= flst_get_len(TRX_RSEG + TRX_RSEG_HISTORY + rseg_hdr->page.frame);
+        node_addr= flst_get_last(TRX_RSEG + TRX_RSEG_HISTORY +
+                                 rseg_hdr->page.frame);
+      }
 
-    fil_addr_t node_addr= flst_get_last(TRX_RSEG + TRX_RSEG_HISTORY +
-                                        rseg_hdr->page.frame);
-    if (node_addr.page >= rseg->space->free_limit ||
-        node_addr.boffset < TRX_UNDO_PAGE_HDR + TRX_UNDO_PAGE_NODE ||
-        node_addr.boffset >= srv_page_size - TRX_UNDO_LOG_OLD_HDR_SIZE)
-      return DB_CORRUPTION;
+      rseg->history_size+= len;
 
-    node_addr.boffset= static_cast<uint16_t>(node_addr.boffset -
-                                             TRX_UNDO_HISTORY_NODE);
-    rseg->last_page_no= node_addr.page;
+      if (!trx_rseg_history_node_is_valid(rseg, node_addr))
+      {
+        return DB_CORRUPTION;
+      }
 
-    const buf_block_t* block=
-      buf_page_get_gen(page_id_t(rseg->space->id, node_addr.page),
-                       0, RW_S_LATCH, nullptr, BUF_GET, mtr, &err);
-    if (!block)
-      return err;
+      node_addr.boffset= static_cast<uint16_t>(node_addr.boffset -
+                                               TRX_UNDO_HISTORY_NODE);
+      rseg->last_page_no= node_addr.page;
 
-    trx_id_t id= mach_read_from_8(block->page.frame + node_addr.boffset +
-                                  TRX_UNDO_TRX_ID);
-    if (id > rseg->needs_purge)
-      rseg->needs_purge= id;
-    id= mach_read_from_8(block->page.frame + node_addr.boffset +
-                         TRX_UNDO_TRX_NO);
-    if (id > rseg->needs_purge)
-      rseg->needs_purge= id;
+      const buf_block_t* block=
+        buf_page_get_gen(page_id_t(rseg->space->id, node_addr.page),
+                         0, RW_S_LATCH, nullptr, BUF_GET, mtr, &err);
+      if (!block)
+      {
+        return err;
+      }
 
-    rseg->set_last_commit(node_addr.boffset, id);
+      trx_id_t id= mach_read_from_8(block->page.frame + node_addr.boffset +
+                                    TRX_UNDO_TRX_ID);
+      if (id > rseg->needs_purge)
+        rseg->needs_purge= id;
+      id= mach_read_from_8(block->page.frame + node_addr.boffset +
+                           TRX_UNDO_TRX_NO);
+      if (id > rseg->needs_purge)
+        rseg->needs_purge= id;
 
-    if (rseg->last_page_no != FIL_NULL)
-      /* There is no need to cover this operation by the purge
-      mutex because we are still bootstrapping. */
-      purge_sys.enqueue(*rseg);
+      rseg->set_last_commit(node_addr.boffset, id);
+
+      if (rseg->last_page_no != FIL_NULL)
+        /* There is no need to cover this operation by the purge
+        mutex because we are still bootstrapping. */
+        purge_sys.enqueue(*rseg);
+    }
   }
 
   trx_sys.set_undo_non_empty(rseg->history_size > 0);

@@ -1165,16 +1165,28 @@ mylite_ownerless_innodb_settle_purge_before_hooks(unsigned int timeout_ms)
   const auto start= std::chrono::steady_clock::now();
   const auto timeout= std::chrono::milliseconds(timeout_ms);
   size_t previous_history_size= trx_sys.history_size();
+  const auto wait_for_purge_coordinator= [&]() {
+    while (purge_coordinator_task.is_running())
+    {
+      if (timeout_ms != 0 &&
+          std::chrono::steady_clock::now() - start >= timeout)
+        return false;
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return true;
+  };
 
   purge_coordinator_task.enable();
-  purge_coordinator_task.wait();
+  if (!wait_for_purge_coordinator())
+    return MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT;
   for (;;)
   {
     if (!trx_sys.history_exists())
       return MYLITE_OWNERLESS_INNODB_LOCK_OK;
     purge_state.m_running= 1;
     srv_thread_pool->submit_task(&purge_coordinator_task);
-    purge_coordinator_task.wait();
+    if (!wait_for_purge_coordinator())
+      return MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT;
 
     const size_t current_history_size= trx_sys.history_size();
     if (current_history_size == 0)

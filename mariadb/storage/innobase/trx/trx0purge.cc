@@ -109,8 +109,50 @@ mylite_ownerless_refresh_history_list_first(
 	const uint16_t history_offset= TRX_RSEG + TRX_RSEG_HISTORY;
 	const fil_addr_t first= flst_get_first(
 		history_offset + rseg_header->page.frame);
-	if (first.page == FIL_NULL || first.page >= rseg->space->free_limit ||
-	    first.page == undo_page->page.id().page_no()) {
+	const auto reset_stale_history= [&]() {
+		flst_init(*rseg_header, history_offset + rseg_header->page.frame,
+			  mtr);
+		mtr->write<4>(*rseg_header,
+			      TRX_RSEG + TRX_RSEG_HISTORY_SIZE +
+			      rseg_header->page.frame,
+			      0U);
+		for (ulint slot= 0; slot < TRX_RSEG_N_SLOTS; slot++) {
+			const ulint slot_offset=
+				TRX_RSEG + TRX_RSEG_UNDO_SLOTS +
+				slot * TRX_RSEG_SLOT_SIZE;
+			if (mach_read_from_4(rseg_header->page.frame +
+					     slot_offset) == first.page) {
+				mtr->memset(rseg_header, slot_offset, 4, 0xff);
+			}
+		}
+		rseg->history_size= 0;
+	};
+	const auto valid_history_node_addr= [rseg, rseg_header](
+		const fil_addr_t addr) {
+		return addr.page == FIL_NULL ||
+		       (addr.page < rseg->space->free_limit &&
+			addr.boffset >= FIL_PAGE_DATA &&
+			addr.boffset < rseg_header->physical_size() -
+				      FIL_PAGE_DATA_END);
+	};
+	if (first.page == FIL_NULL) {
+		return;
+	}
+	if (first.page >= rseg->space->free_limit ||
+	    first.boffset < FIL_PAGE_DATA ||
+	    first.boffset >= rseg_header->physical_size() - FIL_PAGE_DATA_END) {
+		reset_stale_history();
+		return;
+	}
+	if (first.page == undo_page->page.id().page_no()) {
+		const fil_addr_t prev= flst_get_prev_addr(
+			undo_page->page.frame + first.boffset);
+		if (prev.page != FIL_NULL) {
+			flst_write_addr(*undo_page,
+					undo_page->page.frame + first.boffset +
+					FLST_PREV,
+					FIL_NULL, 0, mtr);
+		}
 		return;
 	}
 
@@ -119,13 +161,58 @@ mylite_ownerless_refresh_history_list_first(
 	buf_block_t* first_page= buf_page_get_gen(
 		page_id_t(rseg->space->id, first.page), undo_page->zip_size(),
 		RW_SX_LATCH, nullptr, BUF_GET_POSSIBLY_FREED, mtr, &err);
-	ut_a(first_page);
+	if (first_page == nullptr) {
+		reset_stale_history();
+		return;
+	}
 	mtr->ownerless_page_write_prepare(first_savepoint);
-	if (first_page->page.oldest_modification_acquire() <= 1) {
-		const int refresh_result=
-			mylite_ownerless_innodb_refresh_page_for_write(first_page);
-		ut_a(refresh_result == MYLITE_OWNERLESS_INNODB_LOCK_OK ||
-		     refresh_result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE);
+	const int refresh_result=
+		mylite_ownerless_innodb_refresh_page_for_write_force(first_page);
+	ut_a(refresh_result == MYLITE_OWNERLESS_INNODB_LOCK_OK ||
+	     refresh_result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE);
+	if (fil_page_get_type(first_page->page.frame) != FIL_PAGE_UNDO_LOG) {
+		reset_stale_history();
+		return;
+	}
+
+	const uint32_t history_len= flst_get_len(
+		history_offset + rseg_header->page.frame);
+	const fil_addr_t last= flst_get_last(
+		history_offset + rseg_header->page.frame);
+	if (history_len == 1 && last.page == first.page &&
+	    last.boffset == first.boffset) {
+		const fil_addr_t prev= flst_get_prev_addr(
+			first_page->page.frame + first.boffset);
+		const fil_addr_t next= flst_get_next_addr(
+			first_page->page.frame + first.boffset);
+		const bool zero_prev= prev.page == 0 && prev.boffset == 0;
+		const bool zero_next= next.page == 0 && next.boffset == 0;
+		const bool null_or_zero_prev= prev.page == FIL_NULL || zero_prev;
+		const bool null_or_zero_next= next.page == FIL_NULL || zero_next;
+		if ((zero_prev || zero_next) && null_or_zero_prev &&
+		    null_or_zero_next) {
+			flst_write_addr(*first_page,
+					first_page->page.frame + first.boffset +
+					FLST_PREV,
+					FIL_NULL, 0, mtr);
+			flst_write_addr(*first_page,
+					first_page->page.frame + first.boffset +
+					FLST_NEXT,
+					FIL_NULL, 0, mtr);
+		}
+	}
+	const fil_addr_t prev= flst_get_prev_addr(first_page->page.frame +
+						 first.boffset);
+	const fil_addr_t next= flst_get_next_addr(first_page->page.frame +
+						 first.boffset);
+	if (prev.page != FIL_NULL) {
+		flst_write_addr(*first_page,
+				first_page->page.frame + first.boffset +
+				FLST_PREV,
+				FIL_NULL, 0, mtr);
+	}
+	if (!valid_history_node_addr(next)) {
+		reset_stale_history();
 	}
 }
 
@@ -233,6 +320,7 @@ trx_purge_add_undo_to_history(const trx_t* trx, trx_undo_t*& undo, mtr_t* mtr)
       mylite_ownerless_innodb_refresh_page_for_write(rseg_header);
     ut_a(refresh_result == MYLITE_OWNERLESS_INNODB_LOCK_OK ||
          refresh_result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE);
+    mylite_ownerless_innodb_refresh_external_space_header(rseg->space->id);
     mylite_ownerless_refresh_history_list_first(
       rseg, rseg_header, undo_page, mtr);
   }
@@ -342,9 +430,10 @@ trx_purge_add_undo_to_history(const trx_t* trx, trx_undo_t*& undo, mtr_t* mtr)
   const trx_id_t trx_no= trx->rw_trx_hash_element != nullptr
     ? trx_id_t{trx->rw_trx_hash_element->no}
     : trx->id;
-  ut_a(flst_add_first(rseg_header, history_offset, undo_page,
-                      undo_history_offset, rseg->space->free_limit, mtr)
-       == DB_SUCCESS);
+  const dberr_t add_history_result=
+    flst_add_first(rseg_header, history_offset, undo_page,
+                   undo_history_offset, rseg->space->free_limit, mtr);
+  ut_a(add_history_result == DB_SUCCESS);
 
   mtr->write<2>(*undo_page, TRX_UNDO_SEG_HDR + TRX_UNDO_STATE +
                 undo_page->page.frame, undo_state);
@@ -998,6 +1087,15 @@ bool purge_sys_t::choose_next_log(trx_t *trx) noexcept
   exclusive purge_sys.latch. The purge_sys.head may be read by
   purge_truncation_callback(). */
   ut_a(hdr_page_no != FIL_NULL);
+  /* Ownerless crash recovery can refresh a rollback segment header from a
+  retained page image after purge_sys.tail was queued from an older view.  In
+  that case there is no longer a history record at the queued transaction
+  number, so leave purge idle until the segment is enqueued again. */
+  if (tail.trx_no > last_trx_no)
+  {
+    rseg->latch.wr_unlock();
+    return false;
+  }
   ut_a(tail.trx_no <= last_trx_no);
   tail.trx_no = last_trx_no;
 

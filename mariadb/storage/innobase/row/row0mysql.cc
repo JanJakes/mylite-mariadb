@@ -42,12 +42,15 @@ Created 9/17/2000 Heikki Tuuri
 #include "fil0fil.h"
 #include "fil0crypt.h"
 #include "fsp0file.h"
+#include "fsp0fsp.h"
 #include "fts0fts.h"
 #include "fts0types.h"
 #include "lock0lock.h"
 #include "log0log.h"
+#include "mach0data.h"
 #include "mylite_ownerless_innodb_deep_perf.h"
 #include "mylite_ownerless_innodb_lock_hooks.h"
+#include "os0file.h"
 #include "pars0pars.h"
 #include "que0que.h"
 #include "rem0cmp.h"
@@ -2640,6 +2643,53 @@ row_delete_constraint(
 /*********************************************************************//**
 Renames a table for MySQL.
 @return error code or DB_SUCCESS */
+static bool
+mylite_ownerless_restored_tablespace_matches_table(
+	const char*	name,
+	uint32_t	space_id)
+{
+	if (!mylite_ownerless_innodb_uncheckpointed_file_rename_recovery()) {
+		return false;
+	}
+
+	table_name_t	table_name(const_cast<char*>(name));
+	char*	path = fil_make_filepath(nullptr, table_name, IBD, false);
+	if (!path) {
+		return false;
+	}
+
+	bool	success = false;
+	os_file_t file = os_file_create_simple_no_error_handling(
+		innodb_data_file_key, path, OS_FILE_OPEN,
+		OS_FILE_READ_ONLY, true, &success);
+	ut_free(path);
+	if (!success) {
+		return false;
+	}
+
+	byte*	page = static_cast<byte*>(
+		aligned_malloc(UNIV_PAGE_SIZE_MIN, UNIV_PAGE_SIZE_MIN));
+	if (!page) {
+		os_file_close(file);
+		return false;
+	}
+
+	ulint	read_bytes = 0;
+	const dberr_t read_err = os_file_read(
+		IORequestReadPartial, file, page, 0, UNIV_PAGE_SIZE_MIN,
+		&read_bytes);
+	const bool matches =
+		read_err == DB_SUCCESS && read_bytes >= FIL_PAGE_DATA &&
+		mach_read_from_4(page + FIL_PAGE_OFFSET) == 0 &&
+		mach_read_from_4(page + FIL_PAGE_SPACE_ID) == space_id &&
+		mach_read_from_4(page + FSP_HEADER_OFFSET + FSP_SPACE_ID) ==
+			space_id;
+
+	aligned_free(page);
+	os_file_close(file);
+	return matches;
+}
+
 dberr_t
 row_rename_table_for_mysql(
 /*=======================*/
@@ -2707,13 +2757,22 @@ row_rename_table_for_mysql(
 	if (!table->is_readable() && !table->space
 	    && !(table->flags2 & DICT_TF2_DISCARDED)) {
 
-		err = DB_TABLE_NOT_FOUND;
+		if (mylite_ownerless_restored_tablespace_matches_table(
+			    new_name, table->space_id)) {
+			ib::info()
+				<< "Ownerless recovery is renaming restored "
+				"tablespace dictionary metadata from "
+				<< old_name << " to " << new_name;
+		} else {
+			err = DB_TABLE_NOT_FOUND;
 
-		ib::error() << "Table " << old_name << " does not have an .ibd"
-			" file in the database directory. "
-			<< TROUBLESHOOTING_MSG;
+			ib::error() << "Table " << old_name
+				<< " does not have an .ibd"
+				" file in the database directory. "
+				<< TROUBLESHOOTING_MSG;
 
-		goto funct_exit;
+			goto funct_exit;
+		}
 	} else if (fk == RENAME_ALTER_COPY && !old_is_tmp && new_is_tmp) {
 		/* Non-native ALTER TABLE is renaming the
 		original table to a temporary name. We want to preserve
