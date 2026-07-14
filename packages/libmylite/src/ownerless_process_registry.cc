@@ -33,8 +33,10 @@ constexpr std::size_t k_slot_shm_generation_offset = 32;
 constexpr std::size_t k_slot_start_time_offset = 40;
 constexpr std::size_t k_slot_boot_id_hash_offset = 48;
 constexpr std::uint32_t k_bootstrap_latch_owner_id = std::numeric_limits<std::uint32_t>::max();
+#if defined(__linux__)
 constexpr std::uint64_t k_fnv_offset_basis = 14695981039346656037ULL;
 constexpr std::uint64_t k_fnv_prime = 1099511628211ULL;
+#endif
 
 std::chrono::steady_clock::time_point wait_deadline(unsigned timeout_ms);
 int acquire_registry_latch(

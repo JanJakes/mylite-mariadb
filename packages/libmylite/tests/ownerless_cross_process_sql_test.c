@@ -35650,8 +35650,7 @@ static void assert_ownerless_compressed_row_format_post_peer_ddl_read_refreshes(
     assert(stats[OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_PAGE_VERSION_READS_ENABLED] > 0U);
 }
 
-static void assert_ownerless_compressed_row_format_post_peer_ddl_write_refreshes(
-    const char *label
+static void assert_ownerless_compressed_row_format_post_peer_ddl_write_refreshes(const char *label
 ) {
     uint64_t stats[OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT] = {0};
 
