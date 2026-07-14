@@ -164,7 +164,10 @@ int mylite_ownerless_process_identity_is_alive(
 
     std::uint64_t current_start_time = 0;
     if (read_process_start_time(identity->pid, &current_start_time)) {
-        return current_start_time == identity->start_time && !process_is_zombie(identity->pid);
+        if (current_start_time == identity->start_time && !process_is_zombie(identity->pid)) {
+            return 1;
+        }
+        return 0;
     }
 
     const pid_t process_id = static_cast<pid_t>(identity->pid);

@@ -483,9 +483,10 @@ bool clear_active_owner_state_if_current(
     bool allow_zero_owner_generation
 ) {
     const std::uint64_t active_owner_generation = load64(state, k_active_owner_generation_offset);
-    if (load32(state, k_active_owner_id_offset) != owner_id ||
-        (active_owner_generation != owner_generation &&
-         !(allow_zero_owner_generation && active_owner_generation == 0U))) {
+    const bool owner_generation_matches =
+        active_owner_generation == owner_generation ||
+        (allow_zero_owner_generation && active_owner_generation == 0U);
+    if (load32(state, k_active_owner_id_offset) != owner_id || !owner_generation_matches) {
         return false;
     }
 
