@@ -3705,15 +3705,13 @@ int append_record_at_locked(
         !proof_only_record &&
         (append_options & MYLITE_OWNERLESS_PAGE_LOG_APPEND_HISTORY_RSEG_DELTA) != 0U;
     std::uint32_t page_delta_flag = 0U;
-    const bool page_delta_eligible =
-        !proof_only_record &&
-        page_delta_flag_for_page(
-            space_id,
-            record_page,
-            page_size,
-            allow_history_rseg_delta,
-            &page_delta_flag
-        );
+    const bool page_delta_eligible = !proof_only_record && page_delta_flag_for_page(
+                                                               space_id,
+                                                               record_page,
+                                                               page_size,
+                                                               allow_history_rseg_delta,
+                                                               &page_delta_flag
+                                                           );
     IndexPageDeltaBaseSnapshot page_delta_snapshot;
     bool exact_delta_rejected_standalone = false;
     bool exact_delta_reuse_observed = false;
@@ -8055,8 +8053,7 @@ bool record_is_better_for_history_rseg_recovery(
     }
     const bool candidate_history =
         (candidate.flags & k_record_flag_history_rseg_delta_payload) != 0U;
-    const bool current_history =
-        (current.flags & k_record_flag_history_rseg_delta_payload) != 0U;
+    const bool current_history = (current.flags & k_record_flag_history_rseg_delta_payload) != 0U;
     if (candidate.commit_lsn == current.commit_lsn && candidate.page_lsn == current.page_lsn &&
         candidate_history != current_history) {
         return candidate_history;

@@ -288,9 +288,8 @@ int mylite_ownerless_page_pin_registry_snapshot_oldest_excluding(
     std::uint64_t *out_oldest_read_lsn
 ) {
     if (!mapping_can_hold_registry(mapping, mapping_size) || latch_owner_id == 0U ||
-        latch_owner_generation == 0U || exclude_owner_id == 0U ||
-        exclude_slot_generation == 0U || out_active_count == nullptr ||
-        out_oldest_read_lsn == nullptr) {
+        latch_owner_generation == 0U || exclude_owner_id == 0U || exclude_slot_generation == 0U ||
+        out_active_count == nullptr || out_oldest_read_lsn == nullptr) {
         return MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_ERROR;
     }
 

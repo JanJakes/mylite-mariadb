@@ -9068,11 +9068,7 @@ static void run_ownerless_sql_test_case(size_t test_case_index) {
     if (setpgid(child, child) != 0) {
         assert(errno == EACCES || errno == ESRCH);
     }
-    wait_result = wait_for_child_with_timeout(
-        child,
-        timeout_ms,
-        &child_status
-    );
+    wait_result = wait_for_child_with_timeout(child, timeout_ms, &child_status);
     if (wait_result == 0) {
         fprintf(
             stderr,
@@ -10485,9 +10481,7 @@ static void test_ownerless_concurrent_savepoint_same_table_rollback_handoff(void
         fflush(stderr);
     }
     assert(final_sum == 100U);
-    assert(
-        final_payload_sum == (unsigned)'a' * 4U
-    );
+    assert(final_payload_sum == (unsigned)'a' * 4U);
     assert(mylite_close(db) == MYLITE_OK);
 
     peer_child = fork();
@@ -10598,10 +10592,8 @@ static void test_ownerless_concurrent_savepoint_same_table_rollback_handoff(void
         "SET value = 42 "
         "WHERE id = 4"
     );
-    final_sum = query_unsigned(
-        db,
-        "SELECT SUM(value) FROM app.ownerless_concurrent_savepoint_same_table"
-    );
+    final_sum =
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_concurrent_savepoint_same_table");
     final_value_4 = query_unsigned(
         db,
         "SELECT value FROM app.ownerless_concurrent_savepoint_same_table WHERE id = 4"
@@ -17510,16 +17502,12 @@ static void test_ownerless_live_idle_peer_reclaims_checkpointable_page_log(void)
 
     signal_pipe(release_pipe[1]);
     wait_for_child(peer_child);
-    assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(
-        database_path
-    );
+    assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(database_path);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 35U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(
-        database_path
-    );
+    assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(database_path);
 
     free(database_path);
     free(runtime_root);
@@ -35636,9 +35624,7 @@ static void test_ownerless_row_format_ddl_refreshes_peer_dictionary(void) {
     free(root);
 }
 
-static void assert_ownerless_compressed_row_format_post_peer_ddl_read_refreshes(
-    const char *label
-) {
+static void assert_ownerless_compressed_row_format_post_peer_ddl_read_refreshes(const char *label) {
     uint64_t stats[OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT] = {0};
 
     mylite_ownerless_database_read_perf_stats(stats, OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT);
@@ -82627,8 +82613,7 @@ static void run_ownerless_random_tx_stress_reader(open_database_paths paths, chi
                 weighted_sum,
                 expected_weighted_sum
             );
-            for (unsigned row_id = 1U; row_id <= MYLITE_TEST_RANDOM_TX_STRESS_ROW_COUNT;
-                 ++row_id) {
+            for (unsigned row_id = 1U; row_id <= MYLITE_TEST_RANDOM_TX_STRESS_ROW_COUNT; ++row_id) {
                 fprintf(
                     stderr,
                     "ownerless random tx stress reader row: id=%u value=%llu "
@@ -83454,9 +83439,8 @@ static void ownerless_ddl_stress_relax_statement_lock_timeout_after_forced_retry
     static int relaxed;
     char sql[64];
 
-    if (relaxed ||
-        ownerless_ddl_stress_lock_wait_timeout_seconds() >=
-            MYLITE_TEST_DDL_STRESS_FORCED_RETRY_LOCK_WAIT_TIMEOUT_SECONDS) {
+    if (relaxed || ownerless_ddl_stress_lock_wait_timeout_seconds() >=
+                       MYLITE_TEST_DDL_STRESS_FORCED_RETRY_LOCK_WAIT_TIMEOUT_SECONDS) {
         return;
     }
     assert(
@@ -83525,8 +83509,7 @@ static unsigned long long ownerless_ddl_stress_query_unsigned(
             assert(errmsg == NULL);
             return result.value;
         }
-        const int retryable =
-            mylite_errcode(db) == MYLITE_BUSY && mylite_mariadb_errno(db) == 0U;
+        const int retryable = mylite_errcode(db) == MYLITE_BUSY && mylite_mariadb_errno(db) == 0U;
         if (!retryable || monotonic_milliseconds() >= deadline_ms) {
             fprintf(
                 stderr,
@@ -97463,8 +97446,7 @@ static void assert_ownerless_auto_increment_column_ddl_state(
 
     if (actual_column_count != 1U || actual_count != expected_count ||
         actual_id_sum != expected_id_sum || actual_value_sum != expected_value_sum ||
-        actual_min_id != 1U ||
-        actual_parent_row != (expected_max_id >= 3U ? 1U : 0U) ||
+        actual_min_id != 1U || actual_parent_row != (expected_max_id >= 3U ? 1U : 0U) ||
         actual_max_id != expected_max_id) {
         fprintf(
             stderr,
@@ -116495,8 +116477,7 @@ static unsigned count_concurrency_wal_records_with_flags_at_or_before(
             break;
         }
         next_record_offset = payload_offset + (off_t)payload_size;
-        if ((record_flags & required_flags) == required_flags &&
-            record_commit_lsn <= commit_lsn) {
+        if ((record_flags & required_flags) == required_flags && record_commit_lsn <= commit_lsn) {
             ++count;
         }
         record_offset = next_record_offset;

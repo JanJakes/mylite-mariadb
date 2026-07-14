@@ -443,8 +443,7 @@ int collect_visible_record_metadata(
 }
 
 bool valid_page_size(std::uint32_t page_size) {
-    return page_size >= k_innodb_physical_page_size_min &&
-           page_size <= k_innodb_page_size_max &&
+    return page_size >= k_innodb_physical_page_size_min && page_size <= k_innodb_page_size_max &&
            (page_size & (page_size - 1U)) == 0U;
 }
 
@@ -591,8 +590,7 @@ int mylite_ownerless_tablespace_replay_apply_with_flags(
         (flags & ~(MYLITE_OWNERLESS_TABLESPACE_REPLAY_IGNORE_MISSING_TABLESPACES |
                    MYLITE_OWNERLESS_TABLESPACE_REPLAY_KEEP_NATIVE_SAME_LSN |
                    MYLITE_OWNERLESS_TABLESPACE_REPLAY_KEEP_NATIVE_SAME_LSN_SNAPSHOT_BOUNDARY |
-                   MYLITE_OWNERLESS_TABLESPACE_REPLAY_USER_TABLESPACES_ONLY)) !=
-            0U) {
+                   MYLITE_OWNERLESS_TABLESPACE_REPLAY_USER_TABLESPACES_ONLY)) != 0U) {
         return MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR;
     }
     if (visible_lsn == 0U) {

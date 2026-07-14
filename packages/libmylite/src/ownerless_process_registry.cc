@@ -89,7 +89,9 @@ mylite_ownerless_process_identity slot_identity(const unsigned char *slot);
 bool read_process_start_time(std::uint64_t pid, std::uint64_t *out_start_time);
 bool read_current_boot_id_hash(std::uint64_t *out_boot_id_hash);
 bool process_is_zombie(std::uint64_t pid);
+#if defined(__linux__)
 std::uint64_t hash_bytes(const char *bytes, std::size_t size);
+#endif
 void clear_slot_locked(unsigned char *registry, unsigned char *slot);
 unsigned remaining_timeout_ms(std::chrono::steady_clock::time_point deadline);
 bool registry_size_fits(std::uint32_t slot_count);
@@ -697,6 +699,7 @@ bool process_is_zombie(std::uint64_t pid) {
 #endif
 }
 
+#if defined(__linux__)
 std::uint64_t hash_bytes(const char *bytes, std::size_t size) {
     std::uint64_t hash = k_fnv_offset_basis;
     for (std::size_t index = 0; index < size; ++index) {
@@ -705,6 +708,7 @@ std::uint64_t hash_bytes(const char *bytes, std::size_t size) {
     }
     return hash == 0U ? k_fnv_offset_basis : hash;
 }
+#endif
 
 void clear_slot_locked(unsigned char *registry, unsigned char *slot) {
     const std::uint64_t generation = load64(registry, k_header_generation_offset) + 1U;

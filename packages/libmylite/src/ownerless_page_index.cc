@@ -375,16 +375,14 @@ int mylite_ownerless_page_index_find_with_generation(
         }
     }
 
-    if (result != MYLITE_OWNERLESS_PAGE_INDEX_ERROR && scan_required &&
-        !scan_entries_trusted) {
+    if (result != MYLITE_OWNERLESS_PAGE_INDEX_ERROR && scan_required && !scan_entries_trusted) {
         result = MYLITE_OWNERLESS_PAGE_INDEX_SCAN_REQUIRED;
     } else if (result != MYLITE_OWNERLESS_PAGE_INDEX_ERROR && best != nullptr) {
         *out_record_offset = load64(best, k_entry_record_offset_offset);
         *out_page_lsn = best_page_lsn;
         *out_commit_lsn = best_commit_lsn;
         result = MYLITE_OWNERLESS_PAGE_INDEX_OK;
-    } else if (result != MYLITE_OWNERLESS_PAGE_INDEX_ERROR &&
-               (page_present || scan_required)) {
+    } else if (result != MYLITE_OWNERLESS_PAGE_INDEX_ERROR && (page_present || scan_required)) {
         result = MYLITE_OWNERLESS_PAGE_INDEX_SCAN_REQUIRED;
     }
 
@@ -635,9 +633,8 @@ bool entry_is_better_version(
     const std::uint64_t candidate_record_offset = load64(candidate, k_entry_record_offset_offset);
     return candidate_commit_lsn > best_commit_lsn ||
            (candidate_commit_lsn == best_commit_lsn &&
-            (candidate_page_lsn > best_page_lsn ||
-             (candidate_page_lsn == best_page_lsn &&
-              candidate_record_offset > best_record_offset)));
+            (candidate_page_lsn > best_page_lsn || (candidate_page_lsn == best_page_lsn &&
+                                                    candidate_record_offset > best_record_offset)));
 }
 
 int latch_result_to_index_result(int result) {

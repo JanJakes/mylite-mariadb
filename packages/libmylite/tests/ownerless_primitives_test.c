@@ -7825,20 +7825,10 @@ static void test_tablespace_replay_accepts_compressed_physical_page_sizes(void) 
         MYLITE_OWNERLESS_TABLESPACE_REPLAY_OK
     );
 
-    read_file_at(
-        kb1_fd,
-        out_page,
-        key_block_1_page_size,
-        (off_t)key_block_1_page_size * 3
-    );
+    read_file_at(kb1_fd, out_page, key_block_1_page_size, (off_t)key_block_1_page_size * 3);
     assert(innodb_test_page_lsn(out_page) == 120U);
     assert(out_page[128] == 0xA1U);
-    read_file_at(
-        kb2_fd,
-        out_page,
-        key_block_2_page_size,
-        (off_t)key_block_2_page_size * 3
-    );
+    read_file_at(kb2_fd, out_page, key_block_2_page_size, (off_t)key_block_2_page_size * 3);
     assert(innodb_test_page_lsn(out_page) == 130U);
     assert(out_page[128] == 0xB1U);
 
@@ -18065,8 +18055,7 @@ static mylite_ownerless_process_identity dictionary_state_current_identity(void)
     mylite_ownerless_process_identity identity;
 
     assert(
-        mylite_ownerless_current_process_identity(&identity) ==
-        MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+        mylite_ownerless_current_process_identity(&identity) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
     );
     return identity;
 }
