@@ -246,6 +246,9 @@ inline void PageBulk::insertPage(rec_t *rec, rec_offs *offsets)
       ut_ad(!memcmp(r, c, len));
       if (len > 2)
       {
+        if (UNIV_UNLIKELY(
+                !m_mtr.ownerless_page_write_prepare_checked(*m_block)))
+          return;
         memcpy(b, c, len);
         m_mtr.memmove(*m_block, b - m_page, c - m_page, len);
         c= cm;
@@ -285,6 +288,9 @@ no_data:
         if (len > 2)
         {
           m_mtr.memcpy<mtr_t::FORCED>(*m_block, b, r, m_cur_rec - c);
+          if (UNIV_UNLIKELY(
+                  !m_mtr.ownerless_page_write_prepare_checked(*m_block)))
+            return;
           memcpy(bd, cd, len);
           m_mtr.memmove(*m_block, bd - m_page, cd - m_page, len);
           c= cdm;

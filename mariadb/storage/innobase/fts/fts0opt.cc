@@ -545,7 +545,7 @@ fts_index_fetch_nodes(
 		error = fts_eval_sql(trx, *graph);
 
 		if (UNIV_LIKELY(error == DB_SUCCESS)) {
-			fts_sql_commit(trx);
+			error= fts_sql_commit(trx);
 
 			break;				/* Exit the loop. */
 		} else {
@@ -1016,7 +1016,8 @@ fts_table_fetch_doc_ids(
 		"CLOSE c;");
 
 	error = fts_eval_sql(trx, graph);
-	fts_sql_commit(trx);
+	if (const dberr_t commit_error= fts_sql_commit(trx))
+		error= commit_error;
 	que_graph_free(graph);
 
 	if (error == DB_SUCCESS) {
@@ -1588,7 +1589,8 @@ static
 fts_optimize_t*
 fts_optimize_create(
 /*================*/
-	dict_table_t*	table)		/*!< in: table with FTS indexes */
+	dict_table_t*	table,		/*!< in: table with FTS indexes */
+	dberr_t*	error)		/*!< out: transaction start error */
 {
 	fts_optimize_t*	optim;
 	mem_heap_t*	heap = mem_heap_create(128);
@@ -1605,7 +1607,13 @@ fts_optimize_create(
 	optim->table = table;
 
 	optim->trx = trx_create();
-	trx_start_internal(optim->trx);
+	*error= trx_start_internal(optim->trx);
+	if (UNIV_UNLIKELY(*error != DB_SUCCESS)) {
+		optim->trx->clear_and_free();
+		fts_doc_ids_free(optim->to_delete);
+		mem_heap_free(heap);
+		return NULL;
+	}
 
 	optim->fts_common_table.table_id = table->id;
 	optim->fts_common_table.type = FTS_COMMON_TABLE;
@@ -1739,7 +1747,13 @@ fts_optimize_free(
 {
 	mem_heap_t*	heap = static_cast<mem_heap_t*>(optim->self_heap->arg);
 
-	trx_commit_for_mysql(optim->trx);
+	if (UNIV_UNLIKELY(trx_commit_for_mysql(optim->trx) != DB_SUCCESS)) {
+		/* Ownerless mode rejects FTS tables before background optimize.
+		A coordination failure here must retain the transaction for
+		process quarantine instead of freeing its shared registration. */
+		ut_ad(mylite_ownerless_innodb_lock_has_hooks());
+		return;
+	}
 	optim->trx->clear_and_free();
 	optim->trx = NULL;
 
@@ -1825,7 +1839,7 @@ fts_optimize_words(
 			error = fts_optimize_compact(optim, index, start_time);
 
 			if (error == DB_SUCCESS) {
-				fts_sql_commit(optim->trx);
+				error= fts_sql_commit(optim->trx);
 			} else {
 				fts_sql_rollback(optim->trx);
 			}
@@ -2204,7 +2218,7 @@ fts_optimize_create_deleted_doc_id_snapshot(
 	if (error != DB_SUCCESS) {
 		fts_sql_rollback(optim->trx);
 	} else {
-		fts_sql_commit(optim->trx);
+		error= fts_sql_commit(optim->trx);
 	}
 
 	optim->del_list_regenerated = TRUE;
@@ -2312,7 +2326,7 @@ fts_optimize_indexes(
 	}
 
 	if (error == DB_SUCCESS) {
-		fts_sql_commit(optim->trx);
+		error= fts_sql_commit(optim->trx);
 	} else {
 		fts_sql_rollback(optim->trx);
 	}
@@ -2341,7 +2355,7 @@ fts_optimize_purge_snapshot(
 	}
 
 	if (error == DB_SUCCESS) {
-		fts_sql_commit(optim->trx);
+		error= fts_sql_commit(optim->trx);
 	} else {
 		fts_sql_rollback(optim->trx);
 	}
@@ -2380,7 +2394,7 @@ fts_optimize_reset_start_time(
 #endif
 
 	if (error == DB_SUCCESS) {
-		fts_sql_commit(optim->trx);
+		error= fts_sql_commit(optim->trx);
 	} else {
 		fts_sql_rollback(optim->trx);
 	}
@@ -2441,6 +2455,12 @@ fts_optimize_table(
 	if (srv_read_only_mode) {
 		return DB_READ_ONLY;
 	}
+	if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks())) {
+		/* database.cc rejects ownerless opens containing FTS indexes and
+		ownerless FTS DDL, so background optimize must be unreachable. */
+		ut_ad(!"ownerless FTS optimize is unsupported");
+		return DB_ERROR;
+	}
 
 	dberr_t		error = DB_SUCCESS;
 	fts_optimize_t*	optim = NULL;
@@ -2450,7 +2470,9 @@ fts_optimize_table(
 		ib::info() << "FTS start optimize " << table->name;
 	}
 
-	optim = fts_optimize_create(table);
+	optim = fts_optimize_create(table, &error);
+	if (UNIV_UNLIKELY(optim == NULL))
+		return error;
 
 	// FIXME: Call this only at the start of optimize, currently we
 	// rely on DB_DUPLICATE_KEY to handle corrupting the snapshot.
@@ -2480,7 +2502,7 @@ fts_optimize_table(
 
 			/* Commit the read of being deleted
 			doc ids transaction. */
-			fts_sql_commit(optim->trx);
+			error= fts_sql_commit(optim->trx);
 
 			/* We would do optimization only if there
 			are deleted records to be cleaned up */

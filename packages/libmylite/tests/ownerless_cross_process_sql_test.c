@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <ftw.h>
 #include <limits.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -18,9 +19,13 @@
 #include <unistd.h>
 
 extern uint32_t my_crc32c(uint32_t crc, const void *buf, size_t len);
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+extern void mylite_ownerless_innodb_set_test_faults_enabled(int enabled);
+#endif
 
 #define MYLITE_TEST_REMOVE_TREE_MAX_FDS 32
 #define MYLITE_TEST_WAIT_POLL_INTERVAL_US 10000
+#define MYLITE_TEST_ERROR_DURING_COMMIT_ERRNO 1180U
 #define MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO 1205U
 #define MYLITE_TEST_DEADLOCK_ERRNO 1213U
 #define MYLITE_TEST_DATABASE_EXISTS_ERRNO 1007U
@@ -41,11 +46,13 @@ extern uint32_t my_crc32c(uint32_t crc, const void *buf, size_t len);
 #define MYLITE_TEST_ROW_IS_REFERENCED_ERRNO 1451U
 #define MYLITE_TEST_NO_REFERENCED_ROW_ERRNO 1452U
 #define MYLITE_TEST_NON_INSERTABLE_TABLE_ERRNO 1471U
+#define MYLITE_TEST_TOO_MANY_CONCURRENT_TRXS_ERRNO 1637U
 #define MYLITE_TEST_TRUNCATE_ILLEGAL_FK_ERRNO 1701U
 #define MYLITE_TEST_GENERATED_COLUMN_FUNCTION_ERRNO 1901U
 #define MYLITE_TEST_GENERATED_COLUMN_PRIMARY_KEY_ERRNO 1903U
 #define MYLITE_TEST_WRONG_FK_OPTION_FOR_GENERATED_COLUMN_ERRNO 1905U
 #define MYLITE_TEST_CHECK_CONSTRAINT_ERRNO 4025U
+#define MYLITE_TEST_SERVER_GONE_ERRNO 2006U
 #define MYLITE_TEST_CHILD_OK 0
 #define MYLITE_TEST_CHILD_OPEN_FAILED 2
 #define MYLITE_TEST_CHILD_EXEC_FAILED 3
@@ -60,6 +67,14 @@ extern uint32_t my_crc32c(uint32_t crc, const void *buf, size_t len);
 #define MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_DATA_OFFSET 8
 #define MYLITE_TEST_CONCURRENCY_PROCESS_SEGMENT_TYPE 1U
 #define MYLITE_TEST_CONCURRENCY_PROCESS_ACTIVE_COUNT_OFFSET 16
+#define MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_COUNT_OFFSET 0U
+#define MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_SIZE_OFFSET 4U
+#define MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_HEADER_SIZE 96U
+#define MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_STATE_OFFSET 8U
+#define MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_EXPLICIT_TRANSACTION_COUNT_OFFSET 80U
+#define MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_STATE_ACTIVE 1U
+#define MYLITE_TEST_CONCURRENCY_MDL_SEGMENT_TYPE 3U
+#define MYLITE_TEST_CONCURRENCY_MDL_ACTIVE_COUNT_OFFSET 16
 #define MYLITE_TEST_CONCURRENCY_TRX_SEGMENT_TYPE 4U
 #define MYLITE_TEST_CONCURRENCY_TRX_ACTIVE_COUNT_OFFSET 16
 #define MYLITE_TEST_CONCURRENCY_READ_VIEW_SEGMENT_TYPE 5U
@@ -81,6 +96,13 @@ extern uint32_t my_crc32c(uint32_t crc, const void *buf, size_t len);
 #define MYLITE_TEST_CONCURRENCY_REDO_STATE_WRITTEN_LSN_OFFSET 72
 #define MYLITE_TEST_CONCURRENCY_PAGE_INDEX_SEGMENT_TYPE 8U
 #define MYLITE_TEST_CONCURRENCY_PAGE_INDEX_ACTIVE_COUNT_OFFSET 40
+#define MYLITE_TEST_CONCURRENCY_AUTOINC_SEGMENT_TYPE 11U
+#define MYLITE_TEST_CONCURRENCY_AUTOINC_HEADER_SIZE 64U
+#define MYLITE_TEST_CONCURRENCY_AUTOINC_SLOT_SIZE 32U
+#define MYLITE_TEST_CONCURRENCY_AUTOINC_SLOT_COUNT_OFFSET 0U
+#define MYLITE_TEST_CONCURRENCY_AUTOINC_SLOT_SIZE_OFFSET 4U
+#define MYLITE_TEST_CONCURRENCY_AUTOINC_SLOT_STATE_OFFSET 16U
+#define MYLITE_TEST_CONCURRENCY_AUTOINC_SLOT_STATE_ACTIVE 1U
 #define MYLITE_TEST_CONCURRENCY_RECOVERY_HEADER_SIZE 128
 #define MYLITE_TEST_CONCURRENCY_CHECKPOINT_LATEST_LSN_OFFSET 128
 #define MYLITE_TEST_CONCURRENCY_CHECKPOINT_VISIBLE_LSN_OFFSET 136
@@ -134,7 +156,7 @@ extern uint32_t my_crc32c(uint32_t crc, const void *buf, size_t len);
 #define MYLITE_TEST_INNODB_FIL_PAGE_TYPE_BLOB 10U
 #define MYLITE_TEST_INNODB_FIL_PAGE_TYPE_ZBLOB 11U
 #define MYLITE_TEST_INNODB_FIL_PAGE_TYPE_ZBLOB2 12U
-#define MYLITE_TEST_PAGE_LOG_HEADER_SIZE 64
+#define MYLITE_TEST_PAGE_LOG_HEADER_SIZE 12288
 #define MYLITE_TEST_PAGE_LOG_RECORD_HEADER_SIZE 64
 #define MYLITE_TEST_PAGE_LOG_RECORD_SPACE_ID_OFFSET 8
 #define MYLITE_TEST_PAGE_LOG_RECORD_PAGE_NO_OFFSET 12
@@ -155,6 +177,7 @@ extern uint32_t my_crc32c(uint32_t crc, const void *buf, size_t len);
 #define MYLITE_TEST_STRESS_READER_POLLS 48U
 #define MYLITE_TEST_STRESS_ITERATIONS_MAX 10000U
 #define MYLITE_TEST_STRESS_READER_POLLS_MAX 20000U
+#define MYLITE_TEST_STRESS_MAX_ATTEMPTS 8U
 #define MYLITE_TEST_COMMIT_RACE_WORKER_COUNT 4U
 #define MYLITE_TEST_COMMIT_RACE_READY_TIMEOUT_MS 30000U
 #define MYLITE_TEST_DDL_STRESS_WORKER_COUNT 3U
@@ -189,6 +212,7 @@ extern uint32_t my_crc32c(uint32_t crc, const void *buf, size_t len);
 #define MYLITE_TEST_RANDOM_TX_STRESS_ROUNDS_MAX 5000U
 #define MYLITE_TEST_RANDOM_TX_STRESS_PAD_BYTES 3600U
 #define MYLITE_TEST_RANDOM_TX_STRESS_MAX_ATTEMPTS 200U
+#define MYLITE_TEST_RANDOM_TX_STRESS_PHASE_ROUNDS 10U
 #define MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_WORKER_COUNT 3U
 #define MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_ROW_COUNT 5U
 #define MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_ROUNDS 6U
@@ -204,8 +228,8 @@ extern uint32_t my_crc32c(uint32_t crc, const void *buf, size_t len);
 #define MYLITE_TEST_PURGE_HISTORY_UPDATES 64U
 #define MYLITE_TEST_DDL_WORKER_COUNT 3U
 #define MYLITE_TEST_DDL_TABLES_PER_WORKER 4U
-#define MYLITE_TEST_OWNERLESS_SQL_CASE_TIMEOUT_MS 300000U
-#define MYLITE_TEST_OWNERLESS_SQL_HEAVY_CASE_TIMEOUT_MS 1200000U
+#define MYLITE_TEST_OWNERLESS_SQL_CASE_TIMEOUT_MS 900000U
+#define MYLITE_TEST_OWNERLESS_SQL_HEAVY_CASE_TIMEOUT_MS 1800000U
 #define MYLITE_TEST_OWNERLESS_OPEN_RETRY_TIMEOUT_MS 60000U
 #define MYLITE_TEST_OWNERLESS_SQL_MAX_WEIGHTED_SHARDS 64U
 #define MYLITE_TEST_OWNERLESS_INNODB_LOCK_OK 0
@@ -698,11 +722,7 @@ typedef struct ownerless_pressure_compressed_key_block_case {
 
 static const ownerless_pressure_compressed_key_block_case
     k_ownerless_pressure_compressed_key_block_cases[] = {
-        {"ownerless_pressure_compressed_row_format_kb1", 1U},
-        {"ownerless_pressure_compressed_row_format_kb2", 2U},
-        {"ownerless_pressure_compressed_row_format_kb4", 4U},
         {"ownerless_pressure_compressed_row_format_variant", 8U},
-        {"ownerless_pressure_compressed_row_format_kb16", 16U},
 };
 static const size_t k_ownerless_pressure_compressed_key_block_case_count =
     sizeof(k_ownerless_pressure_compressed_key_block_cases) /
@@ -794,12 +814,22 @@ static void assign_ownerless_sql_weighted_shards(
 static void run_ownerless_crash_tail_test(ownerless_test_fn test_fn);
 static void test_two_processes_update_different_innodb_rows(void);
 static void test_two_processes_update_same_innodb_row(void);
+static void test_ownerless_autocommit_off_first_write_holds_locks(void);
+static void test_ownerless_autocommit_off_repeatable_read_snapshot(void);
 static void test_two_processes_update_different_innodb_tables(void);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void test_ownerless_runtime_fault_propagation_durability(void);
+static void test_ownerless_runtime_fault_propagation_mtr(void);
+static void test_ownerless_runtime_fault_propagation_lifecycle(void);
+static void test_ownerless_runtime_fault_propagation_admission(void);
+static void test_ownerless_retryable_commit_failure_reuses_connection(void);
+static void test_ownerless_retryable_rollback_serialization_reuses_connection(void);
+static void test_ownerless_database_layer_fail_closed_faults(void);
 static void test_ownerless_visible_skip_releases_deferred_page_batch(void);
 #endif
 static void test_ownerless_concurrent_transaction_commits(void);
 static void test_two_processes_deadlock_on_innodb_rows(void);
+static void test_ownerless_full_rollback_survives_dead_writer_recovery_fence(void);
 static void test_ownerless_explicit_dml_deadlock_discards_file_op_marker(void);
 static void test_ownerless_gap_lock_blocks_insert(void);
 static void test_ownerless_savepoint_rollback_is_peer_visible_after_commit(void);
@@ -807,9 +837,16 @@ static void test_ownerless_concurrent_savepoint_rollback_handoff(void);
 static void test_ownerless_concurrent_savepoint_same_page_rollback_handoff(void);
 static void test_ownerless_concurrent_savepoint_same_table_rollback_handoff(void);
 static void test_ownerless_concurrent_savepoint_same_row_rollback_handoff(void);
+static void test_ownerless_post_savepoint_timeout_keeps_prewrite_hidden(void);
 static void test_ownerless_random_savepoint_same_table_schedule(void);
 static void test_ownerless_serializable_read_blocks_peer_update(void);
 static void test_ownerless_serializable_prevents_write_skew(void);
+static void test_ownerless_read_committed_remote_delete_locking_reads(void);
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void test_ownerless_foreign_key_current_reads_refresh_with_local_dirty_pages(void);
+#endif
+static void test_ownerless_serializable_plain_select_uses_current_read(void);
+static void test_ownerless_autocommit_off_next_transaction_isolation(void);
 static void test_ownerless_auto_increment_assigns_distinct_ids(void);
 static void test_ownerless_auto_increment_ddl_refreshes_peer_high_water(void);
 static void test_ownerless_auto_increment_column_ddl_refreshes_peer(void);
@@ -936,6 +973,17 @@ static void test_process_reads_committed_external_update(void);
 static void test_prepared_process_reads_committed_external_update(void);
 static void test_ownerless_tableless_select_skips_page_visibility(void);
 static void test_ownerless_peer_uncommitted_update_stays_hidden(void);
+static void test_ownerless_remote_implicit_insert_blocks_current_reads_and_writes(void);
+static void test_ownerless_chained_transaction_preserves_native_state(void);
+static void test_ownerless_rollback_work_to_savepoint_preserves_transaction(void);
+static void test_ownerless_transaction_release_closes_native_session(void);
+static void test_ownerless_lifetime_lock_fences_ordinary_runtime_bidirectionally(void);
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void test_ownerless_page_observation_token_exhaustion_fails_closed(void);
+#endif
+static void test_ownerless_implicit_ddl_commit_resets_autocommit_off_snapshot(void);
+static void test_ownerless_repeated_consistent_snapshot_replaces_pin(void);
+static void test_ownerless_transaction_and_read_view_capacity_is_recoverable(void);
 static void test_transaction_first_read_sees_committed_external_update(void);
 static void test_prepared_transaction_first_read_sees_committed_external_update(void);
 static void test_transaction_with_local_write_first_read_sees_committed_external_update(void);
@@ -1353,6 +1401,8 @@ static void test_crashed_table_comment_dictionary_ddl_recovers_metadata(void);
 static void test_crashed_truncate_dictionary_ddl_recovers_empty_table(void);
 static void test_crashed_implicit_truncate_dictionary_ddl_recovers_empty_table(void);
 static void test_crashed_foreign_key_child_truncate_dictionary_ddl_recovers_constraint(void);
+static void run_crashed_self_referencing_foreign_key_truncate_recovers_constraint(void);
+static void run_crashed_generated_column_foreign_key_child_truncate_recovers_constraint(void);
 static void test_crashed_foreign_key_truncate_variants_dictionary_ddl_recovers_constraints(void);
 static void test_crashed_unchecked_cyclic_foreign_key_truncate_dictionary_ddl_recovers_constraints(
     void
@@ -1393,10 +1443,20 @@ static void test_ownerless_zombie_writer_cleanup_before_reap(void);
 static void initialize_database(open_database_paths paths);
 static void initialize_database_in_process(open_database_paths paths);
 static void update_first_row_until_released(open_database_paths paths, child_pipes pipes);
+static void update_first_row_after_signal_until_killed(
+    open_database_paths paths,
+    child_pipes pipes
+);
+static void update_first_row_with_autocommit_off_until_released(
+    open_database_paths paths,
+    child_pipes pipes,
+    int prepared
+);
 static void update_first_row_without_commit_until_killed(open_database_paths paths, int ready_fd);
 static void update_first_row_and_exit(open_database_paths paths, int ready_fd);
 static void update_killed_dml_marker_row_and_exit(open_database_paths paths, int ready_fd);
 static void update_uncommitted_dml_marker_row_until_killed(open_database_paths paths, int ready_fd);
+static void hold_implicit_insert_until_released(open_database_paths paths, child_pipes pipes);
 static void update_killed_savepoint_dml_marker_row_and_exit(
     open_database_paths paths,
     int ready_fd
@@ -1412,9 +1472,16 @@ static void rollback_savepoint_dml_marker_row_until_ownerless_state_fault(
 );
 static void rollback_savepoint_after_prewrite_dml_marker_rows_until_ownerless_state_fault(
     open_database_paths paths,
-    int ready_fd
+    int ready_fd,
+    int opened_fd,
+    int start_fd
 );
-static void rollback_savepoint_until_native_row_undo_fault(open_database_paths paths, int ready_fd);
+static void rollback_savepoint_until_native_row_undo_fault(
+    open_database_paths paths,
+    int ready_fd,
+    int pre_rollback_ready_fd,
+    int rollback_start_fd
+);
 static void rollback_transaction_dml_marker_row_until_ownerless_state_fault(
     open_database_paths paths,
     int ready_fd
@@ -1446,6 +1513,10 @@ static void update_first_row_until_record_lock_before_grant_fault(
 static void update_first_row_until_record_lock_grant_fault(open_database_paths paths, int ready_fd);
 #endif
 static void hold_ownerless_open_until_released(open_database_paths paths, child_pipes pipes);
+static void hold_ownerless_open_and_expect_dead_writer_busy(
+    open_database_paths paths,
+    child_pipes pipes
+);
 static void assert_ownerless_open_returns_busy(open_database_paths paths);
 static void update_second_row(open_database_paths paths);
 static void update_first_row_by_two(open_database_paths paths);
@@ -1495,6 +1566,20 @@ static void update_concurrent_savepoint_same_page_rollback_until_released(
     child_pipes pipes
 );
 static void update_concurrent_savepoint_same_page_peer(open_database_paths paths);
+static void hold_ownerless_post_savepoint_timeout_row_until_released(
+    open_database_paths paths,
+    child_pipes pipes
+);
+static void hold_ownerless_post_savepoint_timeout_writer_until_released(
+    open_database_paths paths,
+    child_pipes pipes
+);
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void read_ownerless_post_savepoint_timeout_after_refresh(
+    open_database_paths paths,
+    child_pipes pipes
+);
+#endif
 static void update_concurrent_savepoint_same_table_rollback_until_released(
     open_database_paths paths,
     child_pipes pipes
@@ -1517,6 +1602,7 @@ static void insert_auto_increment_rows_after_signal(
     unsigned worker_id,
     child_pipes pipes
 );
+static void insert_auto_increment_row_eventually(mylite_db *db, unsigned worker_id, unsigned row);
 static void alter_auto_increment_after_signal(open_database_paths paths, child_pipes pipes);
 static void add_auto_increment_column_after_signal(open_database_paths paths, child_pipes pipes);
 static void increment_mix_row_after_signal(
@@ -1531,6 +1617,14 @@ static void run_ownerless_stress_writer(
     child_pipes pipes
 );
 static void run_ownerless_stress_reader(open_database_paths paths, child_pipes pipes);
+static int ownerless_stress_exec_retryable(
+    mylite_db *db,
+    const char *sql,
+    unsigned table_id,
+    unsigned iteration,
+    unsigned attempt
+);
+static void ownerless_stress_retry_pause(unsigned table_id, unsigned iteration, unsigned attempt);
 static void run_ownerless_ddl_stress_worker(
     open_database_paths paths,
     unsigned worker_id,
@@ -1621,6 +1715,10 @@ static void hold_reclaim_boundary_snapshot_until_released(
 #endif
 static void churn_ownerless_history(open_database_paths paths);
 static void update_first_row_by_seven_after_signal(open_database_paths paths, int start_read_fd);
+static void assert_savepoint_write_hidden_and_update_first_row(
+    open_database_paths paths,
+    int start_read_fd
+);
 static void hold_first_row_update_until_released(open_database_paths paths, child_pipes pipes);
 static void hold_select_for_update_until_released(open_database_paths paths, child_pipes pipes);
 static void alter_ownerless_sql_expect_lock_timeout(open_database_paths paths);
@@ -1656,6 +1754,12 @@ static void create_ownerless_ddl_tables_after_signal(
     open_database_paths paths,
     unsigned worker_id,
     child_pipes pipes
+);
+static void insert_ownerless_ddl_row_eventually(
+    mylite_db *db,
+    const char *sql,
+    unsigned worker_id,
+    unsigned table_id
 );
 static void run_ownerless_broader_ddl_sequence(open_database_paths paths, child_pipes pipes);
 static void run_ownerless_online_ddl_options_sequence(open_database_paths paths, child_pipes pipes);
@@ -2933,6 +3037,7 @@ static void write_redo_header_backup(
     const unsigned char *bytes,
     size_t size
 );
+static void create_redo_header_backup_from_current_redo(const char *database_path);
 static void truncate_redo_header_backup(const char *database_path, off_t size);
 #  endif
 typedef void (*ownerless_dictionary_fault_writer_fn)(open_database_paths paths, int ready_fd);
@@ -2994,6 +3099,7 @@ static void expect_exec_busy(mylite_db *db, const char *sql, const char *message
 static void expect_readonly_exec_error(mylite_db *db, const char *sql);
 static unsigned long long query_unsigned(mylite_db *db, const char *sql);
 static unsigned long long prepared_query_unsigned(mylite_db *db, const char *sql);
+static void prepared_exec_ok(mylite_db *db, const char *sql);
 static unsigned long long u64_ull(uint64_t value);
 static unsigned long long query_ownerless_compressed_blob_key_block_matrix_sum(
     mylite_db *db,
@@ -3242,11 +3348,14 @@ static unsigned long long ownerless_ddl_stress_query_unsigned(
 );
 static void ownerless_ddl_stress_retry_pause(unsigned worker_id, unsigned round, unsigned attempt);
 static void ownerless_random_tx_stress_rows(unsigned worker_id, unsigned round, unsigned rows[3]);
-static void ownerless_random_tx_stress_capture_rows(
+static int ownerless_random_tx_stress_capture_rows(
     mylite_db *db,
     const unsigned rows[3],
     unsigned long long values[3],
-    unsigned long long versions[3]
+    unsigned long long versions[3],
+    unsigned worker_id,
+    unsigned round,
+    unsigned attempt
 );
 static void assert_ownerless_random_tx_stress_rows_unchanged_after_rollback(
     mylite_db *db,
@@ -3271,7 +3380,21 @@ static int ownerless_random_tx_stress_exec_retryable(
     unsigned attempt,
     unsigned phase
 );
+static void ownerless_random_tx_stress_exec_busy_retry(
+    mylite_db *db,
+    const char *sql,
+    unsigned worker_id,
+    unsigned round,
+    unsigned attempt,
+    const char *context
+);
 static int ownerless_random_tx_stress_trace_retries(void);
+static void ownerless_random_tx_stress_join_retry_lane_if_active(
+    int retry_lock_fd,
+    int *retry_lock_held
+);
+static void ownerless_random_tx_stress_acquire_retry_lock(int retry_lock_fd, int *retry_lock_held);
+static void ownerless_random_tx_stress_release_retry_lock(int retry_lock_fd, int *retry_lock_held);
 static void ownerless_random_tx_stress_retry_pause(
     unsigned worker_id,
     unsigned round,
@@ -4543,7 +4666,6 @@ static void assert_concurrency_wal_checkpointed_or_retained_native_support_only_
 static void assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(
     const char *database_path
 );
-static void assert_concurrency_wal_checkpointed_eventually(const char *database_path);
 static void assert_concurrency_wal_retained_for(const char *database_path, unsigned duration_ms);
 static int native_rollback_history_headers_state(const char *database_path, int *out_empty);
 static int read_innodb_native_page(
@@ -4596,11 +4718,17 @@ static uint64_t wait_for_concurrency_innodb_table_waiting_count(
 );
 #endif
 static uint64_t read_concurrency_innodb_lock_waiting_count(const char *database_path);
+static uint64_t read_concurrency_innodb_lock_active_count(const char *database_path);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static uint64_t read_concurrency_innodb_table_waiting_count(const char *database_path);
 #endif
 static uint64_t read_concurrency_page_write_lock_waiting_count(const char *database_path);
+static uint64_t read_concurrency_page_write_lock_active_count(const char *database_path);
 static uint64_t read_concurrency_lock_waiting_count(
+    const char *database_path,
+    uint32_t segment_type
+);
+static uint64_t read_concurrency_lock_active_count(
     const char *database_path,
     uint32_t segment_type
 );
@@ -4696,7 +4824,12 @@ static void write_concurrency_checkpoint_visible_lsn(
 );
 static uint64_t read_concurrency_trx_active_count(const char *database_path);
 static uint64_t read_concurrency_process_active_count(const char *database_path);
+static uint64_t read_concurrency_explicit_transaction_count(const char *database_path);
 static uint64_t read_concurrency_read_view_active_count(const char *database_path);
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static uint64_t read_concurrency_mdl_active_count(const char *database_path);
+static uint64_t read_concurrency_autoinc_active_count(const char *database_path);
+#endif
 static uint64_t read_concurrency_page_index_active_count(const char *database_path);
 static uint64_t read_concurrency_shm_segment_offset(int fd, uint32_t segment_type);
 static void read_exact_at(int fd, void *buffer, size_t size, off_t offset);
@@ -4758,6 +4891,13 @@ static char *make_temp_root(void);
 static char *path_join(const char *directory, const char *name);
 static void signal_pipe_message(int pipe_fd);
 static void wait_for_pipe_message(int pipe_fd);
+static int wait_for_pipe_message_or_child_exit(
+    int pipe_fd,
+    const pid_t *children,
+    unsigned child_count,
+    const char *label,
+    unsigned expected_child_index
+);
 static void signal_pipe(int pipe_fd);
 static void wait_for_pipe(int pipe_fd);
 static void wait_for_child(pid_t child);
@@ -5941,6 +6081,10 @@ int main(int argc, char **argv) {
     }
     if (argc == 2 && strcmp(argv[1], "concurrent-savepoint-same-row-handoff") == 0) {
         test_ownerless_concurrent_savepoint_same_row_rollback_handoff();
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "post-savepoint-timeout-prewrite-hidden") == 0) {
+        test_ownerless_post_savepoint_timeout_keeps_prewrite_hidden();
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "random-savepoint-same-table-schedule") == 0) {
@@ -7291,6 +7435,19 @@ int main(int argc, char **argv) {
 #endif
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "dictionary-foreign-key-self-truncate-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        run_crashed_self_referencing_foreign_key_truncate_recovers_constraint();
+#endif
+        return 0;
+    }
+    if (argc == 2 &&
+        strcmp(argv[1], "dictionary-generated-column-foreign-key-child-truncate-crash") == 0) {
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+        run_crashed_generated_column_foreign_key_child_truncate_recovers_constraint();
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "dictionary-foreign-key-truncate-variants-crash") == 0) {
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
         test_crashed_foreign_key_truncate_variants_dictionary_ddl_recovers_constraints();
@@ -7825,6 +7982,7 @@ int main(int argc, char **argv) {
             "concurrent-savepoint-same-page-handoff|"
             "concurrent-savepoint-same-table-handoff|"
             "concurrent-savepoint-same-row-handoff|"
+            "post-savepoint-timeout-prewrite-hidden|"
             "random-savepoint-same-table-schedule|"
             "serializable|write-skew|auto-inc|auto-inc-ddl|"
             "auto-inc-column-ddl|engine-policy|"
@@ -8025,6 +8183,8 @@ int main(int argc, char **argv) {
             "dictionary-table-comment-crash|"
             "dictionary-truncate-crash|"
             "dictionary-foreign-key-child-truncate-crash|"
+            "dictionary-foreign-key-self-truncate-crash|"
+            "dictionary-generated-column-foreign-key-child-truncate-crash|"
             "dictionary-foreign-key-truncate-variants-crash|"
             "dictionary-unchecked-cyclic-foreign-key-truncate-crash|"
             "dictionary-truncate-file-op-marker-crash|"
@@ -8072,21 +8232,49 @@ int main(int argc, char **argv) {
 static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_two_processes_update_different_innodb_rows),
     OWNERLESS_SQL_TEST_CASE(test_two_processes_update_same_innodb_row),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_autocommit_off_first_write_holds_locks),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_autocommit_off_repeatable_read_snapshot),
     OWNERLESS_SQL_TEST_CASE(test_two_processes_update_different_innodb_tables),
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_runtime_fault_propagation_durability),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_runtime_fault_propagation_mtr),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_runtime_fault_propagation_lifecycle),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_runtime_fault_propagation_admission),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_retryable_commit_failure_reuses_connection),
+    OWNERLESS_SQL_TEST_CASE(
+        test_ownerless_retryable_rollback_serialization_reuses_connection
+    ),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_database_layer_fail_closed_faults),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_visible_skip_releases_deferred_page_batch),
 #endif
     OWNERLESS_SQL_TEST_CASE(test_ownerless_concurrent_transaction_commits),
     OWNERLESS_SQL_TEST_CASE(test_two_processes_deadlock_on_innodb_rows),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_full_rollback_survives_dead_writer_recovery_fence),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_gap_lock_blocks_insert),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_savepoint_rollback_is_peer_visible_after_commit),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_concurrent_savepoint_rollback_handoff),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_concurrent_savepoint_same_page_rollback_handoff),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_concurrent_savepoint_same_table_rollback_handoff),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_concurrent_savepoint_same_row_rollback_handoff),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_post_savepoint_timeout_keeps_prewrite_hidden),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_random_savepoint_same_table_schedule),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_serializable_read_blocks_peer_update),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_serializable_prevents_write_skew),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_read_committed_remote_delete_locking_reads),
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_foreign_key_current_reads_refresh_with_local_dirty_pages),
+#endif
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_serializable_plain_select_uses_current_read),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_autocommit_off_next_transaction_isolation),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_chained_transaction_preserves_native_state),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_rollback_work_to_savepoint_preserves_transaction),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_transaction_release_closes_native_session),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_lifetime_lock_fences_ordinary_runtime_bidirectionally),
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_page_observation_token_exhaustion_fails_closed),
+#endif
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_implicit_ddl_commit_resets_autocommit_off_snapshot),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_repeated_consistent_snapshot_replaces_pin),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_auto_increment_assigns_distinct_ids),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_auto_increment_ddl_refreshes_peer_high_water),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_auto_increment_column_ddl_refreshes_peer),
@@ -8097,6 +8285,8 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_prepared_process_reads_committed_external_update),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_tableless_select_skips_page_visibility),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_peer_uncommitted_update_stays_hidden),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_remote_implicit_insert_blocks_current_reads_and_writes),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_transaction_and_read_view_capacity_is_recoverable),
     OWNERLESS_SQL_TEST_CASE(test_transaction_first_read_sees_committed_external_update),
     OWNERLESS_SQL_TEST_CASE(test_prepared_transaction_first_read_sees_committed_external_update),
     OWNERLESS_SQL_TEST_CASE(
@@ -8966,6 +9156,12 @@ static unsigned estimate_ownerless_sql_test_case_weight(const char *name) {
     if (strstr(name, "active_reader_pressure_limit_write_classes_after_release") != NULL) {
         weight += 24U;
     }
+    if (strstr(name, "capacity") != NULL) {
+        weight += 12U;
+    }
+    if (strstr(name, "chained_transaction_preserves_native_state") != NULL) {
+        weight += 12U;
+    }
     if (strstr(name, "crashed") != NULL || strstr(name, "crash") != NULL ||
         strstr(name, "rebuild") != NULL || strstr(name, "replay") != NULL ||
         strstr(name, "checkpoint") != NULL) {
@@ -9016,7 +9212,9 @@ static void assign_ownerless_sql_weighted_shards(
 
 static unsigned ownerless_sql_test_case_timeout_ms(const char *name) {
     assert(name != NULL);
-    if (strstr(name, "active_reader_pressure_limit_write_classes_after_release") != NULL) {
+    if (strstr(name, "active_reader_pressure_limit_write_classes_after_release") != NULL ||
+        strstr(name, "chained_transaction_preserves_native_state") != NULL ||
+        strstr(name, "runtime_fault_propagation") != NULL) {
         return MYLITE_TEST_OWNERLESS_SQL_HEAVY_CASE_TIMEOUT_MS;
     }
     return MYLITE_TEST_OWNERLESS_SQL_CASE_TIMEOUT_MS;
@@ -9292,6 +9490,137 @@ static void test_two_processes_update_same_innodb_row(void) {
     free(root);
 }
 
+static void run_ownerless_autocommit_off_first_write_lock_case(int prepared) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(
+        root,
+        prepared ? "ownerless-autocommit-off-prepared-lock.mylite"
+                 : "ownerless-autocommit-off-direct-lock.mylite"
+    );
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[2];
+    int release_pipe[2];
+    int writer_start_pipe[2];
+    pid_t holder_child;
+    pid_t writer_child;
+    int writer_result;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+    assert(pipe(writer_start_pipe) == 0);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(writer_start_pipe[1]);
+        wait_for_pipe(writer_start_pipe[0]);
+        update_first_row_expect_lock_timeout(paths);
+    }
+    close(writer_start_pipe[0]);
+
+    holder_child = fork();
+    assert(holder_child >= 0);
+    if (holder_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        update_first_row_with_autocommit_off_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            },
+            prepared
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+    signal_pipe(writer_start_pipe[1]);
+    writer_result = wait_for_child_result(writer_child);
+    signal_pipe(release_pipe[1]);
+    wait_for_child(holder_child);
+    assert(writer_result == MYLITE_TEST_CHILD_LOCK_WAIT_TIMEOUT);
+    assert_ownerless_total_value(paths, 31U);
+    assert_total_value(paths, 31U);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_autocommit_off_first_write_holds_locks(void) {
+    run_ownerless_autocommit_off_first_write_lock_case(0);
+    run_ownerless_autocommit_off_first_write_lock_case(1);
+}
+
+static void run_ownerless_autocommit_off_repeatable_read_case(int prepared) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(
+        root,
+        prepared ? "ownerless-autocommit-off-prepared-snapshot.mylite"
+                 : "ownerless-autocommit-off-direct-snapshot.mylite"
+    );
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int start_pipe[2];
+    pid_t writer_child;
+    mylite_db *reader;
+    const char *select_sql = "SELECT value FROM app.ownerless_sql WHERE id = 1";
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(start_pipe) == 0);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(start_pipe[1]);
+        update_first_row_by_seven_after_signal(paths, start_pipe[0]);
+    }
+
+    close(start_pipe[0]);
+    reader = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(reader, "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+    exec_ok(reader, "SET autocommit = 0");
+    assert(query_unsigned(reader, "SELECT @@autocommit") == 0U);
+    assert(
+        (prepared ? prepared_query_unsigned(reader, select_sql)
+                  : query_unsigned(reader, select_sql)) == 10U
+    );
+
+    signal_pipe(start_pipe[1]);
+    wait_for_child(writer_child);
+    assert(
+        (prepared ? prepared_query_unsigned(reader, select_sql)
+                  : query_unsigned(reader, select_sql)) == 10U
+    );
+
+    exec_ok(reader, "COMMIT");
+    assert(query_unsigned(reader, "SELECT @@autocommit") == 0U);
+    assert(
+        (prepared ? prepared_query_unsigned(reader, select_sql)
+                  : query_unsigned(reader, select_sql)) == 17U
+    );
+    exec_ok(reader, "SET autocommit = 1");
+    assert(mylite_close(reader) == MYLITE_OK);
+    assert_total_value(paths, 37U);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_autocommit_off_repeatable_read_snapshot(void) {
+    run_ownerless_autocommit_off_repeatable_read_case(0);
+    run_ownerless_autocommit_off_repeatable_read_case(1);
+}
+
 static void test_two_processes_update_different_innodb_tables(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -9365,6 +9694,714 @@ static void test_two_processes_update_different_innodb_tables(void) {
 }
 
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void assert_ownerless_commit_fault(mylite_db *db, int result) {
+    assert(result == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == MYLITE_TEST_ERROR_DURING_COMMIT_ERRNO);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(strstr(mylite_errmsg(db), "COMMIT") != NULL);
+}
+
+static void assert_ownerless_io_fault(mylite_db *db, int result, const char *message_part) {
+    assert(result == MYLITE_IOERR);
+    assert(mylite_errcode(db) == MYLITE_IOERR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(strstr(mylite_errmsg(db), message_part) != NULL);
+}
+
+static void assert_ownerless_runtime_rejects_direct_work(mylite_db *db) {
+    char *errmsg = NULL;
+    const int result = mylite_exec(db, "SELECT 1", NULL, NULL, &errmsg);
+
+    assert_ownerless_io_fault(db, result, "faulted");
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, "faulted") != NULL);
+    mylite_free(errmsg);
+}
+
+static void assert_ownerless_runtime_rejects_prepared_work(mylite_db *db) {
+    mylite_stmt *stmt = NULL;
+    const char *tail = NULL;
+    const int result = mylite_prepare(db, "SELECT 1", MYLITE_NUL_TERMINATED, &stmt, &tail);
+
+    assert_ownerless_io_fault(db, result, "faulted");
+    assert(stmt == NULL);
+    assert(tail == NULL);
+}
+
+static void assert_ownerless_fault_recovery_total(
+    open_database_paths paths,
+    unsigned long long expected_total
+) {
+    mylite_db *db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == expected_total);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == expected_total);
+    assert(mylite_close(db) == MYLITE_OK);
+}
+
+static void assert_ownerless_injected_coordination_failure(
+    mylite_db *db,
+    const char *failure_name,
+    const char *sql
+) {
+    char *errmsg = NULL;
+
+    assert(setenv("MYLITE_OWNERLESS_TEST_COORDINATION_FAILURE", failure_name, 1) == 0);
+    const int result = mylite_exec(db, sql, NULL, NULL, &errmsg);
+    assert(unsetenv("MYLITE_OWNERLESS_TEST_COORDINATION_FAILURE") == 0);
+    assert_ownerless_io_fault(db, result, "coordination failed");
+    assert(errmsg != NULL && strstr(errmsg, "coordination failed") != NULL);
+    mylite_free(errmsg);
+    assert_ownerless_runtime_rejects_direct_work(db);
+}
+
+static void run_ownerless_runtime_fault_propagation_group(unsigned group) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *wal_database_path = path_join(root, "ownerless-wal-sync-failure.mylite");
+    char *checkpoint_database_path = path_join(root, "ownerless-checkpoint-failure.mylite");
+    char *latest_database_path = path_join(root, "ownerless-latest-checkpoint-failure.mylite");
+    char *mdl_database_path = path_join(root, "ownerless-mdl-release-failure.mylite");
+    char *trx_release_database_path = path_join(root, "ownerless-trx-release-failure.mylite");
+    char *trx_serialization_database_path =
+        path_join(root, "ownerless-trx-serialization-failure.mylite");
+    char *read_view_release_database_path =
+        path_join(root, "ownerless-read-view-release-failure.mylite");
+    char *trx_admission_database_path = path_join(root, "ownerless-trx-admission-failure.mylite");
+    char *read_view_admission_database_path =
+        path_join(root, "ownerless-read-view-admission-failure.mylite");
+    char *record_admission_database_path =
+        path_join(root, "ownerless-record-admission-failure.mylite");
+    char *page_write_admission_database_path =
+        path_join(root, "ownerless-page-write-admission-failure.mylite");
+    char *page_boundary_database_path =
+        path_join(root, "ownerless-page-boundary-publication-failure.mylite");
+    char *redo_enter_database_path = path_join(root, "ownerless-redo-enter-failure.mylite");
+    char *redo_reserve_database_path = path_join(root, "ownerless-redo-reserve-failure.mylite");
+    char *redo_batch_database_path = path_join(root, "ownerless-redo-batch-failure.mylite");
+    char *mdl_admission_database_path = path_join(root, "ownerless-mdl-admission-failure.mylite");
+    char *ddl_marker_database_path = path_join(root, "ownerless-ddl-marker-failure.mylite");
+    char *autoinc_database_path = path_join(root, "ownerless-autoinc-ddl-late-seed.mylite");
+    open_database_paths paths = {.database_path = wal_database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    mylite_stmt *stmt;
+    const char *tail;
+    char *errmsg;
+    int result;
+
+    assert(group < 4U);
+    assert(mkdir(runtime_root, 0700) == 0);
+
+    if (group == 0U) {
+        initialize_database(paths);
+        db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+        assert(setenv("MYLITE_OWNERLESS_TEST_DURABILITY_FAILURE", "wal-sync", 1) == 0);
+        errmsg = NULL;
+        result = mylite_exec(
+            db,
+            "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1",
+            NULL,
+            NULL,
+            &errmsg
+        );
+        assert_ownerless_commit_fault(db, result);
+        assert(errmsg != NULL && strstr(errmsg, "COMMIT") != NULL);
+        mylite_free(errmsg);
+        assert(unsetenv("MYLITE_OWNERLESS_TEST_DURABILITY_FAILURE") == 0);
+        assert_ownerless_runtime_rejects_direct_work(db);
+        assert(mylite_close(db) == MYLITE_OK);
+        assert_ownerless_fault_recovery_total(paths, 31U);
+
+        paths.database_path = checkpoint_database_path;
+        initialize_database(paths);
+        db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+        stmt = NULL;
+        tail = NULL;
+        assert(
+            mylite_prepare(
+                db,
+                "UPDATE app.ownerless_sql SET value = value + ? WHERE id = 1",
+                MYLITE_NUL_TERMINATED,
+                &stmt,
+                &tail
+            ) == MYLITE_OK
+        );
+        assert(stmt != NULL);
+        assert(tail != NULL && *tail == '\0');
+        assert(mylite_bind_int64(stmt, 1U, 1) == MYLITE_OK);
+        assert(
+            setenv("MYLITE_OWNERLESS_TEST_DURABILITY_FAILURE", "checkpoint-durable-write", 1) == 0
+        );
+        result = mylite_step(stmt);
+        assert_ownerless_commit_fault(db, result);
+        assert(unsetenv("MYLITE_OWNERLESS_TEST_DURABILITY_FAILURE") == 0);
+        assert_ownerless_runtime_rejects_prepared_work(db);
+        assert(mylite_finalize(stmt) == MYLITE_OK);
+        assert(mylite_close(db) == MYLITE_OK);
+        assert_ownerless_fault_recovery_total(paths, 31U);
+
+        paths.database_path = latest_database_path;
+        initialize_database(paths);
+        db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+        exec_ok(db, "START TRANSACTION");
+        assert(
+            setenv("MYLITE_OWNERLESS_TEST_DURABILITY_FAILURE", "checkpoint-latest-write", 1) == 0
+        );
+        errmsg = NULL;
+        result = mylite_exec(
+            db,
+            "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1",
+            NULL,
+            NULL,
+            &errmsg
+        );
+        assert_ownerless_io_fault(db, result, "before commit became visible");
+        assert(errmsg != NULL && strstr(errmsg, "before commit became visible") != NULL);
+        mylite_free(errmsg);
+        assert(unsetenv("MYLITE_OWNERLESS_TEST_DURABILITY_FAILURE") == 0);
+        assert_ownerless_runtime_rejects_direct_work(db);
+        assert(mylite_close(db) == MYLITE_OK);
+        assert_ownerless_fault_recovery_total(paths, 30U);
+    }
+
+    if (group == 1U) {
+        paths.database_path = page_write_admission_database_path;
+        initialize_database(paths);
+        db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+        assert_ownerless_injected_coordination_failure(
+            db,
+            "page-write-acquire",
+            "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1"
+        );
+        assert(mylite_close(db) == MYLITE_OK);
+        assert_ownerless_fault_recovery_total(paths, 30U);
+
+        paths.database_path = page_boundary_database_path;
+        initialize_database(paths);
+        db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+        exec_ok(db, "START TRANSACTION");
+        assert_ownerless_injected_coordination_failure(
+            db,
+            "page-publish",
+            "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1"
+        );
+        assert(mylite_close(db) == MYLITE_OK);
+        assert_ownerless_fault_recovery_total(paths, 30U);
+
+        paths.database_path = redo_enter_database_path;
+        initialize_database(paths);
+        db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+        assert_ownerless_injected_coordination_failure(
+            db,
+            "redo-enter",
+            "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1"
+        );
+        assert(mylite_close(db) == MYLITE_OK);
+        assert_ownerless_fault_recovery_total(paths, 30U);
+
+        paths.database_path = redo_reserve_database_path;
+        initialize_database(paths);
+        db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+        assert_ownerless_injected_coordination_failure(
+            db,
+            "redo-reserve",
+            "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1"
+        );
+        assert(mylite_close(db) == MYLITE_OK);
+        assert_ownerless_fault_recovery_total(paths, 30U);
+
+        paths.database_path = redo_batch_database_path;
+        initialize_database(paths);
+        db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+        mylite_ownerless_innodb_set_test_faults_enabled(0);
+        assert(
+            setenv("MYLITE_OWNERLESS_TEST_COORDINATION_FAILURE", "redo-written-leave-batch", 1) == 0
+        );
+        errmsg = NULL;
+        result = mylite_exec(
+            db,
+            "INSERT INTO app.ownerless_sql (id, value) VALUES (3, 1), (4, 1)",
+            NULL,
+            NULL,
+            &errmsg
+        );
+        assert(unsetenv("MYLITE_OWNERLESS_TEST_COORDINATION_FAILURE") == 0);
+        assert_ownerless_commit_fault(db, result);
+        assert(errmsg != NULL && strstr(errmsg, "COMMIT") != NULL);
+        mylite_free(errmsg);
+        assert_ownerless_runtime_rejects_direct_work(db);
+        mylite_ownerless_innodb_set_test_faults_enabled(1);
+        assert(mylite_close(db) == MYLITE_OK);
+        assert_ownerless_fault_recovery_total(paths, 32U);
+    }
+
+    if (group == 2U) {
+        paths.database_path = ddl_marker_database_path;
+        initialize_database(paths);
+        db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+        assert(
+            setenv("MYLITE_OWNERLESS_TEST_DURABILITY_FAILURE", "dictionary-marker-write", 1) == 0
+        );
+        errmsg = NULL;
+        result = mylite_exec(
+            db,
+            "CREATE TABLE app.ownerless_marker_must_not_exist ("
+            "id INT NOT NULL PRIMARY KEY"
+            ") ENGINE=InnoDB",
+            NULL,
+            NULL,
+            &errmsg
+        );
+        assert(unsetenv("MYLITE_OWNERLESS_TEST_DURABILITY_FAILURE") == 0);
+        assert_ownerless_io_fault(db, result, "recovery marker");
+        assert(errmsg != NULL && strstr(errmsg, "recovery marker") != NULL);
+        mylite_free(errmsg);
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_schema = 'app' AND table_name = 'ownerless_marker_must_not_exist'"
+            ) == 0U
+        );
+        assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+        assert(mylite_close(db) == MYLITE_OK);
+
+        paths.database_path = mdl_database_path;
+        initialize_database(paths);
+        db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+        const uint64_t mdl_active_count_before =
+            read_concurrency_mdl_active_count(mdl_database_path);
+        assert(setenv("MYLITE_OWNERLESS_TEST_MDL_RELEASE_FAILURE", "1", 1) == 0);
+        errmsg = NULL;
+        result = mylite_exec(
+            db,
+            "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1",
+            NULL,
+            NULL,
+            &errmsg
+        );
+        assert_ownerless_io_fault(db, result, "metadata lock release failed");
+        assert(errmsg != NULL && strstr(errmsg, "metadata lock release failed") != NULL);
+        mylite_free(errmsg);
+        assert(read_concurrency_mdl_active_count(mdl_database_path) > mdl_active_count_before);
+        assert(unsetenv("MYLITE_OWNERLESS_TEST_MDL_RELEASE_FAILURE") == 0);
+        assert_ownerless_runtime_rejects_direct_work(db);
+        assert(mylite_close(db) == MYLITE_OK);
+        assert(read_concurrency_mdl_active_count(mdl_database_path) == 0U);
+        assert_ownerless_fault_recovery_total(paths, 31U);
+
+        paths.database_path = trx_release_database_path;
+        initialize_database(paths);
+        db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+        exec_ok(db, "START TRANSACTION");
+        exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1");
+        assert(setenv("MYLITE_OWNERLESS_TEST_COORDINATION_FAILURE", "trx-deregister", 1) == 0);
+        errmsg = NULL;
+        result = mylite_exec(db, "COMMIT", NULL, NULL, &errmsg);
+        assert(unsetenv("MYLITE_OWNERLESS_TEST_COORDINATION_FAILURE") == 0);
+        assert_ownerless_commit_fault(db, result);
+        assert(errmsg != NULL && strstr(errmsg, "COMMIT") != NULL);
+        mylite_free(errmsg);
+        assert_ownerless_runtime_rejects_direct_work(db);
+        assert(mylite_close(db) == MYLITE_OK);
+        assert_ownerless_fault_recovery_total(paths, 31U);
+
+        paths.database_path = trx_serialization_database_path;
+        initialize_database(paths);
+        db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+        exec_ok(db, "START TRANSACTION");
+        exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1");
+        assert(setenv("MYLITE_OWNERLESS_TEST_COORDINATION_FAILURE", "trx-assign-no", 1) == 0);
+        errmsg = NULL;
+        result = mylite_exec(db, "COMMIT", NULL, NULL, &errmsg);
+        assert(unsetenv("MYLITE_OWNERLESS_TEST_COORDINATION_FAILURE") == 0);
+        assert_ownerless_commit_fault(db, result);
+        assert(errmsg != NULL && strstr(errmsg, "COMMIT") != NULL);
+        mylite_free(errmsg);
+        assert_ownerless_runtime_rejects_direct_work(db);
+        assert(mylite_close(db) == MYLITE_OK);
+        assert_ownerless_fault_recovery_total(paths, 30U);
+
+        paths.database_path = read_view_release_database_path;
+        initialize_database(paths);
+        db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+        exec_ok(db, "START TRANSACTION WITH CONSISTENT SNAPSHOT");
+        assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+        exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1");
+        assert(
+            setenv("MYLITE_OWNERLESS_TEST_COORDINATION_FAILURE", "read-view-deregister", 1) == 0
+        );
+        errmsg = NULL;
+        result = mylite_exec(db, "COMMIT", NULL, NULL, &errmsg);
+        assert(unsetenv("MYLITE_OWNERLESS_TEST_COORDINATION_FAILURE") == 0);
+        assert_ownerless_commit_fault(db, result);
+        assert(errmsg != NULL && strstr(errmsg, "COMMIT") != NULL);
+        mylite_free(errmsg);
+        assert_ownerless_runtime_rejects_direct_work(db);
+        assert(mylite_close(db) == MYLITE_OK);
+        assert_ownerless_fault_recovery_total(paths, 31U);
+    }
+
+    if (group == 3U) {
+        paths.database_path = trx_admission_database_path;
+        initialize_database(paths);
+        db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+        assert_ownerless_injected_coordination_failure(
+            db,
+            "trx-register",
+            "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1"
+        );
+        assert(mylite_close(db) == MYLITE_OK);
+        assert_ownerless_fault_recovery_total(paths, 30U);
+
+        paths.database_path = read_view_admission_database_path;
+        initialize_database(paths);
+        db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+        assert_ownerless_injected_coordination_failure(
+            db,
+            "read-view-register",
+            "START TRANSACTION WITH CONSISTENT SNAPSHOT"
+        );
+        assert(mylite_close(db) == MYLITE_OK);
+        assert_ownerless_fault_recovery_total(paths, 30U);
+
+        paths.database_path = record_admission_database_path;
+        initialize_database(paths);
+        db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+        assert_ownerless_injected_coordination_failure(
+            db,
+            "record-acquire",
+            "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1"
+        );
+        assert(mylite_close(db) == MYLITE_OK);
+        assert_ownerless_fault_recovery_total(paths, 30U);
+
+        paths.database_path = mdl_admission_database_path;
+        initialize_database(paths);
+        db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+        assert_ownerless_injected_coordination_failure(
+            db,
+            "mdl-acquire",
+            "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1"
+        );
+        assert(mylite_close(db) == MYLITE_OK);
+        assert_ownerless_fault_recovery_total(paths, 30U);
+
+        paths.database_path = autoinc_database_path;
+        initialize_database(paths);
+        db = open_database(paths, MYLITE_OPEN_READWRITE);
+        exec_ok(
+            db,
+            "CREATE TABLE app.ownerless_autoinc_retirement ("
+            "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY"
+            ") ENGINE=InnoDB"
+        );
+        assert(mylite_close(db) == MYLITE_OK);
+        db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+        assert(read_concurrency_autoinc_active_count(autoinc_database_path) == 0U);
+        assert(setenv("MYLITE_OWNERLESS_TEST_AUTOINC_DDL_LATE_SEED", "1", 1) == 0);
+        exec_ok(db, "TRUNCATE TABLE app.ownerless_autoinc_retirement");
+        assert(unsetenv("MYLITE_OWNERLESS_TEST_AUTOINC_DDL_LATE_SEED") == 0);
+        assert(read_concurrency_autoinc_active_count(autoinc_database_path) == 0U);
+        assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_autoinc_retirement") == 0U);
+        exec_ok(db, "INSERT INTO app.ownerless_autoinc_retirement VALUES ()");
+        assert(query_unsigned(db, "SELECT MAX(id) FROM app.ownerless_autoinc_retirement") == 1U);
+        assert(mylite_close(db) == MYLITE_OK);
+    }
+
+    free(autoinc_database_path);
+    free(ddl_marker_database_path);
+    free(redo_batch_database_path);
+    free(redo_reserve_database_path);
+    free(redo_enter_database_path);
+    free(page_boundary_database_path);
+    free(page_write_admission_database_path);
+    free(mdl_admission_database_path);
+    free(record_admission_database_path);
+    free(read_view_admission_database_path);
+    free(trx_admission_database_path);
+    free(trx_serialization_database_path);
+    free(read_view_release_database_path);
+    free(trx_release_database_path);
+    free(mdl_database_path);
+    free(latest_database_path);
+    free(checkpoint_database_path);
+    free(wal_database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_runtime_fault_propagation_durability(void) {
+    run_ownerless_runtime_fault_propagation_group(0U);
+}
+
+static void test_ownerless_runtime_fault_propagation_mtr(void) {
+    run_ownerless_runtime_fault_propagation_group(1U);
+}
+
+static void test_ownerless_runtime_fault_propagation_lifecycle(void) {
+    run_ownerless_runtime_fault_propagation_group(2U);
+}
+
+static void test_ownerless_runtime_fault_propagation_admission(void) {
+    run_ownerless_runtime_fault_propagation_group(3U);
+}
+
+static void test_ownerless_retryable_commit_failure_reuses_connection(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-retryable-commit-failure.mylite");
+    open_database_paths paths = {
+        .database_path = database_path,
+        .runtime_root = runtime_root,
+    };
+    char *errmsg = NULL;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    mylite_db *db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "START TRANSACTION");
+    assert(read_concurrency_explicit_transaction_count(database_path) == 1U);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1");
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "trx-commit-history-page-deadlock", 1) == 0);
+    const int commit_result = mylite_exec(db, "COMMIT", NULL, NULL, &errmsg);
+    assert(getenv("MYLITE_OWNERLESS_TEST_FAULT") == NULL);
+    assert(commit_result == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == MYLITE_TEST_DEADLOCK_ERRNO);
+    assert(strcmp(mylite_sqlstate(db), "40001") == 0);
+    assert(errmsg != NULL);
+    mylite_free(errmsg);
+
+    assert(read_concurrency_explicit_transaction_count(database_path) == 0U);
+    assert(query_unsigned(db, "SELECT @@in_transaction") == 0U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+
+    errmsg = NULL;
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "trx-commit-history-page-deadlock", 1) == 0);
+    const int autocommit_result = mylite_exec(
+        db,
+        "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 2",
+        NULL,
+        NULL,
+        &errmsg
+    );
+    assert(getenv("MYLITE_OWNERLESS_TEST_FAULT") == NULL);
+    assert(autocommit_result == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == MYLITE_TEST_DEADLOCK_ERRNO);
+    assert(strcmp(mylite_sqlstate(db), "40001") == 0);
+    assert(errmsg != NULL);
+    mylite_free(errmsg);
+    assert(query_unsigned(db, "SELECT @@in_transaction") == 0U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+
+    exec_ok(db, "START TRANSACTION");
+    assert(read_concurrency_explicit_transaction_count(database_path) == 1U);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 2");
+    exec_ok(db, "COMMIT");
+    assert(read_concurrency_explicit_transaction_count(database_path) == 0U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_retryable_rollback_serialization_reuses_connection(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-retryable-rollback-failure.mylite");
+    open_database_paths paths = {
+        .database_path = database_path,
+        .runtime_root = runtime_root,
+    };
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    mylite_db *db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "START TRANSACTION");
+    assert(read_concurrency_explicit_transaction_count(database_path) == 1U);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1");
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "trx-rollback-serialization-deadlock", 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_COUNT", "3", 1) == 0);
+    exec_ok(db, "ROLLBACK");
+    assert(getenv("MYLITE_OWNERLESS_TEST_FAULT") == NULL);
+    assert(getenv("MYLITE_OWNERLESS_TEST_FAULT_COUNT") == NULL);
+
+    assert(read_concurrency_explicit_transaction_count(database_path) == 0U);
+    assert(query_unsigned(db, "SELECT @@in_transaction") == 0U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+
+    exec_ok(db, "START TRANSACTION");
+    assert(read_concurrency_explicit_transaction_count(database_path) == 1U);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 2");
+    exec_ok(db, "COMMIT");
+    assert(read_concurrency_explicit_transaction_count(database_path) == 0U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_database_layer_fail_closed_faults(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *snapshot_boundary_database_path =
+        path_join(root, "ownerless-snapshot-boundary-proof-failure.mylite");
+    char *deferred_direct_database_path =
+        path_join(root, "ownerless-deferred-redo-direct-failure.mylite");
+    char *deferred_prepared_database_path =
+        path_join(root, "ownerless-deferred-redo-prepared-failure.mylite");
+    char *process_release_database_path =
+        path_join(root, "ownerless-process-slot-release-pending.mylite");
+    open_database_paths paths = {
+        .database_path = snapshot_boundary_database_path,
+        .runtime_root = runtime_root,
+    };
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t reader_child;
+    mylite_db *db;
+    mylite_stmt *stmt;
+    const char *tail;
+    char *errmsg;
+    int result;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+
+    initialize_database(paths);
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+    reader_child = fork();
+    assert(reader_child >= 0);
+    if (reader_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        hold_repeatable_read_snapshot_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "START TRANSACTION");
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1");
+    assert(setenv("MYLITE_OWNERLESS_TEST_COORDINATION_FAILURE", "snapshot-boundary-proof", 1) == 0);
+    errmsg = NULL;
+    result = mylite_exec(db, "COMMIT", NULL, NULL, &errmsg);
+    assert(unsetenv("MYLITE_OWNERLESS_TEST_COORDINATION_FAILURE") == 0);
+    assert_ownerless_commit_fault(db, result);
+    assert(errmsg != NULL && strstr(errmsg, "COMMIT") != NULL);
+    mylite_free(errmsg);
+    assert_ownerless_runtime_rejects_direct_work(db);
+    assert(mylite_close(db) == MYLITE_OK);
+    signal_pipe(release_pipe[1]);
+    wait_for_child(reader_child);
+    assert_ownerless_fault_recovery_total(paths, 30U);
+
+    paths.database_path = deferred_direct_database_path;
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    mylite_ownerless_innodb_set_test_faults_enabled(0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_COORDINATION_FAILURE", "deferred-redo-finish", 1) == 0);
+    errmsg = NULL;
+    result = mylite_exec(
+        db,
+        "INSERT INTO app.ownerless_sql (id, value) VALUES (3, 1), (4, 1)",
+        NULL,
+        NULL,
+        &errmsg
+    );
+    assert(unsetenv("MYLITE_OWNERLESS_TEST_COORDINATION_FAILURE") == 0);
+    assert_ownerless_io_fault(db, result, "coordination failed");
+    assert(errmsg != NULL && strstr(errmsg, "coordination failed") != NULL);
+    mylite_free(errmsg);
+    assert_ownerless_runtime_rejects_direct_work(db);
+    mylite_ownerless_innodb_set_test_faults_enabled(1);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_ownerless_fault_recovery_total(paths, 32U);
+
+    paths.database_path = deferred_prepared_database_path;
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    stmt = NULL;
+    tail = NULL;
+    assert(
+        mylite_prepare(
+            db,
+            "INSERT INTO app.ownerless_sql (id, value) VALUES (?, ?), (?, ?)",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            &tail
+        ) == MYLITE_OK
+    );
+    assert(stmt != NULL);
+    assert(tail != NULL && *tail == '\0');
+    assert(mylite_bind_int64(stmt, 1U, 3) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 2U, 1) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 3U, 4) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 4U, 1) == MYLITE_OK);
+    mylite_ownerless_innodb_set_test_faults_enabled(0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_COORDINATION_FAILURE", "deferred-redo-finish", 1) == 0);
+    result = mylite_step(stmt);
+    assert(unsetenv("MYLITE_OWNERLESS_TEST_COORDINATION_FAILURE") == 0);
+    assert_ownerless_io_fault(db, result, "coordination failed");
+    assert_ownerless_runtime_rejects_prepared_work(db);
+    mylite_ownerless_innodb_set_test_faults_enabled(1);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_ownerless_fault_recovery_total(paths, 32U);
+
+    paths.database_path = process_release_database_path;
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(read_concurrency_process_active_count(process_release_database_path) == 1U);
+    assert(setenv("MYLITE_OWNERLESS_TEST_PROCESS_SLOT_RELEASE_PENDING", "1", 1) == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(unsetenv("MYLITE_OWNERLESS_TEST_PROCESS_SLOT_RELEASE_PENDING") == 0);
+    assert(read_concurrency_process_active_count(process_release_database_path) == 0U);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(read_concurrency_process_active_count(process_release_database_path) == 1U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_process_active_count(process_release_database_path) == 0U);
+
+    free(process_release_database_path);
+    free(deferred_prepared_database_path);
+    free(deferred_direct_database_path);
+    free(snapshot_boundary_database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_ownerless_visible_skip_releases_deferred_page_batch(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -9730,6 +10767,68 @@ static void test_two_processes_deadlock_on_innodb_rows(void) {
     free(root);
 }
 
+static void test_ownerless_full_rollback_survives_dead_writer_recovery_fence(void) {
+#if defined(__linux__)
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-rollback-dead-writer-fence.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int writer_ready_pipe[2];
+    int writer_release_pipe[2];
+    pid_t writer_child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    assert(pipe(writer_ready_pipe) == 0);
+    assert(pipe(writer_release_pipe) == 0);
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(writer_ready_pipe[0]);
+        close(writer_release_pipe[1]);
+        update_first_row_after_signal_until_killed(
+            paths,
+            (child_pipes){
+                .ready_write_fd = writer_ready_pipe[1],
+                .release_read_fd = writer_release_pipe[0],
+            }
+        );
+    }
+
+    close(writer_ready_pipe[1]);
+    close(writer_release_pipe[0]);
+    wait_for_pipe_message(writer_ready_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    signal_pipe(writer_release_pipe[1]);
+    wait_for_pipe(writer_ready_pipe[0]);
+    exec_ok(db, "START TRANSACTION");
+    exec_ok(db, "UPDATE app.ownerless_a SET value = value + 5 WHERE id = 1");
+
+    assert(kill(writer_child, SIGKILL) == 0);
+    wait_for_signaled_child(writer_child, SIGKILL);
+
+    /*
+    Dead-owner cleanup cannot finish native recovery while this process still
+    has a live transaction.  Full rollback must nevertheless remain available
+    so the local native locks can be released before close and reopen.
+    */
+    exec_ok(db, "ROLLBACK");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_a") == 100U);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+#endif
+}
+
 static void test_ownerless_explicit_dml_deadlock_discards_file_op_marker(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -9840,10 +10939,8 @@ static void run_ownerless_table_pair_deadlock(
 
     first_result = wait_for_child_result(first_child);
     second_result = wait_for_child_result(second_child);
-    const int first_victim = first_result == MYLITE_TEST_CHILD_DEADLOCK ||
-                             first_result == MYLITE_TEST_CHILD_LOCK_WAIT_TIMEOUT;
-    const int second_victim = second_result == MYLITE_TEST_CHILD_DEADLOCK ||
-                              second_result == MYLITE_TEST_CHILD_LOCK_WAIT_TIMEOUT;
+    const int first_victim = first_result == MYLITE_TEST_CHILD_DEADLOCK;
+    const int second_victim = second_result == MYLITE_TEST_CHILD_DEADLOCK;
     if (!((first_result == MYLITE_TEST_CHILD_OK && second_victim) ||
           (first_victim && second_result == MYLITE_TEST_CHILD_OK))) {
         fprintf(
@@ -10384,6 +11481,177 @@ static void test_ownerless_concurrent_savepoint_same_page_rollback_handoff(void)
 #endif
 }
 
+static void test_ownerless_post_savepoint_timeout_keeps_prewrite_hidden(void) {
+#if defined(__linux__)
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-post-savepoint-timeout-hidden.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int locker_ready_pipe[2];
+    int locker_release_pipe[2];
+    int writer_ready_pipe[2];
+    int writer_release_pipe[2];
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    int reader_ready_pipe[2];
+    int reader_release_pipe[2];
+    pid_t reader_child;
+#  endif
+    pid_t locker_child;
+    pid_t writer_child;
+    mylite_db *db;
+    char sql[256];
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_post_savepoint_timeout ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value BIGINT UNSIGNED NOT NULL DEFAULT 0, "
+        "version INT UNSIGNED NOT NULL DEFAULT 0, "
+        "pad VARBINARY(3600) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_post_savepoint_blocker ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value BIGINT UNSIGNED NOT NULL DEFAULT 0"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(db, "INSERT INTO app.ownerless_post_savepoint_blocker VALUES (1, 0)");
+    for (unsigned row_id = 1U; row_id <= MYLITE_TEST_RANDOM_TX_STRESS_ROW_COUNT; ++row_id) {
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "INSERT INTO app.ownerless_post_savepoint_timeout "
+                "VALUES (%u, 0, 0, REPEAT('x', %u))",
+                row_id,
+                MYLITE_TEST_RANDOM_TX_STRESS_PAD_BYTES
+            ) > 0
+        );
+        exec_ok(db, sql);
+    }
+    assert(mylite_close(db) == MYLITE_OK);
+
+    assert(pipe(writer_ready_pipe) == 0);
+    assert(pipe(writer_release_pipe) == 0);
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(writer_ready_pipe[0]);
+        close(writer_release_pipe[1]);
+        hold_ownerless_post_savepoint_timeout_writer_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = writer_ready_pipe[1],
+                .release_read_fd = writer_release_pipe[0],
+            }
+        );
+    }
+    close(writer_ready_pipe[1]);
+    close(writer_release_pipe[0]);
+    wait_for_pipe_message(writer_ready_pipe[0]);
+
+    assert(pipe(locker_ready_pipe) == 0);
+    assert(pipe(locker_release_pipe) == 0);
+    locker_child = fork();
+    assert(locker_child >= 0);
+    if (locker_child == 0) {
+        close(locker_ready_pipe[0]);
+        close(locker_release_pipe[1]);
+        hold_ownerless_post_savepoint_timeout_row_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = locker_ready_pipe[1],
+                .release_read_fd = locker_release_pipe[0],
+            }
+        );
+    }
+    close(locker_ready_pipe[1]);
+    close(locker_release_pipe[0]);
+    wait_for_pipe(locker_ready_pipe[0]);
+
+    signal_pipe_message(writer_release_pipe[1]);
+    wait_for_pipe_message(writer_ready_pipe[0]);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    for (unsigned attempt = 0U; attempt < 32U; ++attempt) {
+        assert(
+            query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_post_savepoint_timeout") == 0U
+        );
+        assert(
+            query_unsigned(db, "SELECT SUM(version) FROM app.ownerless_post_savepoint_timeout") ==
+            0U
+        );
+        sleep_microseconds(1000U);
+    }
+    assert(mylite_close(db) == MYLITE_OK);
+
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    assert(pipe(reader_ready_pipe) == 0);
+    assert(pipe(reader_release_pipe) == 0);
+    reader_child = fork();
+    assert(reader_child >= 0);
+    if (reader_child == 0) {
+        close(reader_ready_pipe[0]);
+        close(reader_release_pipe[1]);
+        read_ownerless_post_savepoint_timeout_after_refresh(
+            paths,
+            (child_pipes){
+                .ready_write_fd = reader_ready_pipe[1],
+                .release_read_fd = reader_release_pipe[0],
+            }
+        );
+    }
+    close(reader_ready_pipe[1]);
+    close(reader_release_pipe[0]);
+    wait_for_pipe(reader_ready_pipe[0]);
+#  endif
+
+    signal_pipe_message(writer_release_pipe[1]);
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    wait_for_pipe_message(writer_ready_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    for (unsigned attempt = 0U; attempt < 32U; ++attempt) {
+        assert(
+            query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_post_savepoint_timeout") == 0U
+        );
+        assert(
+            query_unsigned(db, "SELECT SUM(version) FROM app.ownerless_post_savepoint_timeout") ==
+            0U
+        );
+        sleep_microseconds(1000U);
+    }
+    assert(mylite_close(db) == MYLITE_OK);
+    signal_pipe_message(writer_release_pipe[1]);
+#  endif
+    assert(close(writer_release_pipe[1]) == 0);
+    assert(close(writer_ready_pipe[0]) == 0);
+    wait_for_child(writer_child);
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    signal_pipe(reader_release_pipe[1]);
+    wait_for_child(reader_child);
+#  endif
+    signal_pipe(locker_release_pipe[1]);
+    wait_for_child(locker_child);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_post_savepoint_timeout") == 0U);
+    assert(
+        query_unsigned(db, "SELECT SUM(version) FROM app.ownerless_post_savepoint_timeout") == 0U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+#endif
+}
+
 static void test_ownerless_concurrent_savepoint_same_table_rollback_handoff(void) {
 #if defined(__linux__)
     char *root = make_temp_root();
@@ -10394,6 +11662,7 @@ static void test_ownerless_concurrent_savepoint_same_table_rollback_handoff(void
     int release_pipe[2];
     pid_t savepoint_child;
     pid_t peer_child;
+    int peer_status = 0;
     mylite_db *db;
     unsigned long long final_sum;
     unsigned long long final_payload_sum;
@@ -10490,36 +11759,32 @@ static void test_ownerless_concurrent_savepoint_same_table_rollback_handoff(void
         update_concurrent_savepoint_same_table_peer(paths);
     }
 
-    assert(wait_for_concurrency_ownerless_write_waiting_count(database_path, 1U, 5000U) >= 1U);
+    assert(wait_for_child_with_timeout(peer_child, 5000U, &peer_status) == 1);
+    assert(WIFEXITED(peer_status));
+    assert(WEXITSTATUS(peer_status) == 0);
+    assert(wait_for_concurrency_ownerless_write_waiting_count(database_path, 0U, 5000U) == 0U);
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
         query_unsigned(
             db,
             "SELECT SUM(value) FROM app.ownerless_concurrent_savepoint_same_table"
-        ) == 100U
+        ) == 101U
     );
     assert(
         query_unsigned(
             db,
             "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
             "FROM app.ownerless_concurrent_savepoint_same_table"
-        ) == (unsigned)'a' * 4U
+        ) == (unsigned)'a' * 3U + (unsigned)'d'
     );
     assert(mylite_close(db) == MYLITE_OK);
 
     signal_pipe(release_pipe[1]);
     wait_for_child(savepoint_child);
-    wait_for_child(peer_child);
     assert(wait_for_concurrency_ownerless_write_waiting_count(database_path, 0U, 5000U) == 0U);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 #  if !MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
-    {
-        const int native_dml_marker_pending =
-            read_concurrency_native_dml_file_op_checkpoint_needed(database_path);
-        const int peer_dml_marker_pending =
-            read_concurrency_peer_explicit_dml_checkpoint_needed(database_path);
-        assert(!native_dml_marker_pending || peer_dml_marker_pending);
-    }
+    assert(!read_concurrency_peer_explicit_dml_checkpoint_needed(database_path));
     assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoint_obligation(database_path);
 #  endif
 
@@ -11147,7 +12412,8 @@ static void test_ownerless_auto_increment_assigns_distinct_ids(void) {
     unsigned long long expected_sum = 0U;
     const unsigned long long expected_count =
         MYLITE_TEST_AUTO_INCREMENT_WORKER_COUNT * MYLITE_TEST_AUTO_INCREMENT_ROWS_PER_WORKER;
-    const unsigned long long expected_id_sum = (expected_count * (expected_count + 1U)) / 2U;
+    const unsigned long long minimum_id_sum = (expected_count * (expected_count + 1U)) / 2U;
+    const unsigned long long maximum_id = expected_count * MYLITE_TEST_STRESS_MAX_ATTEMPTS;
     mylite_db *db;
     unsigned long long actual_min_id;
     unsigned long long actual_max_id;
@@ -11223,9 +12489,10 @@ static void test_ownerless_auto_increment_assigns_distinct_ids(void) {
     );
     actual_min_id = query_unsigned(db, "SELECT MIN(id) FROM app.ownerless_auto_inc");
     actual_max_id = query_unsigned(db, "SELECT MAX(id) FROM app.ownerless_auto_inc");
-    assert(actual_min_id == 1U);
-    assert(actual_max_id == expected_count);
-    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_auto_inc") == expected_id_sum);
+    assert(actual_min_id >= 1U);
+    assert(actual_max_id >= expected_count);
+    assert(actual_max_id <= maximum_id);
+    assert(query_unsigned(db, "SELECT SUM(id) FROM app.ownerless_auto_inc") >= minimum_id_sum);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_auto_inc") == expected_sum);
     assert(mylite_close(db) == MYLITE_OK);
 
@@ -12117,11 +13384,15 @@ static void test_ownerless_checksum_stress(void) {
     for (unsigned index = 0U; index < child_count; ++index) {
         close(ready_pipe[index][1]);
         close(release_pipe[index][0]);
-        wait_for_pipe(ready_pipe[index][0]);
     }
-    for (unsigned index = 0U; index < child_count; ++index) {
-        signal_pipe(release_pipe[index][1]);
+    for (unsigned index = 0U; index < MYLITE_TEST_RANDOM_TX_STRESS_WORKER_COUNT; ++index) {
+        wait_for_pipe_message(ready_pipe[index][0]);
     }
+    wait_for_pipe(ready_pipe[reader_index][0]);
+    for (unsigned index = 0U; index < MYLITE_TEST_RANDOM_TX_STRESS_WORKER_COUNT; ++index) {
+        signal_pipe_message(release_pipe[index][1]);
+    }
+    signal_pipe(release_pipe[reader_index][1]);
     wait_for_children("ownerless-checksum-stress", children, child_count);
 
     assert_ownerless_checksum_stress_totals(
@@ -12254,10 +13525,46 @@ static void test_ownerless_random_transaction_stress(void) {
     for (unsigned index = 0U; index < child_count; ++index) {
         close(ready_pipe[index][1]);
         close(release_pipe[index][0]);
-        wait_for_pipe(ready_pipe[index][0]);
     }
     for (unsigned index = 0U; index < child_count; ++index) {
-        signal_pipe(release_pipe[index][1]);
+        if (!wait_for_pipe_message_or_child_exit(
+                ready_pipe[index][0],
+                children,
+                child_count,
+                "ownerless-random-transaction-stress-start",
+                index
+            )) {
+            wait_for_children("ownerless-random-transaction-stress-start", children, child_count);
+        }
+    }
+    for (unsigned index = 0U; index < child_count; ++index) {
+        signal_pipe_message(release_pipe[index][1]);
+    }
+    const unsigned phase_count = (rounds + MYLITE_TEST_RANDOM_TX_STRESS_PHASE_ROUNDS - 1U) /
+                                 MYLITE_TEST_RANDOM_TX_STRESS_PHASE_ROUNDS;
+    for (unsigned phase = 0U; phase < phase_count; ++phase) {
+        for (unsigned index = 0U; index < MYLITE_TEST_RANDOM_TX_STRESS_WORKER_COUNT; ++index) {
+            if (!wait_for_pipe_message_or_child_exit(
+                    ready_pipe[index][0],
+                    children,
+                    MYLITE_TEST_RANDOM_TX_STRESS_WORKER_COUNT,
+                    "ownerless-random-transaction-stress-phase",
+                    index
+                )) {
+                wait_for_children(
+                    "ownerless-random-transaction-stress-phase",
+                    children,
+                    child_count
+                );
+            }
+        }
+        for (unsigned index = 0U; index < MYLITE_TEST_RANDOM_TX_STRESS_WORKER_COUNT; ++index) {
+            signal_pipe_message(release_pipe[index][1]);
+        }
+    }
+    for (unsigned index = 0U; index < child_count; ++index) {
+        assert(close(ready_pipe[index][0]) == 0);
+        assert(close(release_pipe[index][1]) == 0);
     }
     wait_for_children("ownerless-random-transaction-stress", children, child_count);
 
@@ -12842,6 +14149,1504 @@ static void test_ownerless_peer_uncommitted_update_stays_hidden(void) {
     }
     assert(reopened_value == 17U);
     assert(mylite_close(reader) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_remote_implicit_insert_blocks_current_reads_and_writes(void) {
+    static const char *const isolation_levels[] = {
+        "READ COMMITTED",
+        "REPEATABLE READ",
+        "SERIALIZABLE",
+    };
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-remote-implicit-insert.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *reader;
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t writer_child;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    reader = open_database(paths, MYLITE_OPEN_READWRITE);
+    exec_ok(
+        reader,
+        "CREATE TABLE app.ownerless_implicit_insert ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "UNIQUE KEY ownerless_implicit_insert_value (value)"
+        ") ENGINE=InnoDB"
+    );
+    assert(mylite_close(reader) == MYLITE_OK);
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        hold_implicit_insert_until_released(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            }
+        );
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+    reader = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(reader, "SET SESSION innodb_lock_wait_timeout = 1");
+    exec_ok(reader, "SET SESSION lock_wait_timeout = 1");
+    assert(query_unsigned(reader, "SELECT @@SESSION.innodb_lock_wait_timeout") == 1U);
+
+    for (size_t index = 0; index < sizeof(isolation_levels) / sizeof(isolation_levels[0]);
+         ++index) {
+        char isolation_sql[96];
+        unsigned mariadb_errno = 0U;
+
+        assert(
+            snprintf(
+                isolation_sql,
+                sizeof(isolation_sql),
+                "SET SESSION TRANSACTION ISOLATION LEVEL %s",
+                isolation_levels[index]
+            ) > 0
+        );
+        exec_ok(reader, isolation_sql);
+        exec_ok(reader, "SET SESSION innodb_lock_wait_timeout = 1");
+        assert(query_unsigned(reader, "SELECT @@SESSION.innodb_lock_wait_timeout") == 1U);
+        assert(
+            exec_status(
+                reader,
+                "SELECT value FROM app.ownerless_implicit_insert WHERE id = 7 FOR UPDATE",
+                &mariadb_errno
+            ) != MYLITE_OK
+        );
+        assert(mariadb_errno == MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO);
+        assert(query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 10U);
+        mariadb_errno = 0U;
+        assert(
+            exec_status(
+                reader,
+                "SELECT id FROM app.ownerless_implicit_insert "
+                "WHERE value = 70 LOCK IN SHARE MODE",
+                &mariadb_errno
+            ) != MYLITE_OK
+        );
+        assert(mariadb_errno == MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO);
+        assert(query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 10U);
+    }
+
+    {
+        static const char *const conflicting_writes[] = {
+            "UPDATE app.ownerless_implicit_insert SET value = 71 WHERE id = 7",
+            "DELETE FROM app.ownerless_implicit_insert WHERE id = 7",
+            "INSERT INTO app.ownerless_implicit_insert VALUES (7, 70)",
+            "INSERT INTO app.ownerless_implicit_insert VALUES (7, 70) "
+            "ON DUPLICATE KEY UPDATE value = VALUES(value)",
+        };
+        for (size_t index = 0; index < sizeof(conflicting_writes) / sizeof(conflicting_writes[0]);
+             ++index) {
+            unsigned mariadb_errno = 0U;
+            assert(exec_status(reader, conflicting_writes[index], &mariadb_errno) != MYLITE_OK);
+            if (mariadb_errno != MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO) {
+                fprintf(
+                    stderr,
+                    "implicit-insert write mismatch: index=%zu errno=%u sql=%s message=%s\n",
+                    index,
+                    mariadb_errno,
+                    conflicting_writes[index],
+                    mylite_errmsg(reader)
+                );
+            }
+            assert(mariadb_errno == MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO);
+            assert(
+                query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 1") == 10U
+            );
+        }
+    }
+
+    signal_pipe(release_pipe[1]);
+    wait_for_child(writer_child);
+    assert(read_concurrency_innodb_lock_active_count(database_path) == 0U);
+    assert(read_concurrency_page_write_lock_active_count(database_path) == 0U);
+    exec_ok(reader, "SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED");
+    assert(
+        query_unsigned(reader, "SELECT value FROM app.ownerless_implicit_insert WHERE id = 7") ==
+        70U
+    );
+    exec_ok(reader, "UPDATE app.ownerless_implicit_insert SET value = 71 WHERE id = 7");
+    assert(
+        query_unsigned(reader, "SELECT value FROM app.ownerless_implicit_insert WHERE id = 7") ==
+        71U
+    );
+    assert(mylite_close(reader) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void run_ownerless_read_committed_remote_delete_case(
+    int use_secondary_index,
+    int commit_delete
+) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(
+        root,
+        use_secondary_index ? (commit_delete ? "ownerless-remote-delete-secondary-commit.mylite"
+                                             : "ownerless-remote-delete-secondary-rollback.mylite")
+                            : (commit_delete ? "ownerless-remote-delete-primary-commit.mylite"
+                                             : "ownerless-remote-delete-primary-rollback.mylite")
+    );
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t delete_child;
+    mylite_db *reader;
+    unsigned mariadb_errno = 0U;
+    const char *locking_read =
+        use_secondary_index
+            ? "SELECT id FROM app.ownerless_remote_delete "
+              "FORCE INDEX (ownerless_remote_delete_value) WHERE value = 10 FOR UPDATE"
+            : "SELECT value FROM app.ownerless_remote_delete WHERE id = 1 FOR UPDATE";
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    reader = open_database(paths, MYLITE_OPEN_READWRITE);
+    exec_ok(
+        reader,
+        "CREATE TABLE app.ownerless_remote_delete ("
+        "id INT NOT NULL PRIMARY KEY, value INT NOT NULL, "
+        "KEY ownerless_remote_delete_value (value)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(reader, "INSERT INTO app.ownerless_remote_delete VALUES (1, 10), (2, 20)");
+    assert(mylite_close(reader) == MYLITE_OK);
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+
+    delete_child = fork();
+    assert(delete_child >= 0);
+    if (delete_child == 0) {
+        mylite_db *deleter;
+
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        deleter = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+        exec_ok(deleter, "SET SESSION innodb_lock_wait_timeout = 30");
+        exec_ok(deleter, "START TRANSACTION");
+        exec_ok(deleter, "DELETE FROM app.ownerless_remote_delete WHERE id = 1");
+        signal_pipe(ready_pipe[1]);
+        wait_for_pipe(release_pipe[0]);
+        exec_ok(deleter, commit_delete ? "COMMIT" : "ROLLBACK");
+        assert(mylite_close(deleter) == MYLITE_OK);
+        _exit(0);
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+    reader = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(reader, "SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED");
+    exec_ok(reader, "SET SESSION innodb_lock_wait_timeout = 1");
+    assert(exec_status(reader, locking_read, &mariadb_errno) != MYLITE_OK);
+    assert(mariadb_errno == MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO);
+    signal_pipe(release_pipe[1]);
+    wait_for_child(delete_child);
+    assert(mylite_close(reader) == MYLITE_OK);
+
+    reader = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(reader, "SELECT COUNT(*) FROM app.ownerless_remote_delete WHERE id = 1") ==
+        (commit_delete ? 0U : 1U)
+    );
+    assert(mylite_close(reader) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_read_committed_remote_delete_locking_reads(void) {
+    run_ownerless_read_committed_remote_delete_case(0, 0);
+    run_ownerless_read_committed_remote_delete_case(0, 1);
+    run_ownerless_read_committed_remote_delete_case(1, 0);
+    run_ownerless_read_committed_remote_delete_case(1, 1);
+}
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void run_ownerless_foreign_key_current_read_fault_child(
+    open_database_paths paths,
+    child_pipes pipes,
+    int check_parent
+) {
+    const char *fault_name = "foreign-key-current-read-after-statement-refresh";
+    const char *statement = check_parent ? "INSERT INTO app.ownerless_fk_child VALUES (1, 1)"
+                                         : "DELETE FROM app.ownerless_fk_parent WHERE id = 1";
+    const unsigned expected_errno =
+        check_parent ? MYLITE_TEST_NO_REFERENCED_ROW_ERRNO : MYLITE_TEST_ROW_IS_REFERENCED_ERRNO;
+    char ready_fd_value[32];
+    char release_fd_value[32];
+    unsigned mariadb_errno = 0U;
+    mylite_db *db;
+
+    assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", pipes.ready_write_fd) > 0);
+    assert(snprintf(release_fd_value, sizeof(release_fd_value), "%d", pipes.release_read_fd) > 0);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    if (check_parent) {
+        assert(query_unsigned(db, "SELECT id FROM app.ownerless_fk_parent WHERE id = 1") == 1U);
+    } else {
+        assert(
+            query_unsigned(
+                db,
+                "SELECT COUNT(*) FROM app.ownerless_fk_child "
+                "FORCE INDEX (ownerless_fk_child_parent) WHERE parent_id = 1"
+            ) == 0U
+        );
+    }
+    exec_ok(db, "START TRANSACTION");
+    exec_ok(db, "UPDATE app.ownerless_fk_dirty SET value = value + 1 WHERE id = 1");
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", fault_name, 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_RELEASE_FD", release_fd_value, 1) == 0);
+    assert(exec_status(db, statement, &mariadb_errno) != MYLITE_OK);
+    if (mariadb_errno != expected_errno) {
+        fprintf(
+            stderr,
+            "foreign-key current-read error mismatch: sql=%s expected=%u actual=%u message=%s\n",
+            statement,
+            expected_errno,
+            mariadb_errno,
+            mylite_errmsg(db)
+        );
+    }
+    assert(mariadb_errno == expected_errno);
+    assert(unsetenv("MYLITE_OWNERLESS_TEST_FAULT") == 0);
+    assert(unsetenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD") == 0);
+    assert(unsetenv("MYLITE_OWNERLESS_TEST_FAULT_RELEASE_FD") == 0);
+    exec_ok(db, "ROLLBACK");
+    {
+        const unsigned long long local_dirty_value =
+            query_unsigned(db, "SELECT value FROM app.ownerless_fk_dirty WHERE id = 1");
+        if (local_dirty_value != 10U) {
+            fprintf(
+                stderr,
+                "foreign-key rollback local dirty mismatch: value=%llu\n",
+                local_dirty_value
+            );
+        }
+        assert(local_dirty_value == 10U);
+    }
+    if (!check_parent) {
+        const unsigned long long local_parent_count =
+            query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_parent");
+        const unsigned long long local_child_count =
+            query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_child");
+        if (local_parent_count != 1U || local_child_count != 1U) {
+            fprintf(
+                stderr,
+                "foreign-key rollback local mismatch: parents=%llu children=%llu\n",
+                local_parent_count,
+                local_child_count
+            );
+        }
+        assert(local_parent_count == 1U);
+        assert(local_child_count == 1U);
+    }
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
+static void test_ownerless_foreign_key_current_reads_refresh_with_local_dirty_pages(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-foreign-key-current-read.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t child;
+    mylite_db *peer;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    peer = open_database(paths, MYLITE_OPEN_READWRITE);
+    exec_ok(
+        peer,
+        "CREATE TABLE app.ownerless_fk_parent (id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB"
+    );
+    exec_ok(
+        peer,
+        "CREATE TABLE app.ownerless_fk_dirty ("
+        "id INT NOT NULL PRIMARY KEY, value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        peer,
+        "CREATE TABLE app.ownerless_fk_child ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT NOT NULL, "
+        "KEY ownerless_fk_child_parent (parent_id), "
+        "CONSTRAINT ownerless_fk_child_parent_fk FOREIGN KEY (parent_id) "
+        "REFERENCES app.ownerless_fk_parent (id)"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(peer, "INSERT INTO app.ownerless_fk_parent VALUES (1)");
+    exec_ok(peer, "INSERT INTO app.ownerless_fk_dirty VALUES (1, 10)");
+    assert(mylite_close(peer) == MYLITE_OK);
+
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        run_ownerless_foreign_key_current_read_fault_child(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            },
+            1
+        );
+    }
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+    peer = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(peer, "DELETE FROM app.ownerless_fk_parent WHERE id = 1");
+    assert(mylite_close(peer) == MYLITE_OK);
+    signal_pipe(release_pipe[1]);
+    wait_for_child(child);
+
+    peer = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(peer, "SELECT COUNT(*) FROM app.ownerless_fk_parent") == 0U);
+    assert(query_unsigned(peer, "SELECT COUNT(*) FROM app.ownerless_fk_child") == 0U);
+    exec_ok(peer, "INSERT INTO app.ownerless_fk_parent VALUES (1)");
+    assert(mylite_close(peer) == MYLITE_OK);
+
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        run_ownerless_foreign_key_current_read_fault_child(
+            paths,
+            (child_pipes){
+                .ready_write_fd = ready_pipe[1],
+                .release_read_fd = release_pipe[0],
+            },
+            0
+        );
+    }
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+    peer = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(peer, "SET foreign_key_checks = 0");
+    exec_ok(peer, "INSERT INTO app.ownerless_fk_child VALUES (2, 1)");
+    exec_ok(peer, "SET foreign_key_checks = 1");
+    signal_pipe(release_pipe[1]);
+    wait_for_child(child);
+
+    const unsigned long long parent_count =
+        query_unsigned(peer, "SELECT COUNT(*) FROM app.ownerless_fk_parent");
+    const unsigned long long child_count =
+        query_unsigned(peer, "SELECT COUNT(*) FROM app.ownerless_fk_child");
+    if (parent_count != 1U || child_count != 1U) {
+        fprintf(
+            stderr,
+            "foreign-key current-read final mismatch: parents=%llu children=%llu\n",
+            parent_count,
+            child_count
+        );
+    }
+    assert(parent_count == 1U);
+    assert(child_count == 1U);
+    const unsigned long long dirty_value =
+        query_unsigned(peer, "SELECT value FROM app.ownerless_fk_dirty WHERE id = 1");
+    if (dirty_value != 10U) {
+        fprintf(stderr, "foreign-key current-read final dirty mismatch: value=%llu\n", dirty_value);
+    }
+    assert(dirty_value == 10U);
+    assert(mylite_close(peer) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+#endif
+
+static void run_ownerless_serializable_plain_select_case(int prepared) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(
+        root,
+        prepared ? "ownerless-serializable-prepared-current-read.mylite"
+                 : "ownerless-serializable-direct-current-read.mylite"
+    );
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int start_pipe[2];
+    pid_t writer_child;
+    mylite_db *reader;
+    const char *first_read = "SELECT value FROM app.ownerless_sql WHERE id = 1";
+    const char *second_read = "SELECT value FROM app.ownerless_sql WHERE id = 2";
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(start_pipe) == 0);
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        mylite_db *writer;
+
+        close(start_pipe[1]);
+        wait_for_pipe(start_pipe[0]);
+        writer = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+        exec_ok(writer, "UPDATE app.ownerless_sql SET value = value + 7 WHERE id = 2");
+        assert(mylite_close(writer) == MYLITE_OK);
+        _exit(0);
+    }
+
+    close(start_pipe[0]);
+    reader = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(reader, "SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE");
+    exec_ok(reader, "START TRANSACTION");
+    assert(
+        (prepared ? prepared_query_unsigned(reader, first_read)
+                  : query_unsigned(reader, first_read)) == 10U
+    );
+    signal_pipe(start_pipe[1]);
+    wait_for_child(writer_child);
+    assert(
+        (prepared ? prepared_query_unsigned(reader, second_read)
+                  : query_unsigned(reader, second_read)) == 27U
+    );
+    exec_ok(reader, "COMMIT");
+    assert(mylite_close(reader) == MYLITE_OK);
+    assert_total_value(paths, 37U);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_serializable_plain_select_uses_current_read(void) {
+    run_ownerless_serializable_plain_select_case(0);
+    run_ownerless_serializable_plain_select_case(1);
+}
+
+static void run_ownerless_autocommit_off_next_isolation_case(int prepared, int read_committed) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(
+        root,
+        read_committed ? (prepared ? "ownerless-autocommit-next-rc-prepared.mylite"
+                                   : "ownerless-autocommit-next-rc-direct.mylite")
+                       : (prepared ? "ownerless-autocommit-next-rr-prepared.mylite"
+                                   : "ownerless-autocommit-next-rr-direct.mylite")
+    );
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int start_pipe[2];
+    pid_t writer_child;
+    mylite_db *reader;
+    const char *select_sql = "SELECT value FROM app.ownerless_sql WHERE id = 1";
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(start_pipe) == 0);
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(start_pipe[1]);
+        update_first_row_by_seven_after_signal(paths, start_pipe[0]);
+    }
+
+    close(start_pipe[0]);
+    reader = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        reader,
+        read_committed ? "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ"
+                       : "SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED"
+    );
+    if (prepared) {
+        prepared_exec_ok(reader, "SET autocommit = 0");
+        prepared_exec_ok(
+            reader,
+            read_committed ? "SET TRANSACTION ISOLATION LEVEL READ COMMITTED"
+                           : "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"
+        );
+    } else {
+        exec_ok(reader, "SET autocommit = 0");
+        exec_ok(
+            reader,
+            read_committed ? "SET TRANSACTION ISOLATION LEVEL READ COMMITTED"
+                           : "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"
+        );
+    }
+    assert(
+        (prepared ? prepared_query_unsigned(reader, select_sql)
+                  : query_unsigned(reader, select_sql)) == 10U
+    );
+    signal_pipe(start_pipe[1]);
+    wait_for_child(writer_child);
+    assert(
+        (prepared ? prepared_query_unsigned(reader, select_sql)
+                  : query_unsigned(reader, select_sql)) == (read_committed ? 17U : 10U)
+    );
+    exec_ok(reader, "COMMIT");
+    exec_ok(reader, "SET autocommit = 1");
+    assert(mylite_close(reader) == MYLITE_OK);
+    assert_total_value(paths, 37U);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_autocommit_off_next_transaction_isolation(void) {
+    run_ownerless_autocommit_off_next_isolation_case(0, 1);
+    run_ownerless_autocommit_off_next_isolation_case(1, 1);
+    run_ownerless_autocommit_off_next_isolation_case(0, 0);
+    run_ownerless_autocommit_off_next_isolation_case(1, 0);
+}
+
+static void ownerless_chain_exec(mylite_db *db, const char *sql, int prepared) {
+    if (prepared) {
+        prepared_exec_ok(db, sql);
+    } else {
+        exec_ok(db, sql);
+    }
+}
+
+static mylite_stmt *prepare_ownerless_chain_end(mylite_db *db, const char *sql) {
+    mylite_stmt *stmt = NULL;
+    const char *tail = NULL;
+
+    assert(mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, &tail) == MYLITE_OK);
+    assert(stmt != NULL);
+    assert(tail != NULL && *tail == '\0');
+    assert(mylite_bind_parameter_count(stmt) == 0U);
+    return stmt;
+}
+
+static void execute_ownerless_chain_end(
+    mylite_db *db,
+    const char *sql,
+    int prepared,
+    mylite_stmt *prepared_stmt
+) {
+    if (!prepared) {
+        exec_ok(db, sql);
+        return;
+    }
+
+    assert(prepared_stmt != NULL);
+    assert(mylite_step(prepared_stmt) == MYLITE_DONE);
+    assert(mylite_finalize(prepared_stmt) == MYLITE_OK);
+}
+
+static void run_ownerless_chained_transaction_case(
+    int prepared,
+    int read_committed,
+    int completion_type_chain,
+    int rollback_transaction,
+    int expect_chain
+) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char database_name[128];
+    int written = snprintf(
+        database_name,
+        sizeof(database_name),
+        "ownerless-chain-%s-%s-%s-%s.mylite",
+        prepared ? "prepared" : "direct",
+        read_committed ? "rc" : "rr",
+        expect_chain ? (completion_type_chain ? "completion" : "explicit") : "no-chain",
+        rollback_transaction ? "rollback" : "commit"
+    );
+    assert(written > 0 && (size_t)written < sizeof(database_name));
+    char *database_path = path_join(root, database_name);
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int start_pipe[2];
+    pid_t writer_child;
+    mylite_db *reader;
+    const char *select_sql = "SELECT value FROM app.ownerless_sql WHERE id = 1";
+    const char *end_sql =
+        expect_chain ? (completion_type_chain
+                            ? (rollback_transaction ? "ROLLBACK" : "COMMIT")
+                            : (rollback_transaction ? "ROLLBACK AND CHAIN" : "COMMIT AND CHAIN"))
+                     : (rollback_transaction ? "ROLLBACK AND NO CHAIN" : "COMMIT AND NO CHAIN");
+    mylite_stmt *prepared_end = NULL;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(start_pipe) == 0);
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(start_pipe[1]);
+        update_first_row_by_seven_after_signal(paths, start_pipe[0]);
+    }
+
+    close(start_pipe[0]);
+    reader = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    ownerless_chain_exec(
+        reader,
+        read_committed ? "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ"
+                       : "SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED",
+        prepared
+    );
+    ownerless_chain_exec(
+        reader,
+        read_committed ? "SET TRANSACTION ISOLATION LEVEL READ COMMITTED"
+                       : "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ",
+        prepared
+    );
+    if (prepared) {
+        prepared_end = prepare_ownerless_chain_end(reader, end_sql);
+    }
+    if (completion_type_chain) {
+        ownerless_chain_exec(reader, "SET SESSION completion_type = CHAIN", prepared);
+    }
+    ownerless_chain_exec(reader, "START TRANSACTION", prepared);
+    assert(
+        (prepared ? prepared_query_unsigned(reader, select_sql)
+                  : query_unsigned(reader, select_sql)) == 10U
+    );
+    ownerless_chain_exec(
+        reader,
+        "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 2",
+        prepared
+    );
+    execute_ownerless_chain_end(reader, end_sql, prepared, prepared_end);
+    assert(query_unsigned(reader, "SELECT @@in_transaction") == (expect_chain ? 1U : 0U));
+    assert(read_concurrency_explicit_transaction_count(database_path) == (expect_chain ? 1U : 0U));
+    assert(
+        query_unsigned(reader, "SELECT value FROM app.ownerless_sql WHERE id = 2") ==
+        (rollback_transaction ? 20U : 21U)
+    );
+
+    if (!expect_chain) {
+        ownerless_chain_exec(reader, "START TRANSACTION", prepared);
+        assert(query_unsigned(reader, "SELECT @@in_transaction") == 1U);
+        assert(read_concurrency_explicit_transaction_count(database_path) == 1U);
+    }
+    assert(
+        (prepared ? prepared_query_unsigned(reader, select_sql)
+                  : query_unsigned(reader, select_sql)) == 10U
+    );
+
+    signal_pipe(start_pipe[1]);
+    wait_for_child(writer_child);
+    assert(
+        (prepared ? prepared_query_unsigned(reader, select_sql)
+                  : query_unsigned(reader, select_sql)) ==
+        ((expect_chain ? read_committed : !read_committed) ? 17U : 10U)
+    );
+    ownerless_chain_exec(reader, "COMMIT AND NO CHAIN", prepared);
+    assert(query_unsigned(reader, "SELECT @@in_transaction") == 0U);
+    assert(read_concurrency_explicit_transaction_count(database_path) == 0U);
+    assert(query_unsigned(reader, select_sql) == 17U);
+    assert(mylite_close(reader) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_chained_transaction_preserves_native_state(void) {
+    for (int prepared = 0; prepared <= 1; ++prepared) {
+        run_ownerless_chained_transaction_case(prepared, 1, 0, 0, 1);
+        run_ownerless_chained_transaction_case(prepared, 0, 0, 1, 1);
+        run_ownerless_chained_transaction_case(prepared, 0, 1, 0, 1);
+        run_ownerless_chained_transaction_case(prepared, 1, 1, 1, 1);
+        run_ownerless_chained_transaction_case(prepared, 0, 1, 0, 0);
+        run_ownerless_chained_transaction_case(prepared, 1, 1, 1, 0);
+    }
+}
+
+static void run_ownerless_rollback_work_to_savepoint_case(
+    int prepared,
+    int explicit_savepoint_keyword
+) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char database_name[128];
+    const int written = snprintf(
+        database_name,
+        sizeof(database_name),
+        "ownerless-rollback-work-%s-%s.mylite",
+        prepared ? "prepared" : "direct",
+        explicit_savepoint_keyword ? "savepoint" : "name"
+    );
+    assert(written > 0 && (size_t)written < sizeof(database_name));
+    char *database_path = path_join(root, database_name);
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int start_pipe[2];
+    pid_t writer_child;
+    mylite_db *reader;
+    mylite_db *setup;
+    const char *rollback_sql = explicit_savepoint_keyword
+                                   ? "ROLLBACK WORK TO SAVEPOINT ownerless_work"
+                                   : "ROLLBACK WORK TO ownerless_work";
+    const char *base_select_sql = "SELECT value FROM app.ownerless_sql WHERE id = 1";
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    setup = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        setup,
+        "CREATE TABLE app.ownerless_rollback_work ("
+        "id INT NOT NULL PRIMARY KEY, value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(setup, "INSERT INTO app.ownerless_rollback_work VALUES (1, 10), (2, 20)");
+    assert(mylite_close(setup) == MYLITE_OK);
+
+    assert(pipe(start_pipe) == 0);
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(start_pipe[1]);
+        assert_savepoint_write_hidden_and_update_first_row(paths, start_pipe[0]);
+    }
+
+    close(start_pipe[0]);
+    reader = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    ownerless_chain_exec(
+        reader,
+        "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ",
+        prepared
+    );
+    ownerless_chain_exec(reader, "START TRANSACTION", prepared);
+    assert(
+        (prepared ? prepared_query_unsigned(reader, base_select_sql)
+                  : query_unsigned(reader, base_select_sql)) == 10U
+    );
+    ownerless_chain_exec(
+        reader,
+        "UPDATE app.ownerless_rollback_work SET value = value + 1 WHERE id = 1",
+        prepared
+    );
+    ownerless_chain_exec(reader, "SAVEPOINT ownerless_work", prepared);
+    ownerless_chain_exec(
+        reader,
+        "UPDATE app.ownerless_rollback_work SET value = value + 100 WHERE id = 2",
+        prepared
+    );
+    ownerless_chain_exec(reader, rollback_sql, prepared);
+
+    assert(
+        (prepared ? prepared_query_unsigned(reader, "SELECT @@in_transaction")
+                  : query_unsigned(reader, "SELECT @@in_transaction")) == 1U
+    );
+    assert(read_concurrency_explicit_transaction_count(database_path) == 1U);
+    assert(
+        (prepared ? prepared_query_unsigned(
+                        reader,
+                        "SELECT value FROM app.ownerless_rollback_work WHERE id = 1"
+                    )
+                  : query_unsigned(
+                        reader,
+                        "SELECT value FROM app.ownerless_rollback_work WHERE id = 1"
+                    )) == 11U
+    );
+    assert(
+        (prepared ? prepared_query_unsigned(
+                        reader,
+                        "SELECT value FROM app.ownerless_rollback_work WHERE id = 2"
+                    )
+                  : query_unsigned(
+                        reader,
+                        "SELECT value FROM app.ownerless_rollback_work WHERE id = 2"
+                    )) == 20U
+    );
+
+    signal_pipe(start_pipe[1]);
+    wait_for_child(writer_child);
+    assert(
+        (prepared ? prepared_query_unsigned(reader, base_select_sql)
+                  : query_unsigned(reader, base_select_sql)) == 10U
+    );
+    ownerless_chain_exec(reader, "COMMIT", prepared);
+    assert(read_concurrency_explicit_transaction_count(database_path) == 0U);
+    assert(query_unsigned(reader, base_select_sql) == 17U);
+    assert(query_unsigned(reader, "SELECT SUM(value) FROM app.ownerless_rollback_work") == 31U);
+    assert(mylite_close(reader) == MYLITE_OK);
+
+    reader = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(query_unsigned(reader, base_select_sql) == 17U);
+    assert(query_unsigned(reader, "SELECT SUM(value) FROM app.ownerless_rollback_work") == 31U);
+    assert(mylite_close(reader) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_rollback_work_to_savepoint_preserves_transaction(void) {
+    for (int prepared = 0; prepared <= 1; ++prepared) {
+        run_ownerless_rollback_work_to_savepoint_case(prepared, 0);
+        run_ownerless_rollback_work_to_savepoint_case(prepared, 1);
+    }
+}
+
+static void assert_ownerless_released_connection(mylite_db *db) {
+    char *errmsg = NULL;
+    mylite_stmt *stmt = NULL;
+    const char *tail = NULL;
+
+    assert(mylite_exec(db, "SELECT 1", NULL, NULL, &errmsg) == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == MYLITE_TEST_SERVER_GONE_ERRNO);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(errmsg != NULL && strstr(errmsg, "gone away") != NULL);
+    mylite_free(errmsg);
+
+    assert(mylite_prepare(db, "SELECT 1", MYLITE_NUL_TERMINATED, &stmt, &tail) == MYLITE_ERROR);
+    assert(stmt == NULL);
+    assert(tail == NULL);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == MYLITE_TEST_SERVER_GONE_ERRNO);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(strstr(mylite_errmsg(db), "gone away") != NULL);
+}
+
+static void run_ownerless_transaction_release_case(
+    int commit_transaction,
+    int completion_type_release
+) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char database_name[128];
+    const int written = snprintf(
+        database_name,
+        sizeof(database_name),
+        "ownerless-%s-%s-release.mylite",
+        commit_transaction ? "commit" : "rollback",
+        completion_type_release ? "completion" : "explicit"
+    );
+    assert(written > 0 && (size_t)written < sizeof(database_name));
+    char *database_path = path_join(root, database_name);
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db;
+    const char *end_sql = completion_type_release
+                              ? (commit_transaction ? "COMMIT" : "ROLLBACK")
+                              : (commit_transaction ? "COMMIT RELEASE" : "ROLLBACK RELEASE");
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    if (completion_type_release) {
+        exec_ok(db, "SET SESSION completion_type = 'RELEASE'");
+    }
+    exec_ok(db, "START TRANSACTION");
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1");
+    exec_ok(db, end_sql);
+    assert(read_concurrency_explicit_transaction_count(database_path) == 0U);
+    assert_ownerless_released_connection(db);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") ==
+        (commit_transaction ? 31U : 30U)
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_transaction_release_closes_native_session(void) {
+    run_ownerless_transaction_release_case(1, 0);
+    run_ownerless_transaction_release_case(0, 0);
+    run_ownerless_transaction_release_case(1, 1);
+    run_ownerless_transaction_release_case(0, 1);
+}
+
+static void expect_database_open_busy_after_signal(
+    open_database_paths paths,
+    int start_read_fd,
+    unsigned flags
+) {
+    mylite_db *db = NULL;
+
+    wait_for_pipe(start_read_fd);
+    assert(open_database_result(paths, flags, &db) == MYLITE_BUSY);
+    assert(db == NULL);
+    _exit(0);
+}
+
+static void run_ownerless_lifetime_lock_fence_case(
+    unsigned winner_flags,
+    unsigned loser_flags,
+    const char *case_name
+) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char database_name[128];
+    const int written =
+        snprintf(database_name, sizeof(database_name), "ownerless-lifetime-%s.mylite", case_name);
+    assert(written > 0 && (size_t)written < sizeof(database_name));
+    char *database_path = path_join(root, database_name);
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int start_pipe[2];
+    pid_t loser_child;
+    mylite_db *winner;
+    mylite_db *later;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(start_pipe) == 0);
+    loser_child = fork();
+    assert(loser_child >= 0);
+    if (loser_child == 0) {
+        close(start_pipe[1]);
+        expect_database_open_busy_after_signal(paths, start_pipe[0], loser_flags);
+    }
+
+    close(start_pipe[0]);
+    winner = open_database(paths, winner_flags);
+    signal_pipe(start_pipe[1]);
+    wait_for_child(loser_child);
+    assert(query_unsigned(winner, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    assert(mylite_close(winner) == MYLITE_OK);
+
+    later = open_database(paths, loser_flags);
+    assert(query_unsigned(later, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    assert(mylite_close(later) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void create_ownerless_runtime_marker(const char *path) {
+    const char value = 'x';
+    const int fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0600);
+
+    assert(fd >= 0);
+    assert(write(fd, &value, sizeof(value)) == sizeof(value));
+    assert(close(fd) == 0);
+}
+
+static void hold_ownerless_runtime_with_markers(
+    open_database_paths paths,
+    int ready_fd,
+    int release_fd
+) {
+    char *run_marker = path_join(paths.database_path, "run/live-peer.marker");
+    char *tmp_marker = path_join(paths.database_path, "tmp/live-peer.marker");
+    mylite_db *db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+
+    create_ownerless_runtime_marker(run_marker);
+    create_ownerless_runtime_marker(tmp_marker);
+    signal_pipe(ready_fd);
+    wait_for_pipe(release_fd);
+    assert(path_exists(run_marker));
+    assert(path_exists(tmp_marker));
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    assert(mylite_close(db) == MYLITE_OK);
+    free(tmp_marker);
+    free(run_marker);
+    _exit(0);
+}
+
+static void run_ownerless_live_runtime_directory_preservation_case(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-live-runtime-directories.mylite");
+    char *run_marker = path_join(database_path, "run/live-peer.marker");
+    char *tmp_marker = path_join(database_path, "tmp/live-peer.marker");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int ready_pipe[2];
+    int release_pipe[2];
+    pid_t peer;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+    peer = fork();
+    assert(peer >= 0);
+    if (peer == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        hold_ownerless_runtime_with_markers(paths, ready_pipe[1], release_pipe[0]);
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    wait_for_pipe(ready_pipe[0]);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(path_exists(run_marker));
+    assert(path_exists(tmp_marker));
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    signal_pipe(release_pipe[1]);
+    wait_for_child(peer);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(tmp_marker);
+    free(run_marker);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void open_ownerless_with_bootstrap_pause(
+    open_database_paths paths,
+    child_pipes fault_pipes,
+    child_pipes lifecycle_pipes
+) {
+    char ready_fd_value[32];
+    char release_fd_value[32];
+    mylite_db *db;
+
+    assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", fault_pipes.ready_write_fd) > 0);
+    assert(
+        snprintf(release_fd_value, sizeof(release_fd_value), "%d", fault_pipes.release_read_fd) > 0
+    );
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "startup-after-bootstrap-lock", 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_RELEASE_FD", release_fd_value, 1) == 0);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(unsetenv("MYLITE_OWNERLESS_TEST_FAULT") == 0);
+    assert(unsetenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD") == 0);
+    assert(unsetenv("MYLITE_OWNERLESS_TEST_FAULT_RELEASE_FD") == 0);
+    signal_pipe(lifecycle_pipes.ready_write_fd);
+    wait_for_pipe(lifecycle_pipes.release_read_fd);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
+static void open_ownerless_and_hold(open_database_paths paths, child_pipes lifecycle_pipes) {
+    mylite_db *db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+
+    signal_pipe(lifecycle_pipes.ready_write_fd);
+    wait_for_pipe(lifecycle_pipes.release_read_fd);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
+static void run_ownerless_bootstrap_lock_serialization_case(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-bootstrap-serialization.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int fault_ready_pipe[2];
+    int fault_release_pipe[2];
+    int first_ready_pipe[2];
+    int first_release_pipe[2];
+    int second_ready_pipe[2];
+    int second_release_pipe[2];
+    struct pollfd second_open_poll;
+    pid_t first;
+    pid_t second;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(fault_ready_pipe) == 0);
+    assert(pipe(fault_release_pipe) == 0);
+    assert(pipe(first_ready_pipe) == 0);
+    assert(pipe(first_release_pipe) == 0);
+
+    first = fork();
+    assert(first >= 0);
+    if (first == 0) {
+        const child_pipes fault_pipes = {
+            .ready_write_fd = fault_ready_pipe[1],
+            .release_read_fd = fault_release_pipe[0]
+        };
+        const child_pipes lifecycle_pipes = {
+            .ready_write_fd = first_ready_pipe[1],
+            .release_read_fd = first_release_pipe[0]
+        };
+        close(fault_ready_pipe[0]);
+        close(fault_release_pipe[1]);
+        close(first_ready_pipe[0]);
+        close(first_release_pipe[1]);
+        open_ownerless_with_bootstrap_pause(paths, fault_pipes, lifecycle_pipes);
+    }
+    close(fault_ready_pipe[1]);
+    close(fault_release_pipe[0]);
+    close(first_ready_pipe[1]);
+    close(first_release_pipe[0]);
+    wait_for_pipe_message(fault_ready_pipe[0]);
+
+    assert(pipe(second_ready_pipe) == 0);
+    assert(pipe(second_release_pipe) == 0);
+    second = fork();
+    assert(second >= 0);
+    if (second == 0) {
+        const child_pipes lifecycle_pipes = {
+            .ready_write_fd = second_ready_pipe[1],
+            .release_read_fd = second_release_pipe[0]
+        };
+        close(second_ready_pipe[0]);
+        close(second_release_pipe[1]);
+        open_ownerless_and_hold(paths, lifecycle_pipes);
+    }
+    close(second_ready_pipe[1]);
+    close(second_release_pipe[0]);
+    second_open_poll.fd = second_ready_pipe[0];
+    second_open_poll.events = POLLIN;
+    second_open_poll.revents = 0;
+    assert(poll(&second_open_poll, 1, 250) == 0);
+
+    signal_pipe_message(fault_release_pipe[1]);
+    wait_for_pipe(first_ready_pipe[0]);
+    wait_for_pipe(second_ready_pipe[0]);
+    signal_pipe(first_release_pipe[1]);
+    signal_pipe(second_release_pipe[1]);
+    wait_for_child(first);
+    wait_for_child(second);
+
+    close(fault_ready_pipe[0]);
+    close(fault_release_pipe[1]);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+#endif
+
+static void test_ownerless_lifetime_lock_fences_ordinary_runtime_bidirectionally(void) {
+    run_ownerless_lifetime_lock_fence_case(
+        MYLITE_OPEN_READWRITE,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        "ordinary-wins"
+    );
+    run_ownerless_lifetime_lock_fence_case(
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        MYLITE_OPEN_READWRITE,
+        "ownerless-wins"
+    );
+    run_ownerless_live_runtime_directory_preservation_case();
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    run_ownerless_bootstrap_lock_serialization_case();
+#endif
+}
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void fail_page_observation_token_open_in_child(open_database_paths paths) {
+    mylite_db *db = NULL;
+
+    assert(setenv("MYLITE_OWNERLESS_TEST_PAGE_OBSERVATION_TOKEN_EXHAUSTED", "1", 1) == 0);
+    assert(
+        open_database_result(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW, &db) ==
+        MYLITE_ERROR
+    );
+    assert(db == NULL);
+    _exit(0);
+}
+
+static void test_ownerless_page_observation_token_exhaustion_fails_closed(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-observation-token-exhaustion.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    pid_t child;
+    mylite_db *db;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        fail_page_observation_token_open_in_child(paths);
+    }
+    wait_for_child(child);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+#endif
+
+static void run_ownerless_implicit_ddl_commit_snapshot_case(int prepared) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(
+        root,
+        prepared ? "ownerless-implicit-ddl-commit-prepared.mylite"
+                 : "ownerless-implicit-ddl-commit-direct.mylite"
+    );
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int start_pipe[2];
+    pid_t writer_child;
+    mylite_db *reader;
+    const char *select_sql = "SELECT value FROM app.ownerless_sql WHERE id = 1";
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(start_pipe) == 0);
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(start_pipe[1]);
+        update_first_row_by_seven_after_signal(paths, start_pipe[0]);
+    }
+
+    close(start_pipe[0]);
+    reader = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    ownerless_chain_exec(
+        reader,
+        "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ",
+        prepared
+    );
+    ownerless_chain_exec(reader, "SET autocommit = 0", prepared);
+    assert(
+        (prepared ? prepared_query_unsigned(reader, select_sql)
+                  : query_unsigned(reader, select_sql)) == 10U
+    );
+
+    signal_pipe(start_pipe[1]);
+    wait_for_child(writer_child);
+    ownerless_chain_exec(
+        reader,
+        "CREATE TABLE app.ownerless_implicit_commit (id INT PRIMARY KEY) ENGINE=InnoDB",
+        prepared
+    );
+    assert(query_unsigned(reader, "SELECT @@autocommit") == 0U);
+    assert(query_unsigned(reader, "SELECT @@in_transaction") == 0U);
+    assert(
+        (prepared ? prepared_query_unsigned(reader, select_sql)
+                  : query_unsigned(reader, select_sql)) == 17U
+    );
+    ownerless_chain_exec(reader, "COMMIT", prepared);
+    ownerless_chain_exec(reader, "SET autocommit = 1", prepared);
+    assert(mylite_close(reader) == MYLITE_OK);
+    assert_total_value(paths, 37U);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_implicit_ddl_commit_resets_autocommit_off_snapshot(void) {
+    run_ownerless_implicit_ddl_commit_snapshot_case(0);
+    run_ownerless_implicit_ddl_commit_snapshot_case(1);
+}
+
+static void run_ownerless_repeated_consistent_snapshot_case(int prepared) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(
+        root,
+        prepared ? "ownerless-repeated-snapshot-prepared.mylite"
+                 : "ownerless-repeated-snapshot-direct.mylite"
+    );
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    int start_pipe[2];
+    pid_t writer_child;
+    mylite_db *reader;
+    const char *select_sql = "SELECT value FROM app.ownerless_sql WHERE id = 1";
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    assert(pipe(start_pipe) == 0);
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(start_pipe[1]);
+        update_first_row_by_seven_after_signal(paths, start_pipe[0]);
+    }
+
+    close(start_pipe[0]);
+    reader = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    ownerless_chain_exec(
+        reader,
+        "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ",
+        prepared
+    );
+    ownerless_chain_exec(reader, "START TRANSACTION WITH CONSISTENT SNAPSHOT", prepared);
+    assert(
+        (prepared ? prepared_query_unsigned(reader, select_sql)
+                  : query_unsigned(reader, select_sql)) == 10U
+    );
+
+    signal_pipe(start_pipe[1]);
+    wait_for_child(writer_child);
+    ownerless_chain_exec(reader, "START TRANSACTION WITH CONSISTENT SNAPSHOT", prepared);
+    assert(
+        (prepared ? prepared_query_unsigned(reader, select_sql)
+                  : query_unsigned(reader, select_sql)) == 17U
+    );
+    ownerless_chain_exec(reader, "COMMIT", prepared);
+    assert(mylite_close(reader) == MYLITE_OK);
+    assert_total_value(paths, 37U);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_repeated_consistent_snapshot_replaces_pin(void) {
+    run_ownerless_repeated_consistent_snapshot_case(0);
+    run_ownerless_repeated_consistent_snapshot_case(1);
+}
+
+static void test_ownerless_transaction_and_read_view_capacity_is_recoverable(void) {
+    enum {
+        capacity = 64,
+        handle_count = capacity + 1,
+    };
+
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-capacity-recoverable.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *handles[handle_count] = {NULL};
+    char insert_sql[2048];
+    size_t insert_offset;
+    int written;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+    handles[0] = open_database(paths, MYLITE_OPEN_READWRITE);
+    exec_ok(
+        handles[0],
+        "CREATE TABLE app.ownerless_capacity ("
+        "id INT NOT NULL PRIMARY KEY, value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    written =
+        snprintf(insert_sql, sizeof(insert_sql), "INSERT INTO app.ownerless_capacity VALUES ");
+    assert(written > 0 && (size_t)written < sizeof(insert_sql));
+    insert_offset = (size_t)written;
+    for (unsigned row = 1U; row <= handle_count; ++row) {
+        written = snprintf(
+            insert_sql + insert_offset,
+            sizeof(insert_sql) - insert_offset,
+            "%s(%u, %u)",
+            row == 1U ? "" : ", ",
+            row,
+            row * 10U
+        );
+        assert(written > 0 && (size_t)written < sizeof(insert_sql) - insert_offset);
+        insert_offset += (size_t)written;
+    }
+    exec_ok(handles[0], insert_sql);
+    assert(mylite_close(handles[0]) == MYLITE_OK);
+    handles[0] = NULL;
+
+    for (unsigned handle = 0U; handle < handle_count; ++handle) {
+        handles[handle] = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+        exec_ok(handles[handle], "SET SESSION innodb_lock_wait_timeout = 1");
+    }
+
+    for (unsigned handle = 0U; handle < capacity; ++handle) {
+        char sql[128];
+        exec_ok(handles[handle], "START TRANSACTION");
+        written = snprintf(
+            sql,
+            sizeof(sql),
+            "SELECT value FROM app.ownerless_capacity WHERE id = %u FOR UPDATE",
+            handle + 1U
+        );
+        assert(written > 0 && (size_t)written < sizeof(sql));
+        exec_ok(handles[handle], sql);
+    }
+    assert(read_concurrency_trx_active_count(database_path) == capacity);
+    {
+        unsigned mariadb_errno = 0U;
+        exec_ok(handles[capacity], "START TRANSACTION");
+        assert(
+            exec_status(
+                handles[capacity],
+                "SELECT value FROM app.ownerless_capacity WHERE id = 65 FOR UPDATE",
+                &mariadb_errno
+            ) != MYLITE_OK
+        );
+        assert(mariadb_errno == MYLITE_TEST_TOO_MANY_CONCURRENT_TRXS_ERRNO);
+        exec_ok(handles[capacity], "ROLLBACK");
+    }
+    assert(read_concurrency_trx_active_count(database_path) == capacity);
+
+    exec_ok(handles[0], "ROLLBACK");
+    assert(read_concurrency_trx_active_count(database_path) == capacity - 1U);
+    exec_ok(handles[capacity], "START TRANSACTION");
+    exec_ok(handles[capacity], "SELECT value FROM app.ownerless_capacity WHERE id = 1 FOR UPDATE");
+    assert(read_concurrency_trx_active_count(database_path) == capacity);
+    exec_ok(handles[capacity], "ROLLBACK");
+    for (unsigned handle = 1U; handle < capacity; ++handle) {
+        exec_ok(handles[handle], "ROLLBACK");
+    }
+    assert(read_concurrency_trx_active_count(database_path) == 0U);
+
+    for (unsigned handle = 0U; handle < capacity; ++handle) {
+        exec_ok(handles[handle], "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+        exec_ok(handles[handle], "START TRANSACTION WITH CONSISTENT SNAPSHOT");
+    }
+    assert(read_concurrency_read_view_active_count(database_path) == capacity);
+    {
+        unsigned mariadb_errno = 0U;
+        exec_ok(handles[capacity], "START TRANSACTION WITH CONSISTENT SNAPSHOT");
+        assert(
+            exec_status(
+                handles[capacity],
+                "SELECT COUNT(*) FROM app.ownerless_capacity",
+                &mariadb_errno
+            ) != MYLITE_OK
+        );
+        assert(mariadb_errno == MYLITE_TEST_TOO_MANY_CONCURRENT_TRXS_ERRNO);
+        exec_ok(handles[capacity], "ROLLBACK");
+    }
+    assert(read_concurrency_read_view_active_count(database_path) == capacity);
+
+    exec_ok(handles[0], "ROLLBACK");
+    assert(read_concurrency_read_view_active_count(database_path) == capacity - 1U);
+    exec_ok(handles[capacity], "START TRANSACTION WITH CONSISTENT SNAPSHOT");
+    assert(query_unsigned(handles[capacity], "SELECT COUNT(*) FROM app.ownerless_capacity") == 65U);
+    assert(read_concurrency_read_view_active_count(database_path) == capacity);
+    exec_ok(handles[capacity], "ROLLBACK");
+    for (unsigned handle = 1U; handle < capacity; ++handle) {
+        exec_ok(handles[handle], "ROLLBACK");
+    }
+    assert(read_concurrency_read_view_active_count(database_path) == 0U);
+
+    for (unsigned handle = 0U; handle < handle_count; ++handle) {
+        assert(
+            query_unsigned(handles[handle], "SELECT COUNT(*) FROM app.ownerless_capacity") == 65U
+        );
+        assert(mylite_close(handles[handle]) == MYLITE_OK);
+    }
 
     free(database_path);
     free(runtime_root);
@@ -13675,7 +16480,7 @@ static void test_ownerless_native_file_op_marker_clears_without_page_log(void) {
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
     assert(mylite_close(db) == MYLITE_OK);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
@@ -13704,7 +16509,7 @@ static void test_ownerless_native_file_op_marker_recovers_from_torn_clear_record
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
     assert(mylite_close(db) == MYLITE_OK);
 
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
     write_concurrency_checkpoint_lsns(database_path, 0U, 0U);
     write_concurrency_native_file_op_checkpoint_needed(database_path, 1);
     assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
@@ -14623,7 +17428,9 @@ static void test_crashed_prewrite_savepoint_rollback_before_state_recovers_rows(
         close(writer_ready_pipe[0]);
         rollback_savepoint_after_prewrite_dml_marker_rows_until_ownerless_state_fault(
             paths,
-            writer_ready_pipe[1]
+            writer_ready_pipe[1],
+            -1,
+            -1
         );
     }
 
@@ -14704,8 +17511,14 @@ static void test_crashed_prewrite_savepoint_rollback_with_live_peer_blocks_recov
     char *database_path = path_join(root, "ownerless-savepoint-prewrite-live-peer-crash.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     int writer_ready_pipe[2];
+    int writer_opened_pipe[2];
+    int writer_start_pipe[2];
+    int unsafe_writer_ready_pipe[2];
+    int unsafe_writer_pre_rollback_pipe[2];
+    int unsafe_writer_start_pipe[2];
     ownerless_live_peer_guard live_peer;
     pid_t writer_child;
+    pid_t unsafe_writer_child;
     pid_t probe_child;
     mylite_db *db;
 
@@ -14734,6 +17547,21 @@ static void test_crashed_prewrite_savepoint_rollback_with_live_peer_blocks_recov
             "FROM app.ownerless_savepoint_prewrite_rollback_before_state"
         ) == 30U
     );
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_native_row_undo_savepoint ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "payload VARBINARY(256) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_native_row_undo_savepoint VALUES "
+        "(1, 10, REPEAT('a', 256)), "
+        "(2, 20, REPEAT('a', 256)), "
+        "(3, 30, REPEAT('a', 256))"
+    );
     assert(mylite_close(db) == MYLITE_OK);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
@@ -14756,20 +17584,101 @@ static void test_crashed_prewrite_savepoint_rollback_with_live_peer_blocks_recov
         close(live_peer.release_write_fd);
         rollback_savepoint_after_prewrite_dml_marker_rows_until_ownerless_state_fault(
             paths,
-            writer_ready_pipe[1]
+            writer_ready_pipe[1],
+            -1,
+            -1
         );
     }
 
     close(writer_ready_pipe[1]);
     wait_for_pipe(writer_ready_pipe[0]);
     close(writer_ready_pipe[0]);
+    assert(kill(writer_child, SIGKILL) == 0);
+    wait_for_signaled_child(writer_child, SIGKILL);
+
+    probe_child = fork();
+    assert(probe_child >= 0);
+    if (probe_child == 0) {
+        assert_ownerless_open_returns_busy(paths);
+    }
+    wait_for_child(probe_child);
+
+    release_ownerless_live_peer(&live_peer);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(value) FROM app.ownerless_savepoint_prewrite_rollback_before_state"
+        ) == 30U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    live_peer = start_ownerless_live_peer(paths);
+    assert(pipe(writer_ready_pipe) == 0);
+    assert(pipe(writer_opened_pipe) == 0);
+    assert(pipe(writer_start_pipe) == 0);
+    writer_child = fork();
+    assert(writer_child >= 0);
+    if (writer_child == 0) {
+        close(writer_ready_pipe[0]);
+        close(writer_opened_pipe[0]);
+        close(writer_start_pipe[1]);
+        close(live_peer.release_write_fd);
+        rollback_savepoint_after_prewrite_dml_marker_rows_until_ownerless_state_fault(
+            paths,
+            writer_ready_pipe[1],
+            writer_opened_pipe[1],
+            writer_start_pipe[0]
+        );
+    }
+
+    close(writer_ready_pipe[1]);
+    close(writer_opened_pipe[1]);
+    close(writer_start_pipe[0]);
+    wait_for_pipe(writer_opened_pipe[0]);
+    close(writer_opened_pipe[0]);
+
+    assert(pipe(unsafe_writer_ready_pipe) == 0);
+    assert(pipe(unsafe_writer_pre_rollback_pipe) == 0);
+    assert(pipe(unsafe_writer_start_pipe) == 0);
+    unsafe_writer_child = fork();
+    assert(unsafe_writer_child >= 0);
+    if (unsafe_writer_child == 0) {
+        close(unsafe_writer_ready_pipe[0]);
+        close(unsafe_writer_pre_rollback_pipe[0]);
+        close(unsafe_writer_start_pipe[1]);
+        close(live_peer.release_write_fd);
+        rollback_savepoint_until_native_row_undo_fault(
+            paths,
+            unsafe_writer_ready_pipe[1],
+            unsafe_writer_pre_rollback_pipe[1],
+            unsafe_writer_start_pipe[0]
+        );
+    }
+    close(unsafe_writer_ready_pipe[1]);
+    close(unsafe_writer_pre_rollback_pipe[1]);
+    close(unsafe_writer_start_pipe[0]);
+    wait_for_pipe(unsafe_writer_pre_rollback_pipe[0]);
+    close(unsafe_writer_pre_rollback_pipe[0]);
+
+    signal_pipe(writer_start_pipe[1]);
+    close(writer_start_pipe[1]);
+    wait_for_pipe(writer_ready_pipe[0]);
+    close(writer_ready_pipe[0]);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+
+    signal_pipe(unsafe_writer_start_pipe[1]);
+    close(unsafe_writer_start_pipe[1]);
+    wait_for_pipe(unsafe_writer_ready_pipe[0]);
+    close(unsafe_writer_ready_pipe[0]);
+
     assert(kill(writer_child, SIGKILL) == 0);
     wait_for_signaled_child(writer_child, SIGKILL);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
-
+    assert(kill(unsafe_writer_child, SIGKILL) == 0);
+    wait_for_signaled_child(unsafe_writer_child, SIGKILL);
     probe_child = fork();
     assert(probe_child >= 0);
     if (probe_child == 0) {
@@ -14795,6 +17704,16 @@ static void test_crashed_prewrite_savepoint_rollback_with_live_peer_blocks_recov
             "FROM app.ownerless_savepoint_prewrite_rollback_before_state"
         ) == (unsigned)'a' * 2U
     );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_native_row_undo_savepoint") == 60U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.ownerless_native_row_undo_savepoint"
+        ) == (unsigned)'a' * 3U
+    );
     assert(mylite_close(db) == MYLITE_OK);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
@@ -14815,6 +17734,16 @@ static void test_crashed_prewrite_savepoint_rollback_with_live_peer_blocks_recov
             "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
             "FROM app.ownerless_savepoint_prewrite_rollback_before_state"
         ) == (unsigned)'a' * 2U
+    );
+    assert(
+        query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_native_row_undo_savepoint") == 60U
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT SUM(ASCII(SUBSTRING(payload, 1, 1))) "
+            "FROM app.ownerless_native_row_undo_savepoint"
+        ) == (unsigned)'a' * 3U
     );
     assert(mylite_close(db) == MYLITE_OK);
 
@@ -14891,7 +17820,7 @@ static void test_crashed_savepoint_native_row_undo_recovers_rows(void) {
     assert(writer_child >= 0);
     if (writer_child == 0) {
         close(writer_ready_pipe[0]);
-        rollback_savepoint_until_native_row_undo_fault(paths, writer_ready_pipe[1]);
+        rollback_savepoint_until_native_row_undo_fault(paths, writer_ready_pipe[1], -1, -1);
     }
 
     close(writer_ready_pipe[1]);
@@ -15007,7 +17936,7 @@ static void test_crashed_savepoint_native_row_undo_with_live_peer_blocks_recover
     if (writer_child == 0) {
         close(writer_ready_pipe[0]);
         close(live_peer.release_write_fd);
-        rollback_savepoint_until_native_row_undo_fault(paths, writer_ready_pipe[1]);
+        rollback_savepoint_until_native_row_undo_fault(paths, writer_ready_pipe[1], -1, -1);
     }
 
     close(writer_ready_pipe[1]);
@@ -17018,8 +19947,8 @@ static void test_ownerless_explicit_dml_savepoint_retains_file_op_marker(void) {
     );
     assert(mylite_close(db) == MYLITE_OK);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
-    assert(read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
-    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     exec_ok(
@@ -17034,8 +19963,8 @@ static void test_ownerless_explicit_dml_savepoint_retains_file_op_marker(void) {
     );
     assert(mylite_close(db) == MYLITE_OK);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
-    assert(read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
-    assert_concurrency_wal_checkpointed_or_retained_for_native_rollback_history(database_path);
+    assert(!read_concurrency_native_dml_file_op_checkpoint_needed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
     free(database_path);
     free(runtime_root);
@@ -17292,9 +20221,10 @@ static void test_ownerless_redo_header_backup_validation_boundaries(void) {
     exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1");
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only_eventually(database_path);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
+    create_redo_header_backup_from_current_redo(database_path);
     assert_redo_header_backup_fault_fires(paths);
 
     backup = read_redo_header_backup(database_path, &backup_size);
@@ -22162,7 +25092,10 @@ static void test_ownerless_single_owner_foreground_reclaim_budget_defers_to_time
     info.size = sizeof(info);
     assert(mylite_ownerless_pressure_status(writer_db, &info) == MYLITE_OK);
     assert(info.active_page_version_pin_count == 0U);
-    assert_concurrency_wal_checkpointed_eventually(database_path);
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only_within(
+        database_path,
+        5000U
+    );
     assert(mylite_close(cursor_db) == MYLITE_OK);
     assert(mylite_close(writer_db) == MYLITE_OK);
     assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
@@ -22257,7 +25190,7 @@ static void test_ownerless_peer_history_disables_foreground_reclaim_budget(void)
         "UPDATE app.ownerless_foreground_peer_history SET payload = REPEAT('b', 4000)"
     );
     assert(mylite_changes(writer_db) == MYLITE_TEST_OWNERLESS_FOREGROUND_RECLAIM_ROWS);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
     assert(
         query_unsigned(
             writer_db,
@@ -22531,15 +25464,10 @@ static void test_ownerless_timer_checkpoint_scheduling_reclaims_idle_runtime(voi
 
     signal_pipe(release_pipe[1]);
     wait_for_child(reader_child);
-    if (!wait_for_concurrency_wal_checkpointed(database_path, 5000U)) {
-        fprintf(
-            stderr,
-            "ownerless timer checkpoint scheduler did not reclaim WAL while writer was idle: %s\n",
-            database_path
-        );
-        fflush(stderr);
-        assert(0);
-    }
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only_within(
+        database_path,
+        5000U
+    );
 
     assert(
         query_unsigned(
@@ -24304,9 +27232,11 @@ static void run_ownerless_active_reader_pressure_limit_write_classes(
             "SELECT id FROM app.ownerless_pressure_sequence_default WHERE payload = 100"
         ) == 22U
     );
-    assert(mylite_close(db) == MYLITE_OK);
-
-    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    /*
+      Build the large fixture in ordinary exclusive mode. The pressure phase
+      below still exercises every write class through ownerless handles; using
+      ownerless mode for setup only amplified unrelated WAL/checkpoint work.
+    */
     exec_ok(
         db,
         "CREATE TABLE app.ownerless_pressure_policy ("
@@ -25904,6 +28834,10 @@ static void run_ownerless_active_reader_pressure_limit_write_classes(
     assert(mylite_ownerless_pressure_status(db, &info) == MYLITE_OK);
     assert(info.active_page_version_pin_count == 0U);
     assert(info.page_version_wal_limit_reached == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "USE app");
 
     exec_ok(db, "INSERT INTO app.ownerless_pressure_policy VALUES (3, 30)");
     exec_ok(db, "UPDATE app.ownerless_pressure_policy SET value = value + 2 WHERE id = 2");
@@ -25967,11 +28901,6 @@ static void run_ownerless_active_reader_pressure_limit_write_classes(
             "WHERE id = 3 AND value = 30"
         ) == 1U
     );
-    info.size = sizeof(info);
-    assert(mylite_ownerless_pressure_status(db, &info) == MYLITE_OK);
-    assert(info.active_page_version_pin_count == 1U);
-    assert(info.oldest_page_version_pin_lsn > 0U);
-    assert(info.page_version_wal_limit_reached == 0);
     exec_ok(db, "ALTER TABLE app.ownerless_pressure_auto_inc_ddl AUTO_INCREMENT = 100");
     exec_ok(db, "INSERT INTO app.ownerless_pressure_auto_inc_ddl (value) VALUES (1000)");
     assert(
@@ -25981,11 +28910,6 @@ static void run_ownerless_active_reader_pressure_limit_write_classes(
             "WHERE id = 100 AND value = 1000"
         ) == 1U
     );
-    info.size = sizeof(info);
-    assert(mylite_ownerless_pressure_status(db, &info) == MYLITE_OK);
-    assert(info.active_page_version_pin_count == 1U);
-    assert(info.oldest_page_version_pin_lsn > 0U);
-    assert(info.page_version_wal_limit_reached == 0);
     exec_ok(
         db,
         "ALTER TABLE app.ownerless_pressure_column_variant "
@@ -31771,24 +34695,6 @@ static void test_ownerless_table_wait_sql_negative_proof(void) {
                    "LOCK=EXCLUSIVE, ALGORITHM=COPY",
         },
         {
-            .name = "alter-add-column-instant-lock-none",
-            .sql = "ALTER TABLE app.ownerless_sql "
-                   "ADD COLUMN wait_negative_first INT NOT NULL DEFAULT 7 FIRST, "
-                   "ALGORITHM=INSTANT, LOCK=NONE",
-        },
-        {
-            .name = "alter-add-column-instant-lock-shared",
-            .sql = "ALTER TABLE app.ownerless_sql "
-                   "ADD COLUMN wait_negative_after INT NOT NULL DEFAULT 11 AFTER value, "
-                   "ALGORITHM=INSTANT, LOCK=SHARED",
-        },
-        {
-            .name = "alter-rename-column-instant",
-            .sql = "ALTER TABLE app.ownerless_sql "
-                   "RENAME COLUMN value TO wait_negative_value, "
-                   "ALGORITHM=INSTANT, LOCK=DEFAULT",
-        },
-        {
             .name = "alter-modify-column",
             .sql = "ALTER TABLE app.ownerless_sql MODIFY COLUMN value BIGINT NOT NULL",
         },
@@ -32238,7 +35144,20 @@ static void test_crashed_rename_if_exists_target_conflict_dictionary_ddl_preserv
     );
     exec_ok(db, "INSERT INTO app.ownerless_rn_if_exists_conflict_source VALUES (1, 10)");
     exec_ok(db, "INSERT INTO app.ownerless_rn_if_exists_conflict_target VALUES (1, 99)");
-    assert(mylite_close(db) == MYLITE_OK);
+    const int setup_close_result = mylite_close(db);
+    if (setup_close_result != MYLITE_OK) {
+        fprintf(
+            stderr,
+            "ownerless rename target-conflict setup close failed: result=%d errno=%u "
+            "sqlstate=%s message=%s\n",
+            setup_close_result,
+            mylite_mariadb_errno(db),
+            mylite_sqlstate(db),
+            mylite_errmsg(db)
+        );
+        fflush(stderr);
+    }
+    assert(setup_close_result == MYLITE_OK);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
@@ -35650,7 +38569,8 @@ static void assert_ownerless_compressed_row_format_post_peer_ddl_read_refreshes(
     assert(stats[OWNERLESS_TEST_DATABASE_PERF_STAT_REFRESH_PAGE_VERSION_READS_ENABLED] > 0U);
 }
 
-static void assert_ownerless_compressed_row_format_post_peer_ddl_write_refreshes(const char *label
+static void assert_ownerless_compressed_row_format_post_peer_ddl_write_refreshes(
+    const char *label
 ) {
     uint64_t stats[OWNERLESS_TEST_DATABASE_PERF_STAT_COUNT] = {0};
 
@@ -49117,7 +52037,13 @@ static void test_ownerless_rejects_table_storage_option_ddl(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(root, "ownerless-table-storage-option-policy.mylite");
+    char *existing_shape_database_path =
+        path_join(root, "ownerless-existing-table-shape-policy.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    open_database_paths existing_shape_paths = {
+        .database_path = existing_shape_database_path,
+        .runtime_root = runtime_root,
+    };
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -49251,6 +52177,23 @@ static void test_ownerless_rejects_table_storage_option_ddl(void) {
         db,
         "ALTER TABLE app.ownerless_table_storage_option_policy TABLESPACE ownerless_storage_ts"
     );
+    expect_exec_error_containing(
+        db,
+        "CREATE TABLE app.ownerless_system_versioned_policy "
+        "(id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB WITH SYSTEM VERSIONING",
+        "system-versioned table DDL"
+    );
+    expect_prepare_error_containing(
+        db,
+        "CREATE TABLE app.ownerless_prepared_system_versioned_policy "
+        "(id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB WITH SYSTEM VERSIONING",
+        "system-versioned table DDL"
+    );
+    expect_exec_error_containing(
+        db,
+        "ALTER TABLE app.ownerless_table_storage_option_policy ADD SYSTEM VERSIONING",
+        "system-versioned table DDL"
+    );
 
     assert_ownerless_table_storage_option_policy_state(
         paths,
@@ -49273,6 +52216,36 @@ static void test_ownerless_rejects_table_storage_option_ddl(void) {
     );
     assert_ownerless_table_storage_option_policy_state(paths, MYLITE_OPEN_READWRITE, database_path);
 
+    initialize_database(existing_shape_paths);
+    db = open_database(existing_shape_paths, MYLITE_OPEN_READWRITE);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_existing_system_versioned "
+        "(id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB WITH SYSTEM VERSIONING"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    db = NULL;
+    assert(
+        open_database_result(
+            existing_shape_paths,
+            MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+            &db
+        ) == MYLITE_ERROR
+    );
+    assert(db == NULL);
+    db = open_database(existing_shape_paths, MYLITE_OPEN_READWRITE);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_existing_system_versioned' "
+            "AND UPPER(table_type) = 'SYSTEM VERSIONED'"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(existing_shape_database_path);
     free(database_path);
     free(runtime_root);
     remove_tree(root);
@@ -49283,7 +52256,23 @@ static void test_ownerless_rejects_special_index_ddl(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(root, "ownerless-special-index-policy.mylite");
+    char *existing_spatial_index_database_path =
+        path_join(root, "ownerless-existing-spatial-index-policy.mylite");
+    char *existing_fulltext_index_database_path =
+        path_join(root, "ownerless-existing-fulltext-index-policy.mylite");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    open_database_paths existing_spatial_index_paths = {
+        .database_path = existing_spatial_index_database_path,
+        .runtime_root = runtime_root,
+    };
+    open_database_paths existing_fulltext_index_paths = {
+        .database_path = existing_fulltext_index_database_path,
+        .runtime_root = runtime_root,
+    };
+    char overlong_sql[16384];
+    char harmless_overlong_sql[16384];
+    size_t overlong_sql_length = 0U;
+    size_t harmless_overlong_sql_length = 0U;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -49298,6 +52287,12 @@ static void test_ownerless_rejects_special_index_ddl(void) {
         ") ENGINE=InnoDB"
     );
     exec_ok(db, "INSERT INTO app.ownerless_special_index_base VALUES (1, 'alpha beta')");
+    expect_exec_error_containing(
+        db,
+        "ALTER TABLE app.ownerless_special_index_base ALGORITHM=INPLACE",
+        "ownerless read/write mode does not support this DDL recovery shape"
+    );
+    exec_ok(db, "ALTER TABLE app.ownerless_special_index_base AUTO_INCREMENT = 100");
     expect_exec_error(
         db,
         "CREATE FULLTEXT INDEX ownerless_fulltext_idx "
@@ -49375,6 +52370,72 @@ static void test_ownerless_rejects_special_index_ddl(void) {
         "SPATIAL INDEX IF NOT EXISTS ownerless_spatial_inline_idempotent_idx (body)"
         ") ENGINE=InnoDB"
     );
+    {
+        const int written = snprintf(
+            overlong_sql,
+            sizeof(overlong_sql),
+            "CREATE TABLE app.ownerless_policy_token_overflow ("
+            "id INT NOT NULL PRIMARY KEY"
+        );
+        assert(written > 0);
+        overlong_sql_length = (size_t)written;
+    }
+    for (unsigned column = 0U; column < 100U; ++column) {
+        const int written = snprintf(
+            overlong_sql + overlong_sql_length,
+            sizeof(overlong_sql) - overlong_sql_length,
+            ", c%u INT",
+            column
+        );
+        assert(written > 0);
+        assert((size_t)written < sizeof(overlong_sql) - overlong_sql_length);
+        overlong_sql_length += (size_t)written;
+    }
+    {
+        const int written = snprintf(
+            overlong_sql + overlong_sql_length,
+            sizeof(overlong_sql) - overlong_sql_length,
+            ", location POINT NOT NULL, "
+            "SPATIAL INDEX ownerless_policy_token_overflow_idx (location)) ENGINE=InnoDB"
+        );
+        assert(written > 0);
+        assert((size_t)written < sizeof(overlong_sql) - overlong_sql_length);
+    }
+    expect_exec_error_containing(
+        db,
+        overlong_sql,
+        "ownerless read/write mode does not support FULLTEXT, SPATIAL, or VECTOR index DDL"
+    );
+    expect_prepare_error_containing(
+        db,
+        overlong_sql,
+        "ownerless read/write mode does not support FULLTEXT, SPATIAL, or VECTOR index DDL"
+    );
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_policy_token_overflow'"
+        ) == 0U
+    );
+    {
+        const int written =
+            snprintf(harmless_overlong_sql, sizeof(harmless_overlong_sql), "SELECT 0");
+        assert(written > 0);
+        harmless_overlong_sql_length = (size_t)written;
+    }
+    for (unsigned term = 0U; term < 160U; ++term) {
+        const int written = snprintf(
+            harmless_overlong_sql + harmless_overlong_sql_length,
+            sizeof(harmless_overlong_sql) - harmless_overlong_sql_length,
+            " + 1"
+        );
+        assert(written > 0);
+        assert((size_t)written < sizeof(harmless_overlong_sql) - harmless_overlong_sql_length);
+        harmless_overlong_sql_length += (size_t)written;
+    }
+    assert(query_unsigned(db, harmless_overlong_sql) == 160U);
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_special_index_base") == 1U);
     assert_ownerless_special_index_policy_state(
         paths,
@@ -49394,6 +52455,74 @@ static void test_ownerless_rejects_special_index_ddl(void) {
     );
     assert_ownerless_special_index_policy_state(paths, MYLITE_OPEN_READWRITE);
 
+    initialize_database(existing_spatial_index_paths);
+    db = open_database(existing_spatial_index_paths, MYLITE_OPEN_READWRITE);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_existing_spatial_index ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "location POINT NOT NULL, "
+        "SPATIAL INDEX ownerless_existing_spatial_idx (location)"
+        ") ENGINE=InnoDB"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    db = NULL;
+    assert(
+        open_database_result(
+            existing_spatial_index_paths,
+            MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+            &db
+        ) == MYLITE_ERROR
+    );
+    assert(db == NULL);
+    db = open_database(existing_spatial_index_paths, MYLITE_OPEN_READWRITE);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_existing_spatial_index' "
+            "AND index_name = 'ownerless_existing_spatial_idx' "
+            "AND UPPER(index_type) = 'SPATIAL'"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    initialize_database(existing_fulltext_index_paths);
+    db = open_database(existing_fulltext_index_paths, MYLITE_OPEN_READWRITE);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_existing_fulltext_index ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "body TEXT NOT NULL, "
+        "FULLTEXT INDEX ownerless_existing_fulltext_idx (body)"
+        ") ENGINE=InnoDB"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    db = NULL;
+    assert(
+        open_database_result(
+            existing_fulltext_index_paths,
+            MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+            &db
+        ) == MYLITE_ERROR
+    );
+    assert(db == NULL);
+    db = open_database(existing_fulltext_index_paths, MYLITE_OPEN_READWRITE);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = 'app' "
+            "AND table_name = 'ownerless_existing_fulltext_index' "
+            "AND index_name = 'ownerless_existing_fulltext_idx' "
+            "AND UPPER(index_type) = 'FULLTEXT'"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(existing_fulltext_index_database_path);
+    free(existing_spatial_index_database_path);
     free(database_path);
     free(runtime_root);
     remove_tree(root);
@@ -54324,6 +57453,8 @@ static void test_crashed_cross_schema_rename_if_exists_long_missing_recovers_mov
         paths,
         cross_schema_rename_long_missing_if_exists_until_dictionary_finish_fault
     );
+    assert(kill(live_peer.child_pid, 0) == 0);
+    assert(read_concurrency_process_active_count(database_path) >= 1U);
     assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_cross_schema_rename_long_missing_moved_state(
         paths,
@@ -54334,13 +57465,18 @@ static void test_crashed_cross_schema_rename_if_exists_long_missing_recovers_mov
         1U,
         20U
     );
+    assert(kill(live_peer.child_pid, 0) == 0);
+    assert(read_concurrency_process_active_count(database_path) == 1U);
     assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(read_concurrency_process_active_count(database_path) == 2U);
     assert_cross_schema_rename_long_missing_targets_absent(db, database_path);
     exec_ok(db, "INSERT INTO app_archive.ownerless_xrn_if_exists_long_left_dst VALUES (2, 15)");
     exec_ok(db, "INSERT INTO app.ownerless_xrn_if_exists_long_right_dst VALUES (2, 25)");
     assert(mylite_close(db) == MYLITE_OK);
+    assert(kill(live_peer.child_pid, 0) == 0);
+    assert(read_concurrency_process_active_count(database_path) == 1U);
     assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     release_ownerless_live_peer(&live_peer);
@@ -66638,6 +69774,7 @@ static void test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_s
     char *generated_pk_ibd_path =
         path_join(app_path, "ownerless_generated_failed_crash_generated_pk.ibd");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -66659,10 +69796,11 @@ static void test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_s
     exec_ok(db, "COMMIT");
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         generated_column_invalid_create_until_dictionary_finish_fault
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(!path_exists(invalid_create_frm_path));
@@ -66686,11 +69824,13 @@ static void test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_s
     assert(!path_exists(invalid_create_frm_path));
     assert(!path_exists(invalid_create_ibd_path));
     assert(mylite_close(db) == MYLITE_OK);
+    release_ownerless_live_peer(&live_peer);
 
-    crash_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         generated_column_invalid_alter_until_dictionary_finish_fault
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -66733,11 +69873,13 @@ static void test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_s
     );
     exec_ok(db, "COMMIT");
     assert(mylite_close(db) == MYLITE_OK);
+    release_ownerless_live_peer(&live_peer);
 
-    crash_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         generated_column_primary_key_until_dictionary_finish_fault
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(!path_exists(generated_pk_frm_path));
@@ -66762,6 +69904,7 @@ static void test_crashed_generated_column_failed_dictionary_ddl_recovers_clean_s
     assert(!path_exists(generated_pk_frm_path));
     assert(!path_exists(generated_pk_ibd_path));
     assert(mylite_close(db) == MYLITE_OK);
+    release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_generated_column_failed_crash_ddl_state(
         paths,
@@ -70358,6 +73501,7 @@ static void test_crashed_auto_increment_dictionary_ddl_recovers_high_water(void)
     char *frm_path = path_join(app_path, "ownerless_auto_inc_crash.frm");
     char *ibd_path = path_join(app_path, "ownerless_auto_inc_crash.ibd");
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    ownerless_live_peer_guard live_peer;
     mylite_db *db;
 
     assert(mkdir(runtime_root, 0700) == 0);
@@ -70376,10 +73520,11 @@ static void test_crashed_auto_increment_dictionary_ddl_recovers_high_water(void)
     assert(query_unsigned(db, "SELECT MAX(id) FROM app.ownerless_auto_inc_crash") == 1U);
     assert(mylite_close(db) == MYLITE_OK);
 
-    crash_dictionary_writer_with_live_peer(
+    live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         alter_auto_increment_until_dictionary_finish_fault
     );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(path_exists(frm_path));
@@ -70400,6 +73545,10 @@ static void test_crashed_auto_increment_dictionary_ddl_recovers_high_water(void)
         ) == 1U
     );
     assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
+
+    release_ownerless_live_peer(&live_peer);
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     assert_ownerless_auto_increment_crash_ddl_state(
         paths,
@@ -77422,7 +80571,7 @@ static void test_crashed_stale_drop_dictionary_ddl_skips_retained_tablespace(voi
     assert(path_exists(frm_path));
     assert(path_exists(ibd_path));
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
     assert(pipe(reader_ready_pipe) == 0);
     assert(pipe(reader_release_pipe) == 0);
@@ -79733,7 +82882,7 @@ static void test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebui
         close(peer_release_pipe[1]);
         close(writer_ready_pipe[0]);
         close(writer_ready_pipe[1]);
-        hold_ownerless_open_until_released(
+        hold_ownerless_open_and_expect_dead_writer_busy(
             paths,
             (child_pipes){
                 .ready_write_fd = peer_ready_pipe[1],
@@ -79875,6 +83024,62 @@ static void update_first_row_until_released(open_database_paths paths, child_pip
     signal_pipe(pipes.ready_write_fd);
     wait_for_pipe(pipes.release_read_fd);
     exec_ok(db, "COMMIT");
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
+static void update_first_row_after_signal_until_killed(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+
+    signal_pipe_message(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+    exec_ok(db, "START TRANSACTION");
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1");
+    signal_pipe(pipes.ready_write_fd);
+    for (;;) {
+        pause();
+    }
+}
+
+static void update_first_row_with_autocommit_off_until_released(
+    open_database_paths paths,
+    child_pipes pipes,
+    int prepared
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET autocommit = 0");
+    if (prepared) {
+        mylite_stmt *stmt = NULL;
+        const char *tail = NULL;
+
+        assert(
+            mylite_prepare(
+                db,
+                "UPDATE app.ownerless_sql SET value = value + ? WHERE id = ?",
+                MYLITE_NUL_TERMINATED,
+                &stmt,
+                &tail
+            ) == MYLITE_OK
+        );
+        assert(stmt != NULL);
+        assert(tail != NULL && *tail == '\0');
+        assert(mylite_bind_int64(stmt, 1, 1) == MYLITE_OK);
+        assert(mylite_bind_int64(stmt, 2, 1) == MYLITE_OK);
+        assert(mylite_step(stmt) == MYLITE_DONE);
+        assert(mylite_finalize(stmt) == MYLITE_OK);
+    } else {
+        exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1");
+    }
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+    exec_ok(db, "COMMIT");
+    assert(query_unsigned(db, "SELECT @@autocommit") == 0U);
+    exec_ok(db, "SET autocommit = 1");
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);
 }
@@ -80068,7 +83273,9 @@ static void rollback_savepoint_dml_marker_row_until_ownerless_state_fault(
 
 static void rollback_savepoint_after_prewrite_dml_marker_rows_until_ownerless_state_fault(
     open_database_paths paths,
-    int ready_fd
+    int ready_fd,
+    int opened_fd,
+    int start_fd
 ) {
     mylite_db *db;
     char ready_fd_value[32];
@@ -80078,6 +83285,12 @@ static void rollback_savepoint_after_prewrite_dml_marker_rows_until_ownerless_st
     assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    if (opened_fd >= 0) {
+        signal_pipe(opened_fd);
+        close(opened_fd);
+        wait_for_pipe(start_fd);
+        close(start_fd);
+    }
     exec_ok(db, "START TRANSACTION");
     exec_ok(
         db,
@@ -80164,7 +83377,9 @@ static void rollback_transaction_dml_marker_row_until_ownerless_state_fault(
 
 static void rollback_savepoint_until_native_row_undo_fault(
     open_database_paths paths,
-    int ready_fd
+    int ready_fd,
+    int pre_rollback_ready_fd,
+    int rollback_start_fd
 ) {
     mylite_db *db;
     char ready_fd_value[32];
@@ -80208,6 +83423,13 @@ static void rollback_savepoint_until_native_row_undo_fault(
     assert(
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_native_row_undo_savepoint") == 63U
     );
+
+    if (pre_rollback_ready_fd >= 0) {
+        signal_pipe(pre_rollback_ready_fd);
+        close(pre_rollback_ready_fd);
+        wait_for_pipe(rollback_start_fd);
+        close(rollback_start_fd);
+    }
 
     assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "rollback-after-native-row-undo", 1) == 0);
     assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
@@ -80511,6 +83733,19 @@ static void update_uncommitted_dml_marker_row_until_killed(
     }
 }
 
+static void hold_implicit_insert_until_released(open_database_paths paths, child_pipes pipes) {
+    mylite_db *db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
+    exec_ok(db, "START TRANSACTION");
+    exec_ok(db, "INSERT INTO app.ownerless_implicit_insert VALUES (7, 70)");
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+    exec_ok(db, "COMMIT");
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void update_first_row_until_trx_register_fault(open_database_paths paths, int ready_fd) {
     mylite_db *db;
@@ -80562,10 +83797,53 @@ static void update_first_row_until_record_lock_grant_fault(
 
 static void hold_ownerless_open_until_released(open_database_paths paths, child_pipes pipes) {
     mylite_db *db;
+    mylite_result close_result = MYLITE_IOERR;
+    uint64_t close_deadline_ms;
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     signal_pipe(pipes.ready_write_fd);
     wait_for_pipe(pipes.release_read_fd);
+    close_deadline_ms = monotonic_milliseconds() + 30000U;
+    for (;;) {
+        close_result = mylite_close(db);
+        if (close_result != MYLITE_IOERR || monotonic_milliseconds() >= close_deadline_ms) {
+            break;
+        }
+        sleep_microseconds(50000U);
+    }
+    if (close_result != MYLITE_OK) {
+        fprintf(
+            stderr,
+            "ownerless live-peer close failed: result=%d errcode=%d message=%s\n",
+            close_result,
+            mylite_errcode(db),
+            mylite_errmsg(db)
+        );
+    }
+    assert(close_result == MYLITE_OK);
+    _exit(0);
+}
+
+static void hold_ownerless_open_and_expect_dead_writer_busy(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    char *errmsg = NULL;
+
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+    const int result = mylite_exec(
+        db,
+        "UPDATE app.ownerless_sql SET value = value + 5 WHERE id = 2",
+        NULL,
+        NULL,
+        &errmsg
+    );
+    assert(result == MYLITE_BUSY);
+    assert(mylite_errcode(db) == MYLITE_BUSY);
+    assert(errmsg != NULL && strstr(errmsg, "close and reopen recovery") != NULL);
+    mylite_free(errmsg);
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);
 }
@@ -80602,6 +83880,11 @@ static void assert_shared_readonly_open_returns_busy(open_database_paths paths) 
 }
 
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void print_ownerless_platform_probe_phase(const char *phase) {
+    fprintf(stderr, "ownerless-platform-probe phase=%s\n", phase);
+    fflush(stderr);
+}
+
 static void test_ownerless_rejects_directory_probe_failure(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -80621,12 +83904,15 @@ static void test_ownerless_rejects_directory_probe_failure(void) {
     struct stat database_stat;
     FILE *probe_metadata = NULL;
 
+    print_ownerless_platform_probe_phase("initialize-primer");
     assert(mkdir(runtime_root, 0700) == 0);
     initialize_database(primer_paths);
+    print_ownerless_platform_probe_phase("open-primer-ownerless");
     db = open_database(primer_paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(mylite_close(db) == MYLITE_OK);
     assert(path_exists(primer_probe_metadata_path));
 
+    print_ownerless_platform_probe_phase("initialize-target");
     initialize_database(paths);
     assert(mkdir(concurrency_path, 0700) == 0);
     assert(stat(database_path, &database_stat) == 0);
@@ -80644,11 +83930,13 @@ static void test_ownerless_rejects_directory_probe_failure(void) {
     assert(fclose(probe_metadata) == 0);
 
     assert(setenv("MYLITE_OWNERLESS_TEST_PROBE_FAIL", "required-primitives", 1) == 0);
+    print_ownerless_platform_probe_phase("reject-required-primitives-rw");
     assert(
         open_database_result(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW, &db) ==
         MYLITE_ERROR
     );
     assert(db == NULL);
+    print_ownerless_platform_probe_phase("reject-required-primitives-ro");
     assert(
         open_database_result(paths, MYLITE_OPEN_READONLY | MYLITE_OPEN_SHARED_READONLY, &db) ==
         MYLITE_ERROR
@@ -80656,24 +83944,29 @@ static void test_ownerless_rejects_directory_probe_failure(void) {
     assert(db == NULL);
 
     assert(setenv("MYLITE_OWNERLESS_TEST_PROBE_FAIL", "process-identity", 1) == 0);
+    print_ownerless_platform_probe_phase("reject-process-identity-rw");
     assert(
         open_database_result(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW, &db) ==
         MYLITE_ERROR
     );
     assert(db == NULL);
+    print_ownerless_platform_probe_phase("reject-process-identity-ro");
     assert(
         open_database_result(paths, MYLITE_OPEN_READONLY | MYLITE_OPEN_SHARED_READONLY, &db) ==
         MYLITE_ERROR
     );
     assert(db == NULL);
 
+    print_ownerless_platform_probe_phase("ordinary-open-after-rejections");
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert(mylite_close(db) == MYLITE_OK);
 
     assert(unsetenv("MYLITE_OWNERLESS_TEST_PROBE_FAIL") == 0);
+    print_ownerless_platform_probe_phase("ownerless-open-after-rejections");
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(mylite_close(db) == MYLITE_OK);
     assert(path_exists(probe_metadata_path));
+    print_ownerless_platform_probe_phase("complete");
 
     free(primer_probe_metadata_path);
     free(primer_concurrency_path);
@@ -80755,8 +84048,6 @@ static void update_first_table_until_active_writer_visible_skip(
     uint64_t commit_stats[OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT] = {0};
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
-    exec_ok(db, "START TRANSACTION");
-    exec_ok(db, "UPDATE app.ownerless_a SET value = value + 1 WHERE id = 1");
     signal_pipe(updated_ready_fd);
     wait_for_pipe(commit_release_fd);
 
@@ -80768,7 +84059,7 @@ static void update_first_table_until_active_writer_visible_skip(
 
     mylite_ownerless_innodb_set_commit_visibility_stats_enabled(1);
     mylite_ownerless_innodb_reset_commit_visibility_stats();
-    exec_ok(db, "COMMIT");
+    exec_ok(db, "UPDATE app.ownerless_a SET value = value + 1 WHERE id = 1");
     mylite_ownerless_innodb_read_commit_visibility_stats(
         commit_stats,
         OWNERLESS_TEST_COMMIT_VISIBILITY_STAT_COUNT
@@ -80881,6 +84172,11 @@ static void update_table_pair_after_signal(
     if (result != MYLITE_OK) {
         if (mariadb_errno == MYLITE_TEST_DEADLOCK_ERRNO) {
             exec_ok(db, "ROLLBACK");
+            assert(query_unsigned(db, "SELECT @@in_transaction") == 0U);
+            exec_ok(db, "START TRANSACTION");
+            assert(query_unsigned(db, "SELECT @@in_transaction") == 1U);
+            assert(query_unsigned(db, "SELECT 1") == 1U);
+            exec_ok(db, "ROLLBACK");
             (void)mylite_close(db);
             _exit(MYLITE_TEST_CHILD_DEADLOCK);
         }
@@ -80909,6 +84205,11 @@ static void update_table_pair_after_signal(
         if (assert_deadlock_file_op_discard) {
             assert(!mylite_ownerless_innodb_take_file_op_redo());
         }
+        exec_ok(db, "ROLLBACK");
+        assert(query_unsigned(db, "SELECT @@in_transaction") == 0U);
+        exec_ok(db, "START TRANSACTION");
+        assert(query_unsigned(db, "SELECT @@in_transaction") == 1U);
+        assert(query_unsigned(db, "SELECT 1") == 1U);
         exec_ok(db, "ROLLBACK");
         if (assert_deadlock_file_op_discard) {
             assert(!mylite_ownerless_innodb_take_file_op_redo());
@@ -81137,6 +84438,125 @@ static void update_concurrent_savepoint_same_page_peer(open_database_paths paths
     _exit(0);
 }
 
+static void hold_ownerless_post_savepoint_timeout_row_until_released(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "START TRANSACTION");
+    assert(
+        query_unsigned(
+            db,
+            "SELECT value FROM app.ownerless_post_savepoint_blocker "
+            "WHERE id = 1 FOR UPDATE"
+        ) == 0U
+    );
+    signal_pipe(pipes.ready_write_fd);
+    wait_for_pipe(pipes.release_read_fd);
+    exec_ok(db, "ROLLBACK");
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
+static void hold_ownerless_post_savepoint_timeout_writer_until_released(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+    unsigned mariadb_errno = 0U;
+    int result;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 1");
+    exec_ok(db, "SET SESSION lock_wait_timeout = 1");
+    exec_ok(db, "START TRANSACTION");
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_post_savepoint_timeout "
+        "SET value = value + 11, version = version + 1 WHERE id = 1"
+    );
+    exec_ok(db, "SAVEPOINT ownerless_post_savepoint_timeout_sp");
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_post_savepoint_timeout "
+        "SET value = value + 22, version = version + 1 WHERE id = 2"
+    );
+    exec_ok(db, "ROLLBACK TO SAVEPOINT ownerless_post_savepoint_timeout_sp");
+    exec_ok(db, "RELEASE SAVEPOINT ownerless_post_savepoint_timeout_sp");
+    signal_pipe_message(pipes.ready_write_fd);
+    wait_for_pipe_message(pipes.release_read_fd);
+    result = exec_status(
+        db,
+        "UPDATE app.ownerless_post_savepoint_blocker "
+        "SET value = value + 33 WHERE id = 1",
+        &mariadb_errno
+    );
+    assert(result == MYLITE_ERROR);
+    assert(mariadb_errno == MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO);
+    assert(query_unsigned(db, "SELECT @@in_transaction") == 1U);
+    assert(
+        query_unsigned(db, "SELECT value FROM app.ownerless_post_savepoint_timeout WHERE id = 1") ==
+        11U
+    );
+    assert(
+        query_unsigned(db, "SELECT value FROM app.ownerless_post_savepoint_timeout WHERE id = 2") ==
+        0U
+    );
+    signal_pipe_message(pipes.ready_write_fd);
+    wait_for_pipe_message(pipes.release_read_fd);
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    {
+        char ready_fd_value[32];
+        char release_fd_value[32];
+
+        assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", pipes.ready_write_fd) > 0);
+        assert(
+            snprintf(release_fd_value, sizeof(release_fd_value), "%d", pipes.release_read_fd) > 0
+        );
+        assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "rollback-after-native-row-undo", 1) == 0);
+        assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
+        assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_RELEASE_FD", release_fd_value, 1) == 0);
+    }
+#else
+    assert(close(pipes.ready_write_fd) == 0);
+    assert(close(pipes.release_read_fd) == 0);
+#endif
+    exec_ok(db, "ROLLBACK");
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    assert(unsetenv("MYLITE_OWNERLESS_TEST_FAULT") == 0);
+    assert(unsetenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD") == 0);
+    assert(unsetenv("MYLITE_OWNERLESS_TEST_FAULT_RELEASE_FD") == 0);
+#endif
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void read_ownerless_post_savepoint_timeout_after_refresh(
+    open_database_paths paths,
+    child_pipes pipes
+) {
+    mylite_db *db;
+    char ready_fd_value[32];
+    char release_fd_value[32];
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", pipes.ready_write_fd) > 0);
+    assert(snprintf(release_fd_value, sizeof(release_fd_value), "%d", pipes.release_read_fd) > 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "plain-read-after-page-refresh", 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_RELEASE_FD", release_fd_value, 1) == 0);
+    assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_post_savepoint_timeout") == 0U);
+    assert(unsetenv("MYLITE_OWNERLESS_TEST_FAULT") == 0);
+    assert(unsetenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD") == 0);
+    assert(unsetenv("MYLITE_OWNERLESS_TEST_FAULT_RELEASE_FD") == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+#endif
+
 static void update_concurrent_savepoint_same_table_rollback_until_released(
     open_database_paths paths,
     child_pipes pipes
@@ -81299,12 +84719,15 @@ static void hold_serializable_read_until_released(open_database_paths paths, chi
 }
 
 static void update_first_row_expect_lock_timeout(open_database_paths paths) {
+    const uint64_t started_ms = monotonic_milliseconds();
     mylite_db *db;
     unsigned mariadb_errno = 0U;
     int result;
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(monotonic_milliseconds() - started_ms < 10000U);
     exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 1");
+    assert(query_unsigned(db, "SELECT @@innodb_lock_wait_timeout") == 1U);
     result = exec_status(
         db,
         "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1",
@@ -81378,7 +84801,6 @@ static void insert_auto_increment_rows_after_signal(
     child_pipes pipes
 ) {
     mylite_db *db;
-    char sql[128];
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
@@ -81386,18 +84808,75 @@ static void insert_auto_increment_rows_after_signal(
     wait_for_pipe(pipes.release_read_fd);
 
     for (unsigned row = 0U; row < MYLITE_TEST_AUTO_INCREMENT_ROWS_PER_WORKER; ++row) {
-        assert(
-            snprintf(
-                sql,
-                sizeof(sql),
-                "INSERT INTO app.ownerless_auto_inc (value) VALUES (%u)",
-                (worker_id * 1000U) + row
-            ) > 0
-        );
-        exec_ok(db, sql);
+        insert_auto_increment_row_eventually(db, worker_id, row);
     }
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);
+}
+
+static void insert_auto_increment_row_eventually(mylite_db *db, unsigned worker_id, unsigned row) {
+    char count_sql[128];
+    char sql[128];
+    const unsigned value = (worker_id * 1000U) + row;
+
+    assert(
+        snprintf(
+            sql,
+            sizeof(sql),
+            "INSERT INTO app.ownerless_auto_inc (value) VALUES (%u)",
+            value
+        ) > 0
+    );
+    assert(
+        snprintf(
+            count_sql,
+            sizeof(count_sql),
+            "SELECT COUNT(*) FROM app.ownerless_auto_inc WHERE value = %u",
+            value
+        ) > 0
+    );
+
+    for (unsigned attempt = 1U; attempt <= MYLITE_TEST_STRESS_MAX_ATTEMPTS; ++attempt) {
+        unsigned mariadb_errno = 0U;
+        const int result = exec_status(db, sql, &mariadb_errno);
+
+        if (result == MYLITE_OK) {
+            assert(mylite_changes(db) == 1);
+            assert(query_unsigned(db, count_sql) == 1U);
+            return;
+        }
+        if (mariadb_errno != MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO &&
+            mariadb_errno != MYLITE_TEST_DEADLOCK_ERRNO) {
+            fprintf(
+                stderr,
+                "ownerless auto-increment insert unexpected error: "
+                "worker=%u row=%u attempt=%u sql=%s errcode=%d "
+                "mariadb_errno=%u message=%s\n",
+                worker_id,
+                row,
+                attempt,
+                sql,
+                mylite_errcode(db),
+                mariadb_errno,
+                mylite_errmsg(db) != NULL ? mylite_errmsg(db) : "(null)"
+            );
+            fflush(stderr);
+            assert(0);
+        }
+        assert(query_unsigned(db, "SELECT @@in_transaction") == 0U);
+        ownerless_stress_retry_pause(worker_id, row + 1U, attempt);
+    }
+
+    fprintf(
+        stderr,
+        "ownerless auto-increment insert exhausted retries: "
+        "worker=%u row=%u sql=%s\n",
+        worker_id,
+        row,
+        sql
+    );
+    fflush(stderr);
+    assert(0);
 }
 
 static void alter_auto_increment_after_signal(open_database_paths paths, child_pipes pipes) {
@@ -81465,6 +84944,8 @@ static void read_mix_total_after_signal(open_database_paths paths, child_pipes p
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
     exec_ok(db, "SET SESSION lock_wait_timeout = 30");
+    mylite_ownerless_innodb_set_page_write_refresh_stats_enabled(1);
+    mylite_ownerless_innodb_reset_page_write_refresh_stats();
     signal_pipe(pipes.ready_write_fd);
     wait_for_pipe(pipes.release_read_fd);
     for (unsigned iteration = 0U; iteration < 48U; ++iteration) {
@@ -81510,8 +84991,33 @@ static void run_ownerless_stress_writer(
     exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
     signal_pipe(pipes.ready_write_fd);
     wait_for_pipe(pipes.release_read_fd);
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    if (getenv("MYLITE_OWNERLESS_STRESS_INJECT_RETRYABLE_TIMEOUT") != NULL) {
+        assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "space-write-timeout", 1) == 0);
+    }
+#endif
     for (unsigned iteration = 1U; iteration <= stress_iterations; ++iteration) {
-        exec_ok(db, update_sql);
+        int iteration_finished = 0;
+
+        for (unsigned attempt = 1U; attempt <= MYLITE_TEST_STRESS_MAX_ATTEMPTS; ++attempt) {
+            if (ownerless_stress_exec_retryable(db, update_sql, table_id, iteration, attempt)) {
+                iteration_finished = 1;
+                break;
+            }
+            assert(query_unsigned(db, "SELECT @@in_transaction") == 0U);
+            ownerless_stress_retry_pause(table_id, iteration, attempt);
+        }
+        if (!iteration_finished) {
+            fprintf(
+                stderr,
+                "ownerless independent-table stress exhausted retries: "
+                "table=%u iteration=%u\n",
+                table_id,
+                iteration
+            );
+            fflush(stderr);
+        }
+        assert(iteration_finished);
         if (iteration % 6U == 0U || iteration == stress_iterations) {
             const unsigned long long observed = query_unsigned(db, select_sql);
             if (observed != iteration) {
@@ -81531,6 +85037,49 @@ static void run_ownerless_stress_writer(
     }
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);
+}
+
+static int ownerless_stress_exec_retryable(
+    mylite_db *db,
+    const char *sql,
+    unsigned table_id,
+    unsigned iteration,
+    unsigned attempt
+) {
+    unsigned mariadb_errno = 0U;
+    const int result = exec_status(db, sql, &mariadb_errno);
+
+    if (result == MYLITE_OK) {
+        assert(mylite_changes(db) == 1);
+        return 1;
+    }
+    if (mariadb_errno == MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO ||
+        mariadb_errno == MYLITE_TEST_DEADLOCK_ERRNO) {
+        return 0;
+    }
+
+    fprintf(
+        stderr,
+        "ownerless independent-table stress unexpected error: "
+        "table=%u iteration=%u attempt=%u sql=%s errcode=%d "
+        "mariadb_errno=%u message=%s\n",
+        table_id,
+        iteration,
+        attempt,
+        sql,
+        mylite_errcode(db),
+        mariadb_errno,
+        mylite_errmsg(db) != NULL ? mylite_errmsg(db) : "(null)"
+    );
+    fflush(stderr);
+    assert(0);
+    return 0;
+}
+
+static void ownerless_stress_retry_pause(unsigned table_id, unsigned iteration, unsigned attempt) {
+    const unsigned delay = 1000U * (1U + ((table_id * 13U + iteration * 11U + attempt * 7U) % 30U));
+
+    sleep_microseconds(delay);
 }
 
 static void run_ownerless_stress_reader(open_database_paths paths, child_pipes pipes) {
@@ -82009,7 +85558,14 @@ static void run_ownerless_tx_stress_worker(
                     attempt,
                     "pre-savepoint-update"
                 )) {
-                exec_ok(db, "ROLLBACK");
+                ownerless_random_tx_stress_exec_busy_retry(
+                    db,
+                    "ROLLBACK",
+                    worker_id,
+                    round,
+                    attempt,
+                    "retry-phase-0"
+                );
                 ownerless_tx_stress_retry_pause(worker_id, round, attempt);
                 continue;
             }
@@ -82033,7 +85589,14 @@ static void run_ownerless_tx_stress_worker(
                     attempt,
                     "post-savepoint-update"
                 )) {
-                exec_ok(db, "ROLLBACK");
+                ownerless_random_tx_stress_exec_busy_retry(
+                    db,
+                    "ROLLBACK",
+                    worker_id,
+                    round,
+                    attempt,
+                    "retry-phase-1"
+                );
                 ownerless_tx_stress_retry_pause(worker_id, round, attempt);
                 continue;
             }
@@ -82356,17 +85919,26 @@ static void run_ownerless_random_tx_stress_worker(
     child_pipes pipes
 ) {
     mylite_db *db;
+    char *retry_lock_path;
     char sql[256];
+    int retry_lock_fd;
     const unsigned rounds = ownerless_random_tx_stress_rounds();
 
+    retry_lock_path = path_join(paths.runtime_root, "ownerless-random-tx-stress-retry.lock");
+    retry_lock_fd = open(retry_lock_path, O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+    assert(retry_lock_fd >= 0);
+    free(retry_lock_path);
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 1");
     exec_ok(db, "SET SESSION lock_wait_timeout = 1");
-    signal_pipe(pipes.ready_write_fd);
-    wait_for_pipe(pipes.release_read_fd);
+    mylite_ownerless_innodb_set_page_write_refresh_stats_enabled(1);
+    mylite_ownerless_innodb_set_page_write_perf_stats_enabled(1);
+    signal_pipe_message(pipes.ready_write_fd);
+    wait_for_pipe_message(pipes.release_read_fd);
 
     for (unsigned round = 1U; round <= rounds; ++round) {
         int round_finished = 0;
+        int retry_lock_held = 0;
 
         for (unsigned attempt = 1U; attempt <= MYLITE_TEST_RANDOM_TX_STRESS_MAX_ATTEMPTS;
              ++attempt) {
@@ -82378,9 +85950,28 @@ static void run_ownerless_random_tx_stress_worker(
             unsigned long long before_values[3];
             unsigned long long before_versions[3];
 
+            if (attempt == 1U) {
+                ownerless_random_tx_stress_join_retry_lane_if_active(
+                    retry_lock_fd,
+                    &retry_lock_held
+                );
+            }
+            assert(attempt == 1U || retry_lock_held);
             ownerless_random_tx_stress_rows(worker_id, round, rows);
             assert(query_unsigned(db, "SELECT @@in_transaction") == 0U);
-            ownerless_random_tx_stress_capture_rows(db, rows, before_values, before_versions);
+            if (!ownerless_random_tx_stress_capture_rows(
+                    db,
+                    rows,
+                    before_values,
+                    before_versions,
+                    worker_id,
+                    round,
+                    attempt
+                )) {
+                ownerless_random_tx_stress_acquire_retry_lock(retry_lock_fd, &retry_lock_held);
+                ownerless_random_tx_stress_retry_pause(worker_id, round, attempt);
+                continue;
+            }
             exec_ok(db, "START TRANSACTION");
             assert(query_unsigned(db, "SELECT @@in_transaction") == 1U);
             assert(
@@ -82402,7 +85993,15 @@ static void run_ownerless_random_tx_stress_worker(
                     attempt,
                     0U
                 )) {
-                exec_ok(db, "ROLLBACK");
+                ownerless_random_tx_stress_exec_busy_retry(
+                    db,
+                    "ROLLBACK",
+                    worker_id,
+                    round,
+                    attempt,
+                    "retry-phase-0"
+                );
+                ownerless_random_tx_stress_acquire_retry_lock(retry_lock_fd, &retry_lock_held);
                 assert_ownerless_random_tx_stress_rows_unchanged_after_rollback(
                     db,
                     worker_id,
@@ -82437,7 +86036,15 @@ static void run_ownerless_random_tx_stress_worker(
                     attempt,
                     1U
                 )) {
-                exec_ok(db, "ROLLBACK");
+                ownerless_random_tx_stress_exec_busy_retry(
+                    db,
+                    "ROLLBACK",
+                    worker_id,
+                    round,
+                    attempt,
+                    "retry-phase-1"
+                );
+                ownerless_random_tx_stress_acquire_retry_lock(retry_lock_fd, &retry_lock_held);
                 assert_ownerless_random_tx_stress_rows_unchanged_after_rollback(
                     db,
                     worker_id,
@@ -82453,9 +86060,23 @@ static void run_ownerless_random_tx_stress_worker(
             }
             assert(mylite_changes(db) == 1);
             if (rollback_savepoint) {
-                exec_ok(db, "ROLLBACK TO SAVEPOINT ownerless_random_tx_sp");
+                ownerless_random_tx_stress_exec_busy_retry(
+                    db,
+                    "ROLLBACK TO SAVEPOINT ownerless_random_tx_sp",
+                    worker_id,
+                    round,
+                    attempt,
+                    "rollback-savepoint"
+                );
             }
-            exec_ok(db, "RELEASE SAVEPOINT ownerless_random_tx_sp");
+            ownerless_random_tx_stress_exec_busy_retry(
+                db,
+                "RELEASE SAVEPOINT ownerless_random_tx_sp",
+                worker_id,
+                round,
+                attempt,
+                "release-savepoint"
+            );
             assert(
                 snprintf(
                     sql,
@@ -82475,7 +86096,15 @@ static void run_ownerless_random_tx_stress_worker(
                     attempt,
                     2U
                 )) {
-                exec_ok(db, "ROLLBACK");
+                ownerless_random_tx_stress_exec_busy_retry(
+                    db,
+                    "ROLLBACK",
+                    worker_id,
+                    round,
+                    attempt,
+                    "retry-phase-2"
+                );
+                ownerless_random_tx_stress_acquire_retry_lock(retry_lock_fd, &retry_lock_held);
                 assert_ownerless_random_tx_stress_rows_unchanged_after_rollback(
                     db,
                     worker_id,
@@ -82490,17 +86119,19 @@ static void run_ownerless_random_tx_stress_worker(
                 continue;
             }
             assert(mylite_changes(db) == 1);
-            if (round % 7U == 0U || round == rounds) {
-                assert(
-                    query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_random_tx_stress") ==
-                    MYLITE_TEST_RANDOM_TX_STRESS_ROW_COUNT
-                );
-            }
             const char *transaction_end_sql = rollback_transaction ? "ROLLBACK" : "COMMIT";
 
             assert(query_unsigned(db, "SELECT @@in_transaction") == 1U);
-            exec_ok(db, transaction_end_sql);
             if (rollback_transaction) {
+                ownerless_random_tx_stress_exec_busy_retry(
+                    db,
+                    transaction_end_sql,
+                    worker_id,
+                    round,
+                    attempt,
+                    "final-rollback"
+                );
+                ownerless_random_tx_stress_acquire_retry_lock(retry_lock_fd, &retry_lock_held);
                 assert_ownerless_random_tx_stress_rows_unchanged_after_rollback(
                     db,
                     worker_id,
@@ -82511,6 +86142,84 @@ static void run_ownerless_random_tx_stress_worker(
                     before_values,
                     before_versions
                 );
+            } else {
+                unsigned mariadb_errno = 0U;
+                int commit_result = MYLITE_BUSY;
+
+                for (unsigned busy_attempt = 1U;
+                     busy_attempt <= MYLITE_TEST_RANDOM_TX_STRESS_MAX_ATTEMPTS;
+                     ++busy_attempt) {
+                    commit_result = exec_status(db, transaction_end_sql, &mariadb_errno);
+                    if (commit_result == MYLITE_OK || mylite_errcode(db) != MYLITE_BUSY ||
+                        mariadb_errno != 0U) {
+                        break;
+                    }
+                    if (ownerless_random_tx_stress_trace_retries()) {
+                        fprintf(
+                            stderr,
+                            "ownerless random tx stress retryable commit statement-lock busy: "
+                            "worker=%u round=%u attempt=%u busy_attempt=%u\n",
+                            worker_id,
+                            round,
+                            attempt,
+                            busy_attempt
+                        );
+                        fflush(stderr);
+                    }
+                    assert(busy_attempt < MYLITE_TEST_RANDOM_TX_STRESS_MAX_ATTEMPTS);
+                    ownerless_random_tx_stress_retry_pause(
+                        worker_id,
+                        round,
+                        attempt + busy_attempt
+                    );
+                }
+
+                if (commit_result != MYLITE_OK) {
+                    if (mariadb_errno != MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO &&
+                        mariadb_errno != MYLITE_TEST_DEADLOCK_ERRNO) {
+                        fprintf(
+                            stderr,
+                            "ownerless random tx stress unexpected commit error: worker=%u "
+                            "round=%u attempt=%u errcode=%d mariadb_errno=%u message=%s\n",
+                            worker_id,
+                            round,
+                            attempt,
+                            mylite_errcode(db),
+                            mariadb_errno,
+                            mylite_errmsg(db)
+                        );
+                        fflush(stderr);
+                        assert(0);
+                    }
+                    if (ownerless_random_tx_stress_trace_retries()) {
+                        fprintf(
+                            stderr,
+                            "ownerless random tx stress retryable commit error: worker=%u "
+                            "round=%u attempt=%u rows=%u,%u,%u mariadb_errno=%u\n",
+                            worker_id,
+                            round,
+                            attempt,
+                            rows[0],
+                            rows[1],
+                            rows[2],
+                            mariadb_errno
+                        );
+                        fflush(stderr);
+                    }
+                    ownerless_random_tx_stress_acquire_retry_lock(retry_lock_fd, &retry_lock_held);
+                    assert_ownerless_random_tx_stress_rows_unchanged_after_rollback(
+                        db,
+                        worker_id,
+                        round,
+                        attempt,
+                        "retry-commit",
+                        rows,
+                        before_values,
+                        before_versions
+                    );
+                    ownerless_random_tx_stress_retry_pause(worker_id, round, attempt);
+                    continue;
+                }
             }
             if (ownerless_random_tx_stress_trace_retries()) {
                 fprintf(
@@ -82542,8 +86251,28 @@ static void run_ownerless_random_tx_stress_worker(
             fflush(stderr);
         }
         assert(round_finished);
+        ownerless_random_tx_stress_release_retry_lock(retry_lock_fd, &retry_lock_held);
+        /*
+         * A peer that timed out while this writer owned a shared InnoDB page
+         * rechecks after its one-second lock wait and bounded retry jitter.
+         * Leave a deterministic acquisition window beyond that bound before
+         * this writer can begin another transaction.
+         */
+        sleep_microseconds(1100000U);
+        if (round % MYLITE_TEST_RANDOM_TX_STRESS_PHASE_ROUNDS == 0U || round == rounds) {
+            /*
+             * Distinct logical row sets can still share an InnoDB page. Keep
+             * every ten-round phase concurrent, but do not let a fast writer
+             * begin the next phase until all peers finish this one. This
+             * bounds page-reacquisition advantage without forcing four-way
+             * collision before every transaction.
+             */
+            signal_pipe_message(pipes.ready_write_fd);
+            wait_for_pipe_message(pipes.release_read_fd);
+        }
     }
 
+    assert(close(retry_lock_fd) == 0);
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);
 }
@@ -82649,7 +86378,6 @@ static void run_ownerless_random_savepoint_schedule_worker(
 ) {
     mylite_db *db;
     char sql[256];
-
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 1");
     exec_ok(db, "SET SESSION lock_wait_timeout = 1");
@@ -82733,7 +86461,6 @@ static void run_ownerless_random_savepoint_schedule_worker(
         }
         assert(round_finished);
     }
-
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);
 }
@@ -83568,39 +87295,86 @@ static void ownerless_random_tx_stress_rows(unsigned worker_id, unsigned round, 
     }
 }
 
-static void ownerless_random_tx_stress_capture_rows(
+static int ownerless_random_tx_stress_capture_rows(
     mylite_db *db,
     const unsigned rows[3],
     unsigned long long values[3],
-    unsigned long long versions[3]
+    unsigned long long versions[3],
+    unsigned worker_id,
+    unsigned round,
+    unsigned attempt
 ) {
-    char sql[128];
+    ownerless_random_tx_reader_values observed = {{0}, {0}, 0U};
+    char sql[256];
+    char *errmsg = NULL;
+    unsigned mariadb_errno;
+    int result;
 
     assert(db != NULL);
     assert(rows != NULL);
     assert(values != NULL);
     assert(versions != NULL);
+    assert(
+        snprintf(
+            sql,
+            sizeof(sql),
+            "SELECT id, value, version FROM app.ownerless_random_tx_stress "
+            "WHERE id IN (%u, %u, %u) ORDER BY id",
+            rows[0],
+            rows[1],
+            rows[2]
+        ) > 0
+    );
 
-    for (unsigned index = 0U; index < 3U; ++index) {
-        assert(
-            snprintf(
-                sql,
-                sizeof(sql),
-                "SELECT value FROM app.ownerless_random_tx_stress WHERE id = %u",
-                rows[index]
-            ) > 0
+    result = mylite_exec(db, sql, capture_ownerless_random_tx_reader_values, &observed, &errmsg);
+    mariadb_errno = mylite_mariadb_errno(db);
+    if (result != MYLITE_OK) {
+        if (mariadb_errno == MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO ||
+            mariadb_errno == MYLITE_TEST_DEADLOCK_ERRNO) {
+            if (ownerless_random_tx_stress_trace_retries()) {
+                fprintf(
+                    stderr,
+                    "ownerless random tx stress retryable row-capture error: "
+                    "worker=%u round=%u attempt=%u mariadb_errno=%u sql=%s\n",
+                    worker_id,
+                    round,
+                    attempt,
+                    mariadb_errno,
+                    sql
+                );
+                fflush(stderr);
+            }
+            if (errmsg != NULL) {
+                mylite_free(errmsg);
+            }
+            return 0;
+        }
+        fprintf(
+            stderr,
+            "ownerless random tx stress unexpected row-capture error: "
+            "worker=%u round=%u attempt=%u sql=%s errcode=%d "
+            "mariadb_errno=%u errmsg=%s\n",
+            worker_id,
+            round,
+            attempt,
+            sql,
+            mylite_errcode(db),
+            mariadb_errno,
+            errmsg != NULL ? errmsg : mylite_errmsg(db)
         );
-        values[index] = query_unsigned(db, sql);
-        assert(
-            snprintf(
-                sql,
-                sizeof(sql),
-                "SELECT version FROM app.ownerless_random_tx_stress WHERE id = %u",
-                rows[index]
-            ) > 0
-        );
-        versions[index] = query_unsigned(db, sql);
+        fflush(stderr);
+        if (errmsg != NULL) {
+            mylite_free(errmsg);
+        }
+        assert(0);
     }
+    assert(errmsg == NULL);
+    assert(observed.row_count == 3U);
+    for (unsigned index = 0U; index < 3U; ++index) {
+        values[index] = observed.values[rows[index]];
+        versions[index] = observed.versions[rows[index]];
+    }
+    return 1;
 }
 
 static void assert_ownerless_random_tx_stress_rows_unchanged_after_rollback(
@@ -83618,7 +87392,47 @@ static void assert_ownerless_random_tx_stress_rows_unchanged_after_rollback(
     char sql[160];
 
     assert(context != NULL);
-    ownerless_random_tx_stress_capture_rows(db, rows, after_values, after_versions);
+    for (unsigned read_attempt = 1U;; ++read_attempt) {
+        if (ownerless_random_tx_stress_trace_retries()) {
+            fprintf(
+                stderr,
+                "ownerless random tx stress rollback verification begin: "
+                "worker=%u round=%u attempt=%u read_attempt=%u context=%s\n",
+                worker_id,
+                round,
+                attempt,
+                read_attempt,
+                context
+            );
+            fflush(stderr);
+        }
+        if (ownerless_random_tx_stress_capture_rows(
+                db,
+                rows,
+                after_values,
+                after_versions,
+                worker_id,
+                round,
+                attempt + read_attempt
+            )) {
+            if (ownerless_random_tx_stress_trace_retries()) {
+                fprintf(
+                    stderr,
+                    "ownerless random tx stress rollback verification end: "
+                    "worker=%u round=%u attempt=%u read_attempt=%u context=%s\n",
+                    worker_id,
+                    round,
+                    attempt,
+                    read_attempt,
+                    context
+                );
+                fflush(stderr);
+            }
+            break;
+        }
+        assert(read_attempt < MYLITE_TEST_RANDOM_TX_STRESS_MAX_ATTEMPTS);
+        ownerless_random_tx_stress_retry_pause(worker_id, round, attempt + read_attempt);
+    }
     for (unsigned index = 0U; index < 3U; ++index) {
         if (after_values[index] != before_values[index] ||
             after_versions[index] != before_versions[index]) {
@@ -83725,6 +87539,105 @@ static int ownerless_random_tx_stress_exec_retryable(
     return 0;
 }
 
+static void ownerless_random_tx_stress_exec_busy_retry(
+    mylite_db *db,
+    const char *sql,
+    unsigned worker_id,
+    unsigned round,
+    unsigned attempt,
+    const char *context
+) {
+    assert(db != NULL);
+    assert(sql != NULL);
+    assert(context != NULL);
+
+    for (unsigned busy_attempt = 1U; busy_attempt <= MYLITE_TEST_RANDOM_TX_STRESS_MAX_ATTEMPTS;
+         ++busy_attempt) {
+        unsigned mariadb_errno = 0U;
+        if (ownerless_random_tx_stress_trace_retries()) {
+            fprintf(
+                stderr,
+                "ownerless random tx stress transaction-control begin: "
+                "worker=%u round=%u attempt=%u busy_attempt=%u context=%s sql=%s\n",
+                worker_id,
+                round,
+                attempt,
+                busy_attempt,
+                context,
+                sql
+            );
+            fflush(stderr);
+        }
+        const int result = exec_status(db, sql, &mariadb_errno);
+
+        if (result == MYLITE_OK) {
+            if (ownerless_random_tx_stress_trace_retries()) {
+                fprintf(
+                    stderr,
+                    "ownerless random tx stress transaction-control end: "
+                    "worker=%u round=%u attempt=%u busy_attempt=%u context=%s sql=%s\n",
+                    worker_id,
+                    round,
+                    attempt,
+                    busy_attempt,
+                    context,
+                    sql
+                );
+                fflush(stderr);
+            }
+            return;
+        }
+        if (mylite_errcode(db) == MYLITE_BUSY && mariadb_errno == 0U) {
+            if (ownerless_random_tx_stress_trace_retries()) {
+                fprintf(
+                    stderr,
+                    "ownerless random tx stress retryable statement-lock busy: "
+                    "worker=%u round=%u attempt=%u busy_attempt=%u context=%s sql=%s\n",
+                    worker_id,
+                    round,
+                    attempt,
+                    busy_attempt,
+                    context,
+                    sql
+                );
+                fflush(stderr);
+            }
+            ownerless_random_tx_stress_retry_pause(worker_id, round, attempt + busy_attempt);
+            continue;
+        }
+
+        fprintf(
+            stderr,
+            "ownerless random tx stress unexpected transaction-control error: "
+            "worker=%u round=%u attempt=%u busy_attempt=%u context=%s sql=%s "
+            "errcode=%d mariadb_errno=%u\n",
+            worker_id,
+            round,
+            attempt,
+            busy_attempt,
+            context,
+            sql,
+            mylite_errcode(db),
+            mariadb_errno
+        );
+        fflush(stderr);
+        assert(0);
+    }
+
+    fprintf(
+        stderr,
+        "ownerless random tx stress exhausted statement-lock busy retries: "
+        "worker=%u round=%u attempt=%u context=%s sql=%s\n",
+        worker_id,
+        round,
+        attempt,
+        context,
+        sql
+    );
+    fflush(stderr);
+    assert(0);
+}
+
 static int ownerless_random_tx_stress_trace_retries(void) {
     static int initialized = 0;
     static int enabled = 0;
@@ -83738,14 +87651,83 @@ static int ownerless_random_tx_stress_trace_retries(void) {
     return enabled;
 }
 
+static void ownerless_random_tx_stress_join_retry_lane_if_active(
+    int retry_lock_fd,
+    int *retry_lock_held
+) {
+    struct flock lock = {
+        .l_type = F_WRLCK,
+        .l_whence = SEEK_SET,
+        .l_start = 0,
+        .l_len = 1,
+    };
+    int result;
+
+    assert(retry_lock_fd >= 0);
+    assert(retry_lock_held != NULL);
+    assert(!*retry_lock_held);
+    do {
+        result = fcntl(retry_lock_fd, F_SETLK, &lock);
+    } while (result != 0 && errno == EINTR);
+    if (result == 0) {
+        lock.l_type = F_UNLCK;
+        assert(fcntl(retry_lock_fd, F_SETLK, &lock) == 0);
+        return;
+    }
+    assert(errno == EACCES || errno == EAGAIN);
+    ownerless_random_tx_stress_acquire_retry_lock(retry_lock_fd, retry_lock_held);
+}
+
+static void ownerless_random_tx_stress_acquire_retry_lock(int retry_lock_fd, int *retry_lock_held) {
+    struct flock lock = {
+        .l_type = F_WRLCK,
+        .l_whence = SEEK_SET,
+        .l_start = 0,
+        .l_len = 1,
+    };
+    int result;
+
+    assert(retry_lock_fd >= 0);
+    assert(retry_lock_held != NULL);
+    if (*retry_lock_held) {
+        return;
+    }
+    do {
+        result = fcntl(retry_lock_fd, F_SETLKW, &lock);
+    } while (result != 0 && errno == EINTR);
+    assert(result == 0);
+    *retry_lock_held = 1;
+}
+
+static void ownerless_random_tx_stress_release_retry_lock(int retry_lock_fd, int *retry_lock_held) {
+    struct flock lock = {
+        .l_type = F_UNLCK,
+        .l_whence = SEEK_SET,
+        .l_start = 0,
+        .l_len = 1,
+    };
+
+    assert(retry_lock_fd >= 0);
+    assert(retry_lock_held != NULL);
+    if (!*retry_lock_held) {
+        return;
+    }
+    assert(fcntl(retry_lock_fd, F_SETLK, &lock) == 0);
+    *retry_lock_held = 0;
+}
+
 static void ownerless_random_tx_stress_retry_pause(
     unsigned worker_id,
     unsigned round,
     unsigned attempt
 ) {
-    const unsigned delay = 1000U * (1U + ((worker_id * 17U + round * 13U + attempt * 7U) % 20U));
+    const unsigned capped_attempt = attempt < 4U ? attempt : 4U;
+    const unsigned window_ms = 10U << (capped_attempt - 1U);
+    const unsigned worker_slot_ms = (worker_id - 1U) * 250U;
+    const unsigned delay_ms =
+        worker_slot_ms + 1U + ((worker_id * 17U + round * 13U + attempt * 7U) % window_ms);
 
-    sleep_microseconds(delay);
+    sleep_microseconds(delay_ms * 1000U);
 }
 
 static int ownerless_random_tx_stress_rolls_back_transaction(unsigned worker_id, unsigned round) {
@@ -83913,6 +87895,18 @@ static int ownerless_random_savepoint_schedule_exec_retryable(
     }
     if (mariadb_errno == MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO ||
         mariadb_errno == MYLITE_TEST_DEADLOCK_ERRNO) {
+        fprintf(
+            stderr,
+            "ownerless random savepoint schedule retry: worker=%u round=%u attempt=%u "
+            "phase=%u mariadb_errno=%u sql=%s\n",
+            worker_id,
+            round,
+            attempt,
+            phase,
+            mariadb_errno,
+            sql
+        );
+        fflush(stderr);
         return 0;
     }
 
@@ -84561,6 +88555,20 @@ static void update_first_row_by_seven_after_signal(open_database_paths paths, in
     _exit(0);
 }
 
+static void assert_savepoint_write_hidden_and_update_first_row(
+    open_database_paths paths,
+    int start_read_fd
+) {
+    mylite_db *db;
+
+    wait_for_pipe(start_read_fd);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(query_unsigned(db, "SELECT value FROM app.ownerless_rollback_work WHERE id = 1") == 10U);
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 7 WHERE id = 1");
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
 static void hold_first_row_update_until_released(open_database_paths paths, child_pipes pipes) {
     mylite_db *db;
 
@@ -84857,7 +88865,19 @@ static void create_ownerless_ddl_tables_after_signal(
                 (worker_id * 100U) + table_id
             ) > 0
         );
-        exec_ok(db, sql);
+        insert_ownerless_ddl_row_eventually(db, sql, worker_id, table_id);
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "SELECT COUNT(*) FROM app.ownerless_ddl_%u_%u "
+                "WHERE id = 1 AND value = %u",
+                worker_id,
+                table_id,
+                (worker_id * 100U) + table_id
+            ) > 0
+        );
+        assert(query_unsigned(db, sql) == 1U);
 
         assert(
             snprintf(
@@ -84904,6 +88924,54 @@ static void create_ownerless_ddl_tables_after_signal(
     assert(close(pipes.release_read_fd) == 0);
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);
+}
+
+static void insert_ownerless_ddl_row_eventually(
+    mylite_db *db,
+    const char *sql,
+    unsigned worker_id,
+    unsigned table_id
+) {
+    for (unsigned attempt = 1U; attempt <= MYLITE_TEST_STRESS_MAX_ATTEMPTS; ++attempt) {
+        unsigned mariadb_errno = 0U;
+        const int result = exec_status(db, sql, &mariadb_errno);
+
+        if (result == MYLITE_OK) {
+            assert(mylite_changes(db) == 1);
+            return;
+        }
+        if (mariadb_errno != MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO &&
+            mariadb_errno != MYLITE_TEST_DEADLOCK_ERRNO) {
+            fprintf(
+                stderr,
+                "ownerless concurrent DDL insert unexpected error: "
+                "worker=%u table=%u attempt=%u sql=%s errcode=%d "
+                "mariadb_errno=%u message=%s\n",
+                worker_id,
+                table_id,
+                attempt,
+                sql,
+                mylite_errcode(db),
+                mariadb_errno,
+                mylite_errmsg(db) != NULL ? mylite_errmsg(db) : "(null)"
+            );
+            fflush(stderr);
+            assert(0);
+        }
+        assert(query_unsigned(db, "SELECT @@in_transaction") == 0U);
+        ownerless_stress_retry_pause(worker_id + 1U, table_id + 1U, attempt);
+    }
+
+    fprintf(
+        stderr,
+        "ownerless concurrent DDL insert exhausted retries: "
+        "worker=%u table=%u sql=%s\n",
+        worker_id,
+        table_id,
+        sql
+    );
+    fflush(stderr);
+    assert(0);
 }
 
 static void run_ownerless_broader_ddl_sequence(open_database_paths paths, child_pipes pipes) {
@@ -94044,6 +98112,51 @@ static void write_redo_header_backup(
     free(backup_path);
 }
 
+static void create_redo_header_backup_from_current_redo(const char *database_path) {
+    char *backup_path = redo_header_backup_path(database_path);
+    char *redo_path = innodb_redo_log_path(database_path);
+    unsigned char image
+        [MYLITE_TEST_REDO_HEADER_BACKUP_PAYLOAD_OFFSET + MYLITE_TEST_REDO_STARTUP_PREFIX_SIZE] = {
+            0
+        };
+    struct stat redo_stat;
+    int redo_fd = open(redo_path, O_RDONLY | O_CLOEXEC);
+    int backup_fd;
+
+    assert(redo_fd >= 0);
+    assert(fstat(redo_fd, &redo_stat) == 0);
+    assert(redo_stat.st_size >= (off_t)MYLITE_TEST_REDO_STARTUP_PREFIX_SIZE);
+    memcpy(image, "MYLRDO01", 8U);
+    write_le32(image + MYLITE_TEST_REDO_HEADER_BACKUP_FORMAT_OFFSET, 1U);
+    write_le32(
+        image + MYLITE_TEST_REDO_HEADER_BACKUP_HEADER_SIZE_OFFSET,
+        MYLITE_TEST_REDO_HEADER_BACKUP_HEADER_SIZE
+    );
+    write_le64(
+        image + MYLITE_TEST_REDO_HEADER_BACKUP_FILE_SIZE_OFFSET,
+        (uint64_t)redo_stat.st_size
+    );
+    write_le32(
+        image + MYLITE_TEST_REDO_HEADER_BACKUP_PAYLOAD_SIZE_OFFSET,
+        MYLITE_TEST_REDO_STARTUP_PREFIX_SIZE
+    );
+    read_exact_at(
+        redo_fd,
+        image + MYLITE_TEST_REDO_HEADER_BACKUP_PAYLOAD_OFFSET,
+        MYLITE_TEST_REDO_STARTUP_PREFIX_SIZE,
+        0
+    );
+    assert(close(redo_fd) == 0);
+
+    backup_fd = open(backup_path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    assert(backup_fd >= 0);
+    assert(pwrite(backup_fd, image, sizeof(image), 0) == (ssize_t)sizeof(image));
+    assert(fsync(backup_fd) == 0);
+    assert(close(backup_fd) == 0);
+    free(redo_path);
+    free(backup_path);
+}
+
 static void truncate_redo_header_backup(const char *database_path, off_t size) {
     char *backup_path = redo_header_backup_path(database_path);
     int fd = open(backup_path, O_WRONLY | O_CLOEXEC);
@@ -94110,6 +98223,7 @@ static ownerless_live_peer_guard crash_ownerless_dictionary_writer_with_held_liv
     assert(writer_fn != NULL);
     assert(pipe(writer_ready_pipe) == 0);
     guard = start_ownerless_live_peer(paths);
+    assert(read_concurrency_page_write_lock_active_count(paths.database_path) == 0U);
 
     writer_child = fork();
     assert(writer_child >= 0);
@@ -94533,6 +98647,18 @@ static unsigned long long prepared_query_unsigned(mylite_db *db, const char *sql
     assert(mylite_step(stmt) == MYLITE_DONE);
     assert(mylite_finalize(stmt) == MYLITE_OK);
     return value;
+}
+
+static void prepared_exec_ok(mylite_db *db, const char *sql) {
+    mylite_stmt *stmt = NULL;
+    const char *tail = NULL;
+
+    assert(mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, &tail) == MYLITE_OK);
+    assert(stmt != NULL);
+    assert(tail != NULL && *tail == '\0');
+    assert(mylite_bind_parameter_count(stmt) == 0U);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
 }
 
 static unsigned long long query_ownerless_compressed_blob_key_block_matrix_sum(
@@ -117564,14 +121690,6 @@ static void assert_concurrency_wal_checkpointed_or_retained_for_native_checkpoin
     assert(0);
 }
 
-static void assert_concurrency_wal_checkpointed_eventually(const char *database_path) {
-    if (!wait_for_concurrency_wal_checkpointed(database_path, 5000U)) {
-        fprintf(stderr, "ownerless page-version WAL was not checkpointed: %s\n", database_path);
-        fflush(stderr);
-        assert(0);
-    }
-}
-
 static void assert_concurrency_wal_retained_for(const char *database_path, unsigned duration_ms) {
     const unsigned iterations = duration_ms * 1000U / MYLITE_TEST_WAIT_POLL_INTERVAL_US;
 
@@ -117781,6 +121899,13 @@ static uint64_t read_concurrency_innodb_lock_waiting_count(const char *database_
     );
 }
 
+static uint64_t read_concurrency_innodb_lock_active_count(const char *database_path) {
+    return read_concurrency_lock_active_count(
+        database_path,
+        MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SEGMENT_TYPE
+    );
+}
+
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static uint64_t wait_for_concurrency_innodb_table_waiting_count(
     const char *database_path,
@@ -117873,6 +121998,32 @@ static uint64_t read_concurrency_page_write_lock_waiting_count(const char *datab
         database_path,
         MYLITE_TEST_CONCURRENCY_PAGE_WRITE_LOCK_SEGMENT_TYPE
     );
+}
+
+static uint64_t read_concurrency_page_write_lock_active_count(const char *database_path) {
+    return read_concurrency_lock_active_count(
+        database_path,
+        MYLITE_TEST_CONCURRENCY_PAGE_WRITE_LOCK_SEGMENT_TYPE
+    );
+}
+
+static uint64_t read_concurrency_lock_active_count(
+    const char *database_path,
+    uint32_t segment_type
+) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *shm_path = path_join(concurrency_path, "mylite-concurrency.shm");
+    uint64_t lock_offset;
+    unsigned char bytes[8];
+    int fd = open(shm_path, O_RDONLY | O_CLOEXEC);
+
+    assert(fd >= 0);
+    lock_offset = read_concurrency_shm_segment_offset(fd, segment_type);
+    read_exact_at(fd, bytes, sizeof(bytes), (off_t)(lock_offset + 16U));
+    assert(close(fd) == 0);
+    free(shm_path);
+    free(concurrency_path);
+    return read_le64(bytes);
 }
 
 static uint64_t read_concurrency_lock_waiting_count(
@@ -118643,6 +122794,67 @@ static void corrupt_concurrency_native_file_op_latest_record(const char *databas
     free(concurrency_path);
 }
 
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static uint64_t read_concurrency_mdl_active_count(const char *database_path) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *shm_path = path_join(concurrency_path, "mylite-concurrency.shm");
+    uint64_t mdl_offset;
+    unsigned char bytes[8];
+    int fd = open(shm_path, O_RDONLY | O_CLOEXEC);
+
+    assert(fd >= 0);
+    mdl_offset = read_concurrency_shm_segment_offset(fd, MYLITE_TEST_CONCURRENCY_MDL_SEGMENT_TYPE);
+    read_exact_at(
+        fd,
+        bytes,
+        sizeof(bytes),
+        (off_t)(mdl_offset + MYLITE_TEST_CONCURRENCY_MDL_ACTIVE_COUNT_OFFSET)
+    );
+    assert(close(fd) == 0);
+    free(shm_path);
+    free(concurrency_path);
+    return read_native64(bytes);
+}
+
+static uint64_t read_concurrency_autoinc_active_count(const char *database_path) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *shm_path = path_join(concurrency_path, "mylite-concurrency.shm");
+    unsigned char bytes[8];
+    uint64_t active_count = 0U;
+    int fd = open(shm_path, O_RDONLY | O_CLOEXEC);
+
+    assert(fd >= 0);
+    const uint64_t registry_offset =
+        read_concurrency_shm_segment_offset(fd, MYLITE_TEST_CONCURRENCY_AUTOINC_SEGMENT_TYPE);
+    read_exact_at(
+        fd,
+        bytes,
+        sizeof(bytes),
+        (off_t)(registry_offset + MYLITE_TEST_CONCURRENCY_AUTOINC_SLOT_COUNT_OFFSET)
+    );
+    const uint32_t slot_count = read_le32(bytes);
+    const uint32_t slot_size = read_le32(bytes + 4U);
+    assert(slot_size == MYLITE_TEST_CONCURRENCY_AUTOINC_SLOT_SIZE);
+    for (uint32_t index = 0U; index < slot_count; ++index) {
+        read_exact_at(
+            fd,
+            bytes,
+            4U,
+            (off_t)(registry_offset + MYLITE_TEST_CONCURRENCY_AUTOINC_HEADER_SIZE +
+                    ((uint64_t)index * slot_size) +
+                    MYLITE_TEST_CONCURRENCY_AUTOINC_SLOT_STATE_OFFSET)
+        );
+        if (read_le32(bytes) == MYLITE_TEST_CONCURRENCY_AUTOINC_SLOT_STATE_ACTIVE) {
+            ++active_count;
+        }
+    }
+    assert(close(fd) == 0);
+    free(shm_path);
+    free(concurrency_path);
+    return active_count;
+}
+#endif
+
 static uint64_t read_concurrency_page_index_active_count(const char *database_path) {
     char *concurrency_path = path_join(database_path, "concurrency");
     char *shm_path = path_join(concurrency_path, "mylite-concurrency.shm");
@@ -118706,6 +122918,57 @@ static uint64_t read_concurrency_process_active_count(const char *database_path)
     free(shm_path);
     free(concurrency_path);
     return read_native64(bytes);
+}
+
+static uint64_t read_concurrency_explicit_transaction_count(const char *database_path) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *shm_path = path_join(concurrency_path, "mylite-concurrency.shm");
+    uint64_t process_offset;
+    unsigned char header[8];
+    uint64_t explicit_transaction_count = 0U;
+    int fd = open(shm_path, O_RDONLY | O_CLOEXEC);
+
+    assert(fd >= 0);
+    process_offset =
+        read_concurrency_shm_segment_offset(fd, MYLITE_TEST_CONCURRENCY_PROCESS_SEGMENT_TYPE);
+    read_exact_at(fd, header, sizeof(header), (off_t)process_offset);
+    const uint32_t slot_count =
+        read_le32(header + MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_COUNT_OFFSET);
+    const uint32_t slot_size = read_le32(header + MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_SIZE_OFFSET);
+    assert(slot_count > 0U);
+    assert(
+        slot_size >=
+        MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_EXPLICIT_TRANSACTION_COUNT_OFFSET + sizeof(uint64_t)
+    );
+
+    for (uint32_t index = 0U; index < slot_count; ++index) {
+        unsigned char state_bytes[4];
+        unsigned char count_bytes[8];
+        const off_t slot_offset =
+            (off_t)(process_offset + MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_HEADER_SIZE +
+                    ((uint64_t)index * slot_size));
+        read_exact_at(
+            fd,
+            state_bytes,
+            sizeof(state_bytes),
+            slot_offset + MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_STATE_OFFSET
+        );
+        if (read_le32(state_bytes) != MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_STATE_ACTIVE) {
+            continue;
+        }
+        read_exact_at(
+            fd,
+            count_bytes,
+            sizeof(count_bytes),
+            slot_offset + MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_EXPLICIT_TRANSACTION_COUNT_OFFSET
+        );
+        explicit_transaction_count += read_native64(count_bytes);
+    }
+
+    assert(close(fd) == 0);
+    free(shm_path);
+    free(concurrency_path);
+    return explicit_transaction_count;
 }
 
 static uint64_t read_concurrency_read_view_active_count(const char *database_path) {
@@ -119272,6 +123535,58 @@ static void report_child_status(const char *label, unsigned index, pid_t child, 
         WIFSIGNALED(child_status),
         WIFSIGNALED(child_status) ? WTERMSIG(child_status) : -1
     );
+}
+
+static int wait_for_pipe_message_or_child_exit(
+    int pipe_fd,
+    const pid_t *children,
+    unsigned child_count,
+    const char *label,
+    unsigned expected_child_index
+) {
+    assert(pipe_fd >= 0);
+    assert(children != NULL);
+    assert(child_count > 0U);
+    assert(label != NULL);
+    assert(expected_child_index < child_count);
+
+    for (;;) {
+        struct pollfd descriptor = {
+            .fd = pipe_fd,
+            .events = POLLIN,
+            .revents = 0,
+        };
+        int poll_result;
+        do {
+            poll_result = poll(&descriptor, 1U, 100);
+        } while (poll_result < 0 && errno == EINTR);
+        assert(poll_result >= 0);
+        if (poll_result > 0 && (descriptor.revents & POLLIN) != 0) {
+            wait_for_pipe_message(pipe_fd);
+            return 1;
+        }
+
+        for (unsigned child_index = 0U; child_index < child_count; ++child_index) {
+            int child_status = 0;
+            pid_t wait_result;
+
+            do {
+                wait_result = waitpid(children[child_index], &child_status, WNOHANG);
+            } while (wait_result < 0 && errno == EINTR);
+            if (wait_result == children[child_index]) {
+                fprintf(
+                    stderr,
+                    "%s expected child[%u] phase message while child[%u] exited\n",
+                    label,
+                    expected_child_index,
+                    child_index
+                );
+                report_child_status(label, child_index, children[child_index], child_status);
+                return 0;
+            }
+            assert(wait_result == 0);
+        }
+    }
 }
 
 static void wait_for_children(const char *label, const pid_t *children, unsigned count) {

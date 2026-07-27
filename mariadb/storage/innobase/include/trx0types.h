@@ -99,6 +99,20 @@ typedef ib_id_t	roll_ptr_t;
 /** Undo number */
 typedef ib_id_t	undo_no_t;
 
+/** A shared transaction-registry entry reserved before a transaction starts. */
+struct trx_ownerless_rw_reservation_t
+{
+  trx_id_t id= 0;
+};
+
+/** Reserve shared RW-transaction capacity without changing trx_t state. */
+dberr_t trx_ownerless_rw_reserve(trx_ownerless_rw_reservation_t *reservation)
+  MY_ATTRIBUTE((warn_unused_result));
+
+/** Cancel a shared RW-transaction reservation that was not consumed. */
+dberr_t trx_ownerless_rw_cancel(trx_ownerless_rw_reservation_t *reservation)
+  MY_ATTRIBUTE((warn_unused_result));
+
 /** File objects */
 /* @{ */
 /** Undo segment header */

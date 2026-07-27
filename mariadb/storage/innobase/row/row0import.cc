@@ -422,8 +422,14 @@ private:
   /** Begin import, position the cursor on the first record. */
   inline bool open() noexcept;
 
-  /** Close the persistent cursor and commit the mini-transaction. */
-  void close() noexcept { m_mtr.commit(); btr_pcur_close(&m_pcur); }
+  /** Close the persistent cursor and commit the mini-transaction.
+  @return DB_SUCCESS or error code */
+  dberr_t close() noexcept
+  {
+    const dberr_t err= m_mtr.commit();
+    btr_pcur_close(&m_pcur);
+    return err;
+  }
 
   /** Position the cursor on the next record.
   @return DB_SUCCESS or error code */
@@ -1606,9 +1612,13 @@ IndexPurge::garbage_collect() UNIV_NOTHROW
 
 	/* Close the persistent cursor and commit the mini-transaction. */
 
-	close();
+	const dberr_t commit_error= close();
+	if (err == DB_END_OF_INDEX)
+		err= DB_SUCCESS;
+	if (err == DB_SUCCESS)
+		err= commit_error;
 
-	return(err == DB_END_OF_INDEX ? DB_SUCCESS : err);
+	return err;
 }
 
 /**
@@ -1654,9 +1664,8 @@ dberr_t IndexPurge::next() noexcept
 
 	btr_pcur_store_position(&m_pcur, &m_mtr);
 
-	mtr_commit(&m_mtr);
-
-	mtr_start(&m_mtr);
+	if (const dberr_t err= m_mtr.commit_and_restart())
+		return err;
 
 	mtr_set_log_mode(&m_mtr, MTR_LOG_NO_REDO);
 
@@ -1702,19 +1711,20 @@ inline dberr_t IndexPurge::purge_pessimistic_delete() noexcept
   else
     err= DB_CORRUPTION;
 
-  m_mtr.commit();
-  return err;
+	  const dberr_t commit_error= m_mtr.commit_and_restart();
+	  if (err == DB_SUCCESS)
+	    err= commit_error;
+	  return err;
 }
 
-dberr_t IndexPurge::purge() noexcept
+	dberr_t IndexPurge::purge() noexcept
 {
   btr_pcur_store_position(&m_pcur, &m_mtr);
-  m_mtr.commit();
-  m_mtr.start();
+  if (const dberr_t err= m_mtr.commit_and_restart())
+    return err;
   m_mtr.set_log_mode(MTR_LOG_NO_REDO);
   dberr_t err= purge_pessimistic_delete();
 
-  m_mtr.start();
   m_mtr.set_log_mode(MTR_LOG_NO_REDO);
   if (err == DB_SUCCESS)
     err= (m_pcur.restore_position(BTR_MODIFY_LEAF, &m_mtr) ==
@@ -2252,6 +2262,7 @@ row_import_cleanup(row_prebuilt_t* prebuilt,
                    dict_table_t*   fts_table = nullptr)
 {
 	dict_table_t* table = prebuilt->table;
+	bool coordination_fault= false;
 
 	if (err != DB_SUCCESS) {
 		table->file_unreadable = true;
@@ -2275,12 +2286,14 @@ row_import_cleanup(row_prebuilt_t* prebuilt,
 	}
 	else {
 		DBUG_EXECUTE_IF("ib_import_before_commit_crash", DBUG_SUICIDE(););
-		prebuilt->trx->commit();
+		coordination_fault= prebuilt->trx->commit();
+		if (UNIV_UNLIKELY(coordination_fault))
+			err= DB_ERROR;
 	}
 
 	if (fts_table && fts_table != prebuilt->table) {
 
-		if (err == DB_SUCCESS) {
+		if (err == DB_SUCCESS || coordination_fault) {
 			reload_fts_table(prebuilt, fts_table);
 			table= prebuilt->table;
 			ib::warn() << "Added system generated FTS_DOC_ID "
@@ -4767,7 +4780,9 @@ row_import_for_mysql(
 		mtr_t mtr{trx};
 		mtr.start();
 		trx_undo_assign(&mtr, &err);
-		mtr.commit();
+		if (const dberr_t commit_error= mtr.commit())
+			if (err == DB_SUCCESS)
+				err= commit_error;
 	}
 
 	DBUG_EXECUTE_IF("ib_import_undo_assign_failure",

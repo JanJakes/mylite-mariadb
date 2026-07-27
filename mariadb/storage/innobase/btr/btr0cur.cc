@@ -76,6 +76,65 @@ enum btr_intention_t {
 	BTR_INTENTION_INSERT
 };
 
+static bool btr_cur_ownerless_record_page_required(
+    const dict_index_t *index, btr_latch_mode latch_mode, const mtr_t *mtr)
+{
+  if (UNIV_LIKELY(!mylite_ownerless_innodb_lock_hooks_enabled_fast()) ||
+      mtr->trx == nullptr || index->table->is_temporary())
+    return false;
+
+  const auto rw_latch= rw_lock_type_t(
+      latch_mode & (RW_X_LATCH | RW_S_LATCH));
+  return rw_latch == RW_X_LATCH ||
+         mylite_ownerless_innodb_statement_plain_read() == 0;
+}
+
+static dberr_t btr_cur_ownerless_prepare_record_page(
+    const dict_index_t *index, btr_latch_mode latch_mode, mtr_t *mtr,
+    const buf_block_t *block, bool *restart)
+{
+  *restart= false;
+  if (!btr_cur_ownerless_record_page_required(index, latch_mode, mtr))
+    return DB_SUCCESS;
+  return mylite_ownerless_innodb_lock_prepare_record_page(
+      mtr->trx, block, restart);
+}
+
+static bool btr_cur_ownerless_structure_gate_held(
+    const trx_t *trx, uint32_t space_id)
+{
+  if (trx == nullptr)
+    return false;
+  const trx_t::mylite_ownerless_page_vector *pages=
+      trx->mylite_ownerless_modified_pages_for_read();
+  if (pages == nullptr)
+    return false;
+
+  const uint64_t global_gate=
+      (uint64_t{MYLITE_OWNERLESS_INNODB_TRANSACTION_WRITE_SPACE_ID} << 32) |
+      MYLITE_OWNERLESS_INNODB_TRANSACTION_WRITE_PAGE_NO;
+  const uint64_t write_gate=
+      (uint64_t{space_id} << 32) |
+      MYLITE_OWNERLESS_INNODB_SPACE_TRANSACTION_WRITE_PAGE_NO;
+  const uint64_t read_gate=
+      (uint64_t{space_id} << 32) |
+      MYLITE_OWNERLESS_INNODB_SPACE_TRANSACTION_READ_PAGE_NO;
+  return std::find(pages->begin(), pages->end(), global_gate) != pages->end() ||
+         std::find(pages->begin(), pages->end(), write_gate) != pages->end() ||
+         std::find(pages->begin(), pages->end(), read_gate) != pages->end();
+}
+
+static dberr_t btr_cur_ownerless_restart_search(
+    btr_cur_t *cursor, const dtuple_t *tuple, page_cur_mode_t mode,
+    btr_latch_mode latch_mode, mtr_t *mtr, ulint savepoint,
+    mem_heap_t *heap)
+{
+  mtr->rollback_to_savepoint(savepoint);
+  if (UNIV_LIKELY_NULL(heap))
+    mem_heap_free(heap);
+  return cursor->search_leaf(tuple, mode, latch_mode, mtr);
+}
+
 /** For the index->lock scalability improvement, only possibility of clear
 performance regression observed was caused by grown huge history list length.
 That is because the exclusive use of index->lock also worked as reserving
@@ -203,7 +262,7 @@ unreadable:
 		return err;
 	}
 
-	buf_block_t* root = btr_root_block_get(index, RW_SX_LATCH, mtr, &err);
+	buf_block_t* root = btr_root_block_get(index, RW_S_LATCH, mtr, &err);
 	if (!root) {
 		goto unreadable;
 	}
@@ -967,9 +1026,13 @@ MY_ATTRIBUTE((nonnull,warn_unused_result))
 @retval 1  if the page could be latched in the wrong order
 @retval -1 if the latch on block was temporarily released */
 static int btr_latch_prev(rw_lock_type_t rw_latch,
-                          page_id_t page_id, dberr_t *err, mtr_t *mtr) noexcept
+                          page_id_t page_id, const dict_index_t *index,
+                          dberr_t *err, mtr_t *mtr,
+                          bool *ownerless_restart) noexcept
 {
   ut_ad(rw_latch == RW_S_LATCH || rw_latch == RW_X_LATCH);
+  ut_ad(ownerless_restart != nullptr);
+  *ownerless_restart= false;
 
   buf_block_t *block= mtr->at_savepoint(mtr->get_savepoint() - 1);
 
@@ -1064,6 +1127,11 @@ static int btr_latch_prev(rw_lock_type_t rw_latch,
     }
   }
 
+  *err= btr_cur_ownerless_prepare_record_page(
+      index, btr_latch_mode(rw_latch), mtr, prev, ownerless_restart);
+  if (*err != DB_SUCCESS || *ownerless_restart)
+    return *err == DB_SUCCESS ? ret : 0;
+
   const page_t *const p= prev->page.frame;
   if (memcmp_aligned<4>(FIL_PAGE_NEXT + p, FIL_PAGE_OFFSET + page, 4) ||
       memcmp_aligned<2>(FIL_PAGE_TYPE + p, FIL_PAGE_TYPE + page, 2) ||
@@ -1083,6 +1151,8 @@ dberr_t btr_cur_t::search_leaf(const dtuple_t *tuple, page_cur_mode_t mode,
                                btr_latch_mode latch_mode, mtr_t *mtr)
 {
   ut_ad(index()->is_btree());
+
+  const btr_latch_mode original_latch_mode= latch_mode;
 
   buf_block_t *guess;
   btr_intention_t lock_intention;
@@ -1139,6 +1209,7 @@ dberr_t btr_cur_t::search_leaf(const dtuple_t *tuple, page_cur_mode_t mode,
   /* We do a dirty read of btr_search.enabled below,
   and btr_search_guess_on_hash() will have to check it again. */
   else if (!btr_search.enabled);
+  else if (btr_cur_ownerless_record_page_required(index(), latch_mode, mtr));
   else if (btr_search_guess_on_hash(index(), tuple, mode != PAGE_CUR_LE,
                                     latch_mode, this, mtr))
   {
@@ -1215,6 +1286,15 @@ dberr_t btr_cur_t::search_leaf(const dtuple_t *tuple, page_cur_mode_t mode,
     return err;
   }
 
+  if (latch_mode == BTR_MODIFY_TREE ||
+      latch_mode == BTR_MODIFY_ROOT_AND_LEAF)
+  {
+    err= mylite_ownerless_innodb_lock_prepare_tree_write(
+        mtr->trx, index()->table->space_id);
+    if (err != DB_SUCCESS)
+      goto func_exit;
+  }
+
   const ulint zip_size= index()->table->space->zip_size();
 
   /* Start with the root page. */
@@ -1236,6 +1316,15 @@ dberr_t btr_cur_t::search_leaf(const dtuple_t *tuple, page_cur_mode_t mode,
     goto func_exit;
   }
 
+  bool ownerless_restart= false;
+  err= btr_cur_ownerless_prepare_record_page(
+      index(), latch_mode, mtr, block, &ownerless_restart);
+  if (err != DB_SUCCESS)
+    goto func_exit;
+  if (ownerless_restart)
+    return btr_cur_ownerless_restart_search(
+        this, tuple, mode, original_latch_mode, mtr, savepoint, heap);
+
   btr_search_drop_page_hash_index(block, index());
 
   if (!!page_is_comp(block->page.frame) != index()->table->not_redundant() ||
@@ -1253,6 +1342,14 @@ dberr_t btr_cur_t::search_leaf(const dtuple_t *tuple, page_cur_mode_t mode,
 #endif /* UNIV_ZIP_DEBUG */
 
   uint32_t page_level= btr_page_get_level(block->page.frame);
+  if (page_level != 0 &&
+      btr_cur_ownerless_structure_gate_held(mtr->trx, page_id.space()))
+  {
+    err= mylite_ownerless_innodb_lock_release_clean_record_page(
+        mtr->trx, block);
+    if (err != DB_SUCCESS)
+      goto func_exit;
+  }
 
   if (height == ULINT_UNDEFINED)
   {
@@ -1370,13 +1467,32 @@ dberr_t btr_cur_t::search_leaf(const dtuple_t *tuple, page_cur_mode_t mode,
       ut_ad(rw_latch == RW_S_LATCH);
 
       /* latch also siblings from left to right */
-      if (page_has_prev(block->page.frame) &&
-          !btr_latch_prev(rw_latch, page_id, &err, mtr))
-        goto func_exit;
-      if (page_has_next(block->page.frame) &&
-          !btr_block_get(*index(), btr_page_get_next(block->page.frame),
-                         rw_latch, mtr, &err))
-        goto func_exit;
+      if (page_has_prev(block->page.frame))
+      {
+        bool sibling_restart= false;
+        if (!btr_latch_prev(rw_latch, page_id, index(), &err, mtr,
+                            &sibling_restart))
+          goto func_exit;
+        if (sibling_restart)
+          return btr_cur_ownerless_restart_search(
+              this, tuple, mode, original_latch_mode, mtr, savepoint, heap);
+      }
+      if (page_has_next(block->page.frame))
+      {
+        buf_block_t *sibling=
+            btr_block_get(*index(), btr_page_get_next(block->page.frame),
+                          rw_latch, mtr, &err);
+        if (!sibling)
+          goto func_exit;
+        bool sibling_restart= false;
+        err= btr_cur_ownerless_prepare_record_page(
+            index(), latch_mode, mtr, sibling, &sibling_restart);
+        if (err != DB_SUCCESS)
+          goto func_exit;
+        if (sibling_restart)
+          return btr_cur_ownerless_restart_search(
+              this, tuple, mode, original_latch_mode, mtr, savepoint, heap);
+      }
       goto release_tree;
     case BTR_SEARCH_LEAF:
     case BTR_MODIFY_LEAF:
@@ -1396,13 +1512,32 @@ release_tree:
       ut_ad(latch_mode == BTR_MODIFY_TREE);
       ut_ad(rw_latch == RW_X_LATCH);
       /* x-latch also siblings from left to right */
-      if (page_has_prev(block->page.frame) &&
-          !btr_latch_prev(rw_latch, page_id, &err, mtr))
-        goto func_exit;
-      if (page_has_next(block->page.frame) &&
-          !btr_block_get(*index(), btr_page_get_next(block->page.frame),
-                         RW_X_LATCH, mtr, &err))
-        goto func_exit;
+      if (page_has_prev(block->page.frame))
+      {
+        bool sibling_restart= false;
+        if (!btr_latch_prev(rw_latch, page_id, index(), &err, mtr,
+                            &sibling_restart))
+          goto func_exit;
+        if (sibling_restart)
+          return btr_cur_ownerless_restart_search(
+              this, tuple, mode, original_latch_mode, mtr, savepoint, heap);
+      }
+      if (page_has_next(block->page.frame))
+      {
+        buf_block_t *sibling=
+            btr_block_get(*index(), btr_page_get_next(block->page.frame),
+                          RW_X_LATCH, mtr, &err);
+        if (!sibling)
+          goto func_exit;
+        bool sibling_restart= false;
+        err= btr_cur_ownerless_prepare_record_page(
+            index(), latch_mode, mtr, sibling, &sibling_restart);
+        if (err != DB_SUCCESS)
+          goto func_exit;
+        if (sibling_restart)
+          return btr_cur_ownerless_restart_search(
+              this, tuple, mode, original_latch_mode, mtr, savepoint, heap);
+      }
     }
 
   reached_latched_leaf:
@@ -1545,9 +1680,14 @@ release_tree:
 
         /* Latch the previous page if the node pointer is the leftmost
         of the current page. */
-        int ret= btr_latch_prev(rw_latch, page_id, &err, mtr);
+        bool sibling_restart= false;
+        int ret= btr_latch_prev(rw_latch, page_id, index(), &err, mtr,
+                                &sibling_restart);
         if (!ret)
           goto func_exit;
+        if (sibling_restart)
+          return btr_cur_ownerless_restart_search(
+              this, tuple, mode, original_latch_mode, mtr, savepoint, heap);
         ut_ad(block_savepoint + 2 == mtr->get_savepoint());
         if (ret < 0)
         {
@@ -1636,18 +1776,36 @@ dberr_t btr_cur_t::pessimistic_search_leaf(const dtuple_t *tuple,
   const page_cur_mode_t page_mode{btr_cur_nonleaf_mode(mode)};
 
   mtr->page_lock(block, RW_X_LATCH);
-  btr_search_drop_page_hash_index(block, index());
+  mem_heap_t *heap= nullptr;
+  dberr_t err;
 
+ restart_search:
+  mtr->rollback_to_savepoint(2);
+  if (UNIV_LIKELY_NULL(heap))
+  {
+    mem_heap_free(heap);
+    heap= nullptr;
+    offsets= offsets_;
+    rec_offs_init(offsets_);
+  }
+  block= mtr->at_savepoint(1);
+  bool ownerless_restart= false;
+  err= btr_cur_ownerless_prepare_record_page(
+      index(), BTR_MODIFY_TREE, mtr, block, &ownerless_restart);
+  if (err != DB_SUCCESS)
+    return err;
+  if (ownerless_restart)
+    goto restart_search;
+
+  btr_search_drop_page_hash_index(block, index());
   up_match= 0;
   up_bytes= 0;
   low_match= 0;
   low_bytes= 0;
   ulint height= btr_page_get_level(block->page.frame);
   tree_height= height + 1;
-  mem_heap_t *heap= nullptr;
 
  search_loop:
-  dberr_t err;
   page_cur.block= block;
 
   if (UNIV_UNLIKELY(!height))
@@ -1706,6 +1864,14 @@ dberr_t btr_cur_t::pessimistic_search_leaf(const dtuple_t *tuple,
     goto func_exit;
   }
 
+  ownerless_restart= false;
+  err= btr_cur_ownerless_prepare_record_page(
+      index(), BTR_MODIFY_TREE, mtr, block, &ownerless_restart);
+  if (err != DB_SUCCESS)
+    goto func_exit;
+  if (ownerless_restart)
+    goto restart_search;
+
   btr_search_drop_page_hash_index(block, index());
 
   if (!!page_is_comp(block->page.frame) != index()->table->not_redundant() ||
@@ -1724,13 +1890,30 @@ dberr_t btr_cur_t::pessimistic_search_leaf(const dtuple_t *tuple,
   ut_a(!page_zip || page_zip_validate(page_zip, block->page.frame, index()));
 #endif /* UNIV_ZIP_DEBUG */
 
-  if (page_has_prev(block->page.frame) &&
-      !btr_latch_prev(RW_X_LATCH, page_id, &err, mtr))
-    goto func_exit;
-  if (page_has_next(block->page.frame) &&
-      !btr_block_get(*index(), btr_page_get_next(block->page.frame),
-                     RW_X_LATCH, mtr, &err))
-    goto func_exit;
+  if (page_has_prev(block->page.frame))
+  {
+    bool sibling_restart= false;
+    if (!btr_latch_prev(RW_X_LATCH, page_id, index(), &err, mtr,
+                        &sibling_restart))
+      goto func_exit;
+    if (sibling_restart)
+      goto restart_search;
+  }
+  if (page_has_next(block->page.frame))
+  {
+    buf_block_t *sibling=
+        btr_block_get(*index(), btr_page_get_next(block->page.frame),
+                      RW_X_LATCH, mtr, &err);
+    if (!sibling)
+      goto func_exit;
+    bool sibling_restart= false;
+    err= btr_cur_ownerless_prepare_record_page(
+        index(), BTR_MODIFY_TREE, mtr, sibling, &sibling_restart);
+    if (err != DB_SUCCESS)
+      goto func_exit;
+    if (sibling_restart)
+      goto restart_search;
+  }
   goto search_loop;
 }
 
@@ -1798,10 +1981,30 @@ dberr_t btr_cur_search_to_nth_level(ulint level,
   }
 
   const ulint zip_size= index->table->space->zip_size();
+  const ulint ownerless_savepoint= mtr->get_savepoint();
 
   /* Start with the root page. */
   page_id_t page_id(index->table->space_id, index->page);
   ulint height= ULINT_UNDEFINED;
+
+restart_search:
+  mtr->rollback_to_savepoint(ownerless_savepoint);
+  if (UNIV_LIKELY_NULL(heap))
+  {
+    mem_heap_free(heap);
+    heap= nullptr;
+    offsets= offsets_;
+    rec_offs_init(offsets_);
+  }
+  page_id= page_id_t(index->table->space_id, index->page);
+  height= ULINT_UNDEFINED;
+#ifndef BTR_CUR_ADAPT
+  block= nullptr;
+#else
+  block= index->search_info.root_guess;
+#endif
+  cursor->up_match= 0;
+  cursor->low_match= 0;
 
 search_loop:
   err= DB_SUCCESS;
@@ -1814,11 +2017,17 @@ search_loop:
     btr_read_failed(err, *index);
     goto func_exit;
   }
-  else
-  {
-    btr_search_drop_page_hash_index(block, index);
-    btr_cur_nonleaf_make_young(&block->page);
-  }
+
+  bool ownerless_restart= false;
+  err= btr_cur_ownerless_prepare_record_page(
+      index, btr_latch_mode(rw_latch), mtr, block, &ownerless_restart);
+  if (err != DB_SUCCESS)
+    goto func_exit;
+  if (ownerless_restart)
+    goto restart_search;
+
+  btr_search_drop_page_hash_index(block, index);
+  btr_cur_nonleaf_make_young(&block->page);
 
 #ifdef UNIV_ZIP_DEBUG
   if (const page_zip_des_t *page_zip= buf_block_get_page_zip(block))
@@ -1955,6 +2164,27 @@ index_locked:
     if (!block)
       break;
 
+    bool ownerless_restart= false;
+    err= btr_cur_ownerless_prepare_record_page(
+        index, latch_mode, mtr, block, &ownerless_restart);
+    if (err != DB_SUCCESS)
+      break;
+    if (ownerless_restart)
+    {
+      mtr->rollback_to_savepoint(savepoint);
+      if (UNIV_LIKELY_NULL(heap))
+      {
+        mem_heap_free(heap);
+        heap= nullptr;
+        offsets= offsets_;
+        rec_offs_init(offsets_);
+      }
+      page= index->page;
+      height= ULINT_UNDEFINED;
+      n_blocks= 0;
+      continue;
+    }
+
     if (first)
       page_cur_set_before_first(block, &page_cur);
     else
@@ -1988,13 +2218,53 @@ index_locked:
         if (latch_mode == BTR_MODIFY_TREE)
         {
           /* x-latch also siblings from left to right */
+          bool sibling_restart= false;
           if (page_has_prev(block->page.frame) &&
-              !btr_latch_prev(RW_X_LATCH, block->page.id(), &err, mtr))
+              !btr_latch_prev(RW_X_LATCH, block->page.id(), index, &err, mtr,
+                              &sibling_restart))
             break;
-          if (page_has_next(block->page.frame) &&
-              !btr_block_get(*index, btr_page_get_next(block->page.frame),
-                             RW_X_LATCH, mtr, &err))
-            break;
+          if (sibling_restart)
+          {
+            mtr->rollback_to_savepoint(savepoint);
+            if (UNIV_LIKELY_NULL(heap))
+            {
+              mem_heap_free(heap);
+              heap= nullptr;
+              offsets= offsets_;
+              rec_offs_init(offsets_);
+            }
+            page= index->page;
+            height= ULINT_UNDEFINED;
+            n_blocks= 0;
+            continue;
+          }
+          if (page_has_next(block->page.frame))
+          {
+            buf_block_t *sibling=
+                btr_block_get(*index, btr_page_get_next(block->page.frame),
+                              RW_X_LATCH, mtr, &err);
+            if (!sibling)
+              break;
+            err= btr_cur_ownerless_prepare_record_page(
+                index, latch_mode, mtr, sibling, &sibling_restart);
+            if (err != DB_SUCCESS)
+              break;
+            if (sibling_restart)
+            {
+              mtr->rollback_to_savepoint(savepoint);
+              if (UNIV_LIKELY_NULL(heap))
+              {
+                mem_heap_free(heap);
+                heap= nullptr;
+                offsets= offsets_;
+                rec_offs_init(offsets_);
+              }
+              page= index->page;
+              height= ULINT_UNDEFINED;
+              n_blocks= 0;
+              continue;
+            }
+          }
 
           if (!index->lock.have_x() &&
               btr_cur_need_opposite_intention(block->page, index->is_clust(),
@@ -2364,6 +2634,28 @@ static void btr_cur_prefetch_siblings(const buf_block_t *block,
     buf_read_page_background(id, space, trx);
 }
 
+class mylite_ownerless_insert_reservation_guard
+{
+public:
+  mylite_ownerless_insert_reservation_guard(trx_t *trx,
+                                             const dict_index_t *index)
+      : m_trx(trx), m_index(index),
+        m_checkpoint(
+            mylite_ownerless_innodb_lock_insert_reservation_checkpoint())
+  {}
+
+  ~mylite_ownerless_insert_reservation_guard()
+  {
+    mylite_ownerless_innodb_lock_cancel_insert_reservation(
+        m_trx, m_index, m_checkpoint);
+  }
+
+private:
+  trx_t *m_trx;
+  const dict_index_t *m_index;
+  uint64_t m_checkpoint;
+};
+
 /*************************************************************//**
 Tries to perform an insert to a page in an index tree, next to cursor.
 It is assumed that mtr holds an x-latch on the page. The operation does
@@ -2420,6 +2712,8 @@ btr_cur_optimistic_insert(
 	block = btr_cur_get_block(cursor);
 	page = buf_block_get_frame(block);
 	index = cursor->index();
+	mylite_ownerless_insert_reservation_guard insert_reservation(
+		thr ? thr_get_trx(thr) : nullptr, index);
 
 	ut_ad(mtr->memo_contains_flagged(block, MTR_MEMO_PAGE_X_FIX));
 	ut_ad(!dict_index_is_online_ddl(index)
@@ -2673,10 +2967,13 @@ fail_err:
 	if (!(flags & BTR_NO_LOCKING_FLAG) && inherit) {
 		mylite_deep_stage_start =
 			mylite_ownerless_innodb_deep_perf_start_ns();
-		lock_update_insert(block, *rec);
+		err = lock_update_insert(block, *rec);
 		mylite_ownerless_innodb_deep_perf_add_elapsed(
 			MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_BTR_OPTIMISTIC_LOCK_UPDATE_NS,
 			mylite_deep_stage_start);
+		if (err != DB_SUCCESS) {
+			goto fail_err;
+		}
 	}
 
 	*big_rec = big_rec_vec;
@@ -2722,6 +3019,8 @@ btr_cur_pessimistic_insert(
 	big_rec_t*	big_rec_vec	= NULL;
 	bool		inherit = false;
 	uint32_t	n_reserved	= 0;
+	mylite_ownerless_insert_reservation_guard insert_reservation(
+		thr ? thr_get_trx(thr) : nullptr, index);
 
 	ut_ad(dtuple_check_typed(entry));
 	ut_ad(thr || !(~flags & (BTR_NO_LOCKING_FLAG | BTR_NO_UNDO_LOG_FLAG)));
@@ -2835,6 +3134,7 @@ btr_cur_pessimistic_insert(
 		}
 	}
 
+	err = DB_SUCCESS;
 	if (!page_is_leaf(btr_cur_get_page(cursor))) {
 		ut_ad(!big_rec_vec);
 	} else {
@@ -2850,11 +3150,10 @@ btr_cur_pessimistic_insert(
 #endif /* BTR_CUR_HASH_ADAPT */
 		if (inherit && !(flags & BTR_NO_LOCKING_FLAG)) {
 
-			lock_update_insert(btr_cur_get_block(cursor), *rec);
+			err = lock_update_insert(btr_cur_get_block(cursor), *rec);
 		}
 	}
 
-	err = DB_SUCCESS;
 func_exit:
 	index->table->space->release_free_extents(n_reserved);
 	*big_rec = big_rec_vec;
@@ -3022,6 +3321,9 @@ static dberr_t btr_cur_upd_rec_sys(buf_block_t *block, rec_t *rec,
       The total size is: x+13 versus x+4+15-d = x+19-d bytes.
       To save space, we must have d>6, that is, the complete DB_TRX_ID and
       the first byte(s) of DB_ROLL_PTR must match the previous record. */
+      if (UNIV_UNLIKELY(
+              !mtr->ownerless_page_write_prepare_checked(*block)))
+        return mtr->ownerless_error();
       memcpy(dest, src, d);
       mtr->memmove(*block, dest - block->page.frame, src - block->page.frame,
                    d);
@@ -4560,7 +4862,7 @@ btr_cur_optimistic_delete(
 			    && rec_is_add_metadata(first_rec, *index));
 		if (UNIV_LIKELY(empty_table)) {
 			if (UNIV_LIKELY(!is_metadata && !flags)) {
-				lock_update_delete(block, rec);
+				lock_update_delete(block, rec, mtr->trx);
 			}
 			btr_page_empty(block, buf_block_get_page_zip(block),
 				       index, 0, mtr);
@@ -4597,7 +4899,7 @@ btr_cur_optimistic_delete(
 			goto func_exit;
 		} else {
 			if (!flags) {
-				lock_update_delete(block, rec);
+				lock_update_delete(block, rec, mtr->trx);
 			}
 
 			btr_search_update_hash_on_delete(cursor);
@@ -4723,7 +5025,7 @@ btr_cur_pessimistic_delete(
 			ut_ad(index->table->supports_instant());
 			ut_ad(index->is_primary());
 		} else if (flags == 0) {
-			lock_update_delete(block, rec);
+			lock_update_delete(block, rec, mtr->trx);
 		}
 
 		if (block->page.id().page_no() != index->page) {

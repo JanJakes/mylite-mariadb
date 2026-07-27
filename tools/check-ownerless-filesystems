@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "$#" -ne 1 ]; then
+  echo "usage: tools/check-ownerless-filesystems <ownerless-sql-test-binary>" >&2
+  exit 2
+fi
+
+test_binary="$(realpath "$1")"
+if [ ! -x "${test_binary}" ]; then
+  echo "ownerless SQL test binary is not executable: ${test_binary}" >&2
+  exit 2
+fi
+
+root="$(pwd)/build/ownerless-filesystem-gate"
+mounts=()
+loop_devices=()
+cleanup() {
+  local index
+  for ((index = ${#mounts[@]} - 1; index >= 0; --index)); do
+    sudo umount "${mounts[index]}" 2>/dev/null || true
+  done
+  for ((index = ${#loop_devices[@]} - 1; index >= 0; --index)); do
+    sudo losetup --detach "${loop_devices[index]}" 2>/dev/null || true
+  done
+  rm -rf "${root}"
+}
+trap cleanup EXIT
+
+rm -rf "${root}"
+mkdir -p \
+  "${root}/ext4" \
+  "${root}/xfs" \
+  "${root}/tmpfs" \
+  "${root}/overlay/lower" \
+  "${root}/overlay/upper" \
+  "${root}/overlay/work" \
+  "${root}/overlay/merged"
+
+truncate -s 768M "${root}/ext4.img"
+mkfs.ext4 -F -q "${root}/ext4.img"
+ext4_loop="$(sudo losetup --find --show "${root}/ext4.img")"
+loop_devices+=("${ext4_loop}")
+sudo mount "${ext4_loop}" "${root}/ext4"
+mounts+=("${root}/ext4")
+
+truncate -s 768M "${root}/xfs.img"
+mkfs.xfs -f -q "${root}/xfs.img"
+xfs_loop="$(sudo losetup --find --show "${root}/xfs.img")"
+loop_devices+=("${xfs_loop}")
+sudo mount "${xfs_loop}" "${root}/xfs"
+mounts+=("${root}/xfs")
+
+sudo mount -t tmpfs -o size=768M tmpfs "${root}/tmpfs"
+mounts+=("${root}/tmpfs")
+
+sudo mount -t overlay overlay \
+  -o "lowerdir=${root}/overlay/lower,upperdir=${root}/overlay/upper,workdir=${root}/overlay/work" \
+  "${root}/overlay/merged"
+mounts+=("${root}/overlay/merged")
+
+run_on_filesystem() {
+  local test_root="$1"
+  local expected_type="$2"
+  local actual_type
+
+  actual_type="$(findmnt -n -o FSTYPE --target "${test_root}")"
+  if [ "${actual_type}" != "${expected_type}" ]; then
+    echo "ownerless filesystem gate expected ${expected_type}, found ${actual_type}" >&2
+    return 1
+  fi
+
+  sudo unshare --mount --propagation private -- \
+    bash -ceu '
+      mount --bind "$1" /tmp
+      actual_type="$(findmnt -n -o FSTYPE --target /tmp)"
+      if [ "${actual_type}" != "$2" ]; then
+        echo "ownerless filesystem namespace expected $2, found ${actual_type}" >&2
+        exit 1
+      fi
+      test_uid="$3"
+      test_gid="$4"
+      test_binary="$5"
+      run_case() {
+        echo "ownerless_filesystem_case=$1"
+        setpriv \
+          --reuid="${test_uid}" \
+          --regid="${test_gid}" \
+          --clear-groups \
+          "${test_binary}" sql-case "$1"
+      }
+      run_case test_two_processes_update_different_innodb_rows
+      run_case test_ownerless_ddl_refreshes_peer_dictionary
+      run_case test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds
+    ' ownerless-filesystem-gate \
+    "${test_root}" \
+    "${expected_type}" \
+    "$(id -u)" \
+    "$(id -g)" \
+    "${test_binary}"
+}
+
+for filesystem in ext4 xfs tmpfs overlay/merged; do
+  test_root="${root}/${filesystem}/tmp"
+  sudo mkdir -p "${test_root}"
+  sudo chown "$(id -u):$(id -g)" "${test_root}"
+  echo "ownerless_filesystem_gate=${filesystem}"
+  case "${filesystem}" in
+    overlay/merged)
+      run_on_filesystem "${test_root}" overlay
+      ;;
+    *)
+      run_on_filesystem "${test_root}" "${filesystem}"
+      ;;
+  esac
+done
+
+echo "ownerless_filesystem_gate_ok=ext4,xfs,tmpfs,overlay"

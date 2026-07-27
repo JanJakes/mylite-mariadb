@@ -98,6 +98,9 @@ last2:
 template<unsigned l,mtr_t::write_type w,typename V>
 inline bool mtr_t::write(const buf_block_t &block, void *ptr, V val)
 {
+  ownerless_page_write_prepare(block);
+  if (UNIV_UNLIKELY(ownerless_failed()))
+    return false;
   ut_ad(ut_align_down(ptr, srv_page_size) == block.page.frame);
   static_assert(l == 1 || l == 2 || l == 4 || l == 8, "wrong length");
   byte buf[l];
@@ -167,6 +170,9 @@ inline void mtr_t::memset(const buf_block_t &b, ulint ofs, ulint len, byte val)
 @param[in]      val     the data byte to write */
 inline void mtr_t::memset(const buf_block_t *b, ulint ofs, ulint len, byte val)
 {
+  ownerless_page_write_prepare(*b);
+  if (UNIV_UNLIKELY(ownerless_failed()))
+    return;
   ut_ad(ofs <= ulint(srv_page_size));
   ut_ad(ofs + len <= ulint(srv_page_size));
   ::memset(ofs + b->page.frame, val, len);
@@ -207,6 +213,9 @@ inline void mtr_t::memset(const buf_block_t &b, ulint ofs, size_t len,
 inline void mtr_t::memset(const buf_block_t *b, ulint ofs, size_t len,
                           const void *str, size_t size)
 {
+  ownerless_page_write_prepare(*b);
+  if (UNIV_UNLIKELY(ownerless_failed()))
+    return;
   ut_ad(ofs <= ulint(srv_page_size));
   ut_ad(ofs + len <= ulint(srv_page_size));
   ut_ad(len > size); /* use mtr_t::memcpy() for shorter writes */
@@ -277,7 +286,14 @@ inline void mtr_t::memmove(const buf_block_t &b, ulint d, ulint s, ulint len)
   ut_ad(d <= ulint(srv_page_size));
   ut_ad(d + len <= ulint(srv_page_size));
 
+  if (UNIV_UNLIKELY(!ownerless_page_write_prepare_checked(b)))
+    return;
   set_modified(b);
+  if (UNIV_UNLIKELY(ownerless_failed()))
+    return;
+  if (UNIV_UNLIKELY(mylite_ownerless_innodb_test_faults_enabled_fast()))
+    mylite_ownerless_innodb_test_note_mtr_memmove(
+        fil_page_type_is_index(fil_page_get_type(b.page.frame)));
   if (!is_logged())
     return;
   static_assert(MIN_4BYTE > UNIV_PAGE_SIZE_MAX, "consistency");
@@ -413,6 +429,9 @@ template<mtr_t::write_type w>
 inline void mtr_t::memcpy(const buf_block_t &b, void *dest, const void *str,
                           ulint len)
 {
+  ownerless_page_write_prepare(b);
+  if (UNIV_UNLIKELY(ownerless_failed()))
+    return;
   ut_ad(ut_align_down(dest, srv_page_size) == b.page.frame);
   byte *d= static_cast<byte*>(dest);
   const char *s= static_cast<const char*>(str);

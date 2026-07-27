@@ -66,7 +66,7 @@ row_undo_ins_remove_clust_rec(
 /*==========================*/
 	undo_node_t*	node)	/*!< in: undo node */
 {
-	dberr_t		err;
+		dberr_t		err	= DB_SUCCESS;
 	ulint		n_tries	= 0;
 	mtr_t		mtr{node->trx};
 	dict_index_t*	index	= node->pcur.index();
@@ -137,12 +137,15 @@ restart:
 	case DICT_INDEXES_ID:
 		ut_ad(node->trx->dict_operation_lock_mode);
 		ut_ad(node->rec_type == TRX_UNDO_INSERT_REC);
-		if (!table_id) {
-			table_id = mach_read_from_8(rec);
-			if (table_id) {
-				mtr.commit();
-				goto restart;
-			}
+			if (!table_id) {
+				table_id = mach_read_from_8(rec);
+				if (table_id) {
+					err = mtr.commit();
+					if (UNIV_UNLIKELY(err != DB_SUCCESS)) {
+						return err;
+					}
+					goto restart;
+				}
 			ut_ad("corrupted SYS_INDEXES record" == 0);
 		}
 
@@ -178,13 +181,17 @@ restart:
 			d = fil_delete_tablespace(space_id);
 		}
 
-		mtr.commit();
+			const dberr_t commit_error = mtr.commit();
 
-		if (d != OS_FILE_CLOSED) {
-			os_file_close(d);
-		}
+			if (d != OS_FILE_CLOSED) {
+				os_file_close(d);
+			}
+			if (UNIV_UNLIKELY(commit_error != DB_SUCCESS)) {
+				err = commit_error;
+				goto committed_exit;
+			}
 
-		mtr.start();
+			mtr.start();
 		ut_a(node->pcur.restore_position(
 			BTR_MODIFY_LEAF, &mtr) == btr_pcur_t::SAME_ALL);
 	}
@@ -195,7 +202,10 @@ restart:
 		goto func_exit;
 	}
 
-	btr_pcur_commit_specify_mtr(&node->pcur, &mtr);
+		btr_pcur_commit_specify_mtr(&node->pcur, &mtr);
+		if (UNIV_UNLIKELY(mtr.ownerless_error() != DB_SUCCESS)) {
+			goto committed_exit;
+		}
 retry:
 	/* If did not succeed, try pessimistic descent to tree */
 	mtr.start();
@@ -217,7 +227,10 @@ retry:
 	if (err == DB_OUT_OF_FILE_SPACE
 	    && n_tries < BTR_CUR_RETRY_DELETE_N_TIMES) {
 
-		btr_pcur_commit_specify_mtr(&(node->pcur), &mtr);
+			btr_pcur_commit_specify_mtr(&(node->pcur), &mtr);
+			if (UNIV_UNLIKELY(mtr.ownerless_error() != DB_SUCCESS)) {
+				goto committed_exit;
+			}
 
 		n_tries++;
 
@@ -234,7 +247,11 @@ func_exit:
 	}
 
 	btr_pcur_commit_specify_mtr(&node->pcur, &mtr);
+	if (err == DB_SUCCESS) {
+		err = mtr.ownerless_error();
+	}
 
+committed_exit:
 	if (UNIV_LIKELY_NULL(table)) {
 		dict_table_close(table, node->trx->mysql_thd, mdl_ticket);
 	}
@@ -307,7 +324,10 @@ found:
 
 func_exit:
 	btr_pcur_close(&pcur);
-	mtr_commit(&mtr);
+	const dberr_t commit_error = mtr_commit(&mtr);
+	if (err == DB_SUCCESS) {
+		err = commit_error;
+	}
 
 	return(err);
 }
@@ -556,7 +576,7 @@ row_undo_ins(
 	const bool dict_locked = node->trx->dict_operation_lock_mode;
 
 	if (!row_undo_ins_parse_undo_rec(node, dict_locked)) {
-		return DB_SUCCESS;
+		return node->trx->error_state;
 	}
 
 	ut_ad(node->table->is_temporary()

@@ -156,12 +156,15 @@ public:
 			/* It need to update MBR in parent entry,
 			so change search mode to BTR_MODIFY_TREE */
 			if (error == DB_SUCCESS && rtr_info.mbr_adj) {
-				mtr.commit();
+				error = mtr.commit_and_restart();
 				rtr_clean_rtr_info(&rtr_info, true);
+				if (UNIV_UNLIKELY(error != DB_SUCCESS)) {
+					static_cast<void>(mtr.commit());
+					break;
+				}
 				rtr_init_rtr_info(&rtr_info, false, &ins_cur,
 						  index, false);
 				rtr_info_update_btr(&ins_cur, &rtr_info);
-				mtr.start();
 				index->set_modified(mtr);
 				error = rtr_insert_leaf(&ins_cur, nullptr,
 							dtuple,
@@ -178,8 +181,12 @@ public:
 			ut_ad(!big_rec);
 
 			if (error == DB_FAIL) {
-				mtr.commit();
-				mtr.start();
+				error = mtr.commit_and_restart();
+				if (UNIV_UNLIKELY(error != DB_SUCCESS)) {
+					rtr_clean_rtr_info(&rtr_info, true);
+					static_cast<void>(mtr.commit());
+					break;
+				}
 				index->set_modified(mtr);
 
 				rtr_clean_rtr_info(&rtr_info, true);
@@ -220,9 +227,15 @@ public:
 				}
 			}
 
-			mtr.commit();
+			const dberr_t commit_error = mtr.commit();
+			if (error == DB_SUCCESS) {
+				error = commit_error;
+			}
 
 			rtr_clean_rtr_info(&rtr_info, true);
+			if (UNIV_UNLIKELY(commit_error != DB_SUCCESS)) {
+				break;
+			}
 		}
 
 		m_dtuple_vec.clear();
@@ -4306,9 +4319,14 @@ void row_merge_drop_temp_indexes()
 	indexes, so that the data dictionary information can be checked
 	when accessing the tablename.ibd files. */
 	trx_t* trx = trx_create();
-	trx_start_for_ddl(trx);
+	dberr_t error= trx_start_for_ddl(trx);
+	if (UNIV_UNLIKELY(error != DB_SUCCESS)) {
+		ib::error() << "row_merge_drop_temp_indexes(): " << error;
+		trx->dispose_failed_start();
+		return;
+	}
 	trx->op_info = "dropping partially created indexes";
-	dberr_t error = lock_sys_tables(trx);
+	error= lock_sys_tables(trx);
 
 	row_mysql_lock_data_dictionary(trx);
 	/* Ensure that this transaction will be rolled back and locks
@@ -4333,9 +4351,13 @@ void row_merge_drop_temp_indexes()
 		ib::error() << "row_merge_drop_temp_indexes(): " << error;
 	}
 
-	trx_commit_for_mysql(trx);
+	const dberr_t commit_error= trx_commit_for_mysql(trx);
 	row_mysql_unlock_data_dictionary(trx);
-	trx->free();
+	if (UNIV_UNLIKELY(commit_error != DB_SUCCESS))
+		ib::error() << "row_merge_drop_temp_indexes(): "
+			<< commit_error << " during commit";
+	if (!trx->mylite_ownerless_coordination_fault)
+		trx->free();
 }
 
 
@@ -4656,6 +4678,10 @@ row_merge_build_indexes(
 				   ? n_indexes - 1
 				   : n_indexes);
 
+	error= trx_start_if_not_started_xa(trx, true);
+	if (UNIV_UNLIKELY(error != DB_SUCCESS))
+		DBUG_RETURN(error);
+
 	/* Allocate memory for merge file data structure and initialize
 	fields */
 
@@ -4683,7 +4709,6 @@ row_merge_build_indexes(
 		}
 	}
 
-	trx_start_if_not_started_xa(trx, true);
 	ulint	n_merge_files = 0;
 
 	for (ulint i = 0; i < n_indexes; i++)

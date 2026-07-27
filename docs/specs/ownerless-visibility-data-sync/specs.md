@@ -30,9 +30,11 @@ coverage is complete for live readers, peer writers, and no-live recovery.
 - `.github/workflows/ci.yml` already runs the WordPress job through separate
   `docker-image`, `fetch`, `build-php`, `dependencies`, `prepare-db`,
   `perf-probe`, and `phpunit` phases.
-- `packages/php-ext-mysqli-mylite/src/php_mysqli_mylite.c` opens WordPress
-  databases with ordinary `MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE`, so the
-  WordPress PHPUnit suite does not exercise ownerless read/write mode.
+- `packages/php-ext-mysqli-mylite/src/php_mysqli_mylite.c` defaults WordPress
+  databases to ordinary `MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE` opens.
+  The focused WordPress ownerless gate sets the pre-connect mysqli ownerless
+  option through `MYLITE_WORDPRESS_OWNERLESS_RW=1`; ordinary WordPress jobs
+  retain the default mode.
 - `mariadb/storage/innobase/trx/trx0trx.cc` calls
   `mylite_ownerless_innodb_flush_dirty_pages_to_lsn()` before releasing
   ownerless locks whenever the transaction has a native id, ownerless lock id,

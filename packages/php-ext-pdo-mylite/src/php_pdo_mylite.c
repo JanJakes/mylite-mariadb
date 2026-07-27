@@ -76,7 +76,11 @@ static int pdo_mylite_error(pdo_dbh_t *dbh, pdo_stmt_t *stmt, int result, const 
 static int pdo_mylite_bind_zval(mylite_stmt *stmt, unsigned index, zval *value);
 static void pdo_mylite_column_to_zval(mylite_stmt *stmt, unsigned column, zval *value);
 static zend_string *pdo_mylite_quote_string(zend_string *input);
-static char *pdo_mylite_resolve_path(pdo_dbh_t *dbh);
+static char *pdo_mylite_resolve_path(
+    pdo_dbh_t *dbh,
+    unsigned *out_open_flags,
+    const char **out_error
+);
 
 static const struct pdo_dbh_methods pdo_mylite_dbh_methods = {
     pdo_mylite_handle_closer,
@@ -177,7 +181,14 @@ static int pdo_mylite_handle_factory(pdo_dbh_t *dbh, zval *driver_options) {
         goto cleanup;
     }
 
-    char *path = pdo_mylite_resolve_path(dbh);
+    unsigned open_flags = MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE;
+    const char *dsn_error = NULL;
+    char *path = pdo_mylite_resolve_path(dbh, &open_flags, &dsn_error);
+    if (dsn_error != NULL) {
+        pdo_mylite_error(dbh, NULL, MYLITE_MISUSE, dsn_error);
+        efree(path);
+        goto cleanup;
+    }
     if (path == NULL || path[0] == '\0') {
         pdo_mylite_error(
             dbh,
@@ -189,8 +200,7 @@ static int pdo_mylite_handle_factory(pdo_dbh_t *dbh, zval *driver_options) {
         goto cleanup;
     }
 
-    const int open_result =
-        mylite_open(path, &handle->db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, NULL);
+    const int open_result = mylite_open(path, &handle->db, open_flags, NULL);
     efree(path);
     if (open_result != MYLITE_OK) {
         pdo_mylite_error(dbh, NULL, open_result, "could not open MyLite database");
@@ -628,17 +638,38 @@ static zend_string *pdo_mylite_quote_string(zend_string *input) {
     return escaped;
 }
 
-static char *pdo_mylite_resolve_path(pdo_dbh_t *dbh) {
+static char *pdo_mylite_resolve_path(
+    pdo_dbh_t *dbh,
+    unsigned *out_open_flags,
+    const char **out_error
+) {
     struct pdo_data_src_parser parsed[] = {
         {"path", NULL, 0},
+        {"mode", NULL, 0},
     };
-    if (php_pdo_parse_data_source(dbh->data_source, dbh->data_source_len, parsed, 1) > 0 &&
-        parsed[0].optval != NULL) {
-        char *path = estrdup(parsed[0].optval);
-        if (parsed[0].freeme) {
-            efree(parsed[0].optval);
+    const int parsed_count =
+        php_pdo_parse_data_source(dbh->data_source, dbh->data_source_len, parsed, 2);
+    char *path = NULL;
+
+    *out_open_flags = MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE;
+    *out_error = NULL;
+    if (parsed[1].optval != NULL) {
+        if (strcmp(parsed[1].optval, "ownerless_rw") == 0) {
+            *out_open_flags |= MYLITE_OPEN_OWNERLESS_RW;
+        } else if (strcmp(parsed[1].optval, "default") != 0) {
+            *out_error = "MyLite PDO DSN mode must be default or ownerless_rw";
         }
-        return path;
     }
-    return estrndup(dbh->data_source, dbh->data_source_len);
+
+    if (parsed_count > 0) {
+        path = parsed[0].optval != NULL ? estrdup(parsed[0].optval) : estrdup("");
+    } else {
+        path = estrndup(dbh->data_source, dbh->data_source_len);
+    }
+    for (size_t index = 0; index < sizeof(parsed) / sizeof(parsed[0]); ++index) {
+        if (parsed[index].freeme && parsed[index].optval != NULL) {
+            efree(parsed[index].optval);
+        }
+    }
+    return path;
 }

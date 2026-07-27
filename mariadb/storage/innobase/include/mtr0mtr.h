@@ -75,8 +75,20 @@ struct mtr_t {
   /** Start a mini-transaction. */
   void start();
 
-  /** Commit the mini-transaction. */
-  void commit();
+  /** Commit the mini-transaction.
+  @return first ownerless coordination error, or DB_SUCCESS */
+  dberr_t commit();
+
+  /** Commit and restart the mini-transaction without losing an ownerless
+  coordination error.
+  @return first ownerless coordination error, or DB_SUCCESS */
+  dberr_t commit_and_restart()
+  {
+    const dberr_t error= commit();
+    m_ownerless_error= DB_SUCCESS;
+    start();
+    return error;
+  }
 
   /** Release latches of unmodified buffer pages.
   @param begin   first slot to release
@@ -252,7 +264,7 @@ struct mtr_t {
 
   /** Acquire a tablespace X-latch.
   @param space_id   tablespace ID
-  @return the tablespace object (never NULL) */
+  @return the tablespace object, or nullptr on ownerless admission failure */
   fil_space_t *x_lock_space(uint32_t space_id);
 
   /** Acquire a shared rw-latch. */
@@ -289,8 +301,21 @@ struct mtr_t {
   }
 
   /** Acquire an exclusive tablespace latch.
-  @param space  tablespace */
-  void x_lock_space(fil_space_t *space);
+  @param space  tablespace
+  @param ownerless_prepare_only whether the caller only reads advisory metadata
+  @return whether ownerless structural ownership was acquired or unnecessary */
+  bool x_lock_space(fil_space_t *space,
+                    bool ownerless_prepare_only= false);
+
+  /** Record a fallible ownerless operation failure. */
+  void ownerless_record_failure(dberr_t error,
+                                bool coordination_fault) noexcept
+  {
+    ownerless_fail(error, coordination_fault);
+  }
+
+  /** @return the first ownerless failure recorded by this mini-transaction. */
+  dberr_t ownerless_error() const noexcept { return m_ownerless_error; }
 
   /** Release an index latch. */
   void release(const index_lock &lock) { release(&lock); }
@@ -360,6 +385,13 @@ public:
     ownerless_page_write_enter(block);
   }
 
+  /** Acquire ownerless page-write ownership before a caller performs a raw
+  same-page copy.
+  @param block  latched block that will be modified
+  @return whether the copy may proceed */
+  bool ownerless_page_write_prepare_checked(
+      const buf_block_t &block) noexcept;
+
   /** Upgrade U locks on a block to X
   @param block   block on which to upgrade
   @return &block */
@@ -401,8 +433,10 @@ public:
 
   /** Push a buffer page to an the memo.
   @param block  buffer block
-  @param type	object type: MTR_MEMO_S_LOCK, ... */
-  void memo_push(buf_block_t *block, mtr_memo_type_t type)
+  @param type	object type: MTR_MEMO_S_LOCK, ...
+  @param ownerless_prepare whether to prepare ownerless page-write state */
+  void memo_push(buf_block_t *block, mtr_memo_type_t type,
+                 bool ownerless_prepare= true)
     __attribute__((nonnull))
   {
     ut_ad(is_active());
@@ -430,10 +464,10 @@ public:
 #endif
     if (!(type & MTR_MEMO_MODIFY))
     {
-      if (UNIV_UNLIKELY(ownerless_hooks_enabled()) &&
+      if (ownerless_prepare && UNIV_UNLIKELY(ownerless_hooks_enabled()) &&
           (type & (MTR_MEMO_PAGE_X_FIX | MTR_MEMO_PAGE_SX_FIX)) &&
           ownerless_page_write_should_prepare(block->page))
-        ownerless_page_write_enter(*block);
+        ownerless_page_write_enter(*block, true, true);
     }
     else if (block->page.id().space() >= SRV_TMP_SPACE_ID)
     {
@@ -447,6 +481,11 @@ public:
       if (UNIV_UNLIKELY(ownerless_hooks))
         ownerless_transaction_release_holds_page=
             ownerless_page_write_enter(*block);
+      if (UNIV_UNLIKELY(ownerless_failed()))
+      {
+        m_memo.emplace_back(mtr_memo_slot_t{block, type});
+        return;
+      }
       m_modifications= true;
       if (UNIV_UNLIKELY(ownerless_transaction_release_holds_page))
         ownerless_page_write_note_dirty_transaction_page(block->page, true);
@@ -742,7 +781,17 @@ private:
   bool ownerless_hooks_enabled() const noexcept
   {
     return UNIV_UNLIKELY(m_ownerless_hooks != 0 &&
-                         mylite_ownerless_innodb_lock_has_hooks());
+                         mylite_ownerless_innodb_lock_has_hooks() &&
+                         mylite_ownerless_innodb_write_coordination_enabled());
+  }
+
+  /** Record an ownerless coordination failure on this mini-transaction. */
+  void ownerless_fail(dberr_t error, bool coordination_fault) noexcept;
+
+  /** @return whether ownerless admission or publication has failed. */
+  bool ownerless_failed() const noexcept
+  {
+    return m_ownerless_error != DB_SUCCESS;
   }
 
   /** Enter ownerless cross-process redo serialization if active. */
@@ -761,7 +810,7 @@ private:
   trx_t *ownerless_page_write_trx() const noexcept;
 
   /** Refresh an ownerless physical page before modifying it. */
-  void ownerless_page_write_refresh(
+  bool ownerless_page_write_refresh(
       const buf_block_t &block, bool force_page_version= false,
       bool preserve_local_transaction_page= true) noexcept;
 
@@ -797,8 +846,25 @@ private:
   /** Stop tracking a page-write lock acquired by this mini-transaction. */
   bool ownerless_page_write_forget_mtr_page(const buf_page_t &bpage) noexcept;
 
+  enum ownerless_space_write_result
+  {
+    OWNERLESS_SPACE_WRITE_SKIPPED,
+    OWNERLESS_SPACE_WRITE_ACQUIRED,
+    OWNERLESS_SPACE_WRITE_ERROR
+  };
+
   /** Acquire ownerless tablespace-allocation serialization. */
-  void ownerless_space_write_enter(fil_space_t *space) noexcept;
+  ownerless_space_write_result ownerless_space_write_enter(
+      fil_space_t *space, bool prepare_only= false) noexcept;
+
+  /** Track ownerless tablespace-allocation ownership. */
+  void ownerless_space_write_note(uint32_t space_id);
+
+  /** Check for ownerless tablespace-allocation ownership. */
+  bool ownerless_space_write_has(uint32_t space_id) const noexcept;
+
+  /** Stop tracking ownerless tablespace-allocation ownership. */
+  void ownerless_space_write_forget(uint32_t space_id) noexcept;
 
   /** Release ownerless tablespace-allocation serialization. */
   void ownerless_space_write_leave(const mtr_memo_slot_t &slot) noexcept;
@@ -816,8 +882,9 @@ private:
   /** Publish rollback-segment and undo history proof records as one pair. */
   bool ownerless_history_proof_publish_pair() noexcept;
 
-  /** Publish the current committed image before transaction-deferred writes. */
-  void ownerless_page_write_publish_boundary(const buf_page_t &bpage) noexcept;
+  /** Publish the current committed image before transaction-deferred writes.
+  @return whether the predecessor image is either unnecessary or published */
+  bool ownerless_page_write_publish_boundary(const buf_page_t &bpage) noexcept;
 
   /** Add a page to transaction-level ownerless page-write ownership. */
   void ownerless_page_write_note_transaction_page(const buf_page_t &bpage)
@@ -967,6 +1034,7 @@ private:
   small_vector<mtr_memo_slot_t, 16> m_memo;
 
   typedef small_vector<uint64_t, 16> ownerless_page_write_mtr_page_vector;
+  typedef small_vector<uint32_t, 2> ownerless_space_write_vector;
 
   /** first ownerless page-write lock acquired by this mini-transaction */
   uint64_t m_ownerless_page_write_inline_mtr_page= 0;
@@ -976,6 +1044,9 @@ private:
 
   /** ownerless page-write locks acquired by this mini-transaction */
   ownerless_page_write_mtr_page_vector *m_ownerless_page_write_mtr_pages= nullptr;
+
+  /** ownerless tablespace-allocation locks acquired by this mini-transaction */
+  ownerless_space_write_vector *m_ownerless_space_writes= nullptr;
 
   /** mini-transaction log */
   mtr_buf_t m_log;
@@ -988,6 +1059,9 @@ private:
 
   /** Ownerless redo append range end, or 0 if no range was reserved */
   lsn_t m_ownerless_redo_end_lsn;
+
+  /** First ownerless admission or publication error in this mini-transaction. */
+  dberr_t m_ownerless_error= DB_SUCCESS;
 
   /** tablespace where pages have been freed */
   fil_space_t *m_freed_space= nullptr;

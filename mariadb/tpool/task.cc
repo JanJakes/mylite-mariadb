@@ -69,6 +69,17 @@ namespace tpool
     wait(lk);
   }
 
+  bool waitable_task::wait_until(
+      std::chrono::steady_clock::time_point deadline)
+  {
+    std::unique_lock<std::mutex> lk(m_mtx);
+    m_waiter_count++;
+    const bool completed=
+        m_cv.wait_until(lk, deadline, [this] { return !m_ref_count; });
+    m_waiter_count--;
+    return completed;
+  }
+
   static void noop(void*)
   {
   }

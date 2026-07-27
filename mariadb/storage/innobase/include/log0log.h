@@ -453,6 +453,17 @@ public:
     write_lsn= lsn;
   }
 
+  /** Advance the durable frontier from externally retained recovery proof.
+  The caller must cap lsn to a validated startup recovery boundary. */
+  void mylite_advance_external_recovered_lsn(lsn_t lsn) noexcept
+  {
+    ut_ad(latch_have_wr());
+    if (lsn > get_lsn())
+      set_recovered_lsn(lsn);
+    else if (lsn > flushed_to_disk_lsn.load(std::memory_order_relaxed))
+      flushed_to_disk_lsn.store(lsn, std::memory_order_relaxed);
+  }
+
 #ifdef HAVE_PMEM
   /** Persist the log.
   @param lsn            desired new value of flushed_to_disk_lsn */

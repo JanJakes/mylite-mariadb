@@ -528,10 +528,18 @@ que_thr_step(
 	} else if (type == QUE_NODE_SELECT) {
 		thr = row_sel_step(thr);
 	} else if (type == QUE_NODE_INSERT) {
-		trx_start_if_not_started_xa(thr_get_trx(thr), true);
+		if (const dberr_t err=
+			    trx_start_if_not_started_xa(thr_get_trx(thr), true)) {
+			thr_get_trx(thr)->error_state= err;
+			return NULL;
+		}
 		thr = row_ins_step(thr);
 	} else if (type == QUE_NODE_UPDATE) {
-		trx_start_if_not_started_xa(thr_get_trx(thr), true);
+		if (const dberr_t err=
+			    trx_start_if_not_started_xa(thr_get_trx(thr), true)) {
+			thr_get_trx(thr)->error_state= err;
+			return NULL;
+		}
 		thr = row_upd_step(thr);
 	} else if (type == QUE_NODE_FETCH) {
 		thr = fetch_step(thr);
@@ -595,7 +603,7 @@ que_run_threads_low(
 
 	for (trx_t* trx = thr_get_trx(thr);;) {
 		ut_ad(!trx->mutex_is_owner());
-		ut_a(trx->error_state == DB_SUCCESS);
+	ut_a(trx->error_state == DB_SUCCESS);
 		/* Check that there is enough space in the log to accommodate
 		possible log entries by this query step; if the operation can
 		touch more than about 4 pages, checks must be made also within
@@ -656,7 +664,7 @@ que_eval_sql(
 	DBUG_ENTER("que_eval_sql");
 	DBUG_PRINT("que_eval_sql", ("query: %s", sql));
 
-	ut_a(trx->error_state == DB_SUCCESS);
+		ut_a(trx->error_state == DB_SUCCESS);
 
 	graph = pars_sql(info, sql);
 

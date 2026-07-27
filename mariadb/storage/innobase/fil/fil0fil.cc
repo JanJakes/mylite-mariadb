@@ -82,6 +82,9 @@ static const char *mylite_ownerless_file_op_redo_path(
              : path;
 }
 
+static bool mylite_ownerless_read_tablespace_page0_space_id(
+    const char *path, uint32_t *space_id) noexcept;
+
 ATTRIBUTE_COLD bool fil_space_t::set_corrupted() const noexcept
 {
   if (!is_stopping() && !is_corrupted.test_and_set())
@@ -1718,6 +1721,7 @@ fil_space_t *fil_space_t::drop(uint32_t id, pfs_os_file_t *detached_handle)
   if (space->crypt_data)
     fil_space_crypt_close_tablespace(space);
 
+  bool delete_cfg= true;
   if (!space->is_being_imported())
   {
     if (id >= srv_undo_space_id_start &&
@@ -1727,24 +1731,57 @@ fil_space_t *fil_space_t::drop(uint32_t id, pfs_os_file_t *detached_handle)
       goto deleted;
     }
 
-    /* Before deleting the file, persistently write a log record. */
-    mtr_t mtr{nullptr};
-    mtr.start();
-    mtr.log_file_op(FILE_DELETE, id, space->chain.start->name);
-    mtr.commit_file(*space, nullptr);
+    const int guard_result= mylite_ownerless_innodb_file_delete_guard_acquire();
+    bool delete_file=
+        guard_result == MYLITE_OWNERLESS_INNODB_LOCK_OK ||
+        guard_result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
+    if (guard_result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
+    {
+      uint32_t file_space_id= 0;
+      const bool page0_valid= mylite_ownerless_read_tablespace_page0_space_id(
+          space->chain.start->name, &file_space_id);
+      if (page0_valid && file_space_id != id)
+      {
+        sql_print_information(
+            "InnoDB: Ownerless purge preserved replacement tablespace "
+            "'%s' with space ID " UINT32PF " while dropping stale space "
+            UINT32PF ".",
+            space->chain.start->name, file_space_id, id);
+        delete_file= false;
+      }
+    }
+    else if (guard_result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+    {
+      mylite_ownerless_innodb_note_coordination_error();
+    }
 
-    if (FSP_FLAGS_HAS_DATA_DIR(space->flags))
-      RemoteDatafile::delete_link_file(space->name());
+    if (delete_file)
+    {
+      /* Before deleting the file, persistently write a log record. */
+      mtr_t mtr{nullptr};
+      mtr.start();
+      mtr.log_file_op(FILE_DELETE, id, space->chain.start->name);
+      mtr.commit_file(*space, nullptr);
 
-    os_file_delete(innodb_data_file_key, space->chain.start->name);
+      if (FSP_FLAGS_HAS_DATA_DIR(space->flags))
+        RemoteDatafile::delete_link_file(space->name());
+
+      os_file_delete(innodb_data_file_key, space->chain.start->name);
+    }
+    else
+      delete_cfg= false;
+
+    if (guard_result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
+      mylite_ownerless_innodb_file_delete_guard_release();
   }
 
-  if (char *cfg_name= fil_make_filepath(space->chain.start->name,
-                                        fil_space_t::name_type{}, CFG, false))
-  {
-    os_file_delete_if_exists(innodb_data_file_key, cfg_name, nullptr);
-    ut_free(cfg_name);
-  }
+  if (delete_cfg)
+    if (char *cfg_name= fil_make_filepath(space->chain.start->name,
+                                          fil_space_t::name_type{}, CFG, false))
+    {
+      os_file_delete_if_exists(innodb_data_file_key, cfg_name, nullptr);
+      ut_free(cfg_name);
+    }
 
  deleted:
   mysql_mutex_lock(&fil_system.mutex);
@@ -1944,9 +1981,12 @@ static inline char *fil_make_dirpath(const char *path) noexcept
   return fil_make_filepath_low(path, fil_space_t::name_type{}, NO_EXT, true);
 }
 
-static bool mylite_ownerless_path_has_tablespace_page0(
-    const char *path, uint32_t space_id) noexcept
+static bool mylite_ownerless_read_tablespace_page0_space_id(
+    const char *path, uint32_t *space_id) noexcept
 {
+  if (space_id == nullptr)
+    return false;
+
   bool success= false;
   os_file_t file= os_file_create_simple_no_error_handling(
       innodb_data_file_key, path, OS_FILE_OPEN, OS_FILE_READ_ONLY, true,
@@ -1965,15 +2005,28 @@ static bool mylite_ownerless_path_has_tablespace_page0(
   ulint read_bytes= 0;
   const dberr_t err= os_file_read(IORequestReadPartial, file, page, 0,
                                   UNIV_PAGE_SIZE_MIN, &read_bytes);
-  const bool matches=
-      err == DB_SUCCESS && read_bytes >= FIL_PAGE_DATA &&
+  const uint32_t fil_space_id= mach_read_from_4(page + FIL_PAGE_SPACE_ID);
+  const bool valid=
+      err == DB_SUCCESS &&
+      read_bytes >= FSP_HEADER_OFFSET + FSP_SPACE_ID + sizeof(uint32_t) &&
       mach_read_from_4(page + FIL_PAGE_OFFSET) == 0 &&
-      mach_read_from_4(page + FIL_PAGE_SPACE_ID) == space_id &&
-      mach_read_from_4(page + FSP_HEADER_OFFSET + FSP_SPACE_ID) == space_id;
+      fil_space_id != 0 &&
+      mach_read_from_4(page + FSP_HEADER_OFFSET + FSP_SPACE_ID) == fil_space_id;
 
   aligned_free(page);
   os_file_close(file);
-  return matches;
+  if (valid)
+    *space_id= fil_space_id;
+  return valid;
+}
+
+bool mylite_ownerless_fil_path_has_tablespace_page0(
+    const char *path, uint32_t space_id) noexcept
+{
+  uint32_t file_space_id= 0;
+  return mylite_ownerless_read_tablespace_page0_space_id(
+             path, &file_space_id) &&
+         file_space_id == space_id;
 }
 
 dberr_t fil_space_t::rename(const char *path, bool log, bool replace) noexcept
@@ -2012,7 +2065,7 @@ dberr_t fil_space_t::rename(const char *path, bool log, bool replace) noexcept
     if (mylite_ownerless_innodb_uncheckpointed_file_rename_recovery() &&
         os_file_status(path, &target_exists, &ftype) && target_exists &&
         ftype == OS_FILE_TYPE_FILE &&
-        mylite_ownerless_path_has_tablespace_page0(path, id))
+        mylite_ownerless_fil_path_has_tablespace_page0(path, id))
     {
       sql_print_information(
           "InnoDB: Ownerless recovery accepted already-renamed tablespace "
@@ -2933,6 +2986,7 @@ fil_io_t fil_space_t::io(const IORequest &type, os_offset_t offset, size_t len,
 	ut_ad(node);
 	ulint p = static_cast<ulint>(offset >> srv_page_size_shift);
 	dberr_t err;
+	const bool single_file_space = UT_LIST_GET_NEXT(chain, node) == nullptr;
 
 	if (type.type == IORequest::READ_ASYNC && is_stopping()) {
 		err = DB_TABLESPACE_DELETED;
@@ -2982,6 +3036,17 @@ io_error:
 		}
 
 		offset = os_offset_t{p} << srv_page_size_shift;
+	}
+
+	if (UNIV_UNLIKELY(type.is_read() && single_file_space &&
+			  node->size <= p &&
+			  mylite_ownerless_innodb_lock_has_hooks())) {
+		/*
+		A peer may have extended a file-per-table tablespace since this
+		process cached fil_node_t::size. Refresh the native file size and
+		FSP header before treating the newly allocated page as corruption.
+		*/
+		mylite_ownerless_innodb_refresh_external_space_header(id);
 	}
 
 	if (UNIV_UNLIKELY(node->size <= p)) {

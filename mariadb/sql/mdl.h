@@ -735,6 +735,10 @@ public:
   { return m_mylite_ownerless_mdl_mode; }
   void set_mylite_ownerless_mdl_mode(uint mode)
   { m_mylite_ownerless_mdl_mode= mode; }
+  ulonglong get_mylite_ownerless_mdl_session_id() const
+  { return m_mylite_ownerless_mdl_session_id; }
+  void set_mylite_ownerless_mdl_session_id(ulonglong session_id)
+  { m_mylite_ownerless_mdl_session_id= session_id; }
   void downgrade_lock(enum_mdl_type type);
 
   bool has_stronger_or_equal_type(enum_mdl_type type) const;
@@ -767,7 +771,8 @@ private:
      m_ctx(ctx_arg),
      m_lock(NULL),
      m_psi(NULL),
-     m_mylite_ownerless_mdl_mode(0)
+     m_mylite_ownerless_mdl_mode(0),
+     m_mylite_ownerless_mdl_session_id(0)
   {}
 
   virtual ~MDL_ticket()
@@ -798,6 +803,7 @@ private:
   PSI_metadata_lock *m_psi;
 
   uint m_mylite_ownerless_mdl_mode;
+  ulonglong m_mylite_ownerless_mdl_session_id;
 
 private:
   MDL_ticket(const MDL_ticket &);               /* not implemented */
@@ -946,6 +952,9 @@ public:
   void rollback_to_savepoint(const MDL_savepoint &mdl_savepoint);
 
   MDL_context_owner *get_owner() { return m_owner; }
+  ulonglong get_mylite_ownerless_mdl_session_id() const
+  { return m_mylite_ownerless_mdl_session_id; }
+  uint get_mylite_ownerless_deadlock_weight(enum_mdl_type type) const;
 
   /** @pre Only valid if we started waiting for lock. */
   inline uint get_deadlock_weight() const
@@ -1041,6 +1050,7 @@ private:
   */
   Ticket_list m_tickets[MDL_DURATION_END];
   MDL_context_owner *m_owner;
+  ulonglong m_mylite_ownerless_mdl_session_id;
   /**
     TRUE -  if for this context we will break protocol and try to
             acquire table-level locks while having only S lock on
@@ -1075,8 +1085,9 @@ private:
                           enum_mdl_duration *duration);
   void release_locks_stored_before(enum_mdl_duration duration, MDL_ticket *sentinel);
   void release_lock(enum_mdl_duration duration, MDL_ticket *ticket);
-  bool try_acquire_lock_impl(MDL_request *mdl_request,
-                             MDL_ticket **out_ticket);
+  bool try_acquire_lock_impl(MDL_request *mdl_request, MDL_ticket **out_ticket,
+                             double lock_wait_timeout,
+                             bool ownerless_conflict_is_error);
   bool fix_pins();
 
 public:

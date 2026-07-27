@@ -32,7 +32,8 @@ constexpr std::size_t k_slot_heartbeat_offset = 24;
 constexpr std::size_t k_slot_shm_generation_offset = 32;
 constexpr std::size_t k_slot_start_time_offset = 40;
 constexpr std::size_t k_slot_boot_id_hash_offset = 48;
-constexpr std::uint32_t k_bootstrap_latch_owner_id = std::numeric_limits<std::uint32_t>::max();
+constexpr std::uint32_t k_bootstrap_latch_owner_flag = 0x80000000U;
+constexpr std::uint32_t k_bootstrap_latch_owner_pid_mask = 0x7fffffffU;
 #if defined(__linux__)
 constexpr std::uint64_t k_fnv_offset_basis = 14695981039346656037ULL;
 constexpr std::uint64_t k_fnv_prime = 1099511628211ULL;
@@ -41,14 +42,22 @@ constexpr std::uint64_t k_fnv_prime = 1099511628211ULL;
 std::chrono::steady_clock::time_point wait_deadline(unsigned timeout_ms);
 int acquire_registry_latch(
     unsigned char *registry,
+    std::size_t mapping_size,
     std::uint32_t owner_id,
     std::uint64_t owner_generation,
     std::chrono::steady_clock::time_point deadline
 );
-void release_registry_latch(
+bool repair_registry_locked(unsigned char *registry, std::size_t mapping_size);
+bool generation_can_allocate(const unsigned char *registry);
+bool open_mode_is_valid(std::uint32_t open_mode);
+bool open_modes_are_compatible(std::uint32_t requested_mode, std::uint32_t active_mode);
+std::uint32_t bootstrap_latch_owner_id(const mylite_ownerless_process_identity &identity);
+int finish_registry_operation(
     unsigned char *registry,
     std::uint32_t owner_id,
-    std::uint64_t owner_generation
+    std::uint64_t owner_generation,
+    int operation_result,
+    bool operation_applied
 );
 int allocate_locked(
     unsigned char *registry,
@@ -177,6 +186,62 @@ int mylite_ownerless_process_identity_is_alive(
     return errno == EPERM ? 1 : 0;
 }
 
+int mylite_ownerless_process_registry_latch_owner_is_alive(
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
+    void *ctx
+) {
+    if (ctx == nullptr || owner_id == 0U) {
+        return -1;
+    }
+    const auto *liveness =
+        static_cast<const mylite_ownerless_process_registry_liveness_context *>(ctx);
+    if (!mapping_can_hold_registry(liveness->mapping, liveness->mapping_size)) {
+        return -1;
+    }
+    const auto is_alive = liveness->is_alive != nullptr
+                              ? liveness->is_alive
+                              : mylite_ownerless_process_identity_is_alive;
+
+    if ((owner_id & k_bootstrap_latch_owner_flag) != 0U) {
+        const std::uint64_t pid = owner_id & k_bootstrap_latch_owner_pid_mask;
+        mylite_ownerless_process_identity identity = {};
+        if (mylite_ownerless_process_identity_for_pid(pid, &identity) !=
+            MYLITE_OWNERLESS_PROCESS_REGISTRY_OK) {
+            return 0;
+        }
+        /*
+         * A mismatch can be PID reuse or the ACQUIRING publication gap. Only
+         * current PID identity liveness proves whether this owner is dead.
+         */
+        return is_alive(&identity, liveness->is_alive_ctx) != 0 ? 1 : 0;
+    }
+
+    const auto *registry = static_cast<const unsigned char *>(liveness->mapping);
+    const std::uint32_t count = slot_count(registry);
+    if (owner_id > count) {
+        /* Legacy bootstrap owner IDs cannot be tied to a process safely. */
+        return -1;
+    }
+    const unsigned char *slot = slot_at(const_cast<unsigned char *>(registry), owner_id - 1U);
+    const std::uint32_t state = load32(slot, k_slot_state_offset);
+    if (state != MYLITE_OWNERLESS_PROCESS_STATE_ACTIVE) {
+        return 0;
+    }
+    const std::uint64_t slot_generation = load64(slot, k_slot_generation_offset);
+    const mylite_ownerless_process_identity identity = slot_identity(slot);
+    if (load32(slot, k_slot_state_offset) != state ||
+        load64(slot, k_slot_generation_offset) != slot_generation) {
+        return 1;
+    }
+    const int alive = is_alive(&identity, liveness->is_alive_ctx) != 0 ? 1 : 0;
+    if (owner_generation == 0U || owner_generation == slot_generation) {
+        return alive;
+    }
+    /* A live reused slot is ambiguous; fail closed until coordinated cleanup. */
+    return alive;
+}
+
 int mylite_ownerless_process_registry_initialize(
     void *mapping,
     std::size_t mapping_size,
@@ -203,16 +268,26 @@ int mylite_ownerless_process_registry_allocate(
     std::uint32_t *out_slot_index,
     std::uint64_t *out_slot_generation
 ) {
+    if (out_slot_index == nullptr || out_slot_generation == nullptr) {
+        return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
+    }
+    *out_slot_index = 0U;
+    *out_slot_generation = 0U;
     if (!mapping_can_hold_registry(mapping, mapping_size) || identity.pid == 0U ||
-        identity.start_time == 0U || identity.boot_id_hash == 0U || open_mode == 0U ||
-        out_slot_index == nullptr || out_slot_generation == nullptr) {
+        identity.start_time == 0U || identity.boot_id_hash == 0U ||
+        !open_mode_is_valid(open_mode)) {
         return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
     }
 
     auto *registry = static_cast<unsigned char *>(mapping);
+    const std::uint32_t bootstrap_owner_id = bootstrap_latch_owner_id(identity);
+    if (bootstrap_owner_id == 0U) {
+        return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
+    }
     const int latch_result = acquire_registry_latch(
         registry,
-        k_bootstrap_latch_owner_id,
+        mapping_size,
+        bootstrap_owner_id,
         identity.start_time,
         wait_deadline(5000U)
     );
@@ -228,8 +303,13 @@ int mylite_ownerless_process_registry_allocate(
         out_slot_index,
         out_slot_generation
     );
-    release_registry_latch(registry, k_bootstrap_latch_owner_id, identity.start_time);
-    return allocate_result;
+    return finish_registry_operation(
+        registry,
+        bootstrap_owner_id,
+        identity.start_time,
+        allocate_result,
+        allocate_result == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
 }
 
 int mylite_ownerless_process_registry_release(
@@ -243,15 +323,30 @@ int mylite_ownerless_process_registry_release(
     }
 
     auto *registry = static_cast<unsigned char *>(mapping);
-    const std::uint32_t owner_id = slot_index + 1U;
-    const int latch_result =
-        acquire_registry_latch(registry, owner_id, slot_generation, wait_deadline(5000U));
+    mylite_ownerless_process_identity identity = {};
+    if (mylite_ownerless_current_process_identity(&identity) !=
+        MYLITE_OWNERLESS_PROCESS_REGISTRY_OK) {
+        return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
+    }
+    const std::uint32_t owner_id = bootstrap_latch_owner_id(identity);
+    const int latch_result = acquire_registry_latch(
+        registry,
+        mapping_size,
+        owner_id,
+        identity.start_time,
+        wait_deadline(5000U)
+    );
     if (latch_result != MYLITE_OWNERLESS_PROCESS_REGISTRY_OK) {
         return latch_result;
     }
     const int release_result = release_locked(registry, mapping_size, slot_index, slot_generation);
-    release_registry_latch(registry, owner_id, slot_generation);
-    return release_result;
+    return finish_registry_operation(
+        registry,
+        owner_id,
+        identity.start_time,
+        release_result,
+        release_result == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
 }
 
 int mylite_ownerless_process_registry_heartbeat(
@@ -268,15 +363,25 @@ int mylite_ownerless_process_registry_heartbeat(
 
     auto *registry = static_cast<unsigned char *>(mapping);
     const std::uint32_t owner_id = slot_index + 1U;
-    const int latch_result =
-        acquire_registry_latch(registry, owner_id, slot_generation, wait_deadline(5000U));
+    const int latch_result = acquire_registry_latch(
+        registry,
+        mapping_size,
+        owner_id,
+        slot_generation,
+        wait_deadline(5000U)
+    );
     if (latch_result != MYLITE_OWNERLESS_PROCESS_REGISTRY_OK) {
         return latch_result;
     }
     const int heartbeat_result =
         heartbeat_locked(registry, mapping_size, slot_index, slot_generation, heartbeat);
-    release_registry_latch(registry, owner_id, slot_generation);
-    return heartbeat_result;
+    return finish_registry_operation(
+        registry,
+        owner_id,
+        slot_generation,
+        heartbeat_result,
+        heartbeat_result == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
 }
 
 int mylite_ownerless_process_registry_cleanup_dead(
@@ -310,10 +415,22 @@ int mylite_ownerless_process_registry_cleanup_dead_with_callback(
         out_cleaned_slots == nullptr) {
         return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
     }
+    *out_cleaned_slots = 0U;
 
     auto *registry = static_cast<unsigned char *>(mapping);
-    const int latch_result =
-        acquire_registry_latch(registry, k_bootstrap_latch_owner_id, 1U, wait_deadline(5000U));
+    mylite_ownerless_process_identity identity = {};
+    if (mylite_ownerless_current_process_identity(&identity) !=
+        MYLITE_OWNERLESS_PROCESS_REGISTRY_OK) {
+        return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
+    }
+    const std::uint32_t owner_id = bootstrap_latch_owner_id(identity);
+    const int latch_result = acquire_registry_latch(
+        registry,
+        mapping_size,
+        owner_id,
+        identity.start_time,
+        wait_deadline(5000U)
+    );
     if (latch_result != MYLITE_OWNERLESS_PROCESS_REGISTRY_OK) {
         return latch_result;
     }
@@ -326,8 +443,13 @@ int mylite_ownerless_process_registry_cleanup_dead_with_callback(
         cleanup_ctx,
         out_cleaned_slots
     );
-    release_registry_latch(registry, k_bootstrap_latch_owner_id, 1U);
-    return cleanup_result;
+    return finish_registry_operation(
+        registry,
+        owner_id,
+        identity.start_time,
+        cleanup_result,
+        *out_cleaned_slots != 0U
+    );
 }
 
 std::uint64_t mylite_ownerless_process_registry_active_count(const void *mapping) {
@@ -357,16 +479,98 @@ int mylite_ownerless_process_registry_live_count(
         out_live_count == nullptr) {
         return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
     }
+    *out_live_count = 0U;
 
     auto *registry = static_cast<unsigned char *>(mapping);
-    const int latch_result =
-        acquire_registry_latch(registry, k_bootstrap_latch_owner_id, 1U, wait_deadline(5000U));
+    mylite_ownerless_process_identity identity = {};
+    if (mylite_ownerless_current_process_identity(&identity) !=
+        MYLITE_OWNERLESS_PROCESS_REGISTRY_OK) {
+        return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
+    }
+    const std::uint32_t owner_id = bootstrap_latch_owner_id(identity);
+    const int latch_result = acquire_registry_latch(
+        registry,
+        mapping_size,
+        owner_id,
+        identity.start_time,
+        wait_deadline(5000U)
+    );
     if (latch_result != MYLITE_OWNERLESS_PROCESS_REGISTRY_OK) {
         return latch_result;
     }
     *out_live_count = live_count_locked(registry, mapping_size, is_alive, ctx);
-    release_registry_latch(registry, k_bootstrap_latch_owner_id, 1U);
-    return MYLITE_OWNERLESS_PROCESS_REGISTRY_OK;
+    return finish_registry_operation(
+        registry,
+        owner_id,
+        identity.start_time,
+        MYLITE_OWNERLESS_PROCESS_REGISTRY_OK,
+        false
+    );
+}
+
+int mylite_ownerless_process_registry_finish_bootstrap_pending_release(
+    void *mapping,
+    std::size_t mapping_size,
+    mylite_ownerless_process_identity identity
+) {
+    if (!mapping_can_hold_registry(mapping, mapping_size) || identity.pid == 0U ||
+        identity.start_time == 0U || identity.boot_id_hash == 0U) {
+        return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
+    }
+    const std::uint32_t owner_id = bootstrap_latch_owner_id(identity);
+    if (owner_id == 0U) {
+        return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
+    }
+    auto *registry = static_cast<unsigned char *>(mapping);
+    const int latch_result = acquire_registry_latch(
+        registry,
+        mapping_size,
+        owner_id,
+        identity.start_time,
+        wait_deadline(5000U)
+    );
+    if (latch_result != MYLITE_OWNERLESS_PROCESS_REGISTRY_OK) {
+        return latch_result;
+    }
+    return finish_registry_operation(
+        registry,
+        owner_id,
+        identity.start_time,
+        MYLITE_OWNERLESS_PROCESS_REGISTRY_OK,
+        false
+    );
+}
+
+int mylite_ownerless_process_registry_finish_slot_pending_release(
+    void *mapping,
+    std::size_t mapping_size,
+    std::uint32_t slot_index,
+    std::uint64_t slot_generation
+) {
+    if (!mapping_can_hold_registry(mapping, mapping_size) ||
+        slot_index >= slot_count(static_cast<const unsigned char *>(mapping)) ||
+        slot_generation == 0U) {
+        return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
+    }
+    auto *registry = static_cast<unsigned char *>(mapping);
+    const std::uint32_t owner_id = slot_index + 1U;
+    const int latch_result = acquire_registry_latch(
+        registry,
+        mapping_size,
+        owner_id,
+        slot_generation,
+        wait_deadline(5000U)
+    );
+    if (latch_result != MYLITE_OWNERLESS_PROCESS_REGISTRY_OK) {
+        return latch_result;
+    }
+    return finish_registry_operation(
+        registry,
+        owner_id,
+        slot_generation,
+        MYLITE_OWNERLESS_PROCESS_REGISTRY_OK,
+        false
+    );
 }
 
 namespace {
@@ -378,34 +582,122 @@ std::chrono::steady_clock::time_point wait_deadline(unsigned timeout_ms) {
 
 int acquire_registry_latch(
     unsigned char *registry,
+    std::size_t mapping_size,
     std::uint32_t owner_id,
     std::uint64_t owner_generation,
     std::chrono::steady_clock::time_point deadline
 ) {
-    const int latch_result = mylite_ownerless_latch_acquire(
+    mylite_ownerless_process_registry_liveness_context liveness = {
+        registry,
+        mapping_size,
+        mylite_ownerless_process_identity_is_alive,
+        nullptr,
+    };
+    mylite_ownerless_latch_dead_owner dead_owner = {};
+    const int latch_result = mylite_ownerless_latch_acquire_recoverable(
         registry_latch(registry),
         owner_id,
         owner_generation,
-        nullptr,
-        nullptr,
-        remaining_timeout_ms(deadline)
+        mylite_ownerless_process_registry_latch_owner_is_alive,
+        &liveness,
+        remaining_timeout_ms(deadline),
+        &dead_owner
     );
     if (latch_result == MYLITE_OWNERLESS_LATCH_OK) {
         return MYLITE_OWNERLESS_PROCESS_REGISTRY_OK;
+    }
+    if (latch_result == MYLITE_OWNERLESS_LATCH_RECOVERY_REQUIRED) {
+        if (!repair_registry_locked(registry, mapping_size)) {
+            static_cast<void>(mylite_ownerless_latch_mark_not_recoverable(
+                registry_latch(registry),
+                owner_id,
+                owner_generation
+            ));
+            return MYLITE_OWNERLESS_PROCESS_REGISTRY_OWNER_DEAD;
+        }
+        if (mylite_ownerless_latch_mark_consistent(
+                registry_latch(registry),
+                owner_id,
+                owner_generation
+            ) != MYLITE_OWNERLESS_LATCH_OK) {
+            return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
+        }
+        return MYLITE_OWNERLESS_PROCESS_REGISTRY_OK;
+    }
+    if (latch_result == MYLITE_OWNERLESS_LATCH_OWNER_DEAD ||
+        latch_result == MYLITE_OWNERLESS_LATCH_NOT_RECOVERABLE) {
+        return MYLITE_OWNERLESS_PROCESS_REGISTRY_OWNER_DEAD;
     }
     return latch_result == MYLITE_OWNERLESS_LATCH_TIMEOUT
                ? MYLITE_OWNERLESS_PROCESS_REGISTRY_TIMEOUT
                : MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
 }
 
-void release_registry_latch(
+bool repair_registry_locked(unsigned char *registry, std::size_t mapping_size) {
+    const std::uint32_t count = slot_count(registry);
+    std::uint64_t active_count = 0U;
+    std::uint64_t generation = load64(registry, k_header_generation_offset);
+    for (std::uint32_t index = 0; index < count; ++index) {
+        unsigned char *slot = slot_at(registry, index);
+        if (static_cast<std::size_t>(
+                slot + MYLITE_OWNERLESS_PROCESS_REGISTRY_SLOT_SIZE - registry
+            ) > mapping_size) {
+            return false;
+        }
+        const std::uint32_t state = load32(slot, k_slot_state_offset);
+        const std::uint64_t slot_generation = load64(slot, k_slot_generation_offset);
+        generation = std::max(generation, slot_generation);
+        if (state == 0U) {
+            continue;
+        }
+        const mylite_ownerless_process_identity identity = slot_identity(slot);
+        if (state != MYLITE_OWNERLESS_PROCESS_STATE_ACTIVE || slot_generation == 0U ||
+            !open_mode_is_valid(load32(slot, k_slot_open_mode_offset)) || identity.pid == 0U ||
+            identity.start_time == 0U || identity.boot_id_hash == 0U) {
+            return false;
+        }
+        for (std::uint32_t prior = 0; prior < index; ++prior) {
+            const unsigned char *prior_slot = slot_at(registry, prior);
+            if (load32(prior_slot, k_slot_state_offset) == MYLITE_OWNERLESS_PROCESS_STATE_ACTIVE &&
+                load64(prior_slot, k_slot_generation_offset) == slot_generation) {
+                return false;
+            }
+        }
+        ++active_count;
+    }
+    if (active_count > std::numeric_limits<std::uint64_t>::max() - 1U ||
+        generation > std::numeric_limits<std::uint64_t>::max() - active_count - 1U) {
+        return false;
+    }
+    store64(registry, k_header_generation_offset, generation + 1U);
+    store64(registry, k_header_active_count_offset, active_count);
+    return true;
+}
+
+std::uint32_t bootstrap_latch_owner_id(const mylite_ownerless_process_identity &identity) {
+    if (identity.pid == 0U || identity.pid > k_bootstrap_latch_owner_pid_mask) {
+        return 0U;
+    }
+    return k_bootstrap_latch_owner_flag | static_cast<std::uint32_t>(identity.pid);
+}
+
+int finish_registry_operation(
     unsigned char *registry,
     std::uint32_t owner_id,
-    std::uint64_t owner_generation
+    std::uint64_t owner_generation,
+    int operation_result,
+    bool operation_applied
 ) {
-    static_cast<void>(
-        mylite_ownerless_latch_release(registry_latch(registry), owner_id, owner_generation)
-    );
+    const int release_result =
+        mylite_ownerless_latch_release(registry_latch(registry), owner_id, owner_generation);
+    if (release_result == MYLITE_OWNERLESS_LATCH_OK) {
+        return operation_result;
+    }
+    if (release_result == MYLITE_OWNERLESS_LATCH_RELEASE_PENDING) {
+        return operation_applied ? MYLITE_OWNERLESS_PROCESS_REGISTRY_APPLIED_RELEASE_PENDING
+                                 : MYLITE_OWNERLESS_PROCESS_REGISTRY_RELEASE_PENDING;
+    }
+    return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
 }
 
 int allocate_locked(
@@ -418,6 +710,35 @@ int allocate_locked(
     std::uint64_t *out_slot_generation
 ) {
     const std::uint32_t count = slot_count(registry);
+    for (std::uint32_t index = 0; index < count; ++index) {
+        unsigned char *slot = slot_at(registry, index);
+        if (static_cast<std::size_t>(
+                slot + MYLITE_OWNERLESS_PROCESS_REGISTRY_SLOT_SIZE - registry
+            ) > mapping_size) {
+            return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
+        }
+        const std::uint32_t state = load32(slot, k_slot_state_offset);
+        if (state == 0U) {
+            continue;
+        }
+        if (state != MYLITE_OWNERLESS_PROCESS_STATE_ACTIVE) {
+            return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
+        }
+        if (open_mode == MYLITE_OWNERLESS_PROCESS_OPEN_MODE_ORDINARY_EXCLUSIVE) {
+            return MYLITE_OWNERLESS_PROCESS_REGISTRY_BUSY;
+        }
+        const std::uint32_t active_mode = load32(slot, k_slot_open_mode_offset);
+        if (!open_mode_is_valid(active_mode)) {
+            return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
+        }
+        if (!open_modes_are_compatible(open_mode, active_mode)) {
+            return MYLITE_OWNERLESS_PROCESS_REGISTRY_BUSY;
+        }
+    }
+
+    if (!generation_can_allocate(registry)) {
+        return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
+    }
     for (std::uint32_t index = 0; index < count; ++index) {
         unsigned char *slot = slot_at(registry, index);
         if (static_cast<std::size_t>(
@@ -437,13 +758,13 @@ int allocate_locked(
         store64(slot, k_slot_shm_generation_offset, shm_generation);
         store64(slot, k_slot_start_time_offset, identity.start_time);
         store64(slot, k_slot_boot_id_hash_offset, identity.boot_id_hash);
-        store32(slot, k_slot_state_offset, MYLITE_OWNERLESS_PROCESS_STATE_ACTIVE);
         store64(registry, k_header_generation_offset, generation);
         store64(
             registry,
             k_header_active_count_offset,
             load64(registry, k_header_active_count_offset) + 1U
         );
+        store32(slot, k_slot_state_offset, MYLITE_OWNERLESS_PROCESS_STATE_ACTIVE);
         *out_slot_index = index;
         *out_slot_generation = generation;
         return MYLITE_OWNERLESS_PROCESS_REGISTRY_OK;
@@ -466,6 +787,10 @@ int release_locked(
         load32(slot, k_slot_state_offset) != MYLITE_OWNERLESS_PROCESS_STATE_ACTIVE ||
         load64(slot, k_slot_generation_offset) != slot_generation) {
         return MYLITE_OWNERLESS_PROCESS_REGISTRY_NOT_FOUND;
+    }
+
+    if (load64(registry, k_header_generation_offset) == std::numeric_limits<std::uint64_t>::max()) {
+        return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
     }
 
     clear_slot_locked(registry, slot);
@@ -504,7 +829,28 @@ int cleanup_dead_locked(
     std::uint32_t *out_cleaned_slots
 ) {
     std::uint32_t cleaned_slots = 0U;
+    std::uint64_t dead_slots = 0U;
     const std::uint32_t count = slot_count(registry);
+    *out_cleaned_slots = 0U;
+
+    for (std::uint32_t index = 0; index < count; ++index) {
+        unsigned char *slot = slot_at(registry, index);
+        if (static_cast<std::size_t>(
+                slot + MYLITE_OWNERLESS_PROCESS_REGISTRY_SLOT_SIZE - registry
+            ) > mapping_size) {
+            break;
+        }
+        if (load32(slot, k_slot_state_offset) == MYLITE_OWNERLESS_PROCESS_STATE_ACTIVE) {
+            const mylite_ownerless_process_identity identity = slot_identity(slot);
+            if (is_alive(&identity, alive_ctx) == 0) {
+                ++dead_slots;
+            }
+        }
+    }
+    if (dead_slots >
+        std::numeric_limits<std::uint64_t>::max() - load64(registry, k_header_generation_offset)) {
+        return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
+    }
 
     for (std::uint32_t index = 0; index < count; ++index) {
         unsigned char *slot = slot_at(registry, index);
@@ -528,11 +874,13 @@ int cleanup_dead_locked(
                 return MYLITE_OWNERLESS_PROCESS_REGISTRY_BUSY;
             }
             if (cleanup_result != MYLITE_OWNERLESS_PROCESS_CLEANUP_OK) {
+                *out_cleaned_slots = cleaned_slots;
                 return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
             }
         }
         clear_slot_locked(registry, slot);
         ++cleaned_slots;
+        *out_cleaned_slots = cleaned_slots;
     }
 
     *out_cleaned_slots = cleaned_slots;
@@ -717,6 +1065,8 @@ std::uint64_t hash_bytes(const char *bytes, std::size_t size) {
 
 void clear_slot_locked(unsigned char *registry, unsigned char *slot) {
     const std::uint64_t generation = load64(registry, k_header_generation_offset) + 1U;
+    /* State is the publication word; clear it before touching payload fields. */
+    store32(slot, k_slot_state_offset, 0U);
     std::memset(slot, 0, MYLITE_OWNERLESS_PROCESS_REGISTRY_SLOT_SIZE);
     store64(slot, k_slot_generation_offset, generation);
     store64(registry, k_header_generation_offset, generation);
@@ -725,6 +1075,24 @@ void clear_slot_locked(unsigned char *registry, unsigned char *slot) {
         k_header_active_count_offset,
         load64(registry, k_header_active_count_offset) - 1U
     );
+}
+
+bool generation_can_allocate(const unsigned char *registry) {
+    const std::uint64_t generation = load64(registry, k_header_generation_offset);
+    const std::uint64_t active_count = load64(registry, k_header_active_count_offset);
+    return active_count <= std::numeric_limits<std::uint64_t>::max() - 2U &&
+           generation <= std::numeric_limits<std::uint64_t>::max() - active_count - 2U;
+}
+
+bool open_mode_is_valid(std::uint32_t open_mode) {
+    return open_mode == MYLITE_OWNERLESS_PROCESS_OPEN_MODE_ORDINARY_EXCLUSIVE ||
+           open_mode == MYLITE_OWNERLESS_PROCESS_OPEN_MODE_SHARED_READONLY ||
+           open_mode == MYLITE_OWNERLESS_PROCESS_OPEN_MODE_OWNERLESS_RW;
+}
+
+bool open_modes_are_compatible(std::uint32_t requested_mode, std::uint32_t active_mode) {
+    return requested_mode != MYLITE_OWNERLESS_PROCESS_OPEN_MODE_ORDINARY_EXCLUSIVE &&
+           active_mode != MYLITE_OWNERLESS_PROCESS_OPEN_MODE_ORDINARY_EXCLUSIVE;
 }
 
 unsigned remaining_timeout_ms(std::chrono::steady_clock::time_point deadline) {

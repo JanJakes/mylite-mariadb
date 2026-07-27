@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 
 namespace {
 
@@ -20,6 +21,8 @@ constexpr std::size_t k_active_owner_boot_id_hash_offset = 40;
 constexpr std::size_t k_recoverable_kind_offset = 48;
 constexpr std::size_t k_recoverable_owner_id_offset = 52;
 constexpr std::size_t k_recoverable_owner_generation_offset = 56;
+constexpr std::uint64_t k_last_ready_generation = std::numeric_limits<std::uint64_t>::max() - 1U;
+static_assert((k_last_ready_generation & 1U) == 0U);
 
 static_assert(offsetof(mylite_ownerless_dictionary_state_snapshot, generation) == 0);
 static_assert(offsetof(mylite_ownerless_dictionary_state_snapshot, active_owner_id) == 8);
@@ -59,7 +62,11 @@ bool compare_exchange32(
     std::uint32_t *expected,
     std::uint32_t desired
 );
-std::uint64_t add64(unsigned char *base, std::size_t offset, std::uint64_t value);
+bool advance_generation(
+    unsigned char *state,
+    std::uint64_t current_generation,
+    std::uint64_t *out_generation
+);
 
 } // namespace
 
@@ -91,6 +98,9 @@ int mylite_ownerless_dictionary_state_begin_ddl(
     const auto deadline = wait_deadline(timeout_ms);
     for (;;) {
         const std::uint64_t current_generation = load64(state, k_generation_offset);
+        if (current_generation >= k_last_ready_generation) {
+            return MYLITE_OWNERLESS_DICTIONARY_STATE_EXHAUSTED;
+        }
         const std::uint32_t active_owner_id = load32(state, k_active_owner_id_offset);
         if ((current_generation & 1U) != 0U || active_owner_id != 0U) {
             const int wait_result = wait_for_inactive_owner(state, nullptr, nullptr, deadline);
@@ -107,7 +117,13 @@ int mylite_ownerless_dictionary_state_begin_ddl(
             store64(state, k_active_owner_boot_id_hash_offset, owner_identity.boot_id_hash);
             store64(state, k_active_owner_pid_offset, owner_identity.pid);
             clear_recoverable_state(state);
-            const std::uint64_t generation = add64(state, k_generation_offset, 1U);
+            std::uint64_t generation = 0U;
+            if (!advance_generation(state, current_generation, &generation)) {
+                static_cast<void>(
+                    clear_active_owner_state_if_current(state, owner_id, owner_generation, false)
+                );
+                return MYLITE_OWNERLESS_DICTIONARY_STATE_ERROR;
+            }
             if (out_generation != nullptr) {
                 *out_generation = generation;
             }
@@ -141,11 +157,18 @@ int mylite_ownerless_dictionary_state_finish_ddl(
         return MYLITE_OWNERLESS_DICTIONARY_STATE_ERROR;
     }
 
-    if ((load64(state, k_generation_offset) & 1U) == 0U) {
+    const std::uint64_t current_generation = load64(state, k_generation_offset);
+    if (current_generation == std::numeric_limits<std::uint64_t>::max()) {
+        return MYLITE_OWNERLESS_DICTIONARY_STATE_EXHAUSTED;
+    }
+    if ((current_generation & 1U) == 0U) {
         return MYLITE_OWNERLESS_DICTIONARY_STATE_ERROR;
     }
 
-    const std::uint64_t generation = add64(state, k_generation_offset, 1U);
+    std::uint64_t generation = 0U;
+    if (!advance_generation(state, current_generation, &generation)) {
+        return MYLITE_OWNERLESS_DICTIONARY_STATE_ERROR;
+    }
     if (!clear_active_owner_state_if_current(state, owner_id, owner_generation, false)) {
         return MYLITE_OWNERLESS_DICTIONARY_STATE_ERROR;
     }
@@ -174,9 +197,13 @@ int mylite_ownerless_dictionary_state_mark_recoverable(
     }
 
     auto *state = static_cast<unsigned char *>(mapping);
+    const std::uint64_t generation = load64(state, k_generation_offset);
+    if (generation == std::numeric_limits<std::uint64_t>::max()) {
+        return MYLITE_OWNERLESS_DICTIONARY_STATE_EXHAUSTED;
+    }
     if (load32(state, k_active_owner_id_offset) != owner_id ||
         load64(state, k_active_owner_generation_offset) != owner_generation ||
-        (load64(state, k_generation_offset) & 1U) == 0U) {
+        (generation & 1U) == 0U) {
         return MYLITE_OWNERLESS_DICTIONARY_STATE_ERROR;
     }
 
@@ -200,16 +227,23 @@ int mylite_ownerless_dictionary_state_recover_dead_owner(
     }
 
     auto *state = static_cast<unsigned char *>(mapping);
+    const std::uint64_t current_generation = load64(state, k_generation_offset);
+    if (current_generation == std::numeric_limits<std::uint64_t>::max()) {
+        return MYLITE_OWNERLESS_DICTIONARY_STATE_EXHAUSTED;
+    }
     if (load32(state, k_active_owner_id_offset) != owner_id ||
         load64(state, k_active_owner_generation_offset) != owner_generation ||
         load32(state, k_recoverable_kind_offset) != recovery_kind ||
         load32(state, k_recoverable_owner_id_offset) != owner_id ||
         load64(state, k_recoverable_owner_generation_offset) != owner_generation ||
-        (load64(state, k_generation_offset) & 1U) == 0U) {
+        (current_generation & 1U) == 0U) {
         return MYLITE_OWNERLESS_DICTIONARY_STATE_ERROR;
     }
 
-    const std::uint64_t generation = add64(state, k_generation_offset, 1U);
+    std::uint64_t generation = 0U;
+    if (!advance_generation(state, current_generation, &generation)) {
+        return MYLITE_OWNERLESS_DICTIONARY_STATE_ERROR;
+    }
     if (!clear_active_owner_state_if_current(state, owner_id, owner_generation, false)) {
         return MYLITE_OWNERLESS_DICTIONARY_STATE_ERROR;
     }
@@ -239,6 +273,9 @@ int mylite_ownerless_dictionary_state_recover_incomplete_owner(
 
     auto *state = static_cast<unsigned char *>(mapping);
     const std::uint64_t generation = load64(state, k_generation_offset);
+    if (generation >= k_last_ready_generation) {
+        return MYLITE_OWNERLESS_DICTIONARY_STATE_EXHAUSTED;
+    }
     const std::uint64_t active_owner_generation = load64(state, k_active_owner_generation_offset);
     if ((generation & 1U) != 0U || load32(state, k_active_owner_id_offset) != owner_id ||
         (active_owner_generation != 0U && active_owner_generation != owner_generation)) {
@@ -467,7 +504,8 @@ bool valid_recovery_kind(std::uint32_t recovery_kind) {
            recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_RENAME_INDEX ||
            recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_INDEX_IGNORABILITY ||
            recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_FAILED_DDL_NOOP ||
-           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_CHECK_CONSTRAINT;
+           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_CHECK_CONSTRAINT ||
+           recovery_kind == MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_AUTO_INCREMENT;
 }
 
 void clear_recoverable_state(unsigned char *state) {
@@ -516,9 +554,30 @@ bool compare_exchange32(
     );
 }
 
-std::uint64_t add64(unsigned char *base, std::size_t offset, std::uint64_t value) {
-    auto *target = reinterpret_cast<std::uint64_t *>(base + offset);
-    return __atomic_add_fetch(target, value, __ATOMIC_ACQ_REL);
+bool advance_generation(
+    unsigned char *state,
+    std::uint64_t current_generation,
+    std::uint64_t *out_generation
+) {
+    if (out_generation == nullptr ||
+        current_generation == std::numeric_limits<std::uint64_t>::max()) {
+        return false;
+    }
+
+    auto *target = reinterpret_cast<std::uint64_t *>(state + k_generation_offset);
+    const std::uint64_t next_generation = current_generation + 1U;
+    if (!__atomic_compare_exchange_n(
+            target,
+            &current_generation,
+            next_generation,
+            false,
+            __ATOMIC_ACQ_REL,
+            __ATOMIC_ACQUIRE
+        )) {
+        return false;
+    }
+    *out_generation = next_generation;
+    return true;
 }
 
 } // namespace

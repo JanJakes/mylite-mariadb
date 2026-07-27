@@ -3,7 +3,10 @@ set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 workflow="${root_dir}/.github/workflows/ci.yml"
+cmake_presets="${root_dir}/CMakePresets.json"
+libmylite_cmake="${root_dir}/packages/libmylite/CMakeLists.txt"
 wordpress_harness="${root_dir}/tools/wordpress-phpunit-mysqli-mylite"
+ownerless_filesystem_gate="${root_dir}/tools/check-ownerless-filesystems"
 wordpress_runtime_dockerfile="${root_dir}/tools/wordpress-phpunit-runtime.Dockerfile"
 wordpress_timing_append="${root_dir}/tools/wordpress-phpunit-append-timing"
 wordpress_timing_rollup="${root_dir}/tools/wordpress-phpunit-timing-rollup"
@@ -47,6 +50,21 @@ require_literal_count_at_least() {
   if [ "${count}" -lt "${minimum}" ]; then
     echo \
       "Missing required CI production-build marker count: ${needle} (${count}/${minimum})" \
+      >&2
+    failed=1
+  fi
+}
+
+require_file_literal_count_at_least() {
+  local file="$1"
+  local needle="$2"
+  local minimum="$3"
+  local count
+
+  count="$(grep -Fc -- "${needle}" "${file}" || true)"
+  if [ "${count}" -lt "${minimum}" ]; then
+    echo \
+      "Missing required production-build marker count in ${file}: ${needle} (${count}/${minimum})" \
       >&2
     failed=1
   fi
@@ -274,6 +292,75 @@ require_step_timeout() {
       failed=1
       ;;
   esac
+}
+
+matrix_gate_timeout_minutes() {
+  local gate="$1"
+
+  awk -v gate="${gate}" '
+    $0 == "          - gate: " gate {
+      in_gate = 1
+      next
+    }
+    in_gate && /^[[:space:]]+- gate: / {
+      exit
+    }
+    in_gate && /^[[:space:]]+test_timeout_minutes: [0-9]+$/ {
+      print $2
+      exit
+    }
+  ' "${workflow}"
+}
+
+cmake_test_preset_timeout_seconds() {
+  local preset="$1"
+
+  awk -v preset="${preset}" '
+    $0 == "      \"name\": \"" preset "\"," {
+      in_preset = 1
+      next
+    }
+    in_preset && /^      "name": / {
+      exit
+    }
+    in_preset && /"timeout": [0-9]+/ {
+      value = $0
+      sub(/^.*"timeout": /, "", value)
+      sub(/[^0-9].*$/, "", value)
+      print value
+      exit
+    }
+  ' "${cmake_presets}"
+}
+
+require_release_gate_timeout_budget() {
+  local gate="$1"
+  local test_count="$2"
+  local per_test_timeout_seconds="$3"
+  local margin_seconds="$4"
+  local timeout_minutes
+  local available_seconds
+  local required_seconds
+
+  timeout_minutes="$(matrix_gate_timeout_minutes "${gate}")"
+  case "${timeout_minutes}" in
+    ''|*[!0-9]*)
+      echo "Could not determine the ownerless release-gate timeout: ${gate}" >&2
+      failed=1
+      return
+      ;;
+  esac
+
+  available_seconds="$((timeout_minutes * 60))"
+  required_seconds="$((test_count * per_test_timeout_seconds + margin_seconds))"
+  if [ "${available_seconds}" -lt "${required_seconds}" ]; then
+    echo \
+      "Ownerless release-gate timeout is too short for ${gate}: " \
+      "${available_seconds}s < ${test_count} * ${per_test_timeout_seconds}s + " \
+      "${margin_seconds}s" \
+      >&2
+    failed=1
+  fi
 }
 
 require_embedded_timing_step_guards() {
@@ -559,9 +646,8 @@ require_literal "cmake --build --preset format-check-prod"
 require_literal "cmake --build --preset tidy-prod"
 require_literal_count_at_least "Audit CI production build configuration" 4
 require_literal_count_at_least "run: tools/check-ci-production-builds" 4
-require_literal "timeout-minutes: 75"
+require_literal "timeout-minutes: 150"
 require_literal "timeout-minutes: 70"
-require_literal "timeout-minutes: 45"
 require_literal "timeout-minutes: 10"
 
 require_literal "tools/require-cmake-release-build build/prod"
@@ -770,9 +856,18 @@ require_literal "Run embedded large-row bulk performance probe"
 require_literal "Run embedded large-row ownerless attribution probe"
 require_literal "Run embedded ownerless append attribution probe"
 require_literal "Upload embedded performance reports"
+require_literal "Run PHP ownerless application adapter tests"
+require_literal "Run ownerless supported-filesystem gate"
+require_literal "ownerless-external-oracle:"
+require_literal "Run ownerless external MariaDB seed oracle"
+require_literal "Upload ownerless external MariaDB oracle evidence"
+require_literal "ownerless-external-trace-oracle:"
+require_literal "Run ownerless external MariaDB trace oracle"
+require_literal "Upload ownerless external MariaDB trace evidence"
 require_literal "Install WordPress PHPUnit dependencies"
 require_literal "Prepare WordPress PHPUnit database"
 require_literal "Run WordPress mysqli performance probe"
+require_literal "Run WordPress ownerless application gate"
 require_literal "wordpress-phpunit-setup:"
 require_literal "name: wordpress-phpunit-mysqli-mylite-setup"
 require_literal "wordpress-phpunit-runtime-image:"
@@ -929,10 +1024,54 @@ require_literal 'test "${WORDPRESS_SETUP_RESULT}" = "success"'
 require_literal 'test "${WORDPRESS_RUNTIME_IMAGE_RESULT}" = "success"'
 require_literal 'test "${WORDPRESS_SHARD_RESULT}" = "success"'
 
-require_literal "Embedded ownerless SQL weighted shards"
 require_literal "ctest --preset php-embedded-prod"
-require_literal "-R '^libmylite\\.ownerless-cross-process-sql\\.'"
+require_literal "-L compat.ownerless-application"
 require_literal "--parallel 1"
+require_literal "ownerless-release-gate:"
+require_literal "configure_preset: ownerless-test-hooks"
+require_literal_count_at_least "test_label: compat.ownerless-hook-release-shard-" 16
+require_literal_count_at_least "gate: sql-" 16
+for ownerless_sql_shard_index in $(seq 0 15); do
+  require_literal \
+    "test_regex: '^libmylite\\.ownerless-cross-process-sql\\.${ownerless_sql_shard_index}$'"
+done
+require_file_literal "${libmylite_cmake}" "MYLITE_OWNERLESS_HOOK_RELEASE_SHARD_COUNT 16"
+require_file_literal "${libmylite_cmake}" "compat.ownerless-hook-release-shard-"
+require_file_literal "${cmake_presets}" "ownerless-negative-proof|ownerless-innodb-lock|ownerless-mdl|ownerless-transaction|ownerless-primitives|ownerless-hook-primitives|ownerless-hook-sql|ownerless-recovery"
+require_literal "test_preset: ownerless-stress-workload-release-gate"
+require_literal "test_preset: ownerless-stress-randomized-release-gate"
+require_literal "test_preset: ownerless-stress-pressure-release-gate"
+require_file_literal \
+  "${cmake_presets}" \
+  '"name": "^libmylite\\.ownerless-cross-process-(stress|ddl-stress|ddl-stress-statement-lock-retry|temporary-stress|transaction-stress)$"'
+require_file_literal \
+  "${cmake_presets}" \
+  '"name": "^libmylite\\.ownerless-(random-transaction-rollback-handoff|cross-process-(checksum-stress|random-transaction-stress|foreign-key-graph-stress|child-failure-cleanup))$"'
+require_file_literal \
+  "${cmake_presets}" \
+  '"name": "^libmylite\\.ownerless-cross-process-(active-reader-pressure-stress|expanding-page-pressure-stress|blob-page-pressure-stress|compressed-blob-page-pressure-stress)$"'
+require_step_literal "Build ownerless MariaDB embedded archive" \
+  "tools/mariadb-embedded-build ensure"
+require_step_literal "Verify ownerless MariaDB embedded production build type" \
+  "tools/require-cmake-build-type MinSizeRel build/mariadb-embedded"
+require_step_literal "Verify ownerless release-gate production build type" \
+  'tools/require-cmake-release-build "build/${{ matrix.configure_preset }}"'
+require_step_literal "Run ownerless release gate" \
+  'ctest --preset "${{ matrix.test_preset }}"'
+require_step_literal "Run ownerless release gate" \
+  "test_args+=(--label-regex '^\${{ matrix.test_label }}$')"
+require_step_literal "Run ownerless release gate" \
+  "test_args+=(--tests-regex '\${{ matrix.test_regex }}')"
+require_step_literal "Run ownerless release gate" "--parallel 1"
+require_step_literal "Run ownerless release gate" "--no-tests=error"
+require_step_literal "Run embedded non-ownerless tests" "--no-tests=error"
+require_step_literal "Run PHP ownerless application adapter tests" "--no-tests=error"
+require_file_literal_count_at_least \
+  "${cmake_presets}" \
+  '"noTestsAction": "error"' \
+  8
+require_step_literal "Upload ownerless release-gate diagnostics" \
+  'name: ownerless-${{ matrix.gate }}-ctest-diagnostics'
 require_literal "build/php-embedded-prod/packages/libmylite/mylite_embedded_performance_probe"
 require_step_order "Run embedded performance probe" "Run embedded non-ownerless tests"
 require_step_order "Run embedded large-row bulk performance probe" "Run embedded non-ownerless tests"
@@ -940,29 +1079,111 @@ require_step_order "Run embedded large-row ownerless attribution probe" "Run emb
 require_step_order "Run embedded large-row ownerless page-write attribution probe" "Run embedded non-ownerless tests"
 require_step_order "Run embedded ownerless attribution probe" "Run embedded non-ownerless tests"
 require_step_order "Run embedded ownerless append attribution probe" "Run embedded non-ownerless tests"
-require_step_order "Run embedded performance probe" "Run embedded ownerless SQL tests"
-require_step_order "Run embedded large-row bulk performance probe" "Run embedded ownerless SQL tests"
-require_step_order "Run embedded large-row ownerless attribution probe" "Run embedded ownerless SQL tests"
-require_step_order "Run embedded large-row ownerless page-write attribution probe" "Run embedded ownerless SQL tests"
-require_step_order "Run embedded ownerless attribution probe" "Run embedded ownerless SQL tests"
-require_step_order "Run embedded ownerless append attribution probe" "Run embedded ownerless SQL tests"
 require_step_order "Run embedded large-row ownerless attribution probe" "Upload embedded performance reports"
 require_step_order "Run embedded large-row ownerless page-write attribution probe" "Upload embedded performance reports"
 require_step_order "Run embedded ownerless attribution probe" "Upload embedded performance reports"
 require_step_order "Run embedded ownerless append attribution probe" "Upload embedded performance reports"
+require_step_order "Run embedded non-ownerless tests" "Run PHP ownerless application adapter tests"
+require_step_order "Run PHP ownerless application adapter tests" "Run ownerless supported-filesystem gate"
+require_step_order "Run WordPress ownerless application gate" "Pack WordPress PHPUnit runtime artifact"
 require_step_order "Show WordPress timing summary" "Upload WordPress timing summary"
 
 require_step_timeout "Build MariaDB embedded archive" 30
 require_step_timeout "Build embedded PHP targets" 15
-require_step_timeout "Run embedded non-ownerless tests" 10
-require_step_timeout "Run embedded ownerless SQL tests" 45
+require_step_timeout "Run embedded non-ownerless tests" 30
+require_step_timeout "Run PHP ownerless application adapter tests" 5
+require_step_timeout "Run ownerless supported-filesystem gate" 15
+require_step_timeout "Run ownerless external MariaDB seed oracle" 140
+require_step_timeout "Run ownerless external MariaDB trace oracle" 80
 require_step_timeout "Build MyLite PHP extensions for WordPress PHPUnit" 30
+require_step_timeout "Run WordPress ownerless application gate" 10
+
+ownerless_sql_shard_timeout_seconds="$(
+  awk '
+    /^[[:space:]]*foreach\(MYLITE_OWNERLESS_SQL_SHARD_INDEX RANGE / {
+      in_ownerless_shards = 1
+      next
+    }
+    in_ownerless_shards &&
+      $1 == "libmylite.ownerless-cross-process-sql.${MYLITE_OWNERLESS_SQL_SHARD_INDEX}" {
+      in_ownerless_shard_properties = 1
+      next
+    }
+    in_ownerless_shard_properties && $1 == "TIMEOUT" && $2 ~ /^[0-9]+$/ {
+      print $2
+      exit
+    }
+    in_ownerless_shards && /^[[:space:]]*endforeach\(\)/ {
+      in_ownerless_shards = 0
+      in_ownerless_shard_properties = 0
+    }
+  ' "${root_dir}/packages/libmylite/CMakeLists.txt"
+)"
+case "${ownerless_sql_shard_timeout_seconds}" in
+  ''|*[!0-9]*)
+    echo "Could not determine the ownerless SQL CTest shard timeout" >&2
+    failed=1
+    ;;
+  *)
+    for ownerless_sql_shard_index in $(seq 0 15); do
+      require_release_gate_timeout_budget \
+        "sql-${ownerless_sql_shard_index}" \
+        1 \
+        "${ownerless_sql_shard_timeout_seconds}" \
+        600
+    done
+    ;;
+esac
+
+ownerless_stress_workload_timeout_seconds="$(
+  cmake_test_preset_timeout_seconds "ownerless-stress-workload-release-gate"
+)"
+ownerless_stress_randomized_timeout_seconds="$(
+  cmake_test_preset_timeout_seconds "ownerless-stress-randomized-release-gate"
+)"
+ownerless_stress_pressure_timeout_seconds="$(
+  cmake_test_preset_timeout_seconds "ownerless-stress-pressure-release-gate"
+)"
+case "${ownerless_stress_workload_timeout_seconds}" in
+  ''|*[!0-9]*)
+    echo "Could not determine the ownerless workload stress CTest timeout" >&2
+    failed=1
+    ;;
+  *)
+    require_release_gate_timeout_budget \
+      "stress-workload" 5 "${ownerless_stress_workload_timeout_seconds}" 600
+    ;;
+esac
+case "${ownerless_stress_randomized_timeout_seconds}" in
+  ''|*[!0-9]*)
+    echo "Could not determine the ownerless randomized stress CTest timeout" >&2
+    failed=1
+    ;;
+  *)
+    require_release_gate_timeout_budget \
+      "stress-randomized" 5 "${ownerless_stress_randomized_timeout_seconds}" 600
+    ;;
+esac
+case "${ownerless_stress_pressure_timeout_seconds}" in
+  ''|*[!0-9]*)
+    echo "Could not determine the ownerless pressure stress CTest timeout" >&2
+    failed=1
+    ;;
+  *)
+    require_release_gate_timeout_budget \
+      "stress-pressure" 4 "${ownerless_stress_pressure_timeout_seconds}" 600
+    ;;
+esac
 
 require_step_literal "Test" "tools/require-cmake-release-build build/prod"
 forbid_step_literal "Test" "--parallel"
 require_embedded_timing_step_guards "Run embedded non-ownerless tests"
 forbid_step_literal "Run embedded non-ownerless tests" "--parallel"
-require_embedded_timing_step_guards "Run embedded ownerless SQL tests"
+require_embedded_timing_step_guards "Run PHP ownerless application adapter tests"
+require_step_literal \
+  "Run PHP ownerless application adapter tests" \
+  "-L compat.ownerless-application"
+require_step_literal "Run PHP ownerless application adapter tests" "--parallel 1"
 require_embedded_timing_step_guards "Run embedded performance probe"
 require_step_literal \
   "Run embedded performance probe" \
@@ -1044,9 +1265,95 @@ require_step_literal \
 require_wordpress_timing_step_guards "Install WordPress PHPUnit dependencies"
 require_wordpress_timing_step_guards "Prepare WordPress PHPUnit database"
 require_wordpress_timing_step_guards "Run WordPress mysqli performance probe"
+require_wordpress_timing_step_guards "Run WordPress ownerless application gate"
 require_wordpress_timing_step_guards "Pack WordPress PHPUnit runtime artifact"
 require_wordpress_timing_step_guards "Run WordPress PHPUnit shard (test only)"
 require_step_literal "Prepare WordPress PHPUnit database" 'MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL: "1"'
+require_step_literal "Run WordPress ownerless application gate" 'MYLITE_WORDPRESS_PHASE: phpunit'
+require_step_literal "Run WordPress ownerless application gate" 'MYLITE_WORDPRESS_OWNERLESS_RW: "1"'
+require_step_literal "Run WordPress ownerless application gate" 'MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT: "1"'
+require_step_literal "Run WordPress ownerless application gate" 'MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING: "0"'
+require_step_literal \
+  "Run WordPress ownerless application gate" \
+  "--filter '^Tests_DB::(test_query_and_delete|test_get_row|test_replace|test_empty_where_on_update|test_null_insert|test_null_update_value|test_null_delete)$'"
+require_step_literal \
+  "Upload WordPress ownerless application evidence" \
+  "wordpress-ownerless-application-evidence"
+require_step_literal \
+  "Upload WordPress ownerless application evidence" \
+  "if-no-files-found: error"
+require_step_literal \
+  "Run ownerless supported-filesystem gate" \
+  "tools/check-ownerless-filesystems"
+require_file_literal \
+  "${ownerless_filesystem_gate}" \
+  "unshare --mount --propagation private"
+require_file_literal \
+  "${ownerless_filesystem_gate}" \
+  'mount --bind "$1" /tmp'
+require_file_literal \
+  "${ownerless_filesystem_gate}" \
+  'findmnt -n -o FSTYPE --target /tmp'
+require_file_literal \
+  "${ownerless_filesystem_gate}" \
+  "test_two_processes_update_different_innodb_rows"
+require_file_literal \
+  "${ownerless_filesystem_gate}" \
+  "test_ownerless_ddl_refreshes_peer_dictionary"
+require_file_literal \
+  "${ownerless_filesystem_gate}" \
+  "test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebuilds"
+require_step_literal \
+  "Run ownerless external MariaDB seed oracle" \
+  "--image mariadb:11.8.6"
+require_step_literal \
+  "Run ownerless external MariaDB seed oracle" \
+  "--seed-range 1376:1407"
+require_step_literal \
+  "Run ownerless external MariaDB seed oracle" \
+  "--fk-graph-replay-attempts 10"
+require_step_literal \
+  "Run ownerless external MariaDB seed oracle" \
+  "external-seed-sweep-result.txt"
+require_step_literal \
+  "Run ownerless external MariaDB seed oracle" \
+  "overall_result=ok"
+require_step_literal \
+  "Run ownerless external MariaDB trace oracle" \
+  "--image mariadb:11.8.6"
+require_step_literal \
+  "Run ownerless external MariaDB trace oracle" \
+  "--full-suite"
+require_step_literal \
+  "Run ownerless external MariaDB trace oracle" \
+  "--scale 2"
+require_step_literal \
+  "Run ownerless external MariaDB trace oracle" \
+  "--replay-attempts 1"
+reject_regex \
+  '(^|[[:space:]])--replay-attempts[[:space:]]+([2-9]|10)([^0-9]|$)' \
+  "Ownerless external trace release oracles must use one deterministic replay attempt"
+require_file_literal \
+  "${wordpress_harness}" \
+  "MYLITE_WORDPRESS_OWNERLESS_RW must be 0 or 1"
+require_file_literal \
+  "${wordpress_harness}" \
+  '-e MYLITE_WORDPRESS_OWNERLESS_RW="${ownerless_rw}"'
+require_file_literal \
+  "${wordpress_harness}" \
+  'wordpress_ownerless_peer_wpdb_writes='
+require_file_literal \
+  "${wordpress_harness}" \
+  'wordpress_ownerless_phpunit_testcase_count='
+require_file_literal \
+  "${wordpress_harness}" \
+  'src/wp-includes/class-wpdb.php'
+require_file_literal \
+  "${wordpress_harness}" \
+  "MYLITE_WORDPRESS_OWNERLESS_CONNECTION_OPTION"
+require_file_literal \
+  "${wordpress_harness}" \
+  "mysqli_options( \$this->dbh, MYSQLI_OPT_MYLITE_OWNERLESS_RW, true )"
 require_step_literal \
   "Run WordPress PHPUnit shard (test only)" \
   'MYLITE_WORDPRESS_PHASE: phpunit'

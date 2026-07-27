@@ -117,9 +117,43 @@ row_sel_ownerless_current_read_refresh_page(
 	const int refresh_result =
 		mylite_ownerless_innodb_refresh_page_for_current_read(
 			btr_pcur_get_block(pcur));
-	return(refresh_result == MYLITE_OWNERLESS_INNODB_LOCK_OK
-	       || refresh_result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE
-	       ? DB_SUCCESS : DB_ERROR);
+  switch (refresh_result)
+  {
+  case MYLITE_OWNERLESS_INNODB_LOCK_OK:
+  case MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE:
+    return(DB_SUCCESS);
+  case MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT:
+    return (DB_LOCK_WAIT_TIMEOUT);
+  case MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK:
+    return (DB_DEADLOCK);
+  case MYLITE_OWNERLESS_INNODB_LOCK_FULL:
+    return (DB_LOCK_TABLE_FULL);
+  case MYLITE_OWNERLESS_INNODB_LOCK_ERROR:
+  default:
+    return (DB_ERROR);
+  }
+}
+
+static dberr_t row_sel_ownerless_remote_trx_is_active(
+    /*===================================*/
+    trx_id_t trx_id, bool *active)
+{
+  ut_ad(active != NULL);
+  *active= false;
+  if (UNIV_LIKELY(!mylite_ownerless_innodb_lock_hooks_enabled_fast()))
+  {
+    return (DB_SUCCESS);
+  }
+
+  int remote_active= 0;
+  const int result=
+      mylite_ownerless_innodb_remote_trx_active(trx_id, &remote_active);
+  if (result != MYLITE_OWNERLESS_INNODB_LOCK_OK)
+  {
+    return (DB_ERROR);
+  }
+  *active= remote_active != 0;
+  return (DB_SUCCESS);
 }
 
 /* Maximum number of rows to prefetch; MySQL interface has another parameter */
@@ -2438,15 +2472,25 @@ row_sel_step(
 		/* It may be that the current session has not yet started
 		its transaction, or it has been committed: */
 
-		trx_start_if_not_started_xa(thr_get_trx(thr), false);
+    trx_t *trx= thr_get_trx(thr);
+    dberr_t err= trx_start_if_not_started_xa(trx, false);
+    if (UNIV_UNLIKELY(err != DB_SUCCESS))
+    {
+      trx->error_state= err;
+      return NULL;
+    }
 
-		plan_reset_cursor(sel_node_get_nth_plan(node, 0));
+    plan_reset_cursor(sel_node_get_nth_plan(node, 0));
 
 		if (node->consistent_read) {
-			trx_t *trx = thr_get_trx(thr);
-			/* Assign a read view for the query */
-			trx->read_view.open(trx);
-			node->read_view = trx->read_view.is_open() ?
+      /* Assign a read view for the query */
+      err= trx->open_read_view();
+      if (UNIV_UNLIKELY(err != DB_SUCCESS))
+      {
+        trx->error_state= err;
+        return NULL;
+      }
+      node->read_view = trx->read_view.is_open() ?
 					  &trx->read_view : NULL;
 		} else {
 			sym_node_t*	table_node;
@@ -4776,19 +4820,46 @@ aborted:
 		     || srv_read_only_mode || trx->read_view.is_open());
 	} else {
 		prebuilt->sql_stat_start = FALSE;
-		trx_start_if_not_started(trx, false);
+    err= trx_start_if_not_started(trx, false);
+    if (UNIV_UNLIKELY(err != DB_SUCCESS))
+    {
+      trx->op_info= "";
+      DBUG_RETURN(err);
+    }
+    if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_hooks_enabled_fast() &&
+                      prebuilt->select_lock_type == LOCK_S &&
+                      trx->isolation_level == TRX_ISO_SERIALIZABLE &&
+                      trx->read_view.is_open()))
+    {
+      err= trx->close_read_view();
+      if (UNIV_UNLIKELY(err != DB_SUCCESS))
+      {
+        trx->op_info= "";
+        DBUG_RETURN(err);
+      }
+    }
 
-			if (prebuilt->select_lock_type == LOCK_NONE) {
+    if (prebuilt->select_lock_type == LOCK_NONE) {
 				if (UNIV_UNLIKELY(
 					    mylite_ownerless_innodb_external_page_visibility() != 0 &&
 					    (trx->auto_commit ||
 					     (trx->mysql_thd != nullptr &&
 					      !(trx->mysql_thd->variables.option_bits &
 					        (OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN)))))) {
-					trx->read_view.close();
-				}
-				trx->read_view.open(trx);
-			} else {
+        err= trx->close_read_view();
+        if (UNIV_UNLIKELY(err != DB_SUCCESS))
+        {
+          trx->op_info= "";
+          DBUG_RETURN(err);
+        }
+      }
+      err= trx->open_read_view();
+      if (UNIV_UNLIKELY(err != DB_SUCCESS))
+      {
+        trx->op_info= "";
+        DBUG_RETURN(err);
+      }
+    } else {
 wait_table_again:
 			err = lock_table(prebuilt->table, nullptr,
 					 prebuilt->select_lock_type == LOCK_S
@@ -4885,10 +4956,11 @@ page_corrupted:
 		ut_ad(page_rec_is_leaf(rec));
 		if (UNIV_UNLIKELY(row_sel_ownerless_current_read_refresh_needed(
 				  prebuilt, trx))) {
-			if (row_sel_ownerless_current_read_refresh_page(
-				    prebuilt, trx, pcur) != DB_SUCCESS) {
-				err = DB_ERROR;
-				goto page_read_error;
+      err= row_sel_ownerless_current_read_refresh_page(
+				    prebuilt, trx, pcur);
+      if (UNIV_UNLIKELY(err != DB_SUCCESS))
+      {
+        goto page_read_error;
 			}
 			mtr.commit();
 			mtr.start();
@@ -4957,10 +5029,10 @@ page_corrupted:
 			rec = NULL;
 			goto page_read_error;
 		}
-		if (UNIV_UNLIKELY(row_sel_ownerless_current_read_refresh_page(
-				  prebuilt, trx, pcur) != DB_SUCCESS)) {
-			err = DB_ERROR;
-			rec = NULL;
+    err= row_sel_ownerless_current_read_refresh_page(
+				  prebuilt, trx, pcur);
+    if (UNIV_UNLIKELY(err != DB_SUCCESS)) {
+      rec = NULL;
 			goto page_read_error;
 		}
 		if (UNIV_UNLIKELY(row_sel_ownerless_current_read_refresh_needed(
@@ -5306,24 +5378,40 @@ wrong_offs:
 				always refer to an existing undo log record. */
 				ut_ad(trx_id);
 				if (!trx_sys.is_registered(trx, trx_id)) {
-					/* The clustered index record
+          bool remote_active= false;
+          err= row_sel_ownerless_remote_trx_is_active(trx_id, &remote_active);
+          if (err != DB_SUCCESS)
+          {
+            goto lock_wait_or_error;
+          }
+          if (remote_active)
+          {
+            goto no_gap_lock;
+          }
+          /* The clustered index record
 					was delete-marked in a committed
 					transaction. Ignore the record. */
 					goto locks_ok_del_marked;
 				}
-			} else if (trx_t* t = row_vers_impl_x_locked(
-					   trx, rec, index, offsets)) {
+			} else
+      {
+        bool remote_active= false;
+        trx_t* t = row_vers_impl_x_locked(
+					   trx, rec, index, offsets, &remote_active);
+        if (t != nullptr) {
 				/* The record belongs to an active
 				transaction. We must acquire a lock. */
 				t->release_reference();
-			} else {
+			} else if (!remote_active)
+        {
 				/* The secondary index record does not
 				point to a delete-marked clustered index
 				record that belongs to an active transaction.
 				Ignore the secondary index record, because
 				it is not locked. */
 				goto next_rec;
-			}
+        }
+      }
 
 			goto no_gap_lock;
 		}

@@ -15,6 +15,9 @@ extern "C" {
 #define MYLITE_OWNERLESS_PAGE_INDEX_FULL 2
 #define MYLITE_OWNERLESS_PAGE_INDEX_ERROR 3
 #define MYLITE_OWNERLESS_PAGE_INDEX_SCAN_REQUIRED 4
+#define MYLITE_OWNERLESS_PAGE_INDEX_TIMEOUT 5
+#define MYLITE_OWNERLESS_PAGE_INDEX_OWNER_DEAD 6
+#define MYLITE_OWNERLESS_PAGE_INDEX_APPLIED_RELEASE_PENDING 7
 
 #define MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE 96U
 #define MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE 64U
@@ -88,6 +91,21 @@ int mylite_ownerless_page_index_generation(
     void *index,
     size_t index_size,
     uint64_t *out_index_generation
+);
+/* Complete a same-owner latch release after APPLIED_RELEASE_PENDING. */
+int mylite_ownerless_page_index_finish_pending_release(
+    void *index,
+    size_t index_size,
+    uint32_t owner_id,
+    uint64_t owner_generation
+);
+struct mylite_ownerless_process_registry_liveness_context;
+int mylite_ownerless_page_index_recover_dead_latch(
+    void *index,
+    size_t index_size,
+    uint32_t owner_id,
+    uint64_t owner_generation,
+    const struct mylite_ownerless_process_registry_liveness_context *liveness
 );
 
 #ifdef __cplusplus

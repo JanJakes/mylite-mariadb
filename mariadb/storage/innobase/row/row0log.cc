@@ -1686,11 +1686,17 @@ row_log_table_apply_delete_low(
 				   BTR_CREATE_FLAG, false, mtr);
 	if (error != DB_SUCCESS) {
 err_exit:
-		mtr->commit();
+		if (const dberr_t commit_error = mtr->commit()) {
+			if (error == DB_SUCCESS) {
+				error = commit_error;
+			}
+		}
 		return error;
 	}
 
-	mtr->commit();
+	if (const dberr_t commit_error = mtr->commit()) {
+		return commit_error;
+	}
 
 	while ((index = dict_table_get_next_index(index)) != NULL) {
 		if (index->type & DICT_FTS) {
@@ -1722,7 +1728,13 @@ err_exit:
 		btr_cur_pessimistic_delete(&error, FALSE,
 					   btr_pcur_get_btr_cur(pcur),
 					   BTR_CREATE_FLAG, false, mtr);
-		mtr->commit();
+		const dberr_t commit_error = mtr->commit();
+		if (error == DB_SUCCESS) {
+			error = commit_error;
+		}
+		if (UNIV_UNLIKELY(commit_error != DB_SUCCESS)) {
+			return error;
+		}
 	}
 
 	return(error);
@@ -1783,7 +1795,11 @@ row_log_table_apply_delete(
 	if (page_rec_is_infimum(btr_pcur_get_rec(&pcur))
 	    || btr_pcur_get_low_match(&pcur) < index->n_uniq) {
 all_done:
-		mtr_commit(&mtr);
+		if (const dberr_t commit_error = mtr.commit()) {
+			if (err == DB_SUCCESS) {
+				err = commit_error;
+			}
+		}
 		/* The record was not found. All done. */
 		/* This should only happen when an earlier
 		ROW_T_INSERT was skipped or
@@ -1899,7 +1915,11 @@ row_log_table_apply_update(
 			      &mtr);
 	if (error != DB_SUCCESS) {
 func_exit:
-		mtr.commit();
+		if (const dberr_t commit_error = mtr.commit()) {
+			if (error == DB_SUCCESS) {
+				error = commit_error;
+			}
+		}
 func_exit_committed:
 		ut_ad(mtr.has_committed());
 		ut_free(pcur.old_rec_buf);
@@ -2047,7 +2067,12 @@ func_exit_committed:
 			dtuple_copy_v_fields(old_row, old_pk);
 		}
 
-		mtr.commit();
+		if (const dberr_t commit_error = mtr.commit()) {
+			if (error == DB_SUCCESS) {
+				error = commit_error;
+			}
+			goto func_exit_committed;
+		}
 
 		entry = row_build_index_entry(old_row, old_ext, index, heap);
 		if (!entry) {
@@ -2087,7 +2112,12 @@ func_exit_committed:
 			break;
 		}
 
-		mtr.commit();
+		if (const dberr_t commit_error = mtr.commit()) {
+			if (error == DB_SUCCESS) {
+				error = commit_error;
+			}
+			goto func_exit_committed;
+		}
 
 		entry = row_build_index_entry(row, NULL, index, heap);
 		error = row_ins_sec_index_entry_low(
@@ -3112,8 +3142,10 @@ row_log_apply_op_low(
 			if (!has_index_lock) {
 				/* This needs a pessimistic operation.
 				Lock the index tree exclusively. */
-				mtr_commit(&mtr);
-				mtr_start(&mtr);
+				*error = mtr.commit_and_restart();
+				if (UNIV_UNLIKELY(*error != DB_SUCCESS)) {
+					goto func_exit;
+				}
 				index->set_modified(mtr);
 				*error = cursor.search_leaf(entry, PAGE_CUR_LE,
 							    BTR_MODIFY_TREE,
@@ -3216,8 +3248,10 @@ insert_the_rec:
 			if (!has_index_lock) {
 				/* This needs a pessimistic operation.
 				Lock the index tree exclusively. */
-				mtr_commit(&mtr);
-				mtr_start(&mtr);
+				*error = mtr.commit_and_restart();
+				if (UNIV_UNLIKELY(*error != DB_SUCCESS)) {
+					goto func_exit;
+				}
 				index->set_modified(mtr);
 				*error = cursor.search_leaf(entry, PAGE_CUR_LE,
 							    BTR_MODIFY_TREE,
@@ -3254,7 +3288,11 @@ insert_the_rec:
 	}
 
 func_exit:
-	mtr_commit(&mtr);
+	if (const dberr_t commit_error = mtr.commit()) {
+		if (*error == DB_SUCCESS) {
+			*error = commit_error;
+		}
+	}
 }
 
 /******************************************************//**
@@ -4106,4 +4144,3 @@ next_index:
     index= dict_table_get_next_index(index);
   }
 }
-

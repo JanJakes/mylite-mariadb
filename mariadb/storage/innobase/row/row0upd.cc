@@ -2297,145 +2297,178 @@ check_fk:
 
 				goto err_exit;
 			default:
-				WSREP_ERROR("Foreign key check fail: "
-					    "%s on table %s index %s query %s",
-					    ut_strerr(err), index->name(), index->table->name.m_name,
-					    wsrep_thd_query(trx->mysql_thd));
+                          WSREP_ERROR("Foreign key check fail: "
+                                      "%s on table %s index %s query %s",
+                                      ut_strerr(err), index->name(),
+                                      index->table->name.m_name,
+                                      wsrep_thd_query(trx->mysql_thd));
 
-				goto err_exit;
-			}
+                          goto err_exit;
+                        }
 #endif /* WITH_WSREP */
-		}
-	}
-
-	mtr->commit();
-	mtr->start();
-
-	node->state = UPD_NODE_INSERT_CLUSTERED;
-	err = row_ins_clust_index_entry(index, entry, thr,
-					dtuple_get_n_ext(entry));
-err_exit:
-	mem_heap_free(heap);
-	return(err);
+                }
 }
 
-/***********************************************************//**
-Updates a clustered index record of a row when the ordering fields do
-not change.
-@return DB_SUCCESS if operation successfully completed, else error
-code or DB_LOCK_WAIT */
-static MY_ATTRIBUTE((nonnull, warn_unused_result))
-dberr_t
-row_upd_clust_rec(
-/*==============*/
-	ulint		flags,  /*!< in: undo logging and locking flags */
-	upd_node_t*	node,	/*!< in: row update node */
-	dict_index_t*	index,	/*!< in: clustered index */
-	rec_offs*	offsets,/*!< in: rec_get_offsets() on node->pcur */
-	mem_heap_t**	offsets_heap,
-				/*!< in/out: memory heap, can be emptied */
-	que_thr_t*	thr,	/*!< in: query thread */
-	mtr_t*		mtr)	/*!< in,out: mini-transaction; may be
-				committed and restarted here */
+        err= mtr->commit_and_restart();
+        if (UNIV_UNLIKELY(err != DB_SUCCESS))
+          goto err_exit;
+
+node->state= UPD_NODE_INSERT_CLUSTERED;
+err= row_ins_clust_index_entry(index, entry, thr, dtuple_get_n_ext(entry));
+err_exit:
+  mem_heap_free(heap);
+  return (err);
+}
+
+/***********************************************************/ /**
+ Updates a clustered index record of a row when the ordering fields do
+ not change.
+ @return DB_SUCCESS if operation successfully completed, else error
+ code or DB_LOCK_WAIT */
+static MY_ATTRIBUTE((nonnull, warn_unused_result)) dberr_t row_upd_clust_rec(
+    /*==============*/
+    ulint flags,         /*!< in: undo logging and locking flags */
+    upd_node_t *node,    /*!< in: row update node */
+    dict_index_t *index, /*!< in: clustered index */
+    rec_offs *offsets,   /*!< in: rec_get_offsets() on node->pcur */
+    mem_heap_t **offsets_heap,
+    /*!< in/out: memory heap, can be emptied */
+    que_thr_t *thr, /*!< in: query thread */
+    mtr_t *mtr)     /*!< in,out: mini-transaction; may be
+                    committed and restarted here */
 {
-	mem_heap_t*	heap		= NULL;
-	big_rec_t*	big_rec		= NULL;
-	btr_pcur_t*	pcur;
-	btr_cur_t*	btr_cur;
-	dberr_t		err;
+  mem_heap_t *heap= NULL;
+  big_rec_t *big_rec= NULL;
+  btr_pcur_t *pcur;
+  btr_cur_t *btr_cur;
+  trx_t *trx= thr_get_trx(thr);
+  dberr_t err;
+  btr_pcur_t::restore_status restore_status= btr_pcur_t::NOT_SAME;
 
-	ut_ad(dict_index_is_clust(index));
-	ut_ad(!thr_get_trx(thr)->in_rollback);
-	ut_ad(!node->table->skip_alter_undo);
+  ut_ad(dict_index_is_clust(index));
+  ut_ad(!thr_get_trx(thr)->in_rollback);
+  ut_ad(!node->table->skip_alter_undo);
 
-	pcur = node->pcur;
-	btr_cur = btr_pcur_get_btr_cur(pcur);
+  pcur= node->pcur;
+  btr_cur= btr_pcur_get_btr_cur(pcur);
 
-	ut_ad(btr_cur_get_index(btr_cur) == index);
-	ut_ad(!rec_get_deleted_flag(btr_cur_get_rec(btr_cur),
-				    dict_table_is_comp(index->table)));
-	ut_ad(rec_offs_validate(btr_cur_get_rec(btr_cur), index, offsets));
+  ut_ad(btr_cur_get_index(btr_cur) == index);
+  ut_ad(!rec_get_deleted_flag(btr_cur_get_rec(btr_cur),
+                              dict_table_is_comp(index->table)));
+  ut_ad(rec_offs_validate(btr_cur_get_rec(btr_cur), index, offsets));
 
-	/* Try optimistic updating of the record, keeping changes within
-	the page; we do not check locks because we assume the x-lock on the
-	record to update */
+  /* Try optimistic updating of the record, keeping changes within
+  the page; we do not check locks because we assume the x-lock on the
+  record to update */
 
-	if (node->cmpl_info & UPD_NODE_NO_SIZE_CHANGE) {
-		err = btr_cur_update_in_place(
-			flags | BTR_NO_LOCKING_FLAG, btr_cur,
-			offsets, node->update,
-			node->cmpl_info, thr, thr_get_trx(thr)->id, mtr);
-	} else {
-		err = btr_cur_optimistic_update(
-			flags | BTR_NO_LOCKING_FLAG, btr_cur,
-			&offsets, offsets_heap, node->update,
-			node->cmpl_info, thr, thr_get_trx(thr)->id, mtr);
-	}
+  if (node->cmpl_info & UPD_NODE_NO_SIZE_CHANGE)
+  {
+    err= btr_cur_update_in_place(flags | BTR_NO_LOCKING_FLAG, btr_cur, offsets,
+                                 node->update, node->cmpl_info, thr,
+                                 thr_get_trx(thr)->id, mtr);
+  }
+  else
+  {
+    err= btr_cur_optimistic_update(
+        flags | BTR_NO_LOCKING_FLAG, btr_cur, &offsets, offsets_heap,
+        node->update, node->cmpl_info, thr, thr_get_trx(thr)->id, mtr);
+  }
 
-	if (err == DB_SUCCESS) {
-		goto func_exit;
-	}
+  if (err == DB_SUCCESS)
+  {
+    goto func_exit;
+  }
 
-	if (buf_pool.running_out()) {
-		err = DB_LOCK_TABLE_FULL;
-		goto func_exit;
-	}
+  if (buf_pool.running_out())
+  {
+    err= DB_LOCK_TABLE_FULL;
+    goto func_exit;
+  }
 
-	/* We may have to modify the tree structure: do a pessimistic descent
-	down the index tree */
+  /* We may have to modify the tree structure: do a pessimistic descent
+  down the index tree */
 
-	mtr->commit();
-	mtr->start();
+  err= mtr->commit_and_restart();
+  if (UNIV_UNLIKELY(err != DB_SUCCESS))
+    goto func_exit;
 
-	if (index->table->is_temporary()) {
-		/* Disable locking, because temporary tables are never
-		shared between transactions or connections. */
-		flags |= BTR_NO_LOCKING_FLAG;
-		mtr->set_log_mode(MTR_LOG_NO_REDO);
-	} else {
-		index->set_modified(*mtr);
-	}
+  if (index->table->is_temporary())
+  {
+    /* Disable locking, because temporary tables are never
+    shared between transactions or connections. */
+    flags|= BTR_NO_LOCKING_FLAG;
+    mtr->set_log_mode(MTR_LOG_NO_REDO);
+  }
+  else
+  {
+    index->set_modified(*mtr);
+    if (UNIV_UNLIKELY(mtr->ownerless_error() != DB_SUCCESS))
+    {
+      err= mtr->ownerless_error();
+      goto func_exit;
+    }
+  }
 
-	/* NOTE: this transaction has an s-lock or x-lock on the record and
-	therefore other transactions cannot modify the record when we have no
-	latch on the page. In addition, we assume that other query threads of
-	the same transaction do not modify the record in the meantime.
-	Therefore we can assert that the restoration of the cursor succeeds. */
+  /* NOTE: this transaction has an s-lock or x-lock on the record and
+  therefore other transactions cannot modify the record when we have no
+  latch on the page. In addition, we assume that other query threads of
+  the same transaction do not modify the record in the meantime.
+  Therefore we can assert that the restoration of the cursor succeeds. */
 
-	ut_a(pcur->restore_position(BTR_MODIFY_TREE, mtr) ==
-	    btr_pcur_t::SAME_ALL);
+  restore_status= pcur->restore_position(BTR_MODIFY_TREE, mtr);
+  if (UNIV_UNLIKELY(mtr->ownerless_error() != DB_SUCCESS ||
+                    trx->mylite_ownerless_coordination_fault))
+  {
+    err= mtr->ownerless_error() != DB_SUCCESS ? mtr->ownerless_error()
+                                              : trx->error_state;
+    if (err == DB_SUCCESS)
+      err= DB_ERROR;
+    goto func_exit;
+  }
+  if (UNIV_UNLIKELY(restore_status != btr_pcur_t::SAME_ALL))
+  {
+    if (mylite_ownerless_innodb_lock_hooks_enabled_fast())
+    {
+      err= DB_DEADLOCK;
+      goto func_exit;
+    }
+    ut_error;
+  }
 
-	ut_ad(!rec_get_deleted_flag(btr_pcur_get_rec(pcur),
-				    dict_table_is_comp(index->table)));
+  ut_ad(!rec_get_deleted_flag(btr_pcur_get_rec(pcur),
+                              dict_table_is_comp(index->table)));
 
-	if (!heap) {
-		heap = mem_heap_create(1024);
-	}
+  if (!heap)
+  {
+    heap= mem_heap_create(1024);
+  }
 
-	err = btr_cur_pessimistic_update(
-		flags | BTR_NO_LOCKING_FLAG | BTR_KEEP_POS_FLAG, btr_cur,
-		&offsets, offsets_heap, heap, &big_rec,
-		node->update, node->cmpl_info,
-		thr, thr_get_trx(thr)->id, mtr);
-	if (big_rec) {
-		ut_a(err == DB_SUCCESS);
+  err= btr_cur_pessimistic_update(
+      flags | BTR_NO_LOCKING_FLAG | BTR_KEEP_POS_FLAG, btr_cur, &offsets,
+      offsets_heap, heap, &big_rec, node->update, node->cmpl_info, thr,
+      thr_get_trx(thr)->id, mtr);
+  if (big_rec)
+  {
+    ut_a(err == DB_SUCCESS);
 
-		DEBUG_SYNC_C("before_row_upd_extern");
-		err = btr_store_big_rec_extern_fields(
-			pcur, offsets, big_rec, mtr, BTR_STORE_UPDATE);
-		DEBUG_SYNC_C("after_row_upd_extern");
-	}
+    DEBUG_SYNC_C("before_row_upd_extern");
+    err= btr_store_big_rec_extern_fields(pcur, offsets, big_rec, mtr,
+                                         BTR_STORE_UPDATE);
+    DEBUG_SYNC_C("after_row_upd_extern");
+  }
 
 func_exit:
-	if (heap) {
-		mem_heap_free(heap);
-	}
+  if (heap)
+  {
+    mem_heap_free(heap);
+  }
 
-	if (big_rec) {
-		dtuple_big_rec_free(big_rec);
-	}
+  if (big_rec)
+  {
+    dtuple_big_rec_free(big_rec);
+  }
 
-	return(err);
+  return (err);
 }
 
 /***********************************************************//**
@@ -2601,7 +2634,8 @@ row_upd_clust_step(
 		mode = BTR_MODIFY_LEAF;
 	}
 
-	if (pcur->restore_position(mode, &mtr) != btr_pcur_t::SAME_ALL) {
+	if (pcur->restore_position(mode, &mtr)
+	    != btr_pcur_t::SAME_ALL) {
 		err = DB_RECORD_NOT_FOUND;
 		goto exit_func;
 	}
@@ -2689,28 +2723,32 @@ success:
 			flags, node, index, offsets, &heap, thr, &mtr);
 
 		if (err == DB_SUCCESS) {
-			ut_ad(node->is_delete != PLAIN_DELETE);
-			node->state = node->is_delete
-				? UPD_NODE_UPDATE_ALL_SEC
-				: UPD_NODE_UPDATE_SOME_SEC;
-			goto success;
-		}
-	}
+                  ut_ad(node->is_delete != PLAIN_DELETE);
+                  node->state= node->is_delete ? UPD_NODE_UPDATE_ALL_SEC
+                                               : UPD_NODE_UPDATE_SOME_SEC;
+                  goto success;
+                }
+        }
 
 exit_func:
-	mtr.commit();
-	if (UNIV_LIKELY_NULL(heap)) {
-		mem_heap_free(heap);
-	}
-	return err;
+  mtr.commit();
+  if (UNIV_UNLIKELY(err == DB_SUCCESS && mtr.ownerless_error() != DB_SUCCESS))
+  {
+    err= mtr.ownerless_error();
+  }
+  if (UNIV_LIKELY_NULL(heap))
+  {
+    mem_heap_free(heap);
+  }
+  return err;
 }
 
-/***********************************************************//**
-Updates the affected index records of a row. When the control is transferred
-to this node, we assume that we have a persistent cursor which was on a
-record, and the position of the cursor is stored in the cursor.
-@return DB_SUCCESS if operation successfully completed, else error
-code or DB_LOCK_WAIT */
+/***********************************************************/ /**
+ Updates the affected index records of a row. When the control is transferred
+ to this node, we assume that we have a persistent cursor which was on a
+ record, and the position of the cursor is stored in the cursor.
+ @return DB_SUCCESS if operation successfully completed, else error
+ code or DB_LOCK_WAIT */
 static
 dberr_t
 row_upd(

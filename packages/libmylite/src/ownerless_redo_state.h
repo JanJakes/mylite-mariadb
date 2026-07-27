@@ -11,6 +11,8 @@ extern "C" {
 #define MYLITE_OWNERLESS_REDO_STATE_OK 0
 #define MYLITE_OWNERLESS_REDO_STATE_TIMEOUT 1
 #define MYLITE_OWNERLESS_REDO_STATE_ERROR 2
+#define MYLITE_OWNERLESS_REDO_STATE_OWNER_DEAD 3
+#define MYLITE_OWNERLESS_REDO_STATE_APPLIED_RELEASE_PENDING 4
 
 #define MYLITE_OWNERLESS_REDO_STATE_SIZE 4096U
 #define MYLITE_OWNERLESS_REDO_STATE_VISIBLE_LSN_OFFSET 40U
@@ -126,6 +128,15 @@ int mylite_ownerless_redo_state_cleanup_owner(
     uint64_t owner_generation,
     uint32_t *out_released
 );
+int mylite_ownerless_redo_state_cleanup_owner_with_latch_owner(
+    void *state,
+    size_t state_size,
+    uint32_t dead_owner_id,
+    uint64_t dead_owner_generation,
+    uint32_t latch_owner_id,
+    uint64_t latch_owner_generation,
+    uint32_t *out_released
+);
 int mylite_ownerless_redo_state_owner_active_count(
     const void *state,
     size_t state_size,
@@ -136,6 +147,30 @@ int mylite_ownerless_redo_state_read_snapshot(
     const void *state,
     size_t state_size,
     mylite_ownerless_redo_state_snapshot *out_snapshot
+);
+int mylite_ownerless_redo_state_finish_pending_progress_release(
+    void *state,
+    size_t state_size,
+    uint32_t owner_id,
+    uint64_t owner_generation
+);
+int mylite_ownerless_redo_state_finish_pending_state_release(
+    void *state,
+    size_t state_size,
+    uint32_t owner_id,
+    uint64_t owner_generation
+);
+struct mylite_ownerless_process_registry_liveness_context;
+/*
+ * OWNER_DEAD after a successful latch repair means an incomplete reservation
+ * remains and native redo recovery must coordinate before it is discarded.
+ */
+int mylite_ownerless_redo_state_recover_dead_latches(
+    void *state,
+    size_t state_size,
+    uint32_t owner_id,
+    uint64_t owner_generation,
+    const struct mylite_ownerless_process_registry_liveness_context *liveness
 );
 
 #ifdef __cplusplus

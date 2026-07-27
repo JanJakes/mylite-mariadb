@@ -90,6 +90,7 @@ extern my_bool opt_readonly;
 #include "mtr0mtr.h"
 #include <mylite_embedded_startup_perf.h>
 #include "mylite_ownerless_innodb_lock_hooks.h"
+#include "mylite_ownerless_trx_hooks.h"
 #include "os0file.h"
 #include "page0zip.h"
 #include "row0import.h"
@@ -1456,7 +1457,17 @@ static void innodb_drop_database(handlerton*, char *path)
 
   dict_stats stats;
   const bool stats_failed{stats.open(thd)};
-  trx_start_for_ddl(trx);
+  err= trx_start_for_ddl(trx);
+  if (UNIV_UNLIKELY(err != DB_SUCCESS))
+  {
+    sql_print_error("InnoDB: DROP DATABASE %.*s: %s",
+                    int(len), namebuf, ut_strerr(err));
+    if (!stats_failed)
+      stats.close();
+    trx->dispose_failed_start();
+    my_free(namebuf);
+    return;
+  }
 
   uint errors= 0;
   char db[NAME_LEN + 1];
@@ -1472,7 +1483,16 @@ static void innodb_drop_database(handlerton*, char *path)
       /* Ignore this error. Leaving garbage statistics behind is a
       lesser evil. Carry on to try to remove any garbage tables. */
       trx->rollback();
-      trx_start_for_ddl(trx);
+      err= trx_start_for_ddl(trx);
+      if (UNIV_UNLIKELY(err != DB_SUCCESS))
+      {
+        row_mysql_unlock_data_dictionary(trx);
+        if (!stats_failed)
+          stats.close();
+        trx->dispose_failed_start();
+        my_free(namebuf);
+        return;
+      }
     }
     row_mysql_unlock_data_dictionary(trx);
   }
@@ -1563,8 +1583,8 @@ static void innodb_drop_database(handlerton*, char *path)
     sql_print_error("InnoDB: DROP DATABASE %.*s: %s",
                     int(len), namebuf, ut_strerr(err));
   }
-  else
-    trx->commit();
+  else if (UNIV_UNLIKELY(trx->commit()))
+    err= DB_ERROR;
 
   row_mysql_unlock_data_dictionary(trx);
   if (!stats_failed)
@@ -1649,7 +1669,8 @@ static void innodb_drop_database(handlerton*, char *path)
       log_write_up_to(mtr.commit_lsn(), true);
   }
 
-  trx->free();
+  if (!trx->mylite_ownerless_coordination_fault)
+    trx->free();
   my_free(namebuf);
 }
 
@@ -1879,6 +1900,58 @@ trx_t *thd_to_trx(const THD *thd) noexcept
   return static_cast<trx_t*>(thd_get_ha_data(thd, innodb_hton_ptr));
 }
 
+extern "C" int mylite_embedded_cleanup_idle_ownerless_transaction(THD *thd)
+{
+  trx_t *trx= thd != nullptr ? thd_to_trx(thd) : nullptr;
+  if (trx == nullptr)
+    return 0;
+  if (trx->state != TRX_STATE_NOT_STARTED || trx->is_registered ||
+      trx->read_view.is_open())
+    return 1;
+
+  mylite_ownerless_innodb_lock_forget_transaction(trx);
+  return mylite_ownerless_innodb_coordination_error() ? 1 : 0;
+}
+
+extern "C" int mylite_embedded_clear_ownerless_rollback_read_state(THD *thd)
+{
+  trx_t *trx= thd != nullptr ? thd_to_trx(thd) : nullptr;
+  if (trx == nullptr || trx->id == 0 || !mylite_ownerless_trx_has_hooks())
+    return 0;
+  if (mylite_ownerless_trx_set_rollback_state(
+          trx->id, MYLITE_OWNERLESS_TRX_ROLLBACK_NONE) ==
+      MYLITE_OWNERLESS_TRX_OK)
+    return 0;
+
+  trx->mylite_ownerless_coordination_fault= true;
+  trx->error_state= DB_ERROR;
+  return 1;
+}
+
+extern "C" int mylite_embedded_recover_ownerless_transaction_for_close(THD *thd)
+{
+  trx_t *trx= thd != nullptr ? thd_to_trx(thd) : nullptr;
+  if (trx == nullptr)
+    return 0;
+  if (trx->retry_ownerless_commit_cleanup())
+    return 1;
+  if (trx->state == TRX_STATE_ACTIVE || trx->state == TRX_STATE_ABORTED)
+    return trx_rollback_for_mysql(trx) == DB_SUCCESS ? 0 : 1;
+  if (trx->state != TRX_STATE_NOT_STARTED)
+    return 1;
+  if (trx->is_referenced() || trx->lock.wait_lock != nullptr ||
+      trx->lock.wait_thr != nullptr ||
+      UT_LIST_GET_LEN(trx->lock.trx_locks) != 0 ||
+      !trx->lock.table_locks.empty() || !trx->autoinc_locks.empty())
+    return 1;
+  if (!trx->mylite_ownerless_coordination_fault &&
+      (trx->error_state == DB_LOCK_WAIT_TIMEOUT ||
+       trx->error_state == DB_DEADLOCK ||
+       trx->error_state == DB_LOCK_TABLE_FULL))
+    trx->error_state= DB_SUCCESS;
+  return 0;
+}
+
 /** Detach and free a transaction.
 @param trx transaction
 @return the trx->mysql_thd */
@@ -2072,7 +2145,15 @@ static void drop_garbage_tables_after_restore()
     btr_pcur_store_position(&pcur, &mtr);
     btr_pcur_commit_specify_mtr(&pcur, &mtr);
 
-    trx_start_for_ddl(trx);
+    const dberr_t start_error= trx_start_for_ddl(trx);
+    if (UNIV_UNLIKELY(start_error != DB_SUCCESS))
+    {
+      sql_print_error("InnoDB: cannot start garbage-table cleanup: %s",
+                      ut_strerr(start_error));
+      trx->dispose_failed_start();
+      trx= nullptr;
+      goto all_fail;
+    }
     std::vector<pfs_os_file_t> deleted;
     dberr_t err= DB_TABLE_NOT_FOUND;
     row_mysql_lock_data_dictionary(trx);
@@ -2099,7 +2180,15 @@ static void drop_garbage_tables_after_restore()
         err= trx->drop_table(*table);
       if (err != DB_SUCCESS)
         goto fail;
-      trx->commit(deleted);
+      if (UNIV_UNLIKELY(trx->commit(deleted)))
+      {
+        row_mysql_unlock_data_dictionary(trx);
+        for (pfs_os_file_t d : deleted)
+          os_file_close(d);
+        ut_free(pcur.old_rec_buf);
+        ut_d(purge_sys.resume_FTS());
+        return;
+      }
     }
     else
     {
@@ -2120,7 +2209,8 @@ fail:
 
 all_fail:
   mtr.commit();
-  trx->clear_and_free();
+  if (trx != nullptr)
+    trx->clear_and_free();
   ut_free(pcur.old_rec_buf);
   ut_d(purge_sys.resume_FTS());
 }
@@ -2934,7 +3024,9 @@ static int innobase_savepoint(THD *thd, void *savepoint) noexcept
     ut_ad("invalid state" == 0);
     DBUG_RETURN(HA_ERR_NO_SAVEPOINT);
   case TRX_STATE_NOT_STARTED:
-    trx_start_if_not_started_xa(trx, false);
+    if (UNIV_UNLIKELY(
+            trx_start_if_not_started_xa(trx, false) != DB_SUCCESS))
+      DBUG_RETURN(HA_ERR_NO_SAVEPOINT);
     /* fall through */
   case TRX_STATE_ACTIVE:
     const undo_no_t savept{trx->undo_no};
@@ -3348,7 +3440,8 @@ static bool innobase_query_caching_table_check(
 	}
 
 	/* Start the transaction if it is not started yet */
-	trx_start_if_not_started(trx, false);
+	if (UNIV_UNLIKELY(trx_start_if_not_started(trx, false) != DB_SUCCESS))
+		return false;
 
 	bool allow = innobase_query_caching_table_check_low(table, trx);
 
@@ -3363,9 +3456,10 @@ static bool innobase_query_caching_table_check(
 		    && !trx->read_view.is_open()) {
 
 			/* Start the transaction if it is not started yet */
-			trx_start_if_not_started(trx, false);
-
-			trx->read_view.open(trx);
+			if (UNIV_UNLIKELY(
+				    trx_start_if_not_started(trx, false) != DB_SUCCESS) ||
+			    UNIV_UNLIKELY(trx->open_read_view() != DB_SUCCESS))
+				return false;
 		}
 	}
 
@@ -3711,11 +3805,15 @@ ha_innobase::init_table_handle_for_HANDLER(void)
 
 	/* If the transaction is not started yet, start it */
 
-	trx_start_if_not_started_xa(m_prebuilt->trx, false);
+	if (UNIV_UNLIKELY(
+		    trx_start_if_not_started_xa(m_prebuilt->trx, false) !=
+		    DB_SUCCESS))
+		return;
 
 	/* Assign a read view if the transaction does not have it yet */
 
-	m_prebuilt->trx->read_view.open(m_prebuilt->trx);
+	if (UNIV_UNLIKELY(m_prebuilt->trx->open_read_view() != DB_SUCCESS))
+		return;
 
 	innobase_register_trx(innodb_hton_ptr, m_user_thd, m_prebuilt->trx);
 
@@ -3879,7 +3977,14 @@ static ulonglong innodb_prepare_commit_versioned(THD* thd, ulonglong *trx_id)
       }
     }
 
-    return versioned ? trx_sys.get_new_trx_id() : 0;
+    if (versioned)
+    {
+      trx_id_t end_id= 0;
+      if (UNIV_UNLIKELY(trx_sys.get_new_trx_id(&end_id) != DB_SUCCESS))
+        return ULONGLONG_MAX;
+      return end_id;
+    }
+    return 0;
   }
 
   *trx_id= 0;
@@ -4499,7 +4604,7 @@ innobase_end(handlerton*, ha_panic_function)
 
 /*****************************************************************//**
 Commits a transaction in an InnoDB database. */
-void
+dberr_t
 innobase_commit_low(
 /*================*/
 	trx_t*	trx)	/*!< in: transaction handle */
@@ -4515,12 +4620,13 @@ innobase_commit_low(
 		tmp = thd_proc_info(trx->mysql_thd, "innobase_commit_low()");
 	}
 #endif /* WITH_WSREP */
-	trx_commit_for_mysql(trx);
+	const dberr_t err= trx_commit_for_mysql(trx);
 #ifdef WITH_WSREP
 	if (is_wsrep) {
 		thd_proc_info(trx->mysql_thd, tmp);
 	}
 #endif /* WITH_WSREP */
+	return err;
 }
 
 /*****************************************************************//**
@@ -4546,14 +4652,18 @@ innobase_start_trx_and_assign_read_view(
 
 	ut_ad(!trx->is_started());
 
-	trx_start_if_not_started_xa(trx, false);
+	dberr_t err= trx_start_if_not_started_xa(trx, false);
+	if (UNIV_UNLIKELY(err != DB_SUCCESS))
+		DBUG_RETURN(convert_error_code_to_mysql(err, 0, thd));
 
 	/* Assign a read view if the transaction does not have one yet.
 	Skip this for the READ UNCOMMITTED isolation level. */
 	trx->isolation_level = innodb_isolation_level(thd) & 3;
 
 	if (trx->isolation_level != TRX_ISO_READ_UNCOMMITTED) {
-		trx->read_view.open(trx);
+		err= trx->open_read_view();
+		if (UNIV_UNLIKELY(err != DB_SUCCESS))
+			DBUG_RETURN(convert_error_code_to_mysql(err, 0, thd));
 	} else {
 		push_warning_printf(thd, Sql_condition::WARN_LEVEL_WARN,
 				    HA_ERR_UNSUPPORTED,
@@ -4570,7 +4680,7 @@ innobase_start_trx_and_assign_read_view(
 }
 
 static
-void
+dberr_t
 innobase_commit_ordered_2(
 /*======================*/
 	trx_t*	trx, 	/*!< in: Innodb transaction */
@@ -4611,11 +4721,11 @@ innobase_commit_ordered_2(
 	}
 #endif /* WITH_WSREP */
 
-	innobase_commit_low(trx);
+	const dberr_t err= innobase_commit_low(trx);
 	trx->mysql_log_file_name = NULL;
 	trx->flush_log_later = false;
 
-	DBUG_VOID_RETURN;
+	DBUG_RETURN(err);
 }
 
 /*****************************************************************//**
@@ -4655,7 +4765,9 @@ innobase_commit_ordered(
 	DBUG_ASSERT(all ||
 		(!thd_test_options(thd, OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN)));
 
-	innobase_commit_ordered_2(trx, thd);
+	const dberr_t err= innobase_commit_ordered_2(trx, thd);
+	if (UNIV_UNLIKELY(err != DB_SUCCESS))
+		trx->error_state= err;
 	trx->active_commit_ordered = true;
 
 	DBUG_VOID_RETURN;
@@ -4734,6 +4846,8 @@ innobase_commit(
 		break;
 	default:
 	case TRX_STATE_COMMITTED_IN_MEMORY:
+		if (trx->mylite_ownerless_coordination_fault)
+			break;
 	case TRX_STATE_PREPARED_RECOVERED:
 		ut_ad("invalid state" == 0);
 		/* fall through */
@@ -4760,10 +4874,13 @@ innobase_commit(
 	    || (!thd_test_options(thd, OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN))) {
 
 		/* Run the fast part of commit if we did not already. */
-		if (!trx->active_commit_ordered) {
-			innobase_commit_ordered_2(trx, thd);
-
-		}
+		dberr_t commit_error= trx->mylite_ownerless_coordination_fault
+			? DB_ERROR
+			: trx->active_commit_ordered
+				? trx->error_state
+				: DB_SUCCESS;
+		if (!trx->active_commit_ordered && commit_error == DB_SUCCESS)
+			commit_error= innobase_commit_ordered_2(trx, thd);
 
 		/* We were instructed to commit the whole transaction, or
 		this is an SQL statement end and autocommit is on */
@@ -4783,8 +4900,32 @@ innobase_commit(
 			MYLITE_INNODB_HANDLER_PERF_INNODB_COMMIT_COMPLETE_NS,
 			commit_complete_start);
 
-		trx_deregister_from_2pc(trx);
-	} else {
+			if (trx->state != TRX_STATE_ACTIVE
+			    && trx->state != TRX_STATE_PREPARED
+			    && trx->state != TRX_STATE_PREPARED_RECOVERED)
+				trx_deregister_from_2pc(trx);
+			if (UNIV_UNLIKELY(commit_error != DB_SUCCESS)) {
+				/*
+					A failed ownerless history-page handoff is still
+				rollbackable until transaction serialization.  If
+				trx_commit_for_mysql() proved that rollback reached
+				NOT_STARTED, preserve the precise retryable diagnostic
+				instead of allowing the server commit coordinator to
+				replace it with ambiguous ER_ERROR_DURING_COMMIT.
+				Post-serialization and quarantined failures do not meet
+				this condition and remain generic commit failures.
+				*/
+				if (mylite_ownerless_innodb_write_coordination_enabled()
+				    && trx->state == TRX_STATE_NOT_STARTED
+				    && !trx->mylite_ownerless_coordination_fault) {
+					if (commit_error == DB_DEADLOCK)
+						my_error(ER_LOCK_DEADLOCK, MYF(0));
+					else if (commit_error == DB_LOCK_WAIT_TIMEOUT)
+						my_error(ER_LOCK_WAIT_TIMEOUT, MYF(0));
+				}
+				DBUG_RETURN(1);
+			}
+		} else {
 		/* We just mark the SQL statement ended and do not do a
 		transaction commit */
 		lock_unlock_table_autoinc(trx);
@@ -9413,6 +9554,9 @@ ha_innobase::index_read(
 	}
 
 	mylite_ownerless_innodb_refresh_statement_plain_read_pages_once();
+	if (UNIV_UNLIKELY(mylite_ownerless_innodb_test_faults_enabled_fast()))
+		mylite_ownerless_innodb_test_fault(
+			"plain-read-after-page-refresh");
 
 	mariadb_set_stats temp(m_prebuilt->trx, handler_stats);
 	const uint64_t row_search_start =
@@ -13137,7 +13281,9 @@ create_table_info_t::create_foreign_keys()
 	to the data dictionary system tables on disk */
 	m_trx->op_info = "adding foreign keys";
 
-	trx_start_if_not_started_xa(m_trx, true);
+	error= trx_start_if_not_started_xa(m_trx, true);
+	if (UNIV_UNLIKELY(error != DB_SUCCESS))
+		return error;
 
 	m_trx->dict_operation = true;
 
@@ -13675,7 +13821,12 @@ ha_innobase::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info,
 
     if (!(info.flags2() & DICT_TF2_TEMPORARY))
     {
-      trx_start_for_ddl(trx);
+      const dberr_t start_error= trx_start_for_ddl(trx);
+      if (UNIV_UNLIKELY(start_error != DB_SUCCESS))
+      {
+        trx->dispose_failed_start();
+        DBUG_RETURN(convert_error_code_to_mysql(start_error, 0, m_user_thd));
+      }
       if (dberr_t err= lock_sys_tables(trx))
         error= convert_error_code_to_mysql(err, 0, nullptr);
     }
@@ -13695,11 +13846,15 @@ ha_innobase::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info,
     else
     {
       std::vector<pfs_os_file_t> deleted;
-      trx->commit(deleted);
-      ut_ad(deleted.empty());
-      info.table()->acquire();
-      info.create_table_update_dict(info.table(), trx,
-                                    *create_info, *form);
+      if (UNIV_UNLIKELY(trx->commit(deleted)))
+        error= convert_error_code_to_mysql(DB_ERROR, 0, m_user_thd);
+      else
+      {
+        ut_ad(deleted.empty());
+        info.table()->acquire();
+        info.create_table_update_dict(info.table(), trx,
+                                      *create_info, *form);
+      }
     }
 
     if (own_trx)
@@ -13717,7 +13872,10 @@ ha_innobase::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info,
           log_write_up_to(trx->commit_lsn, true);
         info.table()->release();
       }
-      trx->clear_and_free();
+      if (trx->mylite_ownerless_coordination_fault)
+        trx_ownerless_quarantine_detached(trx);
+      else
+        trx->clear_and_free();
     }
   }
   else if (!error && m_prebuilt)
@@ -13777,11 +13935,14 @@ ha_innobase::discard_or_import_tablespace(
 		DBUG_RETURN(HA_ERR_TABLE_NEEDS_UPGRADE);
 	}
 
-	trx_start_if_not_started(m_prebuilt->trx, true);
+	dberr_t err= trx_start_if_not_started(m_prebuilt->trx, true);
+	if (UNIV_UNLIKELY(err != DB_SUCCESS))
+		DBUG_RETURN(convert_error_code_to_mysql(
+			err, m_prebuilt->table->flags, m_prebuilt->trx->mysql_thd));
 	m_prebuilt->trx->dict_operation = true;
 
 	/* Obtain an exclusive lock on the table. */
-	dberr_t	err = lock_table_for_trx(m_prebuilt->table,
+	err = lock_table_for_trx(m_prebuilt->table,
 					 m_prebuilt->trx, LOCK_X);
 	if (err == DB_SUCCESS) {
 		err = lock_sys_tables(m_prebuilt->trx);
@@ -13789,7 +13950,8 @@ ha_innobase::discard_or_import_tablespace(
 
 	if (err != DB_SUCCESS) {
 		/* unable to lock the table: do nothing */
-		m_prebuilt->trx->commit();
+		if (UNIV_UNLIKELY(m_prebuilt->trx->commit()))
+			err= DB_ERROR;
 	} else if (discard) {
 
 		/* Discarding an already discarded tablespace should be an
@@ -13809,7 +13971,11 @@ ha_innobase::discard_or_import_tablespace(
 	} else if (m_prebuilt->table->is_readable()) {
 		/* Commit the transaction in order to
 		release the table lock. */
-		trx_commit_for_mysql(m_prebuilt->trx);
+		err= trx_commit_for_mysql(m_prebuilt->trx);
+		if (UNIV_UNLIKELY(err != DB_SUCCESS))
+			DBUG_RETURN(convert_error_code_to_mysql(
+				err, m_prebuilt->table->flags,
+				m_prebuilt->trx->mysql_thd));
 
 		ib::error() << "Unable to import tablespace "
 			<< m_prebuilt->table->name << " because it already"
@@ -13833,6 +13999,12 @@ ha_innobase::discard_or_import_tablespace(
 			fil_crypt_add_imported_space(m_prebuilt->table->space);
 		}
 	}
+
+	if (UNIV_UNLIKELY(
+		    m_prebuilt->trx->mylite_ownerless_coordination_fault))
+		DBUG_RETURN(convert_error_code_to_mysql(
+			DB_ERROR, m_prebuilt->table->flags,
+			m_prebuilt->trx->mysql_thd));
 
 	ut_ad(m_prebuilt->trx->state == TRX_STATE_NOT_STARTED);
 
@@ -13984,16 +14156,19 @@ int ha_innobase::delete_table(const char *name)
   else
   {
     trx= innobase_trx_allocate(thd);
-    trx_start_for_ddl(trx);
+    err= trx_start_for_ddl(trx);
 
-    if (table->name.is_temporary())
-      /* There is no need to lock any FOREIGN KEY child tables. */;
+    if (err == DB_SUCCESS)
+    {
+      if (table->name.is_temporary())
+        /* There is no need to lock any FOREIGN KEY child tables. */;
 #ifdef WITH_PARTITION_STORAGE_ENGINE
-    else if (table->name.part())
-      /* FOREIGN KEY constraints cannot exist on partitioned tables. */;
+      else if (table->name.part())
+        /* FOREIGN KEY constraints cannot exist on partitioned tables. */;
 #endif
-    else
-      err= lock_table_children(table, trx);
+      else
+        err= lock_table_children(table, trx);
+    }
   }
 
   if (err == DB_SUCCESS)
@@ -14109,7 +14284,10 @@ int ha_innobase::delete_table(const char *name)
   if (err != DB_SUCCESS)
   {
 err_exit:
-    trx->rollback();
+    const bool failed_start=
+      trx->state == TRX_STATE_NOT_STARTED && trx->error_state != DB_SUCCESS;
+    if (!failed_start)
+      trx->rollback();
     switch (err) {
     case DB_CANNOT_DROP_CONSTRAINT:
     case DB_LOCK_WAIT_TIMEOUT:
@@ -14128,7 +14306,12 @@ err_exit:
 #endif
     row_mysql_unlock_data_dictionary(trx);
     if (trx != parent_trx)
-      trx->free();
+    {
+      if (failed_start)
+        trx->dispose_failed_start();
+      else
+        trx->free();
+    }
     if (!stats_failed)
       stats.close();
     DBUG_RETURN(convert_error_code_to_mysql(err, 0, NULL));
@@ -14155,7 +14338,7 @@ err_exit:
     goto err_exit;
 
   std::vector<pfs_os_file_t> deleted;
-  trx->commit(deleted);
+  const bool coordination_fault= trx->commit(deleted);
   row_mysql_unlock_data_dictionary(trx);
   if (!stats_failed)
     stats.close();
@@ -14163,15 +14346,19 @@ err_exit:
     os_file_close(d);
   log_write_up_to(trx->commit_lsn, true);
   trx->commit_lsn= 0;
-  if (trx != parent_trx)
+  if (trx != parent_trx && !coordination_fault)
     trx->free();
   if (!fts)
 #ifdef WITH_PARTITION_STORAGE_ENGINE
   if (!rollback_add_partition)
 #endif
-    DBUG_RETURN(0);
+    DBUG_RETURN(coordination_fault
+                ? convert_error_code_to_mysql(DB_ERROR, 0, thd)
+                : 0);
   purge_sys.resume_FTS();
-  DBUG_RETURN(0);
+  DBUG_RETURN(coordination_fault
+              ? convert_error_code_to_mysql(DB_ERROR, 0, thd)
+              : 0);
 }
 
 /** Rename an InnoDB table.
@@ -14214,8 +14401,9 @@ static dberr_t innobase_rename_table(trx_t *trx, const char *from,
 				system_charset_info->casedn_z(
 					norm_from, strlen(norm_from),
 					par_case_name, sizeof(par_case_name));
-				trx_start_if_not_started(trx, true);
-				error = row_rename_table_for_mysql(
+				error= trx_start_if_not_started(trx, true);
+				if (UNIV_LIKELY(error == DB_SUCCESS))
+					error = row_rename_table_for_mysql(
 					par_case_name, norm_to, trx,
 					RENAME_IGNORE_FK);
 			}
@@ -14280,7 +14468,11 @@ int ha_innobase::truncate()
 
   const auto stored_lock= m_prebuilt->stored_select_lock_type;
   trx_t *trx= innobase_trx_allocate(m_user_thd);
-  trx_start_for_ddl(trx);
+  if (const dberr_t start_error= trx_start_for_ddl(trx))
+  {
+    trx->dispose_failed_start();
+    DBUG_RETURN(convert_error_code_to_mysql(start_error, 0, m_user_thd));
+  }
 
   if (ib_table->is_temporary())
   {
@@ -14413,10 +14605,14 @@ int ha_innobase::truncate()
                 trx);
     if (!err)
     {
-      trx->commit(deleted);
-      m_prebuilt->table->acquire();
-      create_table_info_t::create_table_update_dict(m_prebuilt->table,
-                                                    trx, info, *table);
+      if (UNIV_UNLIKELY(trx->commit(deleted)))
+        err= convert_error_code_to_mysql(DB_ERROR, 0, m_user_thd);
+      else
+      {
+        m_prebuilt->table->acquire();
+        create_table_info_t::create_table_update_dict(m_prebuilt->table,
+                                                      trx, info, *table);
+      }
     }
     else
     {
@@ -14425,14 +14621,17 @@ int ha_innobase::truncate()
                                                  DICT_ERR_IGNORE_FK_NOKEY);
       m_prebuilt->table->def_trx_id= def_trx_id;
     }
-    dict_names_t fk_tables;
+    if (!err)
     {
-      mtr_t mtr{trx};
-      dict_load_foreigns(mtr, m_prebuilt->table->name.m_name, nullptr, 1, true,
-                         DICT_ERR_IGNORE_FK_NOKEY, fk_tables);
+      dict_names_t fk_tables;
+      {
+        mtr_t mtr{trx};
+        dict_load_foreigns(mtr, m_prebuilt->table->name.m_name, nullptr, 1,
+                           true, DICT_ERR_IGNORE_FK_NOKEY, fk_tables);
+      }
+      for (const char *f : fk_tables)
+        dict_sys.load_table({f, strlen(f)});
     }
-    for (const char *f : fk_tables)
-      dict_sys.load_table({f, strlen(f)});
   }
 
   if (fts)
@@ -14470,7 +14669,10 @@ int ha_innobase::truncate()
     }
   }
 
-  trx->clear_and_free();
+  if (trx->commit_lsn)
+    log_write_up_to(trx->commit_lsn, true);
+  if (!trx->mylite_ownerless_coordination_fault)
+    trx->clear_and_free();
   if (!stats_failed)
     stats.close();
   mem_heap_free(heap);
@@ -14533,7 +14735,10 @@ ha_innobase::rename_table(
 	}
 
 	trx_t*	trx = innobase_trx_allocate(thd);
-	trx_start_for_ddl(trx);
+	if (const dberr_t start_error= trx_start_for_ddl(trx)) {
+		trx->dispose_failed_start();
+		DBUG_RETURN(convert_error_code_to_mysql(start_error, 0, thd));
+	}
 
 	char norm_from[MAX_FULL_NAME_LEN];
 	char norm_to[MAX_FULL_NAME_LEN];
@@ -14649,7 +14854,7 @@ ha_innobase::rename_table(
 				ut_ad("unexpected references" == 0);
 			}
 		}
-		innobase_commit_low(trx);
+		error= innobase_commit_low(trx);
 	} else {
 		if (t) {
 			if (fts_exist) {
@@ -14666,11 +14871,11 @@ ha_innobase::rename_table(
 		purge_sys.resume_FTS();
 	}
 
-	if (error == DB_SUCCESS) {
+	if (trx->commit_lsn)
 		log_write_up_to(trx->commit_lsn, true);
-	}
 	trx->flush_log_later = false;
-	trx->clear_and_free();
+	if (!trx->mylite_ownerless_coordination_fault)
+		trx->clear_and_free();
 	if (!stats_fail) {
 		stats.close();
 	}
@@ -15699,8 +15904,14 @@ ha_innobase::check(
 		? TRX_ISO_READ_UNCOMMITTED
 		: TRX_ISO_REPEATABLE_READ;
 
-	trx_start_if_not_started(m_prebuilt->trx, false);
-	m_prebuilt->trx->read_view.open(m_prebuilt->trx);
+	ret= trx_start_if_not_started(m_prebuilt->trx, false);
+	if (UNIV_LIKELY(ret == DB_SUCCESS))
+		ret= m_prebuilt->trx->open_read_view();
+	if (UNIV_UNLIKELY(ret != DB_SUCCESS)) {
+		m_prebuilt->trx->isolation_level= old_isolation_level & 3;
+		m_prebuilt->trx->op_info= "";
+		DBUG_RETURN(convert_error_code_to_mysql(ret, 0, thd));
+	}
 
 	for (dict_index_t* index
 	     = dict_table_get_first_index(m_prebuilt->table);
@@ -16273,7 +16484,9 @@ ha_innobase::extra(
 			break;
 		}
 		ut_ad(trx == m_prebuilt->trx);
-		trx_start_if_not_started(trx, true);
+	if (const dberr_t err= trx_start_if_not_started(trx, true))
+		return convert_error_code_to_mysql(
+			err, m_prebuilt->table->flags, trx->mysql_thd);
 		trx->mod_tables.emplace(
 			const_cast<dict_table_t*>(m_prebuilt->table), 0)
 			.first->second.set_versioned(0);
@@ -16512,6 +16725,8 @@ ha_innobase::external_lock(
 	update_thd(thd);
 	trx_t* trx = m_prebuilt->trx;
 	ut_ad(m_prebuilt->table);
+	if (UNIV_UNLIKELY(trx->mylite_ownerless_coordination_fault))
+		DBUG_RETURN(HA_ERR_GENERIC);
 
 	if (table->s->tmp_table == INTERNAL_TMP_TABLE)
 		trx->check_unique_secondary = true;
@@ -16677,7 +16892,7 @@ ha_innobase::external_lock(
 		current SQL statement has ended */
 		trx->mysql_n_tables_locked = 0;
 		m_prebuilt->used_in_HANDLER = FALSE;
-		if (not_autocommit) {
+		if (not_autocommit || not_started) {
 			mylite_ownerless_innodb_lock_release_transaction_page_write_gates(
 				trx);
 			mylite_ownerless_innodb_lock_release_transaction_clean_page_writes(
@@ -16690,13 +16905,16 @@ ha_innobase::external_lock(
 					mylite_innodb_handler_perf_enabled()
 						? mylite_innodb_handler_perf_now_ns()
 						: 0;
-				innobase_commit(thd, TRUE);
+				const int commit_error= innobase_commit(thd, TRUE);
 				mylite_innodb_handler_perf_add_elapsed(
 					MYLITE_INNODB_HANDLER_PERF_EXTERNAL_LOCK_COMMIT_NS,
 					commit_start);
+				if (UNIV_UNLIKELY(commit_error != 0))
+					DBUG_RETURN(HA_ERR_GENERIC);
 			}
 		} else if (trx->isolation_level <= TRX_ISO_READ_COMMITTED) {
-			trx->read_view.close();
+			if (UNIV_UNLIKELY(trx->close_read_view() != DB_SUCCESS))
+				DBUG_RETURN(HA_ERR_GENERIC);
 		}
 		break;
 	case F_WRLCK:
@@ -16762,12 +16980,12 @@ set_lock:
 			trx->mysql_n_tables_locked++;
 		}
 
-		if (lock_type == F_WRLCK && not_autocommit &&
-		    UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks()) &&
-		    !m_prebuilt->table->is_temporary() &&
-		    m_prebuilt->table->space_id < SRV_TMP_SPACE_ID) {
-			const int gate_result=
-				mylite_ownerless_innodb_lock_acquire_transaction_page_write_gate(
+			if (m_prebuilt->select_lock_type != LOCK_NONE &&
+			    UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks()) &&
+			    !m_prebuilt->table->is_temporary() &&
+			    m_prebuilt->table->space_id < SRV_TMP_SPACE_ID) {
+				const int gate_result=
+				mylite_ownerless_innodb_lock_acquire_transaction_page_read_gate(
 					trx, m_prebuilt->table->space_id,
 					innobase_ownerless_lock_timeout_ms(trx), nullptr);
 			switch (gate_result) {
@@ -17018,7 +17236,8 @@ ha_innobase::store_lock(
 		case ISO_READ_UNCOMMITTED:
 			/* At low transaction isolation levels we let
 			each consistent read set its own snapshot */
-			trx->read_view.close();
+			if (UNIV_UNLIKELY(trx->close_read_view() != DB_SUCCESS))
+				return to;
 			break;
 		case ISO_SERIALIZABLE:
 			auto trx_state = trx->state;
@@ -17026,8 +17245,12 @@ ha_innobase::store_lock(
 				ut_ad(trx_state == TRX_STATE_ACTIVE);
 			} else if (trx->snapshot_isolation) {
 				trx->will_lock = true;
-				trx_start_if_not_started(trx, false);
-				trx->read_view.open(trx);
+				if (UNIV_UNLIKELY(
+					    trx_start_if_not_started(trx, false) !=
+					    DB_SUCCESS) ||
+				    UNIV_UNLIKELY(
+					    trx->open_read_view() != DB_SUCCESS))
+					return to;
 			}
 		}
 	}
@@ -17727,13 +17950,17 @@ innobase_xa_prepare(
     ut_ad("invalid state" == 0);
     return HA_ERR_GENERIC;
   case TRX_STATE_NOT_STARTED:
-    if (prepare_trx)
-      trx_start_if_not_started_xa(trx, false);;
+    if (prepare_trx && UNIV_UNLIKELY(
+            trx_start_if_not_started_xa(trx, false) != DB_SUCCESS))
+      return HA_ERR_GENERIC;
     /* fall through */
   case TRX_STATE_ACTIVE:
     trx->xid= *thd->get_xid();
-    if (prepare_trx)
-      trx_prepare_for_mysql(trx);
+    if (prepare_trx) {
+      const dberr_t err= trx_prepare_for_mysql(trx);
+      if (UNIV_UNLIKELY(err != DB_SUCCESS))
+        return convert_error_code_to_mysql(err, 0, thd);
+    }
     else
     {
       lock_unlock_table_autoinc(trx);
@@ -17780,7 +18007,8 @@ innobase_commit_by_xid(
 
 	if (trx_t* trx = trx_get_trx_by_xid(xid)) {
 		/* use cases are: disconnected xa, slave xa, recovery */
-		innobase_commit_low(trx);
+		if (UNIV_UNLIKELY(innobase_commit_low(trx) != DB_SUCCESS))
+			return XAER_RMERR;
 		ut_ad(trx->mysql_thd == NULL);
 		trx_deregister_from_2pc(trx);
 		trx->free();
@@ -17857,7 +18085,8 @@ static void innobase_tc_log_recovery_done()
   /* Make durable any innobase_recover_rollback_by_xid(). */
   log_buffer_flush_to_disk(true);
 
-  if (srv_force_recovery < SRV_FORCE_NO_TRX_UNDO)
+  if (srv_force_recovery < SRV_FORCE_NO_TRX_UNDO &&
+      !trx_rollback_is_active)
   {
     /* Rollback incomplete non-DDL transactions */
     trx_rollback_is_active= true;

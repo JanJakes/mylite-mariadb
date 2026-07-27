@@ -167,7 +167,8 @@ row_undo_search_clust_to_pcur(
 	mtr_t		mtr{node->trx};
 	row_ext_t**	ext;
 	const rec_t*	rec;
-	mem_heap_t*	heap		= NULL;
+  roll_ptr_t record_roll_ptr= 0;
+  mem_heap_t*	heap		= NULL;
 	rec_offs	offsets_[REC_OFFS_NORMAL_SIZE];
 	rec_offs*	offsets		= offsets_;
 	rec_offs_init(offsets_);
@@ -191,8 +192,8 @@ row_undo_search_clust_to_pcur(
 				  clust_index->n_core_fields,
 				  ULINT_UNDEFINED, &heap);
 
-	found = row_get_rec_roll_ptr(rec, clust_index, offsets)
-		== node->roll_ptr;
+  record_roll_ptr= row_get_rec_roll_ptr(rec, clust_index, offsets);
+  found= record_roll_ptr == node->roll_ptr;
 
 	if (found) {
 		ut_ad(row_get_rec_trx_id(rec, clust_index, offsets)
@@ -252,7 +253,12 @@ row_undo_search_clust_to_pcur(
 
 func_exit:
 	btr_pcur_commit_specify_mtr(&node->pcur, &mtr);
-	return(found);
+  if (UNIV_UNLIKELY(mtr.ownerless_error() != DB_SUCCESS))
+  {
+    node->trx->error_state= mtr.ownerless_error();
+    found= false;
+  }
+  return(found);
 }
 
 /** Get the latest undo log record for rollback.
@@ -265,8 +271,14 @@ static buf_block_t* row_undo_rec_get(undo_node_t* node)
 
 	if (trx->pages_undone) {
 		trx->pages_undone = 0;
-		trx_undo_try_truncate(trx);
-	}
+    /* Ownerless rollback can wait on a peer page owner here while the
+    logical row undo still holds transaction-owned pages.  Tail truncation
+    is optional; terminal undo cleanup remains authoritative. */
+    if (!mylite_ownerless_innodb_lock_has_hooks())
+    {
+      trx_undo_try_truncate(trx);
+    }
+  }
 
 	trx_undo_t*	undo	= NULL;
 	trx_undo_t*	update	= trx->rsegs.m_redo.undo;
@@ -293,8 +305,11 @@ static buf_block_t* row_undo_rec_get(undo_node_t* node)
 	}
 
 	if (undo == NULL) {
-		trx_undo_try_truncate(trx);
-		/* Mark any ROLLBACK TO SAVEPOINT completed, so that
+    if (!mylite_ownerless_innodb_lock_has_hooks())
+    {
+      trx_undo_try_truncate(trx);
+    }
+    /* Mark any ROLLBACK TO SAVEPOINT completed, so that
 		if the transaction object is committed and reused
 		later, we will default to a full ROLLBACK. */
 		trx->roll_limit = 0;
@@ -312,11 +327,18 @@ static buf_block_t* row_undo_rec_get(undo_node_t* node)
 	mtr_t mtr{trx};
 	mtr.start();
 
-	buf_block_t* undo_page = buf_page_get(
+  dberr_t page_error= DB_SUCCESS;
+  buf_block_t* undo_page =
+      buf_page_get_gen(
 		page_id_t(undo->rseg->space->id, undo->top_page_no),
-		0, RW_S_LATCH, &mtr);
+		0, RW_S_LATCH, nullptr, BUF_GET, &mtr, &page_error);
 	if (!undo_page) {
-		return nullptr;
+    const dberr_t commit_error= mtr.commit();
+    trx->error_state=
+        page_error != DB_SUCCESS
+            ? page_error
+            : (commit_error != DB_SUCCESS ? commit_error : DB_ERROR);
+    return nullptr;
 	}
 
 	buf_page_make_young_if_needed(&undo_page->page);
@@ -324,9 +346,10 @@ static buf_block_t* row_undo_rec_get(undo_node_t* node)
 	uint16_t offset = undo->top_offset;
 
 	buf_block_t* prev_page = undo_page;
-	if (trx_undo_rec_t* prev_rec = trx_undo_get_prev_rec(
+  trx_undo_rec_t* prev_rec = trx_undo_get_prev_rec(
 		    prev_page, offset, undo->hdr_page_no, undo->hdr_offset,
-		    true, &mtr)) {
+		    true, &mtr);
+  if (prev_rec) {
 		if (prev_page != undo_page) {
 			trx->pages_undone++;
 		}
@@ -393,7 +416,11 @@ row_undo(
 	buf_block_t* undo_page = row_undo_rec_get(node);
 
 	if (!undo_page) {
-		/* Rollback completed for this query thread */
+    if (node->trx->error_state != DB_SUCCESS)
+    {
+      return node->trx->error_state;
+    }
+    /* Rollback completed for this query thread */
 		thr->run_node = que_node_get_parent(node);
 		return DB_SUCCESS;
 	}
@@ -474,7 +501,12 @@ row_undo_step(
 	trx->error_state = err;
 
 	if (UNIV_UNLIKELY(err != DB_SUCCESS)) {
-		ib::fatal() << "Error (" << err << ") in rollback.";
+    if (mylite_ownerless_innodb_lock_has_hooks())
+    {
+      trx->mylite_ownerless_coordination_fault= true;
+      return nullptr;
+    }
+    ib::fatal() << "Error (" << err << ") in rollback.";
 	}
 
 	return(thr);

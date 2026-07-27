@@ -27,6 +27,7 @@ phpunit_child_timing_summary="${MYLITE_WORDPRESS_PHPUNIT_CHILD_TIMING_SUMMARY:-0
 phpunit_child_script_timing_summary="${MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_TIMING_SUMMARY:-0}"
 phpunit_profile_mysqli="${MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI:-0}"
 phpunit_keepalive="${MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE:-0}"
+ownerless_rw="${MYLITE_WORDPRESS_OWNERLESS_RW:-0}"
 phpunit_static_wpdb_scan="${MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN:-0}"
 phpunit_reconnect_after_child="${MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD:-1}"
 phpunit_child_skip_install="${MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL:-0}"
@@ -95,6 +96,14 @@ case "${phpunit_no_logging}" in
     ;;
   *)
     echo "MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING must be 0 or 1" >&2
+    exit 1
+    ;;
+esac
+case "${ownerless_rw}" in
+  0 | 1)
+    ;;
+  *)
+    echo "MYLITE_WORDPRESS_OWNERLESS_RW must be 0 or 1" >&2
     exit 1
     ;;
 esac
@@ -573,6 +582,7 @@ run_suite() {
     -e MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_TIMING_SUMMARY="${phpunit_child_script_timing_summary}" \
     -e MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI="${phpunit_profile_mysqli}" \
     -e MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE="${phpunit_keepalive}" \
+    -e MYLITE_WORDPRESS_OWNERLESS_RW="${ownerless_rw}" \
     -e MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN="${phpunit_static_wpdb_scan}" \
     -e MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD="${phpunit_reconnect_after_child}" \
     -e MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL="${phpunit_child_skip_install}" \
@@ -827,6 +837,38 @@ if ($count !== 1) {
 file_put_contents($file, $patched);
 echo "wordpress_phpunit_connector_settings_patch=applied\n";
 PHP
+
+  local wpdb_file
+  wpdb_file="${MYLITE_WORDPRESS_DIR}/src/wp-includes/class-wpdb.php"
+  require_nonempty_file "${wpdb_file}" fetch "WordPress wpdb implementation"
+  WORDPRESS_WPDB_FILE="${wpdb_file}" /usr/local/bin/php <<'PHP'
+<?php
+$file = getenv('WORDPRESS_WPDB_FILE');
+$source = file_get_contents($file);
+$marker = 'MYLITE_WORDPRESS_OWNERLESS_CONNECTION_OPTION';
+if (str_contains($source, $marker)) {
+    echo "wordpress_ownerless_connection_patch=present\n";
+    exit(0);
+}
+$needle = "\t\t\$this->dbh = mysqli_init();\n";
+$replacement = $needle . <<<'PATCH'
+
+		// MYLITE_WORDPRESS_OWNERLESS_CONNECTION_OPTION
+		if ( getenv( 'MYLITE_WORDPRESS_OWNERLESS_RW' ) === '1' ) {
+			if ( ! defined( 'MYSQLI_OPT_MYLITE_OWNERLESS_RW' ) || ! mysqli_options( $this->dbh, MYSQLI_OPT_MYLITE_OWNERLESS_RW, true ) ) {
+				throw new RuntimeException( 'Could not enable MyLite ownerless read/write mode.' );
+			}
+			fwrite( STDERR, "wordpress_ownerless_mysqli_option=1\n" );
+		}
+PATCH;
+$patched = str_replace($needle, $replacement, $source, $count);
+if ($count !== 1) {
+    fwrite(STDERR, "Could not patch WordPress ownerless mysqli connection option\n");
+    exit(1);
+}
+file_put_contents($file, $patched);
+echo "wordpress_ownerless_connection_patch=applied\n";
+PHP
 }
 
 require_prepared_database() {
@@ -872,6 +914,7 @@ echo "wordpress_phpunit_child_timing_summary=${MYLITE_WORDPRESS_PHPUNIT_CHILD_TI
 echo "wordpress_phpunit_child_script_timing_summary=${MYLITE_WORDPRESS_PHPUNIT_CHILD_SCRIPT_TIMING_SUMMARY}"
 echo "wordpress_phpunit_profile_mysqli=${MYLITE_WORDPRESS_PHPUNIT_PROFILE_MYSQLI}"
 echo "wordpress_phpunit_keepalive=${MYLITE_WORDPRESS_PHPUNIT_KEEPALIVE}"
+echo "wordpress_ownerless_rw=${MYLITE_WORDPRESS_OWNERLESS_RW:-0}"
 echo "wordpress_phpunit_static_wpdb_scan=${MYLITE_WORDPRESS_PHPUNIT_STATIC_WPDB_SCAN}"
 echo "wordpress_phpunit_reconnect_after_child=${MYLITE_WORDPRESS_PHPUNIT_RECONNECT_AFTER_CHILD}"
 echo "wordpress_phpunit_child_skip_install=${MYLITE_WORDPRESS_PHPUNIT_CHILD_SKIP_INSTALL}"
@@ -2997,10 +3040,167 @@ PHP_KEEPALIVE
       "MYLITE_WORDPRESS_PHPUNIT_ORIGINAL_BOOTSTRAP=${MYLITE_WORDPRESS_DIR}/tests/phpunit/includes/bootstrap.php"
     )
   fi
+  ownerless_peer_pid=
+  ownerless_peer_dir=
+  if [ "${MYLITE_WORDPRESS_OWNERLESS_RW}" = "1" ]; then
+    if [ "$(uname -s)" != "Linux" ]; then
+      echo "MYLITE_WORDPRESS_OWNERLESS_RW=1 requires Linux" >&2
+      exit 1
+    fi
+    if ! ownerless_peer_dir="$(mktemp -d "${TMPDIR:-/tmp}/mylite-wordpress-ownerless-peer.XXXXXX")"; then
+      echo "Could not create ownerless WordPress peer directory" >&2
+      exit 1
+    fi
+    ownerless_peer_ready="${ownerless_peer_dir}/ready"
+    ownerless_peer_stop="${ownerless_peer_dir}/stop"
+    ownerless_peer_output="${ownerless_peer_dir}/output"
+    "${php_wrapper}" -r '
+      $path = $argv[1];
+      $ready = $argv[2];
+      $stop = $argv[3];
+      $configPath = $argv[4];
+      $wpdbPath = $argv[5];
+      require $configPath;
+      if (!defined("WP_DEBUG")) {
+          define("WP_DEBUG", false);
+      }
+      if (!defined("WP_DEBUG_DISPLAY")) {
+          define("WP_DEBUG_DISPLAY", false);
+      }
+      if (!function_exists("mbstring_binary_safe_encoding")) {
+          function mbstring_binary_safe_encoding($reset = false) {
+              static $encodings = [];
+              static $overloaded = null;
+              if ($overloaded === null) {
+                  $overloaded = function_exists("mb_internal_encoding")
+                      && (((int) ini_get("mbstring.func_overload")) & 2);
+              }
+              if (!$overloaded) {
+                  return;
+              }
+              if (!$reset) {
+                  $encodings[] = mb_internal_encoding();
+                  mb_internal_encoding("ISO-8859-1");
+              } elseif ($encodings) {
+                  mb_internal_encoding(array_pop($encodings));
+              }
+          }
+          function reset_mbstring_encoding() {
+              mbstring_binary_safe_encoding(true);
+          }
+      }
+      require dirname($wpdbPath) . "/load.php";
+      require dirname($wpdbPath) . "/plugin.php";
+      require $wpdbPath;
+      mysqli_report(MYSQLI_REPORT_OFF);
+      $wpdb = new wpdb(DB_USER, DB_PASSWORD, DB_NAME, DB_HOST);
+      if (!$wpdb->ready || $wpdb->set_prefix($table_prefix) instanceof WP_Error) {
+          fwrite(STDERR, "Could not open live ownerless WordPress wpdb peer: " . $wpdb->last_error . PHP_EOL);
+          exit(1);
+      }
+      $queryCount = 0;
+      do {
+          ++$queryCount;
+          $value = "ownerless-peer-" . $queryCount;
+          $write = $wpdb->replace(
+              $wpdb->options,
+              [
+                  "option_name" => "mylite_ownerless_peer",
+                  "option_value" => $value,
+                  "autoload" => "no",
+              ],
+              ["%s", "%s", "%s"]
+          );
+          $observed = $wpdb->get_var(
+              $wpdb->prepare(
+                  "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s",
+                  "mylite_ownerless_peer"
+              )
+          );
+          if ($write === false || $observed !== $value) {
+              fwrite(STDERR, "Live ownerless WordPress wpdb peer write/read failed: " . $wpdb->last_error . PHP_EOL);
+              exit(1);
+          }
+          if ($queryCount === 1 && file_put_contents($ready, "ready\n") === false) {
+              fwrite(STDERR, "Could not publish live ownerless WordPress peer readiness\n");
+              exit(1);
+          }
+          usleep(100000);
+      } while (!file_exists($stop));
+      if ($wpdb->delete(
+          $wpdb->options,
+          ["option_name" => "mylite_ownerless_peer"],
+          ["%s"]
+      ) === false) {
+          fwrite(STDERR, "Could not remove ownerless WordPress wpdb peer row: " . $wpdb->last_error . PHP_EOL);
+          exit(1);
+      }
+      $closed = $wpdb->close();
+      printf("wordpress_ownerless_peer_wpdb_writes=%d\n", $queryCount);
+      printf("wordpress_ownerless_peer_closed=%d\n", $closed ? 1 : 0);
+      exit($closed ? 0 : 1);
+    ' "${MYLITE_WORDPRESS_DB_DIR}" "${ownerless_peer_ready}" "${ownerless_peer_stop}" \
+      "${MYLITE_WORDPRESS_DIR}/wp-tests-config.php" \
+      "${MYLITE_WORDPRESS_DIR}/src/wp-includes/class-wpdb.php" \
+      >"${ownerless_peer_output}" 2>&1 &
+    ownerless_peer_pid="$!"
+    for _ in $(seq 1 300); do
+      if [ -s "${ownerless_peer_ready}" ]; then
+        break
+      fi
+      if ! kill -0 "${ownerless_peer_pid}" 2>/dev/null; then
+        break
+      fi
+      sleep 0.1
+    done
+    if [ ! -s "${ownerless_peer_ready}" ]; then
+      kill "${ownerless_peer_pid}" 2>/dev/null || true
+      wait "${ownerless_peer_pid}" 2>/dev/null || true
+      cat "${ownerless_peer_output}" >&2
+      rm -rf "${ownerless_peer_dir}"
+      echo "Live ownerless WordPress peer did not become ready" >&2
+      exit 1
+    fi
+    echo "wordpress_ownerless_peer_ready=1"
+  fi
   TIMEFORMAT=$'wordpress_phpunit_shell_real_seconds=%3R\nwordpress_phpunit_shell_user_seconds=%3U\nwordpress_phpunit_shell_sys_seconds=%3S'
   { time env "${phpunit_env[@]}" "${php_wrapper}" "${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}/vendor/bin/phpunit" "${phpunit_args[@]}"; } 2>&1 |
     tee "${phpunit_output}"
   phpunit_status="${PIPESTATUS[0]}"
+  if [ -n "${ownerless_peer_pid}" ]; then
+    : >"${ownerless_peer_stop}"
+    wait "${ownerless_peer_pid}"
+    ownerless_peer_status="$?"
+    tee -a "${phpunit_output}" <"${ownerless_peer_output}"
+    if [ "${ownerless_peer_status}" -ne 0 ] ||
+       ! grep -Eq '^wordpress_ownerless_peer_wpdb_writes=[1-9][0-9]*$' "${ownerless_peer_output}" ||
+       ! grep -Fxq 'wordpress_ownerless_peer_closed=1' "${ownerless_peer_output}"; then
+      echo "Live ownerless WordPress peer failed with status ${ownerless_peer_status}" >&2
+      phpunit_status=1
+    fi
+    rm -rf "${ownerless_peer_dir}"
+  fi
+  if [ "${MYLITE_WORDPRESS_OWNERLESS_RW}" = "1" ] &&
+     grep -Eq \
+       'InnoDB: ownerless startup .* exceeds proven limit|InnoDB: Trying to (read|write).* outside the bounds|InnoDB: File .* is corrupted' \
+       "${phpunit_output}"; then
+    echo "Ownerless WordPress run emitted an InnoDB concurrency-integrity diagnostic" >&2
+    phpunit_status=1
+  fi
+  if [ "${MYLITE_WORDPRESS_OWNERLESS_RW}" = "1" ]; then
+    ownerless_testcase_count=0
+    if [ -n "${phpunit_junit_path}" ] &&
+       [ "${phpunit_junit_path}" != "caller-supplied" ] &&
+       [ -s "${phpunit_junit_path}" ]; then
+      ownerless_testcase_count="$(grep -o '<testcase[ >]' "${phpunit_junit_path}" | wc -l)"
+    fi
+    echo "wordpress_ownerless_phpunit_testcase_count=${ownerless_testcase_count}" |
+      tee -a "${phpunit_output}"
+    if [ "${ownerless_testcase_count}" -lt 7 ]; then
+      echo "WordPress ownerless gate executed fewer than seven testcases" >&2
+      phpunit_status=1
+    fi
+  fi
   if [ -n "${mysqli_profile_output}" ]; then
     if [ -s "${mysqli_profile_output}" ]; then
       tee -a "${phpunit_output}" <"${mysqli_profile_output}"
@@ -3490,6 +3690,16 @@ PHP_JUNIT_SUMMARY
       fi
     else
       phpunit_status=1
+    fi
+  fi
+  if [ "${MYLITE_WORDPRESS_OWNERLESS_RW}" = "1" ]; then
+    ownerless_evidence_dir="${MYLITE_WORDPRESS_PHPUNIT_REPORT_DIR}/ownerless-application"
+    mkdir -p "${ownerless_evidence_dir}"
+    cp "${phpunit_output}" "${ownerless_evidence_dir}/phpunit-output.log"
+    if [ -n "${phpunit_junit_path}" ] &&
+       [ "${phpunit_junit_path}" != "caller-supplied" ] &&
+       [ -s "${phpunit_junit_path}" ]; then
+      cp "${phpunit_junit_path}" "${ownerless_evidence_dir}/phpunit-junit.xml"
     fi
   fi
   rm -f "${phpunit_output}"

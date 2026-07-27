@@ -155,6 +155,7 @@
       "configurePreset": "dev",
       "execution": {
         "stopOnFailure": true,
+        "noTestsAction": "error",
         "timeout": 60
       },
       "output": {
@@ -166,6 +167,7 @@
       "configurePreset": "prod",
       "execution": {
         "stopOnFailure": true,
+        "noTestsAction": "error",
         "timeout": 60
       },
       "output": {
@@ -221,6 +223,24 @@
       "configurePreset": "ownerless-test-hooks",
       "execution": {
         "stopOnFailure": true,
+        "noTestsAction": "error",
+        "timeout": 60
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "ownerless-hook-release-gate",
+      "configurePreset": "ownerless-test-hooks",
+      "filter": {
+        "include": {
+          "label": "compat\\.(crash-reopen|ownerless-negative-proof|ownerless-innodb-lock|ownerless-mdl|ownerless-transaction|ownerless-primitives|ownerless-hook-primitives|ownerless-hook-sql|ownerless-recovery)"
+        }
+      },
+      "execution": {
+        "stopOnFailure": true,
+        "noTestsAction": "error",
         "timeout": 60
       },
       "output": {
@@ -232,12 +252,67 @@
       "configurePreset": "ownerless-stress",
       "filter": {
         "include": {
-          "name": "libmylite\\.ownerless-cross-process(.*stress|.*child-failure-cleanup)"
+          "label": "compat\\.ownerless-stress"
         }
       },
       "execution": {
         "stopOnFailure": true,
-        "timeout": 900
+        "noTestsAction": "error",
+        "timeout": 1800
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "ownerless-stress-workload-release-gate",
+      "configurePreset": "ownerless-stress",
+      "filter": {
+        "include": {
+          "name": "^libmylite\\.ownerless-cross-process-(stress|ddl-stress|ddl-stress-statement-lock-retry|temporary-stress|transaction-stress)$",
+          "label": "compat\\.ownerless-stress"
+        }
+      },
+      "execution": {
+        "stopOnFailure": true,
+        "noTestsAction": "error",
+        "timeout": 1800
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "ownerless-stress-randomized-release-gate",
+      "configurePreset": "ownerless-stress",
+      "filter": {
+        "include": {
+          "name": "^libmylite\\.ownerless-(random-transaction-rollback-handoff|cross-process-(checksum-stress|random-transaction-stress|foreign-key-graph-stress|child-failure-cleanup))$",
+          "label": "compat\\.ownerless-stress"
+        }
+      },
+      "execution": {
+        "stopOnFailure": true,
+        "noTestsAction": "error",
+        "timeout": 3600
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "ownerless-stress-pressure-release-gate",
+      "configurePreset": "ownerless-stress",
+      "filter": {
+        "include": {
+          "name": "^libmylite\\.ownerless-cross-process-(active-reader-pressure-stress|expanding-page-pressure-stress|blob-page-pressure-stress|compressed-blob-page-pressure-stress)$",
+          "label": "compat\\.ownerless-stress"
+        }
+      },
+      "execution": {
+        "stopOnFailure": true,
+        "noTestsAction": "error",
+        "timeout": 1800
       },
       "output": {
         "outputOnFailure": true

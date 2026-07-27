@@ -56,7 +56,7 @@ expect_true($result->fetch_assoc() === ['body' => 'first'], 'SELECT row mismatch
 $cachedSql = 'SELECT body FROM profile_notes ORDER BY id';
 $result = $db->query($cachedSql);
 expect_true($result instanceof MyLite\MySQLiResult, 'cached SELECT did not return a result');
-expect_true($result->fetch_all(2) === [['body' => 'first']], 'cached SELECT initial row mismatch');
+expect_true($result->fetch_all(MYSQLI_ASSOC) === [['body' => 'first']], 'cached SELECT initial row mismatch');
 expect_true($db->query("INSERT INTO profile_notes VALUES (2, 'second')") === true, 'second INSERT failed');
 $result = $db->query($cachedSql);
 expect_true(
@@ -64,7 +64,7 @@ expect_true(
     'cached SELECT after DML did not return a result'
 );
 expect_true(
-    $result->fetch_all(2) === [['body' => 'first'], ['body' => 'second']],
+    $result->fetch_all(MYSQLI_ASSOC) === [['body' => 'first'], ['body' => 'second']],
     'cached SELECT after DML row mismatch'
 );
 
@@ -89,7 +89,7 @@ $transactionCachedSql = 'SELECT body FROM profile_notes WHERE id = 1';
 $result = $db->query($transactionCachedSql);
 expect_true($result instanceof MyLite\MySQLiResult, 'transaction cached initial SELECT failed');
 expect_true(
-    $result->fetch_all(2) === [['body' => 'first']],
+    $result->fetch_all(MYSQLI_ASSOC) === [['body' => 'first']],
     'transaction cached initial row mismatch'
 );
 expect_true($db->query('START TRANSACTION') === true, 'transaction cache START failed');
@@ -97,7 +97,7 @@ expect_true($db->query('ROLLBACK') === true, 'transaction cache ROLLBACK failed'
 $result = $db->query($transactionCachedSql);
 expect_true($result instanceof MyLite\MySQLiResult, 'transaction cached repeated SELECT failed');
 expect_true(
-    $result->fetch_all(2) === [['body' => 'first']],
+    $result->fetch_all(MYSQLI_ASSOC) === [['body' => 'first']],
     'transaction cached repeated row mismatch'
 );
 expect_true($db->query('START TRANSACTION') === true, 'transaction cache second START failed');
@@ -105,7 +105,7 @@ expect_true($db->query('ROLLBACK') === true, 'transaction cache second ROLLBACK 
 $result = $db->query($transactionCachedSql);
 expect_true($result instanceof MyLite\MySQLiResult, 'transaction cached hit SELECT failed');
 expect_true(
-    $result->fetch_all(2) === [['body' => 'first']],
+    $result->fetch_all(MYSQLI_ASSOC) === [['body' => 'first']],
     'transaction cached hit row mismatch'
 );
 
@@ -114,31 +114,31 @@ $interleavedTwo = 'SELECT id FROM profile_notes WHERE id IN (2, 3) ORDER BY id';
 $result = $db->query($interleavedOne);
 expect_true($result instanceof MyLite\MySQLiResult, 'first interleaved SELECT failed');
 expect_true(
-    $result->fetch_all(2) === [['body' => 'first'], ['body' => 'third']],
+    $result->fetch_all(MYSQLI_ASSOC) === [['body' => 'first'], ['body' => 'third']],
     'first interleaved SELECT row mismatch'
 );
 $result = $db->query($interleavedTwo);
 expect_true($result instanceof MyLite\MySQLiResult, 'second interleaved SELECT failed');
 expect_true(
-    $result->fetch_all(2) === [['id' => '2'], ['id' => '3']],
+    $result->fetch_all(MYSQLI_ASSOC) === [['id' => '2'], ['id' => '3']],
     'second interleaved SELECT row mismatch'
 );
 $result = $db->query($interleavedOne);
 expect_true($result instanceof MyLite\MySQLiResult, 'first repeated interleaved SELECT failed');
 expect_true(
-    $result->fetch_all(2) === [['body' => 'first'], ['body' => 'third']],
+    $result->fetch_all(MYSQLI_ASSOC) === [['body' => 'first'], ['body' => 'third']],
     'first repeated interleaved SELECT row mismatch'
 );
 $result = $db->query($interleavedTwo);
 expect_true($result instanceof MyLite\MySQLiResult, 'second repeated interleaved SELECT failed');
 expect_true(
-    $result->fetch_all(2) === [['id' => '2'], ['id' => '3']],
+    $result->fetch_all(MYSQLI_ASSOC) === [['id' => '2'], ['id' => '3']],
     'second repeated interleaved SELECT row mismatch'
 );
 
 $result = $db->query('SELECT body FROM profile_notes ORDER BY id');
 expect_true($result instanceof MyLite\MySQLiResult, 'fourth SELECT did not return a result');
-$rows = $result->fetch_all(2);
+$rows = $result->fetch_all(MYSQLI_ASSOC);
 expect_true(
     $rows === [['body' => 'first'], ['body' => 'second'], ['body' => 'third']],
     'fetch_all row mismatch'

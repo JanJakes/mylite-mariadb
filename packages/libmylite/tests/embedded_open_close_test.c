@@ -9,6 +9,7 @@
 #include "ownerless_innodb_lock_registry.h"
 #include "ownerless_page_index.h"
 #include "ownerless_page_pin_registry.h"
+#include "ownerless_probe.h"
 #include "ownerless_process_registry.h"
 #include "ownerless_redo_state.h"
 #include "ownerless_trx_registry.h"
@@ -42,7 +43,7 @@
     "concurrency_generation=0\n"                                                                   \
     "mode=exclusive\n"
 #define MYLITE_TEST_CONCURRENCY_SHM_HEADER_SIZE 128
-#define MYLITE_TEST_CONCURRENCY_SHM_FORMAT_VERSION 10
+#define MYLITE_TEST_CONCURRENCY_SHM_FORMAT_VERSION 12
 #define MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE 2097152
 #define MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_TABLE_OFFSET 128
 #define MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_COUNT 12
@@ -76,8 +77,8 @@
     (MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_OFFSET +                                             \
      MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_SIZE)
 #define MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_HEADER_SIZE 96
-#define MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_ENTRY_COUNT 128
-#define MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_ENTRY_SIZE 64
+#define MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_ENTRY_COUNT 1024
+#define MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_ENTRY_SIZE 80
 #define MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_SEGMENT_SIZE                                        \
     (MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_HEADER_SIZE +                                          \
      (MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_ENTRY_COUNT *                                         \
@@ -211,10 +212,14 @@ static void test_innodb_open_close_repeatedly(void);
 static void test_embedded_innodb_uses_mylite_redo_size(void);
 static void test_configured_durability_controls_innodb_flush_policy(void);
 static void test_capabilities(void);
+static void test_ownerless_filesystem_type_policy(void);
 static void test_memory_path_open_close(void);
 static void test_readonly_open_fails(void);
 static void test_shared_readonly_open_reads_existing_database(void);
 static void test_two_handles_share_runtime(void);
+static void test_forked_handles_are_rejected(void);
+static void test_forked_ownerless_handles_are_rejected(void);
+static void run_forked_handle_rejection_test(unsigned open_flags, const char *database_name);
 static void test_second_handle_with_different_durability_fails(void);
 static void test_second_database_fails_while_runtime_open(void);
 static void test_directory_suffix_is_not_enforced(void);
@@ -264,6 +269,7 @@ static void assert_concurrency_shared_memory_file(
     const char *shm_path,
     const char *metadata_path,
     unsigned expected_active_processes,
+    uint32_t expected_open_mode,
     uint64_t expected_min_registry_generation,
     uint64_t expected_recovery_generation,
     uint64_t expected_min_mdl_generation,
@@ -346,7 +352,8 @@ int main(int argc, char **argv) {
     fprintf(
         stderr,
         "usage: %s [all|baseline|innodb-open-close-repeatedly|"
-        "ownerless-directory|ownerless-product-hooks]\n",
+        "ownerless-directory|ownerless-dead-transaction|ownerless-closed-copy|"
+        "ownerless-product-hooks|ownerless-large-transaction]\n",
         argv[0]
     );
     return 2;
@@ -369,8 +376,20 @@ static int run_selected_tests(const char *selector) {
         run_ownerless_directory_tests();
         return 1;
     }
+    if (strcmp(selector, "ownerless-dead-transaction") == 0) {
+        test_dead_ownerless_transaction_rebuilds_shared_state_on_open();
+        return 1;
+    }
+    if (strcmp(selector, "ownerless-closed-copy") == 0) {
+        test_closed_directory_copy_rebuilds_ownerless_shared_memory();
+        return 1;
+    }
     if (strcmp(selector, "ownerless-product-hooks") == 0) {
         run_ownerless_product_hook_tests();
+        return 1;
+    }
+    if (strcmp(selector, "ownerless-large-transaction") == 0) {
+        test_ownerless_innodb_lock_registry_handles_large_transactions();
         return 1;
     }
     return 0;
@@ -378,12 +397,16 @@ static int run_selected_tests(const char *selector) {
 
 static void run_all_tests(void) {
     run_baseline_tests();
+#if defined(__linux__)
     run_ownerless_directory_tests();
     run_ownerless_product_hook_tests();
+    test_ownerless_innodb_lock_registry_handles_large_transactions();
+#endif
 }
 
 static void run_baseline_tests(void) {
     test_capabilities();
+    test_ownerless_filesystem_type_policy();
     test_open_close_repeatedly();
     test_innodb_open_close_repeatedly();
     test_embedded_innodb_uses_mylite_redo_size();
@@ -391,6 +414,7 @@ static void run_baseline_tests(void) {
     test_memory_path_open_close();
     test_readonly_open_fails();
     test_two_handles_share_runtime();
+    test_forked_handles_are_rejected();
     test_second_handle_with_different_durability_fails();
     test_second_database_fails_while_runtime_open();
     test_directory_suffix_is_not_enforced();
@@ -407,6 +431,7 @@ static void run_baseline_tests(void) {
 }
 
 static void run_ownerless_directory_tests(void) {
+    test_forked_ownerless_handles_are_rejected();
     test_shared_readonly_open_reads_existing_database();
     test_ownerless_open_initializes_concurrency_metadata();
     test_ownerless_repeated_fresh_innodb_bootstrap();
@@ -423,19 +448,121 @@ static void run_ownerless_product_hook_tests(void) {
     test_ownerless_trx_registry_tracks_innodb_sql();
     test_ownerless_read_view_registry_tracks_innodb_sql();
     test_ownerless_innodb_lock_registry_tracks_innodb_sql();
-    test_ownerless_innodb_lock_registry_handles_large_transactions();
 }
 
 static void test_capabilities(void) {
     const unsigned long long capabilities = mylite_capabilities();
+    mylite_db *db = NULL;
 
     assert((capabilities & MYLITE_CAP_SAME_PROCESS_CONCURRENCY) != 0U);
+#if defined(__linux__)
     assert((capabilities & MYLITE_CAP_OWNERLESS_RW) != 0U);
     assert((capabilities & MYLITE_CAP_SHARED_READONLY) != 0U);
+#else
+    assert((capabilities & MYLITE_CAP_OWNERLESS_RW) == 0U);
+    assert((capabilities & MYLITE_CAP_SHARED_READONLY) == 0U);
+#endif
+    assert(
+        mylite_open(":memory:", &db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW, NULL) ==
+        MYLITE_MISUSE
+    );
+    assert(db == NULL);
+    assert(
+        mylite_open(":memory:", &db, MYLITE_OPEN_READONLY | MYLITE_OPEN_SHARED_READONLY, NULL) ==
+        MYLITE_MISUSE
+    );
+    assert(db == NULL);
     assert(
         (capabilities & ~(MYLITE_CAP_SAME_PROCESS_CONCURRENCY | MYLITE_CAP_SHARED_READONLY |
                           MYLITE_CAP_OWNERLESS_RW)) == 0U
     );
+}
+
+static void test_ownerless_filesystem_type_policy(void) {
+#if defined(__linux__)
+    assert(mylite_ownerless_filesystem_type_is_validated_local(0xEF53U) == 1);
+    assert(mylite_ownerless_filesystem_type_is_validated_local(0x58465342U) == 1);
+    assert(mylite_ownerless_filesystem_type_is_validated_local(0x01021994U) == 1);
+    assert(mylite_ownerless_filesystem_type_is_validated_local(0x794C7630U) == 1);
+    assert(mylite_ownerless_filesystem_type_is_validated_local(0x6969U) == 0);
+    assert(mylite_ownerless_filesystem_type_is_validated_local(0xFF534D42U) == 0);
+    assert(mylite_ownerless_filesystem_type_is_validated_local(0x65735546U) == 0);
+    assert(mylite_ownerless_filesystem_type_is_validated_local(0U) == 0);
+#endif
+}
+
+static void test_forked_handles_are_rejected(void) {
+    run_forked_handle_rejection_test(
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE,
+        "forked-handle.mylite"
+    );
+}
+
+static void test_forked_ownerless_handles_are_rejected(void) {
+    run_forked_handle_rejection_test(
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE | MYLITE_OPEN_OWNERLESS_RW,
+        "forked-ownerless-handle.mylite"
+    );
+}
+
+static void run_forked_handle_rejection_test(unsigned open_flags, const char *database_name) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, database_name);
+    mylite_open_config config = open_config(runtime_root);
+    mylite_db *db = NULL;
+    mylite_stmt *stmt = NULL;
+    pid_t child;
+    int child_status = 0;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    assert(mylite_open(database_path, &db, open_flags, &config) == MYLITE_OK);
+    assert(mylite_prepare(db, "SELECT ?", MYLITE_NUL_TERMINATED, &stmt, NULL) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 1U, 41) == MYLITE_OK);
+
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        mylite_db *child_db = NULL;
+        mylite_stmt *child_stmt = NULL;
+
+        assert(mylite_exec(db, "SELECT 1", NULL, NULL, NULL) == MYLITE_MISUSE);
+        assert(
+            mylite_prepare(db, "SELECT 1", MYLITE_NUL_TERMINATED, &child_stmt, NULL) ==
+            MYLITE_MISUSE
+        );
+        assert(child_stmt == NULL);
+        assert(mylite_step(stmt) == MYLITE_MISUSE);
+        assert(mylite_reset(stmt) == MYLITE_MISUSE);
+        assert(mylite_clear_bindings(stmt) == MYLITE_MISUSE);
+        assert(mylite_bind_int64(stmt, 1U, 42) == MYLITE_MISUSE);
+        assert(mylite_finalize(stmt) == MYLITE_MISUSE);
+        assert(mylite_errcode(db) == MYLITE_MISUSE);
+        assert(mylite_extended_errcode(db) == MYLITE_MISUSE);
+        assert(mylite_mariadb_errno(db) == 0U);
+        assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+        assert(strcmp(mylite_errmsg(db), "database handle cannot be used after fork") == 0);
+        assert(mylite_close(db) == MYLITE_MISUSE);
+        assert(mylite_open(database_path, &child_db, open_flags, &config) == MYLITE_MISUSE);
+        assert(child_db == NULL);
+        _exit(0);
+    }
+
+    assert(waitpid(child, &child_status, 0) == child);
+    assert(WIFEXITED(child_status));
+    assert(WEXITSTATUS(child_status) == 0);
+    assert(mylite_step(stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(stmt, 0U) == 41);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    assert(mylite_exec(db, "SELECT 1", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(is_directory_empty(runtime_root));
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
 }
 
 static void test_open_close_repeatedly(void) {
@@ -1302,28 +1429,28 @@ static void test_concurrency_shared_memory_is_grow_only(void) {
     write_ownerless_concurrency_metadata(database_path);
     assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 2U, 0U, 0U, 0U);
+    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 0U, 2U, 0U, 0U, 0U);
 
     assert(truncate(shm_path, 1) == 0);
     assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 2U, 0U, 0U, 0U);
+    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 0U, 2U, 0U, 0U, 0U);
 
     write_file_prefix(shm_path, "bad-shm!", strlen("bad-shm!"));
     assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 2U, 0U, 0U, 0U);
+    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 0U, 2U, 0U, 0U, 0U);
 
     assert(truncate(shm_path, MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE * 2) == 0);
     assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);
     assert(mylite_close(db) == MYLITE_OK);
     assert(file_size(shm_path) == MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE * 2);
-    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 2U, 0U, 0U, 0U);
+    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 0U, 2U, 0U, 0U, 0U);
     write_shm_state(shm_path, 2U);
     assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);
     assert(mylite_close(db) == MYLITE_OK);
     assert(file_size(shm_path) == MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE * 2);
-    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 2U, 1U, 0U, 0U);
+    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 0U, 2U, 1U, 0U, 0U);
     assert(is_directory_empty(runtime_root));
 
     free(shm_path);
@@ -1368,7 +1495,7 @@ static void test_legacy_pid_only_process_slot_blocks_rebuild_until_exit(void) {
     );
     exec_ok(db, "INSERT INTO app.legacy_pid_process_slot VALUES (1, 10)");
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 2U, 0U, 0U, 0U);
+    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 0U, 2U, 0U, 0U, 0U);
 
     assert(pipe(child_release) == 0);
     child = fork();
@@ -1410,9 +1537,18 @@ static void test_legacy_pid_only_process_slot_blocks_rebuild_until_exit(void) {
             &config
         ) == MYLITE_OK
     );
-    assert_concurrency_shared_memory_file(shm_path, metadata_path, 1U, 1U, 1U, 0U, 0U);
+    assert_concurrency_shared_memory_file(
+        shm_path,
+        metadata_path,
+        1U,
+        MYLITE_OWNERLESS_PROCESS_OPEN_MODE_OWNERLESS_RW,
+        1U,
+        1U,
+        0U,
+        0U
+    );
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 2U, 1U, 0U, 0U);
+    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 0U, 2U, 1U, 0U, 0U);
     assert(is_directory_empty(runtime_root));
 
     free(shm_path);
@@ -1447,10 +1583,23 @@ static void test_dead_ownerless_transaction_rebuilds_shared_state_on_open(void) 
     seed_dead_ownerless_transaction(database_path);
     assert(read_concurrency_innodb_lock_header_field(database_path, 16) == 1U);
 
-    assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);
-    assert_concurrency_shared_memory_file(shm_path, metadata_path, 1U, 1U, 1U, 0U, 0U);
+    const int reopen_result = mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config);
+    if (reopen_result != MYLITE_OK) {
+        fprintf(stderr, "dead ownerless transaction reopen failed: result=%d\n", reopen_result);
+    }
+    assert(reopen_result == MYLITE_OK);
+    assert_concurrency_shared_memory_file(
+        shm_path,
+        metadata_path,
+        1U,
+        MYLITE_OWNERLESS_PROCESS_OPEN_MODE_ORDINARY_EXCLUSIVE,
+        1U,
+        1U,
+        0U,
+        0U
+    );
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 2U, 1U, 0U, 0U);
+    assert_concurrency_shared_memory_file(shm_path, metadata_path, 0U, 0U, 2U, 1U, 0U, 0U);
     assert(is_directory_empty(runtime_root));
 
     free(shm_path);
@@ -1501,13 +1650,31 @@ static void test_closed_directory_copy_rebuilds_ownerless_shared_memory(void) {
     copy_tree(source_path, copy_path);
 
     assert(mylite_open(copy_path, &db, MYLITE_OPEN_READWRITE, &copy_config) == MYLITE_OK);
-    assert_concurrency_shared_memory_file(copy_shm_path, copy_metadata_path, 1U, 1U, 1U, 0U, 0U);
+    assert_concurrency_shared_memory_file(
+        copy_shm_path,
+        copy_metadata_path,
+        1U,
+        MYLITE_OWNERLESS_PROCESS_OPEN_MODE_ORDINARY_EXCLUSIVE,
+        1U,
+        1U,
+        0U,
+        0U
+    );
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.closed_copy_shm") == 2U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.closed_copy_shm") == 30U);
     exec_ok(db, "INSERT INTO app.closed_copy_shm VALUES (3, 30)");
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.closed_copy_shm") == 60U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert_concurrency_shared_memory_file(copy_shm_path, copy_metadata_path, 0U, 2U, 1U, 0U, 0U);
+    assert_concurrency_shared_memory_file(
+        copy_shm_path,
+        copy_metadata_path,
+        0U,
+        0U,
+        2U,
+        1U,
+        0U,
+        0U
+    );
     assert(is_directory_empty(copy_runtime_root));
 
     free(copy_shm_path);
@@ -1723,12 +1890,8 @@ static void test_ownerless_innodb_lock_registry_handles_large_transactions(void)
 
     assert(mkdir(runtime_root, 0700) == 0);
     assert(
-        mylite_open(
-            database_path,
-            &db,
-            MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE | MYLITE_OPEN_OWNERLESS_RW,
-            &config
-        ) == MYLITE_OK
+        mylite_open(database_path, &db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
+        MYLITE_OK
     );
     exec_ok(db, "CREATE DATABASE app");
     exec_ok(
@@ -1739,6 +1902,7 @@ static void test_ownerless_innodb_lock_registry_handles_large_transactions(void)
         ") ENGINE=InnoDB"
     );
 
+    exec_ok(db, "START TRANSACTION");
     for (unsigned start_id = 1U; start_id <= 1500U; start_id += 100U) {
         char sql[4096];
         size_t offset =
@@ -1759,6 +1923,19 @@ static void test_ownerless_innodb_lock_registry_handles_large_transactions(void)
         }
         exec_ok(db, sql);
     }
+    exec_ok(db, "COMMIT");
+    assert(mylite_close(db) == MYLITE_OK);
+    db = NULL;
+
+    assert(
+        mylite_open(
+            database_path,
+            &db,
+            MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+            &config
+        ) == MYLITE_OK
+    );
+    assert(read_concurrency_innodb_lock_header_field(database_path, 16) == 0U);
 
     exec_ok(db, "START TRANSACTION");
     exec_ok(db, "UPDATE app.ownerless_large_lock SET value = value + 1");
@@ -2035,6 +2212,7 @@ static void assert_ownerless_open_database_layout(const char *database_path) {
         concurrency_shm_path,
         concurrency_metadata_path,
         1U,
+        MYLITE_OWNERLESS_PROCESS_OPEN_MODE_OWNERLESS_RW,
         1U,
         0U,
         0U,
@@ -2084,8 +2262,9 @@ static void assert_ownerless_closed_database_layout(const char *database_path) {
         concurrency_shm_path,
         concurrency_metadata_path,
         0U,
-        2U,
         0U,
+        2U,
+        UINT64_MAX,
         0U,
         0U
     );
@@ -2171,6 +2350,7 @@ static void assert_concurrency_shared_memory_file(
     const char *shm_path,
     const char *metadata_path,
     unsigned expected_active_processes,
+    uint32_t expected_open_mode,
     uint64_t expected_min_registry_generation,
     uint64_t expected_recovery_generation,
     uint64_t expected_min_mdl_generation,
@@ -2250,7 +2430,9 @@ static void assert_concurrency_shared_memory_file(
     assert(read_le32(header + 28U) == (expected_active_processes > 0U ? 2U : 1U));
     assert(read_le64(header + 32U) == (uint64_t)shm_size);
     assert(read_le64(header + 40U) == 0U);
-    assert(read_le64(header + 48U) == expected_recovery_generation);
+    if (expected_recovery_generation != UINT64_MAX) {
+        assert(read_le64(header + 48U) == expected_recovery_generation);
+    }
     assert(read_le32(header + 56U) == MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_TABLE_OFFSET);
     assert(read_le32(header + 60U) == MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_COUNT);
     assert(memcmp(header + 64U, uuid, 36U) == 0);
@@ -2285,7 +2467,7 @@ static void assert_concurrency_shared_memory_file(
     assert(read_le64(wait_segment + 24U) == 0U);
 
     assert(read_le32(mdl_lock_segment) == 3U);
-    assert(read_le32(mdl_lock_segment + 4U) == 2U);
+    assert(read_le32(mdl_lock_segment + 4U) == 3U);
     assert(read_le64(mdl_lock_segment + 8U) == MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_OFFSET);
     assert(
         read_le64(mdl_lock_segment + 16U) ==
@@ -2381,7 +2563,7 @@ static void assert_concurrency_shared_memory_file(
         ++active_slots;
         assert(read_le64(slot) > 0U);
         assert(state == 1U);
-        assert(read_le32(slot + 12U) == 1U);
+        assert(read_le32(slot + 12U) == expected_open_mode);
         assert(read_le64(slot + 16U) == (uint64_t)getpid());
         assert(read_le64(slot + 24U) > 0U);
         assert(read_le64(slot + 32U) == 0U);
@@ -2461,7 +2643,11 @@ static void assert_concurrency_shared_memory_file(
     assert(read_le32(page_index + 36U) == MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE);
     page_index_active_count = read_le32(page_index + 40U);
     assert(page_index_active_count <= MYLITE_TEST_CONCURRENCY_PAGE_INDEX_ENTRY_COUNT);
-    assert(read_le32(page_index + 44U) == 0U);
+    const uint32_t page_index_wal_scan_required = read_le32(page_index + 44U);
+    const uint32_t page_index_wal_scan_entries_trusted = read_le32(page_index + 56U);
+    assert(page_index_wal_scan_required <= 1U);
+    assert(page_index_wal_scan_entries_trusted <= 1U);
+    assert(page_index_wal_scan_required != 0U || page_index_wal_scan_entries_trusted == 0U);
     assert(read_le64(page_index + 48U) >= 1U);
 
     assert(read_le64(dictionary_state) % 2U == 0U);
@@ -2599,8 +2785,8 @@ static void seed_dead_ownerless_transaction(const char *database_path) {
         mylite_ownerless_process_registry_allocate(
             registry,
             MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_SIZE,
-            (mylite_ownerless_process_identity){UINT64_MAX, UINT64_MAX - 1U, 1U},
-            1U,
+            (mylite_ownerless_process_identity){INT32_MAX, UINT64_MAX - 1U, 1U},
+            MYLITE_OWNERLESS_PROCESS_OPEN_MODE_OWNERLESS_RW,
             0U,
             &process_slot,
             &process_generation

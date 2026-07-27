@@ -1370,7 +1370,12 @@ dberr_t dict_sys_t::create_or_check_sys_tables() noexcept
     return DB_SUCCESS;
 
   trx_t *trx= trx_create();
-  trx_start_for_ddl(trx);
+  const dberr_t start_error= trx_start_for_ddl(trx);
+  if (UNIV_UNLIKELY(start_error != DB_SUCCESS))
+  {
+    trx->dispose_failed_start();
+    return start_error;
+  }
 
   {
     /* Do not bother with transactional memory; this is only
@@ -1456,10 +1461,13 @@ err_exit:
     }
   }
 
-  trx->commit();
+  const bool coordination_fault= trx->commit();
   row_mysql_unlock_data_dictionary(trx);
-  trx->clear_and_free();
+  if (!coordination_fault)
+    trx->clear_and_free();
   srv_file_per_table= srv_file_per_table_backup;
+  if (UNIV_UNLIKELY(coordination_fault))
+    return DB_ERROR;
 
   lock(SRW_LOCK_CALL);
   if (sys_foreign);

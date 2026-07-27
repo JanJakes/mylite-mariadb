@@ -13,6 +13,9 @@ extern "C" {
 #define MYLITE_OWNERLESS_READ_VIEW_REGISTRY_NOT_FOUND 2
 #define MYLITE_OWNERLESS_READ_VIEW_REGISTRY_TIMEOUT 3
 #define MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ERROR 4
+#define MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OWNER_DEAD 5
+/* The operation applied; retain its generation token and retry cleanup. */
+#define MYLITE_OWNERLESS_READ_VIEW_REGISTRY_APPLIED_RELEASE_PENDING 6
 
 #define MYLITE_OWNERLESS_READ_VIEW_REGISTRY_HEADER_SIZE 96U
 #define MYLITE_OWNERLESS_READ_VIEW_REGISTRY_SLOT_SIZE 576U
@@ -25,6 +28,7 @@ int mylite_ownerless_read_view_registry_initialize(
     size_t mapping_size,
     uint32_t slot_count
 );
+/* FULL leaves both slot reservation outputs zero. */
 int mylite_ownerless_read_view_registry_open(
     void *mapping,
     size_t mapping_size,
@@ -72,6 +76,14 @@ int mylite_ownerless_read_view_registry_owner_active_count(
     uint32_t latch_owner_id,
     uint64_t latch_owner_generation,
     uint32_t *out_active_count
+);
+struct mylite_ownerless_process_registry_liveness_context;
+int mylite_ownerless_read_view_registry_recover_dead_latch(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t owner_id,
+    uint64_t owner_generation,
+    const struct mylite_ownerless_process_registry_liveness_context *liveness
 );
 
 #ifdef __cplusplus

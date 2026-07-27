@@ -430,6 +430,11 @@ inline dberr_t trx_sys_t::reset_page(mtr_t *mtr)
       *sys_header,
       TRX_SYS_DOUBLEWRITE + FSEG_HEADER_SIZE + TRX_SYS_DOUBLEWRITE_REPEAT,
       TRX_SYS_DOUBLEWRITE + FSEG_HEADER_SIZE, 12);
+    if (UNIV_UNLIKELY(mtr->ownerless_error() != DB_SUCCESS))
+      return mtr->ownerless_error();
+    if (UNIV_UNLIKELY(
+            !mtr->ownerless_page_write_prepare_checked(*sys_header)))
+      return mtr->ownerless_error();
     memcpy(
       sys_header->page.frame + TRX_SYS_DOUBLEWRITE
       + FSEG_HEADER_SIZE + TRX_SYS_DOUBLEWRITE_REPEAT,
@@ -1115,13 +1120,8 @@ static void srv_shutdown_bg_undo_sources()
   }
 }
 
-#ifdef UNIV_DEBUG
 # define srv_init_abort(_db_err)	\
 	srv_init_abort_low(create_new_db, __FILE__, __LINE__, _db_err)
-#else
-# define srv_init_abort(_db_err)	\
-	srv_init_abort_low(create_new_db, _db_err)
-#endif /* UNIV_DEBUG */
 
 /** Innobase start-up aborted. Perform cleanup actions.
 @param[in]	create_new_db	TRUE if new db is  being created
@@ -1134,27 +1134,21 @@ static
 dberr_t
 srv_init_abort_low(
 	bool		create_new_db,
-#ifdef UNIV_DEBUG
 	const char*	file,
 	unsigned	line,
-#endif /* UNIV_DEBUG */
 	dberr_t		err)
 {
 	ut_ad(srv_is_being_started);
 
 	if (create_new_db) {
 		ib::error() << "Database creation was aborted"
-#ifdef UNIV_DEBUG
 			" at " << innobase_basename(file) << "[" << line << "]"
-#endif /* UNIV_DEBUG */
 			" with error " << err << ". You may need"
 			" to delete the ibdata1 file before trying to start"
 			" up again.";
 	} else if (srv_operation == SRV_OPERATION_NORMAL) {
 		ib::error() << "Plugin initialization aborted"
-#ifdef UNIV_DEBUG
 			" at " << innobase_basename(file) << "[" << line << "]"
-#endif /* UNIV_DEBUG */
 			" with error " << err;
 	}
 
@@ -2262,8 +2256,11 @@ dberr_t srv_start(bool create_new_db)
 
 		if (srv_force_recovery < SRV_FORCE_NO_TRX_UNDO
 		    && !srv_read_only_mode) {
-			/* Drop partially created indexes. */
-			row_merge_drop_temp_indexes();
+			/* A live ownerless peer can retain dictionary locks for
+			recovery.  Defer this dictionary-writing cleanup until a
+			no-live startup becomes the sole recovery authority. */
+			if (!mylite_ownerless_innodb_write_coordination_enabled())
+				row_merge_drop_temp_indexes();
 #ifdef EMBEDDED_LIBRARY
 			/* Rollback incomplete non-DDL transactions */
 			trx_rollback_is_active = true;

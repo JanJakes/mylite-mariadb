@@ -33,6 +33,15 @@ Created 3/26/1996 Heikki Tuuri
 #include <queue>
 #include <unordered_map>
 
+/** Refresh ownerless rollback-history pages before commit-side state changes.
+@param[in]	trx		transaction
+@param[in]	undo		undo log
+@param[in,out]	mtr		mini-transaction
+@return error code or DB_SUCCESS */
+dberr_t
+trx_purge_prepare_add_undo_to_history(
+	const trx_t* trx, trx_undo_t* undo, mtr_t* mtr);
+
 /** Prepend the history list with an undo log.
 Remove the undo log segment from the rseg slot if it is too big for reuse.
 @param[in]	trx		transaction

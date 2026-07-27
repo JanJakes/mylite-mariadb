@@ -17,15 +17,18 @@ extern "C" {
 #define MYLITE_OWNERLESS_PAGE_LOG_RECORD_EXTERNAL_SNAPSHOT_LINEAGE 256U
 #define MYLITE_OWNERLESS_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE 1024U
 #define MYLITE_OWNERLESS_PAGE_LOG_RECORD_PROOF_ONLY 2048U
+#define MYLITE_OWNERLESS_PAGE_LOG_RECORD_METADATA_CHECKSUM 4096U
+#define MYLITE_OWNERLESS_PAGE_LOG_RECORD_HISTORY_RSEG_PAIR 8192U
 #define MYLITE_OWNERLESS_PAGE_LOG_RECORD_HISTORY_RSEG_DELTA 512U
 
 #define MYLITE_OWNERLESS_PAGE_LOG_APPEND_HISTORY_RSEG_DELTA 1U
 #define MYLITE_OWNERLESS_PAGE_LOG_APPEND_NATIVE_SUPPORT_STATE 2U
 #define MYLITE_OWNERLESS_PAGE_LOG_APPEND_PROOF_ONLY 4U
+#define MYLITE_OWNERLESS_PAGE_LOG_APPEND_HISTORY_RSEG_PAIR 8U
 
 #define MYLITE_OWNERLESS_PAGE_LOG_FIND_HISTORY_RSEG_DELTA 1U
 
-#define MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE 64U
+#define MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE 12288U
 #define MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE 64U
 
 typedef int (*mylite_ownerless_page_log_replay_callback)(
@@ -50,6 +53,11 @@ typedef struct mylite_ownerless_page_log_append_session {
 
 int mylite_ownerless_page_log_initialize(int fd);
 int mylite_ownerless_page_log_initialize_at(int fd, uint64_t log_offset);
+int mylite_ownerless_page_log_register_checkpoint_stage(int fd, int stage_fd);
+void mylite_ownerless_page_log_unregister_checkpoint_stage(int fd);
+int mylite_ownerless_page_log_retire_process_lock(int fd);
+int mylite_ownerless_page_log_test_faults_enabled(void);
+void mylite_ownerless_page_log_test_inject_unlock_failure_once(void);
 int mylite_ownerless_page_log_append(
     int fd,
     uint32_t space_id,
@@ -263,7 +271,7 @@ int mylite_ownerless_page_log_append_external_snapshot_lineage_session_append_wi
     uint32_t append_options,
     uint64_t *out_record_offset
 );
-void mylite_ownerless_page_log_append_session_end(
+int mylite_ownerless_page_log_append_session_end(
     int fd,
     mylite_ownerless_page_log_append_session *session
 );
@@ -328,7 +336,7 @@ int mylite_ownerless_page_log_snapshot_under_read_lock_at(
     uint64_t *out_log_generation
 );
 int mylite_ownerless_page_log_begin_read(int fd);
-void mylite_ownerless_page_log_end_read(int fd);
+int mylite_ownerless_page_log_end_read(int fd);
 int mylite_ownerless_page_log_find_latest(
     int fd,
     uint32_t space_id,
@@ -589,6 +597,13 @@ int mylite_ownerless_page_log_checkpoint_with_completion_at(
     int fd,
     uint64_t log_offset,
     uint64_t safe_commit_lsn,
+    mylite_ownerless_page_log_replay_callback retained_record_callback,
+    mylite_ownerless_page_log_checkpoint_complete_callback complete_callback,
+    void *context
+);
+int mylite_ownerless_page_log_checkpoint_retaining_native_support_at(
+    int fd,
+    uint64_t log_offset,
     mylite_ownerless_page_log_replay_callback retained_record_callback,
     mylite_ownerless_page_log_checkpoint_complete_callback complete_callback,
     void *context

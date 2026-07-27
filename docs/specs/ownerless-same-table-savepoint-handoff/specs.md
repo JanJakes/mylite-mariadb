@@ -11,9 +11,10 @@ same table.
 This slice covers a same-table large-row schedule. Writer A updates
 one row, saves a point, updates a second row, rolls back to the savepoint, and
 stays open. Writer B updates a fourth large row in the same table and must wait
-behind writer A's ownerless write ownership until writer A is released. Final
-recovery must keep A's pre-savepoint row and B's row, while discarding A's
-rolled-back row.
+only if it reaches a page still owned by writer A. In the deterministic
+large-row layout, writer B reaches a different page and must complete while
+writer A remains open. Final recovery must keep A's pre-savepoint row and B's
+row, while discarding A's rolled-back row.
 
 ## Source Findings
 
@@ -42,7 +43,7 @@ MariaDB base: `mariadb-11.8.6`
 In scope:
 
 - A Linux ownerless SQL selector for same-table large-row savepoint handoff.
-- Writer B waiting while writer A keeps the transaction open.
+- Writer B completing while writer A keeps the transaction open.
 - Native DML file-operation marker cleanup after both writers exit.
 - Final ownerless reopen, forced `.shm` rebuild, and ordinary native reopen.
 
@@ -68,11 +69,11 @@ coverage beyond the compact same-page test. Writer A:
 5. rolls back to the savepoint, and
 6. waits before commit.
 
-Writer B updates row 4 in the same table. The parent waits for ownerless write
-waiting evidence, verifies that neither A nor B is visible while A remains
-open, releases A, and then verifies that final reopen paths see row 1 plus row
-4 but not row 2's rolled-back image, with no stale native file-operation
-markers after no-live recovery.
+Writer B updates row 4 in the same table. The parent requires bounded peer
+completion with no ownerless waiter leak, verifies that B is visible while A
+remains open and A is not, releases A, and then verifies that final reopen paths
+see row 1 plus row 4 but not row 2's rolled-back image, with no stale native
+file-operation markers after no-live recovery.
 
 ## Compatibility Impact
 
@@ -103,9 +104,10 @@ The slice adds one test selector, one CTest entry, and documentation.
 
 ## Acceptance Criteria
 
-- Writer B waits while writer A remains open.
-- While writer A remains open, a peer sees neither writer's uncommitted or
-  blocked row.
+- Writer B completes while writer A remains open and no ownerless wait entry
+  remains.
+- While writer A remains open, a peer sees writer B's committed row but not
+  writer A's uncommitted row.
 - Native DML file-operation markers are clear after no-live recovery.
 - Final ownerless reopen, forced `.shm` rebuild, and ordinary native reopen
   preserve row 1 from writer A, row 4 from writer B, and the original row 2.

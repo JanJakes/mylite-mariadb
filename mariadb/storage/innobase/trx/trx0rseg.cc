@@ -452,21 +452,15 @@ static dberr_t trx_undo_lists_init(trx_rseg_t *rseg,
     uint32_t page_no= trx_rsegf_get_nth_undo(rseg_header, i);
     if (page_no != FIL_NULL)
     {
-      bool ownerless_stale_slot= false;
       const trx_undo_t *undo=
-        trx_undo_mem_create_at_db_start(
-          rseg, i, page_no, &ownerless_stale_slot);
-      if (!undo && ownerless_stale_slot)
+        trx_undo_mem_create_at_db_start(rseg, i, page_no);
+      if (!undo)
       {
-        static_assert(FIL_NULL == 0xffffffff, "compatibility");
-        mtr->memset(rseg_header, TRX_RSEG + TRX_RSEG_UNDO_SLOTS +
-                    i * TRX_RSEG_SLOT_SIZE, 4, 0xff);
-        continue;
-	      }
-	      if (!undo)
-	      {
-	        return DB_CORRUPTION;
-	      }
+        ib::error() << "Ownerless startup could not restore undo slot " << i
+                    << " at page " << page_no << " for rollback segment "
+                    << rseg->space->id << ':' << rseg->page_no;
+        return DB_CORRUPTION;
+      }
       mylite_embedded_startup_perf_count(
         MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_TRX_LISTS_UNDO_SLOT_COUNT);
       switch (undo->state) {
@@ -530,33 +524,134 @@ static bool trx_rseg_header_base_is_valid(const trx_rseg_t *rseg,
                           mach_read_from_4(page + FIL_PAGE_OFFSET)};
   return page_id == rseg->page_id() &&
          mach_read_from_2(page + FIL_PAGE_TYPE) == FIL_PAGE_TYPE_SYS &&
-         buf_page_is_corrupted(false, page, rseg->space->flags) ==
-           NOT_CORRUPTED &&
          trx_rseg_history_base_is_valid(rseg, page);
 }
 
-static bool mylite_ownerless_startup_refresh_rseg_header(
-    trx_rseg_t *rseg, const buf_block_t *rseg_hdr, bool force,
+enum class mylite_ownerless_startup_rseg_refresh_result
+{
+  unavailable,
+  native,
+  retained,
+  error
+};
+
+static bool trx_rseg_history_addr_is_equal(fil_addr_t left, fil_addr_t right)
+{
+  return left.page == right.page && left.boffset == right.boffset;
+}
+
+struct mylite_ownerless_startup_rseg_history_state
+{
+  bool valid;
+  uint32_t len;
+  fil_addr_t first;
+  fil_addr_t last;
+  uint64_t page_lsn;
+};
+
+static bool trx_rseg_history_state_is_equal(
+    const mylite_ownerless_startup_rseg_history_state &left,
+    const mylite_ownerless_startup_rseg_history_state &right)
+{
+  return left.len == right.len &&
+         trx_rseg_history_addr_is_equal(left.first, right.first) &&
+         trx_rseg_history_addr_is_equal(left.last, right.last);
+}
+
+static mylite_ownerless_startup_rseg_refresh_result
+mylite_ownerless_startup_choose_rseg_history(
+    const mylite_ownerless_startup_rseg_history_state &native,
+    const mylite_ownerless_startup_rseg_history_state &retained,
+    bool retained_has_pair)
+{
+  if (native.valid && retained.page_lsn <= native.page_lsn)
+    return mylite_ownerless_startup_rseg_refresh_result::native;
+
+  const bool same_history=
+      native.valid && trx_rseg_history_state_is_equal(native, retained);
+  if (retained.len != 0 && !same_history && !retained_has_pair)
+  {
+    return mylite_ownerless_startup_rseg_refresh_result::error;
+  }
+
+  return mylite_ownerless_startup_rseg_refresh_result::retained;
+}
+
+static mylite_ownerless_startup_rseg_refresh_result
+mylite_ownerless_startup_choose_rseg_header(const trx_rseg_t *rseg,
+                                            const byte *native,
+                                            const byte *retained,
+                                            bool retained_has_pair)
+{
+  const mylite_ownerless_startup_rseg_history_state native_state{
+      trx_rseg_header_base_is_valid(rseg, native),
+      flst_get_len(TRX_RSEG + TRX_RSEG_HISTORY + native),
+      flst_get_first(TRX_RSEG + TRX_RSEG_HISTORY + native),
+      flst_get_last(TRX_RSEG + TRX_RSEG_HISTORY + native),
+      mach_read_from_8(native + FIL_PAGE_LSN)};
+  const mylite_ownerless_startup_rseg_history_state retained_state{
+      true,
+      flst_get_len(TRX_RSEG + TRX_RSEG_HISTORY + retained),
+      flst_get_first(TRX_RSEG + TRX_RSEG_HISTORY + retained),
+      flst_get_last(TRX_RSEG + TRX_RSEG_HISTORY + retained),
+      mach_read_from_8(retained + FIL_PAGE_LSN)};
+  return mylite_ownerless_startup_choose_rseg_history(
+      native_state, retained_state, retained_has_pair);
+}
+
+extern "C" int mylite_ownerless_innodb_test_choose_startup_rseg_history(
+    int native_valid, uint32_t native_len, uint32_t native_first_page,
+    uint16_t native_first_offset, uint32_t native_last_page,
+    uint16_t native_last_offset, uint64_t native_page_lsn,
+    uint32_t retained_len, uint32_t retained_first_page,
+    uint16_t retained_first_offset, uint32_t retained_last_page,
+    uint16_t retained_last_offset, uint64_t retained_page_lsn,
+    int retained_has_pair)
+{
+  const mylite_ownerless_startup_rseg_history_state native{
+      native_valid != 0,
+      native_len,
+      fil_addr_t{native_first_page, native_first_offset},
+      fil_addr_t{native_last_page, native_last_offset},
+      native_page_lsn};
+  const mylite_ownerless_startup_rseg_history_state retained{
+      true,
+      retained_len,
+      fil_addr_t{retained_first_page, retained_first_offset},
+      fil_addr_t{retained_last_page, retained_last_offset},
+      retained_page_lsn};
+  return static_cast<int>(mylite_ownerless_startup_choose_rseg_history(
+      native, retained, retained_has_pair != 0));
+}
+
+dberr_t mylite_ownerless_startup_refresh_undo_header_page(
+    trx_rseg_t *rseg, const page_id_t &page_id, const buf_block_t *block,
+    uint64_t required_commit_lsn, bool require_valid_page);
+
+static mylite_ownerless_startup_rseg_refresh_result
+mylite_ownerless_startup_refresh_rseg_header(
+    trx_rseg_t *rseg, const buf_block_t *rseg_hdr, mtr_t *mtr,
     bool include_history_rseg_delta)
 {
   uint64_t max_commit_lsn=
       mylite_ownerless_innodb_startup_native_support_page_visibility();
   if (max_commit_lsn == 0)
-    return false;
+    return mylite_ownerless_startup_rseg_refresh_result::unavailable;
 
+  const uint32_t expected_page_size=
+      static_cast<uint32_t>(rseg_hdr->physical_size());
   byte *page= static_cast<byte*>(ut_malloc_nokey(UNIV_PAGE_SIZE_MAX));
   if (page == nullptr)
-    return false;
+    return mylite_ownerless_startup_rseg_refresh_result::error;
 
-  const uint64_t native_page_lsn=
-      mach_read_from_8(rseg_hdr->page.frame + FIL_PAGE_LSN);
-  const bool native_header_valid=
-      trx_rseg_header_base_is_valid(rseg, rseg_hdr->page.frame);
   uint32_t page_size= 0;
   uint64_t page_lsn= 0;
   uint64_t commit_lsn= 0;
   uint32_t record_flags= 0;
-  bool refreshed= false;
+  mylite_ownerless_startup_rseg_refresh_result result=
+      trx_rseg_header_base_is_valid(rseg, rseg_hdr->page.frame)
+        ? mylite_ownerless_startup_rseg_refresh_result::native
+        : mylite_ownerless_startup_rseg_refresh_result::unavailable;
   for (;;)
   {
     const uint64_t requested_max_commit_lsn= max_commit_lsn;
@@ -570,46 +665,169 @@ static bool mylite_ownerless_startup_refresh_rseg_header(
                   rseg->space->id, rseg->page_no, max_commit_lsn, page,
                   UNIV_PAGE_SIZE_MAX, &page_size, &page_lsn, &commit_lsn,
                   &record_flags);
+    if (read_result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+    {
+      if (result != mylite_ownerless_startup_rseg_refresh_result::native)
+      {
+        ib::error() << "Ownerless startup has no native or retained rollback "
+                       "segment image for "
+                    << rseg->space->id << ':' << rseg->page_no;
+        result= mylite_ownerless_startup_rseg_refresh_result::error;
+      }
+      break;
+    }
     if (read_result != MYLITE_OWNERLESS_INNODB_LOCK_OK)
     {
-      (void) read_result;
+      ib::error() << "Ownerless startup could not read rollback segment "
+                  << rseg->space->id << ':' << rseg->page_no
+                  << " from retained state: " << read_result;
+      result= mylite_ownerless_startup_rseg_refresh_result::error;
       break;
     }
     if (commit_lsn > requested_max_commit_lsn)
+    {
+      ib::error() << "Ownerless startup rollback segment " << rseg->space->id
+                  << ':' << rseg->page_no << " has commit LSN " << commit_lsn
+                  << " beyond visibility limit " << requested_max_commit_lsn;
+      result= mylite_ownerless_startup_rseg_refresh_result::error;
       break;
+    }
 
-    page_id_t ownerless_id{mach_read_from_4(page + FIL_PAGE_SPACE_ID),
-                           mach_read_from_4(page + FIL_PAGE_OFFSET)};
+    if (page_size != expected_page_size)
+    {
+      ib::error() << "Ownerless startup rollback segment " << rseg->space->id
+                  << ':' << rseg->page_no << " has retained page size "
+                  << page_size << ", expected " << expected_page_size;
+      result= mylite_ownerless_startup_rseg_refresh_result::error;
+      break;
+    }
+
+    const page_id_t ownerless_id{mach_read_from_4(page + FIL_PAGE_SPACE_ID),
+                                 mach_read_from_4(page + FIL_PAGE_OFFSET)};
     const bool native_support_record=
         (record_flags &
          MYLITE_OWNERLESS_INNODB_PAGE_VERSION_NATIVE_SUPPORT_STATE) != 0;
-    const bool retained_record_is_current=
-        !native_header_valid || page_lsn > native_page_lsn;
-    if (page_size != srv_page_size)
-    {
-      if (commit_lsn <= 1 || !force)
-        break;
-      max_commit_lsn= commit_lsn - 1;
-      continue;
-    }
-
+    const bool retained_has_pair=
+        (record_flags &
+         MYLITE_OWNERLESS_INNODB_PAGE_VERSION_HISTORY_RSEG_DELTA) != 0;
     const bool header_valid= trx_rseg_header_base_is_valid(rseg, page);
-    if (ownerless_id == rseg->page_id() && page_lsn != 0 &&
-        commit_lsn != 0 && retained_record_is_current && header_valid &&
-        native_support_record)
+    if (ownerless_id == rseg->page_id() && page_lsn != 0 && commit_lsn != 0 &&
+        header_valid && native_support_record)
     {
-      memcpy(const_cast<byte*>(rseg_hdr->page.frame), page, page_size);
-      refreshed= true;
+      result= mylite_ownerless_startup_choose_rseg_header(
+          rseg, rseg_hdr->page.frame, page, retained_has_pair);
+      if (result == mylite_ownerless_startup_rseg_refresh_result::error)
+      {
+        const byte *native= rseg_hdr->page.frame;
+        ib::error() << "Ownerless startup rollback segment "
+                    << rseg->space->id << ':' << rseg->page_no
+                    << " rejected retained history at commit LSN " << commit_lsn
+                    << ": native valid="
+                    << trx_rseg_header_base_is_valid(rseg, native)
+                    << " lsn=" << mach_read_from_8(native + FIL_PAGE_LSN)
+                    << " len="
+                    << flst_get_len(TRX_RSEG + TRX_RSEG_HISTORY + native)
+                    << " first="
+                    << flst_get_first(TRX_RSEG + TRX_RSEG_HISTORY + native).page
+                    << ':'
+                    << flst_get_first(TRX_RSEG + TRX_RSEG_HISTORY + native).boffset
+                    << " last="
+                    << flst_get_last(TRX_RSEG + TRX_RSEG_HISTORY + native).page
+                    << ':'
+                    << flst_get_last(TRX_RSEG + TRX_RSEG_HISTORY + native).boffset
+                    << "; retained lsn=" << page_lsn << " len="
+                    << flst_get_len(TRX_RSEG + TRX_RSEG_HISTORY + page)
+                    << " first="
+                    << flst_get_first(TRX_RSEG + TRX_RSEG_HISTORY + page).page
+                    << ':'
+                    << flst_get_first(TRX_RSEG + TRX_RSEG_HISTORY + page).boffset
+                    << " last="
+                    << flst_get_last(TRX_RSEG + TRX_RSEG_HISTORY + page).page
+                    << ':'
+                    << flst_get_last(TRX_RSEG + TRX_RSEG_HISTORY + page).boffset
+                    << " paired=" << retained_has_pair;
+      }
+      if (result == mylite_ownerless_startup_rseg_refresh_result::retained)
+      {
+        if (mylite_ownerless_innodb_advance_external_lsn(page_lsn) !=
+            MYLITE_OWNERLESS_INNODB_LOCK_OK)
+        {
+          ib::error() << "Ownerless startup could not advance to rollback "
+                         "segment page LSN "
+                      << page_lsn << " for " << rseg->space->id << ':'
+                      << rseg->page_no;
+          result= mylite_ownerless_startup_rseg_refresh_result::error;
+          break;
+        }
+
+        const uint32_t retained_history_len=
+            flst_get_len(TRX_RSEG + TRX_RSEG_HISTORY + page);
+        if (retained_has_pair && retained_history_len != 0)
+        {
+          const fil_addr_t retained_first=
+              flst_get_first(TRX_RSEG + TRX_RSEG_HISTORY + page);
+          const page_id_t proof_page_id{rseg->space->id,
+                                        retained_first.page};
+          dberr_t err;
+          const buf_block_t *proof_block=
+              buf_page_get_gen(proof_page_id, 0, RW_X_LATCH, nullptr,
+                               BUF_GET, mtr, &err);
+          if (proof_block == nullptr)
+          {
+            ib::error() << "Ownerless startup could not read rollback segment "
+                           "history proof page "
+                        << proof_page_id.space() << ':'
+                        << proof_page_id.page_no() << ": " << err;
+            result= mylite_ownerless_startup_rseg_refresh_result::error;
+            break;
+          }
+          err= mylite_ownerless_startup_refresh_undo_header_page(
+              rseg, proof_page_id, proof_block, commit_lsn, true);
+          mtr->release_last_page();
+          if (err != DB_SUCCESS)
+          {
+            ib::error() << "Ownerless startup could not reconcile rollback "
+                           "segment history proof page "
+                        << proof_page_id.space() << ':'
+                        << proof_page_id.page_no() << ": " << err;
+            result= mylite_ownerless_startup_rseg_refresh_result::error;
+            break;
+          }
+        }
+
+        memcpy(const_cast<byte*>(rseg_hdr->page.frame), page, page_size);
+        mylite_ownerless_innodb_note_external_page_observed(
+            rseg->space->id, rseg->page_no, commit_lsn);
+        mylite_ownerless_mark_retained_native_write_page_dirty(
+            const_cast<buf_block_t*>(rseg_hdr));
+      }
       break;
     }
 
-    if (commit_lsn <= 1 || !force)
-      break;
-    max_commit_lsn= commit_lsn - 1;
+    ib::error() << "Ownerless startup rejected retained rollback segment "
+                << rseg->space->id << ':' << rseg->page_no << ": page id "
+                << ownerless_id.space() << ':' << ownerless_id.page_no()
+                << ", page LSN " << page_lsn << ", commit LSN " << commit_lsn
+                << ", flags " << record_flags << ", header valid "
+                << header_valid << ", native-support record "
+                << native_support_record << ", page type "
+                << mach_read_from_2(page + FIL_PAGE_TYPE) << ", free limit "
+                << rseg->space->free_limit << ", history len "
+                << flst_get_len(TRX_RSEG + TRX_RSEG_HISTORY + page)
+                << ", first "
+                << flst_get_first(TRX_RSEG + TRX_RSEG_HISTORY + page).page
+                << ':'
+                << flst_get_first(TRX_RSEG + TRX_RSEG_HISTORY + page).boffset
+                << ", last "
+                << flst_get_last(TRX_RSEG + TRX_RSEG_HISTORY + page).page
+                << ':'
+                << flst_get_last(TRX_RSEG + TRX_RSEG_HISTORY + page).boffset;
+    result= mylite_ownerless_startup_rseg_refresh_result::error;
+    break;
   }
 
   ut_free(page);
-  return refreshed;
+  return result;
 }
 
 /** Restore the state of a persistent rollback segment.
@@ -634,10 +852,15 @@ static dberr_t trx_rseg_mem_restore(trx_rseg_t *rseg, mtr_t *mtr)
   if (!rseg_hdr)
     return err;
 
-  static_cast<void>(mylite_ownerless_startup_refresh_rseg_header(
-      rseg, rseg_hdr,
-      mylite_ownerless_innodb_startup_native_support_page_visibility() != 0,
-      true));
+  const mylite_ownerless_startup_rseg_refresh_result refresh_result=
+      mylite_ownerless_startup_refresh_rseg_header(
+          rseg, rseg_hdr, mtr, true);
+  if (refresh_result == mylite_ownerless_startup_rseg_refresh_result::error)
+  {
+    ib::error() << "Ownerless startup could not reconcile rollback segment "
+                << rseg->space->id << ':' << rseg->page_no;
+    return DB_CORRUPTION;
+  }
 
   if (!mach_read_from_4(TRX_RSEG + TRX_RSEG_FORMAT + rseg_hdr->page.frame))
   {
@@ -701,6 +924,12 @@ static dberr_t trx_rseg_mem_restore(trx_rseg_t *rseg, mtr_t *mtr)
   rseg->curr_size = mach_read_from_4(TRX_RSEG + TRX_RSEG_HISTORY_SIZE +
                                      rseg_hdr->page.frame) + 1;
   err= trx_undo_lists_init(rseg, rseg_hdr, mtr);
+  if (err != DB_SUCCESS)
+  {
+    ib::error() << "Ownerless startup could not initialize undo lists for "
+                << "rollback segment " << rseg->space->id << ':'
+                << rseg->page_no << ": " << err;
+  }
   if (err == DB_SUCCESS)
   {
     if (auto len= flst_get_len(TRX_RSEG + TRX_RSEG_HISTORY +
@@ -708,18 +937,15 @@ static dberr_t trx_rseg_mem_restore(trx_rseg_t *rseg, mtr_t *mtr)
     {
       fil_addr_t node_addr= flst_get_last(TRX_RSEG + TRX_RSEG_HISTORY +
                                           rseg_hdr->page.frame);
-      if (!trx_rseg_history_node_is_valid(rseg, node_addr) &&
-          mylite_ownerless_startup_refresh_rseg_header(rseg, rseg_hdr, true, true))
-      {
-        len= flst_get_len(TRX_RSEG + TRX_RSEG_HISTORY + rseg_hdr->page.frame);
-        node_addr= flst_get_last(TRX_RSEG + TRX_RSEG_HISTORY +
-                                 rseg_hdr->page.frame);
-      }
 
       rseg->history_size+= len;
 
       if (!trx_rseg_history_node_is_valid(rseg, node_addr))
       {
+        ib::error() << "Ownerless startup found an invalid history node "
+                    << node_addr.page << ':' << node_addr.boffset
+                    << " for rollback segment " << rseg->space->id << ':'
+                    << rseg->page_no;
         return DB_CORRUPTION;
       }
 
@@ -729,9 +955,23 @@ static dberr_t trx_rseg_mem_restore(trx_rseg_t *rseg, mtr_t *mtr)
 
       const buf_block_t* block=
         buf_page_get_gen(page_id_t(rseg->space->id, node_addr.page),
-                         0, RW_S_LATCH, nullptr, BUF_GET, mtr, &err);
+                         0, RW_X_LATCH, nullptr, BUF_GET, mtr, &err);
       if (!block)
       {
+        ib::error() << "Ownerless startup could not read last history page "
+                    << rseg->space->id << ':' << node_addr.page
+                    << " for rollback segment " << rseg->space->id << ':'
+                    << rseg->page_no << ": " << err;
+        return err;
+      }
+      err= mylite_ownerless_startup_refresh_undo_header_page(
+          rseg, page_id_t(rseg->space->id, node_addr.page), block, 0, false);
+      if (err != DB_SUCCESS)
+      {
+        ib::error() << "Ownerless startup could not refresh last history page "
+                    << rseg->space->id << ':' << node_addr.page
+                    << " for rollback segment " << rseg->space->id << ':'
+                    << rseg->page_no << ": " << err;
         return err;
       }
 
@@ -858,6 +1098,10 @@ dberr_t trx_rseg_array_init()
 					max_trx_id = rseg.needs_purge;
 				}
 				if (err != DB_SUCCESS) {
+					ib::error()
+						<< "Failed to restore rollback segment "
+						<< rseg_space->id << "/" << page_no
+						<< " with error " << err;
 					mtr.commit();
 					break;
 				}

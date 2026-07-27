@@ -18,6 +18,8 @@ typedef struct page_visibility_state {
     uint64_t observed_lsn;
     uint64_t last_table_wait_trx_id;
     uint64_t last_table_wait_table_id;
+    uint64_t last_page_write_acquire_trx_id;
+    uint64_t last_page_write_release_trx_id;
     uint32_t last_table_wait_mode;
     unsigned int last_table_wait_timeout_ms;
     unsigned read_count;
@@ -30,7 +32,22 @@ typedef struct page_visibility_state {
     unsigned leave_count;
     unsigned observe_count;
     unsigned table_wait_count;
+    unsigned page_write_acquire_count;
+    unsigned page_write_release_count;
+    unsigned page_publish_count;
+    size_t batch_completed_count;
     int table_wait_result;
+    int page_write_acquire_result;
+    int page_write_release_result;
+    int redo_enter_result;
+    int redo_observe_result;
+    int redo_reserve_result;
+    int redo_written_result;
+    int redo_written_leave_result;
+    int redo_written_leave_batch_result;
+    int redo_leave_result;
+    int pages_visible_result;
+    int page_publish_result;
 } page_visibility_state;
 
 static void test_page_visibility_is_thread_local(void);
@@ -40,7 +57,17 @@ static void test_external_table_wait_dispatch_uses_table_hook(void);
 static void test_redo_written_leave_uses_fused_top_level_hook(void);
 static void test_redo_written_leave_falls_back_to_separate_hooks(void);
 static void test_redo_deferred_flush_uses_batch_hook(void);
+static void test_page_write_full_and_failed_release_are_retryable(void);
+static void test_redo_failure_preserves_active_state(void);
+static void test_failed_deferred_redo_flush_retains_tail_for_reset_retry(void);
+static void test_page_publish_full_and_visibility_error_are_returned(void);
 static void install_page_hooks(page_visibility_state *state);
+static void install_page_hooks_with_write_mode(page_visibility_state *state, int enabled);
+static void test_written_redo_observation_uses_durable_frontier(void);
+static void test_read_hooks_do_not_enable_write_coordination(void);
+static void test_zero_transaction_id_is_inactive(void);
+static void test_zero_startup_lsn_limit_is_bounded(void);
+static void test_transient_lock_transaction_id_saturates(void);
 static void *exercise_visibility_in_thread(void *context);
 static int acquire_table_hook(
     uint64_t trx_id,
@@ -134,6 +161,7 @@ static int clear_wait_hook(uint64_t trx_id, void *context);
 static int redo_enter_hook(uint64_t *out_latest_lsn, void *context);
 static int redo_observe_hook(uint64_t *out_latest_lsn, void *context);
 static int redo_observe_visible_hook(uint64_t *out_visible_lsn, void *context);
+static int redo_observe_written_hook(uint64_t *out_written_lsn, void *context);
 static int redo_reserve_hook(
     uint64_t current_lsn,
     uint64_t length,
@@ -162,8 +190,8 @@ static int redo_written_leave_batch_hook(
     size_t *out_completed_count,
     void *context
 );
-static void redo_leave_hook(uint64_t latest_lsn, void *context);
-static void pages_visible_hook(uint64_t visible_lsn, void *context);
+static int redo_leave_hook(uint64_t latest_lsn, void *context);
+static int pages_visible_hook(uint64_t visible_lsn, void *context);
 static int page_publish_hook(
     uint32_t space_id,
     uint32_t page_no,
@@ -194,16 +222,72 @@ static int page_write_active_hook(
     void *context
 );
 static int skip_external_page_refresh_hook(void *context);
+extern int mylite_test_waitable_task_deadline(void);
 
 int main(void) {
+    test_zero_transaction_id_is_inactive();
+    test_zero_startup_lsn_limit_is_bounded();
+    test_transient_lock_transaction_id_saturates();
+    assert(mylite_test_waitable_task_deadline());
     test_checkpoint_suppression_and_file_op_flags_reset();
     test_file_op_redo_relative_path_normalizes_datadir_prefix();
     test_external_table_wait_dispatch_uses_table_hook();
     test_redo_written_leave_uses_fused_top_level_hook();
     test_redo_written_leave_falls_back_to_separate_hooks();
     test_redo_deferred_flush_uses_batch_hook();
+    test_page_write_full_and_failed_release_are_retryable();
+    test_redo_failure_preserves_active_state();
+    test_failed_deferred_redo_flush_retains_tail_for_reset_retry();
+    test_page_publish_full_and_visibility_error_are_returned();
+    test_written_redo_observation_uses_durable_frontier();
+    test_read_hooks_do_not_enable_write_coordination();
     test_page_visibility_is_thread_local();
     return 0;
+}
+
+static void test_transient_lock_transaction_id_saturates(void) {
+    const uint64_t transient_flag = UINT64_C(1) << 63U;
+
+    mylite_ownerless_innodb_set_test_faults_enabled(1);
+    assert(
+        mylite_ownerless_innodb_test_set_next_transient_lock_trx_id(transient_flag - 1U) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_OK
+    );
+    assert(mylite_ownerless_innodb_test_allocate_transient_lock_trx_id() == UINT64_MAX);
+    assert(mylite_ownerless_innodb_test_allocate_transient_lock_trx_id() == 0U);
+    assert(mylite_ownerless_innodb_coordination_error());
+
+    mylite_ownerless_innodb_clear_coordination_error_for_recovery();
+    assert(
+        mylite_ownerless_innodb_test_set_next_transient_lock_trx_id(1U) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_OK
+    );
+    assert(mylite_ownerless_innodb_test_allocate_transient_lock_trx_id() == (transient_flag | 1U));
+    mylite_ownerless_innodb_set_test_faults_enabled(0);
+}
+
+static void test_zero_transaction_id_is_inactive(void) {
+    int active = 1;
+
+    assert(
+        mylite_ownerless_innodb_remote_trx_active(0U, &active) == MYLITE_OWNERLESS_INNODB_LOCK_OK
+    );
+    assert(active == 0);
+    assert(
+        mylite_ownerless_innodb_remote_trx_active(0U, NULL) == MYLITE_OWNERLESS_INNODB_LOCK_ERROR
+    );
+}
+
+static void test_zero_startup_lsn_limit_is_bounded(void) {
+    mylite_ownerless_innodb_set_startup_lsn_advance_limit(0U);
+    assert(
+        mylite_ownerless_innodb_advance_external_lsn(1U) == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE
+    );
+    assert(
+        mylite_ownerless_innodb_advance_startup_page_lsn(1U) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE
+    );
+    mylite_ownerless_innodb_clear_startup_lsn_advance_limit();
 }
 
 static void test_checkpoint_suppression_and_file_op_flags_reset(void) {
@@ -523,6 +607,160 @@ static void test_redo_deferred_flush_uses_batch_hook(void) {
     assert(!mylite_ownerless_innodb_lock_has_hooks());
 }
 
+static void test_page_write_full_and_failed_release_are_retryable(void) {
+    page_visibility_state state = {0};
+    uint32_t acquire_flags = 0U;
+    uint64_t acquired_trx_id;
+
+    install_page_hooks(&state);
+    state.page_write_acquire_result = MYLITE_OWNERLESS_INNODB_LOCK_FULL;
+    assert(
+        mylite_ownerless_innodb_lock_acquire_page_write_untracked(
+            NULL,
+            7U,
+            11U,
+            9U,
+            &acquire_flags
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_FULL
+    );
+    assert(state.page_write_acquire_count == 1U);
+    assert(!mylite_ownerless_innodb_coordination_error());
+
+    state.page_write_acquire_result = MYLITE_OWNERLESS_INNODB_LOCK_OK;
+    assert(
+        mylite_ownerless_innodb_lock_acquire_page_write_untracked(
+            NULL,
+            7U,
+            11U,
+            9U,
+            &acquire_flags
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_OK
+    );
+    acquired_trx_id = state.last_page_write_acquire_trx_id;
+    state.page_write_release_result = MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    assert(
+        mylite_ownerless_innodb_lock_release_page_write(NULL, 7U, 11U) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_ERROR
+    );
+    assert(mylite_ownerless_innodb_coordination_error());
+    assert(state.page_write_release_count == 1U);
+    assert(state.last_page_write_release_trx_id == acquired_trx_id);
+
+    state.page_write_release_result = MYLITE_OWNERLESS_INNODB_LOCK_OK;
+    assert(
+        mylite_ownerless_innodb_lock_release_page_write(NULL, 7U, 11U) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_OK
+    );
+    assert(state.page_write_release_count == 2U);
+    assert(state.last_page_write_release_trx_id == acquired_trx_id);
+
+    mylite_ownerless_innodb_clear_coordination_error_for_recovery();
+    mylite_ownerless_innodb_lock_reset_hooks();
+    assert(!mylite_ownerless_innodb_lock_has_hooks());
+}
+
+static void test_redo_failure_preserves_active_state(void) {
+    page_visibility_state state = {0};
+    uint64_t latest_lsn = 0U;
+    uint64_t written_lsn = 0U;
+
+    install_page_hooks(&state);
+    mylite_ownerless_innodb_lock_set_redo_written_leave_hook(redo_written_leave_hook);
+    assert(mylite_ownerless_innodb_redo_enter(&latest_lsn) == MYLITE_OWNERLESS_INNODB_LOCK_OK);
+    state.redo_written_leave_result = MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    assert(
+        mylite_ownerless_innodb_redo_written_and_leave(900U, 912U, 950U, &written_lsn) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_ERROR
+    );
+    assert(mylite_ownerless_innodb_redo_is_active());
+    assert(mylite_ownerless_innodb_coordination_error());
+
+    state.redo_written_leave_result = MYLITE_OWNERLESS_INNODB_LOCK_OK;
+    assert(
+        mylite_ownerless_innodb_redo_written_and_leave(900U, 912U, 950U, &written_lsn) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_OK
+    );
+    assert(written_lsn == 912U);
+    assert(!mylite_ownerless_innodb_redo_is_active());
+    assert(state.written_leave_count == 2U);
+
+    mylite_ownerless_innodb_clear_coordination_error_for_recovery();
+    mylite_ownerless_innodb_lock_reset_hooks();
+    assert(!mylite_ownerless_innodb_lock_has_hooks());
+}
+
+static void test_failed_deferred_redo_flush_retains_tail_for_reset_retry(void) {
+    page_visibility_state state = {0};
+    uint64_t latest_lsn = 0U;
+    uint64_t written_lsn = 0U;
+
+    install_page_hooks(&state);
+    mylite_ownerless_innodb_lock_set_redo_written_leave_hook(redo_written_leave_hook);
+    mylite_ownerless_innodb_lock_set_redo_written_leave_batch_hook(redo_written_leave_batch_hook);
+    assert(mylite_ownerless_innodb_set_statement_deferred_page_publish(1) == 0);
+    assert(mylite_ownerless_innodb_redo_enter(&latest_lsn) == MYLITE_OWNERLESS_INNODB_LOCK_OK);
+    assert(
+        mylite_ownerless_innodb_redo_defer_written_and_leave(1000U, 1012U, 1050U, &written_lsn) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_OK
+    );
+    assert(mylite_ownerless_innodb_redo_enter(&latest_lsn) == MYLITE_OWNERLESS_INNODB_LOCK_OK);
+    assert(
+        mylite_ownerless_innodb_redo_defer_written_and_leave(1012U, 1024U, 1060U, &written_lsn) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_OK
+    );
+
+    state.redo_written_leave_batch_result = MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    state.batch_completed_count = 1U;
+    mylite_ownerless_innodb_lock_reset_hooks();
+    assert(mylite_ownerless_innodb_lock_has_hooks());
+    assert(mylite_ownerless_innodb_coordination_error());
+    assert(state.written_leave_batch_count == 1U);
+    assert(state.last_batch_range_count == 2U);
+    assert(state.last_batch_completed_count == 1U);
+
+    state.redo_written_leave_batch_result = MYLITE_OWNERLESS_INNODB_LOCK_OK;
+    state.batch_completed_count = 0U;
+    mylite_ownerless_innodb_lock_reset_hooks();
+    assert(!mylite_ownerless_innodb_lock_has_hooks());
+    assert(state.written_leave_count == 1U);
+    assert(state.last_written_start_lsn == 1012U);
+    assert(state.last_written_end_lsn == 1024U);
+    assert(mylite_ownerless_innodb_set_statement_deferred_page_publish(0) == 1);
+}
+
+static void test_page_publish_full_and_visibility_error_are_returned(void) {
+    page_visibility_state state = {0};
+    unsigned char page[16] = {0};
+
+    install_page_hooks(&state);
+    state.page_publish_result = MYLITE_OWNERLESS_INNODB_LOCK_FULL;
+    assert(
+        mylite_ownerless_innodb_publish_page_version(3U, 5U, 100U, 100U, page, sizeof(page)) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_FULL
+    );
+    assert(!mylite_ownerless_innodb_coordination_error());
+
+    state.page_publish_result = MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    assert(
+        mylite_ownerless_innodb_publish_page_version(3U, 5U, 100U, 100U, page, sizeof(page)) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_ERROR
+    );
+    assert(mylite_ownerless_innodb_coordination_error());
+
+    mylite_ownerless_innodb_clear_coordination_error_for_recovery();
+    state.page_publish_result = MYLITE_OWNERLESS_INNODB_LOCK_OK;
+    state.pages_visible_result = MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+    assert(
+        mylite_ownerless_innodb_publish_pages_visible_lsn(100U) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_ERROR
+    );
+    assert(mylite_ownerless_innodb_coordination_error());
+
+    mylite_ownerless_innodb_clear_coordination_error_for_recovery();
+    mylite_ownerless_innodb_lock_reset_hooks();
+    assert(!mylite_ownerless_innodb_lock_has_hooks());
+}
+
 static void test_page_visibility_is_thread_local(void) {
     page_visibility_state state = {.next_reserved_lsn = 200U};
     unsigned char page[16];
@@ -586,12 +824,17 @@ static void test_page_visibility_is_thread_local(void) {
 }
 
 static void install_page_hooks(page_visibility_state *state) {
+    install_page_hooks_with_write_mode(state, 1);
+}
+
+static void install_page_hooks_with_write_mode(page_visibility_state *state, int enabled) {
     mylite_ownerless_innodb_lock_set_hooks(
         acquire_table_hook,
         release_table_hook,
         wait_table_hook,
         acquire_record_hook,
         release_record_hook,
+        release_page_writes_hook,
         acquire_page_write_hook,
         release_record_hook,
         release_page_writes_hook,
@@ -611,8 +854,88 @@ static void install_page_hooks(page_visibility_state *state) {
         page_read_hook,
         page_write_active_hook,
         skip_external_page_refresh_hook,
+        enabled,
         state
     );
+    mylite_ownerless_innodb_lock_set_redo_observe_written_hook(redo_observe_written_hook);
+}
+
+static void test_written_redo_observation_uses_durable_frontier(void) {
+    page_visibility_state state = {0};
+    uint64_t written_lsn = 0U;
+
+    state.written_lsn = 1234U;
+    install_page_hooks(&state);
+    assert(
+        mylite_ownerless_innodb_redo_observe_written(&written_lsn) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_OK
+    );
+    assert(written_lsn == state.written_lsn);
+
+    mylite_ownerless_innodb_lock_reset_hooks();
+    assert(
+        mylite_ownerless_innodb_redo_observe_written(&written_lsn) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE
+    );
+}
+
+static void test_read_hooks_do_not_enable_write_coordination(void) {
+    page_visibility_state state = {0};
+    unsigned char page[16];
+    uint64_t latest_lsn = 0U;
+    uint64_t start_lsn = 0U;
+    uint64_t end_lsn = 0U;
+
+    install_page_hooks_with_write_mode(&state, 0);
+    assert(mylite_ownerless_innodb_lock_has_hooks());
+    assert(!mylite_ownerless_innodb_write_coordination_enabled());
+    assert(
+        mylite_ownerless_innodb_publish_pages_visible_lsn(100U) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE
+    );
+    assert(
+        mylite_ownerless_innodb_redo_enter(&latest_lsn) == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE
+    );
+    assert(!mylite_ownerless_innodb_redo_is_active());
+    assert(
+        mylite_ownerless_innodb_redo_observe(&latest_lsn) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE
+    );
+    assert(
+        mylite_ownerless_innodb_redo_observe_visible(&latest_lsn) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE
+    );
+    assert(
+        mylite_ownerless_innodb_redo_observe_written(&latest_lsn) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE
+    );
+    assert(
+        mylite_ownerless_innodb_redo_reserve(100U, 12U, &start_lsn, &end_lsn) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE
+    );
+    assert(
+        mylite_ownerless_innodb_redo_written(100U, 112U, &end_lsn) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE
+    );
+    assert(
+        mylite_ownerless_innodb_publish_page_version(1U, 2U, 100U, 100U, page, sizeof(page)) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_ERROR
+    );
+    assert(state.page_publish_count == 0U);
+    assert(mylite_ownerless_innodb_coordination_error());
+    mylite_ownerless_innodb_clear_coordination_error_for_recovery();
+
+    mylite_ownerless_innodb_enable_external_page_visibility(100U);
+    assert(
+        mylite_ownerless_innodb_read_page_version(1U, 2U, page, sizeof(page)) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_OK
+    );
+    assert(state.read_count == 1U);
+    mylite_ownerless_innodb_clear_external_page_visibility();
+
+    mylite_ownerless_innodb_lock_reset_hooks();
+    assert(!mylite_ownerless_innodb_lock_has_hooks());
+    assert(!mylite_ownerless_innodb_write_coordination_enabled());
 }
 
 static void *exercise_visibility_in_thread(void *context) {
@@ -729,8 +1052,16 @@ static int acquire_page_write_hook(
     uint32_t *out_acquire_flags,
     void *context
 ) {
+    page_visibility_state *state = (page_visibility_state *)context;
+
     if (out_acquire_flags != NULL) {
         *out_acquire_flags = 0U;
+    }
+    assert(state != NULL);
+    state->last_page_write_acquire_trx_id = trx_id;
+    ++state->page_write_acquire_count;
+    if (state->page_write_acquire_result != MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+        return state->page_write_acquire_result;
     }
     return acquire_record_hook(
         trx_id,
@@ -755,6 +1086,11 @@ static int release_record_hook(
     uint32_t flags,
     void *context
 ) {
+    page_visibility_state *state = (page_visibility_state *)context;
+
+    assert(state != NULL);
+    state->last_page_write_release_trx_id = trx_id;
+    ++state->page_write_release_count;
     (void)trx_id;
     (void)index_id;
     (void)space_id;
@@ -762,8 +1098,7 @@ static int release_record_hook(
     (void)heap_no;
     (void)mode;
     (void)flags;
-    (void)context;
-    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+    return state->page_write_release_result;
 }
 
 static int release_page_writes_hook(uint64_t trx_id, void *context) {
@@ -846,17 +1181,23 @@ static int clear_wait_hook(uint64_t trx_id, void *context) {
 }
 
 static int redo_enter_hook(uint64_t *out_latest_lsn, void *context) {
-    (void)context;
+    page_visibility_state *state = (page_visibility_state *)context;
+
+    assert(state != NULL);
     if (out_latest_lsn != NULL) {
         *out_latest_lsn = 0U;
     }
-    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+    return state->redo_enter_result;
 }
 
 static int redo_observe_hook(uint64_t *out_latest_lsn, void *context) {
     page_visibility_state *state = (page_visibility_state *)context;
 
     assert(out_latest_lsn != NULL);
+    if (state->redo_observe_result != MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+        ++state->observe_count;
+        return state->redo_observe_result;
+    }
     state->observed_lsn = state->written_lsn;
     ++state->observe_count;
     *out_latest_lsn = state->observed_lsn;
@@ -868,6 +1209,14 @@ static int redo_observe_visible_hook(uint64_t *out_visible_lsn, void *context) {
 
     assert(out_visible_lsn != NULL);
     *out_visible_lsn = state->written_lsn;
+    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
+static int redo_observe_written_hook(uint64_t *out_written_lsn, void *context) {
+    page_visibility_state *state = (page_visibility_state *)context;
+
+    assert(out_written_lsn != NULL);
+    *out_written_lsn = state->written_lsn;
     return MYLITE_OWNERLESS_INNODB_LOCK_OK;
 }
 
@@ -883,6 +1232,10 @@ static int redo_reserve_hook(
     assert(length != 0U);
     assert(out_start_lsn != NULL);
     assert(out_end_lsn != NULL);
+
+    if (state->redo_reserve_result != MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+        return state->redo_reserve_result;
+    }
 
     if (state->next_reserved_lsn < current_lsn) {
         state->next_reserved_lsn = current_lsn;
@@ -906,6 +1259,11 @@ static int redo_written_hook(
     assert(start_lsn != 0U);
     assert(end_lsn > start_lsn);
 
+    if (state->redo_written_result != MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+        ++state->written_count;
+        return state->redo_written_result;
+    }
+
     state->written_lsn = end_lsn;
     state->last_written_start_lsn = start_lsn;
     state->last_written_end_lsn = end_lsn;
@@ -928,11 +1286,15 @@ static int redo_written_leave_hook(
     assert(start_lsn != 0U);
     assert(end_lsn > start_lsn);
 
+    ++state->written_leave_count;
+    if (state->redo_written_leave_result != MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+        return state->redo_written_leave_result;
+    }
+
     state->written_lsn = end_lsn;
     state->last_written_start_lsn = start_lsn;
     state->last_written_end_lsn = end_lsn;
     state->last_written_leave_latest_lsn = latest_lsn;
-    ++state->written_leave_count;
     if (out_written_lsn != NULL) {
         *out_written_lsn = state->written_lsn;
     }
@@ -956,34 +1318,43 @@ static int redo_written_leave_batch_hook(
     ++state->written_leave_batch_count;
     state->last_batch_range_count = (unsigned)range_count;
     state->last_batch_latest_lsn = latest_lsn;
-    for (size_t index = 0; index < range_count; ++index) {
+    const size_t completed_count =
+        state->redo_written_leave_batch_result == MYLITE_OWNERLESS_INNODB_LOCK_OK ||
+                state->batch_completed_count > range_count
+            ? range_count
+            : state->batch_completed_count;
+    for (size_t index = 0; index < completed_count; ++index) {
         assert(ranges[index].start_lsn != 0U);
         assert(ranges[index].end_lsn > ranges[index].start_lsn);
         state->last_written_start_lsn = ranges[index].start_lsn;
         state->last_written_end_lsn = ranges[index].end_lsn;
         state->written_lsn = ranges[index].end_lsn;
     }
-    state->last_batch_completed_count = (unsigned)range_count;
+    state->last_batch_completed_count = (unsigned)completed_count;
     if (out_written_lsn != NULL) {
         *out_written_lsn = state->written_lsn;
     }
     if (out_completed_count != NULL) {
-        *out_completed_count = range_count;
+        *out_completed_count = completed_count;
     }
-    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+    return state->redo_written_leave_batch_result;
 }
 
-static void redo_leave_hook(uint64_t latest_lsn, void *context) {
+static int redo_leave_hook(uint64_t latest_lsn, void *context) {
     page_visibility_state *state = (page_visibility_state *)context;
 
     assert(state != NULL);
     state->last_leave_lsn = latest_lsn;
     ++state->leave_count;
+    return state->redo_leave_result;
 }
 
-static void pages_visible_hook(uint64_t visible_lsn, void *context) {
+static int pages_visible_hook(uint64_t visible_lsn, void *context) {
+    page_visibility_state *state = (page_visibility_state *)context;
+
     (void)visible_lsn;
-    (void)context;
+    assert(state != NULL);
+    return state->pages_visible_result;
 }
 
 static int page_publish_hook(
@@ -996,6 +1367,8 @@ static int page_publish_hook(
     uint32_t publish_flags,
     void *context
 ) {
+    page_visibility_state *state = (page_visibility_state *)context;
+
     (void)space_id;
     (void)page_no;
     (void)page_lsn;
@@ -1003,8 +1376,9 @@ static int page_publish_hook(
     (void)page;
     (void)page_size;
     (void)publish_flags;
-    (void)context;
-    return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+    assert(state != NULL);
+    ++state->page_publish_count;
+    return state->page_publish_result;
 }
 
 static int page_read_hook(

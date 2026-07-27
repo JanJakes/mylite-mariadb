@@ -259,6 +259,10 @@ if [ -z "${container_name}" ]; then
   container_name="mylite-ownerless-seed-sweep-${$}-${RANDOM}"
 fi
 mkdir -p "${output_dir}"
+result_file="${output_dir}/external-seed-sweep-result.txt"
+current_suite=initialization
+result_complete=0
+printf 'overall_result=running\n' >"${result_file}"
 
 seed_args=()
 for seed in "${seeds[@]}"; do
@@ -268,6 +272,10 @@ done
 write_manifest() {
   {
     echo "image=${image}"
+    if [ "${check}" -eq 0 ]; then
+      echo "image_id=$(docker image inspect --format '{{.Id}}' "${image}")"
+      echo "server_version=$(docker exec "${container_name}" mariadb --version)"
+    fi
     echo "container_name=${container_name}"
     if [ "${check}" -eq 1 ]; then
       echo "mode=check"
@@ -354,8 +362,11 @@ run_check_suite() {
 if [ "${check}" -eq 1 ]; then
   write_manifest
   for suite in "${suites[@]}"; do
+    current_suite="${suite}"
     run_check_suite "${suite}"
+    echo "suite_${suite}=ok" >>"${result_file}"
   done
+  echo "overall_result=ok" >>"${result_file}"
   echo "ownerless_external_mariadb_seed_sweep_check=ok"
   echo "output_dir=${output_dir}"
   exit 0
@@ -375,9 +386,16 @@ if docker ps -a --format '{{.Names}}' | grep -Fxq "${container_name}"; then
 fi
 
 cleanup_container() {
+  local result=$?
+
+  if [ "${result_complete}" -eq 0 ]; then
+    echo "overall_result=failed" >>"${result_file}"
+    echo "failed_suite=${current_suite}" >>"${result_file}"
+  fi
   if [ "${keep_container}" -eq 0 ]; then
     docker rm -f "${container_name}" >/dev/null 2>&1 || true
   fi
+  return "${result}"
 }
 trap cleanup_container EXIT
 
@@ -452,8 +470,13 @@ run_seed_suite() {
 
 write_manifest
 for suite in "${suites[@]}"; do
+  current_suite="${suite}"
   run_seed_suite "${suite}"
+  echo "suite_${suite}=ok" >>"${result_file}"
 done
+current_suite=complete
+echo "overall_result=ok" >>"${result_file}"
+result_complete=1
 
 echo "ownerless_external_mariadb_seed_sweep=ok"
 echo "output_dir=${output_dir}"

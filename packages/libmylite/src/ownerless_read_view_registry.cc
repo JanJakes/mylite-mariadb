@@ -1,6 +1,7 @@
 #include "ownerless_read_view_registry.h"
 
 #include "ownerless_latch.h"
+#include "ownerless_process_registry.h"
 #include "ownerless_wait.h"
 
 #include <algorithm>
@@ -34,10 +35,12 @@ int acquire_registry_latch(
     std::uint64_t owner_generation,
     std::chrono::steady_clock::time_point deadline
 );
-void release_registry_latch(
+int finish_registry_operation(
     unsigned char *registry,
     std::uint32_t owner_id,
-    std::uint64_t owner_generation
+    std::uint64_t owner_generation,
+    int operation_result,
+    bool operation_applied
 );
 int open_locked(
     unsigned char *registry,
@@ -78,6 +81,9 @@ int snapshot_oldest_locked(
     std::uint64_t *out_low_limit_no
 );
 void clear_active_slot_locked(unsigned char *registry, unsigned char *slot);
+bool generation_can_open(const unsigned char *registry);
+bool generation_can_advance(const unsigned char *registry, std::uint64_t amount);
+bool repair_registry_locked(unsigned char *registry, std::size_t mapping_size);
 void append_slot_ids_below_limit(
     const unsigned char *slot,
     std::uint64_t low_limit_id,
@@ -140,6 +146,8 @@ int mylite_ownerless_read_view_registry_open(
         out_slot_generation == nullptr) {
         return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ERROR;
     }
+    *out_slot_index = 0U;
+    *out_slot_generation = 0U;
     if (trx_id_count > MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ID_CAPACITY) {
         return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_FULL;
     }
@@ -161,8 +169,13 @@ int mylite_ownerless_read_view_registry_open(
         out_slot_index,
         out_slot_generation
     );
-    release_registry_latch(registry, owner_id, owner_generation);
-    return open_result;
+    return finish_registry_operation(
+        registry,
+        owner_id,
+        owner_generation,
+        open_result,
+        open_result == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
 }
 
 int mylite_ownerless_read_view_registry_close(
@@ -186,8 +199,13 @@ int mylite_ownerless_read_view_registry_close(
     }
     const int close_result =
         close_locked(registry, mapping_size, owner_id, slot_index, slot_generation);
-    release_registry_latch(registry, owner_id, owner_generation);
-    return close_result;
+    return finish_registry_operation(
+        registry,
+        owner_id,
+        owner_generation,
+        close_result,
+        close_result == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
 }
 
 int mylite_ownerless_read_view_registry_release_owner(
@@ -215,8 +233,13 @@ int mylite_ownerless_read_view_registry_release_owner(
     }
     const int release_result =
         release_owner_locked(registry, mapping_size, owner_id, out_released_views);
-    release_registry_latch(registry, latch_owner_id, latch_owner_generation);
-    return release_result;
+    return finish_registry_operation(
+        registry,
+        latch_owner_id,
+        latch_owner_generation,
+        release_result,
+        release_result == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
 }
 
 int mylite_ownerless_read_view_registry_snapshot_oldest(
@@ -235,6 +258,9 @@ int mylite_ownerless_read_view_registry_snapshot_oldest(
         out_trx_id_count == nullptr || out_low_limit_id == nullptr || out_low_limit_no == nullptr) {
         return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ERROR;
     }
+    *out_trx_id_count = 0U;
+    *out_low_limit_id = 0U;
+    *out_low_limit_no = 0U;
 
     auto *registry = static_cast<unsigned char *>(mapping);
     const int latch_result =
@@ -251,8 +277,7 @@ int mylite_ownerless_read_view_registry_snapshot_oldest(
         out_low_limit_id,
         out_low_limit_no
     );
-    release_registry_latch(registry, owner_id, owner_generation);
-    return snapshot_result;
+    return finish_registry_operation(registry, owner_id, owner_generation, snapshot_result, false);
 }
 
 std::uint64_t mylite_ownerless_read_view_registry_active_count(const void *mapping) {
@@ -287,8 +312,66 @@ int mylite_ownerless_read_view_registry_owner_active_count(
         return latch_result;
     }
     *out_active_count = owner_active_count_locked(registry, mapping_size, owner_id);
-    release_registry_latch(registry, latch_owner_id, latch_owner_generation);
-    return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK;
+    return finish_registry_operation(
+        registry,
+        latch_owner_id,
+        latch_owner_generation,
+        MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK,
+        false
+    );
+}
+
+int mylite_ownerless_read_view_registry_recover_dead_latch(
+    void *mapping,
+    std::size_t mapping_size,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
+    const mylite_ownerless_process_registry_liveness_context *liveness
+) {
+    if (!mapping_can_hold_registry(mapping, mapping_size) || owner_id == 0U ||
+        owner_generation == 0U || liveness == nullptr) {
+        return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ERROR;
+    }
+    auto *registry = static_cast<unsigned char *>(mapping);
+    mylite_ownerless_latch_dead_owner dead_owner = {};
+    const int latch_result = mylite_ownerless_latch_acquire_recoverable(
+        registry_latch(registry),
+        owner_id,
+        owner_generation,
+        mylite_ownerless_process_registry_latch_owner_is_alive,
+        const_cast<mylite_ownerless_process_registry_liveness_context *>(liveness),
+        5000U,
+        &dead_owner
+    );
+    if (latch_result == MYLITE_OWNERLESS_LATCH_RECOVERY_REQUIRED) {
+        if (!repair_registry_locked(registry, mapping_size)) {
+            static_cast<void>(mylite_ownerless_latch_mark_not_recoverable(
+                registry_latch(registry),
+                owner_id,
+                owner_generation
+            ));
+            return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OWNER_DEAD;
+        }
+        if (mylite_ownerless_latch_mark_consistent(
+                registry_latch(registry),
+                owner_id,
+                owner_generation
+            ) != MYLITE_OWNERLESS_LATCH_OK) {
+            return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ERROR;
+        }
+    } else if (latch_result != MYLITE_OWNERLESS_LATCH_OK) {
+        if (latch_result == MYLITE_OWNERLESS_LATCH_TIMEOUT) {
+            return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_TIMEOUT;
+        }
+        return latch_result == MYLITE_OWNERLESS_LATCH_OWNER_DEAD ||
+                       latch_result == MYLITE_OWNERLESS_LATCH_NOT_RECOVERABLE
+                   ? MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OWNER_DEAD
+                   : MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ERROR;
+    }
+    return mylite_ownerless_latch_release(registry_latch(registry), owner_id, owner_generation) ==
+                   MYLITE_OWNERLESS_LATCH_OK
+               ? MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+               : MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ERROR;
 }
 
 namespace {
@@ -315,19 +398,30 @@ int acquire_registry_latch(
     if (latch_result == MYLITE_OWNERLESS_LATCH_OK) {
         return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK;
     }
-    return latch_result == MYLITE_OWNERLESS_LATCH_TIMEOUT
-               ? MYLITE_OWNERLESS_READ_VIEW_REGISTRY_TIMEOUT
-               : MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ERROR;
+    if (latch_result == MYLITE_OWNERLESS_LATCH_TIMEOUT) {
+        return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_TIMEOUT;
+    }
+    if (latch_result == MYLITE_OWNERLESS_LATCH_OWNER_DEAD ||
+        latch_result == MYLITE_OWNERLESS_LATCH_NOT_RECOVERABLE) {
+        return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OWNER_DEAD;
+    }
+    return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ERROR;
 }
 
-void release_registry_latch(
+int finish_registry_operation(
     unsigned char *registry,
     std::uint32_t owner_id,
-    std::uint64_t owner_generation
+    std::uint64_t owner_generation,
+    int operation_result,
+    bool operation_applied
 ) {
-    static_cast<void>(
-        mylite_ownerless_latch_release(registry_latch(registry), owner_id, owner_generation)
-    );
+    const int release_result =
+        mylite_ownerless_latch_release(registry_latch(registry), owner_id, owner_generation);
+    if (release_result == MYLITE_OWNERLESS_LATCH_OK) {
+        return operation_result;
+    }
+    return operation_applied ? MYLITE_OWNERLESS_READ_VIEW_REGISTRY_APPLIED_RELEASE_PENDING
+                             : MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ERROR;
 }
 
 int open_locked(
@@ -341,6 +435,12 @@ int open_locked(
     std::uint32_t *out_slot_index,
     std::uint64_t *out_slot_generation
 ) {
+    if (!generation_can_open(registry)) {
+        return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ERROR;
+    }
+    const std::uint64_t current_generation = load64(registry, k_header_generation_offset);
+    const std::uint64_t active_count = load64(registry, k_header_active_count_offset);
+
     const std::uint32_t count = slot_count(registry);
     for (std::uint32_t index = 0; index < count; ++index) {
         unsigned char *slot = slot_at(registry, index);
@@ -353,7 +453,10 @@ int open_locked(
             continue;
         }
 
-        const std::uint64_t generation = load64(slot, k_slot_generation_offset) + 1U;
+        if (load64(slot, k_slot_generation_offset) == std::numeric_limits<std::uint64_t>::max()) {
+            return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ERROR;
+        }
+        const std::uint64_t generation = current_generation + 1U;
         store64(slot, k_slot_generation_offset, generation);
         store32(slot, k_slot_owner_id_offset, owner_id);
         store64(slot, k_slot_low_limit_id_offset, low_limit_id);
@@ -366,17 +469,9 @@ int open_locked(
                 trx_ids[id_index]
             );
         }
+        store64(registry, k_header_generation_offset, generation);
+        store64(registry, k_header_active_count_offset, active_count + 1U);
         store32(slot, k_slot_state_offset, MYLITE_OWNERLESS_READ_VIEW_STATE_ACTIVE);
-        store64(
-            registry,
-            k_header_generation_offset,
-            load64(registry, k_header_generation_offset) + 1U
-        );
-        store64(
-            registry,
-            k_header_active_count_offset,
-            load64(registry, k_header_active_count_offset) + 1U
-        );
         *out_slot_index = index;
         *out_slot_generation = generation;
         return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK;
@@ -397,10 +492,18 @@ int close_locked(
     unsigned char *slot = slot_at(registry, slot_index);
     if (static_cast<std::size_t>(slot + MYLITE_OWNERLESS_READ_VIEW_REGISTRY_SLOT_SIZE - registry) >
             mapping_size ||
-        load32(slot, k_slot_state_offset) == k_slot_state_free ||
-        load32(slot, k_slot_owner_id_offset) != owner_id ||
         load64(slot, k_slot_generation_offset) != slot_generation) {
         return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_NOT_FOUND;
+    }
+    if (load32(slot, k_slot_state_offset) == k_slot_state_free) {
+        return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK;
+    }
+    if (load32(slot, k_slot_owner_id_offset) != owner_id) {
+        return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_NOT_FOUND;
+    }
+    if (!generation_can_advance(registry, 1U) ||
+        load64(registry, k_header_active_count_offset) == 0U) {
+        return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ERROR;
     }
 
     clear_active_slot_locked(registry, slot);
@@ -427,8 +530,24 @@ int release_owner_locked(
             continue;
         }
 
-        clear_active_slot_locked(registry, slot);
         ++released_views;
+    }
+
+    if (!generation_can_advance(registry, released_views) ||
+        load64(registry, k_header_active_count_offset) < released_views) {
+        return MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ERROR;
+    }
+    for (std::uint32_t index = 0; index < count; ++index) {
+        unsigned char *slot = slot_at(registry, index);
+        if (static_cast<std::size_t>(
+                slot + MYLITE_OWNERLESS_READ_VIEW_REGISTRY_SLOT_SIZE - registry
+            ) > mapping_size) {
+            break;
+        }
+        if (load32(slot, k_slot_state_offset) != k_slot_state_free &&
+            load32(slot, k_slot_owner_id_offset) == owner_id) {
+            clear_active_slot_locked(registry, slot);
+        }
     }
 
     *out_released_views = released_views;
@@ -537,6 +656,59 @@ void clear_active_slot_locked(unsigned char *registry, unsigned char *slot) {
         k_header_active_count_offset,
         load64(registry, k_header_active_count_offset) - 1U
     );
+}
+
+bool generation_can_open(const unsigned char *registry) {
+    const std::uint64_t generation = load64(registry, k_header_generation_offset);
+    const std::uint64_t active_count = load64(registry, k_header_active_count_offset);
+    const std::uint64_t maximum = std::numeric_limits<std::uint64_t>::max();
+    return active_count <= maximum - 2U && generation <= maximum - active_count - 2U;
+}
+
+bool generation_can_advance(const unsigned char *registry, std::uint64_t amount) {
+    return amount <=
+           std::numeric_limits<std::uint64_t>::max() - load64(registry, k_header_generation_offset);
+}
+
+bool repair_registry_locked(unsigned char *registry, std::size_t mapping_size) {
+    std::uint64_t generation = load64(registry, k_header_generation_offset);
+    std::uint64_t active_count = 0U;
+    const std::uint32_t count = slot_count(registry);
+    for (std::uint32_t index = 0; index < count; ++index) {
+        unsigned char *slot = slot_at(registry, index);
+        if (static_cast<std::size_t>(
+                slot + MYLITE_OWNERLESS_READ_VIEW_REGISTRY_SLOT_SIZE - registry
+            ) > mapping_size) {
+            return false;
+        }
+        const std::uint32_t state = load32(slot, k_slot_state_offset);
+        generation = std::max(generation, load64(slot, k_slot_generation_offset));
+        if (state == k_slot_state_free) {
+            continue;
+        }
+        const std::uint32_t trx_id_count = load32(slot, k_slot_trx_id_count_offset);
+        if (state != MYLITE_OWNERLESS_READ_VIEW_STATE_ACTIVE ||
+            load64(slot, k_slot_generation_offset) == 0U ||
+            load32(slot, k_slot_owner_id_offset) == 0U ||
+            load64(slot, k_slot_low_limit_id_offset) == 0U ||
+            load64(slot, k_slot_low_limit_no_offset) == 0U ||
+            trx_id_count > MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ID_CAPACITY) {
+            return false;
+        }
+        for (std::uint32_t id_index = 0; id_index < trx_id_count; ++id_index) {
+            if (load64(slot, k_slot_trx_ids_offset + (id_index * sizeof(std::uint64_t))) == 0U) {
+                return false;
+            }
+        }
+        ++active_count;
+    }
+    const std::uint64_t maximum = std::numeric_limits<std::uint64_t>::max();
+    if (active_count > maximum - 1U || generation > maximum - active_count - 1U) {
+        return false;
+    }
+    store64(registry, k_header_generation_offset, generation + 1U);
+    store64(registry, k_header_active_count_offset, active_count);
+    return true;
 }
 
 void append_slot_ids_below_limit(

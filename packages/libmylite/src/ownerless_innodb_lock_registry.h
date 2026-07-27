@@ -14,6 +14,8 @@ extern "C" {
 #define MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_TIMEOUT 3
 #define MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ERROR 4
 #define MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_DEADLOCK 5
+#define MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OWNER_DEAD 6
+#define MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_APPLIED_RELEASE_PENDING 7
 
 #define MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ACQUIRE_WAITED 1U
 
@@ -21,6 +23,7 @@ extern "C" {
 #define MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_SLOT_SIZE 128U
 #define MYLITE_OWNERLESS_INNODB_LOCK_STATE_ACTIVE 1U
 #define MYLITE_OWNERLESS_INNODB_LOCK_STATE_WAITING 2U
+#define MYLITE_OWNERLESS_INNODB_LOCK_STATE_FINALIZING_INSERT 3U
 
 #define MYLITE_OWNERLESS_INNODB_LOCK_KIND_TABLE 1U
 #define MYLITE_OWNERLESS_INNODB_LOCK_KIND_RECORD 2U
@@ -35,6 +38,8 @@ extern "C" {
 #define MYLITE_OWNERLESS_INNODB_RECORD_LOCK_REC_NOT_GAP 2U
 #define MYLITE_OWNERLESS_INNODB_RECORD_LOCK_INSERT_INTENTION 4U
 #define MYLITE_OWNERLESS_INNODB_RECORD_LOCK_SUPREMUM 8U
+#define MYLITE_OWNERLESS_INNODB_RECORD_LOCK_INSERT_RESERVATION 16U
+#define MYLITE_OWNERLESS_INNODB_RECORD_LOCK_FINALIZE_INSERT_RESERVATION 32U
 
 size_t mylite_ownerless_innodb_lock_registry_size(uint32_t slot_count);
 int mylite_ownerless_innodb_lock_registry_initialize(
@@ -160,6 +165,14 @@ int mylite_ownerless_innodb_lock_registry_release_transaction_records(
     uint32_t flags,
     uint32_t *out_released_locks
 );
+int mylite_ownerless_innodb_lock_registry_release_transaction(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t owner_id,
+    uint64_t owner_generation,
+    uint64_t trx_id,
+    uint32_t *out_released_locks
+);
 int mylite_ownerless_innodb_lock_registry_wait_for_record(
     void *mapping,
     size_t mapping_size,
@@ -265,6 +278,21 @@ int mylite_ownerless_innodb_lock_registry_owner_blocks_waiting_lock(
     uint32_t latch_owner_id,
     uint64_t latch_owner_generation,
     int *out_blocks_waiting_lock
+);
+/* Complete a same-owner latch release after APPLIED_RELEASE_PENDING. */
+int mylite_ownerless_innodb_lock_registry_finish_pending_release(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t owner_id,
+    uint64_t owner_generation
+);
+struct mylite_ownerless_process_registry_liveness_context;
+int mylite_ownerless_innodb_lock_registry_recover_dead_latch(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t owner_id,
+    uint64_t owner_generation,
+    const struct mylite_ownerless_process_registry_liveness_context *liveness
 );
 
 #ifdef __cplusplus

@@ -40,6 +40,8 @@ Created 3/26/1996 Heikki Tuuri
 #include "ilist.h"
 #include "my_cpu.h"
 
+#include <algorithm>
+
 #ifdef UNIV_PFS_MUTEX
 extern mysql_pfs_key_t trx_sys_mutex_key;
 #endif
@@ -1024,23 +1026,11 @@ public:
   {
     if (UNIV_UNLIKELY(mylite_ownerless_trx_hooks_enabled_fast()))
     {
-      unsigned int ownerless_count= 0;
-      uint64_t ownerless_max_trx_id= 0;
-      uint64_t ownerless_min_trx_no= 0;
-      int ownerless_result= mylite_ownerless_trx_snapshot_retry(
-        nullptr, 0, &ownerless_count, &ownerless_max_trx_id,
-        &ownerless_min_trx_no);
-      if (ownerless_result == MYLITE_OWNERLESS_TRX_OK ||
-          ownerless_result == MYLITE_OWNERLESS_TRX_FULL)
-      {
-        const trx_id_t local_max_trx_id= m_max_trx_id;
-        const trx_id_t ownerless_max=
-          static_cast<trx_id_t>(ownerless_max_trx_id);
-        return ownerless_max > local_max_trx_id ? ownerless_max
-                                                : local_max_trx_id;
-      }
-      if (ownerless_result != MYLITE_OWNERLESS_TRX_UNAVAILABLE)
-        ut_error;
+      const trx_id_t ownerless_max=
+        static_cast<trx_id_t>(mylite_ownerless_trx_next_id());
+      const trx_id_t local_max= m_max_trx_id;
+      if (ownerless_max > local_max)
+        return ownerless_max;
     }
 
     return m_max_trx_id;
@@ -1049,28 +1039,33 @@ public:
 
   /**
     Allocates a new transaction id.
-    @return new, allocated trx id
+    @param[out] id new, allocated transaction id
+    @return operation status
   */
 
-  trx_id_t get_new_trx_id()
+  dberr_t get_new_trx_id(trx_id_t *id)
   {
+    ut_ad(id);
     if (UNIV_UNLIKELY(mylite_ownerless_trx_hooks_enabled_fast()))
     {
       uint64_t ownerless_id;
       int ownerless_result= mylite_ownerless_trx_allocate(&ownerless_id);
       if (ownerless_result == MYLITE_OWNERLESS_TRX_OK)
       {
-        trx_id_t id= static_cast<trx_id_t>(ownerless_id);
+        if (UNIV_UNLIKELY(ownerless_id == 0 || ownerless_id == TRX_ID_MAX))
+          return DB_ERROR;
+        *id= static_cast<trx_id_t>(ownerless_id);
         refresh_rw_trx_hash_version();
-        return id;
+        return DB_SUCCESS;
       }
-      if (ownerless_result != MYLITE_OWNERLESS_TRX_UNAVAILABLE)
-        ut_error;
+      return ownerless_result == MYLITE_OWNERLESS_TRX_FULL
+        ? DB_TOO_MANY_CONCURRENT_TRXS
+        : DB_ERROR;
     }
 
-    trx_id_t id= get_new_trx_id_no_refresh();
+    *id= get_new_trx_id_no_refresh();
     refresh_rw_trx_hash_version();
-    return id;
+    return DB_SUCCESS;
   }
 
 
@@ -1096,24 +1091,35 @@ public:
 
     @param trx transaction
   */
-  void assign_new_trx_no(trx_t *trx)
+  dberr_t assign_new_trx_no(trx_t *trx)
   {
     if (UNIV_UNLIKELY(mylite_ownerless_trx_hooks_enabled_fast()))
     {
       uint64_t ownerless_no;
-      int ownerless_result= mylite_ownerless_trx_assign_no(trx->id, &ownerless_no);
+      /* Native crash recovery resurrects transactions directly in
+      rw_trx_hash, before any shared ownerless transaction slot exists. A
+      no-live recovery authority still needs a number from the shared
+      monotonic sequence, but must not weaken missing-slot handling for live
+      transactions or remote recovered proxies. */
+      const int ownerless_result=
+        trx->is_recovered && !trx->mylite_ownerless_remote_recovered &&
+            !trx->mylite_ownerless_trx_registered
+          ? mylite_ownerless_trx_allocate(&ownerless_no)
+          : mylite_ownerless_trx_assign_no(trx->id, &ownerless_no);
       if (ownerless_result == MYLITE_OWNERLESS_TRX_OK)
       {
+        if (UNIV_UNLIKELY(ownerless_no == 0 || ownerless_no == TRX_ID_MAX))
+          return DB_ERROR;
         trx->rw_trx_hash_element->no= static_cast<trx_id_t>(ownerless_no);
         refresh_rw_trx_hash_version();
-        return;
+        return DB_SUCCESS;
       }
-      if (ownerless_result != MYLITE_OWNERLESS_TRX_UNAVAILABLE)
-        ut_error;
+      return DB_ERROR;
     }
 
     trx->rw_trx_hash_element->no= get_new_trx_id_no_refresh();
     refresh_rw_trx_hash_version();
+    return DB_SUCCESS;
   }
 
 
@@ -1139,8 +1145,8 @@ public:
     @param[out]    mix_trx_no variable to store min(no) value
   */
 
-  void snapshot_ids(trx_t *caller_trx, trx_ids_t *ids, trx_id_t *max_trx_id,
-                    trx_id_t *min_trx_no)
+  dberr_t snapshot_ids(trx_t *caller_trx, trx_ids_t *ids,
+                       trx_id_t *max_trx_id, trx_id_t *min_trx_no)
   {
     if (UNIV_UNLIKELY(mylite_ownerless_trx_hooks_enabled_fast()))
     {
@@ -1161,36 +1167,54 @@ public:
             ownerless_count ? ownerless_ids.data() : nullptr,
             ownerless_count, &ownerless_count, &ownerless_max_trx_id,
             &ownerless_min_trx_no);
-          if (ownerless_result == MYLITE_OWNERLESS_TRX_FULL)
+          if (ownerless_result == MYLITE_OWNERLESS_TRX_FULL &&
+              ownerless_count > ownerless_ids.size())
             continue;
           if (ownerless_result != MYLITE_OWNERLESS_TRX_OK)
-            ut_error;
+            return ownerless_result == MYLITE_OWNERLESS_TRX_FULL
+              ? DB_TOO_MANY_CONCURRENT_TRXS
+              : DB_ERROR;
           break;
         }
+
+        if (UNIV_UNLIKELY(ownerless_count > ownerless_ids.size() ||
+                          ownerless_max_trx_id == 0 ||
+                          ownerless_max_trx_id == TRX_ID_MAX ||
+                          ownerless_min_trx_no == 0))
+          return DB_ERROR;
+
+        const trx_id_t ownerless_max=
+            static_cast<trx_id_t>(ownerless_max_trx_id);
+        const trx_id_t local_max_trx_id= m_max_trx_id;
+        snapshot_ids_arg local_arg(ids);
+        local_arg.m_id= std::max(ownerless_max, local_max_trx_id);
+        const trx_id_t ownerless_min=
+            static_cast<trx_id_t>(ownerless_min_trx_no);
+        local_arg.m_no=
+            ownerless_min < ownerless_max ? ownerless_min : local_arg.m_id;
 
         ids->clear();
         ids->reserve(ownerless_count + rw_trx_hash.size() + 32);
         for (unsigned int i= 0; i < ownerless_count; ++i)
-          ids->push_back(static_cast<trx_id_t>(ownerless_ids[i]));
+        {
+          const trx_id_t id= static_cast<trx_id_t>(ownerless_ids[i]);
+          if (UNIV_UNLIKELY(id == 0 || id == TRX_ID_MAX))
+            return DB_ERROR;
+          ids->push_back(id);
+          extend_snapshot_max(&local_arg, id);
+        }
 
-        snapshot_ids_arg local_arg(ids);
-        local_arg.m_id= m_max_trx_id;
-        local_arg.m_no= local_arg.m_id;
         rw_trx_hash.iterate(caller_trx, copy_one_id_extend_max, &local_arg);
 
-        const trx_id_t ownerless_max=
-          static_cast<trx_id_t>(ownerless_max_trx_id);
-        *max_trx_id= ownerless_max > local_arg.m_id ? ownerless_max
-                                                    : local_arg.m_id;
-        trx_id_t ownerless_min= static_cast<trx_id_t>(ownerless_min_trx_no);
-        if (ownerless_count == 0 ||
-            (local_arg.m_no != local_arg.m_id && local_arg.m_no < ownerless_min))
-          ownerless_min= local_arg.m_no;
-        *min_trx_no= ownerless_min;
-        return;
+        std::sort(ids->begin(), ids->end());
+        ids->erase(std::unique(ids->begin(), ids->end()), ids->end());
+        *max_trx_id= local_arg.m_id;
+        *min_trx_no= local_arg.m_no;
+        return DB_SUCCESS;
       }
-      if (ownerless_result != MYLITE_OWNERLESS_TRX_UNAVAILABLE)
-        ut_error;
+      return ownerless_result == MYLITE_OWNERLESS_TRX_FULL
+        ? DB_TOO_MANY_CONCURRENT_TRXS
+        : DB_ERROR;
     }
 
     snapshot_ids_arg arg(ids);
@@ -1205,6 +1229,7 @@ public:
 
     *max_trx_id= arg.m_id;
     *min_trx_no= arg.m_no;
+    return DB_SUCCESS;
   }
 
 
@@ -1280,26 +1305,28 @@ public:
     visible through rw_trx_hash.
   */
 
-  void register_rw(trx_t *trx)
+  dberr_t register_rw(trx_t *trx,
+                      trx_ownerless_rw_reservation_t *reservation)
   {
-    if (UNIV_UNLIKELY(mylite_ownerless_trx_hooks_enabled_fast()))
-    {
-      uint64_t ownerless_id;
-      int ownerless_result= mylite_ownerless_trx_register(&ownerless_id);
-      if (ownerless_result == MYLITE_OWNERLESS_TRX_OK)
-      {
-        trx->id= static_cast<trx_id_t>(ownerless_id);
-        rw_trx_hash.insert(trx);
-        refresh_rw_trx_hash_version();
-        return;
-      }
-      if (ownerless_result != MYLITE_OWNERLESS_TRX_UNAVAILABLE)
-        ut_error;
-    }
+    if (UNIV_UNLIKELY(reservation == nullptr))
+      return DB_ERROR;
 
-    trx->id= get_new_trx_id_no_refresh();
+    if (reservation->id)
+    {
+      trx->id= reservation->id;
+      reservation->id= 0;
+      trx->mylite_ownerless_trx_registered= true;
+      trx->mylite_ownerless_trx_deregister_retry= false;
+    }
+    else
+    {
+      trx->id= get_new_trx_id_no_refresh();
+      trx->mylite_ownerless_trx_registered= false;
+      trx->mylite_ownerless_trx_deregister_retry= false;
+    }
     rw_trx_hash.insert(trx);
     refresh_rw_trx_hash_version();
+    return DB_SUCCESS;
   }
 
 
@@ -1310,16 +1337,28 @@ public:
     MVCC snapshot won't see this transaction anymore.
   */
 
-  void deregister_rw(trx_t *trx)
+  dberr_t deregister_rw(trx_t *trx)
   {
-    rw_trx_hash.erase(trx);
-    if (UNIV_UNLIKELY(mylite_ownerless_trx_hooks_enabled_fast()))
+    if (UNIV_UNLIKELY(trx->mylite_ownerless_trx_registered))
     {
-      int ownerless_result= mylite_ownerless_trx_deregister(trx->id);
+      const int ownerless_result= mylite_ownerless_trx_deregister(trx->id);
       if (ownerless_result != MYLITE_OWNERLESS_TRX_OK &&
-          ownerless_result != MYLITE_OWNERLESS_TRX_UNAVAILABLE)
-        ut_error;
+          !(trx->mylite_ownerless_trx_deregister_retry &&
+            ownerless_result == MYLITE_OWNERLESS_TRX_UNAVAILABLE &&
+            mylite_ownerless_trx_hooks_enabled_fast()))
+      {
+        trx->mylite_ownerless_trx_deregister_retry= true;
+        return DB_ERROR;
+      }
+      /* Keep the token live until the first deregistration reports success.
+      If that response was ambiguous, a retry uses the same id. The by-id
+      registry token cannot distinguish that applied release from NOT_FOUND,
+      so only a retry may resolve UNAVAILABLE idempotently. */
+      trx->mylite_ownerless_trx_registered= false;
+      trx->mylite_ownerless_trx_deregister_retry= false;
     }
+    rw_trx_hash.erase(trx);
+    return DB_SUCCESS;
   }
 
 
@@ -1434,8 +1473,7 @@ private:
   {
     auto element= static_cast<const rw_trx_hash_element_t *>(el);
     auto arg= static_cast<snapshot_ids_arg*>(a);
-    if (element->id >= arg->m_id)
-      arg->m_id= element->id + 1;
+    extend_snapshot_max(arg, element->id);
     trx_id_t no= element->no;
     arg->m_ids->push_back(element->id);
     if (no < arg->m_no)
@@ -1443,6 +1481,16 @@ private:
     return 0;
   }
 
+  static void extend_snapshot_max(snapshot_ids_arg *arg, trx_id_t id)
+  {
+    if (id < arg->m_id)
+      return;
+
+    const bool min_is_next_id= arg->m_no == arg->m_id;
+    arg->m_id= id + 1;
+    if (min_is_next_id)
+      arg->m_no= arg->m_id;
+  }
 
   /** Getter for m_rw_trx_hash_version, must issue ACQUIRE memory barrier. */
   trx_id_t get_rw_trx_hash_version()

@@ -16,6 +16,16 @@ std::uint32_t load32(const std::uint32_t *value);
 std::uint64_t load64(const std::uint64_t *value);
 void store64(std::uint64_t *target, std::uint64_t value);
 bool cas64(std::uint64_t *target, std::uint64_t *expected, std::uint64_t value);
+int acquire_latch(
+    mylite_ownerless_latch *latch,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
+    mylite_ownerless_latch_owner_alive_callback is_owner_alive,
+    void *owner_alive_ctx,
+    unsigned timeout_ms,
+    bool recoverable,
+    mylite_ownerless_latch_dead_owner *out_dead_owner
+);
 std::uint64_t latch_state_owner(std::uint32_t state, std::uint32_t owner_id);
 std::uint32_t latch_state(std::uint64_t state_owner);
 std::uint32_t latch_owner_id(std::uint64_t state_owner);
@@ -23,8 +33,14 @@ bool latch_owner_dead(
     const mylite_ownerless_latch *latch,
     std::uint64_t state_owner,
     mylite_ownerless_latch_owner_alive_callback is_owner_alive,
-    void *owner_alive_ctx
+    void *owner_alive_ctx,
+    std::uint64_t *out_owner_generation
 );
+bool latch_state_is_owned(std::uint32_t state);
+bool consume_test_release_pending();
+void wake_latch_waiters(mylite_ownerless_latch *latch);
+
+std::uint32_t test_release_pending_count = 0U;
 
 } // namespace
 
@@ -43,6 +59,103 @@ int mylite_ownerless_latch_acquire(
     void *owner_alive_ctx,
     unsigned timeout_ms
 ) {
+    return acquire_latch(
+        latch,
+        owner_id,
+        owner_generation,
+        is_owner_alive,
+        owner_alive_ctx,
+        timeout_ms,
+        false,
+        nullptr
+    );
+}
+
+int mylite_ownerless_latch_acquire_recoverable(
+    mylite_ownerless_latch *latch,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
+    mylite_ownerless_latch_owner_alive_callback is_owner_alive,
+    void *owner_alive_ctx,
+    unsigned timeout_ms,
+    mylite_ownerless_latch_dead_owner *out_dead_owner
+) {
+    if (out_dead_owner == nullptr || is_owner_alive == nullptr) {
+        return MYLITE_OWNERLESS_LATCH_ERROR;
+    }
+    std::memset(out_dead_owner, 0, sizeof(*out_dead_owner));
+    return acquire_latch(
+        latch,
+        owner_id,
+        owner_generation,
+        is_owner_alive,
+        owner_alive_ctx,
+        timeout_ms,
+        true,
+        out_dead_owner
+    );
+}
+
+int mylite_ownerless_latch_mark_consistent(
+    mylite_ownerless_latch *latch,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation
+) {
+    if (latch == nullptr || owner_id == 0U || owner_generation == 0U ||
+        load64(&latch->state_owner) !=
+            latch_state_owner(MYLITE_OWNERLESS_LATCH_STATE_RECOVERING, owner_id) ||
+        load64(&latch->owner_generation) != owner_generation) {
+        return MYLITE_OWNERLESS_LATCH_ERROR;
+    }
+
+    std::uint64_t expected = latch_state_owner(MYLITE_OWNERLESS_LATCH_STATE_RECOVERING, owner_id);
+    if (!cas64(
+            &latch->state_owner,
+            &expected,
+            latch_state_owner(MYLITE_OWNERLESS_LATCH_STATE_LOCKED, owner_id)
+        )) {
+        return MYLITE_OWNERLESS_LATCH_ERROR;
+    }
+    wake_latch_waiters(latch);
+    return MYLITE_OWNERLESS_LATCH_OK;
+}
+
+int mylite_ownerless_latch_mark_not_recoverable(
+    mylite_ownerless_latch *latch,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation
+) {
+    if (latch == nullptr || owner_id == 0U || owner_generation == 0U ||
+        load64(&latch->state_owner) !=
+            latch_state_owner(MYLITE_OWNERLESS_LATCH_STATE_RECOVERING, owner_id) ||
+        load64(&latch->owner_generation) != owner_generation) {
+        return MYLITE_OWNERLESS_LATCH_ERROR;
+    }
+
+    std::uint64_t expected = latch_state_owner(MYLITE_OWNERLESS_LATCH_STATE_RECOVERING, owner_id);
+    if (!cas64(
+            &latch->state_owner,
+            &expected,
+            latch_state_owner(MYLITE_OWNERLESS_LATCH_STATE_OWNER_DEAD, owner_id)
+        )) {
+        return MYLITE_OWNERLESS_LATCH_ERROR;
+    }
+    wake_latch_waiters(latch);
+    return MYLITE_OWNERLESS_LATCH_NOT_RECOVERABLE;
+}
+
+namespace {
+
+int acquire_latch(
+    mylite_ownerless_latch *latch,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
+    mylite_ownerless_latch_owner_alive_callback is_owner_alive,
+    void *owner_alive_ctx,
+    unsigned timeout_ms,
+    bool recoverable,
+    mylite_ownerless_latch_dead_owner *out_dead_owner
+) {
     if (latch == nullptr || owner_id == 0U || owner_generation == 0U) {
         return MYLITE_OWNERLESS_LATCH_ERROR;
     }
@@ -55,24 +168,94 @@ int mylite_ownerless_latch_acquire(
             if (cas64(
                     &latch->state_owner,
                     &expected,
-                    latch_state_owner(MYLITE_OWNERLESS_LATCH_STATE_LOCKED, owner_id)
+                    latch_state_owner(MYLITE_OWNERLESS_LATCH_STATE_ACQUIRING, owner_id)
                 )) {
                 store64(&latch->owner_generation, owner_generation);
-                mylite_ownerless_wait_store(
-                    &latch->wake_epoch,
-                    mylite_ownerless_wait_load(&latch->wake_epoch) + 1U
-                );
-                static_cast<void>(mylite_ownerless_wait_wake(&latch->wake_epoch));
+                expected = latch_state_owner(MYLITE_OWNERLESS_LATCH_STATE_ACQUIRING, owner_id);
+                if (load64(&latch->owner_generation) != owner_generation ||
+                    !cas64(
+                        &latch->state_owner,
+                        &expected,
+                        latch_state_owner(MYLITE_OWNERLESS_LATCH_STATE_LOCKED, owner_id)
+                    )) {
+                    return MYLITE_OWNERLESS_LATCH_ERROR;
+                }
+                wake_latch_waiters(latch);
                 return MYLITE_OWNERLESS_LATCH_OK;
             }
             continue;
         }
-        if (latch_state(observed) != MYLITE_OWNERLESS_LATCH_STATE_LOCKED) {
+        const std::uint32_t observed_state = latch_state(observed);
+        if (observed_state == MYLITE_OWNERLESS_LATCH_STATE_OWNER_DEAD) {
+            return recoverable ? MYLITE_OWNERLESS_LATCH_NOT_RECOVERABLE
+                               : MYLITE_OWNERLESS_LATCH_OWNER_DEAD;
+        }
+        if (!latch_state_is_owned(observed_state)) {
             return MYLITE_OWNERLESS_LATCH_ERROR;
         }
-        if (latch_owner_dead(latch, observed, is_owner_alive, owner_alive_ctx)) {
+        if (observed_state == MYLITE_OWNERLESS_LATCH_STATE_RELEASE_PENDING &&
+            latch_owner_id(observed) == owner_id &&
+            load64(&latch->owner_generation) == owner_generation) {
+            std::uint64_t expected = observed;
+            if (cas64(
+                    &latch->state_owner,
+                    &expected,
+                    latch_state_owner(MYLITE_OWNERLESS_LATCH_STATE_LOCKED, owner_id)
+                )) {
+                return MYLITE_OWNERLESS_LATCH_OK;
+            }
+            continue;
+        }
+        std::uint64_t dead_owner_generation = 0U;
+        if (latch_owner_dead(
+                latch,
+                observed,
+                is_owner_alive,
+                owner_alive_ctx,
+                &dead_owner_generation
+            )) {
             __atomic_add_fetch(&latch->owner_death_count, 1U, __ATOMIC_ACQ_REL);
-            return MYLITE_OWNERLESS_LATCH_OWNER_DEAD;
+            if (!recoverable) {
+                return MYLITE_OWNERLESS_LATCH_OWNER_DEAD;
+            }
+
+            std::uint64_t expected = observed;
+            const std::uint32_t claim_state =
+                observed_state == MYLITE_OWNERLESS_LATCH_STATE_ACQUIRING
+                    ? MYLITE_OWNERLESS_LATCH_STATE_ACQUIRING
+                    : MYLITE_OWNERLESS_LATCH_STATE_CLAIMING_RECOVERY;
+            if (!cas64(&latch->state_owner, &expected, latch_state_owner(claim_state, owner_id))) {
+                continue;
+            }
+            store64(&latch->owner_generation, owner_generation);
+            if (observed_state == MYLITE_OWNERLESS_LATCH_STATE_ACQUIRING) {
+                /* The previous owner had not entered the protected mutation. */
+                expected = latch_state_owner(MYLITE_OWNERLESS_LATCH_STATE_ACQUIRING, owner_id);
+                if (load64(&latch->owner_generation) != owner_generation ||
+                    !cas64(
+                        &latch->state_owner,
+                        &expected,
+                        latch_state_owner(MYLITE_OWNERLESS_LATCH_STATE_LOCKED, owner_id)
+                    )) {
+                    return MYLITE_OWNERLESS_LATCH_ERROR;
+                }
+                wake_latch_waiters(latch);
+                return MYLITE_OWNERLESS_LATCH_OK;
+            }
+
+            expected = latch_state_owner(MYLITE_OWNERLESS_LATCH_STATE_CLAIMING_RECOVERY, owner_id);
+            if (load64(&latch->owner_generation) != owner_generation ||
+                !cas64(
+                    &latch->state_owner,
+                    &expected,
+                    latch_state_owner(MYLITE_OWNERLESS_LATCH_STATE_RECOVERING, owner_id)
+                )) {
+                return MYLITE_OWNERLESS_LATCH_ERROR;
+            }
+            out_dead_owner->owner_id = latch_owner_id(observed);
+            out_dead_owner->owner_generation = dead_owner_generation;
+            wake_latch_waiters(latch);
+            return MYLITE_OWNERLESS_LATCH_RECOVERY_REQUIRED;
         }
 
         const std::uint32_t wait_epoch = mylite_ownerless_wait_load(&latch->wake_epoch);
@@ -97,6 +280,8 @@ int mylite_ownerless_latch_acquire(
     }
 }
 
+} // namespace
+
 int mylite_ownerless_latch_release(
     mylite_ownerless_latch *latch,
     std::uint32_t owner_id,
@@ -109,14 +294,42 @@ int mylite_ownerless_latch_release(
         return MYLITE_OWNERLESS_LATCH_ERROR;
     }
 
+    std::uint64_t expected = latch_state_owner(MYLITE_OWNERLESS_LATCH_STATE_LOCKED, owner_id);
+    if (!cas64(
+            &latch->state_owner,
+            &expected,
+            latch_state_owner(MYLITE_OWNERLESS_LATCH_STATE_RELEASING, owner_id)
+        )) {
+        return MYLITE_OWNERLESS_LATCH_ERROR;
+    }
+    if (consume_test_release_pending()) {
+        expected = latch_state_owner(MYLITE_OWNERLESS_LATCH_STATE_RELEASING, owner_id);
+        if (!cas64(
+                &latch->state_owner,
+                &expected,
+                latch_state_owner(MYLITE_OWNERLESS_LATCH_STATE_RELEASE_PENDING, owner_id)
+            )) {
+            return MYLITE_OWNERLESS_LATCH_ERROR;
+        }
+        wake_latch_waiters(latch);
+        return MYLITE_OWNERLESS_LATCH_RELEASE_PENDING;
+    }
+    /* Unlocked is published last so a claimant never inherits an old generation. */
     store64(&latch->owner_generation, 0U);
-    store64(&latch->state_owner, latch_state_owner(MYLITE_OWNERLESS_LATCH_STATE_UNLOCKED, 0U));
-    mylite_ownerless_wait_store(
-        &latch->wake_epoch,
-        mylite_ownerless_wait_load(&latch->wake_epoch) + 1U
-    );
-    static_cast<void>(mylite_ownerless_wait_wake(&latch->wake_epoch));
+    expected = latch_state_owner(MYLITE_OWNERLESS_LATCH_STATE_RELEASING, owner_id);
+    if (!cas64(
+            &latch->state_owner,
+            &expected,
+            latch_state_owner(MYLITE_OWNERLESS_LATCH_STATE_UNLOCKED, 0U)
+        )) {
+        return MYLITE_OWNERLESS_LATCH_ERROR;
+    }
+    wake_latch_waiters(latch);
     return MYLITE_OWNERLESS_LATCH_OK;
+}
+
+void mylite_ownerless_latch_test_inject_release_pending_once(void) {
+    __atomic_add_fetch(&test_release_pending_count, 1U, __ATOMIC_RELEASE);
 }
 
 int mylite_ownerless_latch_snapshot(
@@ -181,6 +394,23 @@ bool cas64(std::uint64_t *target, std::uint64_t *expected, std::uint64_t value) 
     );
 }
 
+bool consume_test_release_pending() {
+    std::uint32_t count = __atomic_load_n(&test_release_pending_count, __ATOMIC_ACQUIRE);
+    while (count != 0U) {
+        if (__atomic_compare_exchange_n(
+                &test_release_pending_count,
+                &count,
+                count - 1U,
+                false,
+                __ATOMIC_ACQ_REL,
+                __ATOMIC_ACQUIRE
+            )) {
+            return true;
+        }
+    }
+    return false;
+}
+
 std::uint64_t latch_state_owner(std::uint32_t state, std::uint32_t owner_id) {
     return (static_cast<std::uint64_t>(owner_id) << 32U) | state;
 }
@@ -197,17 +427,43 @@ bool latch_owner_dead(
     const mylite_ownerless_latch *latch,
     std::uint64_t state_owner,
     mylite_ownerless_latch_owner_alive_callback is_owner_alive,
-    void *owner_alive_ctx
+    void *owner_alive_ctx,
+    std::uint64_t *out_owner_generation
 ) {
     if (is_owner_alive == nullptr) {
         return false;
     }
     const std::uint32_t owner_id = latch_owner_id(state_owner);
     const std::uint64_t owner_generation = load64(&latch->owner_generation);
-    if (owner_id == 0U) {
+    if (owner_id == 0U || load64(&latch->state_owner) != state_owner) {
         return false;
     }
-    return is_owner_alive(owner_id, owner_generation, owner_alive_ctx) == 0;
+    const int alive = is_owner_alive(owner_id, owner_generation, owner_alive_ctx);
+    if (load64(&latch->state_owner) != state_owner ||
+        load64(&latch->owner_generation) != owner_generation || alive != 0) {
+        return false;
+    }
+    if (out_owner_generation != nullptr) {
+        *out_owner_generation = owner_generation;
+    }
+    return true;
+}
+
+bool latch_state_is_owned(std::uint32_t state) {
+    return state == MYLITE_OWNERLESS_LATCH_STATE_LOCKED ||
+           state == MYLITE_OWNERLESS_LATCH_STATE_ACQUIRING ||
+           state == MYLITE_OWNERLESS_LATCH_STATE_RECOVERING ||
+           state == MYLITE_OWNERLESS_LATCH_STATE_CLAIMING_RECOVERY ||
+           state == MYLITE_OWNERLESS_LATCH_STATE_RELEASING ||
+           state == MYLITE_OWNERLESS_LATCH_STATE_RELEASE_PENDING;
+}
+
+void wake_latch_waiters(mylite_ownerless_latch *latch) {
+    mylite_ownerless_wait_store(
+        &latch->wake_epoch,
+        mylite_ownerless_wait_load(&latch->wake_epoch) + 1U
+    );
+    static_cast<void>(mylite_ownerless_wait_wake(&latch->wake_epoch));
 }
 
 } // namespace

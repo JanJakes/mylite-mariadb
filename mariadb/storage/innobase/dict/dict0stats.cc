@@ -1145,7 +1145,7 @@ invalid:
 			goto invalid;
 		}
 
-		mtr.x_lock_space(index->table->space);
+		mtr.x_lock_space(index->table->space, true);
 
 		uint32_t dummy, size;
 		index->stat_index_size
@@ -2320,7 +2320,7 @@ empty_index:
 	}
 
 	uint16_t root_level = btr_page_get_level(root->page.frame);
-	mtr.x_lock_space(index->table->space);
+	mtr.x_lock_space(index->table->space, true);
 	uint32_t dummy, size;
 	result.index_size
 		= fseg_n_reserved_pages(*root, PAGE_HEADER + PAGE_BTR_SEG_LEAF
@@ -2883,8 +2883,10 @@ dberr_t dict_stats_save(dict_table_t* table, index_id_t index_id)
 	const time_t now = time(NULL);
 	trx_t*	trx = trx_create();
 	trx->mysql_thd = thd;
-	trx_start_internal(trx);
-	dberr_t ret = trx->read_only
+	dberr_t ret= trx_start_internal(trx);
+	if (UNIV_UNLIKELY(ret != DB_SUCCESS))
+		goto unlocked_free_and_exit;
+	ret = trx->read_only
 		? DB_READ_ONLY
 		: lock_table_for_trx(stats.table(), trx, LOCK_X);
 	if (ret == DB_SUCCESS) {
@@ -2892,7 +2894,8 @@ dberr_t dict_stats_save(dict_table_t* table, index_id_t index_id)
 	}
 	if (ret != DB_SUCCESS) {
 		if (trx->state != TRX_STATE_NOT_STARTED) {
-			trx->commit();
+			if (UNIV_UNLIKELY(trx->commit()))
+				ret= DB_ERROR;
 		}
 		goto unlocked_free_and_exit;
 	}
@@ -2948,7 +2951,8 @@ free_and_exit:
 		trx->dict_operation_lock_mode = false;
 		dict_sys.unlock();
 unlocked_free_and_exit:
-		trx->clear_and_free();
+		if (!trx->mylite_ownerless_coordination_fault)
+			trx->clear_and_free();
 		stats.close();
 		return ret;
 	}
@@ -3047,7 +3051,8 @@ unlocked_free_and_exit:
 		goto rollback_and_exit;
 	}
 
-	trx->commit();
+	if (UNIV_UNLIKELY(trx->commit()))
+		ret= DB_ERROR;
 	goto free_and_exit;
 }
 
@@ -3504,13 +3509,17 @@ dberr_t dict_stats_fetch_from_ps(dict_table_t *table)
 	trx->graph = nullptr;
 	graph->trx = trx;
 
-	trx_start_internal_read_only(trx);
-	que_run_threads(que_fork_start_command(graph));
+	dberr_t ret= trx_start_internal_read_only(trx);
+	if (UNIV_LIKELY(ret == DB_SUCCESS))
+		que_run_threads(que_fork_start_command(graph));
 	que_graph_free(graph);
-	trx_commit_for_mysql(trx);
-	dberr_t ret = index_fetch_arg.stats_were_modified
-		? trx->error_state : DB_STATS_DO_NOT_EXIST;
-	trx->free();
+	if (UNIV_LIKELY(ret == DB_SUCCESS))
+		ret= trx_commit_for_mysql(trx);
+	if (ret == DB_SUCCESS)
+		ret= index_fetch_arg.stats_were_modified
+			? trx->error_state : DB_STATS_DO_NOT_EXIST;
+	if (!trx->mylite_ownerless_coordination_fault)
+		trx->free();
 	stats.close();
 	return ret;
 }

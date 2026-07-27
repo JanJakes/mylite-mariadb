@@ -1088,6 +1088,12 @@ end:
   return result;
 }
 
+int mylite_embedded_connection_was_released(MYSQL *mysql)
+{
+  THD *thd= mysql ? (THD*) mysql->thd : NULL;
+  return thd && thd->killed >= KILL_CONNECTION;
+}
+
 C_MODE_END
 
 void THD::clear_data_list()

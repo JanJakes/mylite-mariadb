@@ -89,13 +89,84 @@ purge_graph_build()
 	return(fork);
 }
 
+/** Convert an ownerless page-refresh result to an InnoDB error.
+@param[in] result ownerless lock-hook result
+@return error code or DB_SUCCESS */
+static dberr_t
+mylite_ownerless_purge_refresh_error(int result)
+{
+	dberr_t error;
+
+	switch (result) {
+	case MYLITE_OWNERLESS_INNODB_LOCK_OK:
+	case MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE:
+		return DB_SUCCESS;
+	case MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT:
+		error= DB_LOCK_WAIT_TIMEOUT;
+		break;
+	case MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK:
+		error= DB_DEADLOCK;
+		break;
+	case MYLITE_OWNERLESS_INNODB_LOCK_FULL:
+		error= DB_LOCK_TABLE_FULL;
+		break;
+	case MYLITE_OWNERLESS_INNODB_LOCK_ERROR:
+	default:
+		error= DB_ERROR;
+		break;
+	}
+
+	return error;
+}
+
+/** Return a deterministic ownerless purge-refresh failure to unsafe tests.
+@param[in] fault_name test fault name
+@param[in] block page to refresh
+@param[in] force force the retained page-version path
+@return ownerless lock-hook result */
+static int
+mylite_ownerless_purge_refresh_page(const char *fault_name,
+				    const buf_block_t *block, bool force,
+				    const mtr_t *mtr)
+{
+	if (UNIV_UNLIKELY(mylite_ownerless_innodb_test_faults_enabled_fast())
+	    && (!mtr || !mtr->trx || !mtr->trx->in_rollback)
+	    && mylite_ownerless_innodb_test_fault_is_configured(fault_name))
+		return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+
+	return force
+		? mylite_ownerless_innodb_refresh_page_for_write_force(block)
+		: mylite_ownerless_innodb_refresh_page_for_write(block);
+}
+
+/** Validate a rollback-history node address without dereferencing it. */
+static bool
+mylite_ownerless_history_node_addr_is_valid(
+	const fil_addr_t addr, uint32_t free_limit, ulint physical_size)
+{
+	return addr.page == FIL_NULL
+		|| (addr.page < free_limit
+		    && addr.boffset >= FIL_PAGE_DATA
+		    && addr.boffset < physical_size - FIL_PAGE_DATA_END);
+}
+
+extern "C" int mylite_ownerless_innodb_test_purge_history_addr_is_valid(
+	uint32_t page_no, uint16_t byte_offset, uint32_t free_limit,
+	uint32_t physical_size)
+{
+	return physical_size > FIL_PAGE_DATA_END
+		&& mylite_ownerless_history_node_addr_is_valid(
+			fil_addr_t{page_no, byte_offset}, free_limit, physical_size);
+}
+
 /** Refresh and serialize the first persistent history-list node before
 prepending another undo log in ownerless mode.
 @param[in]	rseg		rollback segment
 @param[in]	rseg_header	rollback segment header page
 @param[in]	undo_page	undo page being prepended
-@param[in,out]	mtr		mini-transaction */
-static void
+@param[in,out]	mtr		mini-transaction
+@return error code or DB_SUCCESS */
+static dberr_t
 mylite_ownerless_refresh_history_list_first(
 	trx_rseg_t*	rseg,
 	buf_block_t*	rseg_header,
@@ -103,46 +174,18 @@ mylite_ownerless_refresh_history_list_first(
 	mtr_t*		mtr)
 {
 	if (UNIV_LIKELY(!mylite_ownerless_innodb_lock_has_hooks())) {
-		return;
+		return DB_SUCCESS;
 	}
 
 	const uint16_t history_offset= TRX_RSEG + TRX_RSEG_HISTORY;
 	const fil_addr_t first= flst_get_first(
 		history_offset + rseg_header->page.frame);
-	const auto reset_stale_history= [&]() {
-		flst_init(*rseg_header, history_offset + rseg_header->page.frame,
-			  mtr);
-		mtr->write<4>(*rseg_header,
-			      TRX_RSEG + TRX_RSEG_HISTORY_SIZE +
-			      rseg_header->page.frame,
-			      0U);
-		for (ulint slot= 0; slot < TRX_RSEG_N_SLOTS; slot++) {
-			const ulint slot_offset=
-				TRX_RSEG + TRX_RSEG_UNDO_SLOTS +
-				slot * TRX_RSEG_SLOT_SIZE;
-			if (mach_read_from_4(rseg_header->page.frame +
-					     slot_offset) == first.page) {
-				mtr->memset(rseg_header, slot_offset, 4, 0xff);
-			}
-		}
-		rseg->history_size= 0;
-	};
-	const auto valid_history_node_addr= [rseg, rseg_header](
-		const fil_addr_t addr) {
-		return addr.page == FIL_NULL ||
-		       (addr.page < rseg->space->free_limit &&
-			addr.boffset >= FIL_PAGE_DATA &&
-			addr.boffset < rseg_header->physical_size() -
-				      FIL_PAGE_DATA_END);
-	};
 	if (first.page == FIL_NULL) {
-		return;
+		return DB_SUCCESS;
 	}
-	if (first.page >= rseg->space->free_limit ||
-	    first.boffset < FIL_PAGE_DATA ||
-	    first.boffset >= rseg_header->physical_size() - FIL_PAGE_DATA_END) {
-		reset_stale_history();
-		return;
+	if (!mylite_ownerless_history_node_addr_is_valid(
+		first, rseg->space->free_limit, rseg_header->physical_size())) {
+		return DB_CORRUPTION;
 	}
 	if (first.page == undo_page->page.id().page_no()) {
 		const fil_addr_t prev= flst_get_prev_addr(
@@ -153,26 +196,28 @@ mylite_ownerless_refresh_history_list_first(
 					FLST_PREV,
 					FIL_NULL, 0, mtr);
 		}
-		return;
+		return DB_SUCCESS;
 	}
 
-	dberr_t err;
+	dberr_t err= DB_SUCCESS;
 	const ulint first_savepoint= mtr->get_savepoint();
 	buf_block_t* first_page= buf_page_get_gen(
 		page_id_t(rseg->space->id, first.page), undo_page->zip_size(),
 		RW_SX_LATCH, nullptr, BUF_GET_POSSIBLY_FREED, mtr, &err);
 	if (first_page == nullptr) {
-		reset_stale_history();
-		return;
+		if (err == DB_SUCCESS)
+			err= DB_ERROR;
+		return err;
 	}
 	mtr->ownerless_page_write_prepare(first_savepoint);
 	const int refresh_result=
-		mylite_ownerless_innodb_refresh_page_for_write_force(first_page);
-	ut_a(refresh_result == MYLITE_OWNERLESS_INNODB_LOCK_OK ||
-	     refresh_result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE);
+		mylite_ownerless_purge_refresh_page(
+			"purge-history-first-refresh-error", first_page, true, mtr);
+	if (const dberr_t refresh_error=
+		    mylite_ownerless_purge_refresh_error(refresh_result))
+		return refresh_error;
 	if (fil_page_get_type(first_page->page.frame) != FIL_PAGE_UNDO_LOG) {
-		reset_stale_history();
-		return;
+		return DB_CORRUPTION;
 	}
 
 	const uint32_t history_len= flst_get_len(
@@ -211,9 +256,72 @@ mylite_ownerless_refresh_history_list_first(
 				FLST_PREV,
 				FIL_NULL, 0, mtr);
 	}
-	if (!valid_history_node_addr(next)) {
-		reset_stale_history();
+	if (!mylite_ownerless_history_node_addr_is_valid(
+		next, rseg->space->free_limit, rseg_header->physical_size())) {
+		return DB_CORRUPTION;
 	}
+
+	return DB_SUCCESS;
+}
+
+/** Refresh every persistent page that will be read or modified while adding
+an undo log to the history list. This must run before assigning a transaction
+number or changing the purge queue and in-memory undo lists.
+@param[in] trx transaction
+@param[in] undo undo log
+@param[in,out] mtr mini-transaction
+@return error code or DB_SUCCESS */
+dberr_t
+trx_purge_prepare_add_undo_to_history(
+	const trx_t *trx, trx_undo_t *undo, mtr_t *mtr)
+{
+	if (UNIV_LIKELY(!mylite_ownerless_innodb_lock_has_hooks()))
+		return DB_SUCCESS;
+
+	trx_rseg_t *rseg= trx->rsegs.m_redo.rseg;
+	ut_ad(undo != nullptr);
+	ut_ad(undo == trx->rsegs.m_redo.undo);
+	ut_ad(undo->rseg == rseg);
+	const ulint preflight_savepoint= mtr->get_savepoint();
+	const auto fail_preflight= [mtr, preflight_savepoint](dberr_t error) {
+		/* No page has been modified on an error path. Unwind validation-only
+		pages normally; poisoning this MTR would route clean pages through the
+		failed-redo cleanup path. The dberr_t aborts transaction commit, while
+		a real hook error has already quarantined ownerless coordination. */
+		mtr->rollback_to_savepoint(preflight_savepoint);
+		return error;
+	};
+
+	dberr_t error= DB_SUCCESS;
+	buf_block_t *rseg_header= rseg->get(mtr, &error);
+	if (UNIV_UNLIKELY(rseg_header == nullptr)) {
+		if (error == DB_SUCCESS)
+			error= DB_ERROR;
+		return fail_preflight(error);
+	}
+
+	buf_block_t *undo_page= buf_page_get_gen(
+		page_id_t(rseg->space->id, undo->hdr_page_no), 0, RW_X_LATCH,
+		nullptr, BUF_GET, mtr, &error);
+	if (UNIV_UNLIKELY(undo_page == nullptr)) {
+		if (error == DB_SUCCESS)
+			error= DB_ERROR;
+		return fail_preflight(error);
+	}
+
+	const int refresh_result= mylite_ownerless_purge_refresh_page(
+		"purge-history-rseg-refresh-error", rseg_header, false, mtr);
+	if (const dberr_t refresh_error=
+		    mylite_ownerless_purge_refresh_error(refresh_result)) {
+		return fail_preflight(refresh_error);
+	}
+
+	mylite_ownerless_innodb_refresh_external_space_header(rseg->space->id);
+	error= mylite_ownerless_refresh_history_list_first(
+		rseg, rseg_header, undo_page, mtr);
+	if (UNIV_UNLIKELY(error != DB_SUCCESS))
+		return fail_preflight(error);
+	return error;
 }
 
 /** Initialise the purge system. */
@@ -312,18 +420,6 @@ trx_purge_add_undo_to_history(const trx_t* trx, trx_undo_t*& undo, mtr_t* mtr)
   /* This function is invoked during transaction commit, which is not
   allowed to fail. If we get a corrupted undo header, we will crash here. */
   ut_a(undo_page);
-  const bool refresh_ownerless_hooks=
-    UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks());
-  if (refresh_ownerless_hooks)
-  {
-    const int refresh_result=
-      mylite_ownerless_innodb_refresh_page_for_write(rseg_header);
-    ut_a(refresh_result == MYLITE_OWNERLESS_INNODB_LOCK_OK ||
-         refresh_result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE);
-    mylite_ownerless_innodb_refresh_external_space_header(rseg->space->id);
-    mylite_ownerless_refresh_history_list_first(
-      rseg, rseg_header, undo_page, mtr);
-  }
   const uint16_t undo_header_offset= undo->hdr_offset;
   trx_ulogf_t *undo_header= undo_page->page.frame + undo_header_offset;
 

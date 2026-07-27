@@ -19,6 +19,11 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#if defined(__linux__)
+#  include <linux/magic.h>
+#  include <sys/vfs.h>
+#endif
+
 #ifndef MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 #  define MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS 0
 #endif
@@ -85,6 +90,39 @@ int mylite_ownerless_probe_directory(const char *directory, mylite_ownerless_pro
     const int probe_result = run_ownerless_probe(root, result);
     cleanup_probe_root(root);
     return probe_result;
+}
+
+int mylite_ownerless_probe_filesystem_type(const char *directory, uint64_t *out_type) {
+    if (directory == nullptr || directory[0] == '\0' || out_type == nullptr) {
+        return MYLITE_OWNERLESS_PROBE_ERROR;
+    }
+
+#if defined(__linux__)
+    struct statfs filesystem = {};
+    if (statfs(directory, &filesystem) != 0) {
+        return MYLITE_OWNERLESS_PROBE_ERROR;
+    }
+    *out_type = static_cast<std::uint64_t>(filesystem.f_type);
+    return MYLITE_OWNERLESS_PROBE_OK;
+#else
+    (void)directory;
+    (void)out_type;
+    return MYLITE_OWNERLESS_PROBE_ERROR;
+#endif
+}
+
+int mylite_ownerless_filesystem_type_is_validated_local(uint64_t filesystem_type) {
+#if defined(__linux__)
+    return filesystem_type == static_cast<std::uint64_t>(EXT4_SUPER_MAGIC) ||
+                   filesystem_type == static_cast<std::uint64_t>(XFS_SUPER_MAGIC) ||
+                   filesystem_type == static_cast<std::uint64_t>(TMPFS_MAGIC) ||
+                   filesystem_type == static_cast<std::uint64_t>(OVERLAYFS_SUPER_MAGIC)
+               ? 1
+               : 0;
+#else
+    (void)filesystem_type;
+    return 0;
+#endif
 }
 
 namespace {

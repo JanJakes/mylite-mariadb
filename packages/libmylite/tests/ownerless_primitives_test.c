@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <ftw.h>
+#include <poll.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdint.h>
@@ -48,8 +49,12 @@
 #define MYLITE_TEST_INNODB_LOCK_REGISTRY_SLOT_STATE_OFFSET 12U
 #define MYLITE_TEST_LOCK_HASH 0xAABBCCDDEEFF0011ULL
 #define MYLITE_TEST_PROCESS_REGISTRY_SLOT_COUNT 4U
+#define MYLITE_TEST_PROCESS_REGISTRY_LATCH_OFFSET 24U
+#define MYLITE_TEST_PROCESS_BOOTSTRAP_OWNER_FLAG 0x80000000U
+#define MYLITE_TEST_PROCESS_REGISTRY_ACTIVE_COUNT_OFFSET 16U
 #define MYLITE_TEST_TRX_REGISTRY_SLOT_COUNT 4U
 #define MYLITE_TEST_READ_VIEW_REGISTRY_SLOT_COUNT 4U
+#define MYLITE_TEST_READ_VIEW_REGISTRY_GENERATION_OFFSET 8U
 #define MYLITE_TEST_PAGE_PIN_REGISTRY_SLOT_COUNT 4U
 #define MYLITE_TEST_REDO_STATE_PROGRESS_LATCH_OFFSET 96U
 #define MYLITE_TEST_INNODB_PAGE_OFFSET_OFFSET 4U
@@ -63,14 +68,38 @@
 #define MYLITE_TEST_INNODB_PAGE_TYPE_TRX_SYS 7U
 #define MYLITE_TEST_INNODB_PAGE_TYPE_FSP_HEADER 8U
 #define MYLITE_TEST_INNODB_PAGE_TYPE_RTREE 17854U
+#define MYLITE_TEST_PAGE_LOG_RECORD_SPACE_ID_OFFSET 8U
+#define MYLITE_TEST_PAGE_LOG_RECORD_PAGE_NO_OFFSET 12U
+#define MYLITE_TEST_PAGE_LOG_RECORD_PAGE_SIZE_OFFSET 16U
 #define MYLITE_TEST_PAGE_LOG_RECORD_FLAGS_OFFSET 20U
+#define MYLITE_TEST_PAGE_LOG_RECORD_PAGE_LSN_OFFSET 24U
+#define MYLITE_TEST_PAGE_LOG_RECORD_COMMIT_LSN_OFFSET 32U
+#define MYLITE_TEST_PAGE_LOG_RECORD_PAYLOAD_SIZE_OFFSET 40U
 #define MYLITE_TEST_PAGE_LOG_RECORD_FLAG_INDEX_DELTA 32U
 #define MYLITE_TEST_PAGE_LOG_RECORD_FLAG_UNDO_DELTA 64U
 #define MYLITE_TEST_PAGE_LOG_RECORD_FLAG_HISTORY_RSEG_DELTA 512U
 #define MYLITE_TEST_PAGE_LOG_RECORD_FLAG_EXTERNAL_SNAPSHOT_LINEAGE 256U
 #define MYLITE_TEST_PAGE_LOG_RECORD_FLAG_NATIVE_SUPPORT_STATE 1024U
 #define MYLITE_TEST_PAGE_LOG_RECORD_FLAG_PROOF_ONLY 2048U
+#define MYLITE_TEST_PAGE_LOG_RECORD_FLAG_METADATA_CHECKSUM 4096U
+#define MYLITE_TEST_PAGE_LOG_RECORD_FLAG_HISTORY_RSEG_PAIR 8192U
 #define MYLITE_TEST_PAGE_LOG_RECORD_PAYLOAD_CHECKSUM_OFFSET 48U
+#define MYLITE_TEST_PAGE_LOG_HEADER_GENERATION_OFFSET 24U
+#define MYLITE_TEST_PAGE_LOG_HEADER_ACK_SLOTS_OFFSET 4096U
+#define MYLITE_TEST_PAGE_LOG_HEADER_ACK_SLOT_SIZE 4096U
+#define MYLITE_TEST_PAGE_LOG_HEADER_ACK_END_OFFSET 0U
+#define MYLITE_TEST_PAGE_LOG_HEADER_ACK_CHECKSUM_OFFSET 8U
+#define MYLITE_TEST_PAGE_LOG_HEADER_ACK_CHECKSUM_SEED 0x4d594c504741434bULL
+#define MYLITE_TEST_CHECKPOINT_STAGE_SLOT_SIZE 128U
+#define MYLITE_TEST_CHECKPOINT_STAGE_FORMAT_OFFSET 8U
+#define MYLITE_TEST_CHECKPOINT_STAGE_STATE_OFFSET 16U
+#define MYLITE_TEST_CHECKPOINT_STAGE_TARGET_SIZE_OFFSET 64U
+#define MYLITE_TEST_CHECKPOINT_STAGE_STATE_SEQUENCE_OFFSET 96U
+#define MYLITE_TEST_CHECKPOINT_STAGE_DATA_OFFSET_OFFSET 104U
+#define MYLITE_TEST_CHECKPOINT_STAGE_HEADER_CHECKSUM_OFFSET 120U
+#define MYLITE_TEST_CHECKPOINT_STAGE_VALID_SLOT_OFFSET 4096U
+#define MYLITE_TEST_CHECKPOINT_STAGE_READY_SLOT_OFFSET 8192U
+#define MYLITE_TEST_CHECKPOINT_STAGE_DATA_OFFSET 12288U
 
 typedef struct byte_range_lock {
     off_t start;
@@ -99,6 +128,21 @@ typedef struct page_log_checkpoint_index_context {
     unsigned prepare_count;
 } page_log_checkpoint_index_context;
 
+typedef struct page_log_metadata_bit_flip {
+    uint32_t byte_offset;
+    uint8_t mask;
+} page_log_metadata_bit_flip;
+
+static const page_log_metadata_bit_flip page_log_metadata_bit_flips[] = {
+    {MYLITE_TEST_PAGE_LOG_RECORD_SPACE_ID_OFFSET, 0x01U},
+    {MYLITE_TEST_PAGE_LOG_RECORD_PAGE_NO_OFFSET, 0x01U},
+    {MYLITE_TEST_PAGE_LOG_RECORD_PAGE_SIZE_OFFSET, 0x01U},
+    {MYLITE_TEST_PAGE_LOG_RECORD_FLAGS_OFFSET + 1U, 0x10U},
+    {MYLITE_TEST_PAGE_LOG_RECORD_PAGE_LSN_OFFSET, 0x01U},
+    {MYLITE_TEST_PAGE_LOG_RECORD_COMMIT_LSN_OFFSET, 0x01U},
+    {MYLITE_TEST_PAGE_LOG_RECORD_PAYLOAD_SIZE_OFFSET, 0x01U},
+};
+
 typedef struct redo_reserve_thread_context {
     void *state;
     size_t state_size;
@@ -106,6 +150,31 @@ typedef struct redo_reserve_thread_context {
     size_t offset;
     size_t count;
 } redo_reserve_thread_context;
+
+typedef struct page_log_checkpoint_reader_thread_context {
+    int fd;
+    int acquired_fd;
+    int release_once_fd;
+    int released_once_fd;
+    int release_final_fd;
+    int result;
+    int done;
+} page_log_checkpoint_reader_thread_context;
+
+typedef struct page_log_checkpoint_writer_thread_context {
+    int fd;
+    int result;
+    int checkpointed;
+    int started;
+    int done;
+} page_log_checkpoint_writer_thread_context;
+
+typedef struct page_log_append_contender_thread_context {
+    int fd;
+    int result;
+    int started;
+    int done;
+} page_log_append_contender_thread_context;
 
 enum page_log_append_perf_stat_index {
     PAGE_LOG_APPEND_PERF_STAT_CALLS = 0,
@@ -283,6 +352,7 @@ static void test_page_log_encodes_index_delta_payloads(void);
 static void test_page_log_encodes_undo_delta_payloads(void);
 static void test_page_log_keeps_sys_pages_standalone(void);
 static void test_page_log_encodes_history_rseg_delta_payloads(void);
+static void test_page_log_prefers_certified_history_rseg_pair(void);
 static void assert_page_log_encodes_history_rseg_delta_payload(
     uint16_t page_type,
     uint32_t page_no,
@@ -305,15 +375,27 @@ static void test_page_log_initialized_append_uses_existing_header(void);
 static void test_page_log_initialized_sync_uses_existing_header(void);
 static void test_page_log_reads_under_existing_read_lock(void);
 static void test_page_log_tail_scan_absence_generation(void);
+static void test_page_log_binds_record_metadata_checksums(void);
+static void test_page_log_binds_proof_only_metadata_checksums(void);
 static void test_page_log_accepts_legacy_checksum_records(void);
 static void test_page_log_uses_reader_snapshots(void);
 static void test_page_log_tolerates_corrupt_tail_record(void);
 static void test_page_log_rejects_corrupt_interior_record(void);
 static void test_page_log_checkpoints_retained_records(void);
+static void test_page_log_checkpoint_stage_preserves_live_fd(void);
+static void test_page_log_orders_same_process_append_and_checkpoint_ranges(void);
+static void test_page_log_range_locks_survive_alias_close(void);
+static void test_page_log_process_lock_retirement(void);
+static void test_page_log_process_locks_reset_after_fork(void);
+static void test_page_log_repairs_torn_tail_before_append_and_initialize(void);
+static void test_page_log_distinguishes_unacknowledged_tail_from_acknowledged_corruption(void);
+static void test_page_log_checkpoint_rebinds_acknowledged_generation(void);
+static void test_page_log_recovers_checkpoint_stage_crashes(void);
 static void test_page_log_preserves_oldest_snapshot_boundary(void);
 static void test_page_log_preserves_external_snapshot_lineage_metadata(void);
 static void test_page_log_external_snapshot_lineage_session_append(void);
 static void test_page_log_preserves_native_support_metadata(void);
+static void test_page_log_checkpoint_retains_all_native_support_records(void);
 static void test_page_log_skips_proof_only_native_support_records(void);
 static void test_page_log_skips_generic_proof_only_records(void);
 static void test_page_log_appends_native_support_proof_pairs(void);
@@ -378,12 +460,15 @@ static void test_lock_table_allows_same_owner_mode_upgrade(void);
 static void test_lock_table_releases_all_owner_locks(void);
 static void test_innodb_lock_registry_table_compatibility(void);
 static void test_innodb_lock_registry_record_compatibility(void);
+static void test_innodb_lock_registry_insert_reservation_lifecycle(void);
+static void test_innodb_lock_registry_insert_finalization_contention(void);
 static void test_innodb_lock_registry_nonblocking_reserve_waits_for_latch(void);
 static void test_innodb_lock_registry_wait_edges_and_deadlocks(void);
 static void test_innodb_lock_registry_table_waiter_death_requires_owner_cleanup(void);
 static void test_innodb_lock_registry_detects_cross_registry_deadlocks(void);
 static void test_innodb_lock_registry_detects_page_write_gate_deadlocks(void);
 static void test_innodb_lock_registry_page_write_gates_cover_physical_pages(void);
+static void test_innodb_lock_registry_structure_gate_protocol(void);
 static void test_innodb_lock_registry_page_write_owner_bypasses_blocked_waiter(void);
 static void test_innodb_lock_registry_owner_blocks_waiting_lock(void);
 static void test_innodb_lock_registry_same_page_waiter_fairness(void);
@@ -391,7 +476,9 @@ static void test_innodb_lock_registry_wait_until_rechecks_available_after_missed
 static void test_innodb_lock_registry_waits_across_processes(void);
 static void test_innodb_lock_registry_references_and_owner_cleanup(void);
 static void test_innodb_lock_registry_shrinks_scan_limit(void);
+static void test_innodb_lock_registry_release_pending_and_dead_latch_recovery(void);
 static void test_autoinc_registry_preserves_high_watermarks(void);
+static void test_autoinc_registry_release_pending_capacity_and_stale_generation(void);
 static void test_mdl_key_hashes_are_stable_and_distinct(void);
 static void test_mdl_upgradable_is_compatible_with_shared_holders(void);
 static void test_mdl_metadata_modes_follow_mariadb_matrix(void);
@@ -403,12 +490,16 @@ static void test_trx_registry_snapshots_active_ids(void);
 static void test_trx_registry_assigns_read_view_serialisation_numbers(void);
 static void test_trx_registry_bumps_next_id_and_ends_by_owner_id(void);
 static void test_trx_registry_releases_dead_owner_transactions(void);
+static void test_trx_registry_tracks_rollback_read_safety(void);
 static void test_read_view_registry_snapshots_oldest_views(void);
 static void test_read_view_registry_snapshots_cross_process_views(void);
 static void test_read_view_registry_releases_dead_owner_views(void);
+static void test_read_view_registry_rejects_generation_saturation(void);
+static void test_read_view_registry_reuses_last_releasable_generation(void);
 static void test_page_pin_registry_snapshots_oldest_pins(void);
 static void test_page_pin_registry_snapshots_cross_process_pins(void);
 static void test_page_pin_registry_releases_dead_owner_pins(void);
+static void test_page_pin_registry_release_pending_capacity_and_stale_token(void);
 static void test_dictionary_state_serializes_ddl_generations(void);
 static void test_dictionary_state_reports_dead_active_owner(void);
 static void test_dictionary_state_recovers_incomplete_active_owner(void);
@@ -421,6 +512,8 @@ static void test_redo_state_deferred_batch_cap_preserves_peer_headroom(void);
 static void test_redo_state_tracks_contiguous_written_ranges(void);
 static void test_redo_state_combines_write_and_leave_like_separate_steps(void);
 static void test_redo_state_batches_write_and_leave_ranges(void);
+static void test_redo_state_release_pending_and_generation_saturation(void);
+static void test_page_index_release_pending_and_generation_saturation(void);
 static void *reserve_redo_ranges_in_thread(void *context);
 static int compare_uint64_values(const void *left, const void *right);
 static void test_process_registry_allocates_cross_process_slots(void);
@@ -432,12 +525,21 @@ static void test_process_registry_cleanup_callback_releases_owner_locks(void);
 static void test_process_registry_cleanup_callback_can_block_cleanup(void);
 static void test_process_registry_counts_live_slots(void);
 static void test_process_registry_cleans_exited_process_slot(void);
+static void test_process_registry_release_pending_and_slot_reuse(void);
+static void test_process_registry_rejects_generation_saturation(void);
+static void test_process_registry_bootstrap_generation_mismatch_fails_closed(void);
+static void test_process_registry_recovers_dead_bootstrap_latch(void);
+static void test_process_registry_serializes_three_dead_latch_claimants(void);
 static mylite_ownerless_process_identity process_registry_test_identity(uint64_t pid);
 static int process_registry_test_identity_is_alive(
     const mylite_ownerless_process_identity *identity,
     void *ctx
 );
 static int process_registry_identity_is_running(
+    const mylite_ownerless_process_identity *identity,
+    void *ctx
+);
+static int process_registry_identity_is_dead(
     const mylite_ownerless_process_identity *identity,
     void *ctx
 );
@@ -464,9 +566,11 @@ static void set_write_lock(int fd, byte_range_lock range);
 static int try_write_lock(int fd, byte_range_lock range);
 static void unlock_range(int fd, byte_range_lock range);
 static int open_file(const char *path);
+static void register_page_log_checkpoint_stage(int fd, const char *log_path);
 static void truncate_file(int fd, off_t size);
 static void write_file_at(int fd, const void *data, size_t size, off_t offset);
 static void read_file_at(int fd, void *data, size_t size, off_t offset);
+static void convert_ready_checkpoint_stage_to_legacy(int stage_fd);
 static void fill_innodb_test_page(
     uint8_t *page,
     uint32_t space_id,
@@ -481,16 +585,30 @@ static void store_test_be64(uint8_t *bytes, size_t offset, uint64_t value);
 static void store_test_le32(uint8_t *bytes, size_t offset, uint32_t value);
 static void store_test_le64(uint8_t *bytes, size_t offset, uint64_t value);
 static uint32_t load_test_le32(const uint8_t *bytes, size_t offset);
+static uint64_t load_test_le64(const uint8_t *bytes, size_t offset);
 static uint64_t load_test_be64(const uint8_t *bytes, size_t offset);
 static uint32_t read_page_log_record_flags(int fd, uint64_t record_offset);
 static uint64_t legacy_page_log_checksum(const void *buffer, size_t size);
+static uint64_t page_log_ack_checksum_for_test(
+    uint64_t generation,
+    uint64_t relative_end_offset,
+    size_t slot_index
+);
 static uint32_t innodb_lock_registry_occupied_limit(void *registry);
+static void *hold_page_log_checkpoint_read_in_thread(void *context);
+static void *checkpoint_page_log_in_thread(void *context);
+static void *initialize_page_log_in_thread(void *context);
 static void *map_file(int fd, size_t size);
 static void signal_pipe(int pipe_fd);
 static void wait_for_pipe(int pipe_fd);
 static void wait_for_child_exited_without_reaping(pid_t child);
 static void wait_for_child(pid_t child);
 static void sleep_milliseconds(unsigned milliseconds);
+static pid_t start_page_log_lock_helper(
+    const char *operation,
+    const char *log_path,
+    int *out_ready_fd
+);
 static char *make_temp_root(void);
 static char *path_join(const char *directory, const char *name);
 static int path_exists(const char *path);
@@ -502,7 +620,60 @@ static int remove_tree_entry(
     struct FTW *walk
 );
 
-int main(void) {
+int main(int argc, char **argv) {
+    if (argc == 5 && strcmp(argv[1], "--page-log-lock-helper") == 0) {
+        char *end = NULL;
+        long ready_fd = strtol(argv[4], &end, 10);
+        int fd;
+        int result;
+
+        if (end == argv[4] || *end != '\0' || ready_fd < 0 || ready_fd > INT32_MAX) {
+            return 2;
+        }
+        fd = open_file(argv[3]);
+        signal_pipe((int)ready_fd);
+        if (strcmp(argv[2], "append") == 0) {
+            result = mylite_ownerless_page_log_initialize(fd);
+        } else if (strcmp(argv[2], "checkpoint") == 0) {
+            register_page_log_checkpoint_stage(fd, argv[3]);
+            result = mylite_ownerless_page_log_checkpoint(fd, UINT64_MAX, NULL, NULL);
+        } else {
+            result = MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+        }
+        assert(close(fd) == 0);
+        return result == MYLITE_OWNERLESS_PAGE_LOG_OK ? 0 : 1;
+    }
+
+    const char *test_filter = getenv("MYLITE_OWNERLESS_PRIMITIVES_TEST_FILTER");
+    if (test_filter != NULL && strcmp(test_filter, "page-log-range-order") == 0) {
+        test_page_log_orders_same_process_append_and_checkpoint_ranges();
+        test_page_log_range_locks_survive_alias_close();
+        test_page_log_process_lock_retirement();
+        test_page_log_process_locks_reset_after_fork();
+        return 0;
+    }
+    if (test_filter != NULL && strcmp(test_filter, "innodb-structure-gate") == 0) {
+        test_innodb_lock_registry_structure_gate_protocol();
+        return 0;
+    }
+    if (test_filter != NULL && strcmp(test_filter, "read-view-generation") == 0) {
+        test_read_view_registry_rejects_generation_saturation();
+        test_read_view_registry_reuses_last_releasable_generation();
+        return 0;
+    }
+    if (test_filter != NULL && strcmp(test_filter, "registry-fail-closed") == 0) {
+        test_innodb_lock_registry_release_pending_and_dead_latch_recovery();
+        test_autoinc_registry_release_pending_capacity_and_stale_generation();
+        test_page_pin_registry_release_pending_capacity_and_stale_token();
+        test_read_view_registry_rejects_generation_saturation();
+        test_read_view_registry_reuses_last_releasable_generation();
+        test_redo_state_release_pending_and_generation_saturation();
+        test_page_index_release_pending_and_generation_saturation();
+        test_process_registry_release_pending_and_slot_reuse();
+        test_process_registry_rejects_generation_saturation();
+        return 0;
+    }
+
     test_mmap_shared_visibility_across_processes();
     test_fcntl_byte_range_lock_conflict();
     test_fcntl_byte_range_lock_release_on_process_exit();
@@ -528,6 +699,7 @@ int main(void) {
     test_page_log_encodes_undo_delta_payloads();
     test_page_log_keeps_sys_pages_standalone();
     test_page_log_encodes_history_rseg_delta_payloads();
+    test_page_log_prefers_certified_history_rseg_pair();
     test_page_log_fast_encodes_small_index_delta_payloads();
     test_page_log_fast_encodes_medium_index_delta_payloads();
     test_page_log_reuses_fast_miss_delta_payload_for_exact_fallback();
@@ -543,15 +715,27 @@ int main(void) {
     test_page_log_initialized_sync_uses_existing_header();
     test_page_log_reads_under_existing_read_lock();
     test_page_log_tail_scan_absence_generation();
+    test_page_log_binds_record_metadata_checksums();
+    test_page_log_binds_proof_only_metadata_checksums();
     test_page_log_accepts_legacy_checksum_records();
     test_page_log_uses_reader_snapshots();
     test_page_log_tolerates_corrupt_tail_record();
     test_page_log_rejects_corrupt_interior_record();
     test_page_log_checkpoints_retained_records();
+    test_page_log_checkpoint_stage_preserves_live_fd();
+    test_page_log_orders_same_process_append_and_checkpoint_ranges();
+    test_page_log_range_locks_survive_alias_close();
+    test_page_log_process_lock_retirement();
+    test_page_log_process_locks_reset_after_fork();
+    test_page_log_repairs_torn_tail_before_append_and_initialize();
+    test_page_log_distinguishes_unacknowledged_tail_from_acknowledged_corruption();
+    test_page_log_checkpoint_rebinds_acknowledged_generation();
+    test_page_log_recovers_checkpoint_stage_crashes();
     test_page_log_preserves_oldest_snapshot_boundary();
     test_page_log_preserves_external_snapshot_lineage_metadata();
     test_page_log_external_snapshot_lineage_session_append();
     test_page_log_preserves_native_support_metadata();
+    test_page_log_checkpoint_retains_all_native_support_records();
     test_page_log_skips_proof_only_native_support_records();
     test_page_log_skips_generic_proof_only_records();
     test_page_log_appends_native_support_proof_pairs();
@@ -590,12 +774,15 @@ int main(void) {
     test_lock_table_releases_all_owner_locks();
     test_innodb_lock_registry_table_compatibility();
     test_innodb_lock_registry_record_compatibility();
+    test_innodb_lock_registry_insert_reservation_lifecycle();
+    test_innodb_lock_registry_insert_finalization_contention();
     test_innodb_lock_registry_nonblocking_reserve_waits_for_latch();
     test_innodb_lock_registry_wait_edges_and_deadlocks();
     test_innodb_lock_registry_table_waiter_death_requires_owner_cleanup();
     test_innodb_lock_registry_detects_cross_registry_deadlocks();
     test_innodb_lock_registry_detects_page_write_gate_deadlocks();
     test_innodb_lock_registry_page_write_gates_cover_physical_pages();
+    test_innodb_lock_registry_structure_gate_protocol();
     test_innodb_lock_registry_page_write_owner_bypasses_blocked_waiter();
     test_innodb_lock_registry_owner_blocks_waiting_lock();
     test_innodb_lock_registry_same_page_waiter_fairness();
@@ -603,7 +790,9 @@ int main(void) {
     test_innodb_lock_registry_waits_across_processes();
     test_innodb_lock_registry_references_and_owner_cleanup();
     test_innodb_lock_registry_shrinks_scan_limit();
+    test_innodb_lock_registry_release_pending_and_dead_latch_recovery();
     test_autoinc_registry_preserves_high_watermarks();
+    test_autoinc_registry_release_pending_capacity_and_stale_generation();
     test_mdl_key_hashes_are_stable_and_distinct();
     test_mdl_upgradable_is_compatible_with_shared_holders();
     test_mdl_metadata_modes_follow_mariadb_matrix();
@@ -615,12 +804,16 @@ int main(void) {
     test_trx_registry_assigns_read_view_serialisation_numbers();
     test_trx_registry_bumps_next_id_and_ends_by_owner_id();
     test_trx_registry_releases_dead_owner_transactions();
+    test_trx_registry_tracks_rollback_read_safety();
     test_read_view_registry_snapshots_oldest_views();
     test_read_view_registry_snapshots_cross_process_views();
     test_read_view_registry_releases_dead_owner_views();
+    test_read_view_registry_rejects_generation_saturation();
+    test_read_view_registry_reuses_last_releasable_generation();
     test_page_pin_registry_snapshots_oldest_pins();
     test_page_pin_registry_snapshots_cross_process_pins();
     test_page_pin_registry_releases_dead_owner_pins();
+    test_page_pin_registry_release_pending_capacity_and_stale_token();
     test_dictionary_state_serializes_ddl_generations();
     test_dictionary_state_reports_dead_active_owner();
     test_dictionary_state_recovers_incomplete_active_owner();
@@ -633,6 +826,8 @@ int main(void) {
     test_redo_state_tracks_contiguous_written_ranges();
     test_redo_state_combines_write_and_leave_like_separate_steps();
     test_redo_state_batches_write_and_leave_ranges();
+    test_redo_state_release_pending_and_generation_saturation();
+    test_page_index_release_pending_and_generation_saturation();
     test_process_registry_allocates_cross_process_slots();
     test_process_registry_rejects_stale_release();
     test_process_registry_updates_heartbeat();
@@ -642,6 +837,11 @@ int main(void) {
     test_process_registry_cleanup_callback_can_block_cleanup();
     test_process_registry_counts_live_slots();
     test_process_registry_cleans_exited_process_slot();
+    test_process_registry_release_pending_and_slot_reuse();
+    test_process_registry_rejects_generation_saturation();
+    test_process_registry_bootstrap_generation_mismatch_fails_closed();
+    test_process_registry_recovers_dead_bootstrap_latch();
+    test_process_registry_serializes_three_dead_latch_claimants();
     return 0;
 }
 
@@ -1338,6 +1538,7 @@ static void test_page_log_append_reports_write_volume(void) {
     memset(out_page, 0, sizeof(out_page));
 
     assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    register_page_log_checkpoint_stage(fd, log_path);
     mylite_ownerless_page_log_reset_append_perf_stats();
     mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
     assert(
@@ -1356,6 +1557,8 @@ static void test_page_log_append_reports_write_volume(void) {
         mylite_ownerless_page_log_append_session_begin_initialized_at(fd, 0U, &session) ==
         MYLITE_OWNERLESS_PAGE_LOG_OK
     );
+    assert(mylite_ownerless_page_log_begin_read(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    mylite_ownerless_page_log_end_read(fd);
     assert(
         mylite_ownerless_page_log_append_session_append(
             fd,
@@ -1761,6 +1964,7 @@ static void test_page_log_encodes_sparse_zero_payloads(void) {
     assert(commit_lsn == 160U);
     assert(memcmp(out_page, zero_page, sizeof(zero_page)) == 0);
 
+    register_page_log_checkpoint_stage(fd, log_path);
     assert(
         mylite_ownerless_page_log_checkpoint(fd, 140U, NULL, NULL) == MYLITE_OWNERLESS_PAGE_LOG_OK
     );
@@ -1835,6 +2039,7 @@ static void test_page_log_encodes_fill_sparse_zero_payloads(void) {
     page[220] = 0x33U;
 
     assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    register_page_log_checkpoint_stage(fd, log_path);
     mylite_ownerless_page_log_reset_append_perf_stats();
     mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
     assert(
@@ -2082,6 +2287,7 @@ static void test_page_log_rejects_corrupt_sparse_checksum_records(void) {
         ) == MYLITE_OWNERLESS_PAGE_LOG_OK
     );
     assert(second_offset > first_offset);
+    assert(mylite_ownerless_page_log_sync(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
     assert(
         pwrite(
             fd,
@@ -2123,6 +2329,7 @@ static void test_page_log_rejects_corrupt_sparse_checksum_records(void) {
     checkpointed = -1;
     fd = open_file(tail_log_path);
     assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    register_page_log_checkpoint_stage(fd, tail_log_path);
     assert(
         mylite_ownerless_page_log_append(
             fd,
@@ -2238,6 +2445,7 @@ static void test_page_log_encodes_index_fill_sparse_zero_payloads(void) {
     memset(out_page, 0xEE, sizeof(out_page));
 
     assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    register_page_log_checkpoint_stage(fd, missing_boundary_log_path);
     mylite_ownerless_page_log_reset_append_perf_stats();
     mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
     assert(
@@ -2332,6 +2540,7 @@ static void test_page_log_encodes_index_fill_sparse_zero_payloads(void) {
     page_boundary[4000] = 0x24U;
 
     assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    register_page_log_checkpoint_stage(fd, checkpoint_log_path);
     mylite_ownerless_page_log_reset_append_perf_stats();
     mylite_ownerless_page_log_set_append_perf_stats_enabled(1);
     assert(
@@ -2729,6 +2938,7 @@ static void test_page_log_encodes_index_delta_payloads(void) {
     assert(commit_lsn == 510U);
     assert(memcmp(out_page, page_delta, sizeof(page_delta)) == 0);
 
+    register_page_log_checkpoint_stage(fd, log_path);
     assert(
         mylite_ownerless_page_log_checkpoint(
             fd,
@@ -2963,6 +3173,7 @@ static void test_page_log_encodes_undo_delta_payloads(void) {
     assert(commit_lsn == 710U);
     assert(memcmp(out_page, page_delta, sizeof(page_delta)) == 0);
 
+    register_page_log_checkpoint_stage(fd, log_path);
     assert(
         mylite_ownerless_page_log_checkpoint(
             fd,
@@ -3251,6 +3462,7 @@ static void assert_page_log_encodes_history_rseg_delta_payload(
     assert(stats[PAGE_LOG_APPEND_PERF_STAT_HISTORY_RSEG_DELTA_PAYLOAD_BYTES] < sizeof(page_delta));
     delta_flags = read_page_log_record_flags(fd, delta_record_offset);
     assert((delta_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_HISTORY_RSEG_DELTA) != 0U);
+    assert((delta_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_METADATA_CHECKSUM) != 0U);
     assert((delta_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_INDEX_DELTA) == 0U);
     assert((delta_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_UNDO_DELTA) == 0U);
 
@@ -3296,6 +3508,7 @@ static void assert_page_log_encodes_history_rseg_delta_payload(
     assert((record_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_HISTORY_RSEG_DELTA) != 0U);
     assert(memcmp(out_page, page_delta, sizeof(page_delta)) == 0);
 
+    register_page_log_checkpoint_stage(fd, log_path);
     assert(
         mylite_ownerless_page_log_checkpoint(
             fd,
@@ -3309,6 +3522,7 @@ static void assert_page_log_encodes_history_rseg_delta_payload(
     retained_flags =
         read_page_log_record_flags(fd, checkpoint_context.retained.records[0].record_offset);
     assert((retained_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_HISTORY_RSEG_DELTA) == 0U);
+    assert((retained_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_METADATA_CHECKSUM) != 0U);
 
     memset(out_page, 0xEE, sizeof(out_page));
     assert(
@@ -3389,6 +3603,133 @@ static void test_page_log_encodes_history_rseg_delta_payloads(void) {
         "history-rseg-delta-trx-sys-page-log.bin",
         PAGE_LOG_APPEND_PERF_STAT_TRX_SYS_RECORDS
     );
+}
+
+static void test_page_log_prefers_certified_history_rseg_pair(void) {
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "history-rseg-certified-pair-page-log.bin");
+    int fd = open_file(log_path);
+    uint8_t paired_page[MYLITE_TEST_PAGE_SIZE];
+    uint8_t newer_unpaired_page[MYLITE_TEST_PAGE_SIZE];
+    uint8_t out_page[MYLITE_TEST_PAGE_SIZE];
+    const uint32_t space_id = 1U;
+    const uint32_t page_no = 9U;
+    const uint64_t paired_lsn = 1200U;
+    const uint64_t newer_lsn = 1300U;
+    uint64_t paired_record_offset = 0U;
+    uint64_t page_lsn = 0U;
+    uint64_t commit_lsn = 0U;
+    uint32_t out_page_size = 0U;
+    uint32_t record_flags = 0U;
+
+    memset(paired_page, 0x6A, sizeof(paired_page));
+    store_test_be32(paired_page, MYLITE_TEST_INNODB_PAGE_OFFSET_OFFSET, page_no);
+    store_test_be64(paired_page, MYLITE_TEST_INNODB_PAGE_LSN_OFFSET, paired_lsn);
+    store_test_be16(
+        paired_page,
+        MYLITE_TEST_INNODB_PAGE_TYPE_OFFSET,
+        MYLITE_TEST_INNODB_PAGE_TYPE_SYS
+    );
+    store_test_be32(paired_page, MYLITE_TEST_INNODB_PAGE_SPACE_ID_OFFSET, space_id);
+
+    memcpy(newer_unpaired_page, paired_page, sizeof(newer_unpaired_page));
+    store_test_be64(newer_unpaired_page, MYLITE_TEST_INNODB_PAGE_LSN_OFFSET, newer_lsn);
+    newer_unpaired_page[512] ^= 0x37U;
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append_initialized_at_with_checksum_and_options(
+            fd,
+            0U,
+            space_id,
+            page_no,
+            paired_lsn,
+            paired_lsn,
+            paired_page,
+            sizeof(paired_page),
+            mylite_ownerless_page_log_checksum_page(paired_page, sizeof(paired_page)),
+            MYLITE_OWNERLESS_PAGE_LOG_APPEND_HISTORY_RSEG_DELTA |
+                MYLITE_OWNERLESS_PAGE_LOG_APPEND_HISTORY_RSEG_PAIR,
+            &paired_record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    record_flags = read_page_log_record_flags(fd, paired_record_offset);
+    assert((record_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_HISTORY_RSEG_PAIR) != 0U);
+    assert((record_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_HISTORY_RSEG_DELTA) == 0U);
+
+    assert(
+        mylite_ownerless_page_log_append_initialized_at_with_checksum_and_options(
+            fd,
+            0U,
+            space_id,
+            page_no,
+            newer_lsn,
+            newer_lsn,
+            newer_unpaired_page,
+            sizeof(newer_unpaired_page),
+            mylite_ownerless_page_log_checksum_page(
+                newer_unpaired_page,
+                sizeof(newer_unpaired_page)
+            ),
+            0U,
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+
+    memset(out_page, 0xEE, sizeof(out_page));
+    assert(mylite_ownerless_page_log_begin_read(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_find_latest_under_read_lock_at_with_flags_and_options(
+            fd,
+            0U,
+            space_id,
+            page_no,
+            newer_lsn,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn,
+            &record_flags,
+            MYLITE_OWNERLESS_PAGE_LOG_FIND_HISTORY_RSEG_DELTA
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    mylite_ownerless_page_log_end_read(fd);
+    assert(out_page_size == sizeof(paired_page));
+    assert(page_lsn == paired_lsn);
+    assert(commit_lsn == paired_lsn);
+    assert((record_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_HISTORY_RSEG_PAIR) != 0U);
+    assert(memcmp(out_page, paired_page, sizeof(paired_page)) == 0);
+
+    memset(out_page, 0xEE, sizeof(out_page));
+    assert(mylite_ownerless_page_log_begin_read(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_find_latest_under_read_lock_at_with_flags_and_options(
+            fd,
+            0U,
+            space_id,
+            page_no,
+            newer_lsn,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn,
+            &record_flags,
+            0U
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    mylite_ownerless_page_log_end_read(fd);
+    assert(out_page_size == sizeof(newer_unpaired_page));
+    assert(page_lsn == newer_lsn);
+    assert(commit_lsn == newer_lsn);
+    assert((record_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_HISTORY_RSEG_PAIR) == 0U);
+    assert(memcmp(out_page, newer_unpaired_page, sizeof(newer_unpaired_page)) == 0);
+
+    assert(close(fd) == 0);
+    free(log_path);
+    remove_tree(root);
+    free(root);
 }
 
 static void test_page_log_fast_encodes_small_index_delta_payloads(void) {
@@ -5085,6 +5426,7 @@ static void test_page_log_tail_scan_absence_generation(void) {
     memset(out_page, 0, sizeof(out_page));
 
     assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    register_page_log_checkpoint_stage(fd, log_path);
     assert(
         mylite_ownerless_page_log_append(fd, 10U, 1U, 100U, 100U, page_a, sizeof(page_a), NULL) ==
         MYLITE_OWNERLESS_PAGE_LOG_OK
@@ -5278,6 +5620,261 @@ static void test_page_log_uses_reader_snapshots(void) {
     free(root);
 }
 
+static void test_page_log_binds_record_metadata_checksums(void) {
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "metadata-checksum-page-log.bin");
+    int fd = open_file(log_path);
+    uint8_t page[MYLITE_TEST_PAGE_SIZE];
+    uint8_t sentinel_page[MYLITE_TEST_PAGE_SIZE];
+    uint8_t out_page[MYLITE_TEST_PAGE_SIZE + 1U];
+    uint64_t record_offset = 0;
+    uint64_t sentinel_offset = 0;
+    uint64_t page_lsn = 0;
+    uint64_t commit_lsn = 0;
+    uint32_t out_page_size = 0;
+    page_log_retained_records replay_records = {0};
+
+    fill_innodb_test_page(page, 42U, 7U, 90U, 0xABU);
+    fill_innodb_test_page(sentinel_page, 43U, 8U, 100U, 0xCDU);
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            42U,
+            7U,
+            90U,
+            90U,
+            page,
+            sizeof(page),
+            &record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            43U,
+            8U,
+            100U,
+            100U,
+            sentinel_page,
+            sizeof(sentinel_page),
+            &sentinel_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(record_offset < sentinel_offset);
+    assert(
+        (read_page_log_record_flags(fd, record_offset) &
+         MYLITE_TEST_PAGE_LOG_RECORD_FLAG_METADATA_CHECKSUM) != 0U
+    );
+
+    for (size_t index = 0;
+         index < sizeof(page_log_metadata_bit_flips) / sizeof(page_log_metadata_bit_flips[0]);
+         ++index) {
+        const page_log_metadata_bit_flip flip = page_log_metadata_bit_flips[index];
+        const off_t byte_offset = (off_t)(record_offset + flip.byte_offset);
+        uint8_t original_byte = 0;
+        uint8_t corrupt_byte;
+
+        read_file_at(fd, &original_byte, sizeof(original_byte), byte_offset);
+        corrupt_byte = original_byte ^ flip.mask;
+        write_file_at(fd, &corrupt_byte, sizeof(corrupt_byte), byte_offset);
+
+        assert(
+            mylite_ownerless_page_log_read_record_at(
+                fd,
+                0U,
+                record_offset,
+                out_page,
+                sizeof(out_page),
+                &out_page_size,
+                &page_lsn,
+                &commit_lsn
+            ) == MYLITE_OWNERLESS_PAGE_LOG_ERROR
+        );
+        replay_records.count = 0U;
+        assert(
+            mylite_ownerless_page_log_replay_at(
+                fd,
+                0U,
+                capture_page_log_record_for_index_replace,
+                &replay_records
+            ) == MYLITE_OWNERLESS_PAGE_LOG_ERROR
+        );
+
+        write_file_at(fd, &original_byte, sizeof(original_byte), byte_offset);
+        replay_records.count = 0U;
+        assert(
+            mylite_ownerless_page_log_replay_at(
+                fd,
+                0U,
+                capture_page_log_record_for_index_replace,
+                &replay_records
+            ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+        );
+        assert(replay_records.count == 2U);
+    }
+
+    memset(out_page, 0xEE, sizeof(out_page));
+    assert(
+        mylite_ownerless_page_log_read_record_at(
+            fd,
+            0U,
+            record_offset,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(out_page_size == sizeof(page));
+    assert(page_lsn == 90U);
+    assert(commit_lsn == 90U);
+    assert(memcmp(out_page, page, sizeof(page)) == 0);
+
+    assert(close(fd) == 0);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_binds_proof_only_metadata_checksums(void) {
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "proof-metadata-checksum-page-log.bin");
+    int fd = open_file(log_path);
+    uint8_t page_before[MYLITE_TEST_PAGE_SIZE];
+    uint8_t page_after[MYLITE_TEST_PAGE_SIZE];
+    uint8_t out_page = 0;
+    uint8_t checksum_bytes[sizeof(uint64_t)] = {0};
+    const uint8_t zero_checksum[sizeof(checksum_bytes)] = {0};
+    uint64_t before_offset = 0;
+    uint64_t proof_offset = 0;
+    uint64_t after_offset = 0;
+    uint64_t page_lsn = 0;
+    uint64_t commit_lsn = 0;
+    uint32_t out_page_size = 0;
+    page_log_retained_records replay_records = {0};
+
+    fill_innodb_test_page(page_before, 91U, 3U, 200U, 0x24U);
+    fill_innodb_test_page(page_after, 94U, 5U, 240U, 0x26U);
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            91U,
+            3U,
+            200U,
+            200U,
+            page_before,
+            sizeof(page_before),
+            &before_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append_initialized_at_with_checksum_and_options(
+            fd,
+            0U,
+            93U,
+            4U,
+            220U,
+            220U,
+            NULL,
+            MYLITE_TEST_PAGE_SIZE,
+            0U,
+            MYLITE_OWNERLESS_PAGE_LOG_APPEND_PROOF_ONLY,
+            &proof_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            94U,
+            5U,
+            240U,
+            240U,
+            page_after,
+            sizeof(page_after),
+            &after_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(before_offset < proof_offset);
+    assert(proof_offset < after_offset);
+    assert(mylite_ownerless_page_log_sync(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        (read_page_log_record_flags(fd, proof_offset) &
+         (MYLITE_TEST_PAGE_LOG_RECORD_FLAG_PROOF_ONLY |
+          MYLITE_TEST_PAGE_LOG_RECORD_FLAG_METADATA_CHECKSUM)) ==
+        (MYLITE_TEST_PAGE_LOG_RECORD_FLAG_PROOF_ONLY |
+         MYLITE_TEST_PAGE_LOG_RECORD_FLAG_METADATA_CHECKSUM)
+    );
+    read_file_at(
+        fd,
+        checksum_bytes,
+        sizeof(checksum_bytes),
+        (off_t)(proof_offset + MYLITE_TEST_PAGE_LOG_RECORD_PAYLOAD_CHECKSUM_OFFSET)
+    );
+    assert(memcmp(checksum_bytes, zero_checksum, sizeof(checksum_bytes)) != 0);
+
+    for (size_t index = 0;
+         index < sizeof(page_log_metadata_bit_flips) / sizeof(page_log_metadata_bit_flips[0]);
+         ++index) {
+        const page_log_metadata_bit_flip flip = page_log_metadata_bit_flips[index];
+        const off_t byte_offset = (off_t)(proof_offset + flip.byte_offset);
+        uint8_t original_byte = 0;
+        uint8_t corrupt_byte;
+
+        read_file_at(fd, &original_byte, sizeof(original_byte), byte_offset);
+        corrupt_byte = original_byte ^ flip.mask;
+        write_file_at(fd, &corrupt_byte, sizeof(corrupt_byte), byte_offset);
+
+        assert(
+            mylite_ownerless_page_log_read_record_at(
+                fd,
+                0U,
+                proof_offset,
+                &out_page,
+                sizeof(out_page),
+                &out_page_size,
+                &page_lsn,
+                &commit_lsn
+            ) == MYLITE_OWNERLESS_PAGE_LOG_ERROR
+        );
+        replay_records.count = 0U;
+        if (flip.byte_offset == MYLITE_TEST_PAGE_LOG_RECORD_PAYLOAD_SIZE_OFFSET) {
+            assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_ERROR);
+        } else {
+            assert(
+                mylite_ownerless_page_log_replay_at_including_proof_only(
+                    fd,
+                    0U,
+                    capture_page_log_record_for_index_replace,
+                    &replay_records
+                ) == MYLITE_OWNERLESS_PAGE_LOG_ERROR
+            );
+        }
+
+        write_file_at(fd, &original_byte, sizeof(original_byte), byte_offset);
+        assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+        replay_records.count = 0U;
+        assert(
+            mylite_ownerless_page_log_replay_at_including_proof_only(
+                fd,
+                0U,
+                capture_page_log_record_for_index_replace,
+                &replay_records
+            ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+        );
+        assert(replay_records.count == 3U);
+    }
+
+    assert(close(fd) == 0);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_page_log_accepts_legacy_checksum_records(void) {
     enum { entry_count = 8U };
 
@@ -5290,6 +5887,7 @@ static void test_page_log_accepts_legacy_checksum_records(void) {
     page_log_replay_context context = {.page_index = index, .page_index_size = index_size};
     uint8_t page[32];
     uint8_t out_page[32];
+    uint8_t legacy_flags[sizeof(uint32_t)] = {0};
     uint8_t legacy_checksum[8] = {0};
     uint64_t record_offset = 0;
     uint64_t page_lsn = 0;
@@ -5303,6 +5901,7 @@ static void test_page_log_accepts_legacy_checksum_records(void) {
     memset(out_page, 0, sizeof(out_page));
 
     assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    register_page_log_checkpoint_stage(fd, log_path);
     assert(
         mylite_ownerless_page_log_append(
             fd,
@@ -5316,6 +5915,27 @@ static void test_page_log_accepts_legacy_checksum_records(void) {
         ) == MYLITE_OWNERLESS_PAGE_LOG_OK
     );
 
+    read_file_at(
+        fd,
+        legacy_flags,
+        sizeof(legacy_flags),
+        (off_t)(record_offset + MYLITE_TEST_PAGE_LOG_RECORD_FLAGS_OFFSET)
+    );
+    assert(
+        (load_test_le32(legacy_flags, 0U) & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_METADATA_CHECKSUM) !=
+        0U
+    );
+    store_test_le32(
+        legacy_flags,
+        0U,
+        load_test_le32(legacy_flags, 0U) & ~MYLITE_TEST_PAGE_LOG_RECORD_FLAG_METADATA_CHECKSUM
+    );
+    write_file_at(
+        fd,
+        legacy_flags,
+        sizeof(legacy_flags),
+        (off_t)(record_offset + MYLITE_TEST_PAGE_LOG_RECORD_FLAGS_OFFSET)
+    );
     store_test_le64(legacy_checksum, 0U, legacy_page_log_checksum(page, sizeof(page)));
     write_file_at(
         fd,
@@ -5429,6 +6049,7 @@ static void test_page_log_tolerates_corrupt_tail_record(void) {
     memset(out_page, 0, sizeof(out_page));
 
     assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    register_page_log_checkpoint_stage(fd, log_path);
     assert(mylite_ownerless_page_log_sync(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
     assert(
         mylite_ownerless_page_log_append(
@@ -5574,6 +6195,7 @@ static void test_page_log_rejects_corrupt_interior_record(void) {
         ) == MYLITE_OWNERLESS_PAGE_LOG_OK
     );
     assert(second_offset > first_offset);
+    assert(mylite_ownerless_page_log_sync(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
     assert(
         pwrite(
             fd,
@@ -5674,6 +6296,7 @@ static void test_page_log_checkpoints_retained_records(void) {
         mylite_ownerless_page_index_require_wal_scan(index, index_size, 1U, 10U) ==
         MYLITE_OWNERLESS_PAGE_INDEX_OK
     );
+    register_page_log_checkpoint_stage(fd, log_path);
     assert(
         mylite_ownerless_page_log_checkpoint_with_completion(
             fd,
@@ -5753,6 +6376,1178 @@ static void test_page_log_checkpoints_retained_records(void) {
     free(log_path);
     remove_tree(root);
     free(root);
+}
+
+static void test_page_log_checkpoint_stage_preserves_live_fd(void) {
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "live-fd-checkpoint-page-log.bin");
+    char *stage_path = path_join(root, "live-fd-checkpoint-page-log.bin.checkpoint-stage");
+    int fd = open_file(log_path);
+    int peer_fd = open_file(log_path);
+    int stage_fd = open_file(stage_path);
+    uint8_t page_safe[16];
+    uint8_t page_retained[16];
+    uint8_t out_page[16];
+    uint64_t page_lsn = 0;
+    uint64_t commit_lsn = 0;
+    uint32_t out_page_size = 0;
+    struct stat before_stat;
+    struct stat after_stat;
+    struct stat stage_stat;
+
+    memset(page_safe, 0x31, sizeof(page_safe));
+    memset(page_retained, 0x32, sizeof(page_retained));
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            51U,
+            2U,
+            100U,
+            100U,
+            page_safe,
+            sizeof(page_safe),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            51U,
+            2U,
+            120U,
+            120U,
+            page_retained,
+            sizeof(page_retained),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(fstat(fd, &before_stat) == 0);
+    assert(
+        mylite_ownerless_page_log_register_checkpoint_stage(fd, stage_fd) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_checkpoint(fd, 100U, NULL, NULL) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(fstat(peer_fd, &after_stat) == 0);
+    assert(before_stat.st_dev == after_stat.st_dev);
+    assert(before_stat.st_ino == after_stat.st_ino);
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            peer_fd,
+            51U,
+            2U,
+            100U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_NOT_FOUND
+    );
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            peer_fd,
+            51U,
+            2U,
+            120U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(memcmp(out_page, page_retained, sizeof(page_retained)) == 0);
+    assert(fstat(stage_fd, &stage_stat) == 0);
+    assert(stage_stat.st_size == 0);
+
+    mylite_ownerless_page_log_unregister_checkpoint_stage(fd);
+    assert(close(stage_fd) == 0);
+    assert(close(peer_fd) == 0);
+    assert(close(fd) == 0);
+    free(stage_path);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_orders_same_process_append_and_checkpoint_ranges(void) {
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "same-process-page-log-range-order.bin");
+    char *stage_path = path_join(root, "same-process-page-log-range-order.bin.checkpoint-stage");
+    int fd = open_file(log_path);
+    int stage_fd = open_file(stage_path);
+    int reader_acquired[2];
+    int reader_release_once[2];
+    int reader_released_once[2];
+    int reader_release_final[2];
+    pthread_t reader_thread;
+    page_log_checkpoint_reader_thread_context reader = {0};
+    mylite_ownerless_page_log_append_session session = {0};
+
+    assert(
+        mylite_ownerless_page_log_register_checkpoint_stage(fd, stage_fd) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append_session_begin_initialized_at(fd, 0U, &session) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(pipe(reader_acquired) == 0);
+    assert(pipe(reader_release_once) == 0);
+    assert(pipe(reader_released_once) == 0);
+    assert(pipe(reader_release_final) == 0);
+    reader.fd = fd;
+    reader.acquired_fd = reader_acquired[1];
+    reader.release_once_fd = reader_release_once[0];
+    reader.released_once_fd = reader_released_once[1];
+    reader.release_final_fd = reader_release_final[0];
+    assert(
+        pthread_create(&reader_thread, NULL, hold_page_log_checkpoint_read_in_thread, &reader) == 0
+    );
+    wait_for_pipe(reader_acquired[0]);
+    assert(__atomic_load_n(&reader.result, __ATOMIC_ACQUIRE) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+
+    if (mylite_ownerless_page_log_test_faults_enabled()) {
+        int writer_ready[2];
+        int writer_release[2];
+        char ready_fd_value[32];
+        char release_fd_value[32];
+        pthread_t writer_thread;
+        pthread_t contender_thread;
+        page_log_checkpoint_writer_thread_context writer = {0};
+        page_log_append_contender_thread_context contender = {0};
+
+        assert(pipe(writer_ready) == 0);
+        assert(pipe(writer_release) == 0);
+        assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", writer_ready[1]) > 0);
+        assert(snprintf(release_fd_value, sizeof(release_fd_value), "%d", writer_release[0]) > 0);
+        assert(
+            setenv("MYLITE_OWNERLESS_TEST_FAULT", "page-log-checkpoint-after-checkpoint-lock", 1) ==
+            0
+        );
+        assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
+        assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_RELEASE_FD", release_fd_value, 1) == 0);
+        writer.fd = fd;
+        assert(pthread_create(&writer_thread, NULL, checkpoint_page_log_in_thread, &writer) == 0);
+        while (__atomic_load_n(&writer.started, __ATOMIC_ACQUIRE) == 0) {
+            sleep_milliseconds(1U);
+        }
+        sleep_milliseconds(20U);
+        assert(__atomic_load_n(&writer.done, __ATOMIC_ACQUIRE) == 0);
+
+        signal_pipe(reader_release_once[1]);
+        wait_for_pipe(reader_released_once[0]);
+        sleep_milliseconds(20U);
+        assert(__atomic_load_n(&writer.done, __ATOMIC_ACQUIRE) == 0);
+        signal_pipe(reader_release_final[1]);
+        assert(pthread_join(reader_thread, NULL) == 0);
+        assert(reader.done == 1);
+        sleep_milliseconds(20U);
+        assert(__atomic_load_n(&writer.done, __ATOMIC_ACQUIRE) == 0);
+        mylite_ownerless_page_log_append_session_end(fd, &session);
+        wait_for_pipe(writer_ready[0]);
+
+        contender.fd = fd;
+        assert(
+            pthread_create(&contender_thread, NULL, initialize_page_log_in_thread, &contender) == 0
+        );
+        while (__atomic_load_n(&contender.started, __ATOMIC_ACQUIRE) == 0) {
+            sleep_milliseconds(1U);
+        }
+        sleep_milliseconds(20U);
+        assert(__atomic_load_n(&contender.done, __ATOMIC_ACQUIRE) == 0);
+
+        signal_pipe(writer_release[1]);
+        assert(pthread_join(writer_thread, NULL) == 0);
+        assert(writer.result == MYLITE_OWNERLESS_PAGE_LOG_OK);
+        assert(pthread_join(contender_thread, NULL) == 0);
+        assert(contender.result == MYLITE_OWNERLESS_PAGE_LOG_OK);
+        assert(unsetenv("MYLITE_OWNERLESS_TEST_FAULT_RELEASE_FD") == 0);
+        assert(unsetenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD") == 0);
+        assert(unsetenv("MYLITE_OWNERLESS_TEST_FAULT") == 0);
+    } else {
+        signal_pipe(reader_release_once[1]);
+        wait_for_pipe(reader_released_once[0]);
+        signal_pipe(reader_release_final[1]);
+        assert(pthread_join(reader_thread, NULL) == 0);
+        assert(reader.done == 1);
+        mylite_ownerless_page_log_append_session_end(fd, &session);
+    }
+
+    mylite_ownerless_page_log_unregister_checkpoint_stage(fd);
+    assert(close(stage_fd) == 0);
+    assert(close(fd) == 0);
+    free(stage_path);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_range_locks_survive_alias_close(void) {
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "alias-close-page-log.bin");
+    int fd = open_file(log_path);
+    int alias_fd;
+    int helper_ready_fd = -1;
+    pid_t helper;
+    uint8_t page[16];
+    mylite_ownerless_page_log_append_session session = {0};
+    struct stat log_stat;
+
+    memset(page, 0x8AU, sizeof(page));
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append_session_begin_initialized_at(fd, 0U, &session) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    alias_fd = open_file(log_path);
+    assert(close(alias_fd) == 0);
+    helper = start_page_log_lock_helper("append", log_path, &helper_ready_fd);
+    wait_for_pipe(helper_ready_fd);
+    sleep_milliseconds(100U);
+    assert(waitpid(helper, NULL, WNOHANG) == 0);
+    mylite_ownerless_page_log_append_session_end(fd, &session);
+    wait_for_child(helper);
+
+    assert(
+        mylite_ownerless_page_log_append(fd, 67U, 4U, 100U, 100U, page, sizeof(page), NULL) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(mylite_ownerless_page_log_begin_read(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    alias_fd = open_file(log_path);
+    assert(close(alias_fd) == 0);
+    helper = start_page_log_lock_helper("checkpoint", log_path, &helper_ready_fd);
+    wait_for_pipe(helper_ready_fd);
+    sleep_milliseconds(100U);
+    assert(waitpid(helper, NULL, WNOHANG) == 0);
+    mylite_ownerless_page_log_end_read(fd);
+    wait_for_child(helper);
+    assert(fstat(fd, &log_stat) == 0);
+    assert(log_stat.st_size == MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE);
+
+    assert(close(fd) == 0);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_process_lock_retirement(void) {
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "retire-page-log-lock.bin");
+    int fd = open_file(log_path);
+    mylite_ownerless_page_log_append_session session = {0};
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append_session_begin_initialized_at(fd, 0U, &session) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(mylite_ownerless_page_log_retire_process_lock(fd) == MYLITE_OWNERLESS_PAGE_LOG_BUSY);
+    mylite_ownerless_page_log_append_session_end(fd, &session);
+    assert(mylite_ownerless_page_log_retire_process_lock(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(mylite_ownerless_page_log_retire_process_lock(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+
+    assert(close(fd) == 0);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_process_locks_reset_after_fork(void) {
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "fork-reset-page-log.bin");
+    int fd = open_file(log_path);
+    int holder_ready[2];
+    int holder_release[2];
+    pid_t holder;
+    pid_t contender;
+    int status = 0;
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(pipe(holder_ready) == 0);
+    assert(pipe(holder_release) == 0);
+    holder = fork();
+    assert(holder >= 0);
+    if (holder == 0) {
+        mylite_ownerless_page_log_append_session session = {0};
+        close(holder_ready[0]);
+        close(holder_release[1]);
+        if (mylite_ownerless_page_log_append_session_begin_initialized_at(fd, 0U, &session) !=
+            MYLITE_OWNERLESS_PAGE_LOG_OK) {
+            _exit(1);
+        }
+        signal_pipe(holder_ready[1]);
+        wait_for_pipe(holder_release[0]);
+        mylite_ownerless_page_log_append_session_end(fd, &session);
+        _exit(0);
+    }
+    close(holder_ready[1]);
+    close(holder_release[0]);
+    wait_for_pipe(holder_ready[0]);
+
+    contender = fork();
+    assert(contender >= 0);
+    if (contender == 0) {
+        _exit(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK ? 0 : 1);
+    }
+    sleep_milliseconds(100U);
+    assert(waitpid(contender, &status, WNOHANG) == 0);
+
+    signal_pipe(holder_release[1]);
+    wait_for_child(holder);
+    wait_for_child(contender);
+    assert(close(fd) == 0);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_repairs_torn_tail_before_append_and_initialize(void) {
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "torn-repair-page-log.bin");
+    char *donor_path = path_join(root, "torn-repair-donor-page-log.bin");
+    int fd = open_file(log_path);
+    int donor_fd;
+    uint8_t page_first[16];
+    uint8_t page_second[16];
+    uint8_t torn_bytes[23];
+    uint8_t interrupted_header[MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE];
+    uint8_t donor_page[96];
+    uint8_t out_page[16];
+    uint8_t *embedded_record;
+    size_t embedded_record_size;
+    uint64_t second_record_offset = 0;
+    uint64_t page_lsn = 0;
+    uint64_t commit_lsn = 0;
+    uint32_t out_page_size = 0;
+    struct stat valid_stat;
+    struct stat repaired_stat;
+    struct stat donor_stat;
+
+    memset(page_first, 0x41, sizeof(page_first));
+    memset(page_second, 0x42, sizeof(page_second));
+    memset(torn_bytes, 0xA5, sizeof(torn_bytes));
+    memset(interrupted_header, 0xA5, sizeof(interrupted_header));
+    memset(donor_page, 0x43, sizeof(donor_page));
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            61U,
+            3U,
+            100U,
+            100U,
+            page_first,
+            sizeof(page_first),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(fstat(fd, &valid_stat) == 0);
+    write_file_at(fd, torn_bytes, sizeof(torn_bytes), valid_stat.st_size);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            61U,
+            3U,
+            120U,
+            120U,
+            page_second,
+            sizeof(page_second),
+            &second_record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(second_record_offset == (uint64_t)valid_stat.st_size);
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            61U,
+            3U,
+            120U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(memcmp(out_page, page_second, sizeof(page_second)) == 0);
+    assert(mylite_ownerless_page_log_sync(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(fstat(fd, &valid_stat) == 0);
+
+    donor_fd = open_file(donor_path);
+    assert(mylite_ownerless_page_log_initialize(donor_fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append(
+            donor_fd,
+            62U,
+            4U,
+            140U,
+            140U,
+            donor_page,
+            sizeof(donor_page),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(fstat(donor_fd, &donor_stat) == 0);
+    assert(donor_stat.st_size > MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE);
+    embedded_record_size = (size_t)(donor_stat.st_size - MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE);
+    embedded_record = malloc(embedded_record_size);
+    assert(embedded_record != NULL);
+    read_file_at(
+        donor_fd,
+        embedded_record,
+        embedded_record_size,
+        MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE
+    );
+    assert(close(donor_fd) == 0);
+
+    write_file_at(fd, interrupted_header, sizeof(interrupted_header), valid_stat.st_size);
+    write_file_at(
+        fd,
+        embedded_record,
+        embedded_record_size,
+        valid_stat.st_size + (off_t)sizeof(interrupted_header)
+    );
+    assert(close(fd) == 0);
+
+    fd = open_file(log_path);
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(fstat(fd, &repaired_stat) == 0);
+    assert(repaired_stat.st_size == valid_stat.st_size);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            61U,
+            3U,
+            140U,
+            140U,
+            page_first,
+            sizeof(page_first),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(close(fd) == 0);
+    free(embedded_record);
+    free(donor_path);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_distinguishes_unacknowledged_tail_from_acknowledged_corruption(void) {
+    char *root = make_temp_root();
+    char *unacknowledged_path = path_join(root, "unacknowledged-corrupt-tail-page-log.bin");
+    char *acknowledged_path = path_join(root, "acknowledged-corrupt-tail-page-log.bin");
+    char *acknowledged_header_path = path_join(root, "acknowledged-corrupt-header-page-log.bin");
+    char *single_ack_slot_path = path_join(root, "single-ack-slot-page-log.bin");
+    char *crash_path = path_join(root, "pre-ack-crash-page-log.bin");
+    char *post_ack_write_crash_path = path_join(root, "post-ack-write-crash-page-log.bin");
+    char *legacy_path = path_join(root, "legacy-no-ack-page-log.bin");
+    uint8_t page_first[16];
+    uint8_t page_last[16];
+    uint8_t out_page[16];
+    uint8_t empty_ack_slots
+        [MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE - MYLITE_TEST_PAGE_LOG_HEADER_ACK_SLOTS_OFFSET] = {
+            0
+        };
+    uint8_t corrupt_byte = 0U;
+    uint64_t last_record_offset = 0;
+    uint64_t page_lsn = 0;
+    uint64_t commit_lsn = 0;
+    uint32_t out_page_size = 0;
+    struct stat before_repair;
+    struct stat after_repair;
+    int fd;
+
+    memset(page_first, 0x61, sizeof(page_first));
+    memset(page_last, 0x62, sizeof(page_last));
+
+    fd = open_file(unacknowledged_path);
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            81U,
+            5U,
+            100U,
+            100U,
+            page_first,
+            sizeof(page_first),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(mylite_ownerless_page_log_sync(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            81U,
+            5U,
+            120U,
+            120U,
+            page_last,
+            sizeof(page_last),
+            &last_record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    read_file_at(
+        fd,
+        &corrupt_byte,
+        sizeof(corrupt_byte),
+        (off_t)(last_record_offset + MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE)
+    );
+    corrupt_byte ^= 0xFFU;
+    write_file_at(
+        fd,
+        &corrupt_byte,
+        sizeof(corrupt_byte),
+        (off_t)(last_record_offset + MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE)
+    );
+    assert(fsync(fd) == 0);
+    assert(fstat(fd, &before_repair) == 0);
+    assert(close(fd) == 0);
+
+    fd = open_file(unacknowledged_path);
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(fstat(fd, &after_repair) == 0);
+    assert(after_repair.st_size == (off_t)last_record_offset);
+    assert(after_repair.st_size < before_repair.st_size);
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            81U,
+            5U,
+            120U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(commit_lsn == 100U);
+    assert(memcmp(out_page, page_first, sizeof(page_first)) == 0);
+    assert(close(fd) == 0);
+
+    fd = open_file(acknowledged_path);
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            82U,
+            6U,
+            140U,
+            140U,
+            page_last,
+            sizeof(page_last),
+            &last_record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(mylite_ownerless_page_log_sync(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    read_file_at(
+        fd,
+        &corrupt_byte,
+        sizeof(corrupt_byte),
+        (off_t)(last_record_offset + MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE)
+    );
+    corrupt_byte ^= 0x7FU;
+    write_file_at(
+        fd,
+        &corrupt_byte,
+        sizeof(corrupt_byte),
+        (off_t)(last_record_offset + MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE)
+    );
+    assert(fsync(fd) == 0);
+    assert(fstat(fd, &before_repair) == 0);
+    assert(close(fd) == 0);
+
+    fd = open_file(acknowledged_path);
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_ERROR);
+    assert(fstat(fd, &after_repair) == 0);
+    assert(after_repair.st_size == before_repair.st_size);
+    assert(close(fd) == 0);
+
+    fd = open_file(acknowledged_header_path);
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            84U,
+            8U,
+            150U,
+            150U,
+            page_last,
+            sizeof(page_last),
+            &last_record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(mylite_ownerless_page_log_sync(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    read_file_at(
+        fd,
+        &corrupt_byte,
+        sizeof(corrupt_byte),
+        (off_t)(last_record_offset + MYLITE_TEST_PAGE_LOG_RECORD_SPACE_ID_OFFSET)
+    );
+    corrupt_byte ^= 0x01U;
+    write_file_at(
+        fd,
+        &corrupt_byte,
+        sizeof(corrupt_byte),
+        (off_t)(last_record_offset + MYLITE_TEST_PAGE_LOG_RECORD_SPACE_ID_OFFSET)
+    );
+    assert(fsync(fd) == 0);
+    assert(fstat(fd, &before_repair) == 0);
+    assert(close(fd) == 0);
+
+    fd = open_file(acknowledged_header_path);
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_ERROR);
+    assert(fstat(fd, &after_repair) == 0);
+    assert(after_repair.st_size == before_repair.st_size);
+    assert(close(fd) == 0);
+
+    fd = open_file(single_ack_slot_path);
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            87U,
+            11U,
+            210U,
+            210U,
+            page_last,
+            sizeof(page_last),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(mylite_ownerless_page_log_sync(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    memset(empty_ack_slots, 0, MYLITE_TEST_PAGE_LOG_HEADER_ACK_SLOT_SIZE);
+    write_file_at(
+        fd,
+        empty_ack_slots,
+        MYLITE_TEST_PAGE_LOG_HEADER_ACK_SLOT_SIZE,
+        MYLITE_TEST_PAGE_LOG_HEADER_ACK_SLOTS_OFFSET
+    );
+    assert(fsync(fd) == 0);
+    assert(close(fd) == 0);
+
+    fd = open_file(single_ack_slot_path);
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_find_latest(
+            fd,
+            87U,
+            11U,
+            210U,
+            out_page,
+            sizeof(out_page),
+            &out_page_size,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(commit_lsn == 210U);
+    assert(memcmp(out_page, page_last, sizeof(page_last)) == 0);
+    assert(close(fd) == 0);
+
+    fd = open_file(legacy_path);
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            85U,
+            9U,
+            155U,
+            155U,
+            page_last,
+            sizeof(page_last),
+            &last_record_offset
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(mylite_ownerless_page_log_sync(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    write_file_at(
+        fd,
+        empty_ack_slots,
+        sizeof(empty_ack_slots),
+        MYLITE_TEST_PAGE_LOG_HEADER_ACK_SLOTS_OFFSET
+    );
+    assert(fsync(fd) == 0);
+    assert(close(fd) == 0);
+
+    fd = open_file(legacy_path);
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(close(fd) == 0);
+
+    fd = open_file(legacy_path);
+    read_file_at(
+        fd,
+        &corrupt_byte,
+        sizeof(corrupt_byte),
+        (off_t)(last_record_offset + MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE)
+    );
+    corrupt_byte ^= 0x55U;
+    write_file_at(
+        fd,
+        &corrupt_byte,
+        sizeof(corrupt_byte),
+        (off_t)(last_record_offset + MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE)
+    );
+    assert(fsync(fd) == 0);
+    assert(fstat(fd, &before_repair) == 0);
+    assert(close(fd) == 0);
+
+    fd = open_file(legacy_path);
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_ERROR);
+    assert(fstat(fd, &after_repair) == 0);
+    assert(after_repair.st_size == before_repair.st_size);
+    assert(close(fd) == 0);
+
+    if (mylite_ownerless_page_log_test_faults_enabled()) {
+        int ready_pipe[2];
+        pid_t child;
+        int child_status = 0;
+        char ready_fd_value[32];
+
+        fd = open_file(crash_path);
+        assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+        assert(
+            mylite_ownerless_page_log_append(
+                fd,
+                83U,
+                7U,
+                160U,
+                160U,
+                page_first,
+                sizeof(page_first),
+                NULL
+            ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+        );
+        assert(mylite_ownerless_page_log_sync(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+        assert(
+            mylite_ownerless_page_log_append(
+                fd,
+                83U,
+                7U,
+                180U,
+                180U,
+                page_last,
+                sizeof(page_last),
+                &last_record_offset
+            ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+        );
+        assert(pipe(ready_pipe) == 0);
+        child = fork();
+        assert(child >= 0);
+        if (child == 0) {
+            close(ready_pipe[0]);
+            assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", ready_pipe[1]) > 0);
+            assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "page-log-sync-before-ack", 1) == 0);
+            assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
+            (void)mylite_ownerless_page_log_sync(fd);
+            _exit(2);
+        }
+        close(ready_pipe[1]);
+        wait_for_pipe(ready_pipe[0]);
+        assert(kill(child, SIGKILL) == 0);
+        assert(waitpid(child, &child_status, 0) == child);
+        assert(WIFSIGNALED(child_status));
+        assert(WTERMSIG(child_status) == SIGKILL);
+        read_file_at(
+            fd,
+            &corrupt_byte,
+            sizeof(corrupt_byte),
+            (off_t)(last_record_offset + MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE)
+        );
+        corrupt_byte ^= 0x3FU;
+        write_file_at(
+            fd,
+            &corrupt_byte,
+            sizeof(corrupt_byte),
+            (off_t)(last_record_offset + MYLITE_OWNERLESS_PAGE_LOG_RECORD_HEADER_SIZE)
+        );
+        assert(fsync(fd) == 0);
+        assert(close(fd) == 0);
+
+        fd = open_file(crash_path);
+        assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+        assert(fstat(fd, &after_repair) == 0);
+        assert(after_repair.st_size == (off_t)last_record_offset);
+        assert(
+            mylite_ownerless_page_log_find_latest(
+                fd,
+                83U,
+                7U,
+                180U,
+                out_page,
+                sizeof(out_page),
+                &out_page_size,
+                &page_lsn,
+                &commit_lsn
+            ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+        );
+        assert(commit_lsn == 160U);
+        assert(memcmp(out_page, page_first, sizeof(page_first)) == 0);
+        assert(close(fd) == 0);
+
+        fd = open_file(post_ack_write_crash_path);
+        assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+        assert(
+            mylite_ownerless_page_log_append(
+                fd,
+                86U,
+                10U,
+                200U,
+                200U,
+                page_last,
+                sizeof(page_last),
+                NULL
+            ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+        );
+        assert(pipe(ready_pipe) == 0);
+        child = fork();
+        assert(child >= 0);
+        if (child == 0) {
+            close(ready_pipe[0]);
+            assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", ready_pipe[1]) > 0);
+            assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "page-log-sync-after-ack-write", 1) == 0);
+            assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
+            (void)mylite_ownerless_page_log_sync(fd);
+            _exit(2);
+        }
+        close(ready_pipe[1]);
+        wait_for_pipe(ready_pipe[0]);
+        assert(kill(child, SIGKILL) == 0);
+        assert(waitpid(child, &child_status, 0) == child);
+        assert(WIFSIGNALED(child_status));
+        assert(WTERMSIG(child_status) == SIGKILL);
+        assert(close(fd) == 0);
+
+        fd = open_file(post_ack_write_crash_path);
+        assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+        assert(
+            mylite_ownerless_page_log_find_latest(
+                fd,
+                86U,
+                10U,
+                200U,
+                out_page,
+                sizeof(out_page),
+                &out_page_size,
+                &page_lsn,
+                &commit_lsn
+            ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+        );
+        assert(commit_lsn == 200U);
+        assert(memcmp(out_page, page_last, sizeof(page_last)) == 0);
+        assert(close(fd) == 0);
+    }
+
+    free(legacy_path);
+    free(post_ack_write_crash_path);
+    free(crash_path);
+    free(single_ack_slot_path);
+    free(acknowledged_header_path);
+    free(acknowledged_path);
+    free(unacknowledged_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_checkpoint_rebinds_acknowledged_generation(void) {
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "checkpoint-ack-generation-page-log.bin");
+    char *stage_path = path_join(root, "checkpoint-ack-generation-page-log.bin.checkpoint-stage");
+    uint8_t page[16];
+    uint8_t header[MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE];
+    uint64_t source_generation;
+    uint64_t target_generation;
+    size_t current_generation_slots = 0U;
+    size_t stale_generation_slots = 0U;
+    struct stat log_stat;
+    int checkpointed = 0;
+    int fd = open_file(log_path);
+    int stage_fd = open_file(stage_path);
+
+    memset(page, 0x71, sizeof(page));
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append(fd, 87U, 11U, 220U, 220U, page, sizeof(page), NULL) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(mylite_ownerless_page_log_sync(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    read_file_at(fd, header, sizeof(header), 0);
+    source_generation = load_test_le64(header, MYLITE_TEST_PAGE_LOG_HEADER_GENERATION_OFFSET);
+    assert(
+        mylite_ownerless_page_log_register_checkpoint_stage(fd, stage_fd) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_checkpoint_if_safe(fd, 220U, &checkpointed) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(checkpointed == 1);
+    assert(fstat(fd, &log_stat) == 0);
+    assert(log_stat.st_size == MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE);
+    read_file_at(fd, header, sizeof(header), 0);
+    target_generation = load_test_le64(header, MYLITE_TEST_PAGE_LOG_HEADER_GENERATION_OFFSET);
+    assert(target_generation != source_generation);
+
+    for (size_t slot_index = 0; slot_index < 2U; ++slot_index) {
+        const size_t slot_offset = MYLITE_TEST_PAGE_LOG_HEADER_ACK_SLOTS_OFFSET +
+                                   slot_index * MYLITE_TEST_PAGE_LOG_HEADER_ACK_SLOT_SIZE;
+        const uint64_t relative_end =
+            load_test_le64(header, slot_offset + MYLITE_TEST_PAGE_LOG_HEADER_ACK_END_OFFSET);
+        const uint64_t checksum =
+            load_test_le64(header, slot_offset + MYLITE_TEST_PAGE_LOG_HEADER_ACK_CHECKSUM_OFFSET);
+
+        if (checksum ==
+            page_log_ack_checksum_for_test(target_generation, relative_end, slot_index)) {
+            assert(relative_end == MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE);
+            ++current_generation_slots;
+        }
+        if (checksum ==
+            page_log_ack_checksum_for_test(source_generation, relative_end, slot_index)) {
+            ++stale_generation_slots;
+        }
+    }
+    assert(current_generation_slots >= 1U);
+    assert(stale_generation_slots == 0U);
+
+    mylite_ownerless_page_log_unregister_checkpoint_stage(fd);
+    assert(close(stage_fd) == 0);
+    assert(close(fd) == 0);
+    free(stage_path);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_recovers_checkpoint_stage_crashes(void) {
+    static const struct {
+        const char *fault;
+        int expect_compacted;
+        int corrupt_ready_image;
+        int truncate_building_header;
+        off_t torn_state_slot_offset;
+        int damage_live_header;
+        int convert_ready_to_legacy;
+        int expect_recovery_error;
+    } cases[] = {
+        {"checkpoint-stage-building", 0, 0, 0, -1, 0, 0, 0},
+        {"checkpoint-stage-building", 0, 0, 1, -1, 0, 0, 0},
+        {"checkpoint-stage-target-header", 0, 0, 0, -1, 0, 0, 0},
+        {"checkpoint-stage-target-header",
+         0,
+         0,
+         0,
+         MYLITE_TEST_CHECKPOINT_STAGE_VALID_SLOT_OFFSET,
+         0,
+         0,
+         0},
+        {"checkpoint-stage-record", 0, 0, 0, -1, 0, 0, 0},
+        {"checkpoint-stage-valid", 0, 0, 0, -1, 0, 0, 0},
+        {"checkpoint-stage-valid",
+         0,
+         0,
+         0,
+         MYLITE_TEST_CHECKPOINT_STAGE_READY_SLOT_OFFSET,
+         0,
+         0,
+         0},
+        {"checkpoint-stage-ready", 1, 0, 0, -1, 0, 0, 0},
+        {"checkpoint-stage-ready", 1, 0, 0, 0, 0, 0, 0},
+        {"checkpoint-stage-ready", 1, 0, 0, -1, 1, 0, 0},
+        {"checkpoint-stage-ready", 1, 0, 0, -1, 0, 1, 0},
+        {"checkpoint-install-after-header", 1, 0, 0, -1, 0, 0, 0},
+        {"checkpoint-stage-ready", 0, 1, 0, -1, 0, 0, 1},
+    };
+
+    if (!mylite_ownerless_page_log_test_faults_enabled()) {
+        return;
+    }
+    for (size_t case_index = 0; case_index < sizeof(cases) / sizeof(cases[0]); ++case_index) {
+        char *root = make_temp_root();
+        char *log_path = path_join(root, "crash-checkpoint-page-log.bin");
+        char *stage_path = path_join(root, "crash-checkpoint-page-log.bin.checkpoint-stage");
+        int fd = open_file(log_path);
+        int peer_fd = open_file(log_path);
+        int stage_fd = open_file(stage_path);
+        int ready_pipe[2];
+        uint8_t page_safe[16];
+        uint8_t page_retained[16];
+        uint8_t out_page[16];
+        uint64_t page_lsn = 0;
+        uint64_t commit_lsn = 0;
+        uint32_t out_page_size = 0;
+        pid_t child;
+        int child_status = 0;
+        char ready_fd_value[32];
+        struct stat before_recovery_stat;
+        struct stat after_recovery_stat;
+        struct stat stage_stat;
+
+        memset(page_safe, 0x51, sizeof(page_safe));
+        memset(page_retained, 0x52, sizeof(page_retained));
+        assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+        assert(
+            mylite_ownerless_page_log_append(
+                fd,
+                71U,
+                4U,
+                100U,
+                100U,
+                page_safe,
+                sizeof(page_safe),
+                NULL
+            ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+        );
+        assert(
+            mylite_ownerless_page_log_append(
+                fd,
+                71U,
+                4U,
+                120U,
+                120U,
+                page_retained,
+                sizeof(page_retained),
+                NULL
+            ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+        );
+        assert(
+            mylite_ownerless_page_log_register_checkpoint_stage(fd, stage_fd) ==
+            MYLITE_OWNERLESS_PAGE_LOG_OK
+        );
+        assert(pipe(ready_pipe) == 0);
+        child = fork();
+        assert(child >= 0);
+        if (child == 0) {
+            close(ready_pipe[0]);
+            assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", ready_pipe[1]) > 0);
+            assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", cases[case_index].fault, 1) == 0);
+            assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", ready_fd_value, 1) == 0);
+            assert(
+                mylite_ownerless_page_log_register_checkpoint_stage(fd, stage_fd) ==
+                MYLITE_OWNERLESS_PAGE_LOG_OK
+            );
+            (void)mylite_ownerless_page_log_checkpoint(fd, 100U, NULL, NULL);
+            _exit(2);
+        }
+        close(ready_pipe[1]);
+        wait_for_pipe(ready_pipe[0]);
+        assert(kill(child, SIGKILL) == 0);
+        assert(waitpid(child, &child_status, 0) == child);
+        assert(WIFSIGNALED(child_status));
+        assert(WTERMSIG(child_status) == SIGKILL);
+        if (cases[case_index].truncate_building_header) {
+            assert(ftruncate(stage_fd, 63) == 0);
+            assert(fsync(stage_fd) == 0);
+        }
+        if (cases[case_index].torn_state_slot_offset >= 0) {
+            uint8_t torn_slot[63];
+            const uint32_t torn_state = cases[case_index].torn_state_slot_offset ==
+                                                MYLITE_TEST_CHECKPOINT_STAGE_VALID_SLOT_OFFSET
+                                            ? 1U
+                                            : 2U;
+
+            read_file_at(stage_fd, torn_slot, sizeof(torn_slot), 0);
+            store_test_le32(torn_slot, MYLITE_TEST_CHECKPOINT_STAGE_STATE_OFFSET, torn_state);
+            write_file_at(
+                stage_fd,
+                torn_slot,
+                sizeof(torn_slot),
+                cases[case_index].torn_state_slot_offset
+            );
+            assert(fsync(stage_fd) == 0);
+        }
+        if (cases[case_index].convert_ready_to_legacy) {
+            convert_ready_checkpoint_stage_to_legacy(stage_fd);
+        }
+        if (cases[case_index].corrupt_ready_image) {
+            const uint8_t corrupt_byte = 0U;
+
+            write_file_at(
+                stage_fd,
+                &corrupt_byte,
+                sizeof(corrupt_byte),
+                (off_t)(MYLITE_TEST_CHECKPOINT_STAGE_DATA_OFFSET +
+                        MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE)
+            );
+            assert(fsync(stage_fd) == 0);
+        }
+        if (cases[case_index].damage_live_header) {
+            uint8_t torn_header[37];
+
+            memset(torn_header, 0xA5, sizeof(torn_header));
+            write_file_at(fd, torn_header, sizeof(torn_header), 0);
+            assert(fsync(fd) == 0);
+        }
+        assert(fstat(peer_fd, &before_recovery_stat) == 0);
+
+        if (cases[case_index].expect_recovery_error) {
+            assert(
+                mylite_ownerless_page_log_find_latest(
+                    peer_fd,
+                    71U,
+                    4U,
+                    100U,
+                    out_page,
+                    sizeof(out_page),
+                    &out_page_size,
+                    &page_lsn,
+                    &commit_lsn
+                ) == MYLITE_OWNERLESS_PAGE_LOG_ERROR
+            );
+        } else {
+            assert(
+                mylite_ownerless_page_log_find_latest(
+                    peer_fd,
+                    71U,
+                    4U,
+                    100U,
+                    out_page,
+                    sizeof(out_page),
+                    &out_page_size,
+                    &page_lsn,
+                    &commit_lsn
+                ) == (cases[case_index].expect_compacted ? MYLITE_OWNERLESS_PAGE_LOG_NOT_FOUND
+                                                         : MYLITE_OWNERLESS_PAGE_LOG_OK)
+            );
+            assert(
+                mylite_ownerless_page_log_find_latest(
+                    peer_fd,
+                    71U,
+                    4U,
+                    120U,
+                    out_page,
+                    sizeof(out_page),
+                    &out_page_size,
+                    &page_lsn,
+                    &commit_lsn
+                ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+            );
+            assert(memcmp(out_page, page_retained, sizeof(page_retained)) == 0);
+        }
+        assert(fstat(peer_fd, &after_recovery_stat) == 0);
+        assert(before_recovery_stat.st_dev == after_recovery_stat.st_dev);
+        assert(before_recovery_stat.st_ino == after_recovery_stat.st_ino);
+        assert(fstat(stage_fd, &stage_stat) == 0);
+        assert(
+            cases[case_index].expect_recovery_error ? stage_stat.st_size > 0
+                                                    : stage_stat.st_size == 0
+        );
+
+        mylite_ownerless_page_log_unregister_checkpoint_stage(fd);
+        assert(close(stage_fd) == 0);
+        assert(close(peer_fd) == 0);
+        assert(close(fd) == 0);
+        free(stage_path);
+        free(log_path);
+        remove_tree(root);
+        free(root);
+    }
 }
 
 static void test_page_log_preserves_oldest_snapshot_boundary(void) {
@@ -5886,6 +7681,7 @@ static void test_page_log_preserves_oldest_snapshot_boundary(void) {
         ) == MYLITE_OWNERLESS_PAGE_LOG_OK
     );
 
+    register_page_log_checkpoint_stage(fd, checkpoint_log_path);
     assert(
         mylite_ownerless_page_log_checkpoint_preserving_oldest_snapshot_at(
             fd,
@@ -6011,6 +7807,7 @@ static void test_page_log_preserves_oldest_snapshot_boundary(void) {
         ) == MYLITE_OWNERLESS_PAGE_LOG_OK
     );
 
+    register_page_log_checkpoint_stage(fd, single_snapshot_log_path);
     assert(
         mylite_ownerless_page_log_checkpoint_preserving_single_snapshot_at(
             fd,
@@ -6142,9 +7939,11 @@ static void test_page_log_preserves_external_snapshot_lineage_metadata(void) {
     assert((lineage_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_INDEX_DELTA) != 0U);
     assert(
         lineage_metadata_flags ==
-        (lineage_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_EXTERNAL_SNAPSHOT_LINEAGE)
+        (lineage_flags & (MYLITE_TEST_PAGE_LOG_RECORD_FLAG_EXTERNAL_SNAPSHOT_LINEAGE |
+                          MYLITE_TEST_PAGE_LOG_RECORD_FLAG_METADATA_CHECKSUM))
     );
 
+    register_page_log_checkpoint_stage(fd, log_path);
     assert(
         mylite_ownerless_page_log_checkpoint(
             fd,
@@ -6177,7 +7976,8 @@ static void test_page_log_preserves_external_snapshot_lineage_metadata(void) {
     );
     assert(
         retained_metadata_flags ==
-        (retained_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_EXTERNAL_SNAPSHOT_LINEAGE)
+        (retained_flags & (MYLITE_TEST_PAGE_LOG_RECORD_FLAG_EXTERNAL_SNAPSHOT_LINEAGE |
+                           MYLITE_TEST_PAGE_LOG_RECORD_FLAG_METADATA_CHECKSUM))
     );
 
     assert(
@@ -6350,9 +8150,11 @@ static void test_page_log_preserves_native_support_metadata(void) {
     assert((native_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_NATIVE_SUPPORT_STATE) != 0U);
     assert(
         native_metadata_flags ==
-        (native_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_NATIVE_SUPPORT_STATE)
+        (native_flags & (MYLITE_TEST_PAGE_LOG_RECORD_FLAG_NATIVE_SUPPORT_STATE |
+                         MYLITE_TEST_PAGE_LOG_RECORD_FLAG_METADATA_CHECKSUM))
     );
 
+    register_page_log_checkpoint_stage(fd, log_path);
     assert(
         mylite_ownerless_page_log_checkpoint(
             fd,
@@ -6383,7 +8185,8 @@ static void test_page_log_preserves_native_support_metadata(void) {
     );
     assert(
         retained_metadata_flags ==
-        (retained_flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_NATIVE_SUPPORT_STATE)
+        (retained_flags & (MYLITE_TEST_PAGE_LOG_RECORD_FLAG_NATIVE_SUPPORT_STATE |
+                           MYLITE_TEST_PAGE_LOG_RECORD_FLAG_METADATA_CHECKSUM))
     );
 
     assert(
@@ -6402,6 +8205,100 @@ static void test_page_log_preserves_native_support_metadata(void) {
     assert(page_lsn == 220U);
     assert(commit_lsn == 220U);
     assert(memcmp(out_page, page_native, sizeof(page_native)) == 0);
+
+    assert(close(fd) == 0);
+    free(log_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_page_log_checkpoint_retains_all_native_support_records(void) {
+    char *root = make_temp_root();
+    char *log_path = path_join(root, "retain-native-support-page-log.bin");
+    int fd = open_file(log_path);
+    uint8_t native_before[MYLITE_TEST_PAGE_SIZE];
+    uint8_t user_page[MYLITE_TEST_PAGE_SIZE];
+    uint8_t native_after[MYLITE_TEST_PAGE_SIZE];
+    page_log_checkpoint_index_context checkpoint_context = {0};
+    page_log_retained_records replay_records = {0};
+
+    fill_innodb_test_page(native_before, 90U, 4U, 100U, 0x21U);
+    fill_innodb_test_page(user_page, 91U, 5U, 200U, 0x32U);
+    fill_innodb_test_page(native_after, 92U, 6U, 300U, 0x43U);
+
+    assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    assert(
+        mylite_ownerless_page_log_append_initialized_at_with_checksum_and_options(
+            fd,
+            0U,
+            90U,
+            4U,
+            100U,
+            100U,
+            native_before,
+            sizeof(native_before),
+            mylite_ownerless_page_log_checksum_page(native_before, sizeof(native_before)),
+            MYLITE_OWNERLESS_PAGE_LOG_APPEND_NATIVE_SUPPORT_STATE,
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append(
+            fd,
+            91U,
+            5U,
+            200U,
+            200U,
+            user_page,
+            sizeof(user_page),
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(
+        mylite_ownerless_page_log_append_initialized_at_with_checksum_and_options(
+            fd,
+            0U,
+            92U,
+            6U,
+            300U,
+            300U,
+            native_after,
+            sizeof(native_after),
+            mylite_ownerless_page_log_checksum_page(native_after, sizeof(native_after)),
+            MYLITE_OWNERLESS_PAGE_LOG_APPEND_NATIVE_SUPPORT_STATE,
+            NULL
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+
+    register_page_log_checkpoint_stage(fd, log_path);
+    assert(
+        mylite_ownerless_page_log_checkpoint_retaining_native_support_at(
+            fd,
+            0U,
+            capture_page_log_record_for_checkpoint_index,
+            NULL,
+            &checkpoint_context
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(checkpoint_context.retained.count == 2U);
+    assert(checkpoint_context.retained.records[0].commit_lsn == 100U);
+    assert(checkpoint_context.retained.records[1].commit_lsn == 300U);
+    for (size_t index = 0U; index < checkpoint_context.retained.count; ++index) {
+        const uint32_t flags = read_page_log_record_flags(
+            fd,
+            checkpoint_context.retained.records[index].record_offset
+        );
+        assert((flags & MYLITE_TEST_PAGE_LOG_RECORD_FLAG_NATIVE_SUPPORT_STATE) != 0U);
+    }
+    assert(
+        mylite_ownerless_page_log_replay_at(
+            fd,
+            0U,
+            capture_page_log_record_for_index_replace,
+            &replay_records
+        ) == MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(replay_records.count == 2U);
 
     assert(close(fd) == 0);
     free(log_path);
@@ -6548,6 +8445,7 @@ static void test_page_log_skips_proof_only_native_support_records(void) {
     assert(proof_replay_records.records[0].record_offset == base_record_offset);
     assert(proof_replay_records.records[1].record_offset == proof_record_offset);
 
+    register_page_log_checkpoint_stage(fd, log_path);
     assert(
         mylite_ownerless_page_log_checkpoint(
             fd,
@@ -6910,6 +8808,7 @@ static void test_page_log_appends_native_support_proof_pairs(void) {
     assert(replay_records.count == 1U);
     assert(replay_records.records[0].record_offset == base_record_offset);
 
+    register_page_log_checkpoint_stage(fd, log_path);
     assert(
         mylite_ownerless_page_log_checkpoint(
             fd,
@@ -7064,6 +8963,7 @@ static void test_page_log_requires_boundaries_only_for_snapshot_pages(void) {
 
     fill_innodb_test_page(page, 42U, 0U, 140U, 0x60U);
     assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    register_page_log_checkpoint_stage(fd, support_log_path);
     assert(
         mylite_ownerless_page_log_append(fd, 42U, 0U, 140U, 140U, page, sizeof(page), NULL) ==
         MYLITE_OWNERLESS_PAGE_LOG_OK
@@ -7089,6 +8989,7 @@ static void test_page_log_requires_boundaries_only_for_snapshot_pages(void) {
     fill_innodb_test_page(page, 43U, 1U, 140U, 0x70U);
     store_test_be16(page, MYLITE_TEST_INNODB_PAGE_TYPE_OFFSET, MYLITE_TEST_INNODB_PAGE_TYPE_RTREE);
     assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    register_page_log_checkpoint_stage(fd, snapshot_log_path);
     assert(
         mylite_ownerless_page_log_append(fd, 43U, 1U, 140U, 140U, page, sizeof(page), NULL) ==
         MYLITE_OWNERLESS_PAGE_LOG_OK
@@ -7119,9 +9020,9 @@ static void test_page_log_checkpoint_waits_for_readers(void) {
     char *root = make_temp_root();
     char *log_path = path_join(root, "reader-checkpoint-page-log.bin");
     int fd = open_file(log_path);
-    int child_ready[2];
+    int helper_ready_fd = -1;
     uint8_t page[16];
-    pid_t child;
+    pid_t helper;
     struct stat log_stat;
 
     memset(page, 0x77, sizeof(page));
@@ -7132,34 +9033,13 @@ static void test_page_log_checkpoint_waits_for_readers(void) {
         MYLITE_OWNERLESS_PAGE_LOG_OK
     );
     assert(mylite_ownerless_page_log_begin_read(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
-    assert(pipe(child_ready) == 0);
-
-    child = fork();
-    assert(child >= 0);
-    if (child == 0) {
-        int child_fd;
-
-        close(child_ready[0]);
-        child_fd = open_file(log_path);
-        signal_pipe(child_ready[1]);
-        assert(
-            mylite_ownerless_page_log_checkpoint(child_fd, 100U, NULL, NULL) ==
-            MYLITE_OWNERLESS_PAGE_LOG_OK
-        );
-        assert(close(child_fd) == 0);
-        _exit(0);
-    }
-
-    close(child_ready[1]);
-    wait_for_pipe(child_ready[0]);
+    helper = start_page_log_lock_helper("checkpoint", log_path, &helper_ready_fd);
+    wait_for_pipe(helper_ready_fd);
     sleep_milliseconds(100U);
-    {
-        int child_status = 0;
-        assert(waitpid(child, &child_status, WNOHANG) == 0);
-    }
+    assert(waitpid(helper, NULL, WNOHANG) == 0);
 
     mylite_ownerless_page_log_end_read(fd);
-    wait_for_child(child);
+    wait_for_child(helper);
     assert(fstat(fd, &log_stat) == 0);
     assert(log_stat.st_size == MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE);
 
@@ -7228,6 +9108,7 @@ static void test_page_log_scan_recovers_from_stale_index_offset(void) {
             stale_record_offset
         ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
     );
+    register_page_log_checkpoint_stage(fd, log_path);
     assert(
         mylite_ownerless_page_log_checkpoint(
             fd,
@@ -7380,6 +9261,7 @@ static void test_page_log_rejects_stale_index_offset_identity(void) {
             stale_record_offset
         ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
     );
+    register_page_log_checkpoint_stage(fd, log_path);
     assert(
         mylite_ownerless_page_log_checkpoint(
             fd,
@@ -7484,6 +9366,7 @@ static void test_page_log_checkpoints_when_all_records_are_safe(void) {
     memset(out_page, 0, sizeof(out_page));
 
     assert(mylite_ownerless_page_log_initialize(fd) == MYLITE_OWNERLESS_PAGE_LOG_OK);
+    register_page_log_checkpoint_stage(fd, log_path);
     assert(
         mylite_ownerless_page_log_append(fd, 42U, 7U, 90U, 100U, page_v1, sizeof(page_v1), NULL) ==
         MYLITE_OWNERLESS_PAGE_LOG_OK
@@ -10679,6 +12562,226 @@ static void test_innodb_lock_registry_record_compatibility(void) {
     free(root);
 }
 
+static void test_innodb_lock_registry_insert_reservation_lifecycle(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "innodb-lock-insert-reservation.bin");
+    int fd = open_file(shm_path);
+    void *registry;
+    int active = 0;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_innodb_lock_registry_initialize(registry, MYLITE_TEST_PAGE_SIZE, 1U) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_reserve_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            20U,
+            3U,
+            0U,
+            0U,
+            0U,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            MYLITE_OWNERLESS_INNODB_RECORD_LOCK_INSERT_RESERVATION,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(mylite_ownerless_innodb_lock_registry_active_count(registry) == 1U);
+
+    /* A full one-slot registry can only finalize by replacing the
+       reservation in place. */
+    assert(
+        mylite_ownerless_innodb_lock_registry_reserve_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            20U,
+            3U,
+            7U,
+            9U,
+            11U,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            MYLITE_OWNERLESS_INNODB_RECORD_LOCK_REC_NOT_GAP |
+                MYLITE_OWNERLESS_INNODB_RECORD_LOCK_FINALIZE_INSERT_RESERVATION,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(mylite_ownerless_innodb_lock_registry_active_count(registry) == 1U);
+    assert(
+        mylite_ownerless_innodb_lock_registry_record_active_now(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            201U,
+            3U,
+            7U,
+            9U,
+            11U,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            MYLITE_OWNERLESS_INNODB_RECORD_LOCK_REC_NOT_GAP,
+            &active
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(active == 1);
+    assert(
+        mylite_ownerless_innodb_lock_registry_release_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            20U,
+            3U,
+            7U,
+            9U,
+            11U,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            MYLITE_OWNERLESS_INNODB_RECORD_LOCK_REC_NOT_GAP
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+
+    assert(
+        mylite_ownerless_innodb_lock_registry_reserve_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            20U,
+            3U,
+            0U,
+            0U,
+            0U,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            MYLITE_OWNERLESS_INNODB_RECORD_LOCK_INSERT_RESERVATION,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_release_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            20U,
+            3U,
+            0U,
+            0U,
+            0U,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            MYLITE_OWNERLESS_INNODB_RECORD_LOCK_INSERT_RESERVATION
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(mylite_ownerless_innodb_lock_registry_active_count(registry) == 0U);
+
+    assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_innodb_lock_registry_insert_finalization_contention(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "innodb-lock-insert-finalization-contention.bin");
+    int fd = open_file(shm_path);
+    void *registry;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_innodb_lock_registry_initialize(registry, MYLITE_TEST_PAGE_SIZE, 2U) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+
+    /* A heap number can be reused while another transaction is still
+       undoing a failed insert. Finalization reports retryable contention;
+       the engine then cancels its insert reservation before statement
+       rollback. */
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            21U,
+            3U,
+            7U,
+            9U,
+            11U,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            MYLITE_OWNERLESS_INNODB_RECORD_LOCK_REC_NOT_GAP,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_reserve_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            20U,
+            3U,
+            0U,
+            0U,
+            0U,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            MYLITE_OWNERLESS_INNODB_RECORD_LOCK_INSERT_RESERVATION,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_reserve_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            20U,
+            3U,
+            7U,
+            9U,
+            11U,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            MYLITE_OWNERLESS_INNODB_RECORD_LOCK_REC_NOT_GAP |
+                MYLITE_OWNERLESS_INNODB_RECORD_LOCK_FINALIZE_INSERT_RESERVATION,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_TIMEOUT
+    );
+    assert(mylite_ownerless_innodb_lock_registry_active_count(registry) == 2U);
+
+    assert(
+        mylite_ownerless_innodb_lock_registry_release_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            20U,
+            3U,
+            0U,
+            0U,
+            0U,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            MYLITE_OWNERLESS_INNODB_RECORD_LOCK_INSERT_RESERVATION
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_release_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            21U,
+            3U,
+            7U,
+            9U,
+            11U,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            MYLITE_OWNERLESS_INNODB_RECORD_LOCK_REC_NOT_GAP
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(mylite_ownerless_innodb_lock_registry_active_count(registry) == 0U);
+
+    assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_innodb_lock_registry_nonblocking_reserve_waits_for_latch(void) {
     char *root = make_temp_root();
     char *shm_path = path_join(root, "innodb-lock-latch-contention.bin");
@@ -11503,6 +13606,286 @@ static void test_innodb_lock_registry_page_write_gates_cover_physical_pages(void
             UINT64_MAX,
             UINT32_MAX - 2U,
             UINT32_MAX,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(mylite_ownerless_innodb_lock_registry_active_count(registry) == 0U);
+
+    assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_innodb_lock_registry_structure_gate_protocol(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "innodb-lock-structure-gate.bin");
+    int fd = open_file(shm_path);
+    void *registry;
+    const uint32_t space_id = 5U;
+    const uint32_t exact_page_no = 42U;
+    const uint32_t read_gate_page_no = UINT32_MAX - 2U;
+    const uint32_t write_gate_page_no = UINT32_MAX - 1U;
+    const uint32_t structural_write_page_no = UINT32_MAX;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_innodb_lock_registry_initialize(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_INNODB_LOCK_REGISTRY_SLOT_COUNT
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            100U,
+            UINT64_MAX,
+            space_id,
+            read_gate_page_no,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_S,
+            0U,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            3U,
+            300U,
+            UINT64_MAX,
+            space_id,
+            write_gate_page_no,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_TIMEOUT
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            3U,
+            300U,
+            UINT64_MAX,
+            space_id,
+            structural_write_page_no,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_TIMEOUT
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            200U,
+            UINT64_MAX,
+            space_id,
+            read_gate_page_no,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_S,
+            0U,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(mylite_ownerless_innodb_lock_registry_active_count(registry) == 2U);
+    assert(
+        mylite_ownerless_innodb_lock_registry_release_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            100U,
+            UINT64_MAX,
+            space_id,
+            read_gate_page_no,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_S,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            3U,
+            300U,
+            UINT64_MAX,
+            space_id,
+            write_gate_page_no,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_TIMEOUT
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            3U,
+            300U,
+            UINT64_MAX,
+            space_id,
+            exact_page_no,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            4U,
+            400U,
+            UINT64_MAX,
+            space_id,
+            structural_write_page_no,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_TIMEOUT
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_release_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            3U,
+            300U,
+            UINT64_MAX,
+            space_id,
+            exact_page_no,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_release_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            2U,
+            200U,
+            UINT64_MAX,
+            space_id,
+            read_gate_page_no,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_S,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            4U,
+            400U,
+            UINT64_MAX,
+            space_id,
+            structural_write_page_no,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_release_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            4U,
+            400U,
+            UINT64_MAX,
+            space_id,
+            structural_write_page_no,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            3U,
+            300U,
+            UINT64_MAX,
+            space_id,
+            write_gate_page_no,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            4U,
+            400U,
+            UINT64_MAX,
+            space_id,
+            exact_page_no,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_TIMEOUT
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_release_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            3U,
+            300U,
+            UINT64_MAX,
+            space_id,
+            write_gate_page_no,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            4U,
+            400U,
+            UINT64_MAX,
+            space_id,
+            exact_page_no,
+            UINT32_MAX,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_release_record(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            4U,
+            400U,
+            UINT64_MAX,
+            space_id,
+            exact_page_no,
             UINT32_MAX,
             MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
             0U
@@ -12374,6 +14757,26 @@ static void test_innodb_lock_registry_references_and_owner_cleanup(void) {
     );
     assert(active_count == 2U);
     assert(
+        mylite_ownerless_innodb_lock_registry_release_transaction(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            MYLITE_TEST_OWNER_GENERATION(1U),
+            401U,
+            &released_transaction_records
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(released_transaction_records == 1U);
+    assert(
+        mylite_ownerless_innodb_lock_registry_owner_active_count(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            &active_count
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(active_count == 1U);
+    assert(
         mylite_ownerless_innodb_lock_registry_release_owner(
             registry,
             MYLITE_TEST_PAGE_SIZE,
@@ -12381,7 +14784,7 @@ static void test_innodb_lock_registry_references_and_owner_cleanup(void) {
             &released_locks
         ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
     );
-    assert(released_locks == 2U);
+    assert(released_locks == 1U);
     assert(
         mylite_ownerless_innodb_lock_registry_owner_active_count(
             registry,
@@ -12998,6 +15401,7 @@ static void test_trx_registry_allocates_cross_process_ids(void) {
     int fd = open_file(shm_path);
     void *registry;
     uint32_t parent_slot = 0U;
+    uint32_t owner_id = 0U;
     uint64_t parent_generation = 0U;
     uint64_t parent_trx_id = 0U;
     pid_t child;
@@ -13027,6 +15431,17 @@ static void test_trx_registry_allocates_cross_process_ids(void) {
         ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
     );
     assert(parent_trx_id == 100U);
+    assert(
+        mylite_ownerless_trx_registry_lookup_owner(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            1U,
+            parent_trx_id,
+            &owner_id
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(owner_id == 1U);
     assert(mylite_ownerless_trx_registry_active_count(registry) == 1U);
     assert(
         mylite_ownerless_trx_registry_oldest_active_trx_id(registry, MYLITE_TEST_PAGE_SIZE) == 100U
@@ -13045,6 +15460,7 @@ static void test_trx_registry_allocates_cross_process_ids(void) {
         uint32_t trx_id_count = 0U;
         uint64_t next_trx_id = 0U;
         uint64_t oldest_trx_id = 0U;
+        uint32_t child_owner_id = 0U;
 
         assert(
             mylite_ownerless_trx_registry_begin(
@@ -13058,6 +15474,17 @@ static void test_trx_registry_allocates_cross_process_ids(void) {
         );
         assert(child_trx_id == 101U);
         assert(child_slot != parent_slot);
+        assert(
+            mylite_ownerless_trx_registry_lookup_owner(
+                child_registry,
+                MYLITE_TEST_PAGE_SIZE,
+                2U,
+                1U,
+                child_trx_id,
+                &child_owner_id
+            ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+        );
+        assert(child_owner_id == 2U);
         assert(mylite_ownerless_trx_registry_active_count(child_registry) == 2U);
         assert(
             mylite_ownerless_trx_registry_snapshot(
@@ -13103,6 +15530,18 @@ static void test_trx_registry_allocates_cross_process_ids(void) {
         ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
     );
     assert(mylite_ownerless_trx_registry_active_count(registry) == 0U);
+    owner_id = 99U;
+    assert(
+        mylite_ownerless_trx_registry_lookup_owner(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            1U,
+            parent_trx_id,
+            &owner_id
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_NOT_FOUND
+    );
+    assert(owner_id == 0U);
     assert(
         mylite_ownerless_trx_registry_oldest_active_trx_id(registry, MYLITE_TEST_PAGE_SIZE) == 0U
     );
@@ -13122,6 +15561,9 @@ static void test_trx_registry_rejects_stale_end(void) {
     uint64_t trx_id = 0U;
     uint32_t slot = 0U;
     uint64_t generation = 0U;
+    uint64_t replacement_trx_id = 0U;
+    uint32_t replacement_slot = 0U;
+    uint64_t replacement_generation = 0U;
 
     truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
     registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
@@ -13155,7 +15597,35 @@ static void test_trx_registry_rejects_stale_end(void) {
     );
     assert(
         mylite_ownerless_trx_registry_end(registry, MYLITE_TEST_PAGE_SIZE, slot, generation) ==
+        MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(mylite_ownerless_trx_registry_active_count(registry) == 0U);
+    assert(
+        mylite_ownerless_trx_registry_begin(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            &replacement_trx_id,
+            &replacement_slot,
+            &replacement_generation
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(replacement_trx_id == 201U);
+    assert(replacement_slot == slot);
+    assert(replacement_generation != generation);
+    assert(mylite_ownerless_trx_registry_active_count(registry) == 1U);
+    assert(
+        mylite_ownerless_trx_registry_end(registry, MYLITE_TEST_PAGE_SIZE, slot, generation) ==
         MYLITE_OWNERLESS_TRX_REGISTRY_NOT_FOUND
+    );
+    assert(mylite_ownerless_trx_registry_active_count(registry) == 1U);
+    assert(
+        mylite_ownerless_trx_registry_end(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            replacement_slot,
+            replacement_generation
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
     );
     assert(mylite_ownerless_trx_registry_active_count(registry) == 0U);
 
@@ -13793,6 +16263,164 @@ static void test_trx_registry_releases_dead_owner_transactions(void) {
     free(root);
 }
 
+static void test_trx_registry_tracks_rollback_read_safety(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "trx-registry-rollback-state.bin");
+    int fd = open_file(shm_path);
+    void *registry;
+    uint64_t first_trx_id = 0U;
+    uint64_t second_trx_id = 0U;
+    uint32_t slot = 0U;
+    uint64_t generation = 0U;
+    uint32_t active_count = 0U;
+    int allowed = 0;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_trx_registry_initialize(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_TRX_REGISTRY_SLOT_COUNT,
+            500U
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_trx_registry_begin(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            &first_trx_id,
+            &slot,
+            &generation
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_trx_registry_owner_allows_live_peer_plain_read(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            &active_count,
+            &allowed
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(active_count == 1U);
+    assert(allowed == 0);
+    assert(
+        mylite_ownerless_trx_registry_set_rollback_state(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            first_trx_id,
+            MYLITE_OWNERLESS_TRX_ROLLBACK_STATE_IN_PROGRESS
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_trx_registry_set_rollback_state(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            first_trx_id,
+            MYLITE_OWNERLESS_TRX_ROLLBACK_STATE_SAVEPOINT_READ_SAFE
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_trx_registry_owner_allows_live_peer_plain_read(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            &active_count,
+            &allowed
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(active_count == 1U);
+    assert(allowed == 1);
+
+    assert(
+        mylite_ownerless_trx_registry_begin(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            &second_trx_id,
+            &slot,
+            &generation
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_trx_registry_owner_allows_live_peer_plain_read(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            &active_count,
+            &allowed
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(active_count == 2U);
+    assert(allowed == 0);
+    assert(
+        mylite_ownerless_trx_registry_set_rollback_state(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            second_trx_id,
+            MYLITE_OWNERLESS_TRX_ROLLBACK_STATE_SAVEPOINT_READ_SAFE
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_trx_registry_owner_allows_live_peer_plain_read(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            &active_count,
+            &allowed
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(active_count == 2U);
+    assert(allowed == 1);
+    assert(
+        mylite_ownerless_trx_registry_set_rollback_state(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            second_trx_id,
+            MYLITE_OWNERLESS_TRX_ROLLBACK_STATE_SAVEPOINT_READ_SAFE + 1U
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_ERROR
+    );
+    assert(
+        mylite_ownerless_trx_registry_end_by_id(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            first_trx_id
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_trx_registry_end_by_id(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            second_trx_id
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_trx_registry_owner_allows_live_peer_plain_read(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            &active_count,
+            &allowed
+        ) == MYLITE_OWNERLESS_TRX_REGISTRY_OK
+    );
+    assert(active_count == 0U);
+    assert(allowed == 0);
+
+    assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_read_view_registry_snapshots_oldest_views(void) {
     char *root = make_temp_root();
     char *shm_path = path_join(root, "read-view-registry-snapshot.bin");
@@ -13806,6 +16434,8 @@ static void test_read_view_registry_snapshots_oldest_views(void) {
     uint32_t second_slot = 0U;
     uint64_t first_generation = 0U;
     uint64_t second_generation = 0U;
+    uint32_t replacement_slot = 0U;
+    uint64_t replacement_generation = 0U;
     uint32_t oldest_id_count = 0U;
     uint64_t low_limit_id = 0U;
     uint64_t low_limit_no = 0U;
@@ -13911,7 +16541,7 @@ static void test_read_view_registry_snapshots_oldest_views(void) {
             1U,
             first_slot,
             first_generation
-        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_NOT_FOUND
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
     );
     assert(
         mylite_ownerless_read_view_registry_close(
@@ -13920,6 +16550,42 @@ static void test_read_view_registry_snapshots_oldest_views(void) {
             2U,
             second_slot,
             second_generation
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    assert(mylite_ownerless_read_view_registry_active_count(registry) == 0U);
+    assert(
+        mylite_ownerless_read_view_registry_open(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            20U,
+            30U,
+            first_ids,
+            3U,
+            &replacement_slot,
+            &replacement_generation
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    assert(replacement_slot == first_slot);
+    assert(replacement_generation != first_generation);
+    assert(mylite_ownerless_read_view_registry_active_count(registry) == 1U);
+    assert(
+        mylite_ownerless_read_view_registry_close(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            first_slot,
+            first_generation
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_NOT_FOUND
+    );
+    assert(mylite_ownerless_read_view_registry_active_count(registry) == 1U);
+    assert(
+        mylite_ownerless_read_view_registry_close(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            1U,
+            replacement_slot,
+            replacement_generation
         ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
     );
     assert(mylite_ownerless_read_view_registry_active_count(registry) == 0U);
@@ -13956,6 +16622,197 @@ static void test_read_view_registry_snapshots_oldest_views(void) {
     free(shm_path);
     remove_tree(root);
     free(root);
+}
+
+static void test_read_view_registry_rejects_generation_saturation(void) {
+    const size_t registry_size = mylite_ownerless_read_view_registry_size(1U);
+    unsigned char *registry = calloc(1U, registry_size);
+    const uint64_t maximum_generation = UINT64_MAX;
+    const uint64_t unreleasable_header_generation = UINT64_MAX - 1U;
+    uint64_t stored_generation = 0U;
+    uint32_t slot = UINT32_MAX;
+    uint64_t generation = UINT64_MAX;
+
+    assert(registry != NULL);
+    assert(
+        mylite_ownerless_read_view_registry_initialize(registry, registry_size, 1U) ==
+        MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    memcpy(
+        registry + MYLITE_OWNERLESS_READ_VIEW_REGISTRY_HEADER_SIZE,
+        &maximum_generation,
+        sizeof(maximum_generation)
+    );
+    assert(
+        mylite_ownerless_read_view_registry_open(
+            registry,
+            registry_size,
+            1U,
+            20U,
+            30U,
+            NULL,
+            0U,
+            &slot,
+            &generation
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ERROR
+    );
+    assert(slot == 0U);
+    assert(generation == 0U);
+    assert(mylite_ownerless_read_view_registry_active_count(registry) == 0U);
+    assert(
+        memcmp(
+            registry + MYLITE_OWNERLESS_READ_VIEW_REGISTRY_HEADER_SIZE,
+            &maximum_generation,
+            sizeof(maximum_generation)
+        ) == 0
+    );
+
+    assert(
+        mylite_ownerless_read_view_registry_initialize(registry, registry_size, 1U) ==
+        MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    memcpy(
+        registry + MYLITE_TEST_READ_VIEW_REGISTRY_GENERATION_OFFSET,
+        &unreleasable_header_generation,
+        sizeof(unreleasable_header_generation)
+    );
+    slot = UINT32_MAX;
+    generation = UINT64_MAX;
+    assert(
+        mylite_ownerless_read_view_registry_open(
+            registry,
+            registry_size,
+            1U,
+            30U,
+            30U,
+            NULL,
+            0U,
+            &slot,
+            &generation
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ERROR
+    );
+    assert(slot == 0U);
+    assert(generation == 0U);
+    assert(mylite_ownerless_read_view_registry_active_count(registry) == 0U);
+    memcpy(
+        &stored_generation,
+        registry + MYLITE_TEST_READ_VIEW_REGISTRY_GENERATION_OFFSET,
+        sizeof(stored_generation)
+    );
+    assert(stored_generation == unreleasable_header_generation);
+    free(registry);
+}
+
+static void test_read_view_registry_reuses_last_releasable_generation(void) {
+    const size_t registry_size = mylite_ownerless_read_view_registry_size(1U);
+    unsigned char *registry = calloc(1U, registry_size);
+    const uint64_t last_openable_header_generation = UINT64_MAX - 2U;
+    uint64_t stored_generation = 0U;
+    uint32_t first_slot = UINT32_MAX;
+    uint32_t reused_slot = UINT32_MAX;
+    uint32_t saturated_slot = UINT32_MAX;
+    uint64_t first_generation = UINT64_MAX;
+    uint64_t reused_generation = UINT64_MAX;
+    uint64_t saturated_generation = UINT64_MAX;
+
+    assert(registry != NULL);
+    assert(
+        mylite_ownerless_read_view_registry_initialize(registry, registry_size, 1U) ==
+        MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_read_view_registry_open(
+            registry,
+            registry_size,
+            1U,
+            30U,
+            30U,
+            NULL,
+            0U,
+            &first_slot,
+            &first_generation
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_read_view_registry_close(
+            registry,
+            registry_size,
+            1U,
+            first_slot,
+            first_generation
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    memcpy(
+        registry + MYLITE_TEST_READ_VIEW_REGISTRY_GENERATION_OFFSET,
+        &last_openable_header_generation,
+        sizeof(last_openable_header_generation)
+    );
+    assert(
+        mylite_ownerless_read_view_registry_open(
+            registry,
+            registry_size,
+            1U,
+            31U,
+            31U,
+            NULL,
+            0U,
+            &reused_slot,
+            &reused_generation
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    assert(reused_slot == first_slot);
+    assert(reused_generation == UINT64_MAX - 1U);
+    assert(reused_generation != first_generation);
+    assert(
+        mylite_ownerless_read_view_registry_close(
+            registry,
+            registry_size,
+            1U,
+            first_slot,
+            first_generation
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_NOT_FOUND
+    );
+    assert(mylite_ownerless_read_view_registry_active_count(registry) == 1U);
+    assert(
+        mylite_ownerless_read_view_registry_close(
+            registry,
+            registry_size,
+            1U,
+            reused_slot,
+            reused_generation
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_OK
+    );
+    assert(mylite_ownerless_read_view_registry_active_count(registry) == 0U);
+    memcpy(
+        &stored_generation,
+        registry + MYLITE_TEST_READ_VIEW_REGISTRY_GENERATION_OFFSET,
+        sizeof(stored_generation)
+    );
+    assert(stored_generation == UINT64_MAX);
+
+    assert(
+        mylite_ownerless_read_view_registry_open(
+            registry,
+            registry_size,
+            1U,
+            32U,
+            32U,
+            NULL,
+            0U,
+            &saturated_slot,
+            &saturated_generation
+        ) == MYLITE_OWNERLESS_READ_VIEW_REGISTRY_ERROR
+    );
+    assert(saturated_slot == 0U);
+    assert(saturated_generation == 0U);
+    assert(mylite_ownerless_read_view_registry_active_count(registry) == 0U);
+    memcpy(
+        &stored_generation,
+        registry + MYLITE_TEST_READ_VIEW_REGISTRY_GENERATION_OFFSET,
+        sizeof(stored_generation)
+    );
+    assert(stored_generation == UINT64_MAX);
+    free(registry);
 }
 
 static void test_read_view_registry_snapshots_cross_process_views(void) {
@@ -17397,7 +20254,7 @@ static void test_process_registry_allocates_cross_process_slots(void) {
             registry,
             MYLITE_TEST_PAGE_SIZE,
             process_registry_test_identity((uint64_t)getpid()),
-            1U,
+            MYLITE_OWNERLESS_PROCESS_OPEN_MODE_OWNERLESS_RW,
             0U,
             &parent_slot,
             &parent_generation
@@ -17419,7 +20276,7 @@ static void test_process_registry_allocates_cross_process_slots(void) {
                 child_registry,
                 MYLITE_TEST_PAGE_SIZE,
                 process_registry_test_identity((uint64_t)getpid()),
-                1U,
+                MYLITE_OWNERLESS_PROCESS_OPEN_MODE_OWNERLESS_RW,
                 0U,
                 &child_slot,
                 &child_generation
@@ -17464,6 +20321,274 @@ static void test_process_registry_allocates_cross_process_slots(void) {
     free(root);
 }
 
+static void test_process_registry_bootstrap_generation_mismatch_fails_closed(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "process-registry-bootstrap-mismatch.bin");
+    int fd = open_file(shm_path);
+    void *registry;
+    mylite_ownerless_process_identity identity;
+    mylite_ownerless_process_registry_liveness_context liveness;
+    uint64_t mismatched_generation;
+    uint32_t bootstrap_owner_id;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_process_registry_initialize(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_PROCESS_REGISTRY_SLOT_COUNT
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_current_process_identity(&identity) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    bootstrap_owner_id = MYLITE_TEST_PROCESS_BOOTSTRAP_OWNER_FLAG | (uint32_t)identity.pid;
+    mismatched_generation =
+        identity.start_time == UINT64_MAX ? identity.start_time - 1U : identity.start_time + 1U;
+    liveness.mapping = registry;
+    liveness.mapping_size = MYLITE_TEST_PAGE_SIZE;
+    liveness.is_alive = mylite_ownerless_process_identity_is_alive;
+    liveness.is_alive_ctx = NULL;
+    assert(
+        mylite_ownerless_process_registry_latch_owner_is_alive(
+            bootstrap_owner_id,
+            mismatched_generation,
+            &liveness
+        ) == 1
+    );
+
+    assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_process_registry_recovers_dead_bootstrap_latch(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "process-registry-dead-bootstrap.bin");
+    int ready[2];
+    int fd = open_file(shm_path);
+    void *registry;
+    uint32_t slot = 0U;
+    uint64_t generation = 0U;
+    pid_t child;
+    int status = 0;
+    char byte = 0;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_process_registry_initialize(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_PROCESS_REGISTRY_SLOT_COUNT
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(pipe(ready) == 0);
+
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        mylite_ownerless_process_identity identity;
+        mylite_ownerless_latch *latch =
+            (mylite_ownerless_latch *)((unsigned char *)registry +
+                                       MYLITE_TEST_PROCESS_REGISTRY_LATCH_OFFSET);
+        const uint32_t bootstrap_owner_id =
+            MYLITE_TEST_PROCESS_BOOTSTRAP_OWNER_FLAG | (uint32_t)getpid();
+
+        assert(close(ready[0]) == 0);
+        assert(
+            mylite_ownerless_current_process_identity(&identity) ==
+            MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+        );
+        assert(
+            mylite_ownerless_latch_acquire(
+                latch,
+                bootstrap_owner_id,
+                identity.start_time,
+                NULL,
+                NULL,
+                MYLITE_TEST_WAIT_TIMEOUT_MS
+            ) == MYLITE_OWNERLESS_LATCH_OK
+        );
+        __atomic_store_n(
+            (uint64_t *)((unsigned char *)registry +
+                         MYLITE_TEST_PROCESS_REGISTRY_ACTIVE_COUNT_OFFSET),
+            1U,
+            __ATOMIC_RELEASE
+        );
+        byte = 'R';
+        assert(write(ready[1], &byte, 1U) == 1);
+        pause();
+        _exit(1);
+    }
+
+    assert(close(ready[1]) == 0);
+    assert(read(ready[0], &byte, 1U) == 1);
+    assert(byte == 'R');
+    assert(kill(child, SIGKILL) == 0);
+    assert(waitpid(child, &status, 0) == child);
+    assert(WIFSIGNALED(status));
+    assert(WTERMSIG(status) == SIGKILL);
+    assert(close(ready[0]) == 0);
+
+    {
+        mylite_ownerless_process_identity identity;
+        assert(
+            mylite_ownerless_current_process_identity(&identity) ==
+            MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+        );
+        assert(
+            mylite_ownerless_process_registry_allocate(
+                registry,
+                MYLITE_TEST_PAGE_SIZE,
+                identity,
+                MYLITE_OWNERLESS_PROCESS_OPEN_MODE_OWNERLESS_RW,
+                0U,
+                &slot,
+                &generation
+            ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+        );
+    }
+    assert(mylite_ownerless_process_registry_active_count(registry) == 1U);
+    assert(
+        mylite_ownerless_process_registry_release(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            slot,
+            generation
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+
+    assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_process_registry_serializes_three_dead_latch_claimants(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "process-registry-three-claimants.bin");
+    int identity_pipe[2];
+    int start_pipe[2];
+    int fd = open_file(shm_path);
+    void *registry;
+    mylite_ownerless_process_identity dead_identity;
+    mylite_ownerless_latch *latch;
+    pid_t dead_owner;
+    pid_t claimants[3];
+    int status = 0;
+    size_t index;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_process_registry_initialize(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_PROCESS_REGISTRY_SLOT_COUNT
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(pipe(identity_pipe) == 0);
+    dead_owner = fork();
+    assert(dead_owner >= 0);
+    if (dead_owner == 0) {
+        mylite_ownerless_process_identity identity;
+
+        assert(close(identity_pipe[0]) == 0);
+        assert(
+            mylite_ownerless_current_process_identity(&identity) ==
+            MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+        );
+        assert(write(identity_pipe[1], &identity, sizeof(identity)) == (ssize_t)sizeof(identity));
+        pause();
+        _exit(1);
+    }
+    assert(close(identity_pipe[1]) == 0);
+    assert(
+        read(identity_pipe[0], &dead_identity, sizeof(dead_identity)) ==
+        (ssize_t)sizeof(dead_identity)
+    );
+    assert(close(identity_pipe[0]) == 0);
+    assert(kill(dead_owner, SIGKILL) == 0);
+    assert(waitpid(dead_owner, &status, 0) == dead_owner);
+    assert(WIFSIGNALED(status));
+    assert(WTERMSIG(status) == SIGKILL);
+
+    latch = (mylite_ownerless_latch *)((unsigned char *)registry +
+                                       MYLITE_TEST_PROCESS_REGISTRY_LATCH_OFFSET);
+    __atomic_store_n(&latch->owner_generation, dead_identity.start_time, __ATOMIC_RELEASE);
+    __atomic_store_n(
+        &latch->state_owner,
+        ((uint64_t)(MYLITE_TEST_PROCESS_BOOTSTRAP_OWNER_FLAG | (uint32_t)dead_identity.pid)
+         << 32U) |
+            MYLITE_OWNERLESS_LATCH_STATE_ACQUIRING,
+        __ATOMIC_RELEASE
+    );
+
+    assert(pipe(start_pipe) == 0);
+    for (index = 0U; index < sizeof(claimants) / sizeof(claimants[0]); ++index) {
+        claimants[index] = fork();
+        assert(claimants[index] >= 0);
+        if (claimants[index] == 0) {
+            mylite_ownerless_process_identity identity;
+            uint32_t slot = 0U;
+            uint64_t generation = 0U;
+            char byte = 0;
+
+            assert(close(start_pipe[1]) == 0);
+            assert(read(start_pipe[0], &byte, 1U) == 1);
+            assert(byte == 'S');
+            assert(
+                mylite_ownerless_current_process_identity(&identity) ==
+                MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+            );
+            assert(
+                mylite_ownerless_process_registry_allocate(
+                    registry,
+                    MYLITE_TEST_PAGE_SIZE,
+                    identity,
+                    MYLITE_OWNERLESS_PROCESS_OPEN_MODE_OWNERLESS_RW,
+                    0U,
+                    &slot,
+                    &generation
+                ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+            );
+            assert(
+                mylite_ownerless_process_registry_release(
+                    registry,
+                    MYLITE_TEST_PAGE_SIZE,
+                    slot,
+                    generation
+                ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+            );
+            assert(close(start_pipe[0]) == 0);
+            _exit(0);
+        }
+    }
+    assert(close(start_pipe[0]) == 0);
+    for (index = 0U; index < sizeof(claimants) / sizeof(claimants[0]); ++index) {
+        const char byte = 'S';
+        assert(write(start_pipe[1], &byte, 1U) == 1);
+    }
+    assert(close(start_pipe[1]) == 0);
+    for (index = 0U; index < sizeof(claimants) / sizeof(claimants[0]); ++index) {
+        wait_for_child(claimants[index]);
+    }
+    assert(mylite_ownerless_process_registry_active_count(registry) == 0U);
+    assert(__atomic_load_n(&latch->state_owner, __ATOMIC_ACQUIRE) == 0U);
+    assert(__atomic_load_n(&latch->owner_generation, __ATOMIC_ACQUIRE) == 0U);
+
+    assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_process_registry_rejects_stale_release(void) {
     char *root = make_temp_root();
     char *shm_path = path_join(root, "process-registry-stale.bin");
@@ -17486,7 +20611,7 @@ static void test_process_registry_rejects_stale_release(void) {
             registry,
             MYLITE_TEST_PAGE_SIZE,
             process_registry_test_identity((uint64_t)getpid()),
-            1U,
+            MYLITE_OWNERLESS_PROCESS_OPEN_MODE_OWNERLESS_RW,
             0U,
             &slot,
             &generation
@@ -17539,7 +20664,7 @@ static void test_process_registry_updates_heartbeat(void) {
             registry,
             MYLITE_TEST_PAGE_SIZE,
             process_registry_test_identity((uint64_t)getpid()),
-            1U,
+            MYLITE_OWNERLESS_PROCESS_OPEN_MODE_OWNERLESS_RW,
             0U,
             &slot,
             &generation
@@ -17606,7 +20731,7 @@ static void test_process_registry_cleans_dead_slots(void) {
             registry,
             MYLITE_TEST_PAGE_SIZE,
             live_identity,
-            1U,
+            MYLITE_OWNERLESS_PROCESS_OPEN_MODE_OWNERLESS_RW,
             0U,
             &live_slot,
             &live_generation
@@ -17617,7 +20742,7 @@ static void test_process_registry_cleans_dead_slots(void) {
             registry,
             MYLITE_TEST_PAGE_SIZE,
             dead_identity,
-            1U,
+            MYLITE_OWNERLESS_PROCESS_OPEN_MODE_OWNERLESS_RW,
             0U,
             &dead_slot,
             &dead_generation
@@ -17686,7 +20811,7 @@ static void test_process_registry_distinguishes_reused_pid_identity(void) {
             registry,
             MYLITE_TEST_PAGE_SIZE,
             old_identity,
-            1U,
+            MYLITE_OWNERLESS_PROCESS_OPEN_MODE_OWNERLESS_RW,
             0U,
             &old_slot,
             &old_generation
@@ -17757,7 +20882,7 @@ static void test_process_registry_cleanup_callback_releases_owner_locks(void) {
             registry,
             MYLITE_TEST_PAGE_SIZE,
             process_registry_test_identity(222U),
-            1U,
+            MYLITE_OWNERLESS_PROCESS_OPEN_MODE_OWNERLESS_RW,
             0U,
             &dead_slot,
             &dead_generation
@@ -17829,7 +20954,7 @@ static void test_process_registry_cleanup_callback_can_block_cleanup(void) {
             registry,
             MYLITE_TEST_PAGE_SIZE,
             process_registry_test_identity(222U),
-            1U,
+            MYLITE_OWNERLESS_PROCESS_OPEN_MODE_OWNERLESS_RW,
             0U,
             &dead_slot,
             &dead_generation
@@ -17891,7 +21016,7 @@ static void test_process_registry_counts_live_slots(void) {
             registry,
             MYLITE_TEST_PAGE_SIZE,
             live_identity,
-            1U,
+            MYLITE_OWNERLESS_PROCESS_OPEN_MODE_OWNERLESS_RW,
             0U,
             &first_slot,
             &first_generation
@@ -17902,7 +21027,7 @@ static void test_process_registry_counts_live_slots(void) {
             registry,
             MYLITE_TEST_PAGE_SIZE,
             dead_identity,
-            1U,
+            MYLITE_OWNERLESS_PROCESS_OPEN_MODE_OWNERLESS_RW,
             0U,
             &second_slot,
             &second_generation
@@ -17983,7 +21108,7 @@ static void test_process_registry_cleans_exited_process_slot(void) {
                 child_registry,
                 MYLITE_TEST_PAGE_SIZE,
                 child_identity,
-                1U,
+                MYLITE_OWNERLESS_PROCESS_OPEN_MODE_OWNERLESS_RW,
                 0U,
                 &child_slot,
                 &child_generation
@@ -18012,6 +21137,293 @@ static void test_process_registry_cleans_exited_process_slot(void) {
     assert(cleaned_slots == 1U);
     assert(mylite_ownerless_process_registry_active_count(registry) == 0U);
     wait_for_child(child);
+
+    assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_process_registry_release_pending_and_slot_reuse(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "process-registry-release-pending.bin");
+    int fd = open_file(shm_path);
+    void *registry;
+    uint32_t slot = 0U;
+    uint32_t dead_slot = 0U;
+    uint32_t reused_slot = 0U;
+    uint32_t cleaned_slots = 0U;
+    uint64_t generation = 0U;
+    uint64_t dead_generation = 0U;
+    uint64_t reused_generation = 0U;
+    uint64_t live_count = 0U;
+    mylite_ownerless_process_identity current_identity = {0};
+    mylite_ownerless_process_identity dead_identity = process_registry_test_identity(222U);
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    assert(
+        mylite_ownerless_current_process_identity(&current_identity) ==
+        MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_process_registry_initialize(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_PROCESS_REGISTRY_SLOT_COUNT
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+
+    mylite_ownerless_latch_test_inject_release_pending_once();
+    assert(
+        mylite_ownerless_process_registry_allocate(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            current_identity,
+            MYLITE_OWNERLESS_PROCESS_OPEN_MODE_OWNERLESS_RW,
+            0U,
+            &slot,
+            &generation
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_APPLIED_RELEASE_PENDING
+    );
+    assert(generation != 0U);
+    assert(mylite_ownerless_process_registry_active_count(registry) == 1U);
+    mylite_ownerless_latch_test_inject_release_pending_once();
+    assert(
+        mylite_ownerless_process_registry_finish_bootstrap_pending_release(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            current_identity
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_RELEASE_PENDING
+    );
+    assert(
+        mylite_ownerless_process_registry_finish_bootstrap_pending_release(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            current_identity
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+
+    mylite_ownerless_latch_test_inject_release_pending_once();
+    assert(
+        mylite_ownerless_process_registry_heartbeat(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            slot,
+            generation,
+            1234U
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_APPLIED_RELEASE_PENDING
+    );
+    assert(
+        mylite_ownerless_process_registry_finish_slot_pending_release(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            slot,
+            generation
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+
+    mylite_ownerless_latch_test_inject_release_pending_once();
+    assert(
+        mylite_ownerless_process_registry_live_count(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            process_registry_test_identity_is_alive,
+            &current_identity,
+            &live_count
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_RELEASE_PENDING
+    );
+    assert(live_count == 1U);
+    assert(
+        mylite_ownerless_process_registry_finish_bootstrap_pending_release(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            current_identity
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+
+    assert(
+        mylite_ownerless_process_registry_allocate(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            dead_identity,
+            MYLITE_OWNERLESS_PROCESS_OPEN_MODE_OWNERLESS_RW,
+            0U,
+            &dead_slot,
+            &dead_generation
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(dead_slot != slot);
+    assert(dead_generation != 0U);
+    mylite_ownerless_latch_test_inject_release_pending_once();
+    assert(
+        mylite_ownerless_process_registry_cleanup_dead(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            process_registry_test_identity_is_alive,
+            &current_identity,
+            &cleaned_slots
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_APPLIED_RELEASE_PENDING
+    );
+    assert(cleaned_slots == 1U);
+    assert(mylite_ownerless_process_registry_active_count(registry) == 1U);
+    assert(
+        mylite_ownerless_process_registry_finish_bootstrap_pending_release(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            current_identity
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+
+    mylite_ownerless_latch_test_inject_release_pending_once();
+    assert(
+        mylite_ownerless_process_registry_release(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            slot,
+            generation
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_APPLIED_RELEASE_PENDING
+    );
+    assert(mylite_ownerless_process_registry_active_count(registry) == 0U);
+    assert(
+        mylite_ownerless_process_registry_finish_bootstrap_pending_release(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            current_identity
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+
+    mylite_ownerless_latch_test_inject_release_pending_once();
+    assert(
+        mylite_ownerless_process_registry_release(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            slot,
+            generation
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_RELEASE_PENDING
+    );
+    assert(
+        mylite_ownerless_process_registry_finish_bootstrap_pending_release(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            current_identity
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+
+    assert(
+        mylite_ownerless_process_registry_allocate(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            current_identity,
+            MYLITE_OWNERLESS_PROCESS_OPEN_MODE_OWNERLESS_RW,
+            0U,
+            &reused_slot,
+            &reused_generation
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(reused_slot == slot);
+    assert(reused_generation != generation);
+    assert(
+        mylite_ownerless_process_registry_release(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            reused_slot,
+            reused_generation
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+
+    assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
+    assert(close(fd) == 0);
+    free(shm_path);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_process_registry_rejects_generation_saturation(void) {
+    char *root = make_temp_root();
+    char *shm_path = path_join(root, "process-registry-generation-saturation.bin");
+    int fd = open_file(shm_path);
+    void *registry;
+    unsigned char *bytes;
+    mylite_ownerless_process_identity identity = {0};
+    uint32_t slot = UINT32_MAX;
+    uint64_t slot_generation = UINT64_MAX;
+    uint64_t generation = UINT64_MAX - 1U;
+
+    truncate_file(fd, MYLITE_TEST_PAGE_SIZE);
+    registry = map_file(fd, MYLITE_TEST_PAGE_SIZE);
+    bytes = (unsigned char *)registry;
+    assert(
+        mylite_ownerless_current_process_identity(&identity) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_process_registry_initialize(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            MYLITE_TEST_PROCESS_REGISTRY_SLOT_COUNT
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+
+    memcpy(bytes + 8U, &generation, sizeof(generation));
+    assert(
+        mylite_ownerless_process_registry_allocate(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            identity,
+            MYLITE_OWNERLESS_PROCESS_OPEN_MODE_OWNERLESS_RW,
+            0U,
+            &slot,
+            &slot_generation
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR
+    );
+    assert(slot == 0U);
+    assert(slot_generation == 0U);
+    assert(mylite_ownerless_process_registry_active_count(registry) == 0U);
+    assert(mylite_ownerless_process_registry_generation(registry) == UINT64_MAX - 1U);
+
+    generation = UINT64_MAX - 2U;
+    memcpy(bytes + 8U, &generation, sizeof(generation));
+    assert(
+        mylite_ownerless_process_registry_allocate(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            identity,
+            MYLITE_OWNERLESS_PROCESS_OPEN_MODE_OWNERLESS_RW,
+            0U,
+            &slot,
+            &slot_generation
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(slot_generation == UINT64_MAX - 1U);
+    assert(mylite_ownerless_process_registry_active_count(registry) == 1U);
+    assert(
+        mylite_ownerless_process_registry_release(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            slot,
+            slot_generation
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(mylite_ownerless_process_registry_active_count(registry) == 0U);
+    assert(mylite_ownerless_process_registry_generation(registry) == UINT64_MAX);
+
+    slot = UINT32_MAX;
+    slot_generation = UINT64_MAX;
+    assert(
+        mylite_ownerless_process_registry_allocate(
+            registry,
+            MYLITE_TEST_PAGE_SIZE,
+            identity,
+            MYLITE_OWNERLESS_PROCESS_OPEN_MODE_OWNERLESS_RW,
+            0U,
+            &slot,
+            &slot_generation
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR
+    );
+    assert(slot == 0U);
+    assert(slot_generation == 0U);
+    assert(mylite_ownerless_process_registry_active_count(registry) == 0U);
 
     assert(munmap(registry, MYLITE_TEST_PAGE_SIZE) == 0);
     assert(close(fd) == 0);
@@ -18155,6 +21567,23 @@ static int open_file(const char *path) {
     return fd;
 }
 
+static void register_page_log_checkpoint_stage(int fd, const char *log_path) {
+    const char suffix[] = ".checkpoint-stage";
+    const size_t path_size = strlen(log_path) + sizeof(suffix);
+    char *stage_path = malloc(path_size);
+    int stage_fd;
+
+    assert(stage_path != NULL);
+    assert(snprintf(stage_path, path_size, "%s%s", log_path, suffix) > 0);
+    stage_fd = open_file(stage_path);
+    assert(
+        mylite_ownerless_page_log_register_checkpoint_stage(fd, stage_fd) ==
+        MYLITE_OWNERLESS_PAGE_LOG_OK
+    );
+    assert(close(stage_fd) == 0);
+    free(stage_path);
+}
+
 static void truncate_file(int fd, off_t size) {
     assert(ftruncate(fd, size) == 0);
 }
@@ -18190,6 +21619,48 @@ static void read_file_at(int fd, void *data, size_t size, off_t offset) {
         assert(result > 0);
         read_bytes += (size_t)result;
     }
+}
+
+static void convert_ready_checkpoint_stage_to_legacy(int stage_fd) {
+    uint8_t header[MYLITE_TEST_CHECKPOINT_STAGE_SLOT_SIZE];
+    uint8_t *target;
+    uint64_t target_size;
+
+    read_file_at(stage_fd, header, sizeof(header), MYLITE_TEST_CHECKPOINT_STAGE_READY_SLOT_OFFSET);
+    assert(load_test_le32(header, MYLITE_TEST_CHECKPOINT_STAGE_FORMAT_OFFSET) == 3U);
+    assert(load_test_le32(header, MYLITE_TEST_CHECKPOINT_STAGE_STATE_OFFSET) == 2U);
+    assert(load_test_le64(header, MYLITE_TEST_CHECKPOINT_STAGE_STATE_SEQUENCE_OFFSET) == 3U);
+    assert(
+        load_test_le64(header, MYLITE_TEST_CHECKPOINT_STAGE_DATA_OFFSET_OFFSET) ==
+        MYLITE_TEST_CHECKPOINT_STAGE_DATA_OFFSET
+    );
+    target_size = load_test_le64(header, MYLITE_TEST_CHECKPOINT_STAGE_TARGET_SIZE_OFFSET);
+    assert(target_size >= MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE);
+    assert(target_size <= SIZE_MAX - MYLITE_TEST_CHECKPOINT_STAGE_SLOT_SIZE);
+    target = malloc((size_t)target_size);
+    assert(target != NULL);
+    read_file_at(stage_fd, target, (size_t)target_size, MYLITE_TEST_CHECKPOINT_STAGE_DATA_OFFSET);
+
+    store_test_le32(header, MYLITE_TEST_CHECKPOINT_STAGE_FORMAT_OFFSET, 1U);
+    memset(
+        header + MYLITE_TEST_CHECKPOINT_STAGE_STATE_SEQUENCE_OFFSET,
+        0,
+        MYLITE_TEST_CHECKPOINT_STAGE_HEADER_CHECKSUM_OFFSET -
+            MYLITE_TEST_CHECKPOINT_STAGE_STATE_SEQUENCE_OFFSET
+    );
+    store_test_le64(header, MYLITE_TEST_CHECKPOINT_STAGE_HEADER_CHECKSUM_OFFSET, 0U);
+    store_test_le64(
+        header,
+        MYLITE_TEST_CHECKPOINT_STAGE_HEADER_CHECKSUM_OFFSET,
+        legacy_page_log_checksum(header, sizeof(header))
+    );
+
+    assert(ftruncate(stage_fd, 0) == 0);
+    write_file_at(stage_fd, header, sizeof(header), 0);
+    write_file_at(stage_fd, target, (size_t)target_size, MYLITE_TEST_CHECKPOINT_STAGE_SLOT_SIZE);
+    assert(ftruncate(stage_fd, (off_t)(MYLITE_TEST_CHECKPOINT_STAGE_SLOT_SIZE + target_size)) == 0);
+    assert(fsync(stage_fd) == 0);
+    free(target);
 }
 
 static void fill_innodb_test_page(
@@ -18250,6 +21721,15 @@ static uint32_t load_test_le32(const uint8_t *bytes, size_t offset) {
            ((uint32_t)bytes[offset + 2U] << 16U) | ((uint32_t)bytes[offset + 3U] << 24U);
 }
 
+static uint64_t load_test_le64(const uint8_t *bytes, size_t offset) {
+    uint64_t value = 0;
+
+    for (size_t index = 0; index < 8U; ++index) {
+        value |= (uint64_t)bytes[offset + index] << (index * 8U);
+    }
+    return value;
+}
+
 static uint64_t load_test_be64(const uint8_t *bytes, size_t offset) {
     uint64_t value = 0;
 
@@ -18282,6 +21762,20 @@ static uint64_t legacy_page_log_checksum(const void *buffer, size_t size) {
     return hash;
 }
 
+static uint64_t page_log_ack_checksum_for_test(
+    uint64_t generation,
+    uint64_t relative_end_offset,
+    size_t slot_index
+) {
+    uint8_t input[sizeof(uint64_t) * 4U] = {0};
+
+    store_test_le64(input, 0U, MYLITE_TEST_PAGE_LOG_HEADER_ACK_CHECKSUM_SEED);
+    store_test_le64(input, sizeof(uint64_t), generation);
+    store_test_le64(input, sizeof(uint64_t) * 2U, relative_end_offset);
+    store_test_le64(input, sizeof(uint64_t) * 3U, slot_index);
+    return legacy_page_log_checksum(input, sizeof(input));
+}
+
 static uint32_t innodb_lock_registry_occupied_limit(void *registry) {
     uint32_t value = 0U;
 
@@ -18291,6 +21785,56 @@ static uint32_t innodb_lock_registry_occupied_limit(void *registry) {
         sizeof(value)
     );
     return value;
+}
+
+static void *hold_page_log_checkpoint_read_in_thread(void *context) {
+    page_log_checkpoint_reader_thread_context *reader =
+        (page_log_checkpoint_reader_thread_context *)context;
+    int acquired_count = 0;
+    int result;
+
+    result = mylite_ownerless_page_log_begin_read(reader->fd);
+    if (result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
+        acquired_count = 1;
+        result = mylite_ownerless_page_log_begin_read(reader->fd);
+        if (result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
+            acquired_count = 2;
+        }
+    }
+    __atomic_store_n(&reader->result, result, __ATOMIC_RELEASE);
+    signal_pipe(reader->acquired_fd);
+    if (acquired_count == 2) {
+        wait_for_pipe(reader->release_once_fd);
+        mylite_ownerless_page_log_end_read(reader->fd);
+        signal_pipe(reader->released_once_fd);
+        wait_for_pipe(reader->release_final_fd);
+        mylite_ownerless_page_log_end_read(reader->fd);
+    } else if (acquired_count == 1) {
+        mylite_ownerless_page_log_end_read(reader->fd);
+    }
+    __atomic_store_n(&reader->done, 1, __ATOMIC_RELEASE);
+    return NULL;
+}
+
+static void *checkpoint_page_log_in_thread(void *context) {
+    page_log_checkpoint_writer_thread_context *writer =
+        (page_log_checkpoint_writer_thread_context *)context;
+
+    __atomic_store_n(&writer->started, 1, __ATOMIC_RELEASE);
+    writer->result =
+        mylite_ownerless_page_log_checkpoint_if_safe(writer->fd, 1U, &writer->checkpointed);
+    __atomic_store_n(&writer->done, 1, __ATOMIC_RELEASE);
+    return NULL;
+}
+
+static void *initialize_page_log_in_thread(void *context) {
+    page_log_append_contender_thread_context *contender =
+        (page_log_append_contender_thread_context *)context;
+
+    __atomic_store_n(&contender->started, 1, __ATOMIC_RELEASE);
+    contender->result = mylite_ownerless_page_log_initialize(contender->fd);
+    __atomic_store_n(&contender->done, 1, __ATOMIC_RELEASE);
+    return NULL;
 }
 
 static void *map_file(int fd, size_t size) {
@@ -18308,8 +21852,19 @@ static void signal_pipe(int pipe_fd) {
 }
 
 static void wait_for_pipe(int pipe_fd) {
+    struct pollfd ready = {
+        .fd = pipe_fd,
+        .events = POLLIN,
+        .revents = 0,
+    };
     char value = '\0';
+    int poll_result;
 
+    do {
+        poll_result = poll(&ready, 1U, (int)MYLITE_TEST_WAIT_TIMEOUT_MS);
+    } while (poll_result < 0 && errno == EINTR);
+    assert(poll_result == 1);
+    assert((ready.revents & POLLIN) != 0);
     assert(read(pipe_fd, &value, sizeof(value)) == sizeof(value));
     assert(value == 'x');
     assert(close(pipe_fd) == 0);
@@ -18340,6 +21895,41 @@ static void wait_for_child(pid_t child) {
     assert(waitpid(child, &child_status, 0) == child);
     assert(WIFEXITED(child_status));
     assert(WEXITSTATUS(child_status) == 0);
+}
+
+static pid_t start_page_log_lock_helper(
+    const char *operation,
+    const char *log_path,
+    int *out_ready_fd
+) {
+    int ready_pipe[2];
+    pid_t child;
+
+    assert(operation != NULL);
+    assert(log_path != NULL);
+    assert(out_ready_fd != NULL);
+    assert(pipe(ready_pipe) == 0);
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        char ready_fd_value[32];
+
+        assert(close(ready_pipe[0]) == 0);
+        assert(snprintf(ready_fd_value, sizeof(ready_fd_value), "%d", ready_pipe[1]) > 0);
+        execl(
+            "/proc/self/exe",
+            "/proc/self/exe",
+            "--page-log-lock-helper",
+            operation,
+            log_path,
+            ready_fd_value,
+            (char *)NULL
+        );
+        _exit(127);
+    }
+    assert(close(ready_pipe[1]) == 0);
+    *out_ready_fd = ready_pipe[0];
+    return child;
 }
 
 static void sleep_milliseconds(unsigned milliseconds) {
@@ -18399,4 +21989,655 @@ static int remove_tree_entry(
         return rmdir(path);
     }
     return unlink(path);
+}
+
+static void test_autoinc_registry_release_pending_capacity_and_stale_generation(void) {
+    const size_t registry_size = mylite_ownerless_autoinc_registry_size(1U);
+    void *registry = calloc(1U, registry_size);
+    uint64_t generation = 0U;
+    uint64_t next_value = 0U;
+
+    assert(registry != NULL);
+    assert(
+        mylite_ownerless_autoinc_registry_initialize(registry, registry_size, 1U) ==
+        MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK
+    );
+    mylite_ownerless_latch_test_inject_release_pending_once();
+    assert(
+        mylite_ownerless_autoinc_registry_publish(registry, registry_size, 1U, 11U, 101U, 8U, 7U) ==
+        MYLITE_OWNERLESS_AUTOINC_REGISTRY_APPLIED_RELEASE_PENDING
+    );
+    assert(
+        mylite_ownerless_autoinc_registry_finish_pending_release(
+            registry,
+            registry_size,
+            1U,
+            11U
+        ) == MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_autoinc_registry_entry_generation(
+            registry,
+            registry_size,
+            1U,
+            11U,
+            101U,
+            &generation
+        ) == MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK
+    );
+    assert(generation != 0U);
+    mylite_ownerless_latch_test_inject_release_pending_once();
+    assert(
+        mylite_ownerless_autoinc_registry_remove(
+            registry,
+            registry_size,
+            1U,
+            11U,
+            101U,
+            generation
+        ) == MYLITE_OWNERLESS_AUTOINC_REGISTRY_APPLIED_RELEASE_PENDING
+    );
+    assert(
+        mylite_ownerless_autoinc_registry_finish_pending_release(
+            registry,
+            registry_size,
+            1U,
+            11U
+        ) == MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_autoinc_registry_publish(registry, registry_size, 1U, 11U, 202U, 4U, 3U) ==
+        MYLITE_OWNERLESS_AUTOINC_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_autoinc_registry_remove(
+            registry,
+            registry_size,
+            1U,
+            11U,
+            101U,
+            generation
+        ) == MYLITE_OWNERLESS_AUTOINC_REGISTRY_STALE
+    );
+    assert(
+        mylite_ownerless_autoinc_registry_read_or_seed(
+            registry,
+            registry_size,
+            1U,
+            11U,
+            303U,
+            1U,
+            &next_value
+        ) == MYLITE_OWNERLESS_AUTOINC_REGISTRY_FULL
+    );
+    free(registry);
+}
+
+static void test_page_pin_registry_release_pending_capacity_and_stale_token(void) {
+    const size_t registry_size = mylite_ownerless_page_pin_registry_size(1U);
+    void *registry = calloc(1U, registry_size);
+    uint32_t slot = 0U;
+    uint32_t replacement_slot = 0U;
+    uint32_t second_slot = 0U;
+    uint32_t active_count = 0U;
+    uint64_t generation = 0U;
+    uint64_t replacement_generation = 0U;
+    uint64_t second_generation = 0U;
+    uint64_t oldest_read_lsn = 0U;
+
+    assert(registry != NULL);
+    assert(
+        mylite_ownerless_page_pin_registry_initialize(registry, registry_size, 1U) ==
+        MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+    );
+    mylite_ownerless_latch_test_inject_release_pending_once();
+    assert(
+        mylite_ownerless_page_pin_registry_open(
+            registry,
+            registry_size,
+            1U,
+            12U,
+            100U,
+            &slot,
+            &generation
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_APPLIED_RELEASE_PENDING
+    );
+    assert(generation != 0U);
+    mylite_ownerless_latch_test_inject_release_pending_once();
+    assert(
+        mylite_ownerless_page_pin_registry_finish_pending_release(
+            registry,
+            registry_size,
+            1U,
+            12U
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_RELEASE_PENDING
+    );
+    assert(
+        mylite_ownerless_page_pin_registry_finish_pending_release(
+            registry,
+            registry_size,
+            1U,
+            12U
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+    );
+    mylite_ownerless_latch_test_inject_release_pending_once();
+    assert(
+        mylite_ownerless_page_pin_registry_replace(
+            registry,
+            registry_size,
+            1U,
+            12U,
+            slot,
+            generation,
+            105U,
+            &replacement_slot,
+            &replacement_generation
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_APPLIED_RELEASE_PENDING
+    );
+    assert(replacement_slot == slot);
+    assert(replacement_generation != 0U);
+    assert(replacement_generation != generation);
+    assert(mylite_ownerless_page_pin_registry_active_count(registry) == 1U);
+    assert(
+        mylite_ownerless_page_pin_registry_finish_pending_release(
+            registry,
+            registry_size,
+            1U,
+            12U
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_page_pin_registry_snapshot_oldest(
+            registry,
+            registry_size,
+            1U,
+            12U,
+            &active_count,
+            &oldest_read_lsn
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+    );
+    assert(active_count == 1U);
+    assert(oldest_read_lsn == 105U);
+    assert(
+        mylite_ownerless_page_pin_registry_close(
+            registry,
+            registry_size,
+            1U,
+            12U,
+            slot,
+            generation
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_NOT_FOUND
+    );
+    mylite_ownerless_latch_test_inject_release_pending_once();
+    assert(
+        mylite_ownerless_page_pin_registry_open(
+            registry,
+            registry_size,
+            2U,
+            13U,
+            101U,
+            &second_slot,
+            &second_generation
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_RELEASE_PENDING
+    );
+    assert(second_generation == 0U);
+    assert(
+        mylite_ownerless_page_pin_registry_finish_pending_release(
+            registry,
+            registry_size,
+            2U,
+            13U
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_page_pin_registry_close(
+            registry,
+            registry_size,
+            1U,
+            12U,
+            slot,
+            generation
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_NOT_FOUND
+    );
+    mylite_ownerless_latch_test_inject_release_pending_once();
+    assert(
+        mylite_ownerless_page_pin_registry_close(
+            registry,
+            registry_size,
+            1U,
+            12U,
+            replacement_slot,
+            replacement_generation
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_APPLIED_RELEASE_PENDING
+    );
+    assert(
+        mylite_ownerless_page_pin_registry_finish_pending_release(
+            registry,
+            registry_size,
+            1U,
+            12U
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_page_pin_registry_open(
+            registry,
+            registry_size,
+            2U,
+            13U,
+            101U,
+            &second_slot,
+            &second_generation
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+    );
+    assert(second_slot == slot);
+    assert(second_generation != replacement_generation);
+    assert(
+        mylite_ownerless_page_pin_registry_close(
+            registry,
+            registry_size,
+            1U,
+            12U,
+            slot,
+            replacement_generation
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_NOT_FOUND
+    );
+    assert(
+        mylite_ownerless_page_pin_registry_close(
+            registry,
+            registry_size,
+            2U,
+            13U,
+            second_slot,
+            second_generation
+        ) == MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OK
+    );
+    free(registry);
+}
+
+static void test_page_index_release_pending_and_generation_saturation(void) {
+    const size_t index_size =
+        MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE + (2U * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE);
+    unsigned char *index = calloc(1U, index_size);
+    uint64_t record_offset = 0U;
+    uint64_t page_lsn = 0U;
+    uint64_t commit_lsn = 0U;
+    uint64_t maximum_generation = UINT64_MAX;
+
+    assert(index != NULL);
+    assert(mylite_ownerless_page_index_initialize(index, index_size, 2U) == 0);
+    mylite_ownerless_latch_test_inject_release_pending_once();
+    assert(
+        mylite_ownerless_page_index_publish(index, index_size, 1U, 14U, 1U, 2U, 100U, 90U, 4096U) ==
+        MYLITE_OWNERLESS_PAGE_INDEX_APPLIED_RELEASE_PENDING
+    );
+    assert(
+        mylite_ownerless_page_index_finish_pending_release(index, index_size, 1U, 14U) ==
+        MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    mylite_ownerless_latch_test_inject_release_pending_once();
+    assert(
+        mylite_ownerless_page_index_find(
+            index,
+            index_size,
+            1U,
+            14U,
+            1U,
+            2U,
+            100U,
+            &record_offset,
+            &page_lsn,
+            &commit_lsn
+        ) == MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
+    assert(record_offset == 4096U);
+    memcpy(index + 48U, &maximum_generation, sizeof(maximum_generation));
+    assert(
+        mylite_ownerless_page_index_publish(index, index_size, 1U, 14U, 1U, 2U, 101U, 91U, 8192U) ==
+        MYLITE_OWNERLESS_PAGE_INDEX_ERROR
+    );
+    assert(memcmp(index + 48U, &maximum_generation, sizeof(maximum_generation)) == 0);
+    free(index);
+}
+
+static void test_redo_state_release_pending_and_generation_saturation(void) {
+    unsigned char state[MYLITE_OWNERLESS_REDO_STATE_SIZE];
+    mylite_ownerless_redo_state_snapshot snapshot;
+    uint64_t latest_lsn = 0U;
+    uint64_t start_lsn = 0U;
+    uint64_t end_lsn = 0U;
+    uint64_t written_lsn = 0U;
+    uint64_t advanced_lsn = 0U;
+    uint32_t remaining = 0U;
+    uint64_t maximum_generation = UINT64_MAX;
+
+    assert(
+        mylite_ownerless_redo_state_initialize(state, sizeof(state), 100U, 100U) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    mylite_ownerless_latch_test_inject_release_pending_once();
+    assert(
+        mylite_ownerless_redo_state_enter(state, sizeof(state), 1U, 15U, 100U, &latest_lsn) ==
+        MYLITE_OWNERLESS_REDO_STATE_APPLIED_RELEASE_PENDING
+    );
+    assert(
+        mylite_ownerless_redo_state_finish_pending_progress_release(
+            state,
+            sizeof(state),
+            1U,
+            15U
+        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    mylite_ownerless_latch_test_inject_release_pending_once();
+    assert(
+        mylite_ownerless_redo_state_reserve(
+            state,
+            sizeof(state),
+            1U,
+            15U,
+            latest_lsn,
+            10U,
+            &start_lsn,
+            &end_lsn
+        ) == MYLITE_OWNERLESS_REDO_STATE_APPLIED_RELEASE_PENDING
+    );
+    assert(
+        mylite_ownerless_redo_state_finish_pending_progress_release(
+            state,
+            sizeof(state),
+            1U,
+            15U
+        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    mylite_ownerless_latch_test_inject_release_pending_once();
+    assert(
+        mylite_ownerless_redo_state_complete_write_and_leave(
+            state,
+            sizeof(state),
+            1U,
+            15U,
+            start_lsn,
+            end_lsn,
+            end_lsn,
+            &written_lsn,
+            &advanced_lsn,
+            &remaining
+        ) == MYLITE_OWNERLESS_REDO_STATE_APPLIED_RELEASE_PENDING
+    );
+    assert(
+        mylite_ownerless_redo_state_finish_pending_progress_release(
+            state,
+            sizeof(state),
+            1U,
+            15U
+        ) == MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(remaining == 0U);
+    assert(
+        mylite_ownerless_redo_state_read_snapshot(state, sizeof(state), &snapshot) ==
+        MYLITE_OWNERLESS_REDO_STATE_OK
+    );
+    assert(snapshot.refcount == 0U);
+    assert(snapshot.active_reservation_count == 0U);
+    memcpy(
+        state + MYLITE_OWNERLESS_REDO_STATE_VISIBLE_GENERATION_OFFSET,
+        &maximum_generation,
+        sizeof(maximum_generation)
+    );
+    assert(
+        mylite_ownerless_redo_state_publish_visible(state, sizeof(state), end_lsn, NULL, NULL) ==
+        MYLITE_OWNERLESS_REDO_STATE_ERROR
+    );
+}
+
+static void test_innodb_lock_registry_release_pending_and_dead_latch_recovery(void) {
+    const size_t lock_size = mylite_ownerless_innodb_lock_registry_size(4U);
+    const size_t process_size = mylite_ownerless_process_registry_size(1U);
+    unsigned char *registry = calloc(1U, lock_size);
+    void *process_registry = calloc(1U, process_size);
+    uint32_t process_slot = 0U;
+    uint64_t process_generation = 0U;
+    uint32_t cleared = 0U;
+    uint32_t released = 0U;
+    uint32_t active_count = 0U;
+    uint64_t maximum_generation = UINT64_MAX;
+    mylite_ownerless_process_registry_liveness_context liveness;
+    mylite_ownerless_latch *latch;
+
+    assert(registry != NULL);
+    assert(process_registry != NULL);
+    assert(
+        mylite_ownerless_innodb_lock_registry_initialize(registry, lock_size, 4U) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    mylite_ownerless_latch_test_inject_release_pending_once();
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_table(
+            registry,
+            lock_size,
+            1U,
+            1001U,
+            2001U,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_APPLIED_RELEASE_PENDING
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_finish_pending_release(
+            registry,
+            lock_size,
+            1U,
+            MYLITE_TEST_OWNER_GENERATION(1U)
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    mylite_ownerless_latch_test_inject_release_pending_once();
+    assert(
+        mylite_ownerless_innodb_lock_registry_release_table(
+            registry,
+            lock_size,
+            1U,
+            1001U,
+            2001U,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_APPLIED_RELEASE_PENDING
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_finish_pending_release(
+            registry,
+            lock_size,
+            1U,
+            MYLITE_TEST_OWNER_GENERATION(1U)
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_release_table(
+            registry,
+            lock_size,
+            1U,
+            1001U,
+            2001U,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_NOT_FOUND
+    );
+
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_table(
+            registry,
+            lock_size,
+            1U,
+            1001U,
+            2001U,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    mylite_ownerless_latch_test_inject_release_pending_once();
+    assert(
+        mylite_ownerless_innodb_lock_registry_wait_for_table(
+            registry,
+            lock_size,
+            2U,
+            1002U,
+            2001U,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_S,
+            1U,
+            1001U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_APPLIED_RELEASE_PENDING
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_finish_pending_release(
+            registry,
+            lock_size,
+            2U,
+            MYLITE_TEST_OWNER_GENERATION(2U)
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    mylite_ownerless_latch_test_inject_release_pending_once();
+    assert(
+        mylite_ownerless_innodb_lock_registry_clear_wait(
+            registry,
+            lock_size,
+            2U,
+            1002U,
+            &cleared
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_APPLIED_RELEASE_PENDING
+    );
+    assert(cleared == 1U);
+    assert(
+        mylite_ownerless_innodb_lock_registry_finish_pending_release(
+            registry,
+            lock_size,
+            2U,
+            MYLITE_TEST_OWNER_GENERATION(2U)
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_release_table(
+            registry,
+            lock_size,
+            1U,
+            1001U,
+            2001U,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    memcpy(registry + 8U, &maximum_generation, sizeof(maximum_generation));
+    assert(
+        mylite_ownerless_innodb_lock_registry_acquire_table(
+            registry,
+            lock_size,
+            1U,
+            1001U,
+            2002U,
+            MYLITE_OWNERLESS_INNODB_LOCK_MODE_X,
+            0U
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_ERROR
+    );
+    assert(mylite_ownerless_innodb_lock_registry_active_count(registry) == 0U);
+    assert(memcmp(registry + 8U, &maximum_generation, sizeof(maximum_generation)) == 0);
+    assert(
+        mylite_ownerless_innodb_lock_registry_initialize(registry, lock_size, 4U) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+
+    assert(
+        mylite_ownerless_process_registry_initialize(process_registry, process_size, 1U) ==
+        MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(
+        mylite_ownerless_process_registry_allocate(
+            process_registry,
+            process_size,
+            process_registry_test_identity(40001U),
+            MYLITE_OWNERLESS_PROCESS_OPEN_MODE_OWNERLESS_RW,
+            0U,
+            &process_slot,
+            &process_generation
+        ) == MYLITE_OWNERLESS_PROCESS_REGISTRY_OK
+    );
+    assert(process_slot == 0U);
+    liveness.mapping = process_registry;
+    liveness.mapping_size = process_size;
+    liveness.is_alive = process_registry_identity_is_dead;
+    liveness.is_alive_ctx = NULL;
+
+    assert(
+        (mylite_ownerless_innodb_lock_registry_acquire_table)(registry,
+                                                              lock_size,
+                                                              1U,
+                                                              process_generation,
+                                                              3001U,
+                                                              4001U,
+                                                              MYLITE_OWNERLESS_INNODB_LOCK_MODE_S,
+                                                              0U) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    latch = (mylite_ownerless_latch *)(registry + 24U);
+    assert(
+        mylite_ownerless_latch_acquire(latch, 1U, process_generation, NULL, NULL, 0U) ==
+        MYLITE_OWNERLESS_LATCH_OK
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_recover_dead_latch(
+            registry,
+            lock_size,
+            2U,
+            18U,
+            &liveness
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OWNER_DEAD
+    );
+    assert(
+        (mylite_ownerless_innodb_lock_registry_release_owner)(registry,
+                                                              lock_size,
+                                                              1U,
+                                                              2U,
+                                                              18U,
+                                                              &released) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    assert(released == 1U);
+
+    assert(
+        mylite_ownerless_innodb_lock_registry_initialize(registry, lock_size, 4U) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OK
+    );
+    latch = (mylite_ownerless_latch *)(registry + 24U);
+    assert(
+        mylite_ownerless_latch_acquire(latch, 1U, process_generation, NULL, NULL, 0U) ==
+        MYLITE_OWNERLESS_LATCH_OK
+    );
+    __atomic_store_n(
+        (uint32_t *)(registry + MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_HEADER_SIZE + 12U),
+        MYLITE_OWNERLESS_INNODB_LOCK_STATE_ACTIVE,
+        __ATOMIC_RELEASE
+    );
+    assert(
+        mylite_ownerless_innodb_lock_registry_recover_dead_latch(
+            registry,
+            lock_size,
+            2U,
+            18U,
+            &liveness
+        ) == MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OWNER_DEAD
+    );
+    assert(
+        (mylite_ownerless_innodb_lock_registry_owner_active_count)(registry,
+                                                                   lock_size,
+                                                                   1U,
+                                                                   2U,
+                                                                   18U,
+                                                                   &active_count) ==
+        MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_OWNER_DEAD
+    );
+
+    free(process_registry);
+    free(registry);
+}
+
+static int process_registry_identity_is_dead(
+    const mylite_ownerless_process_identity *identity,
+    void *ctx
+) {
+    (void)identity;
+    (void)ctx;
+    return 0;
 }

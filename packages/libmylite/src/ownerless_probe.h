@@ -25,6 +25,8 @@ typedef struct mylite_ownerless_probe_result {
 
 int mylite_ownerless_probe_platform(mylite_ownerless_probe_result *result);
 int mylite_ownerless_probe_directory(const char *directory, mylite_ownerless_probe_result *result);
+int mylite_ownerless_probe_filesystem_type(const char *directory, uint64_t *out_type);
+int mylite_ownerless_filesystem_type_is_validated_local(uint64_t filesystem_type);
 
 #ifdef __cplusplus
 }

@@ -842,9 +842,10 @@ convert_search_mode_to_innobase(
 
 /** Commits a transaction in an InnoDB database.
 @param[in]	trx	Transaction handle. */
-void
+dberr_t
 innobase_commit_low(
-	trx_t*	trx);
+	trx_t*	trx)
+	MY_ATTRIBUTE((warn_unused_result));
 
 extern my_bool	innobase_stats_on_metadata;
 

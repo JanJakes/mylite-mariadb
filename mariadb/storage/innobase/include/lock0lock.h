@@ -227,19 +227,50 @@ lock_update_discard(
 	const buf_block_t*	block);		/*!< in: index page
 						which will be discarded */
 /*************************************************************//**
-Updates the lock table when a new user record is inserted. */
-void
+Updates the lock table when a new user record is inserted.
+@return DB_SUCCESS or ownerless lock coordination error */
+dberr_t
 lock_update_insert(
 /*===============*/
 	const buf_block_t*	block,	/*!< in: buffer block containing rec */
 	const rec_t*		rec);	/*!< in: the inserted record */
+
+/** Reserve and refresh a page before a B-tree search can inspect it.
+@param trx transaction that owns the reservation
+@param block page that has just been fixed
+@param restart set if the page was refreshed and the search must restart
+@return DB_SUCCESS or lock coordination error */
+dberr_t mylite_ownerless_innodb_lock_prepare_record_page(
+    trx_t *trx, const buf_block_t *block, bool *restart);
+
+/** Reserve a tablespace-wide write gate before a structural B-tree operation.
+@param trx transaction that owns the reservation
+@param space_id persistent tablespace identifier
+@return DB_SUCCESS or lock coordination error */
+dberr_t mylite_ownerless_innodb_lock_prepare_tree_write(
+    trx_t *trx, uint32_t space_id);
+
+/** Release a clean internal traversal page while retaining structure gate.
+@param trx transaction that owns the reservation
+@param block internal page that is still locally latched
+@return DB_SUCCESS or coordination error */
+dberr_t mylite_ownerless_innodb_lock_release_clean_record_page(
+    trx_t *trx, const buf_block_t *block);
+
+/** Return a thread-local insert reservation checkpoint for scoped cleanup. */
+uint64_t mylite_ownerless_innodb_lock_insert_reservation_checkpoint();
+
+/** Cancel unfinished insert reservations created after a checkpoint. */
+void mylite_ownerless_innodb_lock_cancel_insert_reservation(
+    trx_t *trx, const dict_index_t *index, uint64_t checkpoint);
 /*************************************************************//**
 Updates the lock table when a record is removed. */
 void
 lock_update_delete(
 /*===============*/
 	const buf_block_t*	block,	/*!< in: buffer block containing rec */
-	const rec_t*		rec);	/*!< in: the record to be removed */
+	const rec_t*		rec,	/*!< in: the record to be removed */
+	trx_t*			trx);	/*!< in: transaction, if any */
 /*********************************************************************//**
 Stores on the page infimum record the explicit locks of another record.
 This function is used to store the lock state of a record when it is

@@ -685,7 +685,32 @@ handle_new_error:
 			/* Roll back the latest, possibly incomplete insertion
 			or update */
 
-			trx->rollback(savept);
+			if (UNIV_UNLIKELY(
+				    mylite_ownerless_innodb_lock_has_hooks())) {
+				const dberr_t rollback_error=
+					trx->rollback(savept);
+				if (UNIV_UNLIKELY(
+					    rollback_error != DB_SUCCESS)) {
+					/*
+					 * Statement rollback can cross the same
+					 * fallible shared-page boundary as full
+					 * rollback.  Escalate to bounded terminal
+					 * cleanup instead of returning the original
+					 * retryable error with coordination state
+					 * still live.
+					 */
+					const dberr_t cleanup_error=
+						trx_rollback_for_mysql(trx);
+					if (UNIV_UNLIKELY(
+						    cleanup_error != DB_SUCCESS)) {
+						trx->mylite_ownerless_coordination_fault=
+							true;
+						err= DB_ERROR;
+					}
+				}
+			} else {
+				trx->rollback(savept);
+			}
 		}
 		if (!trx->bulk_insert) {
 			/* MariaDB will roll back the latest SQL statement */
@@ -698,6 +723,12 @@ handle_new_error:
 		ha_innobase::extra(HA_EXTRA_ABORT_ALTER_COPY) */
 		trx->bulk_insert &= TRX_DDL_BULK;
 		trx->last_stmt_start = 0;
+		break;
+	case DB_ERROR:
+		if (mylite_ownerless_innodb_lock_has_hooks()) {
+			goto rollback_to_savept;
+		}
+		ib::fatal() << "Unknown error " << err;
 		break;
 	case DB_LOCK_WAIT:
 		err = lock_wait(thr);
@@ -716,7 +747,23 @@ handle_new_error:
 	rollback:
 		/* Roll back the whole transaction; this resolution was added
 		to version 3.23.43 */
-		trx->rollback();
+		if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_has_hooks())) {
+			const dberr_t rollback_error= trx_rollback_for_mysql(trx);
+			if (UNIV_UNLIKELY(rollback_error != DB_SUCCESS)) {
+				/*
+			 * Ownerless rollback can encounter a fallible shared
+			 * coordination boundary. Do not report the original
+			 * retryable error after an incomplete rollback: the
+			 * server error conversion would mark the transaction
+			 * aborted and permit this connection to start a new
+			 * transaction with native lock-list state still live.
+			 */
+				trx->mylite_ownerless_coordination_fault= true;
+				err= DB_ERROR;
+			}
+		} else {
+			trx->rollback();
+		}
 		break;
 
 	case DB_IO_ERROR:
@@ -1146,9 +1193,9 @@ row_lock_table_autoinc_for_mysql(
 		/* It may be that the current session has not yet started
 		its transaction, or it has been committed: */
 
-		trx_start_if_not_started_xa(trx, true);
-
-		err = lock_table(prebuilt->table, NULL, LOCK_AUTO_INC, thr);
+		err = trx_start_if_not_started_xa(trx, true);
+		if (err == DB_SUCCESS)
+			err = lock_table(prebuilt->table, NULL, LOCK_AUTO_INC, thr);
 
 		trx->error_state = err;
 	} while (err != DB_SUCCESS
@@ -1188,10 +1235,10 @@ row_lock_table(row_prebuilt_t* prebuilt)
 		/* It may be that the current session has not yet started
 		its transaction, or it has been committed: */
 
-		trx_start_if_not_started_xa(trx, false);
-
-		err = lock_table(prebuilt->table, NULL, static_cast<lock_mode>(
-					 prebuilt->select_lock_type), thr);
+		err = trx_start_if_not_started_xa(trx, false);
+		if (err == DB_SUCCESS)
+			err = lock_table(prebuilt->table, NULL, static_cast<lock_mode>(
+					     prebuilt->select_lock_type), thr);
 		trx->error_state = err;
 	} while (err != DB_SUCCESS
 		 && row_mysql_handle_errors(&err, trx, thr, nullptr));
@@ -1275,10 +1322,14 @@ row_insert_for_mysql(
 	if (!table->no_rollback()) {
 		mylite_deep_stage_start =
 			mylite_ownerless_innodb_deep_perf_start_ns();
-		trx_start_if_not_started_xa(trx, true);
+		err = trx_start_if_not_started_xa(trx, true);
 		mylite_ownerless_innodb_deep_perf_add_elapsed(
 			MYLITE_OWNERLESS_INNODB_DEEP_ROW_INSERT_START_TRX_NS,
 			mylite_deep_stage_start);
+		if (UNIV_UNLIKELY(err != DB_SUCCESS)) {
+			trx->op_info = "";
+			return err;
+		}
 	}
 
 	mylite_deep_stage_start = mylite_ownerless_innodb_deep_perf_start_ns();
@@ -1656,28 +1707,37 @@ static dberr_t mylite_ownerless_prepare_referenced_foreign_write_current_read(
 	dict_table_t*	table,
 	trx_t*		trx)
 {
-	if (UNIV_LIKELY(!mylite_ownerless_innodb_lock_has_hooks())
+	if (UNIV_LIKELY(
+		!mylite_ownerless_innodb_write_coordination_enabled())
 	    || table == nullptr || table->is_temporary()
-	    || table->referenced_set.empty()
-	    || (trx != nullptr && !trx->mylite_ownerless_dirty_pages_empty())) {
+	    || table->referenced_set.empty()) {
 		return DB_SUCCESS;
 	}
 
 	uint64_t	latest_lsn = 0;
 	const int observe_result =
 		mylite_ownerless_innodb_redo_observe(&latest_lsn);
-	if (observe_result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE ||
-	    latest_lsn == 0) {
-		return DB_SUCCESS;
-	}
 	if (observe_result != MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+		mylite_ownerless_innodb_note_coordination_error();
+		if (trx != nullptr) {
+			trx->mylite_ownerless_coordination_fault = true;
+			trx->error_state = DB_ERROR;
+		}
 		return DB_ERROR;
+	}
+	if (latest_lsn == 0) {
+		return DB_SUCCESS;
 	}
 
 	mylite_ownerless_innodb_enable_current_external_page_visibility(
 		latest_lsn);
-	mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_visible_boundary_no_skip(
+	mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_visible_boundary_preserve_clean_no_skip(
 		latest_lsn);
+	if (mylite_ownerless_innodb_coordination_error()) {
+		trx->mylite_ownerless_coordination_fault = true;
+		trx->error_state = DB_ERROR;
+		return DB_ERROR;
+	}
 
 	return DB_SUCCESS;
 }
@@ -1731,7 +1791,11 @@ row_update_for_mysql(row_prebuilt_t* prebuilt)
 	init_fts_doc_id_for_ref(table, &fk_depth);
 
 	if (!table->no_rollback()) {
-		trx_start_if_not_started_xa(trx, true);
+		err = trx_start_if_not_started_xa(trx, true);
+		if (UNIV_UNLIKELY(err != DB_SUCCESS)) {
+			trx->op_info = "";
+			DBUG_RETURN(err);
+		}
 	}
 
 	node = prebuilt->upd_node;
@@ -2566,7 +2630,8 @@ rollback:
                   log_buffer_flush_to_disk(); DBUG_SUICIDE(););
   /* FTS_ tables may be deleted */
   std::vector<pfs_os_file_t> deleted;
-  trx->commit(deleted);
+  if (UNIV_UNLIKELY(trx->commit(deleted)))
+    err= DB_ERROR;
   const auto space_id= table->space_id;
   pfs_os_file_t d= fil_delete_tablespace(space_id);
   DBUG_EXECUTE_IF("ib_discard_after_commit_crash", DBUG_SUICIDE(););

@@ -72,6 +72,13 @@ trx_get_error_info(
 /** @return an allocated transaction */
 trx_t *trx_create();
 
+/** Retain a detached transaction until ownerless cleanup can be retried. */
+void trx_ownerless_quarantine_detached(trx_t *trx) noexcept;
+
+/** Retry and free detached transactions retained after coordination failure.
+@return true if at least one transaction still requires cleanup */
+bool trx_ownerless_retry_quarantined(bool *retried= nullptr) noexcept;
+
 /** At shutdown, frees a transaction object. */
 void trx_free_at_shutdown(trx_t *trx);
 
@@ -84,52 +91,47 @@ dberr_t trx_lists_init_at_db_start();
 
 /*************************************************************//**
 Starts the transaction if it is not yet started. */
-void
+dberr_t
 trx_start_if_not_started_xa_low(
 /*============================*/
 	trx_t*	trx,		/*!< in/out: transaction */
-	bool	read_write);	/*!< in: true if read write transaction */
+	bool	read_write)	/*!< in: true if read write transaction */
+	MY_ATTRIBUTE((warn_unused_result));
 /*************************************************************//**
 Starts the transaction if it is not yet started. */
-void
+dberr_t
 trx_start_if_not_started_low(
 /*=========================*/
 	trx_t*	trx,		/*!< in/out: transaction */
-	bool	read_write);	/*!< in: true if read write transaction */
+	bool	read_write)	/*!< in: true if read write transaction */
+	MY_ATTRIBUTE((warn_unused_result));
 
 /**
 Start a transaction for internal processing.
 @param trx          transaction
 @param read_write   whether writes may be performed */
-void trx_start_internal_low(trx_t *trx, bool read_write);
+dberr_t trx_start_internal_low(trx_t *trx, bool read_write)
+  MY_ATTRIBUTE((warn_unused_result));
 
 #ifdef UNIV_DEBUG
 #define trx_start_if_not_started_xa(t, rw)			\
-	do {							\
-	(t)->start_line = __LINE__;				\
-	(t)->start_file = __FILE__;				\
-	trx_start_if_not_started_xa_low((t), rw);		\
-	} while (false)
+	((t)->start_line = __LINE__,				\
+	 (t)->start_file = __FILE__,				\
+	 trx_start_if_not_started_xa_low((t), (rw)))
 
 #define trx_start_if_not_started(t, rw)				\
-	do {							\
-	(t)->start_line = __LINE__;				\
-	(t)->start_file = __FILE__;				\
-	trx_start_if_not_started_low((t), rw);			\
-	} while (false)
+	((t)->start_line = __LINE__,				\
+	 (t)->start_file = __FILE__,				\
+	 trx_start_if_not_started_low((t), (rw)))
 
 #define trx_start_internal(t)					\
-	do {							\
-	(t)->start_line = __LINE__;				\
-	(t)->start_file = __FILE__;				\
-	trx_start_internal_low(t, true);			\
-	} while (false)
+	((t)->start_line = __LINE__,				\
+	 (t)->start_file = __FILE__,				\
+	 trx_start_internal_low((t), true))
 #define trx_start_internal_read_only(t)				\
-	do {							\
-	(t)->start_line = __LINE__;				\
-	(t)->start_file = __FILE__;				\
-	trx_start_internal_low(t, false);			\
-	} while (false)
+	((t)->start_line = __LINE__,				\
+	 (t)->start_file = __FILE__,				\
+	 trx_start_internal_low((t), false))
 #else
 #define trx_start_if_not_started(t, rw)				\
 	trx_start_if_not_started_low((t), rw)
@@ -143,26 +145,28 @@ void trx_start_internal_low(trx_t *trx, bool read_write);
 
 /** Start a transaction for a DDL operation.
 @param trx   transaction */
-void trx_start_for_ddl_low(trx_t *trx);
+dberr_t trx_start_for_ddl_low(trx_t *trx)
+  MY_ATTRIBUTE((warn_unused_result));
 
 #ifdef UNIV_DEBUG
 # define trx_start_for_ddl(t)					\
-	do {							\
-	ut_ad((t)->start_file == 0);				\
-	(t)->start_line = __LINE__;				\
-	(t)->start_file = __FILE__;				\
-	t->state= TRX_STATE_NOT_STARTED;			\
-	trx_start_for_ddl_low(t);				\
-	} while (0)
+	(ut_ad((t)->start_file == 0),				\
+	 (t)->start_line = __LINE__,				\
+	 (t)->start_file = __FILE__,				\
+	 (t)->state= TRX_STATE_NOT_STARTED,			\
+	 trx_start_for_ddl_low(t))
 #else
 # define trx_start_for_ddl(t) trx_start_for_ddl_low(t)
 #endif /* UNIV_DEBUG */
 
-/** Commit a transaction */
-void trx_commit_for_mysql(trx_t *trx) noexcept;
+/** Commit a transaction.
+@return DB_ERROR if ownerless coordination cleanup requires quarantine */
+dberr_t trx_commit_for_mysql(trx_t *trx) noexcept
+  MY_ATTRIBUTE((warn_unused_result));
 /** XA PREPARE a transaction.
 @param[in,out]	trx	transaction to prepare */
-void trx_prepare_for_mysql(trx_t* trx);
+dberr_t trx_prepare_for_mysql(trx_t* trx)
+  MY_ATTRIBUTE((warn_unused_result));
 /**********************************************************************//**
 This function is used to find number of prepared transactions and
 their transaction objects for a recovery.
@@ -184,10 +188,11 @@ trx_t* trx_get_trx_by_xid(const XID* xid);
 void trx_commit_complete_for_mysql(trx_t *trx);
 /****************************************************************//**
 Prepares a transaction for commit/rollback. */
-void
+dberr_t
 trx_commit_or_rollback_prepare(
 /*===========================*/
-	trx_t*	trx);	/*!< in/out: transaction */
+	trx_t*	trx)	/*!< in/out: transaction */
+	MY_ATTRIBUTE((warn_unused_result));
 /*********************************************************************//**
 Creates a commit command node struct.
 @return own: commit node struct */
@@ -285,9 +290,10 @@ trx_pool_close();
 Set the transaction as a read-write transaction if it is not already
 tagged as such.
 @param[in,out] trx	Transaction that needs to be "upgraded" to RW from RO */
-void
+dberr_t
 trx_set_rw_mode(
-	trx_t*		trx);
+	trx_t*		trx)
+	MY_ATTRIBUTE((warn_unused_result));
 
 /**
 Transactions that aren't started by the MySQL server don't set
@@ -635,6 +641,27 @@ public:
   Cleared in commit_in_memory() after commit_state(),
   trx_sys_t::deregister_rw(), release_locks(). */
   trx_id_t id;
+  /** Whether id names a live entry in the ownerless transaction registry. */
+  bool mylite_ownerless_trx_registered;
+  /** Whether ownerless transaction deregistration previously failed after it
+  may have been applied. */
+  bool mylite_ownerless_trx_deregister_retry;
+  /** Coordination failed and this transaction must be quarantined. */
+  bool mylite_ownerless_coordination_fault;
+  /** Intrusive link used while a detached transaction awaits close recovery. */
+  trx_t *mylite_ownerless_quarantine_next;
+  /** Whether this transaction is owned by the detached quarantine. */
+  bool mylite_ownerless_quarantined;
+  enum mylite_ownerless_commit_retry_stage_t
+  {
+    MYLITE_OWNERLESS_COMMIT_RETRY_NONE,
+    MYLITE_OWNERLESS_COMMIT_RETRY_ROLLBACK_REFRESH,
+    MYLITE_OWNERLESS_COMMIT_RETRY_PUBLISH_VISIBLE
+  };
+  /** Ownerless post-commit boundary that must succeed before shared cleanup. */
+  mylite_ownerless_commit_retry_stage_t mylite_ownerless_commit_retry_stage;
+  /** LSN to use when retrying the ownerless post-commit boundary. */
+  lsn_t mylite_ownerless_commit_retry_lsn;
   /** MyLite lock-registry transaction identifier for locks acquired before
   InnoDB assigns trx_t::id. */
   trx_id_t mylite_ownerless_lock_trx_id;
@@ -883,14 +910,18 @@ public:
   {
     ut_ad(!mutex_is_owner());
     mutex.wr_lock();
+#ifdef UNIV_DEBUG
     assert(!mutex_owner.exchange(pthread_self(),
                                  std::memory_order_relaxed));
+#endif /* UNIV_DEBUG */
   }
   /** Release the mutex */
   void mutex_unlock()
   {
+#ifdef UNIV_DEBUG
     assert(mutex_owner.exchange(0, std::memory_order_relaxed) ==
            pthread_self());
+#endif /* UNIV_DEBUG */
     mutex.wr_unlock();
   }
 #ifndef SUX_LOCK_GENERIC
@@ -997,6 +1028,13 @@ public:
   /** Consistent read view of the transaction */
   ReadView read_view;
 
+  /** Open a consistent read view and retain any error for the caller. */
+  dberr_t open_read_view() noexcept MY_ATTRIBUTE((warn_unused_result));
+
+  /** Close a consistent read view. A failed shared unpublish leaves the view
+  open and marks this transaction as requiring quarantine. */
+  dberr_t close_read_view() noexcept MY_ATTRIBUTE((warn_unused_result));
+
 	/* These fields are not protected by any mutex. */
 
 	/** false=normal transaction, true=recovered (must be rolled back)
@@ -1007,6 +1045,9 @@ public:
 	There is only one foreign-thread access in trx_print_low()
 	and a possible race condition with trx_disconnect_prepared(). */
 	bool		is_recovered;
+	/** Recovered native undo owned by a live ownerless peer. This process may
+	observe it but must never roll it back or release its shared ownership. */
+	bool		mylite_ownerless_remote_recovered;
 	const char*	op_info;	/*!< English text describing the
 					current operation, or an empty
 					string */
@@ -1235,24 +1276,34 @@ private:
   /** Mark a transaction committed in the main memory data structures.
   @param mtr  mini-transaction */
   inline void commit_in_memory(mtr_t *mtr);
-  /** Commit the transaction in the file system. */
-  void commit_persist() noexcept;
+  /** Commit the transaction in the file system.
+  @return error code or DB_SUCCESS */
+  dberr_t commit_persist() noexcept;
   /** Clean up the transaction after commit_in_memory()
-  @retval false (always) */
+  @retval false if cleanup completed
+  @retval true if an ownerless coordination fault requires quarantine */
   bool commit_cleanup() noexcept;
   /** Commit an empty transaction.
-  @param mtr   mini-transaction */
-  void commit_empty(mtr_t *mtr);
-  /** Commit an empty transaction.
-  @param mtr   mini-transaction */
+  @param mtr   mini-transaction
+  @return error code or DB_SUCCESS */
+  dberr_t commit_empty(mtr_t *mtr);
   /** Assign the transaction its history serialisation number and write the
   UNDO log to the assigned rollback segment.
-  @param mtr   mini-transaction */
-  inline void write_serialisation_history(mtr_t *mtr);
+  @param mtr   mini-transaction
+  @return error code or DB_SUCCESS */
+  inline dberr_t write_serialisation_history(mtr_t *mtr);
 public:
+  /** Retry cleanup after an ownerless commit or active read-only close fault.
+  @retval false if cleanup completed or was not needed
+  @retval true if coordination remains faulted */
+  bool retry_ownerless_commit_cleanup() noexcept;
+  /** Retry cleanup for this transaction without draining detached owners. */
+  bool retry_ownerless_commit_cleanup_low() noexcept;
   /** Commit the transaction.
-  @retval false (always) */
-  bool commit() noexcept;
+  @retval false if commit and cleanup completed
+  @retval true if commit failed or an ownerless coordination fault requires
+  quarantine */
+  bool commit() noexcept MY_ATTRIBUTE((warn_unused_result));
 
   /** Try to drop a persistent table.
   @param table       persistent table
@@ -1269,7 +1320,8 @@ public:
   dberr_t drop_table_statistics(const table_name_t &name);
   /** Commit the transaction, possibly after drop_table().
   @param deleted   handles of data files that were deleted */
-  void commit(std::vector<pfs_os_file_t> &deleted);
+  bool commit(std::vector<pfs_os_file_t> &deleted)
+    MY_ATTRIBUTE((warn_unused_result));
 
 
   bool is_referenced() const
@@ -1318,10 +1370,18 @@ public:
   /** Clear commit_lsn and free the memory */
   void clear_and_free() noexcept { ut_d(commit_lsn= 0;) free(); }
 
+  /** Dispose a transaction after a failed start if no ownership escaped.
+  @return true if the transaction was freed, false if it was quarantined */
+  bool dispose_failed_start() noexcept;
+  /** @return whether no ownerless/native cleanup ownership remains. */
+  bool ownerless_cleanup_ownership_empty() const noexcept;
+
   void assert_freed() const
   {
     ut_ad(state == TRX_STATE_NOT_STARTED);
     ut_ad(!id);
+    ut_ad(!mylite_ownerless_quarantined);
+    ut_ad(mylite_ownerless_quarantine_next == nullptr);
     ut_ad(!*detailed_error);
     ut_ad(!mutex_is_owner());
     ut_ad(!has_logged());

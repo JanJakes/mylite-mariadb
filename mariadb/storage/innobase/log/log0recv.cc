@@ -3563,7 +3563,6 @@ set_start_lsn:
 		ut_ad(!mtr.has_modifications());
 		block->page.set_freed(block->page.state());
 	}
-
 	/* Make sure that committing mtr does not change the modification
 	lsn values of page */
 
@@ -4753,17 +4752,56 @@ static dberr_t recv_rename_files()
         char *old_name= mem_strdup(old);
         char *new_name_copy= mem_strdup(new_name);
         mysql_mutex_unlock(&fil_system.mutex);
-        fil_space_free(replace_other_id, false);
-        const bool replaced=
-            os_file_delete(innodb_data_file_key, new_name_copy) &&
-            os_file_rename(innodb_data_file_key, old_name, new_name_copy);
+        const int guard_result=
+            mylite_ownerless_innodb_file_delete_guard_acquire();
+        bool replaced= false;
+        bool already_replaced= false;
+        if (guard_result == MYLITE_OWNERLESS_INNODB_LOCK_OK ||
+            guard_result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+        {
+          already_replaced=
+              mylite_ownerless_fil_path_has_tablespace_page0(new_name_copy, id);
+          const bool source_matches=
+              mylite_ownerless_fil_path_has_tablespace_page0(old_name, id);
+          const bool target_matches_replaced=
+              mylite_ownerless_fil_path_has_tablespace_page0(
+                  new_name_copy, replace_other_id);
+          bool target_exists= false;
+          os_file_type_t target_type;
+          const bool target_status=
+              os_file_status(new_name_copy, &target_exists, &target_type);
+
+          if (already_replaced)
+            replaced= true;
+          else if (source_matches && target_status && !target_exists)
+            replaced= os_file_rename(innodb_data_file_key, old_name,
+                                     new_name_copy);
+          else if (source_matches && target_matches_replaced)
+            replaced=
+                os_file_delete(innodb_data_file_key, new_name_copy) &&
+                os_file_rename(innodb_data_file_key, old_name, new_name_copy);
+        }
+        else
+          mylite_ownerless_innodb_note_coordination_error();
+
+        if (guard_result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
+          mylite_ownerless_innodb_file_delete_guard_release();
+
+        if (replaced)
+          fil_space_free(replace_other_id, false);
         mysql_mutex_lock(&fil_system.mutex);
         if (replaced)
         {
-          sql_print_information("InnoDB: Replayed MyLite rename of tablespace "
-                                UINT32PF " from '%s' over stale tablespace "
-                                UINT32PF " at '%s'",
-                                id, old_name, replace_other_id, new_name_copy);
+          if (already_replaced)
+            sql_print_information(
+                "InnoDB: Completed MyLite rename metadata for tablespace "
+                UINT32PF " at '%s' over stale tablespace " UINT32PF,
+                id, new_name_copy, replace_other_id);
+          else
+            sql_print_information(
+                "InnoDB: Replayed MyLite rename of tablespace " UINT32PF
+                " from '%s' over stale tablespace " UINT32PF " at '%s'",
+                id, old_name, replace_other_id, new_name_copy);
           space->chain.start->name= mem_strdup(new_name);
           ut_free(old);
         }
@@ -5121,6 +5159,9 @@ read_only_recovery:
 	mysql_mutex_lock(&recv_sys.mutex);
 	if (UNIV_UNLIKELY(recv_sys.scanned_lsn != recv_sys.lsn)
 	    && log_sys.is_recoverable()) {
+		ib::error() << "Ownerless startup redo scan stopped at LSN "
+			    << recv_sys.scanned_lsn << " before parsed LSN "
+			    << recv_sys.lsn;
 		ut_ad("log parsing error" == 0);
 		mysql_mutex_unlock(&recv_sys.mutex);
 		err = DB_CORRUPTION;
@@ -5150,6 +5191,8 @@ read_only_recovery:
 		MYLITE_EMBEDDED_STARTUP_PERF_INNODB_RECOVERY_START_DEFERRED_REINIT_NS,
 		mylite_stage_start);
 	if (mylite_deferred_reinit_failed) {
+		ib::error() << "Ownerless startup could not reinitialize a deferred "
+			       "tablespace file operation";
 		err = DB_CORRUPTION;
 	}
 

@@ -227,6 +227,15 @@
         trx_id,                                                                                    \
         out_no                                                                                     \
     )
+#define mylite_ownerless_trx_registry_set_rollback_state(mapping, size, owner, trx_id, state)      \
+    mylite_ownerless_trx_registry_set_rollback_state(                                              \
+        mapping,                                                                                   \
+        size,                                                                                      \
+        owner,                                                                                     \
+        MYLITE_TEST_OWNER_GENERATION(owner),                                                       \
+        trx_id,                                                                                    \
+        state                                                                                      \
+    )
 #define mylite_ownerless_trx_registry_end(mapping, size, slot, gen)                                \
     mylite_ownerless_trx_registry_end(                                                             \
         mapping,                                                                                   \
@@ -293,6 +302,22 @@
         MYLITE_TEST_LATCH_OWNER_ID,                                                                \
         MYLITE_TEST_LATCH_OWNER_GENERATION,                                                        \
         out_count                                                                                  \
+    )
+#define mylite_ownerless_trx_registry_owner_allows_live_peer_plain_read(                           \
+    mapping,                                                                                       \
+    size,                                                                                          \
+    owner,                                                                                         \
+    out_count,                                                                                     \
+    out_allowed                                                                                    \
+)                                                                                                  \
+    mylite_ownerless_trx_registry_owner_allows_live_peer_plain_read(                               \
+        mapping,                                                                                   \
+        size,                                                                                      \
+        owner,                                                                                     \
+        MYLITE_TEST_LATCH_OWNER_ID,                                                                \
+        MYLITE_TEST_LATCH_OWNER_GENERATION,                                                        \
+        out_count,                                                                                 \
+        out_allowed                                                                                \
     )
 
 #define mylite_ownerless_read_view_registry_open(                                                  \

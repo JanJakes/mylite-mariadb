@@ -86,6 +86,8 @@ static void flst_zero_both(const buf_block_t& b, byte *addr, mtr_t *mtr)
   mtr->write<2,mtr_t::MAYBE_NOP>(b, addr + FIL_ADDR_BYTE, 0U);
   /* Initialize the other address by (MEMMOVE|0x80,offset,FIL_ADDR_SIZE,source)
   which is 4 bytes, or less than FIL_ADDR_SIZE. */
+  if (UNIV_UNLIKELY(!mtr->ownerless_page_write_prepare_checked(b)))
+    return;
   memcpy(addr + FIL_ADDR_SIZE, addr, FIL_ADDR_SIZE);
   mtr->memmove(b, boffset + FIL_ADDR_SIZE, boffset, FIL_ADDR_SIZE);
 }
@@ -107,6 +109,9 @@ static void flst_add_to_empty(buf_block_t *base, uint16_t boffset,
   /* Update first and last fields of base node */
   flst_write_addr(*base, base->page.frame + boffset + FLST_FIRST,
                   add->page.id().page_no(), aoffset, mtr);
+  if (UNIV_UNLIKELY(
+          !mtr->ownerless_page_write_prepare_checked(*base)))
+    return;
   memcpy(base->page.frame + boffset + FLST_LAST,
          base->page.frame + boffset + FLST_FIRST,
          FIL_ADDR_SIZE);

@@ -41,6 +41,28 @@ Created 2/6/1997 Heikki Tuuri
 #include "rem0cmp.h"
 #include "lock0lock.h"
 #include "row0mysql.h"
+#include "mylite_ownerless_innodb_lock_hooks.h"
+
+static bool
+row_vers_remote_trx_is_active(
+	trx_id_t	trx_id)
+{
+	if (UNIV_LIKELY(
+		!mylite_ownerless_innodb_write_coordination_enabled())) {
+		return(false);
+	}
+
+	int active = 0;
+	const int result = mylite_ownerless_innodb_remote_trx_active(
+		trx_id, &active);
+	if (result != MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+		/* Conservatively retain the version until the sticky coordination
+		error rejects work at a fallible database boundary. */
+		mylite_ownerless_innodb_note_coordination_error();
+		return(true);
+	}
+	return(active != 0);
+}
 
 /** Check whether all non-virtual index fields are equal.
 @param[in]	index	the secondary index
@@ -86,7 +108,8 @@ row_vers_impl_x_locked_low(
 	const rec_t*	rec,
 	dict_index_t*	index,
 	const rec_offs*	offsets,
-	mtr_t*		mtr)
+	mtr_t*		mtr,
+	bool*		remote_active)
 {
 	trx_id_t	trx_id;
 	rec_t*		prev_version = NULL;
@@ -122,7 +145,8 @@ row_vers_impl_x_locked_low(
 
 	trx_t* trx = nullptr;
 	trx_id = row_get_rec_trx_id(clust_rec, clust_index, clust_offsets);
-	if (trx_id <= mtr->trx->max_inactive_id) {
+	if (!mylite_ownerless_innodb_write_coordination_enabled()
+	    && trx_id <= mtr->trx->max_inactive_id) {
 		/* The transaction history was already purged. */
 	done:
 		mem_heap_free(heap);
@@ -138,6 +162,13 @@ row_vers_impl_x_locked_low(
 	} else {
 		trx = trx_sys.find(mtr->trx, trx_id);
 		if (trx == 0) {
+			if (row_vers_remote_trx_is_active(trx_id)) {
+				if (remote_active != nullptr) {
+					*remote_active = true;
+				}
+				mem_heap_free(heap);
+				DBUG_RETURN(0);
+			}
 			/* The transaction that modified or inserted
 			clust_rec is no longer active, or it is
 			corrupt: no implicit lock on rec */
@@ -394,12 +425,16 @@ row_vers_impl_x_locked(
 	trx_t*		caller_trx,
 	const rec_t*	rec,
 	dict_index_t*	index,
-	const rec_offs*	offsets)
+	const rec_offs*	offsets,
+	bool*		remote_active)
 {
 	mtr_t		mtr{caller_trx};
 	trx_t*		trx;
 	const rec_t*	clust_rec;
 	dict_index_t*	clust_index;
+	if (remote_active != nullptr) {
+		*remote_active = false;
+	}
 
 	/* The function must not be invoked under lock_sys latch to prevert
 	latching orded violation, i.e. page latch must be acquired before
@@ -437,7 +472,7 @@ row_vers_impl_x_locked(
 	} else {
 		trx = row_vers_impl_x_locked_low(
 				clust_rec, clust_index, rec, index,
-				offsets, &mtr);
+				offsets, &mtr, remote_active);
 
 		ut_ad(trx == 0 || trx->is_referenced());
 	}
@@ -865,7 +900,8 @@ row_vers_build_for_semi_consistent_read(
 			rec_trx_id = version_trx_id;
 		}
 
-		if (!trx_sys.is_registered(mtr->trx, version_trx_id)) {
+		if (!trx_sys.is_registered(mtr->trx, version_trx_id)
+		    && !row_vers_remote_trx_is_active(version_trx_id)) {
 committed_version_trx:
 			/* We found a version that belongs to a
 			committed transaction: return it. */

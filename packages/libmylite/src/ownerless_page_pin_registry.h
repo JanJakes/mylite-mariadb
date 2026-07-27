@@ -13,6 +13,9 @@ extern "C" {
 #define MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_NOT_FOUND 2
 #define MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_TIMEOUT 3
 #define MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_ERROR 4
+#define MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_OWNER_DEAD 5
+#define MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_APPLIED_RELEASE_PENDING 6
+#define MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_RELEASE_PENDING 7
 
 #define MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_HEADER_SIZE 96U
 #define MYLITE_OWNERLESS_PAGE_PIN_REGISTRY_SLOT_SIZE 64U
@@ -29,6 +32,21 @@ int mylite_ownerless_page_pin_registry_open(
     size_t mapping_size,
     uint32_t owner_id,
     uint64_t owner_generation,
+    uint64_t read_lsn,
+    uint32_t *out_slot_index,
+    uint64_t *out_slot_generation
+);
+/*
+ * Atomically replace an active pin. APPLIED_RELEASE_PENDING means the old
+ * token is stale and the returned replacement token must be retained.
+ */
+int mylite_ownerless_page_pin_registry_replace(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t owner_id,
+    uint64_t owner_generation,
+    uint32_t old_slot_index,
+    uint64_t old_slot_generation,
     uint64_t read_lsn,
     uint32_t *out_slot_index,
     uint64_t *out_slot_generation
@@ -76,6 +94,21 @@ int mylite_ownerless_page_pin_registry_owner_active_count(
     uint32_t latch_owner_id,
     uint64_t latch_owner_generation,
     uint32_t *out_active_count
+);
+/* Idempotently finish either pending-release result for the same latch owner. */
+int mylite_ownerless_page_pin_registry_finish_pending_release(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t owner_id,
+    uint64_t owner_generation
+);
+struct mylite_ownerless_process_registry_liveness_context;
+int mylite_ownerless_page_pin_registry_recover_dead_latch(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t owner_id,
+    uint64_t owner_generation,
+    const struct mylite_ownerless_process_registry_liveness_context *liveness
 );
 
 #ifdef __cplusplus

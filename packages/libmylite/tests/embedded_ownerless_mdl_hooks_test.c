@@ -4,6 +4,7 @@
 
 #include <assert.h>
 #include <ftw.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -21,8 +22,15 @@ typedef struct mdl_hook_counts {
     unsigned app_posts_upgradable_acquires;
     unsigned app_posts_exclusive_acquires;
     unsigned max_app_posts_active;
+    unsigned app_posts_upgradable_active;
+    unsigned cancellation_checks;
+    unsigned high_priority_shared_acquires;
+    int fail_next_result;
+    int failed_exclusive_during_upgrade;
+    int released_original_mode_after_failed_upgrade;
 } mdl_hook_counts;
 
+static void test_mdl_session_id_saturation(void);
 static void test_mdl_hooks_balance_table_tickets(void);
 static int acquire_mdl_hook(
     const mylite_ownerless_mdl_key_view *key,
@@ -32,6 +40,13 @@ static int acquire_mdl_hook(
 static void release_mdl_hook(const mylite_ownerless_mdl_key_view *key, void *ctx);
 static int is_app_posts_table_key(const mylite_ownerless_mdl_key_view *key);
 static int string_part_equals(const char *value, unsigned length, const char *expected);
+static void expect_hook_error(
+    mylite_db *db,
+    mdl_hook_counts *counts,
+    int hook_result,
+    unsigned mariadb_errno,
+    const char *sqlstate
+);
 static mylite_db *open_database(const char *root, char **database_path);
 static void exec_ok(mylite_db *db, const char *sql);
 static char *make_temp_root(void);
@@ -45,8 +60,17 @@ static int remove_tree_entry(
 );
 
 int main(void) {
+    test_mdl_session_id_saturation();
     test_mdl_hooks_balance_table_tickets();
     return 0;
+}
+
+static void test_mdl_session_id_saturation(void) {
+    mylite_ownerless_mdl_test_set_session_sequence(UINT64_MAX - 1U);
+    assert(mylite_ownerless_mdl_test_allocate_session_id() == UINT64_MAX - 1U);
+    assert(mylite_ownerless_mdl_test_allocate_session_id() == 0U);
+    assert(mylite_ownerless_mdl_test_allocate_session_id() == 0U);
+    mylite_ownerless_mdl_test_set_session_sequence(1U);
 }
 
 static void test_mdl_hooks_balance_table_tickets(void) {
@@ -63,6 +87,14 @@ static void test_mdl_hooks_balance_table_tickets(void) {
     exec_ok(db, "CREATE TABLE app.posts (id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB");
     exec_ok(db, "INSERT INTO app.posts VALUES (1)");
     exec_ok(db, "SELECT id FROM app.posts WHERE id = 1");
+    exec_ok(db, "SHOW FULL COLUMNS FROM app.posts");
+    expect_hook_error(db, &counts, MYLITE_OWNERLESS_MDL_DEADLOCK, 1213U, "40001");
+    assert(counts.failed_exclusive_during_upgrade);
+    assert(counts.released_original_mode_after_failed_upgrade);
+    expect_hook_error(db, &counts, MYLITE_OWNERLESS_MDL_TIMEOUT, 1205U, "HY000");
+    expect_hook_error(db, &counts, MYLITE_OWNERLESS_MDL_KILLED, 1317U, "70100");
+    expect_hook_error(db, &counts, MYLITE_OWNERLESS_MDL_FULL, 1041U, "HY000");
+    expect_hook_error(db, &counts, MYLITE_OWNERLESS_MDL_ERROR, 1815U, "HY000");
     exec_ok(db, "ALTER TABLE app.posts ADD COLUMN title VARCHAR(64) NULL");
     exec_ok(db, "DROP TABLE app.posts");
     assert(mylite_close(db) == MYLITE_OK);
@@ -74,7 +106,10 @@ static void test_mdl_hooks_balance_table_tickets(void) {
     assert(counts.app_posts_upgradable_acquires > 0U);
     assert(counts.app_posts_exclusive_acquires > 0U);
     assert(counts.app_posts_active == 0U);
+    assert(counts.app_posts_upgradable_active == 0U);
     assert(counts.max_app_posts_active > 0U);
+    assert(counts.cancellation_checks > 0U);
+    assert(counts.high_priority_shared_acquires > 0U);
 
     mylite_ownerless_mdl_reset_hooks();
     assert(!mylite_ownerless_mdl_has_hooks());
@@ -93,6 +128,22 @@ static int acquire_mdl_hook(
 
     (void)lock_wait_timeout;
     if (is_app_posts_table_key(key)) {
+        assert(key->session_id != 0U);
+        assert(key->wait_options.is_cancelled != NULL);
+        assert(key->wait_options.cancel_context != NULL);
+        assert(!key->wait_options.is_cancelled(key->wait_options.cancel_context));
+        ++counts->cancellation_checks;
+        if (key->wait_options.bypass_queued_waiters != 0U) {
+            assert(key->ownerless_mode == MYLITE_OWNERLESS_MDL_MODE_SHARED);
+            ++counts->high_priority_shared_acquires;
+        }
+        if (counts->fail_next_result != MYLITE_OWNERLESS_MDL_OK &&
+            key->ownerless_mode == MYLITE_OWNERLESS_MDL_MODE_EXCLUSIVE) {
+            const int result = counts->fail_next_result;
+            counts->fail_next_result = MYLITE_OWNERLESS_MDL_OK;
+            counts->failed_exclusive_during_upgrade = counts->app_posts_upgradable_active > 0U;
+            return result;
+        }
         ++counts->app_posts_acquires;
         ++counts->app_posts_active;
         if (key->ownerless_mode == MYLITE_OWNERLESS_MDL_MODE_SHARED) {
@@ -103,6 +154,7 @@ static int acquire_mdl_hook(
             ++counts->app_posts_shared_write_acquires;
         } else if (key->ownerless_mode == MYLITE_OWNERLESS_MDL_MODE_UPGRADABLE) {
             ++counts->app_posts_upgradable_acquires;
+            ++counts->app_posts_upgradable_active;
         } else if (key->ownerless_mode == MYLITE_OWNERLESS_MDL_MODE_EXCLUSIVE) {
             ++counts->app_posts_exclusive_acquires;
         }
@@ -118,6 +170,13 @@ static void release_mdl_hook(const mylite_ownerless_mdl_key_view *key, void *ctx
 
     if (is_app_posts_table_key(key)) {
         assert(counts->app_posts_active > 0U);
+        if (key->ownerless_mode == MYLITE_OWNERLESS_MDL_MODE_UPGRADABLE) {
+            assert(counts->app_posts_upgradable_active > 0U);
+            --counts->app_posts_upgradable_active;
+            if (counts->failed_exclusive_during_upgrade) {
+                counts->released_original_mode_after_failed_upgrade = 1;
+            }
+        }
         --counts->app_posts_active;
         ++counts->app_posts_releases;
     }
@@ -134,6 +193,23 @@ static int string_part_equals(const char *value, unsigned length, const char *ex
 
     return value != NULL && length == expected_length &&
            memcmp(value, expected, expected_length) == 0;
+}
+
+static void expect_hook_error(
+    mylite_db *db,
+    mdl_hook_counts *counts,
+    int hook_result,
+    unsigned mariadb_errno,
+    const char *sqlstate
+) {
+    counts->fail_next_result = hook_result;
+    assert(
+        mylite_exec(db, "ALTER TABLE app.posts ADD COLUMN rejected INT NULL", NULL, NULL, NULL) !=
+        MYLITE_OK
+    );
+    assert(counts->fail_next_result == MYLITE_OWNERLESS_MDL_OK);
+    assert(mylite_mariadb_errno(db) == mariadb_errno);
+    assert(strcmp(mylite_sqlstate(db), sqlstate) == 0);
 }
 
 static mylite_db *open_database(const char *root, char **database_path) {

@@ -33,11 +33,15 @@ Created 3/26/1996 Heikki Tuuri
 #include <my_service_manager.h>
 #include <mysql/service_wsrep.h>
 
+#include <chrono>
+#include <thread>
+
 #include "sql_class.h" // THD
 #include "fsp0fsp.h"
 #include "lock0lock.h"
 #include "mach0data.h"
 #include "mylite_ownerless_innodb_lock_hooks.h"
+#include "mylite_ownerless_trx_hooks.h"
 #include "pars0pars.h"
 #include "que0que.h"
 #include "row0mysql.h"
@@ -76,11 +80,66 @@ bool trx_t::rollback_finish() noexcept
       id != 0 && !read_only;
     if (ownerless_rollback)
       in_rollback= true;
-    commit();
+    if (ownerless_rollback)
+    {
+      /* Full row undo is complete. Make the restored application pages
+      durable before waiting for the shared history gate, then drop their
+      physical ownership. Record locks and the shared transaction entry stay
+      live until commit() serializes the undo history. This avoids a cycle
+      where a peer holds the history page while waiting for one of our
+      already-restored application pages. */
+      const bool restored_pages= !mylite_ownerless_dirty_pages_empty() ||
+                                 (mylite_ownerless_page_images != nullptr &&
+                                  !mylite_ownerless_page_images->empty());
+      if (restored_pages)
+      {
+        log_buffer_flush_to_disk();
+        const uint64_t rollback_lsn=
+            mylite_ownerless_innodb_publish_rollback_pages_to_lsn(
+                this, mylite_ownerless_innodb_current_lsn());
+        if (UNIV_UNLIKELY(rollback_lsn == 0))
+        {
+          mylite_ownerless_coordination_fault= true;
+          error_state= DB_ERROR;
+          in_rollback= false;
+          return false;
+        }
+        mylite_ownerless_innodb_flush_dirty_pages_for_page_writes(
+            rollback_lsn);
+        mylite_ownerless_innodb_flush_transaction_pages_for_page_writes(
+            this, rollback_lsn, nullptr, nullptr);
+        if (UNIV_UNLIKELY(mylite_ownerless_innodb_publish_pages_visible_lsn(
+                              rollback_lsn) !=
+                          MYLITE_OWNERLESS_INNODB_LOCK_OK))
+        {
+          mylite_ownerless_coordination_fault= true;
+          error_state= DB_ERROR;
+          in_rollback= false;
+          return false;
+        }
+      }
+      mylite_ownerless_innodb_lock_release_transaction_page_writes(this);
+      if (UNIV_UNLIKELY(mylite_ownerless_innodb_coordination_error()))
+      {
+        mylite_ownerless_coordination_fault= true;
+        error_state= DB_ERROR;
+        in_rollback= false;
+        return false;
+      }
+    }
+    const bool coordination_fault= commit();
     if (ownerless_rollback)
       in_rollback= false;
     commit_lsn= 0;
-    return true;
+    return !coordination_fault;
+  }
+
+  if (UNIV_UNLIKELY(error_state != DB_INTERRUPTED))
+  {
+    /* Undo did not reach its terminal commit. Keep the transaction available
+    for quarantined recovery instead of applying shutdown-only assumptions. */
+    mylite_ownerless_coordination_fault= true;
+    return false;
   }
 
   ut_a(error_state == DB_INTERRUPTED);
@@ -100,8 +159,10 @@ bool trx_t::rollback_finish() noexcept
     ut_free(undo);
     undo= nullptr;
   }
-  commit();
+  const bool coordination_fault= commit();
   commit_lsn= 0;
+  if (coordination_fault)
+    mylite_ownerless_coordination_fault= true;
   return false;
 }
 
@@ -144,18 +205,24 @@ dberr_t trx_t::rollback_low(const undo_no_t *savept) noexcept
     ut_a(thr == que_fork_start_command(static_cast<que_fork_t*>
                                        (que_node_get_parent(thr))));
     que_run_threads(thr);
-    que_run_threads(roll_node->undo_thr);
+    if (UNIV_LIKELY(roll_node->undo_thr != nullptr))
+    {
+      que_run_threads(roll_node->undo_thr);
 
     /* Free the memory reserved by the undo graph. */
     que_graph_free(static_cast<que_t*>(roll_node->undo_thr->common.parent));
   }
+    else if (error_state == DB_SUCCESS)
+      error_state= DB_ERROR;
+  }
 
   if (!savept)
   {
-    rollback_finish();
+    if (UNIV_UNLIKELY(!rollback_finish()) && error_state == DB_SUCCESS)
+      error_state= DB_ERROR;
     MONITOR_INC(MONITOR_TRX_ROLLBACK);
   }
-  else
+  else if (UNIV_LIKELY(error_state == DB_SUCCESS))
   {
     /* There must not be partial rollback if transaction was chosen as deadlock
     victim. Galera transaction abort can be invoked during partial rollback. */
@@ -217,17 +284,63 @@ dberr_t trx_t::rollback(const undo_no_t *savept) noexcept
     return DB_SUCCESS;
   case TRX_STATE_PREPARED:
   case TRX_STATE_PREPARED_RECOVERED:
-  case TRX_STATE_COMMITTED_IN_MEMORY:
     ut_ad("invalid state" == 0);
     /* fall through */
   case TRX_STATE_ACTIVE:
     break;
+  case TRX_STATE_COMMITTED_IN_MEMORY:
+    return error_state == DB_SUCCESS ? DB_ERROR : error_state;
   }
 #ifdef WITH_WSREP
   if (!savept && is_wsrep() && wsrep_thd_is_SR(mysql_thd))
     wsrep_handle_SR_rollback(nullptr, mysql_thd);
 #endif /* WITH_WSREP */
-  return rollback_low(savept);
+
+  const trx_id_t ownerless_trx_id= id;
+  const bool ownerless_rollback=
+      ownerless_trx_id != 0 && mylite_ownerless_trx_has_hooks();
+  if (ownerless_rollback)
+  {
+    /* The statement that triggered rollback is no longer waiting. Clear both
+    shared record and page-write wait edges before undo needs internal pages;
+    otherwise a stale edge can make rollback rediscover the resolved cycle. */
+    mylite_ownerless_innodb_lock_clear_transaction_wait(this);
+    if (mylite_ownerless_innodb_coordination_error())
+    {
+      mylite_ownerless_coordination_fault= true;
+      error_state= DB_ERROR;
+      return DB_ERROR;
+    }
+  }
+  if (ownerless_rollback &&
+      mylite_ownerless_trx_set_rollback_state(
+          ownerless_trx_id, MYLITE_OWNERLESS_TRX_ROLLBACK_IN_PROGRESS) !=
+          MYLITE_OWNERLESS_TRX_OK)
+  {
+    mylite_ownerless_coordination_fault= true;
+    error_state= DB_ERROR;
+    return DB_ERROR;
+  }
+
+  const dberr_t rollback_error= rollback_low(savept);
+  if (rollback_error != DB_SUCCESS || !ownerless_rollback)
+    return rollback_error;
+
+  const bool user_savepoint_rollback=
+      savept != nullptr && mysql_thd != nullptr && mysql_thd->lex != nullptr &&
+      mysql_thd->lex->sql_command == SQLCOM_ROLLBACK_TO_SAVEPOINT;
+  const uint32_t rollback_state=
+      user_savepoint_rollback
+          ? MYLITE_OWNERLESS_TRX_ROLLBACK_SAVEPOINT_READ_SAFE
+          : MYLITE_OWNERLESS_TRX_ROLLBACK_NONE;
+  if (mylite_ownerless_trx_set_rollback_state(
+          ownerless_trx_id, rollback_state) != MYLITE_OWNERLESS_TRX_OK)
+  {
+    mylite_ownerless_coordination_fault= true;
+    error_state= DB_ERROR;
+    return DB_ERROR;
+  }
+  return DB_SUCCESS;
 }
 
 /** Rollback a transaction used in MySQL
@@ -261,9 +374,58 @@ dberr_t trx_rollback_for_mysql(trx_t* trx)
 		ut_ad(trx->mysql_thd);
 		ut_ad(!trx->is_recovered);
 		ut_ad(!trx->is_autocommit_non_locking() || trx->read_only);
-		return trx->rollback_low();
+    {
+      dberr_t last_error= DB_ERROR;
+      /*
+      Row undo can finish before terminal ownerless transaction
+      serialization loses a transient shared-page race.  Keep retrying both
+      the committed-in-memory cleanup boundary and, when needed, the
+      still-active rollback boundary.  Returning after one cleanup retry can
+      expose ER_ERROR_DURING_ROLLBACK even though no irreversible cleanup
+      error occurred.
+      */
+      static constexpr unsigned int max_cleanup_attempts= 64;
+      for (unsigned int attempt= 0; attempt < max_cleanup_attempts; ++attempt)
+      {
+        if (trx->state == TRX_STATE_ACTIVE &&
+            !trx->mylite_ownerless_coordination_fault)
+        {
+          last_error= trx->rollback();
+          if (last_error == DB_SUCCESS)
+            return DB_SUCCESS;
+        }
 
-	case TRX_STATE_PREPARED:
+        if (trx->mylite_ownerless_coordination_fault)
+        {
+          const bool cleanup_pending= trx->retry_ownerless_commit_cleanup();
+          if (!cleanup_pending && trx->state == TRX_STATE_NOT_STARTED)
+            return DB_SUCCESS;
+        }
+
+        if (trx->state == TRX_STATE_NOT_STARTED &&
+            !trx->mylite_ownerless_coordination_fault)
+          return last_error;
+        if (trx->state != TRX_STATE_ACTIVE &&
+            trx->state != TRX_STATE_COMMITTED_IN_MEMORY &&
+            trx->state != TRX_STATE_NOT_STARTED)
+          return last_error;
+        if (!trx->mylite_ownerless_coordination_fault &&
+            trx->state == TRX_STATE_COMMITTED_IN_MEMORY)
+          return last_error;
+
+        if (attempt + 1 < max_cleanup_attempts)
+        {
+          const unsigned int capped_attempt= attempt < 6 ? attempt : 6;
+          std::this_thread::sleep_for(
+              std::chrono::milliseconds(1U << capped_attempt));
+        }
+      }
+      ib::error() << "MyLite ownerless rollback exhausted terminal cleanup "
+                     "retries";
+      return trx->error_state == DB_SUCCESS ? last_error : trx->error_state;
+    }
+
+  case TRX_STATE_PREPARED:
 	case TRX_STATE_PREPARED_RECOVERED:
 		ut_ad(!trx->is_autocommit_non_locking());
 		if (trx->rsegs.m_redo.undo) {
@@ -296,14 +458,15 @@ dberr_t trx_rollback_for_mysql(trx_t* trx)
 			a durable log write of a later mini-transaction
 			takes place for whatever reason, then this state
 			change will be durable as well. */
-			mtr.commit();
+      const dberr_t commit_error= mtr.commit();
+      if (UNIV_UNLIKELY(commit_error != DB_SUCCESS))
+        return commit_error;
 			ut_ad(mtr.commit_lsn() > 0);
 		}
 		return trx->rollback_low();
 
 	case TRX_STATE_COMMITTED_IN_MEMORY:
-		ut_ad(!trx->is_autocommit_non_locking());
-		break;
+    return trx->error_state == DB_SUCCESS ? DB_ERROR : trx->error_state;
 	}
 
 	ut_error;
@@ -351,16 +514,27 @@ trx_rollback_active(
 	}
 
 	que_run_threads(thr);
-	ut_a(roll_node->undo_thr != NULL);
-
-	que_run_threads(roll_node->undo_thr);
+  if (UNIV_LIKELY(roll_node->undo_thr != NULL))
+  {
+    que_run_threads(roll_node->undo_thr);
 
 	que_graph_free(
 		static_cast<que_t*>(roll_node->undo_thr->common.parent));
+  }
+  else if (trx->error_state == DB_SUCCESS)
+  {
+    trx->error_state= DB_ERROR;
+  }
 
-	if (UNIV_UNLIKELY(!trx->rollback_finish())) {
-		ut_ad(!dictionary_locked);
-	} else {
+  if (UNIV_UNLIKELY(!trx->rollback_finish())) {
+    if (trx->error_state != DB_INTERRUPTED)
+    {
+      trx->mylite_ownerless_coordination_fault= true;
+      if (trx->error_state == DB_SUCCESS)
+        trx->error_state= DB_ERROR;
+      mylite_ownerless_innodb_note_coordination_error();
+    }
+  } else {
 		sql_print_information(
 			"InnoDB: Rolled back recovered transaction "
 			TRX_ID_FMT, trx_id);
@@ -446,6 +620,96 @@ static my_bool trx_rollback_recovered_callback(rw_trx_hash_element_t *element,
   return 0;
 }
 
+static bool trx_ownerless_discard_remote_recovered(trx_t *trx)
+{
+  ut_ad(trx != nullptr);
+  ut_ad(trx->is_recovered);
+  ut_ad(trx->mylite_ownerless_remote_recovered);
+  ut_ad(trx_state_eq(trx, TRX_STATE_ACTIVE));
+  ut_ad(!trx->mylite_ownerless_trx_registered);
+
+  if (trx_sys.deregister_rw(trx) != DB_SUCCESS)
+    return false;
+  for (unsigned int attempt= 0; attempt < 10000 && trx->is_referenced();
+       ++attempt)
+    LF_BACKOFF();
+  if (trx->is_referenced())
+    return false;
+
+  ut_ad(UT_LIST_GET_LEN(trx->lock.trx_locks) == 0);
+  ut_ad(trx->lock.table_locks.empty());
+  ut_ad(trx->mylite_ownerless_lock_trx_id == 0);
+  ut_ad(trx->mylite_ownerless_page_write_trx_id == 0);
+
+  if (trx_undo_t *undo= trx->rsegs.m_redo.undo)
+  {
+    trx_rseg_t *rseg= trx->rsegs.m_redo.rseg;
+    ut_ad(rseg != nullptr);
+    rseg->latch.wr_lock(SRW_LOCK_CALL);
+    UT_LIST_REMOVE(rseg->undo_list, undo);
+    rseg->release();
+    rseg->latch.wr_unlock();
+    ut_free(undo);
+    trx->rsegs.m_redo.undo= nullptr;
+    trx->rsegs.m_redo.rseg= nullptr;
+  }
+  ut_ad(trx->rsegs.m_noredo.undo == nullptr);
+  ut_ad(trx->rsegs.m_noredo.rseg == nullptr);
+
+  trx->id= 0;
+  trx->undo_no= 0;
+  trx->roll_limit= 0;
+  trx->pages_undone= 0;
+  trx->in_rollback= false;
+  trx->is_recovered= false;
+  trx->mylite_ownerless_remote_recovered= false;
+  trx->state= TRX_STATE_NOT_STARTED;
+  trx->error_state= DB_SUCCESS;
+  trx->will_lock= false;
+  trx->dict_operation= false;
+  trx->commit_lsn= 0;
+  trx->mod_tables.clear();
+  trx->free();
+  return true;
+}
+
+static int trx_ownerless_reap_remote_recovered(bool shutdown)
+{
+  std::vector<trx_t *> trx_list;
+  trx_sys.rw_trx_hash.iterate_no_dups(trx_rollback_recovered_callback,
+                                      &trx_list);
+
+  for (trx_t *trx : trx_list)
+  {
+    if (!trx->mylite_ownerless_remote_recovered)
+      continue;
+
+    int recovery_state= MYLITE_OWNERLESS_TRX_RECOVERY_BLOCKED;
+    const int result=
+        mylite_ownerless_trx_recovery_state(trx->id, &recovery_state);
+    if (!shutdown && (result != MYLITE_OWNERLESS_TRX_OK ||
+                      recovery_state != MYLITE_OWNERLESS_TRX_RECOVERY_ABSENT))
+      continue;
+    if (!trx_ownerless_discard_remote_recovered(trx))
+      return MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+  }
+  return MYLITE_OWNERLESS_INNODB_LOCK_OK;
+}
+
+extern "C" int mylite_ownerless_innodb_reap_remote_recovered_transactions(void)
+{
+  rollback_all_recovered_task.wait();
+  return trx_ownerless_reap_remote_recovered(false);
+}
+
+extern "C" int
+mylite_ownerless_innodb_discard_remote_recovered_transactions_for_shutdown(
+    void)
+{
+  rollback_all_recovered_task.wait();
+  return trx_ownerless_reap_remote_recovered(true);
+}
+
 /**
   Rollback any incomplete transactions which were encountered in crash recovery.
 
@@ -487,6 +751,27 @@ void trx_rollback_recovered(bool all)
     ut_ad(trx_state_eq(trx, TRX_STATE_ACTIVE));
     ut_d(trx->mutex_unlock());
 
+    if (trx->mylite_ownerless_remote_recovered)
+    {
+      int recovery_state= MYLITE_OWNERLESS_TRX_RECOVERY_BLOCKED;
+      const int result=
+          mylite_ownerless_trx_recovery_state(trx->id, &recovery_state);
+      if (srv_shutdown_state != SRV_SHUTDOWN_NONE)
+      {
+        if (!trx_ownerless_discard_remote_recovered(trx))
+          mylite_ownerless_innodb_note_coordination_error();
+      }
+      else if (result == MYLITE_OWNERLESS_TRX_OK &&
+               recovery_state == MYLITE_OWNERLESS_TRX_RECOVERY_ABSENT)
+      {
+        if (!trx_ownerless_discard_remote_recovered(trx))
+          mylite_ownerless_innodb_note_coordination_error();
+      }
+      /* A proxy that transitions from live to dead must remain untouched.
+      Only a fresh no-live startup may become native recovery authority. */
+      continue;
+    }
+
     if (srv_shutdown_state != SRV_SHUTDOWN_NONE && !srv_undo_sources &&
         srv_fast_shutdown)
       goto discard;
@@ -496,7 +781,15 @@ void trx_rollback_recovered(bool all)
       trx_rollback_active(trx);
       if (trx->error_state != DB_SUCCESS)
       {
-        ut_ad(trx->error_state == DB_INTERRUPTED);
+        if (UNIV_UNLIKELY(trx->error_state != DB_INTERRUPTED))
+        {
+          /* Recovery must retain a transaction whose terminal undo commit
+          failed. Discarding it would turn an unproved rollback into success.
+        */
+          trx->mylite_ownerless_coordination_fault= true;
+          mylite_ownerless_innodb_note_coordination_error();
+          continue;
+        }
         trx->error_state= DB_SUCCESS;
         ut_ad(!srv_undo_sources);
         ut_ad(srv_fast_shutdown);
@@ -658,9 +951,16 @@ trx_rollback_step(
 
 		trx->mutex_lock();
 
-		trx_commit_or_rollback_prepare(trx);
+    const dberr_t err= trx_commit_or_rollback_prepare(trx);
+    if (UNIV_UNLIKELY(err != DB_SUCCESS))
+    {
+      if (trx->error_state == DB_SUCCESS)
+        trx->error_state= err;
+      trx->mutex_unlock();
+      return NULL;
+    }
 
-		node->undo_thr = trx_rollback_start(trx, node->savept);
+    node->undo_thr = trx_rollback_start(trx, node->savept);
 
 		trx->mutex_unlock();
 	} else {

@@ -52,7 +52,8 @@ row_vers_impl_x_locked(
 	trx_t*		caller_trx,
 	const rec_t*	rec,
 	dict_index_t*	index,
-	const rec_offs*	offsets);
+	const rec_offs*	offsets,
+	bool*		remote_active = nullptr);
 
 /** Find out whether data tuple has missing data type
 for indexed virtual column.

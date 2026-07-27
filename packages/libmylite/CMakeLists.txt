@@ -106,6 +106,93 @@ if(BUILD_TESTING)
   add_test(NAME libmylite.api COMMAND mylite_api_test)
   add_test(NAME libmylite.version COMMAND mylite_version_test)
 
+  add_executable(mylite_ownerless_mdl_session_test
+    tests/ownerless_mdl_session_test.cc
+    src/ownerless_latch.cc
+    src/ownerless_lock_table.cc
+    src/ownerless_mdl.cc
+    src/ownerless_process_registry.cc
+    src/ownerless_wait.cc
+  )
+  find_package(Threads REQUIRED)
+  mylite_configure_cxx_target(mylite_ownerless_mdl_session_test)
+  target_include_directories(mylite_ownerless_mdl_session_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+  )
+  target_link_libraries(mylite_ownerless_mdl_session_test PRIVATE Threads::Threads)
+  add_test(
+    NAME libmylite.ownerless-mdl-session
+    COMMAND mylite_ownerless_mdl_session_test
+  )
+  set_tests_properties(libmylite.ownerless-mdl-session PROPERTIES
+    LABELS "compat.concurrency;compat.ownerless-primitives"
+    TIMEOUT 30
+  )
+
+  add_executable(mylite_ownerless_dictionary_saturation_test
+    tests/ownerless_dictionary_saturation_test.cc
+    src/ownerless_dictionary_state.cc
+    src/ownerless_wait.cc
+  )
+  mylite_configure_cxx_target(mylite_ownerless_dictionary_saturation_test)
+  mylite_enable_c_test_assertions(mylite_ownerless_dictionary_saturation_test)
+  target_include_directories(mylite_ownerless_dictionary_saturation_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+  )
+  add_test(
+    NAME libmylite.ownerless-dictionary-saturation
+    COMMAND mylite_ownerless_dictionary_saturation_test
+  )
+  set_tests_properties(libmylite.ownerless-dictionary-saturation PROPERTIES
+    LABELS "compat.concurrency;compat.ownerless-primitives"
+    TIMEOUT 30
+  )
+
+  add_executable(mylite_ownerless_process_mode_test
+    tests/ownerless_process_mode_test.cc
+    src/ownerless_latch.cc
+    src/ownerless_process_registry.cc
+    src/ownerless_wait.cc
+  )
+  mylite_configure_cxx_target(mylite_ownerless_process_mode_test)
+  mylite_enable_c_test_assertions(mylite_ownerless_process_mode_test)
+  target_include_directories(mylite_ownerless_process_mode_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+  )
+  target_link_libraries(mylite_ownerless_process_mode_test PRIVATE Threads::Threads)
+  add_test(
+    NAME libmylite.ownerless-process-mode
+    COMMAND mylite_ownerless_process_mode_test
+  )
+  set_tests_properties(libmylite.ownerless-process-mode PROPERTIES
+    LABELS "compat.concurrency;compat.ownerless-primitives;compat.ownerless-process"
+    TIMEOUT 30
+  )
+
+  add_executable(mylite_ownerless_capacity_release_test
+    tests/ownerless_capacity_release_test.cc
+    src/ownerless_innodb_lock_registry.cc
+    src/ownerless_latch.cc
+    src/ownerless_process_registry.cc
+    src/ownerless_read_view_registry.cc
+    src/ownerless_trx_registry.cc
+    src/ownerless_wait.cc
+  )
+  mylite_configure_cxx_target(mylite_ownerless_capacity_release_test)
+  mylite_enable_c_test_assertions(mylite_ownerless_capacity_release_test)
+  target_include_directories(mylite_ownerless_capacity_release_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+  )
+  target_link_libraries(mylite_ownerless_capacity_release_test PRIVATE Threads::Threads)
+  add_test(
+    NAME libmylite.ownerless-capacity-release
+    COMMAND mylite_ownerless_capacity_release_test
+  )
+  set_tests_properties(libmylite.ownerless-capacity-release PROPERTIES
+    LABELS "compat.concurrency;compat.ownerless-primitives;compat.ownerless-transaction"
+    TIMEOUT 30
+  )
+
   if(MYLITE_WITH_MARIADB_EMBEDDED)
     function(mylite_configure_embedded_c_test target)
       target_link_libraries(${target} PRIVATE MyLite::mylite)
@@ -182,18 +269,32 @@ if(BUILD_TESTING)
 
     add_executable(mylite_embedded_ownerless_trx_hooks_test
       tests/embedded_ownerless_trx_hooks_test.c
+      tests/embedded_ownerless_trx_snapshot_test_hook.cc
+    )
+    set_source_files_properties(
+      tests/embedded_ownerless_trx_snapshot_test_hook.cc
+      PROPERTIES COMPILE_DEFINITIONS "DBUG_OFF;NDEBUG"
     )
     mylite_configure_embedded_c_test(mylite_embedded_ownerless_trx_hooks_test)
-    target_include_directories(mylite_embedded_ownerless_trx_hooks_test PRIVATE
+    target_include_directories(mylite_embedded_ownerless_trx_hooks_test SYSTEM PRIVATE
+      "${PROJECT_SOURCE_DIR}/mariadb/include"
+      "${MYLITE_MARIADB_BUILD_DIR}/include"
+      "${PROJECT_SOURCE_DIR}/mariadb/libmysqld"
+      "${PROJECT_SOURCE_DIR}/mariadb/sql"
       "${PROJECT_SOURCE_DIR}/mariadb/storage/innobase/include"
+      "${PROJECT_SOURCE_DIR}/mariadb/tpool"
     )
 
     add_executable(mylite_embedded_ownerless_innodb_lock_hooks_test
       tests/embedded_ownerless_innodb_lock_hooks_test.c
+      tests/embedded_ownerless_innodb_lock_wait_test_hook.cc
     )
     mylite_configure_embedded_c_test(mylite_embedded_ownerless_innodb_lock_hooks_test)
-    target_include_directories(mylite_embedded_ownerless_innodb_lock_hooks_test PRIVATE
+    target_include_directories(mylite_embedded_ownerless_innodb_lock_hooks_test SYSTEM PRIVATE
+      "${PROJECT_SOURCE_DIR}/mariadb/include"
+      "${MYLITE_MARIADB_BUILD_DIR}/include"
       "${PROJECT_SOURCE_DIR}/mariadb/storage/innobase/include"
+      "${PROJECT_SOURCE_DIR}/mariadb/tpool"
     )
 
     add_executable(mylite_ownerless_primitives_test
@@ -224,6 +325,53 @@ if(BUILD_TESTING)
         tests/ownerless_negative_proof_test.c
       )
       mylite_configure_embedded_c_test(mylite_ownerless_negative_proof_test)
+
+      add_executable(mylite_ownerless_recovery_protocol_test
+        tests/ownerless_recovery_protocol_test.cc
+      )
+      target_link_libraries(mylite_ownerless_recovery_protocol_test PRIVATE MyLite::mylite)
+      mylite_configure_cxx_target(mylite_ownerless_recovery_protocol_test)
+      mylite_enable_c_test_assertions(mylite_ownerless_recovery_protocol_test)
+      target_include_directories(mylite_ownerless_recovery_protocol_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+      )
+
+      add_executable(mylite_ownerless_purge_recovery_test
+        tests/ownerless_purge_recovery_test.cc
+      )
+      target_link_libraries(mylite_ownerless_purge_recovery_test PRIVATE MyLite::mylite)
+      mylite_configure_cxx_target(mylite_ownerless_purge_recovery_test)
+      mylite_enable_c_test_assertions(mylite_ownerless_purge_recovery_test)
+
+      add_executable(mylite_ownerless_storage_engine_regression_test
+        tests/ownerless_storage_engine_regression_test.cc
+      )
+      target_link_libraries(mylite_ownerless_storage_engine_regression_test PRIVATE MyLite::mylite)
+      mylite_configure_cxx_target(mylite_ownerless_storage_engine_regression_test)
+      mylite_enable_c_test_assertions(mylite_ownerless_storage_engine_regression_test)
+      target_include_directories(mylite_ownerless_storage_engine_regression_test PRIVATE
+        "${PROJECT_SOURCE_DIR}/mariadb/storage/innobase/include"
+      )
+
+      add_executable(mylite_ownerless_teardown_file_lock_test
+        tests/ownerless_teardown_file_lock_test.cc
+      )
+      target_link_libraries(mylite_ownerless_teardown_file_lock_test PRIVATE MyLite::mylite)
+      mylite_configure_cxx_target(mylite_ownerless_teardown_file_lock_test)
+      mylite_enable_c_test_assertions(mylite_ownerless_teardown_file_lock_test)
+      target_include_directories(mylite_ownerless_teardown_file_lock_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+      )
+
+      add_executable(mylite_ownerless_page_log_unlock_test
+        tests/ownerless_page_log_unlock_test.cc
+      )
+      target_link_libraries(mylite_ownerless_page_log_unlock_test PRIVATE MyLite::mylite)
+      mylite_configure_cxx_target(mylite_ownerless_page_log_unlock_test)
+      mylite_enable_c_test_assertions(mylite_ownerless_page_log_unlock_test)
+      target_include_directories(mylite_ownerless_page_log_unlock_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+      )
     endif()
 
     add_executable(mylite_embedded_compatibility_harness_test
@@ -313,6 +461,10 @@ if(BUILD_TESTING)
       NAME libmylite.ownerless-history-proof-pair-payload-wal
       COMMAND mylite_ownerless_cross_process_sql_test history-proof-pair-payload-wal
     )
+    set_tests_properties(libmylite.ownerless-history-proof-pair-payload-wal PROPERTIES
+      LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-focused"
+      TIMEOUT 300
+    )
     add_test(
       NAME libmylite.ownerless-single-owner-native-support-page-wal-elision
       COMMAND mylite_ownerless_cross_process_sql_test single-owner-native-support-page-wal-elision
@@ -376,6 +528,12 @@ if(BUILD_TESTING)
       COMMAND
         mylite_ownerless_cross_process_sql_test
         concurrent-savepoint-same-row-handoff
+    )
+    add_test(
+      NAME libmylite.ownerless-post-savepoint-timeout-prewrite-hidden
+      COMMAND
+        mylite_ownerless_cross_process_sql_test
+        post-savepoint-timeout-prewrite-hidden
     )
     add_test(
       NAME libmylite.ownerless-random-savepoint-same-table-schedule
@@ -465,6 +623,10 @@ if(BUILD_TESTING)
       NAME libmylite.ownerless-schema-invalid-options
       COMMAND mylite_ownerless_cross_process_sql_test schema-invalid-options
     )
+    set_tests_properties(libmylite.ownerless-schema-invalid-options PROPERTIES
+      LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-focused"
+      TIMEOUT 300
+    )
     add_test(
       NAME libmylite.ownerless-single-owner-foreground-reclaim-peer-history
       COMMAND mylite_ownerless_cross_process_sql_test single-owner-foreground-reclaim-peer-history
@@ -479,6 +641,20 @@ if(BUILD_TESTING)
         $<TARGET_FILE:mylite_ownerless_cross_process_sql_test>
         random-tx-stress
     )
+    if(MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS)
+      add_test(
+        NAME libmylite.ownerless-independent-table-stress-retryable-timeout
+        COMMAND
+          ${CMAKE_COMMAND}
+          -E
+          env
+          MYLITE_OWNERLESS_STRESS_ITERATIONS=2
+          MYLITE_OWNERLESS_STRESS_READER_POLLS=8
+          MYLITE_OWNERLESS_STRESS_INJECT_RETRYABLE_TIMEOUT=1
+          $<TARGET_FILE:mylite_ownerless_cross_process_sql_test>
+          stress
+      )
+    endif()
     if(MYLITE_ENABLE_OWNERLESS_STRESS_TESTS)
       add_test(
         NAME libmylite.ownerless-cross-process-stress
@@ -541,6 +717,100 @@ if(BUILD_TESTING)
       )
     endif()
     if(MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS)
+      add_test(
+        NAME libmylite.ownerless-recovery-protocol
+        COMMAND mylite_ownerless_recovery_protocol_test
+      )
+      set_tests_properties(libmylite.ownerless-recovery-protocol PROPERTIES
+        LABELS "compat.concurrency;compat.crash-reopen;compat.ownerless-negative-proof;compat.ownerless-recovery"
+        TIMEOUT 120
+      )
+      add_test(
+        NAME libmylite.ownerless-purge-recovery
+        COMMAND mylite_ownerless_purge_recovery_test
+      )
+      set_tests_properties(libmylite.ownerless-purge-recovery PROPERTIES
+        LABELS "compat.concurrency;compat.crash-reopen;compat.ownerless-negative-proof;compat.ownerless-recovery"
+        TIMEOUT 600
+      )
+      add_test(
+        NAME libmylite.ownerless-storage-engine-regression
+        COMMAND mylite_ownerless_storage_engine_regression_test
+      )
+      set_tests_properties(libmylite.ownerless-storage-engine-regression PROPERTIES
+        LABELS "compat.concurrency;compat.ownerless-negative-proof;compat.ownerless-innodb-lock"
+        TIMEOUT 300
+      )
+      add_test(
+        NAME libmylite.ownerless-teardown-file-lock
+        COMMAND mylite_ownerless_teardown_file_lock_test
+      )
+      set_tests_properties(libmylite.ownerless-teardown-file-lock PROPERTIES
+        LABELS "compat.concurrency;compat.ownerless-recovery;compat.ownerless-teardown"
+        TIMEOUT 900
+      )
+      add_test(
+        NAME libmylite.ownerless-page-log-unlock
+        COMMAND mylite_ownerless_page_log_unlock_test
+      )
+      set_tests_properties(libmylite.ownerless-page-log-unlock PROPERTIES
+        LABELS "compat.concurrency;compat.ownerless-negative-proof;compat.ownerless-recovery"
+        TIMEOUT 30
+      )
+      foreach(MYLITE_OWNERLESS_RUNTIME_FAULT_GROUP
+          durability
+          mtr
+          lifecycle
+          admission)
+        add_test(
+          NAME libmylite.ownerless-runtime-fault-propagation-${MYLITE_OWNERLESS_RUNTIME_FAULT_GROUP}
+          COMMAND
+            mylite_ownerless_cross_process_sql_test
+            sql-case
+            test_ownerless_runtime_fault_propagation_${MYLITE_OWNERLESS_RUNTIME_FAULT_GROUP}
+        )
+      endforeach()
+      add_test(
+        NAME libmylite.ownerless-retryable-commit-failure-connection-reuse
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          sql-case
+          test_ownerless_retryable_commit_failure_reuses_connection
+      )
+      add_test(
+        NAME libmylite.ownerless-retryable-rollback-serialization-connection-reuse
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          sql-case
+          test_ownerless_retryable_rollback_serialization_reuses_connection
+      )
+      add_test(
+        NAME libmylite.ownerless-foreign-key-current-reads-refresh-with-local-dirty-pages
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          sql-case
+          test_ownerless_foreign_key_current_reads_refresh_with_local_dirty_pages
+      )
+      set_tests_properties(
+        libmylite.ownerless-foreign-key-current-reads-refresh-with-local-dirty-pages
+        PROPERTIES
+          LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-hook-sql;compat.ownerless-innodb-lock"
+          TIMEOUT 300
+      )
+      add_test(
+        NAME libmylite.ownerless-visible-skip-deferred-page-batch
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          sql-case
+          test_ownerless_visible_skip_releases_deferred_page_batch
+      )
+      add_test(
+        NAME libmylite.ownerless-redo-header-backup-validation
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          sql-case
+          test_ownerless_redo_header_backup_validation_boundaries
+      )
       add_test(
         NAME libmylite.ownerless-negative-proof
         COMMAND mylite_ownerless_negative_proof_test
@@ -1819,10 +2089,16 @@ if(BUILD_TESTING)
           dictionary-foreign-key-child-truncate-crash
       )
       add_test(
-        NAME libmylite.ownerless-dictionary-foreign-key-truncate-variants-crash
+        NAME libmylite.ownerless-dictionary-foreign-key-self-truncate-crash
         COMMAND
           mylite_ownerless_cross_process_sql_test
-          dictionary-foreign-key-truncate-variants-crash
+          dictionary-foreign-key-self-truncate-crash
+      )
+      add_test(
+        NAME libmylite.ownerless-dictionary-generated-column-foreign-key-child-truncate-crash
+        COMMAND
+          mylite_ownerless_cross_process_sql_test
+          dictionary-generated-column-foreign-key-child-truncate-crash
       )
       add_test(
         NAME libmylite.ownerless-dictionary-unchecked-cyclic-foreign-key-truncate-crash
@@ -1933,6 +2209,10 @@ if(BUILD_TESTING)
       NAME libmylite.embedded-ownerless-product-hooks
       COMMAND mylite_embedded_open_close_test ownerless-product-hooks
     )
+    add_test(
+      NAME libmylite.embedded-ownerless-large-transaction
+      COMMAND mylite_embedded_open_close_test ownerless-large-transaction
+    )
     add_test(NAME libmylite.embedded-storage COMMAND mylite_embedded_storage_test)
     add_test(
       NAME libmylite.embedded-transactions-recovery
@@ -1944,8 +2224,13 @@ if(BUILD_TESTING)
     )
     set_tests_properties(libmylite.embedded-ownerless-directory-lifecycle PROPERTIES
       LABELS "compat.concurrency;compat.directory-boundary;compat.ownerless-primitives;compat.ownerless-readonly"
+      TIMEOUT 600
     )
     set_tests_properties(libmylite.embedded-ownerless-product-hooks PROPERTIES
+      LABELS "compat.concurrency;compat.ownerless-transaction;compat.ownerless-innodb-lock"
+      TIMEOUT 300
+    )
+    set_tests_properties(libmylite.embedded-ownerless-large-transaction PROPERTIES
       LABELS "compat.concurrency;compat.ownerless-transaction;compat.ownerless-innodb-lock"
       TIMEOUT 300
     )
@@ -1969,6 +2254,7 @@ if(BUILD_TESTING)
     )
     set_tests_properties(libmylite.embedded-same-process-concurrency PROPERTIES
       LABELS "compat.concurrency;compat.query"
+      TIMEOUT 300
     )
     set_tests_properties(libmylite.embedded-ownerless-mdl-hooks PROPERTIES
       LABELS "compat.concurrency;compat.ownerless-mdl"
@@ -2070,6 +2356,10 @@ if(BUILD_TESTING)
       LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
       TIMEOUT 300
     )
+    set_tests_properties(libmylite.ownerless-post-savepoint-timeout-prewrite-hidden PROPERTIES
+      LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-focused"
+      TIMEOUT 300
+    )
     set_tests_properties(libmylite.ownerless-random-savepoint-same-table-schedule PROPERTIES
       LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
       TIMEOUT 300
@@ -2155,50 +2445,58 @@ if(BUILD_TESTING)
       TIMEOUT 300
     )
     set_tests_properties(libmylite.ownerless-random-transaction-rollback-handoff PROPERTIES
-      LABELS "compat.concurrency;compat.ownerless-cross-process-sql"
+      LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-stress"
       TIMEOUT 300
     )
+    if(MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS)
+      set_tests_properties(
+        libmylite.ownerless-independent-table-stress-retryable-timeout
+        PROPERTIES
+          LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-hook-sql"
+          TIMEOUT 300
+      )
+    endif()
     if(MYLITE_ENABLE_OWNERLESS_STRESS_TESTS)
       set_tests_properties(libmylite.ownerless-cross-process-stress PROPERTIES
         ENVIRONMENT
           "MYLITE_OWNERLESS_STRESS_ITERATIONS=200;MYLITE_OWNERLESS_STRESS_READER_POLLS=400"
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-stress"
-        TIMEOUT 3000
+        TIMEOUT 1800
       )
       set_tests_properties(libmylite.ownerless-cross-process-ddl-stress PROPERTIES
         ENVIRONMENT
           "MYLITE_OWNERLESS_DDL_STRESS_ROUNDS=8;MYLITE_OWNERLESS_DDL_STRESS_LOCK_WAIT_TIMEOUT=1"
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-stress"
-        TIMEOUT 3000
+        TIMEOUT 1800
       )
       set_tests_properties(libmylite.ownerless-cross-process-ddl-stress-statement-lock-retry PROPERTIES
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-stress"
-        TIMEOUT 3000
+        TIMEOUT 900
       )
       set_tests_properties(libmylite.ownerless-cross-process-temporary-stress PROPERTIES
         ENVIRONMENT "MYLITE_OWNERLESS_TEMP_STRESS_ROUNDS=40"
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-stress"
-        TIMEOUT 3000
+        TIMEOUT 900
       )
       set_tests_properties(libmylite.ownerless-cross-process-transaction-stress PROPERTIES
         ENVIRONMENT "MYLITE_OWNERLESS_TX_STRESS_ROUNDS=80"
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-stress"
-        TIMEOUT 3000
+        TIMEOUT 900
       )
       set_tests_properties(libmylite.ownerless-cross-process-checksum-stress PROPERTIES
         ENVIRONMENT "MYLITE_OWNERLESS_CHECKSUM_STRESS_ROUNDS=48"
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-stress"
-        TIMEOUT 3000
+        TIMEOUT 900
       )
       set_tests_properties(libmylite.ownerless-cross-process-random-transaction-stress PROPERTIES
         ENVIRONMENT "MYLITE_OWNERLESS_RANDOM_TX_STRESS_ROUNDS=120"
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-stress"
-        TIMEOUT 3000
+        TIMEOUT 3600
       )
       set_tests_properties(libmylite.ownerless-cross-process-foreign-key-graph-stress PROPERTIES
         ENVIRONMENT "MYLITE_OWNERLESS_FK_GRAPH_STRESS_ROUNDS=48"
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-stress"
-        TIMEOUT 3000
+        TIMEOUT 1800
       )
       set_tests_properties(libmylite.ownerless-cross-process-child-failure-cleanup PROPERTIES
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-stress"
@@ -2207,25 +2505,60 @@ if(BUILD_TESTING)
       set_tests_properties(libmylite.ownerless-cross-process-active-reader-pressure-stress PROPERTIES
         ENVIRONMENT "MYLITE_OWNERLESS_ACTIVE_READER_PRESSURE_ROUNDS=48"
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-stress"
-        TIMEOUT 3000
+        TIMEOUT 900
       )
       set_tests_properties(libmylite.ownerless-cross-process-expanding-page-pressure-stress PROPERTIES
         ENVIRONMENT "MYLITE_OWNERLESS_EXPANDING_PAGE_PRESSURE_ROWS=48"
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-stress"
-        TIMEOUT 3000
+        TIMEOUT 900
       )
       set_tests_properties(libmylite.ownerless-cross-process-blob-page-pressure-stress PROPERTIES
         ENVIRONMENT "MYLITE_OWNERLESS_BLOB_PAGE_PRESSURE_ROWS=12"
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-stress"
-        TIMEOUT 3000
+        TIMEOUT 900
       )
       set_tests_properties(libmylite.ownerless-cross-process-compressed-blob-page-pressure-stress PROPERTIES
         ENVIRONMENT "MYLITE_OWNERLESS_COMPRESSED_BLOB_PAGE_PRESSURE_ROWS=8"
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-stress"
-        TIMEOUT 3000
+        TIMEOUT 900
       )
     endif()
     if(MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS)
+      set_property(
+        TEST libmylite.ownerless-primitives
+        APPEND PROPERTY LABELS compat.ownerless-hook-primitives
+      )
+      set_tests_properties(libmylite.ownerless-primitives PROPERTIES TIMEOUT 900)
+      set_tests_properties(
+        libmylite.ownerless-runtime-fault-propagation-durability
+        libmylite.ownerless-runtime-fault-propagation-mtr
+        libmylite.ownerless-runtime-fault-propagation-lifecycle
+        libmylite.ownerless-runtime-fault-propagation-admission
+        PROPERTIES
+          LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-hook-sql"
+          TIMEOUT 1800
+      )
+      set_tests_properties(
+        libmylite.ownerless-retryable-commit-failure-connection-reuse
+        libmylite.ownerless-retryable-rollback-serialization-connection-reuse
+        PROPERTIES
+          LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-transaction;compat.ownerless-hook-sql"
+          TIMEOUT 300
+      )
+      set_tests_properties(
+        libmylite.ownerless-visible-skip-deferred-page-batch
+        libmylite.ownerless-redo-header-backup-validation
+        PROPERTIES
+          LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-hook-sql"
+          TIMEOUT 900
+      )
+      set_tests_properties(
+        libmylite.ownerless-dictionary-foreign-key-crash
+        libmylite.ownerless-dictionary-foreign-key-drop-crash
+        PROPERTIES
+          LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
+          TIMEOUT 300
+      )
       set_tests_properties(libmylite.ownerless-negative-proof PROPERTIES
         LABELS "compat.concurrency;compat.ownerless-negative-proof"
       )
@@ -2242,6 +2575,7 @@ if(BUILD_TESTING)
         libmylite.ownerless-rename-if-exists-target-conflict-native-negative-proof
         PROPERTIES
           LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-negative-proof"
+          TIMEOUT 300
       )
       set_tests_properties(libmylite.ownerless-native-table-wait PROPERTIES
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-innodb-lock"
@@ -2318,7 +2652,7 @@ if(BUILD_TESTING)
         libmylite.ownerless-temporary-cross-schema-mixed-if-exists-matrix-second-loop-crash
         PROPERTIES
           LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
-          TIMEOUT 300
+          TIMEOUT 600
       )
       set_tests_properties(libmylite.ownerless-stale-drop-crash-recovery PROPERTIES
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
@@ -2429,6 +2763,15 @@ if(BUILD_TESTING)
         PROPERTIES
           LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
           TIMEOUT 300
+      )
+      set_tests_properties(
+        libmylite.ownerless-dictionary-compressed-row-format-key-block-16-file-op-marker-crash
+        PROPERTIES TIMEOUT 600
+      )
+      set_tests_properties(
+        libmylite.ownerless-dictionary-compressed-row-format-key-block-copy-lock-crash
+        libmylite.ownerless-dictionary-compressed-row-format-key-block-lock-copy-crash
+        PROPERTIES TIMEOUT 1800
       )
       set_tests_properties(
         libmylite.ownerless-dictionary-cross-schema-multi-rename-crash
@@ -2561,6 +2904,17 @@ if(BUILD_TESTING)
           TIMEOUT 300
       )
       set_tests_properties(
+        libmylite.ownerless-dictionary-column-add-copy-lock-crash
+        libmylite.ownerless-dictionary-column-add-lock-copy-crash
+        libmylite.ownerless-dictionary-column-add-placement-copy-lock-crash
+        libmylite.ownerless-dictionary-column-copy-lock-option-order-crash
+        libmylite.ownerless-dictionary-column-drop-copy-lock-crash
+        libmylite.ownerless-dictionary-column-modify-copy-lock-crash
+        libmylite.ownerless-dictionary-column-change-copy-lock-crash
+        libmylite.ownerless-dictionary-column-rename-copy-lock-crash
+        PROPERTIES TIMEOUT 600
+      )
+      set_tests_properties(
         libmylite.ownerless-dictionary-view-create-crash
         libmylite.ownerless-dictionary-view-drop-crash
         libmylite.ownerless-dictionary-view-replace-crash
@@ -2603,6 +2957,10 @@ if(BUILD_TESTING)
           LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
           TIMEOUT 300
       )
+      set_tests_properties(
+        libmylite.ownerless-dictionary-generated-column-success-crash
+        PROPERTIES TIMEOUT 1800
+      )
       set_tests_properties(libmylite.ownerless-dictionary-truncate-file-op-marker-crash PROPERTIES
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
         TIMEOUT 300
@@ -2618,10 +2976,11 @@ if(BUILD_TESTING)
           TIMEOUT 300
       )
       set_tests_properties(
-        libmylite.ownerless-dictionary-foreign-key-truncate-variants-crash
+        libmylite.ownerless-dictionary-foreign-key-self-truncate-crash
+        libmylite.ownerless-dictionary-generated-column-foreign-key-child-truncate-crash
         PROPERTIES
           LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.crash-reopen"
-          TIMEOUT 300
+          TIMEOUT 1800
       )
       set_tests_properties(
         libmylite.ownerless-dictionary-unchecked-cyclic-foreign-key-truncate-crash
@@ -2655,10 +3014,11 @@ if(BUILD_TESTING)
       )
       set_tests_properties(libmylite.ownerless-platform-probe-failure PROPERTIES
         LABELS "compat.concurrency;compat.platform;compat.ownerless-negative-proof"
+        TIMEOUT 600
       )
       set_tests_properties(libmylite.ownerless-history-proof-publish-failure-fallback PROPERTIES
         LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-negative-proof"
-        TIMEOUT 90
+        TIMEOUT 300
       )
     endif()
     set_tests_properties(libmylite.embedded-native-table-operations PROPERTIES
@@ -2682,5 +3042,43 @@ if(BUILD_TESTING)
     set_tests_properties(libmylite.compat.application-queries PROPERTIES
       LABELS "compat.application-query;compat.directory-boundary;compat.query"
     )
+    if(MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS)
+      set(MYLITE_OWNERLESS_HOOK_RELEASE_SHARD_COUNT 16)
+      set(MYLITE_OWNERLESS_HOOK_RELEASE_TEST_INDEX 0)
+      get_property(MYLITE_OWNERLESS_HOOK_TESTS DIRECTORY PROPERTY TESTS)
+      foreach(MYLITE_OWNERLESS_HOOK_TEST IN LISTS MYLITE_OWNERLESS_HOOK_TESTS)
+        get_test_property(${MYLITE_OWNERLESS_HOOK_TEST} LABELS MYLITE_OWNERLESS_HOOK_LABELS)
+        if("compat.crash-reopen" IN_LIST MYLITE_OWNERLESS_HOOK_LABELS)
+          get_test_property(${MYLITE_OWNERLESS_HOOK_TEST} TIMEOUT MYLITE_OWNERLESS_HOOK_TIMEOUT)
+          if(MYLITE_OWNERLESS_HOOK_TIMEOUT LESS 1800)
+            set_tests_properties(${MYLITE_OWNERLESS_HOOK_TEST} PROPERTIES TIMEOUT 1800)
+          endif()
+        endif()
+
+        set(MYLITE_OWNERLESS_HOOK_RELEASE_TEST FALSE)
+        foreach(MYLITE_OWNERLESS_HOOK_LABEL IN LISTS MYLITE_OWNERLESS_HOOK_LABELS)
+          if(MYLITE_OWNERLESS_HOOK_LABEL MATCHES
+              "^compat\\.(crash-reopen|ownerless-negative-proof|ownerless-innodb-lock|ownerless-mdl|ownerless-transaction|ownerless-primitives|ownerless-hook-primitives|ownerless-hook-sql|ownerless-recovery)$")
+            set(MYLITE_OWNERLESS_HOOK_RELEASE_TEST TRUE)
+          endif()
+        endforeach()
+        if(MYLITE_OWNERLESS_HOOK_RELEASE_TEST)
+          math(
+            EXPR MYLITE_OWNERLESS_HOOK_RELEASE_SHARD
+            "${MYLITE_OWNERLESS_HOOK_RELEASE_TEST_INDEX} % ${MYLITE_OWNERLESS_HOOK_RELEASE_SHARD_COUNT}"
+          )
+          set_tests_properties(
+            ${MYLITE_OWNERLESS_HOOK_TEST}
+            PROPERTIES
+              LABELS
+                "${MYLITE_OWNERLESS_HOOK_LABELS};compat.ownerless-hook-release-shard-${MYLITE_OWNERLESS_HOOK_RELEASE_SHARD}"
+          )
+          math(
+            EXPR MYLITE_OWNERLESS_HOOK_RELEASE_TEST_INDEX
+            "${MYLITE_OWNERLESS_HOOK_RELEASE_TEST_INDEX} + 1"
+          )
+        endif()
+      endforeach()
+    endif()
   endif()
 endif()

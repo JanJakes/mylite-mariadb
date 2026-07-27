@@ -230,12 +230,14 @@ dberr_t trx_t::drop_table(const dict_table_t &table)
 
 /** Commit the transaction, possibly after drop_table().
 @param deleted   handles of data files that were deleted */
-void trx_t::commit(std::vector<pfs_os_file_t> &deleted)
+bool trx_t::commit(std::vector<pfs_os_file_t> &deleted)
 {
   ut_ad(dict_operation);
   flush_log_later= true;
   commit_persist();
   flush_log_later= false;
+  if (UNIV_UNLIKELY(mylite_ownerless_coordination_fault))
+    return true;
   if (dict_operation)
   {
     ut_ad(dict_sys.locked());
@@ -283,5 +285,5 @@ void trx_t::commit(std::vector<pfs_os_file_t> &deleted)
     lock_sys.deadlock_check();
     mysql_mutex_unlock(&lock_sys.wait_mutex);
   }
-  commit_cleanup();
+  return commit_cleanup();
 }

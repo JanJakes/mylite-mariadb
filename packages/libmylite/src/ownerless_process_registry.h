@@ -14,6 +14,11 @@ extern "C" {
 #define MYLITE_OWNERLESS_PROCESS_REGISTRY_TIMEOUT 3
 #define MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR 4
 #define MYLITE_OWNERLESS_PROCESS_REGISTRY_BUSY 5
+#define MYLITE_OWNERLESS_PROCESS_REGISTRY_OWNER_DEAD 6
+/* The protected mutation applied; retain its output token and finish release. */
+#define MYLITE_OWNERLESS_PROCESS_REGISTRY_APPLIED_RELEASE_PENDING 7
+/* No protected mutation applied, but the same latch owner must finish release. */
+#define MYLITE_OWNERLESS_PROCESS_REGISTRY_RELEASE_PENDING 8
 
 #define MYLITE_OWNERLESS_PROCESS_CLEANUP_OK 0
 #define MYLITE_OWNERLESS_PROCESS_CLEANUP_BLOCKED 1
@@ -22,6 +27,10 @@ extern "C" {
 #define MYLITE_OWNERLESS_PROCESS_REGISTRY_HEADER_SIZE 96U
 #define MYLITE_OWNERLESS_PROCESS_REGISTRY_SLOT_SIZE 128U
 #define MYLITE_OWNERLESS_PROCESS_STATE_ACTIVE 1U
+
+#define MYLITE_OWNERLESS_PROCESS_OPEN_MODE_ORDINARY_EXCLUSIVE 1U
+#define MYLITE_OWNERLESS_PROCESS_OPEN_MODE_SHARED_READONLY 2U
+#define MYLITE_OWNERLESS_PROCESS_OPEN_MODE_OWNERLESS_RW 3U
 
 typedef struct mylite_ownerless_process_identity {
     uint64_t pid;
@@ -40,6 +49,13 @@ typedef int (*mylite_ownerless_process_cleanup_callback)(
     void *ctx
 );
 
+typedef struct mylite_ownerless_process_registry_liveness_context {
+    const void *mapping;
+    size_t mapping_size;
+    mylite_ownerless_process_alive_callback is_alive;
+    void *is_alive_ctx;
+} mylite_ownerless_process_registry_liveness_context;
+
 int mylite_ownerless_process_identity_for_pid(
     uint64_t pid,
     mylite_ownerless_process_identity *out_identity
@@ -47,6 +63,12 @@ int mylite_ownerless_process_identity_for_pid(
 int mylite_ownerless_current_process_identity(mylite_ownerless_process_identity *out_identity);
 int mylite_ownerless_process_identity_is_alive(
     const mylite_ownerless_process_identity *identity,
+    void *ctx
+);
+/* Callback-compatible, lock-free lookup for ownerless latch recovery. */
+int mylite_ownerless_process_registry_latch_owner_is_alive(
+    uint32_t owner_id,
+    uint64_t owner_generation,
     void *ctx
 );
 size_t mylite_ownerless_process_registry_size(uint32_t slot_count);
@@ -101,6 +123,19 @@ int mylite_ownerless_process_registry_live_count(
     mylite_ownerless_process_alive_callback is_alive,
     void *ctx,
     uint64_t *out_live_count
+);
+/* Idempotently finish a pending allocate/cleanup/live-count/release latch release. */
+int mylite_ownerless_process_registry_finish_bootstrap_pending_release(
+    void *mapping,
+    size_t mapping_size,
+    mylite_ownerless_process_identity identity
+);
+/* Idempotently finish a pending heartbeat release using its retained slot token. */
+int mylite_ownerless_process_registry_finish_slot_pending_release(
+    void *mapping,
+    size_t mapping_size,
+    uint32_t slot_index,
+    uint64_t slot_generation
 );
 
 #ifdef __cplusplus

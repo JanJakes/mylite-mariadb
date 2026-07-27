@@ -135,6 +135,15 @@ loop:
     append(other);
   }
 
+  /** Prevent purge from advancing after a coordination snapshot failure. */
+  void clamp_conservative()
+  {
+    m_ids.clear();
+    m_low_limit_id= 1;
+    m_low_limit_no= 1;
+    m_up_limit_id= 1;
+  }
+
 
   /**
     Creates a snapshot where exactly the transactions serialized before this
@@ -142,7 +151,7 @@ loop:
 
     @param[in,out] trx transaction
   */
-  inline void snapshot(trx_t *trx);
+  inline dberr_t snapshot(trx_t *trx) MY_ATTRIBUTE((warn_unused_result));
 
 
   /**
@@ -233,7 +242,7 @@ public:
 
     @param[in,out] trx transaction
   */
-  void open(trx_t *trx);
+  dberr_t open(trx_t *trx) MY_ATTRIBUTE((warn_unused_result));
 
 
   /**
@@ -242,7 +251,7 @@ public:
     View becomes not visible to purge thread. Intended to be called by the
     ReadView owner thread.
   */
-  void close();
+  dberr_t close() MY_ATTRIBUTE((warn_unused_result));
 
 
   /** Returns true if view is open. */
@@ -307,6 +316,6 @@ public:
   }
 
 private:
-  void publish_ownerless();
-  void unpublish_ownerless();
+  dberr_t publish_ownerless() MY_ATTRIBUTE((warn_unused_result));
+  dberr_t unpublish_ownerless() MY_ATTRIBUTE((warn_unused_result));
 };

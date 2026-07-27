@@ -534,7 +534,10 @@ dberr_t fsp_header_init(fil_space_t *space, uint32_t size, mtr_t *mtr)
 
 	buf_block_t *free_block = buf_LRU_get_free_block(have_no_mutex);
 
-	mtr->x_lock_space(space);
+	if (UNIV_UNLIKELY(!mtr->x_lock_space(space))) {
+		buf_pool.free_block(free_block);
+		return mtr->ownerless_error();
+	}
 
 	buf_block_t* block = buf_page_create(space, 0, zip_size, mtr,
 					     free_block);
@@ -1707,6 +1710,7 @@ fseg_create(fil_space_t *space, ulint byte_offset, mtr_t *mtr, dberr_t *err,
 	fseg_inode_t*	inode;
 	ib_id_t		seg_id;
 	uint32_t	n_reserved = 0;
+	bool		reservation_attempted = false;
 
 	DBUG_ENTER("fseg_create");
 
@@ -1716,7 +1720,10 @@ fseg_create(fil_space_t *space, ulint byte_offset, mtr_t *mtr, dberr_t *err,
 	      <= srv_page_size - FIL_PAGE_DATA_END);
 	buf_block_t* iblock= 0;
 
-	mtr->x_lock_space(space);
+	if (UNIV_UNLIKELY(!mtr->x_lock_space(space))) {
+		*err = mtr->ownerless_error();
+		DBUG_RETURN(nullptr);
+	}
 	ut_d(space->modify_check(*mtr));
 
 	ut_ad(!block || block->page.id().space() == space->id);
@@ -1733,7 +1740,8 @@ inode_alloc:
 	if (!inode) {
 		block = nullptr;
 reserve_extent:
-		if (!has_done_reservation && !n_reserved) {
+		if (!has_done_reservation && !reservation_attempted) {
+			reservation_attempted = true;
 			*err = fsp_reserve_free_extents(&n_reserved, space, 2,
 							FSP_NORMAL, mtr);
 			if (UNIV_UNLIKELY(*err != DB_SUCCESS)) {
@@ -2332,6 +2340,10 @@ fseg_alloc_free_page_general(
 
 	const uint32_t space_id = page_get_space_id(page_align(seg_header));
 	space = mtr->x_lock_space(space_id);
+	if (UNIV_UNLIKELY(!space)) {
+		*err = mtr->ownerless_error();
+		return nullptr;
+	}
 	inode = fseg_inode_try_get(seg_header, space_id, space->zip_size(),
 				   mtr, &iblock, err);
 	if (!inode) {
@@ -2462,7 +2474,9 @@ fsp_reserve_free_extents(
 
 	const uint32_t extent_size = FSP_EXTENT_SIZE;
 
-	mtr->x_lock_space(space);
+	if (UNIV_UNLIKELY(!mtr->x_lock_space(space))) {
+		return mtr->ownerless_error();
+	}
 	const unsigned physical_size = space->physical_size();
 
 	dberr_t err;
@@ -2688,8 +2702,8 @@ dberr_t fseg_free_page(fseg_header_t *seg_header, fil_space_t *space,
   buf_block_t *iblock;
   if (have_latch)
     ut_ad(space->is_owner());
-  else
-    mtr->x_lock_space(space);
+  else if (UNIV_UNLIKELY(!mtr->x_lock_space(space)))
+    return mtr->ownerless_error();
 
   DBUG_PRINT("fseg_free_page",
              ("space_id: %" PRIu32 ", page_no: %" PRIu32, space->id, offset));
@@ -2722,8 +2736,8 @@ dberr_t fseg_page_is_allocated(mtr_t *mtr, fil_space_t *space, unsigned page)
   dberr_t err= DB_SUCCESS;
   const auto sp= mtr->get_savepoint();
 
-  if (!space->is_owner())
-    mtr->x_lock_space(space);
+  if (!space->is_owner() && UNIV_UNLIKELY(!mtr->x_lock_space(space)))
+    return mtr->ownerless_error();
 
   if (page >= space->free_limit || page >= space->size_in_header);
   else if (const buf_block_t *b=
@@ -2934,6 +2948,8 @@ bool fseg_free_step(buf_block_t *block, size_t header, mtr_t *mtr
 
 	const page_id_t header_id{block->page.id()};
 	fil_space_t* space = mtr->x_lock_space(header_id.space());
+	if (UNIV_UNLIKELY(!space))
+		return true;
 	xdes_t* descr = xdes_get_descriptor(space, header_id.page_no(), mtr);
 
 	if (!descr) {
@@ -2981,6 +2997,8 @@ bool fseg_free_step_not_header(buf_block_t *block, size_t header, mtr_t *mtr
 	ut_ad(mtr->is_named_space(header_id.space()));
 
 	fil_space_t* space = mtr->x_lock_space(header_id.space());
+	if (UNIV_UNLIKELY(!space))
+		return true;
 	buf_block_t* iblock;
 
 	inode = fseg_inode_try_get(block->page.frame + header,
@@ -3108,6 +3126,8 @@ fseg_print(
 {
   const fil_space_t *space=
     mtr->x_lock_space(page_get_space_id(page_align(header)));
+  if (UNIV_UNLIKELY(!space))
+    return;
   buf_block_t *block;
   if (fseg_inode_t *inode=
       fseg_inode_try_get(header, space->id, space->zip_size(), mtr, &block))
@@ -3897,7 +3917,11 @@ static dberr_t fseg_inode_free(uint32_t page_no, uint16_t offset)
   dberr_t err= DB_SUCCESS;
   mtr_t mtr{nullptr};
   mtr.start();
-  mtr.x_lock_space(space);
+  if (UNIV_UNLIKELY(!mtr.x_lock_space(space))) {
+    err= mtr.ownerless_error();
+    mtr.commit();
+    return err;
+  }
   buf_block_t *iblock= buf_page_get_gen(page_id_t{0, page_no}, 0,
                                         RW_X_LATCH, nullptr, BUF_GET,
                                         &mtr, &err);
@@ -3919,7 +3943,12 @@ static dberr_t fseg_inode_free(uint32_t page_no, uint16_t offset)
     mtr.commit();
 
     mtr.start();
-    mtr.x_lock_space(space);
+    if (UNIV_UNLIKELY(!mtr.x_lock_space(space)))
+    {
+      err= mtr.ownerless_error();
+      iblock->page.unfix();
+      goto func_exit;
+    }
     iblock->page.lock.x_lock();
     mtr.memo_push(iblock, MTR_MEMO_PAGE_X_FIX);
   }
@@ -4027,7 +4056,12 @@ dberr_t fil_space_t::garbage_collect(bool shutdown)
   treated as unused file segment. These segments will be freed as a
   part of inode_info::free_segs  */
   mtr.start();
-  mtr.x_lock_space(fil_system.sys_space);
+  if (UNIV_UNLIKELY(!mtr.x_lock_space(fil_system.sys_space)))
+  {
+    err= mtr.ownerless_error();
+    mtr.commit();
+    return err;
+  }
   for (trx_rseg_t &rseg : trx_sys.rseg_array)
   {
     if (rseg.space == fil_system.sys_space &&
@@ -4248,6 +4282,9 @@ namespace flst
                       FIL_NULL, 0, mtr);
       flst_write_addr(*base, base->page.frame + boffset + FLST_FIRST,
                       curr->page.id().page_no(), coffset, mtr);
+      if (UNIV_UNLIKELY(
+              !mtr->ownerless_page_write_prepare_checked(*base)))
+        return;
       memcpy(base->page.frame + boffset + FLST_LAST,
              base->page.frame + boffset + FLST_FIRST, FIL_ADDR_SIZE);
       mtr->memmove(*base, boffset + FLST_LAST,
@@ -5283,7 +5320,12 @@ class SpaceDefragmenter final
     uint32_t last_descr_page_no= 0;
     fil_space_t *space= fil_system.sys_space;
     mtr.start();
-    mtr.x_lock_space(space);
+    if (UNIV_UNLIKELY(!mtr.x_lock_space(space)))
+    {
+      err= mtr.ownerless_error();
+      mtr.commit();
+      return err;
+    }
     buf_block_t *last_descr= buf_page_get_gen(page_id_t{space->id, 0}, 0,
                                               RW_S_LATCH, nullptr,
                                               BUF_GET_POSSIBLY_FREED, &mtr,
@@ -5564,7 +5606,8 @@ fetch_next_page:
       cur_page_no= next_page_no;
 
       mtr->start();
-      mtr->x_lock_space(space);
+      if (UNIV_UNLIKELY(!mtr->x_lock_space(space)))
+        return mtr->ownerless_error();
       block= fsp_get_latched_page(page_id_t{0, cur_page_no},
                                   mtr, &err);
       if (!block)
@@ -5685,7 +5728,8 @@ err_exit:
   {
     mtr->commit();
     mtr->start();
-    mtr->x_lock_space(space);
+    if (UNIV_UNLIKELY(!mtr->x_lock_space(space)))
+      return mtr->ownerless_error();
   }
   return DB_SUCCESS;
 }
@@ -5697,7 +5741,13 @@ dberr_t IndexDefragmenter::defragment(SpaceDefragmenter *space_defrag) noexcept
   dberr_t err= DB_SUCCESS;
   m_index.lock.x_lock(SRW_LOCK_CALL);
   fil_space_t *const space= fil_system.sys_space;
-  mtr.x_lock_space(space);
+  if (UNIV_UNLIKELY(!mtr.x_lock_space(space)))
+  {
+    err= mtr.ownerless_error();
+    mtr.commit();
+    m_index.lock.x_unlock();
+    return err;
+  }
   m_root= btr_root_block_get(&m_index, RW_S_LATCH, &mtr, &err);
   if (!m_root)
   {
@@ -5827,7 +5877,11 @@ void fsp_system_tablespace_truncate(bool shutdown)
 
   mtr_t mtr{nullptr};
   mtr.start();
-  mtr.x_lock_space(space);
+  if (UNIV_UNLIKELY(!mtr.x_lock_space(space)))
+  {
+    err= mtr.ownerless_error();
+    goto err_exit;
+  }
   err= fsp_traverse_extents(space, &last_used_extent, &mtr);
   DBUG_EXECUTE_IF("traversal_extent_fail", err= DB_CORRUPTION;);
   if (err != DB_SUCCESS)
@@ -5866,7 +5920,16 @@ err_exit:
 #endif /* UNIV_DEBUG */
 
   mtr.start();
-  mtr.x_lock_space(space);
+  if (UNIV_UNLIKELY(!mtr.x_lock_space(space)))
+  {
+    err= mtr.ownerless_error();
+    mtr.commit();
+    fil_system.set_use_doublewrite(old_dblwr_buf);
+    sql_print_warning("InnoDB: Cannot shrink the system tablespace "
+                      "due to %s", ut_strerr(err));
+    srv_sys_space.set_shrink_fail();
+    return;
+  }
 
   {
     /* Take the rough estimation of modified extent

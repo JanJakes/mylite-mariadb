@@ -378,6 +378,9 @@ template<mtr_t::write_type w>
 inline void mtr_t::zmemcpy(const buf_block_t &b, void *dest, const void *str,
                            ulint len)
 {
+  ownerless_page_write_prepare(b);
+  if (UNIV_UNLIKELY(ownerless_failed()))
+    return;
   byte *d= static_cast<byte*>(dest);
   const byte *s= static_cast<const byte*>(str);
   ut_ad(d >= b.page.zip.data + FIL_PAGE_OFFSET);
@@ -3550,6 +3553,9 @@ page_zip_write_rec_ext(
 		externs -= blob_no * FIELD_REF_SIZE;
 
 		if (create) {
+			if (UNIV_UNLIKELY(
+				    !mtr->ownerless_page_write_prepare_checked(*block)))
+				return nullptr;
 			page_zip->n_blobs = (page_zip->n_blobs + n_ext)
 				& ((1U << 12) - 1);
 			ASSERT_ZERO_BLOB(ext_end - n_ext * FIELD_REF_SIZE);
@@ -3736,6 +3742,8 @@ void page_zip_write_rec(buf_block_t *block, const byte *rec,
 					rec, index, offsets, create,
 					index->db_trx_id(), heap_no,
 					storage, data, mtr);
+				if (UNIV_UNLIKELY(data == nullptr))
+					return;
 			} else {
 				/* Locate trx_id and roll_ptr. */
 				ulint len;
@@ -3995,6 +4003,9 @@ page_zip_write_trx_id_and_roll_ptr(
 
 			The total size is: x+13 versus x+2+15-len = x+17-len.
 			To save space, we must have len>4. */
+			if (UNIV_UNLIKELY(
+				    !mtr->ownerless_page_write_prepare_checked(*block)))
+				return;
 			memcpy(storage, prev, len);
 			mtr->memmove(*block, ulint(storage - page_zip->data),
 				     ulint(storage - page_zip->data) + sys_len,
@@ -4235,6 +4246,10 @@ page_zip_dir_insert(
 
 	if (const ulint slot_len = ulint(slot_rec - slot_free)) {
 		/* Shift the dense directory to allocate place for rec. */
+		if (UNIV_UNLIKELY(
+			    !mtr->ownerless_page_write_prepare_checked(
+				*cursor->block)))
+			return;
 		memmove_aligned<2>(slot_free - PAGE_ZIP_DIR_SLOT_SIZE,
 				   slot_free, slot_len);
 		mtr->memmove(*cursor->block, (slot_free - page_zip->data)
@@ -4318,6 +4333,9 @@ void page_zip_dir_delete(buf_block_t *block, byte *rec,
   const ulint slot_len= slot_rec > slot_free ? ulint(slot_rec - slot_free) : 0;
   if (slot_len)
   {
+    if (UNIV_UNLIKELY(
+            !mtr->ownerless_page_write_prepare_checked(*block)))
+      return;
     memmove_aligned<2>(slot_free + PAGE_ZIP_DIR_SLOT_SIZE, slot_free,
                        slot_len);
     mtr->memmove(*block, (slot_free - page_zip->data) + PAGE_ZIP_DIR_SLOT_SIZE,
@@ -4347,6 +4365,9 @@ void page_zip_dir_delete(buf_block_t *block, byte *rec,
     if (const ulint ext_len= ulint(page_zip->n_blobs - n_ext - blob_no) *
         BTR_EXTERN_FIELD_REF_SIZE)
     {
+      if (UNIV_UNLIKELY(
+              !mtr->ownerless_page_write_prepare_checked(*block)))
+        return;
       memmove(ext_end + n_ext * FIELD_REF_SIZE, ext_end, ext_len);
       mtr->memmove(*block, (ext_end - page_zip->data) + n_ext * FIELD_REF_SIZE,
                    ext_end - page_zip->data, ext_len);

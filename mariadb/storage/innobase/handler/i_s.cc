@@ -2726,7 +2726,7 @@ i_s_fts_index_table_fill_selected(
 		error = fts_eval_sql(trx, graph);
 
 		if (UNIV_LIKELY(error == DB_SUCCESS)) {
-			fts_sql_commit(trx);
+			error= fts_sql_commit(trx);
 
 			break;
 		} else {
@@ -2747,9 +2747,11 @@ i_s_fts_index_table_fill_selected(
 
 	que_graph_free(graph);
 
-	trx->free();
+	if (!trx->mylite_ownerless_coordination_fault)
+		trx->free();
 
-	if (fetch.total_memory >= fts_result_cache_limit) {
+	if (error == DB_SUCCESS
+	    && fetch.total_memory >= fts_result_cache_limit) {
 		error = DB_FTS_EXCEED_RESULT_CACHE_LIMIT;
 	}
 
@@ -3196,11 +3198,13 @@ i_s_fts_config_fill(
 		i++;
 	}
 
-	fts_sql_commit(trx);
+	if (UNIV_UNLIKELY(fts_sql_commit(trx) != DB_SUCCESS))
+		ret= 1;
 
 	dict_table_close(user_table, thd, mdl_ticket);
 
-	trx->free();
+	if (!trx->mylite_ownerless_coordination_fault)
+		trx->free();
 
 	DBUG_RETURN(ret);
 }

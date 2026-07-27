@@ -983,16 +983,6 @@ dberr_t wsrep_append_foreign_key(trx_t *trx,
 			       Wsrep_service_key_type	key_type);
 #endif /* WITH_WSREP */
 
-static
-dberr_t
-row_ins_ownerless_refresh_fk_cursor(
-	dtuple_t*	entry,
-	page_cur_mode_t	mode,
-	dict_index_t*	check_index,
-	btr_pcur_t*	pcur,
-	mtr_t*		mtr,
-	trx_t*		trx);
-
 /*********************************************************************//**
 Perform referential actions or checks when a parent row is deleted or updated
 and the constraint had an ON DELETE or ON UPDATE condition which was not
@@ -1157,13 +1147,6 @@ row_ins_foreign_check_on_constraint(
 		err = btr_pcur_open_with_no_init(ref,
 						 PAGE_CUR_LE, BTR_SEARCH_LEAF,
 						 cascade->pcur, mtr);
-		if (UNIV_UNLIKELY(err != DB_SUCCESS)) {
-			goto nonstandard_exit_func;
-		}
-
-		err = row_ins_ownerless_refresh_fk_cursor(
-			ref, PAGE_CUR_LE, clust_index, cascade->pcur, mtr,
-			trx);
 		if (UNIV_UNLIKELY(err != DB_SUCCESS)) {
 			goto nonstandard_exit_func;
 		}
@@ -1407,8 +1390,11 @@ nonstandard_exit_func:
 
 	btr_pcur_store_position(pcur, mtr);
 
-	mtr_commit(mtr);
-	mtr_start(mtr);
+	if (const dberr_t commit_error = mtr->commit_and_restart()) {
+		if (err == DB_SUCCESS) {
+			err = commit_error;
+		}
+	}
 
 	if (pcur->restore_position(BTR_SEARCH_LEAF, mtr)
 	    != btr_pcur_t::SAME_ALL && err == DB_SUCCESS) {
@@ -1509,81 +1495,39 @@ row_ins_ownerless_fk_current_read_sql(
 
 static
 dberr_t
-row_ins_ownerless_refresh_fk_cursor(
-/*====================================*/
-	dtuple_t*	entry,
-	page_cur_mode_t	mode,
-	dict_index_t*	check_index,
-	btr_pcur_t*	pcur,
-	mtr_t*		mtr,
-	trx_t*		trx)
-{
-	if (UNIV_LIKELY(!row_ins_ownerless_fk_current_read_sql(trx) ||
-			!mylite_ownerless_innodb_lock_has_hooks())) {
-		return(DB_SUCCESS);
-	}
-
-	const buf_block_t*	block = btr_pcur_get_block(pcur);
-	if (trx != NULL) {
-		const trx_t::mylite_ownerless_page_vector* pages =
-			trx->mylite_ownerless_dirty_pages_for_read();
-		if (pages != NULL && block != NULL) {
-			const page_id_t page_id{block->page.id()};
-			const uint64_t packed_page =
-				(uint64_t{page_id.space()} << 32) |
-				page_id.page_no();
-			for (uint64_t modified_page : *pages) {
-				if (modified_page == packed_page) {
-					return(DB_SUCCESS);
-				}
-			}
-		}
-	}
-
-	const int refresh_result =
-		mylite_ownerless_innodb_refresh_page_for_current_read(
-			block);
-
-	if (refresh_result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
-	    refresh_result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE) {
-		return(DB_ERROR);
-	}
-
-	mtr_commit(mtr);
-	btr_pcur_close(pcur);
-	mtr_start(mtr);
-	pcur->btr_cur.page_cur.index = check_index;
-
-	return(btr_pcur_open(entry, mode, BTR_SEARCH_LEAF, pcur, mtr));
-}
-
-static
-dberr_t
 row_ins_ownerless_prepare_fk_current_read(
 /*=====================================*/
 	trx_t*	trx)
 {
 	if (UNIV_LIKELY(!row_ins_ownerless_fk_current_read_sql(trx) ||
-			!mylite_ownerless_innodb_lock_has_hooks() ||
-			(trx != NULL && !trx->mylite_ownerless_dirty_pages_empty()))) {
+			!mylite_ownerless_innodb_write_coordination_enabled())) {
 		return(DB_SUCCESS);
 	}
 
 	uint64_t	latest_lsn = 0;
 	const int observe_result =
 		mylite_ownerless_innodb_redo_observe(&latest_lsn);
-	if (observe_result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE ||
-	    latest_lsn == 0) {
-		return(DB_SUCCESS);
-	}
 	if (observe_result != MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+		mylite_ownerless_innodb_note_coordination_error();
+		if (trx != NULL) {
+			trx->mylite_ownerless_coordination_fault = true;
+			trx->error_state = DB_ERROR;
+		}
 		return(DB_ERROR);
+	}
+	if (latest_lsn == 0) {
+		return(DB_SUCCESS);
 	}
 
 	mylite_ownerless_innodb_enable_current_external_page_visibility(
 		latest_lsn);
-	mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_visible_boundary_no_skip(
+	mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_visible_boundary_preserve_clean_no_skip(
 		latest_lsn);
+	if (mylite_ownerless_innodb_coordination_error()) {
+		trx->mylite_ownerless_coordination_fault = true;
+		trx->error_state = DB_ERROR;
+		return(DB_ERROR);
+	}
 
 	return(DB_SUCCESS);
 }
@@ -1771,12 +1715,6 @@ row_ins_check_foreign_constraint(
 	dtuple_set_n_fields_cmp(entry, foreign->n_fields);
 	pcur.btr_cur.page_cur.index = check_index;
 	err = btr_pcur_open(entry, PAGE_CUR_GE, BTR_SEARCH_LEAF, &pcur, &mtr);
-	if (UNIV_UNLIKELY(err != DB_SUCCESS)) {
-		goto end_scan;
-	}
-
-	err = row_ins_ownerless_refresh_fk_cursor(
-		entry, PAGE_CUR_GE, check_index, &pcur, &mtr, trx);
 	if (UNIV_UNLIKELY(err != DB_SUCCESS)) {
 		goto end_scan;
 	}
@@ -2602,7 +2540,7 @@ duplicate:
 
 			switch (err) {
 			default:
-				break;
+				goto func_exit;
 			case DB_SUCCESS_LOCKED_REC:
 				err = DB_SUCCESS;
 				/* fall through */
@@ -2706,7 +2644,11 @@ row_ins_index_entry_big_rec(
 		&pcur, offsets, big_rec, &mtr, BTR_STORE_INSERT);
 	DEBUG_SYNC_C_IF_THD(trx->mysql_thd, "after_row_ins_extern");
 
-	mtr.commit();
+	if (const dberr_t commit_error = mtr.commit()) {
+		if (error == DB_SUCCESS) {
+			error = commit_error;
+		}
+	}
 
 	ut_free(pcur.old_rec_buf);
 	return(error);
@@ -2896,11 +2838,17 @@ row_ins_clust_index_entry_low(
 		MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_CLUST_LOW_BTR_PCUR_OPEN_NS,
 		mylite_deep_stage_start);
 	if (err != DB_SUCCESS) {
-		index->table->file_unreadable = true;
+		if (err == DB_CORRUPTION || err == DB_PAGE_CORRUPTED) {
+			index->table->file_unreadable = true;
+		}
 err_exit:
 		mylite_deep_stage_start =
 			mylite_ownerless_innodb_deep_perf_start_ns();
-		mtr.commit();
+		if (const dberr_t commit_error = mtr.commit()) {
+			if (err == DB_SUCCESS) {
+				err = commit_error;
+			}
+		}
 		mylite_ownerless_innodb_deep_perf_add_elapsed(
 			MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_CLUST_LOW_MTR_COMMIT_NS,
 			mylite_deep_stage_start);
@@ -3009,7 +2957,9 @@ avoid_bulk:
 			insert operation are buffered in the
 			bulk buffer and doesn't check for constraint
 			validity of foreign key relationship. */
-			trx_start_if_not_started(trx, true);
+			err= trx_start_if_not_started(trx, true);
+			if (UNIV_UNLIKELY(err != DB_SUCCESS))
+				goto err_exit;
 			trx->bulk_insert = TRX_DDL_BULK;
 			auto m = trx->mod_tables.emplace(index->table, 0);
 			m.first->second.start_bulk_insert(index->table, true);
@@ -3111,7 +3061,11 @@ row_level_insert:
 
 		mylite_deep_stage_start =
 			mylite_ownerless_innodb_deep_perf_start_ns();
-		mtr_commit(&mtr);
+		if (const dberr_t commit_error = mtr.commit()) {
+			if (err == DB_SUCCESS) {
+				err = commit_error;
+			}
+		}
 		mylite_ownerless_innodb_deep_perf_add_elapsed(
 			MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_CLUST_LOW_MTR_COMMIT_NS,
 			mylite_deep_stage_start);
@@ -3188,32 +3142,37 @@ do_insert:
 				mylite_deep_stage_start);
 		}
 
-		mylite_deep_stage_start =
-			mylite_ownerless_innodb_deep_perf_start_ns();
-		mtr.commit();
+			mylite_deep_stage_start =
+				mylite_ownerless_innodb_deep_perf_start_ns();
+			if (const dberr_t commit_error = mtr.commit()) {
+				if (err == DB_SUCCESS) {
+					err = commit_error;
+				}
+			}
 		mylite_ownerless_innodb_deep_perf_add_elapsed(
 			MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_CLUST_LOW_MTR_COMMIT_NS,
 			mylite_deep_stage_start);
 
-		if (big_rec) {
-			ut_ad(err == DB_SUCCESS);
-			/* Online table rebuild could read (and
-			ignore) the incomplete record at this point.
-			If online rebuild is in progress, the
-			row_ins_index_entry_big_rec() will write log. */
+			if (big_rec) {
+				/* Online table rebuild could read (and
+				ignore) the incomplete record at this point.
+				If online rebuild is in progress, the
+				row_ins_index_entry_big_rec() will write log. */
 
-			DBUG_EXECUTE_IF(
-				"row_ins_extern_checkpoint",
-				log_write_up_to(mtr.commit_lsn(), true););
-			mylite_deep_stage_start =
-				mylite_ownerless_innodb_deep_perf_start_ns();
-			err = row_ins_index_entry_big_rec(
-				entry, big_rec, offsets, &offsets_heap, index,
-				trx);
-			mylite_ownerless_innodb_deep_perf_add_elapsed(
-				MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_CLUST_LOW_BIG_REC_NS,
-				mylite_deep_stage_start);
-			dtuple_convert_back_big_rec(index, entry, big_rec);
+				if (err == DB_SUCCESS) {
+					DBUG_EXECUTE_IF(
+						"row_ins_extern_checkpoint",
+						log_write_up_to(mtr.commit_lsn(), true););
+					mylite_deep_stage_start =
+						mylite_ownerless_innodb_deep_perf_start_ns();
+					err = row_ins_index_entry_big_rec(
+						entry, big_rec, offsets, &offsets_heap,
+						index, trx);
+					mylite_ownerless_innodb_deep_perf_add_elapsed(
+						MYLITE_OWNERLESS_INNODB_DEEP_ROW_INS_CLUST_LOW_BIG_REC_NS,
+						mylite_deep_stage_start);
+				}
+				dtuple_convert_back_big_rec(index, entry, big_rec);
 		}
 	}
 
@@ -3314,14 +3273,16 @@ row_ins_sec_index_entry_low(
 
 		if (err == DB_SUCCESS && search_mode == BTR_MODIFY_LEAF
 		    && rtr_info.mbr_adj) {
-			mtr_commit(&mtr);
+			err = mtr.commit_and_restart();
+			if (UNIV_UNLIKELY(err != DB_SUCCESS)) {
+				goto func_exit;
+			}
 			search_mode = mode = BTR_MODIFY_TREE;
 			rtr_clean_rtr_info(&rtr_info, true);
 			rtr_init_rtr_info(&rtr_info, false, &cursor,
 					  index, false);
 			rtr_info.thr = thr;
 			rtr_info_update_btr(&cursor, &rtr_info);
-			mtr.start();
 			if (index->table->is_temporary()) {
 				mtr.set_log_mode(MTR_LOG_NO_REDO);
 			} else {
@@ -3363,7 +3324,13 @@ row_ins_sec_index_entry_low(
 
 	if (dict_index_is_unique(index)
 	    && (cursor.low_match >= n_unique || cursor.up_match >= n_unique)) {
-		mtr_commit(&mtr);
+		if (const dberr_t commit_error = mtr.commit()) {
+			err = commit_error;
+			if (dict_index_is_spatial(index)) {
+				rtr_clean_rtr_info(&rtr_info, true);
+			}
+			DBUG_RETURN(err);
+		}
 
 		DEBUG_SYNC_C("row_ins_sec_index_unique");
 
@@ -3372,7 +3339,11 @@ row_ins_sec_index_entry_low(
 		err = row_ins_scan_sec_index_for_duplicate(
 			flags, index, entry, thr, &mtr, offsets_heap);
 
-		mtr_commit(&mtr);
+		if (const dberr_t commit_error = mtr.commit()) {
+			if (err == DB_SUCCESS) {
+				err = commit_error;
+			}
+		}
 
 		switch (err) {
 		case DB_SUCCESS:
@@ -3506,7 +3477,11 @@ func_exit:
 		rtr_clean_rtr_info(&rtr_info, true);
 	}
 
-	mtr_commit(&mtr);
+	if (const dberr_t commit_error = mtr.commit()) {
+		if (err == DB_SUCCESS) {
+			err = commit_error;
+		}
+	}
 	DBUG_RETURN(err);
 }
 

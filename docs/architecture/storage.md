@@ -216,11 +216,13 @@ app.mylite/
   initialized from the durable page-version records in `mylite-concurrency.wal`.
   The embedded runtime disables InnoDB buffer-pool dump/load so concurrent
   processes do not race on the advisory `ib_buffer_pool` file in `datadir/`.
-  Ownerless read/write is available through `MYLITE_OPEN_OWNERLESS_RW` for the
-  supported persistent InnoDB application-table surface. Non-InnoDB ownerless
+  Experimental ownerless read/write is available through
+  `MYLITE_OPEN_OWNERLESS_RW` for the currently admitted persistent InnoDB
+  application-table surface. Non-InnoDB ownerless
   durable tables, server/global SQL surfaces, network-filesystem semantics, and
-  broader external-oracle long-running stress remain outside that supported
-  surface until separately designed and validated.
+  broader external-oracle long-running stress remain outside that admitted
+  surface until separately designed and validated. The compatibility release
+  gates remain authoritative for graduation from experimental status.
 - `concurrency/mylite-concurrency.wal` and
   `concurrency/mylite-concurrency.ckpt` are durable coordination-log and
   checkpoint anchors for future ownerless recovery. They contain fixed headers

@@ -58,9 +58,10 @@ In scope:
   ownerless statement activity.
 - Reuse the existing native reclaim path and its live-peer/native-idle
   predicates.
-- Add SQL coverage proving an idle open writer reclaims WAL after a shared
-  read-only snapshot pin releases, without executing another SQL statement or
-  closing the writer.
+- Add SQL coverage proving an idle open writer retires user-page WAL after a
+  shared read-only snapshot pin releases, without executing another SQL
+  statement or closing the writer. Native-support records may remain while
+  rollback history is live and purge is deferred under ownerless hooks.
 - Add SQL coverage proving an open prepared result cursor counts as active
   same-process statement work and keeps the timer from reclaiming retained WAL
   until the cursor is finalized.
@@ -173,8 +174,9 @@ No new dependency is added. The runtime adds one `std::thread` and
 ## Acceptance Criteria
 
 - A writer that remains open and executes no further SQL after a shared
-  read-only snapshot pin releases observes page-version WAL checkpointing
-  before close.
+  read-only snapshot pin releases observes user-page WAL checkpointing before
+  close; retained WAL is native-support-only when live rollback history still
+  requires recovery evidence.
 - A prepared result cursor keeps retained WAL from being checkpointed by the
   timer after the snapshot pin releases; finalizing the cursor lets the timer
   reclaim without another writer SQL statement.

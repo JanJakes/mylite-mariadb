@@ -1772,10 +1772,13 @@ dberr_t trx_undo_report_rename(trx_t* trx, const dict_table_t* table)
 	ut_ad(!table->is_temporary());
 
 	mtr_t		mtr{trx};
-	dberr_t		err;
+	dberr_t		err= DB_SUCCESS;
+	trx_undo_t*	undo= nullptr;
+	buf_block_t*	block= nullptr;
+	uint16_t	offset= 0;
 	mtr.start();
-	if (buf_block_t* block = trx_undo_assign(&mtr, &err)) {
-		trx_undo_t*	undo = trx->rsegs.m_redo.undo;
+	if ((block = trx_undo_assign(&mtr, &err))) {
+		undo = trx->rsegs.m_redo.undo;
 		ut_ad(err == DB_SUCCESS);
 		ut_ad(undo);
 		for (ut_d(int loop_count = 0);;) {
@@ -1783,19 +1786,13 @@ dberr_t trx_undo_report_rename(trx_t* trx, const dict_table_t* table)
 			ut_ad(undo->last_page_no
 			      == block->page.id().page_no());
 
-			if (uint16_t offset = trx_undo_page_report_rename(
-				    table, block, &mtr)) {
-				undo->top_page_no = undo->last_page_no;
-				undo->top_offset  = offset;
-				undo->top_undo_no = trx->undo_no++;
-				undo->guess_block = block;
-				ut_ad(!undo->empty());
-
-				err = DB_SUCCESS;
+			if ((offset = trx_undo_page_report_rename(
+				     table, block, &mtr))) {
 				break;
 			} else {
-				mtr.commit();
-				mtr.start();
+				err= mtr.commit_and_restart();
+				if (UNIV_UNLIKELY(err != DB_SUCCESS))
+					break;
 				block = trx_undo_add_page(undo, &mtr, &err);
 				if (!block) {
 					break;
@@ -1804,7 +1801,16 @@ dberr_t trx_undo_report_rename(trx_t* trx, const dict_table_t* table)
 		}
 	}
 
-	mtr.commit();
+	const dberr_t commit_error= mtr.commit();
+	if (err == DB_SUCCESS)
+		err= commit_error;
+	if (UNIV_LIKELY(err == DB_SUCCESS) && offset != 0) {
+		undo->top_page_no = undo->last_page_no;
+		undo->top_offset  = offset;
+		undo->top_undo_no = trx->undo_no++;
+		undo->guess_block = block;
+		ut_ad(!undo->empty());
+	}
 	return err;
 }
 
@@ -1967,10 +1973,19 @@ trx_undo_report_row_operation(
 		mylite_deep_stage_start);
 
 	mtr_t		mtr{trx};
-	dberr_t		err;
+	dberr_t		err= DB_SUCCESS;
 	mylite_deep_stage_start =
 		mylite_ownerless_innodb_deep_perf_start_ns();
 	mtr.start();
+	const auto commit_mtr= [&]() -> dberr_t {
+		const uint64_t commit_start=
+			mylite_ownerless_innodb_deep_perf_start_ns();
+		const dberr_t commit_error= mtr.commit();
+		mylite_ownerless_innodb_deep_perf_add_elapsed(
+			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_MTR_COMMIT_NS,
+			commit_start);
+		return commit_error;
+	};
 	trx_undo_t**	pundo;
 	trx_rseg_t*	rseg;
 	const bool	is_temp	= index->table->is_temporary();
@@ -1980,8 +1995,15 @@ trx_undo_report_row_operation(
 		mtr.set_log_mode(MTR_LOG_NO_REDO);
 		rseg = trx->get_temp_rseg();
 		pundo = &trx->rsegs.m_noredo.undo;
-		undo_block = trx_undo_assign_low<true>(&mtr, &err,
-						       rseg, pundo);
+		if (UNIV_UNLIKELY(rseg == nullptr)) {
+			err= trx->error_state == DB_SUCCESS
+				? DB_ERROR
+				: trx->error_state;
+			undo_block= nullptr;
+		} else {
+			undo_block = trx_undo_assign_low<true>(&mtr, &err,
+							       rseg, pundo);
+		}
 		mylite_ownerless_innodb_deep_perf_add_elapsed(
 			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_ASSIGN_TEMP_NS,
 			mylite_deep_stage_start);
@@ -2002,15 +2024,7 @@ trx_undo_report_row_operation(
 	if (UNIV_UNLIKELY(undo_block == NULL)) {
 		mylite_ownerless_innodb_deep_perf_count(
 			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_ASSIGN_FAIL);
-err_exit:
-		mylite_deep_stage_start =
-			mylite_ownerless_innodb_deep_perf_start_ns();
-		mtr.commit();
-		mylite_ownerless_innodb_deep_perf_add_elapsed(
-			MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_MTR_COMMIT_NS,
-			mylite_deep_stage_start);
-		mylite_trx_undo_report_count_error(err);
-		return err;
+		goto err_exit;
 	}
 
 	ut_ad(undo != NULL);
@@ -2056,13 +2070,17 @@ err_exit:
 
 				mylite_deep_stage_start =
 					mylite_ownerless_innodb_deep_perf_start_ns();
-				mtr.commit();
+				const dberr_t commit_error=
+					mtr.commit_and_restart();
 				mylite_ownerless_innodb_deep_perf_add_elapsed(
 					MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_MTR_COMMIT_NS,
 					mylite_deep_stage_start);
-				mtr.start();
 				if (is_temp) {
 					mtr.set_log_mode(MTR_LOG_NO_REDO);
+				}
+				if (UNIV_UNLIKELY(commit_error != DB_SUCCESS)) {
+					err= commit_error;
+					goto err_exit;
 				}
 
 				rseg->latch.wr_lock(SRW_LOCK_CALL);
@@ -2096,23 +2114,23 @@ err_exit:
 					   - FIL_PAGE_DATA_END, 0);
 			}
 
-			mylite_deep_stage_start =
-				mylite_ownerless_innodb_deep_perf_start_ns();
-			mtr.commit();
-			mylite_ownerless_innodb_deep_perf_add_elapsed(
-				MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_MTR_COMMIT_NS,
-				mylite_deep_stage_start);
+			const dberr_t commit_error= commit_mtr();
+			if (UNIV_UNLIKELY(commit_error != DB_SUCCESS)) {
+				mylite_trx_undo_report_count_error(commit_error);
+				return commit_error;
+			}
 		} else {
 			/* Success */
-			undo->top_page_no = undo_block->page.id().page_no();
+			const uint32_t top_page_no=
+				undo_block->page.id().page_no();
+			const dberr_t commit_error= commit_mtr();
+			if (UNIV_UNLIKELY(commit_error != DB_SUCCESS)) {
+				mylite_trx_undo_report_count_error(commit_error);
+				return commit_error;
+			}
 			mylite_deep_stage_start =
 				mylite_ownerless_innodb_deep_perf_start_ns();
-			mtr.commit();
-			mylite_ownerless_innodb_deep_perf_add_elapsed(
-				MYLITE_OWNERLESS_INNODB_DEEP_TRX_UNDO_REPORT_MTR_COMMIT_NS,
-				mylite_deep_stage_start);
-			mylite_deep_stage_start =
-				mylite_ownerless_innodb_deep_perf_start_ns();
+			undo->top_page_no = top_page_no;
 			undo->top_offset  = offset;
 			undo->top_undo_no = trx->undo_no++;
 			undo->guess_block = undo_block;
@@ -2187,7 +2205,15 @@ err_exit:
 		undo->rseg->space == fil_system.sys_space
 		? "system" : is_temp ? "temporary" : "undo");
 
-	goto err_exit;
+
+err_exit:
+	{
+		const dberr_t commit_error= commit_mtr();
+		if (err == DB_SUCCESS)
+			err= commit_error;
+	}
+	mylite_trx_undo_report_count_error(err);
+	return err;
 }
 
 /*============== BUILDING PREVIOUS VERSION OF A RECORD ===============*/

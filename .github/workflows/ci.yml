@@ -66,7 +66,7 @@ jobs:
   embedded:
     name: ubuntu-embedded
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
+    timeout-minutes: 150
 
     steps:
       - uses: actions/checkout@v5
@@ -89,6 +89,7 @@ jobs:
             pkg-config \
             php-cli \
             php-dev \
+            xfsprogs \
             zlib1g-dev
 
       - name: Normalize embedded MariaDB archive source mtimes
@@ -219,35 +220,423 @@ jobs:
           if-no-files-found: warn
 
       - name: Run embedded non-ownerless tests
-        timeout-minutes: 10
+        timeout-minutes: 30
         run: |
           set -euo pipefail
           tools/require-cmake-build-type MinSizeRel build/mariadb-embedded
           tools/require-cmake-release-build build/php-embedded-prod
           ctest --preset php-embedded-prod \
-            -LE compat.ownerless-cross-process-sql \
+            -LE 'compat.ownerless-cross-process-sql|compat.ownerless-application' \
+            --no-tests=error \
             --output-on-failure
 
-      - name: Run embedded ownerless SQL tests
-        timeout-minutes: 45
+      - name: Run PHP ownerless application adapter tests
+        timeout-minutes: 5
         run: |
           set -euo pipefail
           tools/require-cmake-build-type MinSizeRel build/mariadb-embedded
           tools/require-cmake-release-build build/php-embedded-prod
+          ctest --preset php-embedded-prod \
+            -L compat.ownerless-application \
+            --parallel 1 \
+            --no-tests=error \
+            --output-on-failure
+
+      - name: Run ownerless supported-filesystem gate
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          tools/require-cmake-build-type MinSizeRel build/mariadb-embedded
+          tools/require-cmake-release-build build/php-embedded-prod
+          tools/check-ownerless-filesystems \
+            build/php-embedded-prod/packages/libmylite/mylite_ownerless_cross_process_sql_test
+
+  ownerless-release-gate:
+    name: ubuntu-ownerless-${{ matrix.gate }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 210
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - gate: hooks-0
+            configure_preset: ownerless-test-hooks
+            test_preset: ownerless-test-hooks
+            test_label: compat.ownerless-hook-release-shard-0
+            test_timeout_minutes: 120
+          - gate: hooks-1
+            configure_preset: ownerless-test-hooks
+            test_preset: ownerless-test-hooks
+            test_label: compat.ownerless-hook-release-shard-1
+            test_timeout_minutes: 120
+          - gate: hooks-2
+            configure_preset: ownerless-test-hooks
+            test_preset: ownerless-test-hooks
+            test_label: compat.ownerless-hook-release-shard-2
+            test_timeout_minutes: 120
+          - gate: hooks-3
+            configure_preset: ownerless-test-hooks
+            test_preset: ownerless-test-hooks
+            test_label: compat.ownerless-hook-release-shard-3
+            test_timeout_minutes: 120
+          - gate: hooks-4
+            configure_preset: ownerless-test-hooks
+            test_preset: ownerless-test-hooks
+            test_label: compat.ownerless-hook-release-shard-4
+            test_timeout_minutes: 120
+          - gate: hooks-5
+            configure_preset: ownerless-test-hooks
+            test_preset: ownerless-test-hooks
+            test_label: compat.ownerless-hook-release-shard-5
+            test_timeout_minutes: 120
+          - gate: hooks-6
+            configure_preset: ownerless-test-hooks
+            test_preset: ownerless-test-hooks
+            test_label: compat.ownerless-hook-release-shard-6
+            test_timeout_minutes: 120
+          - gate: hooks-7
+            configure_preset: ownerless-test-hooks
+            test_preset: ownerless-test-hooks
+            test_label: compat.ownerless-hook-release-shard-7
+            test_timeout_minutes: 120
+          - gate: hooks-8
+            configure_preset: ownerless-test-hooks
+            test_preset: ownerless-test-hooks
+            test_label: compat.ownerless-hook-release-shard-8
+            test_timeout_minutes: 120
+          - gate: hooks-9
+            configure_preset: ownerless-test-hooks
+            test_preset: ownerless-test-hooks
+            test_label: compat.ownerless-hook-release-shard-9
+            test_timeout_minutes: 120
+          - gate: hooks-10
+            configure_preset: ownerless-test-hooks
+            test_preset: ownerless-test-hooks
+            test_label: compat.ownerless-hook-release-shard-10
+            test_timeout_minutes: 120
+          - gate: hooks-11
+            configure_preset: ownerless-test-hooks
+            test_preset: ownerless-test-hooks
+            test_label: compat.ownerless-hook-release-shard-11
+            test_timeout_minutes: 120
+          - gate: hooks-12
+            configure_preset: ownerless-test-hooks
+            test_preset: ownerless-test-hooks
+            test_label: compat.ownerless-hook-release-shard-12
+            test_timeout_minutes: 120
+          - gate: hooks-13
+            configure_preset: ownerless-test-hooks
+            test_preset: ownerless-test-hooks
+            test_label: compat.ownerless-hook-release-shard-13
+            test_timeout_minutes: 120
+          - gate: hooks-14
+            configure_preset: ownerless-test-hooks
+            test_preset: ownerless-test-hooks
+            test_label: compat.ownerless-hook-release-shard-14
+            test_timeout_minutes: 120
+          - gate: hooks-15
+            configure_preset: ownerless-test-hooks
+            test_preset: ownerless-test-hooks
+            test_label: compat.ownerless-hook-release-shard-15
+            test_timeout_minutes: 120
+          - gate: stress-workload
+            configure_preset: ownerless-stress
+            test_preset: ownerless-stress-workload-release-gate
+            test_label: ""
+            test_timeout_minutes: 160
+          - gate: stress-randomized
+            configure_preset: ownerless-stress
+            test_preset: ownerless-stress-randomized-release-gate
+            test_label: ""
+            test_timeout_minutes: 310
+          - gate: stress-pressure
+            configure_preset: ownerless-stress
+            test_preset: ownerless-stress-pressure-release-gate
+            test_label: ""
+            test_timeout_minutes: 130
+          - gate: sql-0
+            configure_preset: embedded-prod
+            test_preset: embedded-prod
+            test_label: ""
+            test_regex: '^libmylite\.ownerless-cross-process-sql\.0$'
+            test_timeout_minutes: 60
+          - gate: sql-1
+            configure_preset: embedded-prod
+            test_preset: embedded-prod
+            test_label: ""
+            test_regex: '^libmylite\.ownerless-cross-process-sql\.1$'
+            test_timeout_minutes: 60
+          - gate: sql-2
+            configure_preset: embedded-prod
+            test_preset: embedded-prod
+            test_label: ""
+            test_regex: '^libmylite\.ownerless-cross-process-sql\.2$'
+            test_timeout_minutes: 60
+          - gate: sql-3
+            configure_preset: embedded-prod
+            test_preset: embedded-prod
+            test_label: ""
+            test_regex: '^libmylite\.ownerless-cross-process-sql\.3$'
+            test_timeout_minutes: 60
+          - gate: sql-4
+            configure_preset: embedded-prod
+            test_preset: embedded-prod
+            test_label: ""
+            test_regex: '^libmylite\.ownerless-cross-process-sql\.4$'
+            test_timeout_minutes: 60
+          - gate: sql-5
+            configure_preset: embedded-prod
+            test_preset: embedded-prod
+            test_label: ""
+            test_regex: '^libmylite\.ownerless-cross-process-sql\.5$'
+            test_timeout_minutes: 60
+          - gate: sql-6
+            configure_preset: embedded-prod
+            test_preset: embedded-prod
+            test_label: ""
+            test_regex: '^libmylite\.ownerless-cross-process-sql\.6$'
+            test_timeout_minutes: 60
+          - gate: sql-7
+            configure_preset: embedded-prod
+            test_preset: embedded-prod
+            test_label: ""
+            test_regex: '^libmylite\.ownerless-cross-process-sql\.7$'
+            test_timeout_minutes: 60
+          - gate: sql-8
+            configure_preset: embedded-prod
+            test_preset: embedded-prod
+            test_label: ""
+            test_regex: '^libmylite\.ownerless-cross-process-sql\.8$'
+            test_timeout_minutes: 60
+          - gate: sql-9
+            configure_preset: embedded-prod
+            test_preset: embedded-prod
+            test_label: ""
+            test_regex: '^libmylite\.ownerless-cross-process-sql\.9$'
+            test_timeout_minutes: 60
+          - gate: sql-10
+            configure_preset: embedded-prod
+            test_preset: embedded-prod
+            test_label: ""
+            test_regex: '^libmylite\.ownerless-cross-process-sql\.10$'
+            test_timeout_minutes: 60
+          - gate: sql-11
+            configure_preset: embedded-prod
+            test_preset: embedded-prod
+            test_label: ""
+            test_regex: '^libmylite\.ownerless-cross-process-sql\.11$'
+            test_timeout_minutes: 60
+          - gate: sql-12
+            configure_preset: embedded-prod
+            test_preset: embedded-prod
+            test_label: ""
+            test_regex: '^libmylite\.ownerless-cross-process-sql\.12$'
+            test_timeout_minutes: 60
+          - gate: sql-13
+            configure_preset: embedded-prod
+            test_preset: embedded-prod
+            test_label: ""
+            test_regex: '^libmylite\.ownerless-cross-process-sql\.13$'
+            test_timeout_minutes: 60
+          - gate: sql-14
+            configure_preset: embedded-prod
+            test_preset: embedded-prod
+            test_label: ""
+            test_regex: '^libmylite\.ownerless-cross-process-sql\.14$'
+            test_timeout_minutes: 60
+          - gate: sql-15
+            configure_preset: embedded-prod
+            test_preset: embedded-prod
+            test_label: ""
+            test_regex: '^libmylite\.ownerless-cross-process-sql\.15$'
+            test_timeout_minutes: 60
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Audit CI production build configuration
+        run: tools/check-ci-production-builds
+
+      - name: Install ownerless release-gate build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bison \
+            build-essential \
+            cmake \
+            libcrypt-dev \
+            libncurses-dev \
+            libpcre2-dev \
+            libssl-dev \
+            ninja-build \
+            pkg-config \
+            zlib1g-dev
+
+      - name: Normalize ownerless MariaDB archive source mtimes
+        run: tools/normalize-mariadb-embedded-cache-mtimes
+
+      - name: Cache ownerless MariaDB archive build
+        uses: actions/cache@v4
+        with:
+          path: build/mariadb-embedded
+          key: ${{ runner.os }}-mariadb-embedded-${{ hashFiles('mariadb/**', 'cmake/mariadb-embedded-baseline.cmake', 'tools/mariadb-embedded-build') }}
+
+      - name: Build ownerless MariaDB embedded archive
+        timeout-minutes: 30
+        run: tools/mariadb-embedded-build ensure
+
+      - name: Verify ownerless MariaDB embedded production build type
+        run: tools/require-cmake-build-type MinSizeRel build/mariadb-embedded
+
+      - name: Configure ownerless release gate
+        run: cmake --preset "${{ matrix.configure_preset }}"
+
+      - name: Verify ownerless release-gate production build type
+        run: tools/require-cmake-release-build "build/${{ matrix.configure_preset }}"
+
+      - name: Build ownerless release gate
+        timeout-minutes: 15
+        run: cmake --build --preset "${{ matrix.configure_preset }}"
+
+      - name: Run ownerless release gate
+        timeout-minutes: ${{ matrix.test_timeout_minutes }}
+        run: |
+          set -euo pipefail
+          tools/require-cmake-build-type MinSizeRel build/mariadb-embedded
+          tools/require-cmake-release-build "build/${{ matrix.configure_preset }}"
           if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
             {
-              printf '\n### Embedded ownerless SQL weighted shards\n\n'
+              printf '\n### Ownerless %s release gate\n\n' '${{ matrix.gate }}'
               printf '| Field | Value |\n'
               printf '| --- | --- |\n'
-              printf '| Preset | `php-embedded-prod` |\n'
-              printf '| Selector | `^libmylite\\.ownerless-cross-process-sql\\.` |\n'
+              printf '| Configure preset | `%s` |\n' '${{ matrix.configure_preset }}'
+              printf '| Test preset | `%s` |\n' '${{ matrix.test_preset }}'
+              printf '| Test label | `%s` |\n' '${{ matrix.test_label }}'
+              printf '| Test regex | `%s` |\n' '${{ matrix.test_regex }}'
               printf '| Parallelism | `--parallel 1` |\n'
             } >> "${GITHUB_STEP_SUMMARY}"
           fi
-            ctest --preset php-embedded-prod \
-              -R '^libmylite\.ownerless-cross-process-sql\.' \
+          test_args=()
+          if [ -n '${{ matrix.test_label }}' ]; then
+            test_args+=(--label-regex '^${{ matrix.test_label }}$')
+          fi
+          if [ -n '${{ matrix.test_regex }}' ]; then
+            test_args+=(--tests-regex '${{ matrix.test_regex }}')
+          fi
+          ctest --preset "${{ matrix.test_preset }}" \
+            "${test_args[@]}" \
             --parallel 1 \
+            --no-tests=error \
             --output-on-failure
+
+      - name: Show ownerless release-gate failure diagnostics
+        if: failure()
+        run: |
+          set +e
+          echo "ownerless_gate=${{ matrix.gate }}"
+          echo "ownerless_configure_preset=${{ matrix.configure_preset }}"
+          echo "ownerless_test_preset=${{ matrix.test_preset }}"
+          df -h .
+          free -h
+          ps -eo pid,ppid,pgid,sid,stat,etime,cmd --forest
+          diagnostics_dir="build/${{ matrix.configure_preset }}/Testing/Temporary"
+          if [ -d "${diagnostics_dir}" ]; then
+            find "${diagnostics_dir}" -maxdepth 1 -type f -print -exec tail -n 200 {} \;
+          fi
+          core_diagnostics_dir="build/${{ matrix.configure_preset }}/ownerless-core-diagnostics"
+          mkdir -p "${core_diagnostics_dir}"
+          find "build/${{ matrix.configure_preset }}/packages/libmylite" \
+            -maxdepth 1 -type f -name 'core.*' -print0 2>/dev/null \
+            | while IFS= read -r -d '' core_file; do
+                core_name="$(basename "${core_file}")"
+                {
+                  stat "${core_file}"
+                  file "${core_file}"
+                } > "${core_diagnostics_dir}/${core_name}.metadata.txt" 2>&1
+                if command -v gdb >/dev/null 2>&1; then
+                  timeout 30s gdb -batch -q -c "${core_file}" \
+                    -ex 'info threads' \
+                    -ex 'thread apply all bt 20' \
+                    > "${core_diagnostics_dir}/${core_name}.backtrace.txt" 2>&1
+                fi
+              done
+          find /tmp -maxdepth 1 -type d -name '*mylite*' -printf '%TY-%Tm-%Td %TH:%TM:%TS %p\n' \
+            2>/dev/null | sort
+
+      - name: Upload ownerless release-gate diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ownerless-${{ matrix.gate }}-ctest-diagnostics
+          path: |
+            build/${{ matrix.configure_preset }}/Testing/Temporary
+            build/${{ matrix.configure_preset }}/ownerless-core-diagnostics
+          if-no-files-found: warn
+
+  ownerless-external-oracle:
+    name: ubuntu-ownerless-external-mariadb-oracle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Audit CI production build configuration
+        run: tools/check-ci-production-builds
+
+      - name: Run ownerless external MariaDB seed oracle
+        timeout-minutes: 140
+        run: |
+          set -euo pipefail
+          tools/ownerless-external-mariadb-seed-sweep \
+            --output build/ownerless-external-mariadb-oracle \
+            --image mariadb:11.8.6 \
+            --random-tx-rounds 2 \
+            --ddl-rounds 2 \
+            --fk-graph-rounds 2 \
+            --fk-graph-replay-attempts 10 \
+            --seed-range 1376:1407
+          grep -Fxq 'overall_result=ok' \
+            build/ownerless-external-mariadb-oracle/external-seed-sweep-result.txt
+
+      - name: Upload ownerless external MariaDB oracle evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ownerless-external-mariadb-oracle
+          path: build/ownerless-external-mariadb-oracle
+          if-no-files-found: warn
+
+  ownerless-external-trace-oracle:
+    name: ubuntu-ownerless-external-mariadb-trace-oracle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Audit CI production build configuration
+        run: tools/check-ci-production-builds
+
+      - name: Run ownerless external MariaDB trace oracle
+        timeout-minutes: 80
+        run: |
+          set -euo pipefail
+          tools/ownerless-external-mariadb-trace-smoke \
+            --output build/ownerless-external-mariadb-trace-oracle \
+            --image mariadb:11.8.6 \
+            --full-suite \
+            --scale 2 \
+            --replay-attempts 1
+
+      - name: Upload ownerless external MariaDB trace evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ownerless-external-mariadb-trace-oracle
+          path: build/ownerless-external-mariadb-trace-oracle
+          if-no-files-found: warn
 
   wordpress-phpunit-setup:
     name: wordpress-phpunit-mysqli-mylite-setup
@@ -419,6 +808,31 @@ jobs:
           tools/require-cmake-build-type MinSizeRel build/wordpress-mariadb-embedded
           tools/require-cmake-release-build build/wordpress-php-embedded-prod
           tools/wordpress-phpunit-mysqli-mylite
+
+      - name: Run WordPress ownerless application gate
+        timeout-minutes: 10
+        env:
+          MYLITE_WORDPRESS_PHASE: phpunit
+          MYLITE_WORDPRESS_SKIP_DOCKER_BUILD: "1"
+          MYLITE_WORDPRESS_TIMING_LABEL: ownerless-application-gate
+          MYLITE_WORDPRESS_PHPUNIT_SKIP_INSTALL: "1"
+          MYLITE_WORDPRESS_OWNERLESS_RW: "1"
+          MYLITE_WORDPRESS_PHPUNIT_LOG_JUNIT: "1"
+          MYLITE_WORDPRESS_PHPUNIT_NO_LOGGING: "0"
+        run: |
+          set -euo pipefail
+          tools/require-cmake-build-type MinSizeRel build/wordpress-mariadb-embedded
+          tools/require-cmake-release-build build/wordpress-php-embedded-prod
+          tools/wordpress-phpunit-mysqli-mylite \
+            --filter '^Tests_DB::(test_query_and_delete|test_get_row|test_replace|test_empty_where_on_update|test_null_insert|test_null_update_value|test_null_delete)$'
+
+      - name: Upload WordPress ownerless application evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wordpress-ownerless-application-evidence
+          path: build/wordpress-phpunit-reports/ownerless-application
+          if-no-files-found: error
 
       - name: Pack WordPress PHPUnit runtime artifact
         run: |

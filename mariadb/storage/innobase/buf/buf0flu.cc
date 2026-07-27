@@ -3413,13 +3413,14 @@ void buf_flush_publish_ownerless_pages_to_lsn(lsn_t visible_lsn) noexcept
                                  space->full_crc32());
     space->release();
 
-    const int result= mylite_ownerless_innodb_publish_page_version(
+    const int result= mylite_ownerless_innodb_try_publish_page_version_with_flags(
         version.space_id,
         version.page_no,
         version.page_lsn,
         visible_lsn,
         page.data(),
-        static_cast<uint32_t>(page.size()));
+        static_cast<uint32_t>(page.size()),
+        0U);
     if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
       mylite_ownerless_innodb_deep_perf_count(
           MYLITE_OWNERLESS_INNODB_DEEP_PAGE_PUBLISH_DIRTY_SCAN_PUBLISHED);
@@ -3721,9 +3722,18 @@ lsn_t buf_flush_publish_ownerless_page_to_lsn(
           aligned_free(page);
           return observed_lsn;
         }
-        const int result= mylite_ownerless_innodb_publish_page_version_with_flags(
-            space_id, page_no, page_lsn, visible_lsn, page, page_size,
-            publish_flags);
+        const bool native_support_page=
+            buf_flush_ownerless_can_publish_dirty_page(page);
+        const bool best_effort_publish=
+            native_support_page ||
+            (publish_flags & MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_PROOF_ONLY) != 0;
+        const int result= best_effort_publish
+            ? mylite_ownerless_innodb_try_publish_page_version_with_flags(
+                space_id, page_no, page_lsn, visible_lsn, page, page_size,
+                publish_flags)
+            : mylite_ownerless_innodb_publish_page_version_with_flags(
+                space_id, page_no, page_lsn, visible_lsn, page, page_size,
+                publish_flags);
         if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK &&
             published_pages != nullptr)
           ++*published_pages;

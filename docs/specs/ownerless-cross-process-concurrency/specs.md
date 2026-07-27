@@ -2,14 +2,15 @@
 
 ## Problem Statement
 
-MyLite currently protects a durable database directory with one cross-process
-exclusive `mylite.lock`. That is safe, but it is not enough for applications
-that use many independent OS processes, such as PHP-FPM workers, and expect
-them all to open the same database and run read/write SQL concurrently.
+Before this project, MyLite protected a durable database directory with one
+cross-process exclusive `mylite.lock`. That was safe, but it was not enough for
+applications that use many independent OS processes, such as PHP-FPM workers,
+and expect them all to open the same database and run read/write SQL
+concurrently.
 
-This spec researches whether MyLite can provide full read and write concurrency
-without a coordinating owner process, daemon, socket broker, or hidden server.
-The requested shape is:
+This spec records the research, design, implementation, and release evidence
+for read and write concurrency without a coordinating owner process, daemon,
+socket broker, or hidden server. The implemented shape is:
 
 - every process links `libmylite`,
 - every process opens the same `<name>.mylite/` directory directly,
@@ -32,7 +33,7 @@ important limits: it requires same-host shared memory, can return busy during
 recovery or cleanup, supports many readers with one WAL writer, and checkpoints
 can be starved by long readers.
 
-MyLite should use the same broad primitive shape: a file-backed
+MyLite uses the same broad primitive shape: a file-backed
 `mmap(MAP_SHARED)` region inside the `.mylite` directory, plus byte-range locks
 and durable logs. That is real shared memory between processes after mapping,
 but it keeps identity, permissions, copy/delete behavior, and stale-state
@@ -50,15 +51,15 @@ same InnoDB files. Those paths are not enough for MyLite ownerless concurrency,
 but they are important startup and safety constraints that must be replaced only
 after directory-owned coordination is active.
 
-Therefore ownerless cross-process writers are possible only if MyLite turns the
-relevant MariaDB/InnoDB process-global coordination into directory-owned
-coordination. That is not a small locking change. It is a new multi-process
-InnoDB runtime mode, with a persistent/shared transaction, lock, page-version,
-redo, checkpoint, dictionary, and recovery protocol.
+Therefore the ownerless implementation turns the relevant MariaDB/InnoDB
+process-global coordination into directory-owned coordination. This was not a
+small locking change. It is a multi-process InnoDB runtime mode with a
+persistent/shared transaction, lock, page-version, redo, checkpoint,
+dictionary, and recovery protocol.
 
-The plan below is the least compromised way to implement the requested shape.
-It preserves the "no coordinating process" rule, but it does not preserve the
-current small fork delta. It is a large, high-risk storage-engine project.
+The completed plan below preserves the "no coordinating process" rule, but it
+does not preserve a small fork delta. It remains a large, high-risk
+storage-engine subsystem whose support claim is intentionally bounded.
 
 ## Non-Goals
 
@@ -300,6 +301,20 @@ Roles:
   the selected payload encoding; ownerless InnoDB publish hooks may precompute
   that checksum after accepting a page for append and hand it to the page-log
   encoder to keep the append path from rescanning the page.
+  Page-log format 2 reserves three separate 4 KiB failure units for immutable
+  header metadata and two alternating acknowledged-end slots. Record checksums
+  bind page identity, flags, page and commit LSNs, payload size, and decoded
+  page bytes. Physical checkpoint compaction requires a registered sibling
+  stage file: stage format 3 writes BUILDING, VALID, and READY state records in
+  separate 4 KiB units, checksums the complete source and target images, and
+  installs the durable target into the existing WAL inode so already-open peers
+  do not split onto a replacement inode. Recovery can reapply a durable READY
+  image idempotently; without a stage file, a checkpoint that would mutate the
+  WAL returns busy. Linux locking uses a stable per-inode descriptor with OFD
+  byte-range locks and bounded waits, so closing another descriptor for the WAL
+  cannot release cross-process exclusion. The experimental ownerless protocol
+  has no format-1-to-format-2 migration; an older nonempty WAL is rejected
+  without modification.
   Guarded ownerless SQL can use page-version reads for direct or prepared
   `SELECT`/`WITH` statements at a live page-version read LSN, while the
   page-visible LSN remains the durable recovery/checkpoint boundary. Eligible
@@ -601,7 +616,8 @@ size, byte-order marker, feature flags, clean/dirty/rebuilding state, mapping
 size, shared-memory and recovery generation counters, segment-table
 offset/count, and the database UUID copied from `mylite-concurrency.meta`. The
 active segments are a fixed process registry with 16 fixed-size slots, a fixed
-wait-channel table with 16 fixed-size channels, a fixed MDL lock-table segment,
+wait-channel table with 16 fixed-size channels, a format-12 fixed MDL lock-table
+segment with 80-byte scheduling entries,
 a fixed transaction-registry segment with 64 transaction slots, a fixed
 read-view registry, a fixed InnoDB table/record lock registry, a
 redo-visibility state segment, a page-version index segment, a
@@ -629,7 +645,12 @@ runtime recover normally. Guarded ownerless SQL opens take a narrow
 `SYSTEM_TABLES` byte-range lock around embedded runtime bootstrap and the core
 `mysql.*` compatibility-table bootstrap, preventing two processes from racing
 InnoDB startup table locks or Aria-backed `CREATE TABLE IF NOT EXISTS`
-statements during open. Volatile process-registry active/live counters are read
+statements during open. This lock remains required after ownerless lifetime
+fencing moves to a shared `mylite.lock`; the shared lifetime lock admits peer
+startups and is not itself bootstrap serialization. Ownerless runtime layout
+creation also disables stale `run/` and `tmp/` cleanup because only an ordinary
+opener holding the exclusive lifetime lock may remove stale children. Volatile
+process-registry active/live counters are read
 through `MAP_SHARED` mappings, not ordinary file reads, so recovery decisions do
 not rebuild live peer state from stale file-cache observations. Page-version
 segments are active in the production `.shm` layout for rebuild and checkpoint
@@ -708,6 +729,12 @@ buffer-pool refresh that skips page-version WAL and page-version negative-cache
 proofs. That keeps rebuilt/compressed table reads native-only while allowing
 the same handle to observe peer commits, cascades, and deletes even if it
 previously cached the affected pages locally.
+The generation counter is saturating. A new DDL that cannot reserve another
+odd/even pair fails with `MYLITE_IOERR` and
+`ownerless dictionary generation is exhausted`. Exhaustion discovered after
+active DDL publication or during dead-owner recovery quarantines the runtime
+and preserves the recovery obligation rather than wrapping the generation or
+reporting the condition as ordinary contention.
 If an ownerless autocommit plain read still reaches MariaDB errno `1932`
 against a peer-created file-per-table InnoDB table, direct and prepared
 `SELECT`/`WITH` statements refresh native pages, flush SQL table caches, evict
@@ -847,6 +874,12 @@ Each process slot must contain:
 - oldest read-view end mark,
 - cleanup cursor,
 - per-process wait-channel range.
+
+The implemented open-mode field uses three explicit values:
+ordinary-exclusive, shared-read-only, and ownerless-read/write. Process-slot
+allocation rejects any live ordinary/ownerless combination even though the
+lifetime `mylite.lock` is the primary fencing mechanism. Shared-read-only and
+ownerless-read/write slots remain mutually compatible.
 
 PIDs are never sufficient alone because they can be reused. Product
 process-registry liveness checks compare the stored PID, `/proc/<pid>/stat`
@@ -1041,17 +1074,16 @@ corresponding transient lock.
 
 ### Platform Policy
 
-Initial platform support should be explicit:
+Current platform support is explicit and fail closed:
 
-- Linux local filesystems are the primary high-performance target because
-  `MAP_SHARED`, futexes, and byte-range locks can cover the intended design.
-- macOS/APFS can support the directory-backed `mmap` and byte-range-lock
-  correctness model, but the high-performance wait backend must be validated
-  separately. Until then, macOS ownerless mode should be experimental or use
-  the slower lock/backoff backend.
-- Windows needs a separate backend using `CreateFileMapping`, byte-range locks,
-  and a Windows wait primitive such as `WaitOnAddress` before support can be
-  claimed.
+- Ownerless read/write and shared read-only capabilities are exposed only by
+  embedded Linux builds.
+- The current filesystem allowlist is local ext4, XFS, tmpfs, and overlayfs.
+  Unknown, network, FUSE, and all other filesystem types are rejected before
+  the runtime primitive probe.
+- macOS/APFS and Windows ownerless modes are unsupported until platform-specific
+  process identity, wait/wake, mapping, locking, and mounted-filesystem evidence
+  exists. Those builds do not advertise ownerless capability bits.
 - Network filesystems remain unsupported unless a later slice proves mmap
   coherence, byte-range locks, fsync semantics, and stale-client behavior.
 
@@ -1064,8 +1096,9 @@ The open path must run a capability probe before enabling ownerless mode:
 - verify file growth/remap behavior,
 - reject the mode with a precise diagnostic if any required primitive fails.
 
-Current implementation runs this probe under the prepared database directory
-before the ownerless startup lock and embedded MariaDB runtime startup. A
+Current implementation first checks the Linux filesystem type against the
+allowlist, then runs this probe under the prepared database directory before
+the ownerless startup lock and embedded MariaDB runtime startup. A
 successful probe writes `concurrency/mylite-ownerless-platform.meta` with the
 database-directory device id and `required_primitives=1`; later ownerless opens
 reuse that proof and re-probe when the proof is absent or the database directory
@@ -1192,17 +1225,18 @@ critical path is covered by tests.
 
 ### InnoDB File-Lock Policy
 
-The current exclusive `mylite.lock` protects the whole directory before MariaDB
-starts. Ownerless mode cannot simply remove that lock and set
-`skip_external_locking`; that would bypass inherited file-lock checks without
-replacing the transaction, lock, page-visibility, and recovery state that made
-single-process InnoDB safe.
+The lifetime `mylite.lock` protects the whole directory before MariaDB starts.
+Ordinary runtimes hold it exclusively. Ownerless read/write and shared
+read-only runtimes hold it shared, allowing ownerless peers while fencing every
+ordinary runtime in both open-race directions. Ownerless mode cannot simply
+remove that lock and set `skip_external_locking`; that would allow ordinary and
+ownerless native runtimes to overlap without a common recovery authority.
 
 Ownerless mode needs an explicit file-lock policy:
 
 - keep existing MariaDB/InnoDB file locking unchanged in exclusive mode,
-- keep current `mylite.lock` while opening modes are exclusive or shared
-  read-only,
+- keep `mylite.lock` for the complete embedded runtime lifetime, exclusive for
+  ordinary modes and shared for ownerless read/write or shared read-only,
 - add a MyLite ownerless startup path that disables or bypasses only the
   inherited InnoDB file locks that conflict with multiple processes after
   `RECOVERY` and shared-memory validation have succeeded,
@@ -1516,9 +1550,9 @@ Exit criteria:
 Tasks:
 
 1. Add shared read-only opens through the ownerless runtime.
-   `MYLITE_OPEN_READONLY | MYLITE_OPEN_SHARED_READONLY` now skips the
-   process-wide `mylite.lock`, uses the same per-process ownerless `run/` and
-   `tmp/` layout as ownerless writers, starts MariaDB with server
+   `MYLITE_OPEN_READONLY | MYLITE_OPEN_SHARED_READONLY` now takes the shared
+   lifetime `mylite.lock`, uses the same per-process ownerless `run/` and `tmp/`
+   layout as ownerless writers, starts MariaDB with server
    `@@read_only=ON`, publishes process/read-view state in the directory-owned
    coordination files, and can observe commits from ownerless read/write peers.
    The embedded runtime records one access mode per process, so a same-process
@@ -1597,7 +1631,10 @@ Tasks:
    recovery-sensitive shared state. If MDL,
    transaction, read-view, InnoDB lock, or redo-visibility state remains for a
    dead owner while another process is live, cleanup is blocked and open returns
-   busy until the durable recovery/rebuild path can run without live peers.
+   busy until the durable recovery/rebuild path can run without live peers. This
+   applies to ownerless read/write and shared-read-only opens alike; neither
+   metadata-only access nor plain reads are admitted from an already-open peer's
+   private buffer pool after the dead writer is detected.
 7. Add shared-memory rebuild from durable metadata and empty coordination logs.
 8. Add capability probing for mmap visibility, byte-range lock behavior,
    release-on-death, remap after growth, wait/wake behavior, and process
@@ -1983,7 +2020,12 @@ Tasks:
    older snapshot states for diagnostics, and page reads still use the WAL scan
    as the authoritative proof when the index cannot prove the requested
    snapshot. Direct page-index reads and WAL scans run under the existing
-   page-log read guard instead of taking a nested checkpoint read lock. The
+   page-log read guard instead of taking a nested checkpoint read lock. Its
+   status-returning release is mandatory: unlock failure quarantines the
+   runtime, retains the pending WAL release identity for close retry, and makes
+   the read fail closed instead of consuming a page result. Append-session
+   release and bounded recovered-rollback waits follow the same
+   status-consumption rule at publication and shutdown boundaries. The
    stats-enabled embedded performance probe classifies authoritative WAL-scan
    misses into true page-key absence versus same-page-not-visible misses, and
    classifies page-version publish append attempts by InnoDB page type and by
@@ -2228,7 +2270,10 @@ Tasks:
    same byte-range lock file on every statement. A successful session
    `SET lock_wait_timeout = N` on an ownerless handle now also bounds these
    MyLite statement-lock waits to `N` seconds; handles that do not set the
-   variable keep the existing 60 second internal wait. Contended
+   variable keep the existing 60 second internal wait. Statement timeout state
+   and the shared MDL conversion use 64-bit milliseconds so MariaDB's legal
+   `LONG_TIMEOUT` range is preserved without a `UINT_MAX` millisecond cap.
+   Contended
    directory-owned file-lock acquisition now polls at 1 ms first and backs off
    to the existing 10 ms cap, preserving the timeout contract while reducing
    short ownerless statement-lock and startup-lock handoff latency.
@@ -2468,9 +2513,10 @@ Tasks:
    renamed, truncated, force-rebuilt, primary-key-rebuilt, and compressed
    row-format-rebuilt file-per-table, same-schema and
    cross-schema multi-rename swap, and multi-table schema-drop SQL coverage.
-   Native InnoDB redo/checkpoint reconciliation is still incomplete:
-   MyLite now reclaims retained page-version records on non-read-only runtime
-   close after forcing a native InnoDB checkpoint, advancing local native LSN
+   Native InnoDB redo/checkpoint reconciliation uses the following
+   conservative completed path. MyLite reclaims retained page-version records
+   on non-read-only runtime close after forcing a native InnoDB checkpoint,
+   advancing local native LSN
    state to the durable page-visible LSN when needed, and, when no live peers
    remain, publishing eligible native support/allocation/system buffer-pool
    pages and flushing native dirty pages to advance a lagging page-visible LSN
@@ -3312,13 +3358,17 @@ Tasks:
    daemon lifetime, while ownerless coordination uses directory-owned process
    slots and recovery state rather than SQL commands that control another
    embedded connection.
-   `FULLTEXT` and `SPATIAL` index DDL is also rejected in ownerless mode until
-   InnoDB full-text auxiliary state, spatial R-tree pages, spatial predicate
-   locks, and special-index recovery are designed; current ownerless policy
-   rejects top-level, idempotent top-level, `ALTER TABLE`, idempotent
+   Existing FULLTEXT and SPATIAL indexes are rejected during ownerless
+   admission. `FULLTEXT` and `SPATIAL` index DDL is also rejected in ownerless
+   mode until InnoDB full-text auxiliary state, spatial R-tree pages, spatial
+   predicate locks, and special-index recovery are designed; current ownerless
+   policy rejects top-level, idempotent top-level, `ALTER TABLE`, idempotent
    `ALTER TABLE`, and inline create-time FULLTEXT/SPATIAL definitions while
    ordinary ownerless index coverage remains scoped to InnoDB secondary
-   indexes.
+   indexes; vector-index DDL remains rejected by the shipped no-vector profile.
+   Current focused admission coverage proves the pre-existing FULLTEXT and
+   SPATIAL cases. Profile-enabled VECTOR ownerless admission is outside this
+   slice's compatibility claim.
    Partitioned table DDL is also rejected in ownerless mode until partition
    metadata, `.par` files, per-partition native engine files, partition
    maintenance, and partition-aware no-live replay are designed.
@@ -3337,6 +3387,10 @@ Tasks:
    `ENCRYPTED`, `ENCRYPTION_KEY_ID`, and table `TABLESPACE` are rejected in
    ownerless mode until native page-compression, encryption, and table-option
    file-layout recovery paths are designed.
+   All ownerless dictionary DDL is classified before execution. Only DDL shapes
+   with an explicit recovery kind and focused compatibility coverage are
+   admitted; every other valid MariaDB DDL fails closed with `MYLITE_ERROR` and
+   `ownerless read/write mode does not support this DDL recovery shape`.
    These unsupported ownerless policy gates are ordered before active-reader
    pressure throttling, so retained page-version WAL pressure does not turn
    deliberately unsupported table-admin, locked-table, flush lock/export,
@@ -5391,11 +5445,14 @@ Tasks:
    `tools/ownerless-external-mariadb-trace-smoke`, an opt-in Docker-backed
    path that starts a disposable MariaDB container and runs the deterministic
    trace suite through a real external `mariadb` client while default CMake
-   coverage only validates the dependency-free command plan. The FK graph trace
-   now emits bounded stored-procedure retry loops for ordinary MariaDB
-   `1205`/`1213` contention and SQLSTATE `40001` deadlock reporting, so the
-   Docker smoke can replay the deterministic FK graph with the rest of the
-   suite; `--skip-trace` remains available for constrained environments. It also
+   coverage only validates the dependency-free command plan. The suite and
+   Docker wrapper expose a bounded whole-trace replay budget and preserve
+   per-attempt logs because MariaDB can still report `1205`/`1213` at the
+   outer `CALL` boundary after a stored-procedure handler has retried its
+   transaction body. The release oracle uses ten attempts. The FK graph trace
+   also emits bounded stored-procedure retry loops for ordinary MariaDB
+   `1205`/`1213` contention and SQLSTATE `40001` deadlock reporting;
+   `--skip-trace` remains available for constrained environments. It also
    runs
    active-reader pressure stress with
    `MYLITE_OWNERLESS_ACTIVE_READER_PRESSURE_ROUNDS=48`, holding a
@@ -5513,7 +5570,12 @@ Tasks:
    recreate under an active retained page-version pin,
    plus the
    public active-pin/WAL pressure diagnostic.
-   Each stress test has a 900-second timeout. Long-running randomized external
+   Release workload and pressure presets use a 1800-second per-test ceiling.
+   Tests already validated under a tighter bound retain their explicit shorter
+   watchdogs. The randomized preset uses a 3600-second ceiling because its
+   120-round transaction schedule deliberately includes one-second native lock
+   waits, bounded retry jitter, and ten-round phase handoff; the workflow job
+   budget remains larger than that per-test watchdog. Long-running randomized external
    MariaDB/RQG oracle execution remains environment-owned follow-up work, but the
    deterministic trace-suite and external-MariaDB smoke bridges now provide
    reproducible generated-input and real-client replay entry points, including
@@ -5677,7 +5739,7 @@ Minimum suites before support can be claimed:
     retries the insert through ownerless/native reopen and forced `.shm`
     rebuild. Hook-build SQL negative proof arms the
     local ownerless table-wait callback while representative blocked `ALTER TABLE`,
-    instant add/rename column, column table-copy ADD/DROP/MODIFY/CHANGE/RENAME
+    column table-copy ADD/DROP/MODIFY/CHANGE/RENAME
     in both exact copy-lock option orders, column modify/default, table comment,
     CHECK/FK add, `CREATE INDEX`, unique and online index add, existing-index
     drop/rename/ignored, copy-force and primary-key replacement `ALTER TABLE`,
@@ -5685,7 +5747,10 @@ Minimum suites before support can be claimed:
     `DROP TABLE`, `CREATE OR REPLACE TABLE ... LIKE`, and
     `CREATE OR REPLACE TABLE ... AS SELECT` variants time out, verify blocked
     metadata remains unchanged, and fail if any tested SQL shape reaches the
-    local callback, so positive SQL-level local table-wait fault injection
+    local callback. MariaDB-compatible instant column metadata operations are
+    excluded because their metadata-lock mode is compatible with the held
+    writer and are covered by the instant-DDL success matrix, so positive
+    SQL-level local table-wait fault injection
     remains unclaimed beyond the covered external native table-wait registry
     path.
     Ownerless SQL `LOCK TABLES`/`UNLOCK TABLES` is rejected until SQL locked-table
@@ -5921,12 +5986,15 @@ Minimum suites before support can be claimed:
   - wpdb mysqli API compatibility,
   - PDO transaction tests.
 - filesystem/platform:
-  - APFS local,
-  - ext4 local in Linux CI,
-  - tmpfs,
+  - embedded Linux capability exposure and non-Linux capability rejection,
+  - ext4, XFS, tmpfs, and overlayfs allowlist classification,
   - database-directory primitive probe coverage,
   - hook-only ownerless open rejection for failed directory probes,
-  - explicit rejection for unsupported or unproven filesystems.
+  - explicit rejection for unsupported or unproven filesystems,
+  - a private mount-namespace release gate that binds real mounted ext4, XFS,
+    tmpfs, and overlayfs over the SQL harness's `/tmp` root, asserts the observed
+    filesystem type, and runs a two-process InnoDB write/read/reopen case on
+    each admitted filesystem.
 
 ## Compatibility Impact
 
@@ -7829,13 +7897,15 @@ subsystems that this mode needs:
   Focused production commit-race coverage now also repeats the WAL-empty
   native-authoritative reopen path with exact native-checkpoint clamping so the
   former checkpoint-record-gap corruption class does not recur.
-  Focused production coverage includes the
-  explicit transaction history-proof selectors, uncommitted-peer-hidden,
-  registered three-round random rollback handoff CTest, adjacent savepoint,
-  deadlock, and commit-race commands, 100 traced and 50 untraced direct
-  three-round random stress loops, reduced transaction stress, six-round random
-  stress, and one default random stress pass. This is transaction rollback and
-  handoff evidence only; broader redo/checkpoint reconciliation, arbitrary DDL
+  Current production coverage includes the explicit transaction history-proof
+  selectors, uncommitted-peer-hidden, the registered three-round random
+  rollback-handoff CTest, and adjacent savepoint, deadlock, and commit-race
+  commands. The opt-in stress preset supplies the currently registered bounded
+  random and transaction stress gates. Earlier investigation additionally ran
+  100 traced and 50 untraced direct three-round random loops, reduced
+  transaction stress, six-round random stress, and one default random stress
+  pass; those counts are historical evidence, not the current CI contract.
+  This is transaction rollback and handoff evidence only; broader redo/checkpoint reconciliation, arbitrary DDL
   file-lifecycle recovery, active-reader pressure crash/oracle breadth, and
   external MariaDB/RQG stress remain open.
   The killed-before-savepoint-rollback follow-up adds a focused
@@ -7855,9 +7925,9 @@ subsystems that this mode needs:
   native `ROLLBACK TO SAVEPOINT`, then proves an overlapping page writer waits
   until the savepoint writer commits while the final state preserves the
   pre-savepoint row image and discards the rolled-back row. The same-table
-  large-row follow-up proves a peer updating a large row in the same table also
-  waits behind the savepoint writer's ownerless write ownership, then commits
-  after release and preserves final row state through reopen. The same-row
+  large-row follow-up proves a peer updating a large row on a different page in
+  the same table commits while the savepoint writer remains open, leaves no
+  stale ownerless waiter, and preserves final row state through reopen. The same-row
   savepoint follow-up
   proves a peer updating the savepoint writer's pre-savepoint row waits until
   the writer commits and then applies on top of that committed row, while the
@@ -7867,6 +7937,19 @@ subsystems that this mode needs:
   handling, savepoint rollback, full transaction rollback, and final
   ownerless/native reopen oracles. Broader native rollback internals and
   longer randomized savepoint schedules remain planned.
+  The transaction-lifecycle grammar follow-up classifies MariaDB's complete
+  `ROLLBACK [WORK] TO [SAVEPOINT] name` family as savepoint-scoped in every
+  direct and prepared ownerless state transition. Focused coverage preserves
+  the shared explicit-transaction count, pre-savepoint writes, and the original
+  repeatable-read snapshot while a peer commits. Transaction completion with
+  `RELEASE` is deliberately not inferred from tokens: after successful
+  dispatch, the embedded helper reports MariaDB's actual post-command
+  `KILL_CONNECTION` state, including `completion_type=RELEASE`. MyLite then
+  returns connection-gone diagnostics for later SQL but allows close to bypass
+  the synthetic rollback and release ownerless runtime state. Explicit
+  `COMMIT RELEASE`, `ROLLBACK RELEASE`, and both session-default forms are
+  verified through ordinary native reopen for commit persistence and rollback
+  absence.
   The savepoint-rollback-before-state hook follow-up kills a writer after
   native `ROLLBACK TO SAVEPOINT` succeeds but before MyLite updates
   process-local savepoint state and discards rolled-back file-operation
@@ -8122,25 +8205,143 @@ subsystems that this mode needs:
   workload; it does not change product retry semantics or close the broader
   DDL/file-lifecycle recovery matrix.
 
-  Completion status for this branch:
+  Retryable transaction-end failures now have an explicit reusable-connection
+  contract. If commit fails before serialization and ownerless automatic
+  rollback completes, InnoDB returns the original commit error but clears the
+  transaction-local error state; `libmylite` observes that MariaDB no longer
+  reports an active transaction, reconciles the directory-owned transaction
+  and page-write state, refreshes rolled-back visibility, and preserves the
+  original diagnostic. If rollback cleanup itself fails, the cleanup error
+  supersedes the retryable commit error and the ownerless coordination fault
+  quarantines the connection. Automatic whole-transaction rollback after a
+  deadlock uses the same fallible rollback wrapper instead of the native
+  no-return-value shortcut. Hook coverage forces a pre-serialization commit
+  error and proves the same connection can read and complete another
+  transaction; both deterministic two-process deadlock victim branches prove
+  the same reuse boundary.
 
-  1. Ownerless read/write support is complete for persistent InnoDB
-     application tables, including directory-backed process registration,
-     statement/metadata/record/page-write coordination, page-version WAL,
-     checkpoint state, native redo/checkpoint handoff, active-reader retention,
-     dead-owner cleanup, and deterministic crash recovery for the covered DML,
-     DDL, rollback, foreign-key, generated-column, trigger, view, temporary-table,
-     and pressure paths.
+  Terminal cleanup also completes the native half of a deferred ownerless
+  deregistration before connection teardown. A transaction that has reached
+  `NOT_STARTED` can still retain native record/table locks when shared
+  deregistration or reference draining previously interrupted the normal
+  release point. The retry path now finishes any pending commit boundary,
+  deregisters the shared transaction, drains native references, releases the
+  remaining native locks, clears the deadlock-victim marker, and requires the
+  full ownerless ownership set to be empty before reporting recovery success.
+  The close bridge separately rejects any residual native wait, record, table,
+  AUTO_INCREMENT, or reference ownership. The deterministic two-process
+  deadlock test reproduced the pre-fix destructor assertion within repeated
+  runs and passed `50/50` consecutive runs after the fix, while still requiring
+  exactly one commit and one MariaDB `1213` victim.
+
+  The randomized transaction failure investigation also added a deterministic
+  post-savepoint timeout regression. One process retains a pre-savepoint write,
+  rolls back the post-savepoint write, then times out behind a peer record lock.
+  A live reader must not observe the retained uncommitted write before full
+  rollback, while full rollback is paused after native row undo, or when a
+  plain read is paused after external-page refresh and resumes after rollback.
+  Final ownerless and native reads must observe the original rows. This closes
+  the rollback-visibility boundary without treating a test-only scheduling
+  yield or longer SQL lock wait as a product fix.
+
+  Terminal rollback serialization now has a bounded recovery contract rather
+  than a single best-effort cleanup retry. `trx_rollback_for_mysql()` retries
+  the active or committed-in-memory ownerless cleanup boundary up to 64 times
+  with exponential pauses capped at `64` milliseconds (about `3.7` seconds of
+  total backoff), spanning the four-writer native lock-wait handoff window,
+  returns success only after the transaction is not started and the
+  coordination fault is clear, and otherwise preserves the terminal error and
+  quarantine. A hook forces three consecutive pre-serialization rollback
+  failures; the SQL regression proves the explicit `ROLLBACK` succeeds,
+  directory transaction state reaches zero, the original write stays rolled
+  back, and the same connection can commit a later transaction.
+
+  Insert-record ownership now distinguishes a transient heap-number collision
+  from shared-registry corruption. A failed foreign-key insert can retain its
+  finalized synthetic record lock until native statement undo deletes the
+  inserted record; another owner may reuse that heap number after page-write
+  handoff but before the first undo completes. Finalization reports that overlap
+  as retryable lock timeout, cancels the later insert reservation, propagates
+  the error through `lock_update_insert()` and the B-tree insert result, and
+  lets native statement rollback remove the physical row. Native rollback
+  deletes release the exact finalized `REC_NOT_GAP` record ownership. A
+  primitive regression proves the conflicting finalization/cancellation
+  lifecycle, and the production-clean 48-round foreign-key graph release gate
+  passed in `14m13s` without faulting the runtime.
+
+  The randomized transaction gate now captures each attempt's three-row
+  baseline in one coherent query, retries only the expected native
+  `1205`/`1213` outcomes, and treats only pre-execution MyLite statement-lock
+  `MYLITE_BUSY` with MariaDB errno zero as retryable for transaction-control
+  statements. Successful rounds yield beyond the one-second native lock wait,
+  worker-specific bounded retry slots break symmetric reacquisition, and a
+  ten-round parent barrier bounds worker skew without forcing a collision
+  before every transaction. After an expected failure has rolled back, a
+  test-only byte-range retry arbiter protects its row/version rollback oracle
+  and serializes that worker's next transaction attempt. First attempts remain
+  concurrent while the retry lane is idle; a first attempt that observes an
+  active retry joins and retains the lane so fresh transactions cannot starve
+  rollback verification. Rollback cleanup remains concurrent. The parent also
+  observes worker exit
+  while waiting at each phase barrier so a failed child terminates the group
+  instead of stranding a surviving peer until CTest's outer timeout. This
+  prevents symmetric harness retry and verification storms without converting the workload
+  into a serial transaction test. Every rolled-back attempt verifies the
+  captured row values and versions before retrying; each final gate still
+  verifies ownerless, native, and forced-`.shm`-rebuild aggregate oracles.
+  Focused exact-tier final-source runs passed at `30` rounds in `1m36s`, `60`
+  rounds in `4m01s`, and `120` rounds in `14m48s`. The production-clean
+  randomized release-preset rerun passed the exact `120`-round schedule in
+  `14m59s`; all tiers completed `4 * rounds` worker rounds with zero exhausted
+  terminal-cleanup retries.
+
+  Deterministic concurrent autocommit setup traffic follows the same exact
+  retry contract. Independent-table, concurrent-DDL insert, and
+  AUTO_INCREMENT workers retry only MariaDB `1205` or `1213`, require
+  `@@in_transaction = 0` before retry, and use bounded deterministic backoff.
+  Each logical AUTO_INCREMENT input is unique and is verified exactly once
+  after success. The final oracle requires the expected row count, distinct
+  positive IDs, and exact value sum, but permits bounded gaps because native
+  InnoDB does not reuse AUTO_INCREMENT reservations consumed by a rolled-back
+  attempt. Focused final-source repetitions passed the independent-table,
+  concurrent-DDL, and AUTO_INCREMENT cases `10/10` each.
+
+  Current status for this branch:
+
+  1. Ownerless read/write is complete for the admitted surface: embedded Linux
+     on a validated local ext4, XFS, tmpfs, or overlay filesystem, persistent
+     InnoDB application tables, and the DML and DDL shapes explicitly
+     classified and covered in this specification. The implementation includes
+     directory-backed process registration, statement/metadata/record/page-write
+     coordination, page-version WAL, checkpoint state, native redo/checkpoint
+     handoff, active-reader retention, dead-owner cleanup, and deterministic
+     recovery for the enumerated paths. This is a precise bounded completion
+     claim, not a claim that arbitrary engines, platforms, filesystems, or
+     server-oriented SQL can participate.
   2. Non-InnoDB durable application tables are deliberately outside the
      ownerless protocol. Ownerless opens reject existing persistent non-InnoDB
      application tables, and ownerless SQL rejects explicit non-InnoDB engine
      requests, storage-engine default/override changes, non-InnoDB `LIKE` and
      CTAS sources including derived sources, replacement-copy sources, and
      non-InnoDB-to-InnoDB conversion attempts.
-  3. External randomized/RQG-style stress, more exhaustive edge-case matrices,
-     and future per-engine ownerless designs remain validation and roadmap
-     hardening work. They are not part of the supported ownerless read/write
-     surface in this branch.
+  3. Unclassified DDL, existing or newly requested special indexes, unsupported
+     server/global SQL, unsupported platforms, and unvalidated filesystems fail
+     closed. The release gate mounts ext4 and XFS loop filesystems plus tmpfs
+     and overlay and runs the two-process InnoDB write/read/reopen case on each
+     admitted filesystem. Longer external randomized/RQG-style stress, more
+     exhaustive edge-case matrices, and future per-engine ownerless designs
+     remain validation and roadmap work; none is part of the current admitted
+     ownerless read/write surface.
+  4. Final release evidence passed all gates on the completed branch state:
+     ordinary production tests `65/65`; PHP ownerless adapters `2/2`; weighted
+     production SQL shards `16/16` in `581.13s`; hook-enabled coverage
+     `269/269` in `4097.55s`; bounded workload `5/5` in `2320.93s`; randomized
+     rollback, checksum, exact `120`-round transaction, `48`-round FK graph, and
+     child-cleanup gates; pressure `4/4` in `234.37s`; ext4, XFS, tmpfs, and
+     overlay mounts; focused WordPress `7/7` with `22` assertions and `66` peer
+     writes; external MariaDB traces `12/12`; and `32` seeds each for random
+     transactions, DDL, and FK graphs. Production-build policy, formatting,
+     clang-tidy, and whitespace checks also pass.
 
   SQL-level local table-wait fault injection is no longer listed as a primary
   completion gate for supported ownerless SQL: ownerless `LOCK TABLES` and
@@ -8168,7 +8369,7 @@ subsystems that this mode needs:
   unsupported-surface policy until later designs add more engines or storage
   surfaces.
 
-## Acceptance Criteria For The Full Feature
+## Acceptance Criteria For The Admitted Feature
 
 - No owner process, daemon, broker, or hidden server exists.
 - No directory-wide exclusive read/write lock is held during ordinary work.
@@ -8200,9 +8401,9 @@ subsystems that this mode needs:
 - Unsupported filesystems and unsupported engines fail explicitly.
 - Compatibility docs and roadmap describe the precise limits.
 
-## Recommendation
+## Completed Implementation Sequence
 
-Do not start by attempting full ownerless cross-process writes. Start with:
+The project followed this risk-reducing sequence:
 
 1. same-process concurrency coverage,
 2. shared read-only opens,
@@ -8211,5 +8412,5 @@ Do not start by attempting full ownerless cross-process writes. Start with:
 5. cross-process MDL and transaction visibility,
 6. only then page visibility and write commits.
 
-This is the only path that keeps the project honest. It also gives useful
-deliverables before the full ownerless write design is complete.
+Each stage produced separately testable deliverables before the admitted
+ownerless write design was declared complete.

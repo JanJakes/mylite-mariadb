@@ -516,7 +516,9 @@ cleanup:
 		dberr_t error = fts_eval_sql(trx, graph);
 
 		if (UNIV_LIKELY(error == DB_SUCCESS)) {
-			fts_sql_commit(trx);
+			error= fts_sql_commit(trx);
+			if (UNIV_UNLIKELY(error != DB_SUCCESS))
+				break;
 			stopword_info->status = STOPWORD_USER_TABLE;
 			break;
 		} else {
@@ -2650,7 +2652,9 @@ fts_cmp_set_sync_doc_id(
 
 	if (trx == nullptr) {
 		trx = trx_create();
-		trx_start_internal_read_only(trx);
+		error= trx_start_internal_read_only(trx);
+		if (UNIV_UNLIKELY(error != DB_SUCCESS))
+			goto func_exit;
 	}
 retry:
 	error = fts_read_synced_doc_id(table, doc_id, trx);
@@ -2685,7 +2689,7 @@ func_exit:
 	}
 
 	if (UNIV_LIKELY(error == DB_SUCCESS)) {
-		fts_sql_commit(trx);
+		error= fts_sql_commit(trx);
 	} else {
 		*doc_id = 0;
 
@@ -2739,7 +2743,11 @@ fts_update_sync_doc_id(
 
 	if (!trx) {
 		trx = trx_create();
-		trx_start_internal(trx);
+		error= trx_start_internal(trx);
+		if (UNIV_UNLIKELY(error != DB_SUCCESS)) {
+			trx->clear_and_free();
+			return error;
+		}
 
 		trx->op_info = "setting last FTS document id";
 		local_trx = TRUE;
@@ -2768,8 +2776,9 @@ fts_update_sync_doc_id(
 
 	if (local_trx) {
 		if (UNIV_LIKELY(error == DB_SUCCESS)) {
-			fts_sql_commit(trx);
-			cache->synced_doc_id = doc_id;
+			error= fts_sql_commit(trx);
+			if (error == DB_SUCCESS)
+				cache->synced_doc_id = doc_id;
 		} else {
 			ib::error() << "(" << error << ") while"
 				" updating last doc id for table"
@@ -2777,7 +2786,8 @@ fts_update_sync_doc_id(
 
 			fts_sql_rollback(trx);
 		}
-		trx->clear_and_free();
+		if (!trx->mylite_ownerless_coordination_fault)
+			trx->clear_and_free();
 	}
 
 	return(error);
@@ -2957,7 +2967,11 @@ fts_commit_table(
 	fts_cache_t*		cache = ftt->table->fts->cache;
 	trx_t*			trx = trx_create();
 
-	trx_start_internal(trx);
+	error= trx_start_internal(trx);
+	if (UNIV_UNLIKELY(error != DB_SUCCESS)) {
+		trx->clear_and_free();
+		return error;
+	}
 
 	rows = ftt->rows;
 
@@ -2995,9 +3009,11 @@ fts_commit_table(
 		}
 	}
 
-	fts_sql_commit(trx);
+	if (const dberr_t commit_error= fts_sql_commit(trx))
+		error= commit_error;
 
-	trx->clear_and_free();
+	if (!trx->mylite_ownerless_coordination_fault)
+		trx->clear_and_free();
 
 	return(error);
 }
@@ -3801,8 +3817,10 @@ fts_doc_fetch_by_doc_id(
 	}
 
 	error = fts_eval_sql(trx, graph);
-	fts_sql_commit(trx);
-	trx->free();
+	if (const dberr_t commit_error= fts_sql_commit(trx))
+		error= commit_error;
+	if (!trx->mylite_ownerless_coordination_fault)
+		trx->free();
 
 	if (!get_doc) {
 		que_graph_free(graph);
@@ -4055,7 +4073,7 @@ fts_sync_write_words(
 /*********************************************************************//**
 Begin Sync, create transaction, acquire locks, etc. */
 static
-void
+dberr_t
 fts_sync_begin(
 /*===========*/
 	fts_sync_t*	sync)			/*!< in: sync state */
@@ -4068,7 +4086,9 @@ fts_sync_begin(
 	sync->start_time = time(NULL);
 
 	sync->trx = trx_create();
-	trx_start_internal(sync->trx);
+	const dberr_t error= trx_start_internal(sync->trx);
+	if (UNIV_UNLIKELY(error != DB_SUCCESS))
+		return error;
 
 	if (UNIV_UNLIKELY(fts_enable_diag_print)) {
 		ib::info() << "FTS SYNC for table " << sync->table->name
@@ -4076,6 +4096,7 @@ fts_sync_begin(
 			<< ib_vector_size(cache->deleted_doc_ids)
 			<< " size: " << ib::bytes_iec{cache->total_size};
 	}
+	return DB_SUCCESS;
 }
 
 /*********************************************************************//**
@@ -4192,7 +4213,7 @@ fts_sync_commit(
 
 	if (UNIV_LIKELY(error == DB_SUCCESS)) {
 		DEBUG_SYNC_C("fts_crash_before_commit_sync");
-		fts_sql_commit(trx);
+		error= fts_sql_commit(trx);
 	} else {
 		fts_sql_rollback(trx);
 		ib::error() << "(" << error << ") during SYNC of "
@@ -4309,7 +4330,12 @@ fts_sync(
 	sync->in_progress = true;
 
 	DEBUG_SYNC_C("fts_sync_begin");
-	fts_sync_begin(sync);
+	error= fts_sync_begin(sync);
+	if (UNIV_UNLIKELY(error != DB_SUCCESS)) {
+		sync->in_progress= false;
+		mysql_mutex_unlock(&cache->lock);
+		return error;
+	}
 
 begin_sync:
 	const size_t fts_cache_size= fts_max_cache_size;
@@ -4946,7 +4972,7 @@ fts_get_rows_count(
 		error = fts_eval_sql(trx, graph);
 
 		if (UNIV_LIKELY(error == DB_SUCCESS)) {
-			fts_sql_commit(trx);
+			error= fts_sql_commit(trx);
 
 			break;				/* Exit the loop. */
 		} else {
@@ -4969,7 +4995,11 @@ fts_get_rows_count(
 
 	que_graph_free(graph);
 
-	trx->free();
+	if (!trx->mylite_ownerless_coordination_fault)
+		trx->free();
+
+	if (UNIV_UNLIKELY(error != DB_SUCCESS))
+		count= 0;
 
 	return(count);
 }
@@ -4993,9 +5023,11 @@ fts_update_max_cache_size(
 	/* The size returned is in bytes. */
 	sync->max_cache_size = fts_get_max_cache_size(trx, &fts_table);
 
-	fts_sql_commit(trx);
+	const dberr_t error= fts_sql_commit(trx);
 
-	trx->free();
+	if (!trx->mylite_ownerless_coordination_fault)
+		trx->free();
+	ut_ad(error == DB_SUCCESS || mylite_ownerless_trx_hooks_enabled_fast());
 }
 #endif /* FTS_CACHE_SIZE_DEBUG */
 
@@ -5857,7 +5889,11 @@ fts_load_stopword(
 		trx->start_line = __LINE__;
 		trx->start_file = __FILE__;
 #endif
-		trx_start_internal_low(trx, !high_level_read_only);
+		error= trx_start_internal_low(trx, !high_level_read_only);
+		if (UNIV_UNLIKELY(error != DB_SUCCESS)) {
+			trx->clear_and_free();
+			return false;
+		}
 		trx->op_info = "upload FTS stopword";
 		new_trx = TRUE;
 	}
@@ -5926,12 +5962,13 @@ fts_load_stopword(
 cleanup:
 	if (new_trx) {
 		if (error == DB_SUCCESS) {
-			fts_sql_commit(trx);
+			error= fts_sql_commit(trx);
 		} else {
 			fts_sql_rollback(trx);
 		}
 
-		trx->clear_and_free();
+		if (!trx->mylite_ownerless_coordination_fault)
+			trx->clear_and_free();
 	}
 
 	if (!cache->stopword_info.cached_stopword) {
@@ -6146,10 +6183,13 @@ fts_init_index(
 
 	if (!start_doc) {
 		trx_t *trx = trx_create();
-		trx_start_internal_read_only(trx);
-		dberr_t err= fts_read_synced_doc_id(table, &start_doc, trx);
-		fts_sql_commit(trx);
-		trx->free();
+		dberr_t err= trx_start_internal_read_only(trx);
+		if (UNIV_LIKELY(err == DB_SUCCESS))
+			err= fts_read_synced_doc_id(table, &start_doc, trx);
+		if (UNIV_LIKELY(err == DB_SUCCESS))
+			err= fts_sql_commit(trx);
+		if (!trx->mylite_ownerless_coordination_fault)
+			trx->free();
 		if (err != DB_SUCCESS) {
 			goto func_exit;
 		}

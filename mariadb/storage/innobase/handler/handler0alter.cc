@@ -1185,7 +1185,9 @@ struct ha_innobase_inplace_ctx : public inplace_alter_handler_ctx
 		}
 #endif /* UNIV_DEBUG */
 
-		trx_start_for_ddl(trx);
+		const dberr_t start_error= trx_start_for_ddl(trx);
+		if (UNIV_UNLIKELY(start_error != DB_SUCCESS))
+			trx->error_state= start_error;
 	}
 
 	~ha_innobase_inplace_ctx() override
@@ -4381,11 +4383,53 @@ static void unlock_and_close_files(const std::vector<pfs_os_file_t> &deleted,
 }
 
 /** Commit a DDL transaction and unlink any deleted files. */
-static void commit_unlock_and_unlink(trx_t *trx)
+static bool commit_unlock_and_unlink(trx_t *trx)
 {
   std::vector<pfs_os_file_t> deleted;
-  trx->commit(deleted);
+  const bool coordination_fault= trx->commit(deleted);
   unlock_and_close_files(deleted, trx);
+  return coordination_fault;
+}
+
+/** Transfer a failed detached ALTER transaction to close-time recovery. */
+static void quarantine_detached_alter_trx(trx_t *&trx)
+{
+  ut_ad(trx != nullptr);
+  trx_ownerless_quarantine_detached(trx);
+  trx= nullptr;
+}
+
+/** Roll back and free a detached ALTER transaction.
+@return true if close-time recovery retained the transaction */
+static bool rollback_and_free_detached_alter_trx(trx_t *&trx)
+{
+  ut_ad(trx != nullptr);
+  if (trx->rollback() != DB_SUCCESS ||
+      trx->mylite_ownerless_coordination_fault ||
+      trx->state != TRX_STATE_NOT_STARTED)
+  {
+    quarantine_detached_alter_trx(trx);
+    return true;
+  }
+
+  trx->free();
+  trx= nullptr;
+  return false;
+}
+
+/** Dispose a transaction whose DDL start failed, retaining ambiguous cleanup.
+@return true if close-time recovery retained the transaction */
+static bool dispose_or_quarantine_failed_alter_start(trx_t *&trx)
+{
+  ut_ad(trx != nullptr);
+  if (trx->dispose_failed_start())
+  {
+    trx= nullptr;
+    return false;
+  }
+
+  quarantine_detached_alter_trx(trx);
+  return true;
 }
 
 /**
@@ -4400,15 +4444,29 @@ static void online_retry_drop_indexes(dict_table_t *table, THD *thd)
   {
     trx_t *trx= innobase_trx_allocate(thd);
 
-    trx_start_for_ddl(trx);
+    if (UNIV_UNLIKELY(trx_start_for_ddl(trx) != DB_SUCCESS))
+    {
+      static_cast<void>(dispose_or_quarantine_failed_alter_start(trx));
+      return;
+    }
     if (lock_sys_tables(trx) == DB_SUCCESS)
     {
       row_mysql_lock_data_dictionary(trx);
       online_retry_drop_indexes_low(table, trx);
-      commit_unlock_and_unlink(trx);
+      if (UNIV_UNLIKELY(commit_unlock_and_unlink(trx)))
+      {
+        trx_ownerless_quarantine_detached(trx);
+        return;
+      }
     }
     else
-      trx->commit();
+    {
+      if (UNIV_UNLIKELY(trx->commit()))
+      {
+        trx_ownerless_quarantine_detached(trx);
+        return;
+      }
+    }
     trx->free();
   }
 
@@ -6541,7 +6599,11 @@ prepare_inplace_alter_table_dict(
 				     | DICT_TF_MASK_ATOMIC_BLOBS));
 	}
 
-	trx_start_if_not_started_xa(ctx->prebuilt->trx, true);
+	error= trx_start_if_not_started_xa(ctx->prebuilt->trx, true);
+	if (UNIV_UNLIKELY(error != DB_SUCCESS)) {
+		my_error_innodb(error, table_name, user_table->flags);
+		DBUG_RETURN(true);
+	}
 
 	if (ha_alter_info->handler_flags
 	    & ALTER_DROP_VIRTUAL_COLUMN) {
@@ -6696,21 +6758,30 @@ acquire_lock:
 			    ctx->trx->mysql_thd->is_strict_mode())) {
 new_clustered_failed:
 			DBUG_ASSERT(ctx->trx != ctx->prebuilt->trx);
-			ctx->trx->rollback();
+			if (UNIV_UNLIKELY(ctx->trx->rollback() != DB_SUCCESS ||
+					  ctx->trx->mylite_ownerless_coordination_fault)) {
+				error = DB_ERROR;
+				goto err_exit;
+			}
 
 			ut_ad(user_table->get_ref_count() == 1);
 
 			if (user_table->drop_aborted) {
 				row_mysql_unlock_data_dictionary(ctx->trx);
-				trx_start_for_ddl(ctx->trx);
-				if (lock_sys_tables(ctx->trx) == DB_SUCCESS) {
+				error= trx_start_for_ddl(ctx->trx);
+				if (error == DB_SUCCESS &&
+				    lock_sys_tables(ctx->trx) == DB_SUCCESS) {
 					row_mysql_lock_data_dictionary(
 						ctx->trx);
 					online_retry_drop_indexes_low(
 						user_table, ctx->trx);
-					commit_unlock_and_unlink(ctx->trx);
+					if (UNIV_UNLIKELY(
+						    commit_unlock_and_unlink(ctx->trx)))
+						DBUG_RETURN(true);
 				} else {
-					ctx->trx->commit();
+					if (ctx->trx->is_started() &&
+					    UNIV_UNLIKELY(ctx->trx->commit()))
+						DBUG_RETURN(true);
 				}
 				row_mysql_lock_data_dictionary(ctx->trx);
 			}
@@ -7417,7 +7488,9 @@ error_handling_drop_uncached:
 	if (ctx->online && ctx->num_to_add_index) {
 		/* Assign a consistent read view for
 		row_merge_read_clustered_index(). */
-		ctx->prebuilt->trx->read_view.open(ctx->prebuilt->trx);
+		error= ctx->prebuilt->trx->open_read_view();
+		if (UNIV_UNLIKELY(error != DB_SUCCESS))
+			goto error_handling;
 	}
 
 	if (fts_index) {
@@ -7494,12 +7567,18 @@ error_handling_drop_uncached:
 
 		/* fts_create_common_tables() may drop old common tables,
 		whose files would be deleted here. */
-		commit_unlock_and_unlink(ctx->trx);
+		if (UNIV_UNLIKELY(commit_unlock_and_unlink(ctx->trx))) {
+			if (pause_purge)
+				purge_sys.resume_FTS();
+			DBUG_RETURN(true);
+		}
 		if (pause_purge) {
 			purge_sys.resume_FTS();
 		}
 
-		trx_start_for_ddl(ctx->trx);
+		error= trx_start_for_ddl(ctx->trx);
+		if (UNIV_UNLIKELY(error != DB_SUCCESS))
+			DBUG_RETURN(true);
 		ctx->prebuilt->trx_id = ctx->trx->id;
 	}
 
@@ -7524,13 +7603,16 @@ error_handling:
 		my_error_innodb(error, table_name, user_table->flags);
 	}
 
-	ctx->trx->rollback();
+	if (UNIV_UNLIKELY(ctx->trx->rollback() != DB_SUCCESS ||
+			  ctx->trx->mylite_ownerless_coordination_fault)) {
+		error = DB_ERROR;
+		goto err_exit;
+	}
 
 	ut_ad(!ctx->need_rebuild()
 	      || !user_table->indexes.start->online_log);
 
 	ctx->prebuilt->trx->error_info = NULL;
-	ctx->trx->error_state = DB_SUCCESS;
 
 	if (false) {
 error_handled:
@@ -7551,8 +7633,9 @@ error_handled:
 		if (dict_locked) {
 			row_mysql_unlock_data_dictionary(ctx->trx);
 		}
-		trx_start_for_ddl(ctx->trx);
-		dberr_t err= lock_sys_tables(ctx->trx);
+		dberr_t err= trx_start_for_ddl(ctx->trx);
+		if (UNIV_LIKELY(err == DB_SUCCESS))
+			err= lock_sys_tables(ctx->trx);
 		row_mysql_lock_data_dictionary(ctx->trx);
 		if (err != DB_SUCCESS) {
 			goto err_exit;
@@ -7567,12 +7650,14 @@ error_handled:
 
 	if (new_clustered) {
 		online_retry_drop_indexes_low(user_table, ctx->trx);
-		commit_unlock_and_unlink(ctx->trx);
+		if (UNIV_UNLIKELY(commit_unlock_and_unlink(ctx->trx)))
+			DBUG_RETURN(true);
 		row_mysql_lock_data_dictionary(ctx->trx);
 	} else {
 		row_merge_drop_indexes(ctx->trx, user_table, true);
 		user_table->indexes.start->online_log = nullptr;
-		ctx->trx->commit();
+		if (UNIV_UNLIKELY(ctx->trx->commit()))
+			DBUG_RETURN(true);
 	}
 
 	ut_d(dict_table_check_for_dup_indexes(user_table, CHECK_ALL_COMPLETE));
@@ -7588,10 +7673,17 @@ err_exit:
 
 	if (ctx->trx) {
 		row_mysql_unlock_data_dictionary(ctx->trx);
-		ctx->trx->rollback();
-		ctx->trx->free();
+		if (ctx->trx->state == TRX_STATE_NOT_STARTED &&
+		    ctx->trx->error_state != DB_SUCCESS) {
+			static_cast<void>(
+				dispose_or_quarantine_failed_alter_start(ctx->trx));
+		} else
+			static_cast<void>(rollback_and_free_detached_alter_trx(
+				ctx->trx));
 	}
-	trx_commit_for_mysql(ctx->prebuilt->trx);
+	if (UNIV_UNLIKELY(
+		    trx_commit_for_mysql(ctx->prebuilt->trx) != DB_SUCCESS))
+		ctx->prebuilt->trx->mylite_ownerless_coordination_fault= true;
 	if (pause_purge) {
 		purge_sys.resume_FTS();
 	}
@@ -8616,6 +8708,12 @@ field_changed:
 					alt_opt.page_compressed,
 					alt_opt.page_compression_level);
 			ha_alter_info->handler_ctx = ctx;
+			if (UNIV_UNLIKELY(ctx->trx->error_state != DB_SUCCESS)) {
+				my_error_innodb(ctx->trx->error_state,
+						table_share->table_name.str,
+						indexed_table->flags);
+				DBUG_RETURN(true);
+			}
 		}
 
 		if ((ha_alter_info->handler_flags
@@ -8770,6 +8868,15 @@ found_col:
 		autoinc_col_max_value,
 		ha_alter_info->ignore || !m_user_thd->is_strict_mode(),
 		alt_opt.page_compressed, alt_opt.page_compression_level);
+	if (UNIV_UNLIKELY(
+		    static_cast<ha_innobase_inplace_ctx*>(
+			    ha_alter_info->handler_ctx)->trx->error_state != DB_SUCCESS)) {
+		auto ctx= static_cast<ha_innobase_inplace_ctx*>(
+			ha_alter_info->handler_ctx);
+		my_error_innodb(ctx->trx->error_state,
+				table_share->table_name.str, m_prebuilt->table->flags);
+		DBUG_RETURN(true);
+	}
 
 	if (!prepare_inplace_alter_table_dict(
 		    ha_alter_info, altered_table, table,
@@ -9298,7 +9405,12 @@ inline bool rollback_inplace_alter_table(Alter_inplace_info *ha_alter_info,
     }
 
     DEBUG_SYNC(ctx->trx->mysql_thd, "before_commit_rollback_inplace");
-    commit_unlock_and_unlink(ctx->trx);
+    if (UNIV_UNLIKELY(commit_unlock_and_unlink(ctx->trx)))
+    {
+      if (fts_exist)
+        purge_sys.resume_FTS();
+      DBUG_RETURN(true);
+    }
     if (fts_exist)
       purge_sys.resume_FTS();
     if (ctx->old_table->fts)
@@ -9362,7 +9474,8 @@ free_and_exit:
       col.ord_part= 0;
   }
   dict_sys.unlock();
-  trx_commit_for_mysql(prebuilt->trx);
+  if (UNIV_UNLIKELY(trx_commit_for_mysql(prebuilt->trx) != DB_SUCCESS))
+    fail= true;
   prebuilt->trx_id = 0;
   MONITOR_ATOMIC_DEC(MONITOR_PENDING_ALTER_TABLE);
   DBUG_RETURN(fail);
@@ -11445,7 +11558,10 @@ lock_fail:
 			index from data dictionary and table cache
 			in rollback_inplace_alter_table() */
 			if (!trx->is_started()) {
-				trx_start_for_ddl(trx);
+				error= trx_start_for_ddl(trx);
+				if (UNIV_UNLIKELY(error != DB_SUCCESS))
+					my_error_innodb(
+						error, table_share->table_name.str, 0);
 			}
 
 			DBUG_RETURN(true);
@@ -11595,7 +11711,9 @@ err_index:
 			table or index stubs from data dictionary
 			and table cache in
 			rollback_inplace_alter_table() */
-			trx_start_for_ddl(trx);
+			const dberr_t start_error= trx_start_for_ddl(trx);
+			if (UNIV_UNLIKELY(start_error != DB_SUCCESS))
+				error= start_error;
 		}
 
 		my_error_innodb(error, table_share->table_name.str, 0);
@@ -11614,7 +11732,11 @@ err_index:
 			my_error(ER_TABLESPACE_DISCARDED, MYF(0),
 				 table->s->table_name.str);
 fail:
-			trx->rollback();
+			if (UNIV_UNLIKELY(trx->rollback() != DB_SUCCESS ||
+					  trx->mylite_ownerless_coordination_fault)) {
+				my_error_innodb(DB_ERROR,
+						table_share->table_name.str, 0);
+			}
 			ut_ad(!trx->fts_trx);
 			row_mysql_unlock_data_dictionary(trx);
 			if (!stats_failed) {
@@ -11623,7 +11745,10 @@ fail:
 			if (fts_exist) {
 				purge_sys.resume_FTS();
 			}
-			trx_start_for_ddl(trx);
+			const dberr_t start_error= trx_start_for_ddl(trx);
+			if (UNIV_UNLIKELY(start_error != DB_SUCCESS))
+				my_error_innodb(
+					start_error, table_share->table_name.str, 0);
 			DBUG_RETURN(true);
 		}
 
@@ -11691,7 +11816,20 @@ fail:
 			if (own) {
 				m_prebuilt = ctx->prebuilt;
 			}
-			trx_start_if_not_started(user_trx, true);
+			error= trx_start_if_not_started(user_trx, true);
+			if (UNIV_UNLIKELY(error != DB_SUCCESS)) {
+				if (UNIV_UNLIKELY(
+					    trx->rollback() != DB_SUCCESS ||
+					    trx->mylite_ownerless_coordination_fault))
+					my_error_innodb(DB_ERROR,
+							table_share->table_name.str, 0);
+				row_mysql_unlock_data_dictionary(trx);
+				if (!stats_failed)
+					stats.close();
+				if (fts_exist)
+					purge_sys.resume_FTS();
+				DBUG_RETURN(true);
+			}
 			m_prebuilt->trx = user_trx;
 		}
 	}
@@ -11719,7 +11857,14 @@ fail:
 	not start until innodb_ddl_recovery_done(). */
 	ha_alter_info->inplace_alter_table_committed = purge_sys.resume_SYS;
 	purge_sys.stop_SYS();
-	trx->commit(deleted);
+	if (UNIV_UNLIKELY(trx->commit(deleted))) {
+		unlock_and_close_files(deleted, trx);
+		if (!stats_failed)
+			stats.close();
+		if (fts_exist)
+			purge_sys.resume_FTS();
+		DBUG_RETURN(true);
+	}
 
 	/* At this point, the changes to the persistent storage have
 	been committed or rolled back. What remains to be done is to
@@ -11777,16 +11922,27 @@ foreign_fail:
 	use the ctx0->trx here. Others may have been allocated in
 	the prepare stage. */
 
+	bool partition_cleanup_failed= false;
 	for (inplace_alter_handler_ctx** pctx = &ctx_array[1]; *pctx;
 	     pctx++) {
 		ha_innobase_inplace_ctx*	ctx
 			= static_cast<ha_innobase_inplace_ctx*>(*pctx);
 
 		if (ctx->trx) {
-			ctx->trx->rollback();
-			ctx->trx->free();
-			ctx->trx = NULL;
+			partition_cleanup_failed|=
+				rollback_and_free_detached_alter_trx(ctx->trx);
 		}
+	}
+
+	if (UNIV_UNLIKELY(partition_cleanup_failed)) {
+		my_error_innodb(DB_ERROR, table_share->table_name.str, 0);
+		unlock_and_close_files(deleted, trx);
+		trx->free();
+		if (!stats_failed)
+			stats.close();
+		if (fts_exist)
+			purge_sys.resume_FTS();
+		DBUG_RETURN(true);
 	}
 
 	/* MDEV-17468: Avoid this at least when ctx->is_instant().

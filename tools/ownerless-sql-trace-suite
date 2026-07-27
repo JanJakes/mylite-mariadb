@@ -9,6 +9,7 @@ client_args=()
 log_dir=""
 skip_negative=0
 scale=1
+replay_attempts=1
 requested_traces=()
 skipped_traces=()
 
@@ -27,6 +28,8 @@ Options:
   --dry-run            Alias for --check
   --skip-negative      Pass through to the trace runner during replay
   --scale N            Multiply smoke-sized trace rounds/rows (1-25, default: 1)
+  --replay-attempts N  Whole-trace replay attempts for transient external
+                       MariaDB failures (1-10, default: 1)
   --trace NAME         Only generate/replay this trace; repeatable
   --skip-trace NAME    Omit this trace from the suite; repeatable
 EOF
@@ -66,6 +69,10 @@ while [ "$#" -gt 0 ]; do
       scale="${2:-}"
       shift 2
       ;;
+    --replay-attempts)
+      replay_attempts="${2:-}"
+      shift 2
+      ;;
     --trace)
       requested_traces+=("${2:-}")
       shift 2
@@ -101,6 +108,16 @@ if [ "${scale}" -le 0 ] || [ "${scale}" -gt 25 ]; then
   echo "--scale must be between 1 and 25" >&2
   exit 2
 fi
+case "${replay_attempts}" in
+  ''|*[!0-9]*)
+    echo "--replay-attempts must be a positive integer" >&2
+    exit 2
+    ;;
+esac
+if [ "${replay_attempts}" -le 0 ] || [ "${replay_attempts}" -gt 10 ]; then
+  echo "--replay-attempts must be between 1 and 10" >&2
+  exit 2
+fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 runner="${script_dir}/ownerless-sql-trace-runner"
@@ -127,26 +144,42 @@ run_exporter() {
 validate_or_run_trace() {
   local name="$1"
   local trace_dir="${output_dir}/${name}"
-  local args=("--trace-dir" "${trace_dir}")
+  local attempt
 
   if [ "${check}" -eq 1 ] || [ "${dry_run}" -eq 1 ]; then
-    args+=("--check")
-  else
-    args+=("--client" "${client}")
+    "${runner}" --trace-dir "${trace_dir}" --check
+    return 0
+  fi
+
+  for attempt in $(seq 1 "${replay_attempts}"); do
+    local args=("--trace-dir" "${trace_dir}" "--client" "${client}")
     if [ "${#client_args[@]}" -gt 0 ]; then
       for client_arg in "${client_args[@]}"; do
         args+=("--client-arg" "${client_arg}")
       done
     fi
     if [ -n "${log_dir}" ]; then
-      args+=("--log-dir" "${log_dir}/${name}")
+      if [ "${replay_attempts}" -eq 1 ]; then
+        args+=("--log-dir" "${log_dir}/${name}")
+      else
+        args+=("--log-dir" "${log_dir}/${name}/attempt-${attempt}")
+      fi
     fi
     if [ "${skip_negative}" -eq 1 ]; then
       args+=("--skip-negative")
     fi
-  fi
-
-  "${runner}" "${args[@]}"
+    if "${runner}" "${args[@]}"; then
+      if [ "${attempt}" -gt 1 ]; then
+        echo "trace_replay_recovered trace=${name} attempt=${attempt}"
+      fi
+      return 0
+    fi
+    if [ "${attempt}" -lt "${replay_attempts}" ]; then
+      echo "trace_replay_retry trace=${name} attempt=${attempt}" >&2
+    fi
+  done
+  echo "trace_replay_failed trace=${name} attempts=${replay_attempts}" >&2
+  return 1
 }
 
 trace_names=(
@@ -278,6 +311,7 @@ done
 
 {
   echo "scale=${scale}"
+  echo "replay_attempts=${replay_attempts}"
   echo "trace_count=${#selected_trace_names[@]}"
   for name in "${selected_trace_names[@]}"; do
     echo "trace=${name}"

@@ -171,13 +171,16 @@ For details see: row_undo_mod_sec_is_unsafe() and row_purge_poss_sec()
 
   @param[in,out] trx transaction
 */
-inline void ReadViewBase::snapshot(trx_t *trx)
+inline dberr_t ReadViewBase::snapshot(trx_t *trx)
 {
-  trx_sys.snapshot_ids(trx, &m_ids, &m_low_limit_id, &m_low_limit_no);
+  const dberr_t err=
+    trx_sys.snapshot_ids(trx, &m_ids, &m_low_limit_id, &m_low_limit_no);
+  if (UNIV_UNLIKELY(err != DB_SUCCESS))
+    return err;
   if (m_ids.empty())
   {
     m_up_limit_id= m_low_limit_id;
-    return;
+    return DB_SUCCESS;
   }
 
   std::sort(m_ids.begin(), m_ids.end());
@@ -190,6 +193,7 @@ inline void ReadViewBase::snapshot(trx_t *trx)
     m_ids.clear();
     m_low_limit_id= m_low_limit_no= m_up_limit_id;
   }
+  return DB_SUCCESS;
 }
 
 
@@ -227,11 +231,14 @@ inline void ReadViewBase::snapshot(trx_t *trx)
   and purged meanwhile. It is acceptable as well, since this view doesn't see
   it.
 */
-void ReadView::open(trx_t *trx)
+dberr_t ReadView::open(trx_t *trx)
 {
   ut_ad(this == &trx->read_view);
   if (is_open())
+  {
     ut_ad(!srv_read_only_mode);
+    return DB_SUCCESS;
+  }
   else if (likely(!srv_read_only_mode))
   {
     m_creator_trx_id= trx->id;
@@ -240,31 +247,44 @@ void ReadView::open(trx_t *trx)
         low_limit_id() == trx_sys.get_max_trx_id())
     {
       m_mutex.wr_lock();
-      publish_ownerless();
-      m_open.store(true, std::memory_order_relaxed);
+      const dberr_t err= publish_ownerless();
+      if (err == DB_SUCCESS)
+        m_open.store(true, std::memory_order_relaxed);
+      else
+        m_creator_trx_id= 0;
       m_mutex.wr_unlock();
+      return err;
     }
     else
     {
       m_mutex.wr_lock();
-      snapshot(trx);
-      publish_ownerless();
-      m_open.store(true, std::memory_order_relaxed);
+      dberr_t err= snapshot(trx);
+      if (err == DB_SUCCESS)
+        err= publish_ownerless();
+      if (err == DB_SUCCESS)
+        m_open.store(true, std::memory_order_relaxed);
+      else
+        m_creator_trx_id= 0;
       m_mutex.wr_unlock();
+      return err;
     }
   }
+  return DB_SUCCESS;
 }
 
-void ReadView::close()
+dberr_t ReadView::close()
 {
-  unpublish_ownerless();
+  const dberr_t err= unpublish_ownerless();
+  if (UNIV_UNLIKELY(err != DB_SUCCESS))
+    return err;
   m_open.store(false, std::memory_order_relaxed);
+  return DB_SUCCESS;
 }
 
-void ReadView::publish_ownerless()
+dberr_t ReadView::publish_ownerless()
 {
   if (UNIV_LIKELY(!mylite_ownerless_read_view_hooks_enabled_fast()))
-    return;
+    return DB_SUCCESS;
 
   ut_ad(!m_ownerless_slot_generation);
 
@@ -276,28 +296,111 @@ void ReadView::publish_ownerless()
     view_ids.empty() ? nullptr : reinterpret_cast<const uint64_t*>(view_ids.data()),
     static_cast<unsigned int>(view_ids.size()),
     &slot_index, &slot_generation);
-  if (result == MYLITE_OWNERLESS_READ_VIEW_OK)
+  if (slot_generation != 0)
   {
     m_ownerless_slot_index= slot_index;
     m_ownerless_slot_generation= slot_generation;
-    return;
   }
-  if (result != MYLITE_OWNERLESS_READ_VIEW_UNAVAILABLE)
-    ut_error;
+  if (result == MYLITE_OWNERLESS_READ_VIEW_OK)
+  {
+    if (UNIV_UNLIKELY(slot_generation == 0))
+      return DB_ERROR;
+    return DB_SUCCESS;
+  }
+  return result == MYLITE_OWNERLESS_READ_VIEW_FULL
+    ? DB_TOO_MANY_CONCURRENT_TRXS
+    : DB_ERROR;
 }
 
-void ReadView::unpublish_ownerless()
+dberr_t ReadView::unpublish_ownerless()
 {
   if (!m_ownerless_slot_generation)
-    return;
+    return DB_SUCCESS;
 
   const int result= mylite_ownerless_read_view_deregister(
     m_ownerless_slot_index, m_ownerless_slot_generation);
+  if (result != MYLITE_OWNERLESS_READ_VIEW_OK)
+    return DB_ERROR;
+  /* Preserve the generation token until deregistration succeeds. A retry can
+  safely resolve an ambiguous first response against the same slot token. */
   m_ownerless_slot_index= 0;
   m_ownerless_slot_generation= 0;
-  if (result != MYLITE_OWNERLESS_READ_VIEW_OK &&
-      result != MYLITE_OWNERLESS_READ_VIEW_UNAVAILABLE)
-    ut_error;
+  return DB_SUCCESS;
+}
+
+
+static void append_conservative_ownerless_purge_view(ReadViewBase *view)
+{
+  /* Transaction identifiers start above zero. Keeping both limits at one
+  prevents purge from advancing when shared read-view state is unavailable. */
+  view->clamp_conservative();
+}
+
+
+static void append_ownerless_purge_view(ReadViewBase *view)
+{
+  static constexpr unsigned int retry_count= 3;
+  std::vector<uint64_t> ownerless_ids;
+  unsigned int ownerless_capacity= 0;
+  unsigned int error_attempts= 0;
+
+  for (;;)
+  {
+    unsigned int ownerless_count= 0;
+    uint64_t ownerless_low_limit_id= 0;
+    uint64_t ownerless_low_limit_no= 0;
+    const int result= mylite_ownerless_read_view_snapshot(
+      ownerless_capacity ? ownerless_ids.data() : nullptr,
+      ownerless_capacity, &ownerless_count, &ownerless_low_limit_id,
+      &ownerless_low_limit_no);
+
+    if (result == MYLITE_OWNERLESS_READ_VIEW_OK)
+    {
+      if (ownerless_count == 0 && ownerless_low_limit_id == 0 &&
+          ownerless_low_limit_no == 0)
+        return;
+      bool malformed= ownerless_count > ownerless_capacity ||
+                      ownerless_low_limit_id == 0 ||
+                      ownerless_low_limit_id == TRX_ID_MAX ||
+                      ownerless_low_limit_no == 0;
+      for (unsigned int i= 0; !malformed && i < ownerless_count; ++i)
+        malformed= ownerless_ids[i] == 0 || ownerless_ids[i] == TRX_ID_MAX;
+      if (UNIV_UNLIKELY(malformed))
+      {
+        append_conservative_ownerless_purge_view(view);
+        return;
+      }
+      view->append_ownerless(
+        ownerless_low_limit_id, ownerless_low_limit_no,
+        ownerless_count ? ownerless_ids.data() : nullptr, ownerless_count);
+      return;
+    }
+    if (result == MYLITE_OWNERLESS_READ_VIEW_FULL)
+    {
+      if (ownerless_count <= ownerless_capacity)
+      {
+        append_conservative_ownerless_purge_view(view);
+        return;
+      }
+      ownerless_ids.resize(ownerless_count);
+      ownerless_capacity= ownerless_count;
+      error_attempts= 0;
+      continue;
+    }
+    if (result == MYLITE_OWNERLESS_READ_VIEW_UNAVAILABLE)
+    {
+      append_conservative_ownerless_purge_view(view);
+      return;
+    }
+    if (++error_attempts < retry_count)
+    {
+      ut_delay(1000);
+      continue;
+    }
+
+    append_conservative_ownerless_purge_view(view);
+    return;
+  }
 }
 
 
@@ -310,42 +413,15 @@ void ReadView::unpublish_ownerless()
 */
 void trx_sys_t::clone_oldest_view(ReadViewBase *view) const
 {
-  view->snapshot(nullptr);
+  const bool ownerless_read_views_required=
+    UNIV_UNLIKELY(mylite_ownerless_read_view_hooks_enabled_fast());
+  if (UNIV_UNLIKELY(view->snapshot(nullptr) != DB_SUCCESS))
+    append_conservative_ownerless_purge_view(view);
   /* Find oldest view. */
   trx_list.for_each([view](const trx_t &trx) {
                       trx.read_view.append_to(view);
 		    });
-  if (UNIV_LIKELY(!mylite_ownerless_read_view_hooks_enabled_fast()))
+  if (UNIV_LIKELY(!ownerless_read_views_required))
     return;
-
-  unsigned int ownerless_count= 0;
-  uint64_t ownerless_low_limit_id= 0;
-  uint64_t ownerless_low_limit_no= 0;
-  int ownerless_result= mylite_ownerless_read_view_snapshot(
-    nullptr, 0, &ownerless_count, &ownerless_low_limit_id,
-    &ownerless_low_limit_no);
-  if (ownerless_result == MYLITE_OWNERLESS_READ_VIEW_OK ||
-      ownerless_result == MYLITE_OWNERLESS_READ_VIEW_FULL)
-  {
-    std::vector<uint64_t> ownerless_ids;
-    for (;;)
-    {
-      ownerless_ids.resize(ownerless_count);
-      ownerless_result= mylite_ownerless_read_view_snapshot(
-        ownerless_count ? ownerless_ids.data() : nullptr,
-        ownerless_count, &ownerless_count, &ownerless_low_limit_id,
-        &ownerless_low_limit_no);
-      if (ownerless_result == MYLITE_OWNERLESS_READ_VIEW_FULL)
-        continue;
-      if (ownerless_result != MYLITE_OWNERLESS_READ_VIEW_OK)
-        ut_error;
-      break;
-    }
-    view->append_ownerless(ownerless_low_limit_id, ownerless_low_limit_no,
-                           ownerless_ids.empty() ? nullptr : ownerless_ids.data(),
-                           ownerless_count);
-    return;
-  }
-  if (ownerless_result != MYLITE_OWNERLESS_READ_VIEW_UNAVAILABLE)
-    ut_error;
+  append_ownerless_purge_view(view);
 }

@@ -20,6 +20,7 @@
 #include <unistd.h>
 
 #define PHP_MYSQLI_MYLITE_EXT_VERSION "0.1.0"
+#define PHP_MYLITE_MYSQLI_OPT_OWNERLESS_RW 0x4D4C0001L
 #define PHP_MYLITE_MYSQLI_QUERY_CACHE_CAPACITY 8U
 #define PHP_MYLITE_MYSQLI_PROFILE_QUERY_SHAPE_CAPACITY 128U
 #define PHP_MYLITE_MYSQLI_PROFILE_QUERY_SHAPE_SAMPLE_SIZE 160U
@@ -144,6 +145,7 @@ typedef struct php_mylite_mysqli_query_cache_entry {
 
 typedef struct php_mylite_mysqli_link {
     mylite_db *db;
+    unsigned open_flags;
     zend_string *charset;
     zend_string *recent_result_sql;
     php_mylite_mysqli_query_cache_entry query_cache[PHP_MYLITE_MYSQLI_QUERY_CACHE_CAPACITY];
@@ -405,6 +407,12 @@ static int php_mylite_mysqli_open_link(
     zend_object *object,
     const char *path
 );
+static int php_mylite_mysqli_options_impl(
+    php_mylite_mysqli_link *link,
+    zend_object *object,
+    zend_long option,
+    zval *value
+);
 static const char *php_mylite_mysqli_connection_path(
     const char *host,
     size_t host_len,
@@ -636,6 +644,20 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO_EX(arginfo_mylite_mysqli_init, 0, 0, mysqli, 0)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mylite_namespaced_mysqli_init, 0, 0, IS_OBJECT, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mylite_mysqli_options, 0, 3, _IS_BOOL, 0)
+ZEND_ARG_INFO(0, mysql)
+ZEND_ARG_TYPE_INFO(0, option, IS_LONG, 0)
+ZEND_ARG_INFO(0, value)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mylite_mysqli_method_options, 0, 2, _IS_BOOL, 0)
+ZEND_ARG_TYPE_INFO(0, option, IS_LONG, 0)
+ZEND_ARG_INFO(0, value)
+ZEND_END_ARG_INFO()
+
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mylite_mysqli_real_connect, 0, 1, _IS_BOOL, 0)
 ZEND_ARG_INFO(0, mysql)
 ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, hostname, IS_STRING, 1, "null")
@@ -863,6 +885,32 @@ PHP_FUNCTION(mylite_mysqli_init) {
     ZEND_PARSE_PARAMETERS_NONE();
 
     object_init_ex(return_value, php_mylite_mysqli_global_link_ce);
+}
+
+PHP_FUNCTION(mylite_namespaced_mysqli_init) {
+    ZEND_PARSE_PARAMETERS_NONE();
+
+    object_init_ex(return_value, php_mylite_mysqli_link_ce);
+}
+
+PHP_FUNCTION(mylite_mysqli_options) {
+    zval *link_zval = NULL;
+    zend_long option = 0;
+    zval *value = NULL;
+
+    ZEND_PARSE_PARAMETERS_START(3, 3)
+    Z_PARAM_ZVAL(link_zval)
+    Z_PARAM_LONG(option)
+    Z_PARAM_ZVAL(value)
+    ZEND_PARSE_PARAMETERS_END();
+
+    if (Z_TYPE_P(link_zval) != IS_OBJECT || !php_mylite_mysqli_is_link_object(Z_OBJ_P(link_zval))) {
+        zend_argument_type_error(1, "must be a MyLite mysqli link");
+        RETURN_THROWS();
+    }
+
+    php_mylite_mysqli_link *link = php_mylite_mysqli_link_from_object(Z_OBJ_P(link_zval));
+    RETURN_BOOL(php_mylite_mysqli_options_impl(link, Z_OBJ_P(link_zval), option, value) == SUCCESS);
 }
 
 PHP_FUNCTION(mylite_mysqli_connect) {
@@ -1168,7 +1216,7 @@ PHP_FUNCTION(mylite_mysqli_fetch_object) {
 
 PHP_FUNCTION(mylite_mysqli_fetch_all) {
     zval *result_zval = NULL;
-    zend_long mode = 1;
+    zend_long mode = 2;
 
     ZEND_PARSE_PARAMETERS_START(1, 2)
     Z_PARAM_ZVAL(result_zval)
@@ -1651,6 +1699,19 @@ PHP_METHOD(MyLite_MySQLi, real_connect) {
     RETURN_TRUE;
 }
 
+PHP_METHOD(MyLite_MySQLi, options) {
+    php_mylite_mysqli_link *link = Z_MYLITE_MYSQLI_LINK_P(ZEND_THIS);
+    zend_long option = 0;
+    zval *value = NULL;
+
+    ZEND_PARSE_PARAMETERS_START(2, 2)
+    Z_PARAM_LONG(option)
+    Z_PARAM_ZVAL(value)
+    ZEND_PARSE_PARAMETERS_END();
+
+    RETURN_BOOL(php_mylite_mysqli_options_impl(link, Z_OBJ_P(ZEND_THIS), option, value) == SUCCESS);
+}
+
 PHP_METHOD(MyLite_MySQLi, select_db) {
     php_mylite_mysqli_link *link = Z_MYLITE_MYSQLI_LINK_P(ZEND_THIS);
     char *database = NULL;
@@ -1799,7 +1860,7 @@ PHP_METHOD(MyLite_MySQLiResult, fetch_object) {
 
 PHP_METHOD(MyLite_MySQLiResult, fetch_all) {
     php_mylite_mysqli_result *result = Z_MYLITE_MYSQLI_RESULT_P(ZEND_THIS);
-    zend_long mode = 1;
+    zend_long mode = 2;
 
     ZEND_PARSE_PARAMETERS_START(0, 1)
     Z_PARAM_OPTIONAL
@@ -1962,7 +2023,28 @@ static const zend_function_entry php_mylite_mysqli_functions[] = {
                                                     ZEND_FN(mylite_mysqli_global_symbols_enabled),
                                                     arginfo_mylite_mysqli_global_enabled,
                                                     0
-                                                ) PHP_FE_END
+                                                )
+                                                    ZEND_NS_FENTRY(
+                                                        "MyLite",
+                                                        mysqli_init,
+                                                        ZEND_FN(mylite_namespaced_mysqli_init),
+                                                        arginfo_mylite_namespaced_mysqli_init,
+                                                        0
+                                                    )
+                                                        ZEND_NS_FENTRY(
+                                                            "MyLite",
+                                                            mysqli_options,
+                                                            ZEND_FN(mylite_mysqli_options),
+                                                            arginfo_mylite_mysqli_options,
+                                                            0
+                                                        )
+                                                            ZEND_NS_FENTRY(
+                                                                "MyLite",
+                                                                mysqli_real_connect,
+                                                                ZEND_FN(mylite_mysqli_real_connect),
+                                                                arginfo_mylite_mysqli_real_connect,
+                                                                0
+                                                            ) PHP_FE_END
 };
 
 static const zend_function_entry php_mylite_mysqli_global_functions[] = {
@@ -2077,7 +2159,14 @@ static const zend_function_entry php_mylite_mysqli_global_functions[] = {
                                                                                         mylite_mysqli_stmt_get_result
                                                                                     ),
                                                                                     arginfo_mylite_mysqli_stmt_function
-                                                                                ) PHP_FE_END
+                                                                                )
+                                                                                    ZEND_NAMED_FE(
+                                                                                        mysqli_options,
+                                                                                        ZEND_FN(
+                                                                                            mylite_mysqli_options
+                                                                                        ),
+                                                                                        arginfo_mylite_mysqli_options
+                                                                                    ) PHP_FE_END
 };
 
 static const zend_function_entry php_mylite_mysqli_link_methods[] = {
@@ -2116,7 +2205,13 @@ static const zend_function_entry php_mylite_mysqli_link_methods[] = {
                             real_escape_string,
                             arginfo_mylite_mysqli_escape,
                             ZEND_ACC_PUBLIC
-                        ) PHP_FE_END
+                        )
+                            PHP_ME(
+                                MyLite_MySQLi,
+                                options,
+                                arginfo_mylite_mysqli_method_options,
+                                ZEND_ACC_PUBLIC
+                            ) PHP_FE_END
 };
 
 static const zend_function_entry php_mylite_mysqli_result_methods[] = {
@@ -2177,6 +2272,13 @@ PHP_MINIT_FUNCTION(mysqli_mylite) {
     mylite_embedded_open_perf_set_enabled(php_mylite_mysqli_profile_enabled ? 1 : 0);
     php_mylite_mysqli_prepared_query_results_enabled =
         php_mylite_mysqli_prepared_query_results_env_enabled();
+
+    REGISTER_NS_LONG_CONSTANT(
+        "MyLite",
+        "MYSQLI_OPT_OWNERLESS_RW",
+        PHP_MYLITE_MYSQLI_OPT_OWNERLESS_RW,
+        CONST_CS | CONST_PERSISTENT
+    );
 
     INIT_NS_CLASS_ENTRY(class_entry, "MyLite", "MySQLi", php_mylite_mysqli_link_methods);
     php_mylite_mysqli_link_ce = zend_register_internal_class(&class_entry);
@@ -2257,6 +2359,7 @@ ZEND_GET_MODULE(mysqli_mylite)
 static zend_object *php_mylite_mysqli_link_create(zend_class_entry *class_entry) {
     php_mylite_mysqli_link *link = zend_object_alloc(sizeof(php_mylite_mysqli_link), class_entry);
     link->db = NULL;
+    link->open_flags = MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE;
     link->charset = zend_string_init("utf8mb4", sizeof("utf8mb4") - 1, false);
     link->recent_result_sql = NULL;
     memset(link->query_cache, 0, sizeof(link->query_cache));
@@ -3497,7 +3600,7 @@ static int php_mylite_mysqli_open_link(
         ++php_mylite_mysqli_profile.open_calls;
     }
     const uint64_t open_start = php_mylite_mysqli_profile_start();
-    const int result = mylite_open(path, &db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, NULL);
+    const int result = mylite_open(path, &db, link->open_flags, NULL);
     if (php_mylite_mysqli_profile_enabled) {
         php_mylite_mysqli_profile.open_ns += php_mylite_mysqli_profile_elapsed_ns(open_start);
         if (result == MYLITE_OK) {
@@ -3515,6 +3618,40 @@ static int php_mylite_mysqli_open_link(
     php_mylite_mysqli_clear_connect_error();
     php_mylite_mysqli_clear_error(object);
     php_mylite_mysqli_sync_status(link, object);
+    return SUCCESS;
+}
+
+static int php_mylite_mysqli_options_impl(
+    php_mylite_mysqli_link *link,
+    zend_object *object,
+    zend_long option,
+    zval *value
+) {
+    if (link->db != NULL) {
+        php_mylite_mysqli_set_error(
+            link,
+            object,
+            MYLITE_MISUSE,
+            "MyLite mysqli options must be set before real_connect"
+        );
+        return FAILURE;
+    }
+    if (option != PHP_MYLITE_MYSQLI_OPT_OWNERLESS_RW) {
+        php_mylite_mysqli_set_error(
+            link,
+            object,
+            MYLITE_MISUSE,
+            "unsupported MyLite mysqli option"
+        );
+        return FAILURE;
+    }
+
+    if (zend_is_true(value)) {
+        link->open_flags |= MYLITE_OPEN_OWNERLESS_RW;
+    } else {
+        link->open_flags &= ~MYLITE_OPEN_OWNERLESS_RW;
+    }
+    php_mylite_mysqli_clear_error(object);
     return SUCCESS;
 }
 
@@ -3591,6 +3728,12 @@ static mylite_db *php_mylite_mysqli_require_db(php_mylite_mysqli_link *link) {
 static void php_mylite_mysqli_clear_error(zend_object *object) {
     php_mylite_mysqli_update_property_long_if_changed(object, "errno", sizeof("errno") - 1, 0);
     php_mylite_mysqli_update_property_string_if_changed(object, "error", sizeof("error") - 1, "");
+    php_mylite_mysqli_update_property_string_if_changed(
+        object,
+        "sqlstate",
+        sizeof("sqlstate") - 1,
+        "00000"
+    );
     php_mylite_mysqli_update_property_long_if_changed(
         object,
         "connect_errno",
@@ -3634,6 +3777,10 @@ static void php_mylite_mysqli_set_error(
     if (mariadb_errno == 0U) {
         mariadb_errno = (unsigned)result;
     }
+    const char *sqlstate = link->db != NULL ? mylite_sqlstate(link->db) : "HY000";
+    if (sqlstate == NULL || sqlstate[0] == '\0') {
+        sqlstate = "HY000";
+    }
     zend_update_property_long(
         object->ce,
         object,
@@ -3642,6 +3789,7 @@ static void php_mylite_mysqli_set_error(
         (zend_long)mariadb_errno
     );
     zend_update_property_string(object->ce, object, "error", sizeof("error") - 1, message);
+    zend_update_property_string(object->ce, object, "sqlstate", sizeof("sqlstate") - 1, sqlstate);
     zend_update_property_long(
         object->ce,
         object,
@@ -4550,7 +4698,7 @@ static void php_mylite_mysqli_fetch_array_row(
     zval *return_value
 ) {
     array_init(return_value);
-    if ((mode & 2) != 0) {
+    if ((mode & 1) != 0) {
         zend_string *key = NULL;
         zval *value = NULL;
         ZEND_HASH_FOREACH_STR_KEY_VAL(Z_ARRVAL_P(row), key, value) {
@@ -4561,7 +4709,7 @@ static void php_mylite_mysqli_fetch_array_row(
         }
         ZEND_HASH_FOREACH_END();
     }
-    if ((mode & 1) != 0) {
+    if ((mode & 2) != 0) {
         zval *field = NULL;
         ZEND_HASH_FOREACH_VAL(Z_ARRVAL(result->fields), field) {
             zval name;
@@ -4822,6 +4970,13 @@ static zend_class_entry *php_mylite_mysqli_stmt_class_for_link(zend_object *link
 static void php_mylite_mysqli_declare_link_properties(zend_class_entry *class_entry) {
     zend_declare_property_long(class_entry, "errno", sizeof("errno") - 1, 0, ZEND_ACC_PUBLIC);
     zend_declare_property_string(class_entry, "error", sizeof("error") - 1, "", ZEND_ACC_PUBLIC);
+    zend_declare_property_string(
+        class_entry,
+        "sqlstate",
+        sizeof("sqlstate") - 1,
+        "00000",
+        ZEND_ACC_PUBLIC
+    );
     zend_declare_property_long(
         class_entry,
         "connect_errno",
@@ -4884,8 +5039,8 @@ static void php_mylite_mysqli_register_global_symbols(int module_number) {
 }
 
 static void php_mylite_mysqli_register_global_constants(int module_number) {
-    REGISTER_LONG_CONSTANT("MYSQLI_ASSOC", 2, CONST_CS | CONST_PERSISTENT);
-    REGISTER_LONG_CONSTANT("MYSQLI_NUM", 1, CONST_CS | CONST_PERSISTENT);
+    REGISTER_LONG_CONSTANT("MYSQLI_ASSOC", 1, CONST_CS | CONST_PERSISTENT);
+    REGISTER_LONG_CONSTANT("MYSQLI_NUM", 2, CONST_CS | CONST_PERSISTENT);
     REGISTER_LONG_CONSTANT("MYSQLI_BOTH", 3, CONST_CS | CONST_PERSISTENT);
     REGISTER_LONG_CONSTANT("MYSQLI_STORE_RESULT", 0, CONST_CS | CONST_PERSISTENT);
     REGISTER_LONG_CONSTANT("MYSQLI_USE_RESULT", 1, CONST_CS | CONST_PERSISTENT);
@@ -4894,6 +5049,11 @@ static void php_mylite_mysqli_register_global_constants(int module_number) {
     REGISTER_LONG_CONSTANT("MYSQLI_REPORT_STRICT", 2, CONST_CS | CONST_PERSISTENT);
     REGISTER_LONG_CONSTANT("MYSQLI_REPORT_INDEX", 4, CONST_CS | CONST_PERSISTENT);
     REGISTER_LONG_CONSTANT("MYSQLI_REPORT_ALL", 255, CONST_CS | CONST_PERSISTENT);
+    REGISTER_LONG_CONSTANT(
+        "MYSQLI_OPT_MYLITE_OWNERLESS_RW",
+        PHP_MYLITE_MYSQLI_OPT_OWNERLESS_RW,
+        CONST_CS | CONST_PERSISTENT
+    );
 }
 
 static bool php_mylite_mysqli_is_call_query(const char *sql, size_t sql_len) {

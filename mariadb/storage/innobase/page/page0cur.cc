@@ -1901,6 +1901,9 @@ static inline void page_zip_dir_add_slot(buf_block_t *block,
     ut_ad(!memcmp(dst, field_ref_zero, PAGE_ZIP_CLUST_LEAF_SLOT_SIZE));
     if (const ulint len = ulint(stored - externs))
     {
+      if (UNIV_UNLIKELY(
+              !mtr->ownerless_page_write_prepare_checked(*block)))
+        return;
       memmove(dst, externs, len);
       mtr->memmove(*block, dst - page_zip->data, externs - page_zip->data,
                    len);
@@ -1918,6 +1921,9 @@ static inline void page_zip_dir_add_slot(buf_block_t *block,
   if (const ulint len = ulint(dir - stored))
   {
     byte* dst = stored - PAGE_ZIP_DIR_SLOT_SIZE;
+    if (UNIV_UNLIKELY(
+            !mtr->ownerless_page_write_prepare_checked(*block)))
+      return;
     memmove(dst, stored, len);
     mtr->memmove(*block, dst - page_zip->data, stored - page_zip->data, len);
   }
@@ -2200,6 +2206,8 @@ use_heap:
     static_assert(PAGE_N_HEAP == PAGE_HEAP_TOP + 2, "compatibility");
     mtr->memcpy(*cursor->block, PAGE_HEAP_TOP + PAGE_HEADER, 4);
     page_zip_dir_add_slot(cursor->block, index, mtr);
+    if (UNIV_UNLIKELY(mtr->ownerless_error() != DB_SUCCESS))
+      return nullptr;
   }
 
   /* next record after current before the insertion */
@@ -2290,6 +2298,8 @@ inc_dir:
                       REC_NEW_N_OWNED, REC_N_OWNED_MASK, REC_N_OWNED_SHIFT);
 
   page_zip_dir_insert(cursor, free_rec, insert_rec, mtr);
+  if (UNIV_UNLIKELY(mtr->ownerless_error() != DB_SUCCESS))
+    return nullptr;
 
   /* 8. Now we have incremented the n_owned field of the owner
   record. If the number exceeds PAGE_DIR_SLOT_MAX_N_OWNED,
@@ -2520,6 +2530,8 @@ page_cur_delete_rec(
 				    page_header_get_ptr(block->page.frame,
 							PAGE_FREE),
 				    mtr);
+		if (UNIV_UNLIKELY(mtr->ownerless_error() != DB_SUCCESS))
+			return;
 		if (cur_n_owned <= PAGE_DIR_SLOT_MIN_N_OWNED) {
 			page_zip_dir_balance_slot(block, cur_slot_no, mtr);
 		}

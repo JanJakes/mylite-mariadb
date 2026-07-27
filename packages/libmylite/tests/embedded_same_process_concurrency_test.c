@@ -10,60 +10,22 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 
 #define MYLITE_TEST_REMOVE_TREE_MAX_FDS 32
-#define MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE 2097152
-#define MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_OFFSET 512
-#define MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_HEADER_SIZE 96
-#define MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_COUNT 16
-#define MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_SIZE 128
-#define MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_SIZE                                              \
-    (MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_HEADER_SIZE +                                        \
-     (MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_COUNT * MYLITE_TEST_CONCURRENCY_PROCESS_SLOT_SIZE))
-#define MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_HEADER_SIZE 64
-#define MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_COUNT 16
-#define MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_SIZE 64
-#define MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_SEGMENT_SIZE                                          \
-    (MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_HEADER_SIZE +                                            \
-     (MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_COUNT * MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_SIZE))
-#define MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_OFFSET                                                \
-    (MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_OFFSET +                                             \
-     MYLITE_TEST_CONCURRENCY_PROCESS_REGISTRY_SIZE)
-#define MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_HEADER_SIZE 96
-#define MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_ENTRY_COUNT 128
-#define MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_ENTRY_SIZE 64
-#define MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_SEGMENT_SIZE                                        \
-    (MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_HEADER_SIZE +                                          \
-     (MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_ENTRY_COUNT *                                         \
-      MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_ENTRY_SIZE))
-#define MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_OFFSET                                              \
-    (MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_OFFSET +                                                 \
-     MYLITE_TEST_CONCURRENCY_WAIT_CHANNEL_SEGMENT_SIZE)
-#define MYLITE_TEST_CONCURRENCY_TRX_REGISTRY_HEADER_SIZE 96
-#define MYLITE_TEST_CONCURRENCY_TRX_SLOT_COUNT 64
-#define MYLITE_TEST_CONCURRENCY_TRX_SLOT_SIZE 64
-#define MYLITE_TEST_CONCURRENCY_TRX_REGISTRY_SIZE                                                  \
-    (MYLITE_TEST_CONCURRENCY_TRX_REGISTRY_HEADER_SIZE +                                            \
-     (MYLITE_TEST_CONCURRENCY_TRX_SLOT_COUNT * MYLITE_TEST_CONCURRENCY_TRX_SLOT_SIZE))
-#define MYLITE_TEST_CONCURRENCY_TRX_REGISTRY_OFFSET                                                \
-    (MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_OFFSET +                                               \
-     MYLITE_TEST_CONCURRENCY_MDL_LOCK_TABLE_SEGMENT_SIZE)
-#define MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_OFFSET                                          \
-    (MYLITE_TEST_CONCURRENCY_TRX_REGISTRY_OFFSET + MYLITE_TEST_CONCURRENCY_TRX_REGISTRY_SIZE)
-#define MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_HEADER_SIZE 96
-#define MYLITE_TEST_CONCURRENCY_READ_VIEW_SLOT_COUNT 64
-#define MYLITE_TEST_CONCURRENCY_READ_VIEW_SLOT_SIZE 576
-#define MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_SIZE                                            \
-    (MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_HEADER_SIZE +                                      \
-     (MYLITE_TEST_CONCURRENCY_READ_VIEW_SLOT_COUNT * MYLITE_TEST_CONCURRENCY_READ_VIEW_SLOT_SIZE))
-#define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_OFFSET                                        \
-    (MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_OFFSET +                                           \
-     MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_SIZE)
+#define MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_TABLE_OFFSET 56
+#define MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_COUNT_OFFSET 60
+#define MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_DESCRIPTOR_SIZE 32
+#define MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_TYPE_OFFSET 0
+#define MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_DATA_OFFSET 8
+#define MYLITE_TEST_CONCURRENCY_MDL_SEGMENT_TYPE 3U
+#define MYLITE_TEST_CONCURRENCY_MDL_ACTIVE_COUNT_OFFSET 16
+#define MYLITE_TEST_CONCURRENCY_MDL_WAITING_COUNT_OFFSET 56
+#define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SEGMENT_TYPE 6U
+#define MYLITE_TEST_CONCURRENCY_PAGE_WRITE_LOCK_SEGMENT_TYPE 10U
 #define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_WAITING_COUNT_OFFSET 64
 #define MYLITE_TEST_WAIT_POLL_INTERVAL_US 10000U
 
@@ -83,6 +45,11 @@ typedef struct expected_result {
     int seen_rows;
 } expected_result;
 
+typedef struct mdl_lock_counts {
+    uint64_t active;
+    uint64_t waiting;
+} mdl_lock_counts;
+
 typedef struct open_database_paths {
     const char *database_path;
     const char *runtime_root;
@@ -96,24 +63,49 @@ typedef struct exec_thread_args {
     int close_result;
 } exec_thread_args;
 
+typedef struct overlap_barrier {
+    pthread_mutex_t mutex;
+    pthread_cond_t condition;
+    unsigned arrived;
+} overlap_barrier;
+
+typedef struct overlap_thread_args {
+    open_database_paths paths;
+    overlap_barrier *barrier;
+    int row_id;
+    int update_result;
+    unsigned mariadb_errno;
+    int transaction_result;
+    int close_result;
+} overlap_thread_args;
+
 static void test_committed_rows_are_visible_across_handles(void);
 static void test_active_transactions_can_write_different_rows(void);
+static void test_ownerless_different_leaf_pages_overlap(void);
 static void test_lock_wait_timeout_between_handles(void);
 static void test_innodb_wait_registry_tracks_local_waits(void);
 static void test_metadata_lock_timeout_between_handles(void);
+static void test_ownerless_metadata_lock_timeout_between_handles(void);
 static void test_savepoints_and_foreign_keys_across_handles(void);
 static void create_database_schema(mylite_db *db);
 static mylite_db *open_database(open_database_paths paths, unsigned flags);
 static void exec_ok(mylite_db *db, const char *sql);
 static void expect_exec_error(mylite_db *db, const char *sql, unsigned mariadb_errno);
 static void *execute_sql_in_thread(void *ctx);
-static uint64_t wait_for_innodb_lock_waiting_count(
+static void *execute_overlapping_update_in_thread(void *ctx);
+static void populate_wide_items(mylite_db *db, unsigned rows);
+static uint64_t wait_for_ownerless_write_waiting_count(
     const char *database_path,
     uint64_t expected_minimum,
     unsigned timeout_ms
 );
 static void sleep_microseconds(unsigned microseconds);
-static uint64_t read_innodb_lock_waiting_count(const char *database_path);
+static uint64_t read_ownerless_write_waiting_count(const char *database_path);
+static uint64_t read_lock_waiting_count(const char *database_path, uint32_t segment_type);
+static mdl_lock_counts read_mdl_lock_counts(const char *database_path);
+static uint64_t read_concurrency_shm_segment_offset(int fd, uint32_t segment_type);
+static void read_exact_at(int fd, void *buffer, size_t size, off_t offset);
+static uint64_t monotonic_milliseconds(void);
 static void query_expect(mylite_db *db, expected_query query);
 static int expected_result_callback(
     void *ctx,
@@ -125,6 +117,7 @@ static char *make_temp_root(void);
 static char *path_join(const char *directory, const char *name);
 static int is_directory_empty(const char *path);
 static int path_exists(const char *path);
+static uint32_t read_le32(const unsigned char *bytes);
 static uint64_t read_le64(const unsigned char *bytes);
 static void remove_tree(const char *path);
 static int remove_tree_entry(
@@ -137,9 +130,11 @@ static int remove_tree_entry(
 int main(void) {
     test_committed_rows_are_visible_across_handles();
     test_active_transactions_can_write_different_rows();
+    test_ownerless_different_leaf_pages_overlap();
     test_lock_wait_timeout_between_handles();
     test_innodb_wait_registry_tracks_local_waits();
     test_metadata_lock_timeout_between_handles();
+    test_ownerless_metadata_lock_timeout_between_handles();
     test_savepoints_and_foreign_keys_across_handles();
     return 0;
 }
@@ -238,6 +233,91 @@ static void test_active_transactions_can_write_different_rows(void) {
     free(root);
 }
 
+static void test_ownerless_different_leaf_pages_overlap(void) {
+    static const char *const columns[] = {"id", "value"};
+    static const char *const values[] = {"1", "1", "400", "1"};
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "different-leaf-overlap.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db = NULL;
+    pthread_t first_thread;
+    pthread_t second_thread;
+    overlap_barrier barrier = {
+        .mutex = PTHREAD_MUTEX_INITIALIZER,
+        .condition = PTHREAD_COND_INITIALIZER,
+        .arrived = 0U,
+    };
+    overlap_thread_args first = {
+        .paths = paths,
+        .barrier = &barrier,
+        .row_id = 1,
+        .update_result = MYLITE_ERROR,
+        .mariadb_errno = 0U,
+        .transaction_result = MYLITE_ERROR,
+        .close_result = MYLITE_ERROR,
+    };
+    overlap_thread_args second = {
+        .paths = paths,
+        .barrier = &barrier,
+        .row_id = 400,
+        .update_result = MYLITE_ERROR,
+        .mariadb_errno = 0U,
+        .transaction_result = MYLITE_ERROR,
+        .close_result = MYLITE_ERROR,
+    };
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    db =
+        open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "CREATE DATABASE app");
+    exec_ok(
+        db,
+        "CREATE TABLE app.wide_items ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "padding VARCHAR(3000) NOT NULL"
+        ") ENGINE=InnoDB ROW_FORMAT=COMPACT"
+    );
+    populate_wide_items(db, 400U);
+
+    assert(pthread_create(&first_thread, NULL, execute_overlapping_update_in_thread, &first) == 0);
+    assert(
+        pthread_create(&second_thread, NULL, execute_overlapping_update_in_thread, &second) == 0
+    );
+    assert(pthread_join(first_thread, NULL) == 0);
+    assert(pthread_join(second_thread, NULL) == 0);
+
+    assert(first.update_result == MYLITE_OK);
+    assert(first.mariadb_errno == 0U);
+    assert(first.transaction_result == MYLITE_OK);
+    assert(first.close_result == MYLITE_OK);
+    assert(second.update_result == MYLITE_OK);
+    assert(second.mariadb_errno == 0U);
+    assert(second.transaction_result == MYLITE_OK);
+    assert(second.close_result == MYLITE_OK);
+    query_expect(
+        db,
+        (expected_query){
+            .sql = "SELECT id, value FROM app.wide_items WHERE id IN (1, 400) ORDER BY id",
+            .column_count = 2,
+            .row_count = 2,
+            .column_names = columns,
+            .values = values,
+        }
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(pthread_cond_destroy(&barrier.condition) == 0);
+    assert(pthread_mutex_destroy(&barrier.mutex) == 0);
+    assert(is_directory_empty(runtime_root));
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_lock_wait_timeout_between_handles(void) {
     static const char *const columns[] = {"value"};
     static const char *const old_value[] = {"10"};
@@ -319,14 +399,14 @@ static void test_innodb_wait_registry_tracks_local_waits(void) {
     exec_ok(first, "START TRANSACTION");
     exec_ok(first, "UPDATE app.items SET value = value + 100 WHERE id = 1");
     assert(pthread_create(&update_thread, NULL, execute_sql_in_thread, &args) == 0);
-    assert(wait_for_innodb_lock_waiting_count(database_path, 1U, 5000U) >= 1U);
+    assert(wait_for_ownerless_write_waiting_count(database_path, 1U, 5000U) >= 1U);
 
     exec_ok(first, "ROLLBACK");
     assert(pthread_join(update_thread, NULL) == 0);
     assert(args.result == MYLITE_OK);
     assert(args.mariadb_errno == 0U);
     assert(args.close_result == MYLITE_OK);
-    assert(wait_for_innodb_lock_waiting_count(database_path, 0U, 5000U) == 0U);
+    assert(wait_for_ownerless_write_waiting_count(database_path, 0U, 5000U) == 0U);
     query_expect(
         first,
         (expected_query){
@@ -384,6 +464,114 @@ static void test_metadata_lock_timeout_between_handles(void) {
     exec_ok(second, "UPDATE app.items SET note = 'ok' WHERE id = 1");
 
     assert(mylite_close(second) == MYLITE_OK);
+    assert(mylite_close(first) == MYLITE_OK);
+    assert(is_directory_empty(runtime_root));
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_ownerless_metadata_lock_timeout_between_handles(void) {
+    static const char *const columns[] = {"value", "note"};
+    static const char *const ownerless_values[] = {"11", "ownerless"};
+    static const char *const native_values[] = {"12", "native"};
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-metadata-lock.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *first = NULL;
+    mylite_db *second = NULL;
+    mdl_lock_counts counts;
+    uint64_t start_ms;
+    uint64_t elapsed_ms;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    first =
+        open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE | MYLITE_OPEN_OWNERLESS_RW);
+    create_database_schema(first);
+    exec_ok(first, "INSERT INTO app.items VALUES (1, 10)");
+    second = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+
+    counts = read_mdl_lock_counts(database_path);
+    assert(counts.active == 0U);
+    assert(counts.waiting == 0U);
+    exec_ok(second, "SET SESSION lock_wait_timeout = 1");
+    exec_ok(first, "START TRANSACTION");
+    exec_ok(first, "SELECT * FROM app.items WHERE id = 1 FOR UPDATE");
+    counts = read_mdl_lock_counts(database_path);
+    assert(counts.active > 0U);
+    assert(counts.waiting == 0U);
+
+    start_ms = monotonic_milliseconds();
+    expect_exec_error(second, "ALTER TABLE app.items ADD COLUMN note VARCHAR(32)", 1205U);
+    elapsed_ms = monotonic_milliseconds() - start_ms;
+    assert(elapsed_ms >= 500U);
+    assert(elapsed_ms <= 5000U);
+    counts = read_mdl_lock_counts(database_path);
+    assert(counts.active > 0U);
+    assert(counts.waiting == 0U);
+
+    exec_ok(first, "ROLLBACK");
+    counts = read_mdl_lock_counts(database_path);
+    assert(counts.active == 0U);
+    assert(counts.waiting == 0U);
+    exec_ok(second, "ALTER TABLE app.items ADD COLUMN note VARCHAR(32)");
+    exec_ok(second, "UPDATE app.items SET value = value + 1, note = 'ownerless' WHERE id = 1");
+    query_expect(
+        first,
+        (expected_query){
+            .sql = "SELECT value, note FROM app.items WHERE id = 1",
+            .column_count = 2,
+            .row_count = 1,
+            .column_names = columns,
+            .values = ownerless_values,
+        }
+    );
+    query_expect(
+        second,
+        (expected_query){
+            .sql = "SELECT value, note FROM app.items WHERE id = 1",
+            .column_count = 2,
+            .row_count = 1,
+            .column_names = columns,
+            .values = ownerless_values,
+        }
+    );
+    counts = read_mdl_lock_counts(database_path);
+    assert(counts.active == 0U);
+    assert(counts.waiting == 0U);
+
+    assert(mylite_close(second) == MYLITE_OK);
+    counts = read_mdl_lock_counts(database_path);
+    assert(counts.active == 0U);
+    assert(counts.waiting == 0U);
+    assert(mylite_close(first) == MYLITE_OK);
+    assert(is_directory_empty(runtime_root));
+
+    first = open_database(paths, MYLITE_OPEN_READWRITE);
+    query_expect(
+        first,
+        (expected_query){
+            .sql = "SELECT value, note FROM app.items WHERE id = 1",
+            .column_count = 2,
+            .row_count = 1,
+            .column_names = columns,
+            .values = ownerless_values,
+        }
+    );
+    exec_ok(first, "UPDATE app.items SET value = value + 1, note = 'native' WHERE id = 1");
+    query_expect(
+        first,
+        (expected_query){
+            .sql = "SELECT value, note FROM app.items WHERE id = 1",
+            .column_count = 2,
+            .row_count = 1,
+            .column_names = columns,
+            .values = native_values,
+        }
+    );
     assert(mylite_close(first) == MYLITE_OK);
     assert(is_directory_empty(runtime_root));
 
@@ -491,8 +679,22 @@ static mylite_db *open_database(open_database_paths paths, unsigned flags) {
 
 static void exec_ok(mylite_db *db, const char *sql) {
     char *errmsg = NULL;
+    const int result = mylite_exec(db, sql, NULL, NULL, &errmsg);
 
-    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_OK);
+    if (result != MYLITE_OK) {
+        fprintf(
+            stderr,
+            "SQL failed: %s\nresult=%d errcode=%d mariadb_errno=%u sqlstate=%s message=%s\n",
+            sql,
+            result,
+            mylite_errcode(db),
+            mylite_mariadb_errno(db),
+            mylite_sqlstate(db),
+            errmsg != NULL ? errmsg : mylite_errmsg(db)
+        );
+        mylite_free(errmsg);
+        abort();
+    }
     assert(errmsg == NULL);
 }
 
@@ -520,7 +722,77 @@ static void *execute_sql_in_thread(void *ctx) {
     return NULL;
 }
 
-static uint64_t wait_for_innodb_lock_waiting_count(
+static void *execute_overlapping_update_in_thread(void *ctx) {
+    overlap_thread_args *args = ctx;
+    char sql[160];
+    char *errmsg = NULL;
+    mylite_db *db = open_database(args->paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 2");
+    exec_ok(db, "START TRANSACTION");
+    assert(
+        snprintf(
+            sql,
+            sizeof(sql),
+            "UPDATE app.wide_items SET value = value + 1 WHERE id = %d",
+            args->row_id
+        ) > 0
+    );
+    args->update_result = mylite_exec(db, sql, NULL, NULL, &errmsg);
+    args->mariadb_errno = mylite_mariadb_errno(db);
+    if (errmsg != NULL) {
+        mylite_free(errmsg);
+        errmsg = NULL;
+    }
+
+    assert(pthread_mutex_lock(&args->barrier->mutex) == 0);
+    ++args->barrier->arrived;
+    assert(pthread_cond_broadcast(&args->barrier->condition) == 0);
+    while (args->barrier->arrived < 2U) {
+        assert(pthread_cond_wait(&args->barrier->condition, &args->barrier->mutex) == 0);
+    }
+    assert(pthread_mutex_unlock(&args->barrier->mutex) == 0);
+
+    args->transaction_result = mylite_exec(
+        db,
+        args->update_result == MYLITE_OK ? "COMMIT" : "ROLLBACK",
+        NULL,
+        NULL,
+        &errmsg
+    );
+    if (errmsg != NULL) {
+        mylite_free(errmsg);
+    }
+    args->close_result = mylite_close(db);
+    return NULL;
+}
+
+static void populate_wide_items(mylite_db *db, unsigned rows) {
+    const size_t capacity = 96U + ((size_t)rows * 40U);
+    char *sql = malloc(capacity);
+    size_t offset;
+    int written;
+
+    assert(sql != NULL);
+    written = snprintf(sql, capacity, "INSERT INTO app.wide_items VALUES ");
+    assert(written > 0 && (size_t)written < capacity);
+    offset = (size_t)written;
+    for (unsigned row = 1U; row <= rows; ++row) {
+        written = snprintf(
+            sql + offset,
+            capacity - offset,
+            "%s(%u, 0, REPEAT('x', 3000))",
+            row == 1U ? "" : ",",
+            row
+        );
+        assert(written > 0 && (size_t)written < capacity - offset);
+        offset += (size_t)written;
+    }
+    exec_ok(db, sql);
+    free(sql);
+}
+
+static uint64_t wait_for_ownerless_write_waiting_count(
     const char *database_path,
     uint64_t expected_minimum,
     unsigned timeout_ms
@@ -528,7 +800,7 @@ static uint64_t wait_for_innodb_lock_waiting_count(
     const unsigned iterations = timeout_ms * 1000U / MYLITE_TEST_WAIT_POLL_INTERVAL_US;
 
     for (unsigned iteration = 0U; iteration <= iterations; ++iteration) {
-        const uint64_t waiting_count = read_innodb_lock_waiting_count(database_path);
+        const uint64_t waiting_count = read_ownerless_write_waiting_count(database_path);
         if (expected_minimum == 0U) {
             if (waiting_count == 0U) {
                 return waiting_count;
@@ -538,7 +810,7 @@ static uint64_t wait_for_innodb_lock_waiting_count(
         }
         sleep_microseconds(MYLITE_TEST_WAIT_POLL_INTERVAL_US);
     }
-    return read_innodb_lock_waiting_count(database_path);
+    return read_ownerless_write_waiting_count(database_path);
 }
 
 static void sleep_microseconds(unsigned microseconds) {
@@ -552,25 +824,126 @@ static void sleep_microseconds(unsigned microseconds) {
     }
 }
 
-static uint64_t read_innodb_lock_waiting_count(const char *database_path) {
+static uint64_t read_ownerless_write_waiting_count(const char *database_path) {
+    return read_lock_waiting_count(
+               database_path,
+               MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SEGMENT_TYPE
+           ) +
+           read_lock_waiting_count(
+               database_path,
+               MYLITE_TEST_CONCURRENCY_PAGE_WRITE_LOCK_SEGMENT_TYPE
+           );
+}
+
+static uint64_t read_lock_waiting_count(const char *database_path, uint32_t segment_type) {
     char *concurrency_path = path_join(database_path, "concurrency");
     char *shm_path = path_join(concurrency_path, "mylite-concurrency.shm");
+    unsigned char bytes[8];
     int fd = open(shm_path, O_RDONLY | O_CLOEXEC);
-    const unsigned char *page;
-    uint64_t waiting_count;
+    uint64_t registry_offset;
 
     assert(fd >= 0);
-    page = mmap(NULL, MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE, PROT_READ, MAP_SHARED, fd, 0);
-    assert(page != MAP_FAILED);
-    waiting_count = read_le64(
-        page + MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_OFFSET +
-        MYLITE_TEST_CONCURRENCY_INNODB_LOCK_WAITING_COUNT_OFFSET
+    registry_offset = read_concurrency_shm_segment_offset(fd, segment_type);
+    read_exact_at(
+        fd,
+        bytes,
+        sizeof(bytes),
+        (off_t)(registry_offset + MYLITE_TEST_CONCURRENCY_INNODB_LOCK_WAITING_COUNT_OFFSET)
     );
-    assert(munmap((void *)page, MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE) == 0);
     assert(close(fd) == 0);
     free(shm_path);
     free(concurrency_path);
-    return waiting_count;
+    return read_le64(bytes);
+}
+
+static mdl_lock_counts read_mdl_lock_counts(const char *database_path) {
+    char *concurrency_path = path_join(database_path, "concurrency");
+    char *shm_path = path_join(concurrency_path, "mylite-concurrency.shm");
+    unsigned char bytes[8];
+    int fd = open(shm_path, O_RDONLY | O_CLOEXEC);
+    uint64_t mdl_offset;
+    mdl_lock_counts counts;
+
+    assert(fd >= 0);
+    mdl_offset = read_concurrency_shm_segment_offset(fd, MYLITE_TEST_CONCURRENCY_MDL_SEGMENT_TYPE);
+    read_exact_at(
+        fd,
+        bytes,
+        sizeof(bytes),
+        (off_t)(mdl_offset + MYLITE_TEST_CONCURRENCY_MDL_ACTIVE_COUNT_OFFSET)
+    );
+    counts.active = read_le64(bytes);
+    read_exact_at(
+        fd,
+        bytes,
+        sizeof(bytes),
+        (off_t)(mdl_offset + MYLITE_TEST_CONCURRENCY_MDL_WAITING_COUNT_OFFSET)
+    );
+    counts.waiting = read_le64(bytes);
+    assert(close(fd) == 0);
+    free(shm_path);
+    free(concurrency_path);
+    return counts;
+}
+
+static uint64_t read_concurrency_shm_segment_offset(int fd, uint32_t segment_type) {
+    unsigned char bytes[8];
+    uint64_t segment_table_offset;
+    uint32_t segment_count;
+
+    read_exact_at(fd, bytes, 4U, MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_TABLE_OFFSET);
+    segment_table_offset = read_le32(bytes);
+    read_exact_at(fd, bytes, 4U, MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_COUNT_OFFSET);
+    segment_count = read_le32(bytes);
+
+    for (uint32_t index = 0U; index < segment_count; ++index) {
+        const off_t descriptor_offset =
+            (off_t)(segment_table_offset +
+                    (index * MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_DESCRIPTOR_SIZE));
+        read_exact_at(
+            fd,
+            bytes,
+            4U,
+            descriptor_offset + MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_TYPE_OFFSET
+        );
+        if (read_le32(bytes) != segment_type) {
+            continue;
+        }
+        read_exact_at(
+            fd,
+            bytes,
+            sizeof(bytes),
+            descriptor_offset + MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_DATA_OFFSET
+        );
+        return read_le64(bytes);
+    }
+
+    assert(0);
+    return 0U;
+}
+
+static void read_exact_at(int fd, void *buffer, size_t size, off_t offset) {
+    unsigned char *cursor = buffer;
+    size_t remaining = size;
+
+    while (remaining > 0U) {
+        const ssize_t read_size = pread(fd, cursor, remaining, offset);
+
+        if (read_size < 0 && errno == EINTR) {
+            continue;
+        }
+        assert(read_size > 0);
+        cursor += (size_t)read_size;
+        remaining -= (size_t)read_size;
+        offset += read_size;
+    }
+}
+
+static uint64_t monotonic_milliseconds(void) {
+    struct timespec now;
+
+    assert(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
+    return ((uint64_t)now.tv_sec * 1000U) + ((uint64_t)now.tv_nsec / 1000000U);
 }
 
 static void query_expect(mylite_db *db, expected_query query) {
@@ -650,6 +1023,15 @@ static int path_exists(const char *path) {
     struct stat path_stat;
 
     return stat(path, &path_stat) == 0;
+}
+
+static uint32_t read_le32(const unsigned char *bytes) {
+    uint32_t value = 0U;
+
+    for (unsigned shift = 0U; shift < 32U; shift += 8U) {
+        value |= (uint32_t)*bytes++ << shift;
+    }
+    return value;
 }
 
 static uint64_t read_le64(const unsigned char *bytes) {

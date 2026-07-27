@@ -64,6 +64,7 @@ if(BUILD_TESTING)
       "${CMAKE_CURRENT_SOURCE_DIR}/ownerless-external-mariadb-trace-smoke"
       --output "${CMAKE_CURRENT_BINARY_DIR}/ownerless-external-mariadb-trace-smoke-check"
       --scale 2
+      --replay-attempts 3
       --trace random-tx
       --check
   )

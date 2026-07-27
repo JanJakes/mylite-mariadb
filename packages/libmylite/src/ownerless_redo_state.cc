@@ -1,6 +1,7 @@
 #include "ownerless_redo_state.h"
 
 #include "ownerless_latch.h"
+#include "ownerless_process_registry.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -88,14 +89,6 @@ std::uint32_t load32(const void *state, std::size_t offset);
 void store64(void *state, std::size_t offset, std::uint64_t value);
 void store32(void *state, std::size_t offset, std::uint32_t value);
 std::uint64_t entry_lsn(const void *state);
-bool reserve_range64(
-    void *state,
-    std::size_t offset,
-    std::uint64_t minimum_start,
-    std::uint64_t length,
-    std::uint64_t *out_start,
-    std::uint64_t *out_end
-);
 int acquire_progress_latch(void *state, std::uint32_t owner_id, std::uint64_t owner_generation);
 int acquire_progress_latch(
     void *state,
@@ -162,6 +155,12 @@ int clear_owner_entry_slots_guarded(
     std::uint64_t owner_generation
 );
 void clear_owner_entry_slots(void *state, std::uint32_t owner_id, std::uint64_t owner_generation);
+bool repair_progress_state_locked(void *state);
+bool owner_has_incomplete_reservation(
+    const void *state,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation
+);
 std::uint32_t active_reservation_count(const void *state);
 std::uint32_t completed_range_count(const void *state);
 std::uint32_t owner_active_state_count(const void *state, std::uint32_t owner_id);
@@ -180,7 +179,15 @@ std::uint64_t drain_completed_ranges(void *state, std::uint64_t written_lsn);
 bool range_is_contiguous(std::uint64_t start_lsn, std::uint64_t written_lsn);
 std::size_t completed_range_slot_offset(std::uint32_t slot_index);
 std::uint64_t fetch_max64(void *state, std::size_t offset, std::uint64_t value);
+bool increment_visible_generation(void *state);
 int latch_result_to_redo_state_result(int latch_result);
+int finish_latch_operation(
+    mylite_ownerless_latch *latch,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
+    int operation_result,
+    bool operation_applied
+);
 
 } // namespace
 
@@ -310,33 +317,45 @@ int mylite_ownerless_redo_state_reserve(
 
     unsigned char *slot = find_free_active_reservation_slot(state);
     if (slot == nullptr) {
-        static_cast<void>(
-            mylite_ownerless_latch_release(progress_latch(state), owner_id, owner_generation)
+        return finish_latch_operation(
+            progress_latch(state),
+            owner_id,
+            owner_generation,
+            MYLITE_OWNERLESS_REDO_STATE_ERROR,
+            false
         );
-        return MYLITE_OWNERLESS_REDO_STATE_ERROR;
     }
-    if (!reserve_range64(
-            state,
-            k_reserved_lsn_offset,
-            minimum_start_lsn,
-            length,
-            out_start_lsn,
-            out_end_lsn
-        )) {
-        static_cast<void>(
-            mylite_ownerless_latch_release(progress_latch(state), owner_id, owner_generation)
+    const std::uint64_t reserved_lsn = load64(state, k_reserved_lsn_offset);
+    const std::uint64_t start_lsn = std::max(reserved_lsn, minimum_start_lsn);
+    if (length > std::numeric_limits<std::uint64_t>::max() - start_lsn) {
+        return finish_latch_operation(
+            progress_latch(state),
+            owner_id,
+            owner_generation,
+            MYLITE_OWNERLESS_REDO_STATE_ERROR,
+            false
         );
-        *out_start_lsn = 0U;
-        *out_end_lsn = 0U;
-        return MYLITE_OWNERLESS_REDO_STATE_ERROR;
     }
-    reserve_active_range(state, slot, owner_id, owner_generation, *out_start_lsn, *out_end_lsn);
+    const std::uint64_t end_lsn = start_lsn + length;
+    /*
+     * Publish the reservation record before advancing the allocator. Recovery
+     * can raise reserved_lsn from this record; the opposite order leaves an
+     * ownerless gap with no evidence describing it.
+     */
+    reserve_active_range(state, slot, owner_id, owner_generation, start_lsn, end_lsn);
+    fetch_max64(state, k_reserved_lsn_offset, end_lsn);
+    *out_start_lsn = start_lsn;
+    *out_end_lsn = end_lsn;
     if (*out_start_lsn != 0U && load64(state, k_written_lsn_offset) == 0U) {
         store64(state, k_written_lsn_offset, *out_start_lsn);
     }
-    const int release_result =
-        mylite_ownerless_latch_release(progress_latch(state), owner_id, owner_generation);
-    return latch_result_to_redo_state_result(release_result);
+    return finish_latch_operation(
+        progress_latch(state),
+        owner_id,
+        owner_generation,
+        MYLITE_OWNERLESS_REDO_STATE_OK,
+        true
+    );
 }
 
 int mylite_ownerless_redo_state_complete_write(
@@ -370,12 +389,13 @@ int mylite_ownerless_redo_state_complete_write(
         out_written_lsn
     );
 
-    const int release_result =
-        mylite_ownerless_latch_release(progress_latch(state), owner_id, owner_generation);
-    if (release_result != MYLITE_OWNERLESS_LATCH_OK) {
-        return latch_result_to_redo_state_result(release_result);
-    }
-    return result;
+    return finish_latch_operation(
+        progress_latch(state),
+        owner_id,
+        owner_generation,
+        result,
+        result == MYLITE_OWNERLESS_REDO_STATE_OK
+    );
 }
 
 int mylite_ownerless_redo_state_complete_write_and_leave(
@@ -428,12 +448,13 @@ int mylite_ownerless_redo_state_complete_write_and_leave(
         );
     }
 
-    const int release_result =
-        mylite_ownerless_latch_release(progress_latch(state), owner_id, owner_generation);
-    if (release_result != MYLITE_OWNERLESS_LATCH_OK) {
-        return latch_result_to_redo_state_result(release_result);
-    }
-    return result;
+    return finish_latch_operation(
+        progress_latch(state),
+        owner_id,
+        owner_generation,
+        result,
+        result == MYLITE_OWNERLESS_REDO_STATE_OK
+    );
 }
 
 int mylite_ownerless_redo_state_complete_write_and_leave_batch(
@@ -525,12 +546,13 @@ int mylite_ownerless_redo_state_complete_write_and_leave_batch(
         *out_completed_count = completed_count;
     }
 
-    const int release_result =
-        mylite_ownerless_latch_release(progress_latch(state), owner_id, owner_generation);
-    if (release_result != MYLITE_OWNERLESS_LATCH_OK) {
-        return latch_result_to_redo_state_result(release_result);
-    }
-    return result;
+    return finish_latch_operation(
+        progress_latch(state),
+        owner_id,
+        owner_generation,
+        result,
+        completed_count > 0U
+    );
 }
 
 int mylite_ownerless_redo_state_publish_visible(
@@ -554,17 +576,15 @@ int mylite_ownerless_redo_state_publish_visible(
         }
         return MYLITE_OWNERLESS_REDO_STATE_OK;
     }
+    if (!increment_visible_generation(state)) {
+        return MYLITE_OWNERLESS_REDO_STATE_ERROR;
+    }
 
     const std::uint64_t safe_visible_lsn = std::min(visible_lsn, written_lsn);
     const std::uint64_t latest_lsn = fetch_max64(state, k_latest_lsn_offset, safe_visible_lsn);
     const std::uint64_t published_visible_lsn =
         fetch_max64(state, k_visible_lsn_offset, safe_visible_lsn);
     fetch_max64(state, k_durable_lsn_offset, published_visible_lsn);
-    fetch_max64(state, k_visible_generation_offset, 1U);
-    auto *visible_generation = reinterpret_cast<std::uint64_t *>(
-        static_cast<unsigned char *>(state) + k_visible_generation_offset
-    );
-    __atomic_add_fetch(visible_generation, 1U, __ATOMIC_ACQ_REL);
     if (out_latest_lsn != nullptr) {
         *out_latest_lsn = latest_lsn;
     }
@@ -603,13 +623,193 @@ int mylite_ownerless_redo_state_cleanup_owner(
     if (clear_result != MYLITE_OWNERLESS_REDO_STATE_OK) {
         return clear_result;
     }
-    store32(state, k_refcount_offset, 0U);
-    const int release_result =
-        mylite_ownerless_latch_release(state_latch(state), owner_id, owner_generation);
-    if (release_result == MYLITE_OWNERLESS_LATCH_OK && out_released != nullptr) {
+    if (out_released != nullptr) {
         *out_released = 1U;
     }
-    return latch_result_to_redo_state_result(release_result);
+    return finish_latch_operation(
+        state_latch(state),
+        owner_id,
+        owner_generation,
+        MYLITE_OWNERLESS_REDO_STATE_OK,
+        true
+    );
+}
+
+int mylite_ownerless_redo_state_cleanup_owner_with_latch_owner(
+    void *state,
+    std::size_t state_size,
+    std::uint32_t dead_owner_id,
+    std::uint64_t dead_owner_generation,
+    std::uint32_t latch_owner_id,
+    std::uint64_t latch_owner_generation,
+    std::uint32_t *out_released
+) {
+    if (!state_valid(state, state_size) || dead_owner_id == 0U || dead_owner_generation == 0U ||
+        latch_owner_id == 0U || latch_owner_generation == 0U) {
+        return MYLITE_OWNERLESS_REDO_STATE_ERROR;
+    }
+    if (out_released != nullptr) {
+        *out_released = 0U;
+    }
+
+    const int latch_result = acquire_progress_latch(state, latch_owner_id, latch_owner_generation);
+    if (latch_result != MYLITE_OWNERLESS_LATCH_OK) {
+        return latch_result_to_redo_state_result(latch_result);
+    }
+    const std::uint32_t before = owner_active_state_count(state, dead_owner_id);
+    clear_owner_entry_slots(state, dead_owner_id, dead_owner_generation);
+    const bool incomplete =
+        owner_has_incomplete_reservation(state, dead_owner_id, dead_owner_generation);
+    const std::uint32_t after = owner_active_state_count(state, dead_owner_id);
+    if (out_released != nullptr) {
+        *out_released = before - after;
+    }
+    return finish_latch_operation(
+        progress_latch(state),
+        latch_owner_id,
+        latch_owner_generation,
+        incomplete ? MYLITE_OWNERLESS_REDO_STATE_OWNER_DEAD : MYLITE_OWNERLESS_REDO_STATE_OK,
+        before != after
+    );
+}
+
+int mylite_ownerless_redo_state_recover_dead_latches(
+    void *state,
+    std::size_t state_size,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
+    const mylite_ownerless_process_registry_liveness_context *liveness
+) {
+    if (!state_valid(state, state_size) || owner_id == 0U || owner_generation == 0U ||
+        liveness == nullptr) {
+        return MYLITE_OWNERLESS_REDO_STATE_ERROR;
+    }
+
+    mylite_ownerless_latch_dead_owner dead_owner = {};
+    int latch_result = mylite_ownerless_latch_acquire_recoverable(
+        state_latch(state),
+        owner_id,
+        owner_generation,
+        mylite_ownerless_process_registry_latch_owner_is_alive,
+        const_cast<mylite_ownerless_process_registry_liveness_context *>(liveness),
+        k_progress_latch_timeout_ms,
+        &dead_owner
+    );
+    if (latch_result == MYLITE_OWNERLESS_LATCH_RECOVERY_REQUIRED) {
+        /* The legacy outer latch has no current protected mutations. */
+        if (mylite_ownerless_latch_mark_consistent(
+                state_latch(state),
+                owner_id,
+                owner_generation
+            ) != MYLITE_OWNERLESS_LATCH_OK) {
+            return MYLITE_OWNERLESS_REDO_STATE_ERROR;
+        }
+    } else if (latch_result != MYLITE_OWNERLESS_LATCH_OK) {
+        return latch_result_to_redo_state_result(latch_result);
+    }
+    const int state_release_result = finish_latch_operation(
+        state_latch(state),
+        owner_id,
+        owner_generation,
+        MYLITE_OWNERLESS_REDO_STATE_OK,
+        latch_result == MYLITE_OWNERLESS_LATCH_RECOVERY_REQUIRED
+    );
+    if (state_release_result != MYLITE_OWNERLESS_REDO_STATE_OK) {
+        return state_release_result;
+    }
+
+    dead_owner = {};
+    latch_result = mylite_ownerless_latch_acquire_recoverable(
+        progress_latch(state),
+        owner_id,
+        owner_generation,
+        mylite_ownerless_process_registry_latch_owner_is_alive,
+        const_cast<mylite_ownerless_process_registry_liveness_context *>(liveness),
+        k_progress_latch_timeout_ms,
+        &dead_owner
+    );
+    bool owner_coordination_required = false;
+    if (latch_result == MYLITE_OWNERLESS_LATCH_RECOVERY_REQUIRED) {
+        if (!repair_progress_state_locked(state)) {
+            static_cast<void>(mylite_ownerless_latch_mark_not_recoverable(
+                progress_latch(state),
+                owner_id,
+                owner_generation
+            ));
+            return MYLITE_OWNERLESS_REDO_STATE_OWNER_DEAD;
+        }
+        /* The latch generation can be zero/stale in a dead publication window. */
+        owner_coordination_required =
+            owner_has_incomplete_reservation(state, dead_owner.owner_id, 0U);
+        if (mylite_ownerless_latch_mark_consistent(
+                progress_latch(state),
+                owner_id,
+                owner_generation
+            ) != MYLITE_OWNERLESS_LATCH_OK) {
+            return MYLITE_OWNERLESS_REDO_STATE_ERROR;
+        }
+    } else if (latch_result != MYLITE_OWNERLESS_LATCH_OK) {
+        return latch_result_to_redo_state_result(latch_result);
+    }
+    return finish_latch_operation(
+        progress_latch(state),
+        owner_id,
+        owner_generation,
+        owner_coordination_required ? MYLITE_OWNERLESS_REDO_STATE_OWNER_DEAD
+                                    : MYLITE_OWNERLESS_REDO_STATE_OK,
+        latch_result == MYLITE_OWNERLESS_LATCH_RECOVERY_REQUIRED
+    );
+}
+
+int mylite_ownerless_redo_state_finish_pending_progress_release(
+    void *state,
+    std::size_t state_size,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation
+) {
+    if (!state_valid(state, state_size) || owner_id == 0U || owner_generation == 0U) {
+        return MYLITE_OWNERLESS_REDO_STATE_ERROR;
+    }
+    const int latch_result = acquire_progress_latch(state, owner_id, owner_generation);
+    if (latch_result != MYLITE_OWNERLESS_LATCH_OK) {
+        return latch_result_to_redo_state_result(latch_result);
+    }
+    return finish_latch_operation(
+        progress_latch(state),
+        owner_id,
+        owner_generation,
+        MYLITE_OWNERLESS_REDO_STATE_OK,
+        false
+    );
+}
+
+int mylite_ownerless_redo_state_finish_pending_state_release(
+    void *state,
+    std::size_t state_size,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation
+) {
+    if (!state_valid(state, state_size) || owner_id == 0U || owner_generation == 0U) {
+        return MYLITE_OWNERLESS_REDO_STATE_ERROR;
+    }
+    const int latch_result = mylite_ownerless_latch_acquire(
+        state_latch(state),
+        owner_id,
+        owner_generation,
+        nullptr,
+        nullptr,
+        k_progress_latch_timeout_ms
+    );
+    if (latch_result != MYLITE_OWNERLESS_LATCH_OK) {
+        return latch_result_to_redo_state_result(latch_result);
+    }
+    return finish_latch_operation(
+        state_latch(state),
+        owner_id,
+        owner_generation,
+        MYLITE_OWNERLESS_REDO_STATE_OK,
+        false
+    );
 }
 
 int mylite_ownerless_redo_state_owner_active_count(
@@ -725,37 +925,6 @@ std::uint64_t entry_lsn(const void *state) {
     return std::max(load64(state, k_latest_lsn_offset), load64(state, k_reserved_lsn_offset));
 }
 
-bool reserve_range64(
-    void *state,
-    std::size_t offset,
-    std::uint64_t minimum_start,
-    std::uint64_t length,
-    std::uint64_t *out_start,
-    std::uint64_t *out_end
-) {
-    auto *target = reinterpret_cast<std::uint64_t *>(static_cast<unsigned char *>(state) + offset);
-    std::uint64_t observed = __atomic_load_n(target, __ATOMIC_ACQUIRE);
-    for (;;) {
-        const std::uint64_t start = std::max(observed, minimum_start);
-        if (length > std::numeric_limits<std::uint64_t>::max() - start) {
-            return false;
-        }
-        const std::uint64_t end = start + length;
-        if (__atomic_compare_exchange_n(
-                target,
-                &observed,
-                end,
-                false,
-                __ATOMIC_ACQ_REL,
-                __ATOMIC_ACQUIRE
-            )) {
-            *out_start = start;
-            *out_end = end;
-            return true;
-        }
-    }
-}
-
 int acquire_progress_latch(void *state, std::uint32_t owner_id, std::uint64_t owner_generation) {
     return acquire_progress_latch(state, owner_id, owner_generation, k_progress_latch_timeout_ms);
 }
@@ -847,45 +1016,59 @@ int enter_active_owner(
     }
 
     unsigned char *slot = find_active_entry_slot(state, owner_id, owner_generation);
+    bool new_slot = false;
     if (slot == nullptr) {
         slot = find_free_active_reservation_slot(state);
-        if (slot != nullptr) {
-            store64(slot, k_active_entry_slot_refcount_offset, 0U);
-            store64(slot, k_active_reservation_slot_owner_generation_offset, owner_generation);
-            store32(slot, k_active_reservation_slot_owner_id_offset, owner_id);
-            store32(
-                slot,
-                k_active_reservation_slot_state_offset,
-                k_active_reservation_slot_state_entry
-            );
-        }
+        new_slot = slot != nullptr;
     }
     if (slot == nullptr) {
-        static_cast<void>(
-            mylite_ownerless_latch_release(progress_latch(state), owner_id, owner_generation)
+        return finish_latch_operation(
+            progress_latch(state),
+            owner_id,
+            owner_generation,
+            MYLITE_OWNERLESS_REDO_STATE_ERROR,
+            false
         );
-        return MYLITE_OWNERLESS_REDO_STATE_ERROR;
     }
 
-    const std::uint64_t refcount = load64(slot, k_active_entry_slot_refcount_offset);
+    const std::uint64_t refcount =
+        new_slot ? 0U : load64(slot, k_active_entry_slot_refcount_offset);
     const std::uint32_t global_refcount = load32(state, k_refcount_offset);
     if (refcount == std::numeric_limits<std::uint64_t>::max() ||
         global_refcount == std::numeric_limits<std::uint32_t>::max()) {
-        static_cast<void>(
-            mylite_ownerless_latch_release(progress_latch(state), owner_id, owner_generation)
+        return finish_latch_operation(
+            progress_latch(state),
+            owner_id,
+            owner_generation,
+            MYLITE_OWNERLESS_REDO_STATE_ERROR,
+            false
         );
-        return MYLITE_OWNERLESS_REDO_STATE_ERROR;
     }
     store64(slot, k_active_entry_slot_refcount_offset, refcount + 1U);
+    if (new_slot) {
+        store64(slot, k_active_reservation_slot_owner_generation_offset, owner_generation);
+        store32(slot, k_active_reservation_slot_owner_id_offset, owner_id);
+    }
     __atomic_add_fetch(
         reinterpret_cast<std::uint32_t *>(static_cast<unsigned char *>(state) + k_refcount_offset),
         1U,
         __ATOMIC_ACQ_REL
     );
+    if (new_slot) {
+        store32(
+            slot,
+            k_active_reservation_slot_state_offset,
+            k_active_reservation_slot_state_entry
+        );
+    }
 
-    const int release_result =
-        mylite_ownerless_latch_release(progress_latch(state), owner_id, owner_generation);
-    return latch_result_to_redo_state_result(release_result);
+    return finish_latch_operation(
+        progress_latch(state),
+        owner_id,
+        owner_generation,
+        MYLITE_OWNERLESS_REDO_STATE_OK,
+        true
+    );
 }
 
 int leave_active_owner(
@@ -910,12 +1093,13 @@ int leave_active_owner(
         out_remaining
     );
 
-    const int release_result =
-        mylite_ownerless_latch_release(progress_latch(state), owner_id, owner_generation);
-    if (release_result != MYLITE_OWNERLESS_LATCH_OK) {
-        return latch_result_to_redo_state_result(release_result);
-    }
-    return result;
+    return finish_latch_operation(
+        progress_latch(state),
+        owner_id,
+        owner_generation,
+        result,
+        result == MYLITE_OWNERLESS_REDO_STATE_OK
+    );
 }
 
 int leave_active_owner_locked(
@@ -1017,16 +1201,17 @@ void reserve_active_range(
     store64(slot, k_active_reservation_slot_start_offset, start_lsn);
     store64(slot, k_active_reservation_slot_owner_generation_offset, owner_generation);
     store32(slot, k_active_reservation_slot_owner_id_offset, owner_id);
-    store32(slot, k_active_reservation_slot_state_offset, k_active_reservation_slot_state_active);
     increment_active_reservation_count(state);
+    store32(slot, k_active_reservation_slot_state_offset, k_active_reservation_slot_state_active);
 }
 
 void clear_active_reservation_slot(void *state, unsigned char *slot) {
-    if (load32(slot, k_active_reservation_slot_state_offset) ==
-        k_active_reservation_slot_state_active) {
+    const bool was_active = load32(slot, k_active_reservation_slot_state_offset) ==
+                            k_active_reservation_slot_state_active;
+    clear_redo_state_slot(slot);
+    if (was_active) {
         decrement_active_reservation_count(state);
     }
-    clear_redo_state_slot(slot);
 }
 
 void clear_redo_state_slot(unsigned char *slot) {
@@ -1047,17 +1232,24 @@ int clear_owner_entry_slots_guarded(
         return latch_result_to_redo_state_result(latch_result);
     }
 
+    const std::uint32_t before = owner_active_state_count(state, owner_id);
     clear_owner_entry_slots(state, owner_id, owner_generation);
+    const std::uint32_t after = owner_active_state_count(state, owner_id);
 
-    const int release_result =
-        mylite_ownerless_latch_release(progress_latch(state), owner_id, owner_generation);
-    return latch_result_to_redo_state_result(release_result);
+    return finish_latch_operation(
+        progress_latch(state),
+        owner_id,
+        owner_generation,
+        MYLITE_OWNERLESS_REDO_STATE_OK,
+        before != after
+    );
 }
 
 void clear_owner_entry_slots(void *state, std::uint32_t owner_id, std::uint64_t owner_generation) {
     while (unsigned char *slot = find_active_entry_slot(state, owner_id, owner_generation)) {
         const std::uint64_t owner_refcount = load64(slot, k_active_entry_slot_refcount_offset);
         const std::uint32_t global_refcount = load32(state, k_refcount_offset);
+        clear_redo_state_slot(slot);
         store32(
             state,
             k_refcount_offset,
@@ -1065,8 +1257,125 @@ void clear_owner_entry_slots(void *state, std::uint32_t owner_id, std::uint64_t 
                 ? 0U
                 : static_cast<std::uint32_t>(global_refcount - owner_refcount)
         );
-        clear_redo_state_slot(slot);
     }
+}
+
+bool repair_progress_state_locked(void *state) {
+    auto *bytes = static_cast<unsigned char *>(state);
+    std::uint64_t maximum_reserved_lsn = load64(state, k_reserved_lsn_offset);
+    std::uint64_t total_refcount = 0U;
+
+    for (std::uint32_t slot_index = 0; slot_index < k_active_reservation_slot_count; ++slot_index) {
+        unsigned char *slot =
+            bytes + k_active_reservation_slots_offset +
+            (static_cast<std::size_t>(slot_index) * k_active_reservation_slot_size);
+        const std::uint32_t slot_state = load32(slot, k_active_reservation_slot_state_offset);
+        if (slot_state == k_active_reservation_slot_state_free) {
+            continue;
+        }
+        const std::uint32_t slot_owner_id = load32(slot, k_active_reservation_slot_owner_id_offset);
+        const std::uint64_t slot_owner_generation =
+            load64(slot, k_active_reservation_slot_owner_generation_offset);
+        if (slot_owner_id == 0U || slot_owner_generation == 0U) {
+            return false;
+        }
+        if (slot_state == k_active_reservation_slot_state_active) {
+            const std::uint64_t start_lsn = load64(slot, k_active_reservation_slot_start_offset);
+            const std::uint64_t end_lsn = load64(slot, k_active_reservation_slot_end_offset);
+            if (start_lsn == 0U || end_lsn <= start_lsn) {
+                return false;
+            }
+            maximum_reserved_lsn = std::max(maximum_reserved_lsn, end_lsn);
+            continue;
+        }
+        if (slot_state != k_active_reservation_slot_state_entry) {
+            return false;
+        }
+        const std::uint64_t owner_refcount = load64(slot, k_active_entry_slot_refcount_offset);
+        if (owner_refcount == 0U ||
+            owner_refcount > std::numeric_limits<std::uint32_t>::max() - total_refcount) {
+            return false;
+        }
+        total_refcount += owner_refcount;
+    }
+
+    std::uint32_t completed_count = 0U;
+    const std::uint64_t initial_written_lsn = load64(state, k_written_lsn_offset);
+    for (std::uint32_t slot_index = 0; slot_index < k_completed_range_slot_count; ++slot_index) {
+        const std::size_t slot_offset = completed_range_slot_offset(slot_index);
+        const std::uint64_t start_lsn =
+            load64(state, slot_offset + k_completed_range_slot_start_offset);
+        if (start_lsn == 0U) {
+            store64(state, slot_offset + k_completed_range_slot_end_offset, 0U);
+            continue;
+        }
+        const std::uint64_t end_lsn =
+            load64(state, slot_offset + k_completed_range_slot_end_offset);
+        if (end_lsn <= start_lsn) {
+            return false;
+        }
+        if (end_lsn <= initial_written_lsn) {
+            store64(state, slot_offset + k_completed_range_slot_start_offset, 0U);
+            store64(state, slot_offset + k_completed_range_slot_end_offset, 0U);
+            continue;
+        }
+        ++completed_count;
+    }
+
+    store64(state, k_reserved_lsn_offset, maximum_reserved_lsn);
+    store32(state, k_refcount_offset, static_cast<std::uint32_t>(total_refcount));
+    store32(state, k_completed_range_count_offset, completed_count);
+    static_cast<void>(drain_completed_ranges(state, initial_written_lsn));
+
+    const std::uint64_t repaired_written_lsn = load64(state, k_written_lsn_offset);
+    std::uint32_t active_reservations = 0U;
+    for (std::uint32_t slot_index = 0; slot_index < k_active_reservation_slot_count; ++slot_index) {
+        unsigned char *slot =
+            bytes + k_active_reservation_slots_offset +
+            (static_cast<std::size_t>(slot_index) * k_active_reservation_slot_size);
+        if (load32(slot, k_active_reservation_slot_state_offset) !=
+            k_active_reservation_slot_state_active) {
+            continue;
+        }
+        if (load64(slot, k_active_reservation_slot_end_offset) <= repaired_written_lsn) {
+            clear_redo_state_slot(slot);
+            continue;
+        }
+        ++active_reservations;
+    }
+    completed_count = 0U;
+    for (std::uint32_t slot_index = 0; slot_index < k_completed_range_slot_count; ++slot_index) {
+        if (load64(
+                state,
+                completed_range_slot_offset(slot_index) + k_completed_range_slot_start_offset
+            ) != 0U) {
+            ++completed_count;
+        }
+    }
+    store32(state, k_active_reservation_count_offset, active_reservations);
+    store32(state, k_completed_range_count_offset, completed_count);
+    return true;
+}
+
+bool owner_has_incomplete_reservation(
+    const void *state,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation
+) {
+    const auto *bytes = static_cast<const unsigned char *>(state);
+    for (std::uint32_t slot_index = 0; slot_index < k_active_reservation_slot_count; ++slot_index) {
+        const unsigned char *slot =
+            bytes + k_active_reservation_slots_offset +
+            (static_cast<std::size_t>(slot_index) * k_active_reservation_slot_size);
+        if (load32(slot, k_active_reservation_slot_state_offset) ==
+                k_active_reservation_slot_state_active &&
+            load32(slot, k_active_reservation_slot_owner_id_offset) == owner_id &&
+            (owner_generation == 0U ||
+             load64(slot, k_active_reservation_slot_owner_generation_offset) == owner_generation)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 std::uint32_t active_reservation_count(const void *state) {
@@ -1126,8 +1435,9 @@ void decrement_completed_range_count(void *state) {
 bool record_completed_range(void *state, std::uint64_t start_lsn, std::uint64_t end_lsn) {
     std::uint64_t merged_start_lsn = start_lsn;
     std::uint64_t merged_end_lsn = end_lsn;
-    for (;;) {
-        bool merged = false;
+    bool expanded = true;
+    while (expanded) {
+        expanded = false;
         for (std::uint32_t slot_index = 0; slot_index < k_completed_range_slot_count;
              ++slot_index) {
             const std::size_t slot_offset = completed_range_slot_offset(slot_index);
@@ -1146,30 +1456,56 @@ bool record_completed_range(void *state, std::uint64_t start_lsn, std::uint64_t 
                 )) {
                 continue;
             }
-
-            merged_start_lsn = std::min(merged_start_lsn, slot_start_lsn);
-            merged_end_lsn = std::max(merged_end_lsn, slot_end_lsn);
-            store64(state, slot_offset + k_completed_range_slot_end_offset, 0U);
-            store64(state, slot_offset + k_completed_range_slot_start_offset, 0U);
-            decrement_completed_range_count(state);
-            merged = true;
+            const std::uint64_t next_start = std::min(merged_start_lsn, slot_start_lsn);
+            const std::uint64_t next_end = std::max(merged_end_lsn, slot_end_lsn);
+            expanded = expanded || next_start != merged_start_lsn || next_end != merged_end_lsn;
+            merged_start_lsn = next_start;
+            merged_end_lsn = next_end;
         }
-        if (!merged) {
+    }
+
+    std::size_t publication_offset = MYLITE_OWNERLESS_REDO_STATE_SIZE;
+    for (std::uint32_t slot_index = 0; slot_index < k_completed_range_slot_count; ++slot_index) {
+        const std::size_t slot_offset = completed_range_slot_offset(slot_index);
+        if (load64(state, slot_offset + k_completed_range_slot_start_offset) == 0U) {
+            publication_offset = slot_offset;
             break;
         }
     }
+    if (publication_offset == MYLITE_OWNERLESS_REDO_STATE_SIZE) {
+        return false;
+    }
+
+    /* Publish the replacement first. A crash can leave duplicates, never a hole. */
+    store64(state, publication_offset + k_completed_range_slot_end_offset, merged_end_lsn);
+    increment_completed_range_count(state);
+    store64(state, publication_offset + k_completed_range_slot_start_offset, merged_start_lsn);
 
     for (std::uint32_t slot_index = 0; slot_index < k_completed_range_slot_count; ++slot_index) {
         const std::size_t slot_offset = completed_range_slot_offset(slot_index);
-        if (load64(state, slot_offset + k_completed_range_slot_start_offset) != 0U) {
+        if (slot_offset == publication_offset) {
             continue;
         }
-        store64(state, slot_offset + k_completed_range_slot_end_offset, merged_end_lsn);
-        store64(state, slot_offset + k_completed_range_slot_start_offset, merged_start_lsn);
-        increment_completed_range_count(state);
-        return true;
+        const std::uint64_t slot_start_lsn =
+            load64(state, slot_offset + k_completed_range_slot_start_offset);
+        if (slot_start_lsn == 0U) {
+            continue;
+        }
+        const std::uint64_t slot_end_lsn =
+            load64(state, slot_offset + k_completed_range_slot_end_offset);
+        if (!ranges_touch_or_overlap(
+                merged_start_lsn,
+                merged_end_lsn,
+                slot_start_lsn,
+                slot_end_lsn
+            )) {
+            continue;
+        }
+        store64(state, slot_offset + k_completed_range_slot_start_offset, 0U);
+        store64(state, slot_offset + k_completed_range_slot_end_offset, 0U);
+        decrement_completed_range_count(state);
     }
-    return false;
+    return true;
 }
 
 bool ranges_touch_or_overlap(
@@ -1182,18 +1518,10 @@ bool ranges_touch_or_overlap(
 }
 
 std::uint64_t drain_completed_ranges(void *state, std::uint64_t written_lsn) {
-    std::uint32_t ranges_remaining = completed_range_count(state);
-    if (ranges_remaining == 0U) {
-        return written_lsn;
-    }
-
     for (;;) {
         bool advanced = false;
         for (std::uint32_t slot_index = 0; slot_index < k_completed_range_slot_count;
              ++slot_index) {
-            if (ranges_remaining == 0U) {
-                return written_lsn;
-            }
             const std::size_t slot_offset = completed_range_slot_offset(slot_index);
             const std::uint64_t start_lsn =
                 load64(state, slot_offset + k_completed_range_slot_start_offset);
@@ -1203,15 +1531,15 @@ std::uint64_t drain_completed_ranges(void *state, std::uint64_t written_lsn) {
 
             const std::uint64_t end_lsn =
                 load64(state, slot_offset + k_completed_range_slot_end_offset);
-            store64(state, slot_offset + k_completed_range_slot_end_offset, 0U);
-            store64(state, slot_offset + k_completed_range_slot_start_offset, 0U);
-            decrement_completed_range_count(state);
-            --ranges_remaining;
             if (end_lsn > written_lsn) {
                 written_lsn = end_lsn;
                 store64(state, k_written_lsn_offset, written_lsn);
                 advanced = true;
             }
+            /* Clear the publication word only after written_lsn covers it. */
+            store64(state, slot_offset + k_completed_range_slot_start_offset, 0U);
+            store64(state, slot_offset + k_completed_range_slot_end_offset, 0U);
+            decrement_completed_range_count(state);
         }
         if (!advanced) {
             return written_lsn;
@@ -1243,6 +1571,28 @@ std::uint64_t fetch_max64(void *state, std::size_t offset, std::uint64_t value) 
     return std::max(observed, value);
 }
 
+bool increment_visible_generation(void *state) {
+    auto *generation = reinterpret_cast<std::uint64_t *>(
+        static_cast<unsigned char *>(state) + k_visible_generation_offset
+    );
+    std::uint64_t observed = __atomic_load_n(generation, __ATOMIC_ACQUIRE);
+    for (;;) {
+        if (observed == std::numeric_limits<std::uint64_t>::max()) {
+            return false;
+        }
+        if (__atomic_compare_exchange_n(
+                generation,
+                &observed,
+                observed + 1U,
+                false,
+                __ATOMIC_ACQ_REL,
+                __ATOMIC_ACQUIRE
+            )) {
+            return true;
+        }
+    }
+}
+
 int latch_result_to_redo_state_result(int latch_result) {
     if (latch_result == MYLITE_OWNERLESS_LATCH_OK) {
         return MYLITE_OWNERLESS_REDO_STATE_OK;
@@ -1250,7 +1600,39 @@ int latch_result_to_redo_state_result(int latch_result) {
     if (latch_result == MYLITE_OWNERLESS_LATCH_TIMEOUT) {
         return MYLITE_OWNERLESS_REDO_STATE_TIMEOUT;
     }
+    if (latch_result == MYLITE_OWNERLESS_LATCH_OWNER_DEAD ||
+        latch_result == MYLITE_OWNERLESS_LATCH_NOT_RECOVERABLE) {
+        return MYLITE_OWNERLESS_REDO_STATE_OWNER_DEAD;
+    }
     return MYLITE_OWNERLESS_REDO_STATE_ERROR;
+}
+
+int finish_latch_operation(
+    mylite_ownerless_latch *latch,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
+    int operation_result,
+    bool operation_applied
+) {
+    const int release_result = mylite_ownerless_latch_release(latch, owner_id, owner_generation);
+    if (release_result == MYLITE_OWNERLESS_LATCH_OK) {
+        return operation_result;
+    }
+    if (!operation_applied && release_result == MYLITE_OWNERLESS_LATCH_RELEASE_PENDING &&
+        mylite_ownerless_latch_acquire(
+            latch,
+            owner_id,
+            owner_generation,
+            nullptr,
+            nullptr,
+            k_progress_latch_timeout_ms
+        ) == MYLITE_OWNERLESS_LATCH_OK &&
+        mylite_ownerless_latch_release(latch, owner_id, owner_generation) ==
+            MYLITE_OWNERLESS_LATCH_OK) {
+        return operation_result;
+    }
+    return operation_applied ? MYLITE_OWNERLESS_REDO_STATE_APPLIED_RELEASE_PENDING
+                             : MYLITE_OWNERLESS_REDO_STATE_ERROR;
 }
 
 } // namespace

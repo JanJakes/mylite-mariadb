@@ -29,8 +29,10 @@ directory. Multiple handles for the same directory coordinate through a shared
 directory runtime. The current embedded implementation supports one open
 database directory per process at a time; opening a different directory while
 the runtime is active returns `MYLITE_BUSY`. A second process opening the same
-durable directory for read/write access also returns `MYLITE_BUSY` while the
-directory lock is held.
+durable directory through an ordinary, non-ownerless read/write open also
+returns `MYLITE_BUSY` while the directory lock is held. Experimental ownerless
+read/write opens use the separate directory-owned coordination contract
+described below.
 
 `mylite_stmt` owns one prepared statement.
 After a result statement has returned `MYLITE_DONE`, `mylite_reset()` releases
@@ -131,8 +133,8 @@ Callers should zero-initialize the struct before setting `size` and any
 non-default fields.
 `MYLITE_OPEN_READONLY | MYLITE_OPEN_SHARED_READONLY` opens an existing
 directory through the ownerless coordination path for user-visible read-only
-SQL and starts MariaDB with server `read_only=ON`. It does not take the
-process-wide `mylite.lock`; it still writes directory-owned coordination state
+SQL and starts MariaDB with server `read_only=ON`. It holds a shared lifetime
+lock on `mylite.lock` and writes directory-owned coordination state
 under `concurrency/` for process slots, read-view state, page visibility, and
 recovery anchors. Read-only handles allow ordinary reads and session state,
 reject DDL/DML and locking reads with `MYLITE_READONLY`, and can observe
@@ -142,21 +144,35 @@ read/write first so the ownerless runtime can rebuild stale coordination
 safely.
 `MYLITE_OPEN_READONLY` without `MYLITE_OPEN_SHARED_READONLY` remains reserved
 and returns `MYLITE_MISUSE`. `MYLITE_OPEN_OWNERLESS_RW` opens the directory
-through the ownerless read/write coordination path: it skips the process-wide
-`mylite.lock`, starts MariaDB with MyLite-managed file-lock policy, and
+through the ownerless read/write coordination path: it holds the same shared
+lifetime `mylite.lock`, starts MariaDB with MyLite-managed file-lock policy, and
 coordinates process slots, transactions, read views, InnoDB locks, redo
 visibility, page-version WAL, and checkpoint anchors through files in the
-database directory.
+database directory. Ordinary runtimes hold `mylite.lock` exclusively, so
+ordinary and ownerless runtimes cannot overlap regardless of which mode wins
+the open race.
 `mylite_capabilities()` reports the compiled and currently available
-concurrency modes. The embedded backend currently reports
-`MYLITE_CAP_SAME_PROCESS_CONCURRENCY`, `MYLITE_CAP_SHARED_READONLY`, and
-`MYLITE_CAP_OWNERLESS_RW` in embedded builds. Ownerless read/write support is
-complete for the persistent InnoDB application-table surface documented in the
-compatibility matrix. Ownerless read/write opens reject explicit non-InnoDB
-durable engines, existing persistent non-InnoDB application tables, and session
-storage-engine defaults and overrides until per-engine coordination is designed;
-server/global SQL surfaces remain governed by the documented unsupported
-surface policy.
+concurrency modes. Embedded builds report
+`MYLITE_CAP_SAME_PROCESS_CONCURRENCY`; only embedded Linux builds currently
+report `MYLITE_CAP_SHARED_READONLY` and `MYLITE_CAP_OWNERLESS_RW`. Each
+ownerless or shared-read-only open then admits only a validated local ext4,
+XFS, tmpfs, or overlay filesystem after the database-directory primitive
+checks pass. Ownerless read/write is experimental and incomplete. Its current
+admitted SQL surface is persistent InnoDB application tables plus the DML and
+DDL shapes explicitly enumerated in the compatibility matrix. Unclassified DDL
+fails closed with `MYLITE_ERROR`; ownerless opens reject existing persistent
+non-InnoDB application tables and existing FULLTEXT or SPATIAL indexes. The
+shipped no-vector profile rejects vector DDL before an index can exist;
+profile-enabled VECTOR ownerless admission is not part of this claim. Ownerless
+SQL rejects non-InnoDB engine requests, special-index DDL, and session
+storage-engine defaults or overrides. Unsupported platforms,
+filesystems, and server/global SQL surfaces remain explicit errors rather than
+participating accidentally in ownerless coordination.
+If a process dies while it still owns native transaction, undo, redo, record-lock,
+or page-write recovery state, MyLite fails closed while any peer runtime remains
+live. New ownerless read/write and shared-read-only opens return `MYLITE_BUSY`;
+there is no metadata-only, savepoint, or plain-read exception. All peers must
+close before an ownerless read/write reopen can run no-live native recovery.
 A live embedded runtime uses one concurrency and access mode, so mixing
 ownerless/shared read-only opens with ordinary opens or ownerless read/write
 opens on the same directory in one process is rejected.
@@ -179,9 +195,12 @@ requested MyLite database directory, and creates the baseline layout:
 state, not durable truth; current opens create or grow it, validate its fixed
 header against the database UUID through a `MAP_SHARED` mapping, and rebuild
 stale header bytes before the embedded runtime starts. Durable opens publish
-one exclusive-runtime process slot after MariaDB embedded startup, mark `.shm`
-dirty while that process is active, and clear the process registry on final
-close. Ownerless foundation segments use fixed-width shared latch words that
+one process slot after MariaDB embedded startup, explicitly classified as
+ordinary-exclusive, shared-read-only, or ownerless-read/write. The registry
+rejects an ordinary/ownerless mode conflict as a fail-closed defense in
+addition to the lifetime `mylite.lock`, marks `.shm` dirty while a process is
+active, and clears the process registry on final close. Ownerless foundation
+segments use fixed-width shared latch words that
 record owner slot generations for MDL, transaction, read-view, InnoDB lock,
 page-write lock, and redo-visibility coordination. A later open rebuilds dirty
 or rebuilding `.shm` state and increments its recovery generation before
@@ -207,7 +226,11 @@ runtime startup, connection, dictionary-generation initialization, and final
 no-live ownerless native shutdown redo-header repair through
 `mylite-runtime-startup.lock`; ownerless open creates `concurrency/` before
 taking that lock, and ordinary user SQL is not covered by those bootstrap
-locks. Failed ownerless or native read/write startup is retried only after the
+locks. The shared lifetime directory lock does not authorize stale runtime
+cleanup: ownerless opens preserve every live peer's `run/` and `tmp/`
+children, while only an ordinary opener holding the exclusive lifetime lock
+may remove stale children. Failed ownerless or native read/write startup is
+retried only after the
 partial MariaDB embedded startup state is ended and the saved 12 KiB redo
 startup prefix whose checkpoint pages pass MariaDB startup validation, or the
 captured prefix fallback, is restored. A first ownerless read/write startup
@@ -251,8 +274,9 @@ topology and account surfaces are disabled with startup options such as
 `--skip-grant-tables`, `--skip-networking`, `--skip-log-bin`, and
 `--skip-slave-start`; Performance Schema is omitted by the default build
 profile or disabled when a custom build includes it. The final close removes
-the current runtime's `run/` and `tmp/` children; durable metadata and table
-files remain in `datadir/`. `mylite.lock` is
+the current runtime's `run/` and `tmp/` children; ownerless peer opens preserve
+live runtime children, and durable metadata and table files remain in
+`datadir/`. `mylite.lock` is
 an advisory lock anchor and may remain after close or process exit. A clean
 open replaces stale inactive runtime state after taking the directory lock.
 `mylite_open_config.temp_directory` is currently used only by the `:memory:`
@@ -357,6 +381,15 @@ WordPress-shaped InnoDB DDL. Broader DDL coverage includes `CREATE TABLE ...
 LIKE`, `CREATE TABLE ... SELECT`, standalone index DDL, representative
 `ALTER TABLE` column and index changes, CHECK constraints, foreign keys, and
 generated columns; more specialized DDL remains later work.
+
+For an ownerless explicit transaction, a pre-serialization `COMMIT` failure may
+be returned after MariaDB has automatically rolled the transaction back. When
+that rollback and ownerless cleanup complete, MyLite preserves the original
+commit diagnostic, reports no active transaction, and keeps the connection
+usable. Explicit `ROLLBACK` applies the same bounded cleanup contract. If
+terminal rollback cleanup cannot complete, the cleanup failure supersedes the
+retryable transaction-end error and the ownerless runtime fails closed; callers
+must close the faulted connection rather than starting another transaction.
 
 ## Prepared Statements
 
@@ -574,10 +607,14 @@ flushes to the periodic timeout. The default is full durability.
 - Ordinary cross-process read/write opens are rejected with `MYLITE_BUSY` while
   another process owns the directory lock.
 - Cross-process ownerless read/write opens opt into `MYLITE_OPEN_OWNERLESS_RW`.
-  Supported InnoDB paths coordinate through directory-backed shared memory,
-  byte-range locks, page-version WAL, and checkpoint files. The mode remains
-  partial where the compatibility matrix marks DDL crash/stress or recovery
-  surfaces as planned.
+  On embedded Linux and a validated local filesystem, the enumerated persistent
+  InnoDB paths coordinate through directory-backed shared memory, byte-range
+  locks, page-version WAL, and checkpoint files. The mode remains experimental
+  and incomplete where the compatibility matrix marks hook, stress, DDL, or
+  recovery release gates as pending.
+- Database handles, prepared statements, and inherited embedded-runtime state
+  cannot be used in a child after `fork()`. The child must `exec()` before using
+  MyLite; inherited operations fail with `MYLITE_MISUSE`.
 
 SQLite-style threading modes can be added when backed by tests.
 

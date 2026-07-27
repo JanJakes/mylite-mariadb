@@ -1535,7 +1535,12 @@ row_fts_merge_insert(
 	needed in the row module call */
 
 	trx = trx_create();
-	trx_start_if_not_started(trx, true);
+	error= trx_start_if_not_started(trx, true);
+	if (UNIV_UNLIKELY(error != DB_SUCCESS)) {
+		if (!trx->mylite_ownerless_coordination_fault)
+			trx->free();
+		return error;
+	}
 
 	trx->op_info = "inserting index entries";
 
@@ -1739,7 +1744,9 @@ row_fts_merge_insert(
 	}
 
 exit:
-	fts_sql_commit(trx);
+	if (const dberr_t commit_error= fts_sql_commit(trx))
+		if (error == DB_SUCCESS)
+			error= commit_error;
 
 	trx->op_info = "";
 
@@ -1750,7 +1757,8 @@ exit:
 
 	aux_table->release();
 
-	trx->free();
+	if (!trx->mylite_ownerless_coordination_fault)
+		trx->free();
 
 	mem_heap_free(heap);
 

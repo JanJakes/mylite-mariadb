@@ -51,7 +51,9 @@ Created 5/7/1996 Heikki Tuuri
 #include <debug_sync.h>
 #include <mysql/service_thd_mdl.h>
 
+#include <cstdlib>
 #include <cstdio>
+#include <limits>
 #include <set>
 
 #ifdef WITH_WSREP
@@ -59,6 +61,26 @@ Created 5/7/1996 Heikki Tuuri
 #endif /* WITH_WSREP */
 
 const conflicting_lock_info null_c_lock_info{nullptr, nullptr, ut_d(nullptr)};
+
+struct mylite_ownerless_insert_lock_reservation
+{
+  trx_t *trx= nullptr;
+  dict_index_t *index= nullptr;
+  index_id_t index_id= 0;
+  uint64_t reservation_id= 0;
+};
+
+static constexpr size_t mylite_ownerless_pending_insert_lock_capacity= 16;
+struct mylite_ownerless_pending_insert_locks_t
+{
+  mylite_ownerless_insert_lock_reservation
+      locks[mylite_ownerless_pending_insert_lock_capacity];
+  size_t count= 0;
+  uint64_t next_reservation_id= 0;
+};
+
+static thread_local mylite_ownerless_pending_insert_locks_t
+    mylite_ownerless_pending_insert_locks;
 
 /** The value of innodb_deadlock_detect */
 my_bool innodb_deadlock_detect;
@@ -1295,9 +1317,10 @@ lock_sec_rec_some_has_impl(
 
   /* Note: It is possible to have caller_trx->id == 0 in a locking read
   if caller_trx has not modified any persistent tables. */
-  if (!trx_sys.find_same_or_older(caller_trx, max_trx_id) ||
-      !lock_check_trx_id_sanity(max_trx_id, rec, index, offsets))
-    return nullptr;
+	if ((!mylite_ownerless_innodb_write_coordination_enabled() &&
+	     !trx_sys.find_same_or_older(caller_trx, max_trx_id)) ||
+	    !lock_check_trx_id_sanity(max_trx_id, rec, index, offsets))
+		return nullptr;
 
   /* We checked above that some active (or XA PREPARE) transaction exists
   that is older than PAGE_MAX_TRX_ID. That is, some transaction may be
@@ -1417,6 +1440,37 @@ static void lock_reset_lock_and_trx_wait(lock_t *lock)
 #endif
 }
 
+template <bool from_deadlock= false, bool inner_trx_lock= true>
+static void lock_cancel_waiting_and_release(lock_t *lock) noexcept;
+
+static int mylite_ownerless_innodb_lock_test_wait_publish_result(bool table)
+{
+  if (!mylite_ownerless_innodb_test_faults_enabled_fast())
+    return -1;
+  struct result_mapping
+  {
+    const char *suffix;
+    int result;
+  };
+  static constexpr result_mapping mappings[]= {
+      {"timeout", MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT},
+      {"deadlock", MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK},
+      {"full", MYLITE_OWNERLESS_INNODB_LOCK_FULL},
+      {"error", MYLITE_OWNERLESS_INNODB_LOCK_ERROR}};
+  for (const result_mapping &mapping : mappings)
+  {
+    char name[64];
+    snprintf(name, sizeof(name), "%s-wait-publish-%s",
+             table ? "table" : "record", mapping.suffix);
+    if (mylite_ownerless_innodb_test_fault_is_configured(name))
+    {
+      static_cast<void>(unsetenv("MYLITE_OWNERLESS_TEST_FAULT"));
+      return mapping.result;
+    }
+  }
+  return -1;
+}
+
 static void mylite_ownerless_innodb_lock_apply_wait_result(
     trx_t *trx,
     int result)
@@ -1439,7 +1493,10 @@ static void mylite_ownerless_innodb_lock_apply_wait_result(
     trx->error_state= DB_ERROR;
     return;
   default:
-    ut_error;
+    trx->mylite_ownerless_coordination_fault= true;
+    trx->error_state= DB_ERROR;
+    mylite_ownerless_innodb_note_coordination_error();
+    return;
   }
 }
 
@@ -1458,7 +1515,7 @@ static dberr_t mylite_ownerless_innodb_lock_dberr_from_result(int result)
   case MYLITE_OWNERLESS_INNODB_LOCK_ERROR:
     return DB_ERROR;
   default:
-    ut_error;
+    return DB_ERROR;
   }
 }
 
@@ -1467,6 +1524,9 @@ static dberr_t mylite_ownerless_innodb_lock_reserve_table_for_grant(
     const dict_table_t *table,
     lock_mode mode)
 {
+  if (UNIV_LIKELY(!mylite_ownerless_innodb_lock_hooks_enabled_fast()))
+    return DB_SUCCESS;
+
   const int result= mylite_ownerless_innodb_lock_reserve_table(
       trx, table, static_cast<uint32_t>(mode), 0U);
   if (result == MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK ||
@@ -1483,6 +1543,9 @@ static dberr_t mylite_ownerless_innodb_lock_reserve_record_for_grant(
     ulint heap_no,
     unsigned type_mode)
 {
+  if (UNIV_LIKELY(!mylite_ownerless_innodb_lock_hooks_enabled_fast()))
+    return DB_SUCCESS;
+
   const int result= mylite_ownerless_innodb_lock_reserve_record(
       trx,
       index,
@@ -1496,6 +1559,244 @@ static dberr_t mylite_ownerless_innodb_lock_reserve_record_for_grant(
       result == MYLITE_OWNERLESS_INNODB_LOCK_ERROR)
     mylite_ownerless_innodb_lock_apply_wait_result(trx, result);
   return mylite_ownerless_innodb_lock_dberr_from_result(result);
+}
+
+static dberr_t mylite_ownerless_innodb_lock_reserve_insert_for_grant(
+    trx_t *trx,
+    const dict_index_t *index)
+{
+  auto &pending= mylite_ownerless_pending_insert_locks;
+  if (pending.count == mylite_ownerless_pending_insert_lock_capacity)
+  {
+    mylite_ownerless_innodb_lock_apply_wait_result(
+        trx, MYLITE_OWNERLESS_INNODB_LOCK_FULL);
+    return DB_LOCK_TABLE_FULL;
+  }
+  if (UNIV_UNLIKELY(
+          pending.next_reservation_id == std::numeric_limits<uint64_t>::max()))
+  {
+    mylite_ownerless_innodb_lock_apply_wait_result(
+        trx, MYLITE_OWNERLESS_INNODB_LOCK_ERROR);
+    return DB_ERROR;
+  }
+
+  const int result=
+      mylite_ownerless_innodb_lock_reserve_insert_record(trx, index, 0U);
+  if (result == MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK ||
+      result == MYLITE_OWNERLESS_INNODB_LOCK_FULL ||
+      result == MYLITE_OWNERLESS_INNODB_LOCK_ERROR)
+    mylite_ownerless_innodb_lock_apply_wait_result(trx, result);
+  const dberr_t err= mylite_ownerless_innodb_lock_dberr_from_result(result);
+  if (err == DB_SUCCESS && result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
+  {
+    ++pending.next_reservation_id;
+    pending.locks[pending.count++]= {trx, const_cast<dict_index_t *>(index),
+                                     index->id, pending.next_reservation_id};
+  }
+  return err;
+}
+
+uint64_t mylite_ownerless_innodb_lock_insert_reservation_checkpoint()
+{
+  return mylite_ownerless_pending_insert_locks.next_reservation_id;
+}
+
+void mylite_ownerless_innodb_lock_cancel_insert_reservation(
+    trx_t *trx,
+    const dict_index_t *index,
+    uint64_t checkpoint)
+{
+  if (trx == nullptr || index == nullptr)
+    return;
+
+  auto &pending= mylite_ownerless_pending_insert_locks;
+  for (;;)
+  {
+    size_t reservation_index= pending.count;
+    while (reservation_index != 0)
+    {
+      const auto &reservation= pending.locks[reservation_index - 1];
+      if (reservation.trx == trx && reservation.index == index &&
+          reservation.index_id == index->id &&
+          reservation.reservation_id > checkpoint)
+        break;
+      --reservation_index;
+    }
+    if (reservation_index == 0)
+      return;
+
+    --reservation_index;
+    for (size_t i= reservation_index + 1; i < pending.count; ++i)
+      pending.locks[i - 1]= pending.locks[i];
+    pending.locks[--pending.count]= {};
+    static_cast<void>(
+        mylite_ownerless_innodb_lock_cancel_insert_record(trx, index));
+  }
+}
+
+static unsigned mylite_ownerless_innodb_lock_timeout_ms(const trx_t *trx)
+{
+  const ulong timeout_seconds= trx_lock_wait_timeout_get(trx);
+  if (timeout_seconds >
+      static_cast<ulong>(std::numeric_limits<unsigned>::max() / 1000U))
+    return std::numeric_limits<unsigned>::max();
+  return static_cast<unsigned>(timeout_seconds * 1000U);
+}
+
+static dberr_t mylite_ownerless_innodb_lock_acquire_record_space_gate(
+    trx_t *trx,
+    const dict_index_t *index)
+{
+  if (UNIV_LIKELY(!mylite_ownerless_innodb_lock_hooks_enabled_fast()) ||
+      index == nullptr || index->table == nullptr || index->table->is_temporary())
+    return DB_SUCCESS;
+
+  const int result=
+      mylite_ownerless_innodb_lock_acquire_transaction_page_read_gate(
+          trx, index->table->space_id,
+          mylite_ownerless_innodb_lock_timeout_ms(trx), nullptr);
+  if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
+    return DB_SUCCESS;
+
+  const int failure= result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE
+                         ? MYLITE_OWNERLESS_INNODB_LOCK_ERROR
+                         : result;
+  mylite_ownerless_innodb_lock_apply_wait_result(trx, failure);
+  return mylite_ownerless_innodb_lock_dberr_from_result(failure);
+}
+
+dberr_t mylite_ownerless_innodb_lock_prepare_record_page(
+    trx_t *trx,
+    const buf_block_t *block,
+    bool *restart)
+{
+  ut_ad(restart != nullptr);
+  *restart= false;
+  if (trx == nullptr || block == nullptr ||
+      UNIV_LIKELY(!mylite_ownerless_innodb_lock_hooks_enabled_fast()))
+    return DB_SUCCESS;
+
+  /* Native undo already owns the transaction's record locks and persistent
+  page-write ownership. Reserving each B-tree search page again can introduce
+  a new page-level cycle while the transaction is trying to unwind that very
+  cycle. The MTR write gate remains authoritative for pages actually changed
+  by rollback. */
+  if (trx->in_rollback)
+    return DB_SUCCESS;
+
+  const page_t *page= block->page.frame;
+  const uint16_t page_type= fil_page_get_type(page);
+  if ((page_type == FIL_PAGE_INDEX || page_type == FIL_PAGE_RTREE) &&
+      btr_page_get_level(page) != 0)
+  {
+    /* Record ownership belongs to the leaf that contains the record. Upper
+    levels are protected by B-tree latches and the ownerless structure gate;
+    retaining their pages for the transaction would create false cycles
+    between otherwise independent leaf updates. */
+    return DB_SUCCESS;
+  }
+
+  uint32_t acquire_flags= 0U;
+  const int result= mylite_ownerless_innodb_lock_reserve_record_page_write(
+      trx, block, mylite_ownerless_innodb_lock_timeout_ms(trx),
+      &acquire_flags);
+  if (result == MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK ||
+      result == MYLITE_OWNERLESS_INNODB_LOCK_FULL ||
+      result == MYLITE_OWNERLESS_INNODB_LOCK_ERROR)
+    mylite_ownerless_innodb_lock_apply_wait_result(trx, result);
+  *restart=
+      (acquire_flags &
+       MYLITE_OWNERLESS_INNODB_LOCK_ACQUIRE_NEW_RECORD_PAGE) != 0U;
+  return mylite_ownerless_innodb_lock_dberr_from_result(result);
+}
+
+dberr_t mylite_ownerless_innodb_lock_prepare_tree_write(
+    trx_t *trx,
+    uint32_t space_id)
+{
+  if (trx == nullptr || space_id >= SRV_TMP_SPACE_ID ||
+      UNIV_LIKELY(!mylite_ownerless_innodb_lock_hooks_enabled_fast()))
+    return DB_SUCCESS;
+
+  uint32_t acquire_flags= 0U;
+  const int result=
+      mylite_ownerless_innodb_lock_acquire_transaction_page_write_gate(
+          trx, space_id, mylite_ownerless_innodb_lock_timeout_ms(trx),
+          &acquire_flags);
+  if (result == MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK ||
+      result == MYLITE_OWNERLESS_INNODB_LOCK_FULL ||
+      result == MYLITE_OWNERLESS_INNODB_LOCK_ERROR)
+    mylite_ownerless_innodb_lock_apply_wait_result(trx, result);
+  return mylite_ownerless_innodb_lock_dberr_from_result(result);
+}
+
+dberr_t mylite_ownerless_innodb_lock_release_clean_record_page(
+    trx_t *trx,
+    const buf_block_t *block)
+{
+  if (trx == nullptr || block == nullptr ||
+      UNIV_LIKELY(!mylite_ownerless_innodb_lock_hooks_enabled_fast()))
+    return DB_SUCCESS;
+
+  const page_id_t id{block->page.id()};
+  const int result=
+      mylite_ownerless_innodb_lock_release_clean_record_page_write(
+          trx, id.space(), id.page_no());
+  if (result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
+      result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+    mylite_ownerless_innodb_lock_apply_wait_result(trx, result);
+  return mylite_ownerless_innodb_lock_dberr_from_result(result);
+}
+
+static dberr_t mylite_ownerless_innodb_lock_reserve_page_for_grant(
+    trx_t *trx,
+    const buf_block_t *block,
+    bool *new_reservation)
+{
+  dberr_t err= mylite_ownerless_innodb_lock_prepare_record_page(
+      trx, block, new_reservation);
+  if (err == DB_SUCCESS && *new_reservation)
+    return DB_RECORD_CHANGED;
+  return err;
+}
+
+static dberr_t mylite_ownerless_innodb_lock_finish_page_grant(
+    trx_t *trx,
+    const page_id_t id,
+    bool new_reservation,
+    dberr_t grant_result)
+{
+  if (!new_reservation || grant_result == DB_SUCCESS ||
+      grant_result == DB_SUCCESS_LOCKED_REC)
+    return grant_result;
+
+  const int cancel_result= mylite_ownerless_innodb_lock_cancel_record_page_write(
+      trx, id.space(), id.page_no());
+  if (cancel_result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
+    return grant_result;
+
+  mylite_ownerless_innodb_lock_apply_wait_result(trx, cancel_result);
+  return mylite_ownerless_innodb_lock_dberr_from_result(cancel_result);
+}
+
+static dberr_t mylite_ownerless_innodb_remote_trx_is_active(
+    trx_id_t trx_id,
+    bool *active)
+{
+  ut_ad(active != nullptr);
+  *active= false;
+  if (UNIV_LIKELY(!mylite_ownerless_innodb_lock_hooks_enabled_fast()))
+    return DB_SUCCESS;
+
+  int remote_active= 0;
+  const int result=
+      mylite_ownerless_innodb_remote_trx_active(trx_id, &remote_active);
+  if (result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+    return DB_ERROR;
+  if (result != MYLITE_OWNERLESS_INNODB_LOCK_OK)
+    return DB_ERROR;
+  *active= remote_active != 0;
+  return DB_SUCCESS;
 }
 
 static dberr_t
@@ -1540,6 +1841,9 @@ static unsigned mylite_ownerless_innodb_lock_remaining_wait_ms(
 static dberr_t mylite_ownerless_innodb_lock_snapshot_external_wait_lock(
     lock_t *wait_lock,
     mylite_ownerless_innodb_lock_external_wait *snapshot);
+static bool mylite_ownerless_innodb_lock_wait_page_has_local_changes(
+    const trx_t *trx,
+    const mylite_ownerless_innodb_lock_external_wait &snapshot);
 static dberr_t mylite_ownerless_innodb_lock_enqueue_external_record_wait(
     unsigned type_mode,
     const page_id_t id,
@@ -1764,16 +2068,30 @@ lock_rec_enqueue_waiting(
 	lock_t* lock = lock_rec_create(
 		c_lock_info,
 		type_mode | LOCK_WAIT, id, page, heap_no, index, trx, true);
-	mylite_ownerless_innodb_lock_apply_wait_result(
-		trx,
-		mylite_ownerless_innodb_lock_publish_record_wait(
-			lock, c_lock_info.conflicting));
-
 	if (prdt && type_mode & LOCK_PREDICATE) {
 		lock_prdt_set_prdt(lock, prdt);
 	}
-
 	trx->lock.wait_thr = thr;
+	if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_hooks_enabled_fast())) {
+		const int test_result=
+			mylite_ownerless_innodb_lock_test_wait_publish_result(false);
+		const int ownerless_result=
+			test_result >= 0
+				? test_result
+				: mylite_ownerless_innodb_lock_publish_record_wait(
+					lock, c_lock_info.conflicting);
+		if (ownerless_result != MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+			const dberr_t error=
+				mylite_ownerless_innodb_lock_dberr_from_result(
+					ownerless_result);
+			mysql_mutex_lock(&lock_sys.wait_mutex);
+			lock_cancel_waiting_and_release<false, false>(lock);
+			mysql_mutex_unlock(&lock_sys.wait_mutex);
+			mylite_ownerless_innodb_lock_apply_wait_result(
+				trx, ownerless_result);
+			return error;
+		}
+	}
 
 	DBUG_LOG("ib_lock", "trx " << ib::hex(trx->id)
 		 << " waits for lock in index " << index->name
@@ -1794,14 +2112,15 @@ static dberr_t mylite_ownerless_innodb_lock_enqueue_external_record_wait(
     bool caller_owns_trx_mutex)
 {
   trx_t *trx= thr_get_trx(thr);
-  lock_rec_create(null_c_lock_info,
-                  type_mode | LOCK_WAIT,
-                  id,
-                  page,
-                  heap_no,
-                  index,
-                  trx,
-                  caller_owns_trx_mutex);
+  lock_t *lock= lock_rec_create(null_c_lock_info,
+                                type_mode | LOCK_WAIT,
+                                id,
+                                page,
+                                heap_no,
+                                index,
+                                trx,
+                                caller_owns_trx_mutex);
+  trx->lock.wait_thr= thr;
   const int ownerless_wait_result=
       mylite_ownerless_innodb_lock_before_external_record_wait(
           trx,
@@ -1810,15 +2129,20 @@ static dberr_t mylite_ownerless_innodb_lock_enqueue_external_record_wait(
           id.page_no(),
           static_cast<uint32_t>(heap_no),
           static_cast<uint32_t>(type_mode));
-  if (ownerless_wait_result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
-      ownerless_wait_result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
+  if (ownerless_wait_result != MYLITE_OWNERLESS_INNODB_LOCK_OK)
   {
+    const dberr_t error=
+        mylite_ownerless_innodb_lock_dberr_from_result(ownerless_wait_result);
+    mysql_mutex_lock(&lock_sys.wait_mutex);
+    if (caller_owns_trx_mutex)
+      lock_cancel_waiting_and_release<false, false>(lock);
+    else
+      lock_cancel_waiting_and_release<false, true>(lock);
+    mysql_mutex_unlock(&lock_sys.wait_mutex);
     mylite_ownerless_innodb_lock_apply_wait_result(
         trx, ownerless_wait_result);
-    return mylite_ownerless_innodb_lock_dberr_from_result(
-        ownerless_wait_result);
+    return error;
   }
-  trx->lock.wait_thr= thr;
   MONITOR_INC(MONITOR_LOCKREC_WAIT);
   return DB_LOCK_WAIT;
 }
@@ -2124,9 +2448,12 @@ lock_rec_lock(
         (strstr(index->table->name.m_name, "/FTS_") &&
          strstr(index->table->name.m_name, "_CONFIG") + sizeof("_CONFIG") ==
          index->table->name.m_name + strlen(index->table->name.m_name) + 1));
-  MONITOR_ATOMIC_INC(MONITOR_NUM_RECLOCK_REQ);
-  const page_id_t id{block->page.id()};
-  LockGuard g{lock_sys.rec_hash, id};
+	  MONITOR_ATOMIC_INC(MONITOR_NUM_RECLOCK_REQ);
+	  const page_id_t id{block->page.id()};
+	  if (const dberr_t error=
+	          mylite_ownerless_innodb_lock_acquire_record_space_gate(trx, index))
+	    return error;
+	  LockGuard g{lock_sys.rec_hash, id};
 
   if (lock_t *lock= lock_sys_t::get_first(g.cell(), id))
   {
@@ -2435,16 +2762,6 @@ dberr_t lock_wait(que_thr_t *thr)
   /* InnoDB system transactions may use the global value of
   innodb_lock_wait_timeout, because trx->mysql_thd == NULL. */
   ulong innodb_lock_wait_timeout= trx_lock_wait_timeout_get(trx);
-  if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_hooks_enabled_fast()) &&
-      trx->mysql_thd == nullptr)
-  {
-    /* Ownerless embedded SQL waits can rely on current_thd for session
-    variables even when the InnoDB transaction was not linked to mysql_thd. */
-    if (THD *thd= current_thd)
-      innodb_lock_wait_timeout= thd_lock_wait_timeout(thd);
-    else
-      innodb_lock_wait_timeout= thd_lock_wait_timeout(nullptr);
-  }
   const my_hrtime_t suspend_time= my_hrtime_coarse();
   ut_ad(!trx->dict_operation_lock_mode);
 
@@ -2898,10 +3215,19 @@ static void lock_rec_dequeue_from_page(lock_t *in_lock, bool owns_wait_mutex)
 		if (c_lock_info.conflicting) {
 			trx_t* c_trx = c_lock_info.conflicting->trx;
 			lock->trx->lock.wait_trx = c_trx;
-			mylite_ownerless_innodb_lock_apply_wait_result(
-				lock->trx,
-				mylite_ownerless_innodb_lock_publish_record_wait(
-					lock, c_lock_info.conflicting));
+			if (UNIV_UNLIKELY(
+				mylite_ownerless_innodb_lock_hooks_enabled_fast())) {
+				const int ownerless_result=
+					mylite_ownerless_innodb_lock_publish_record_wait(
+						lock, c_lock_info.conflicting);
+				if (ownerless_result != MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+					mylite_ownerless_innodb_lock_apply_wait_result(
+						lock->trx, ownerless_result);
+					lock->trx->lock.wait_trx = nullptr;
+					pthread_cond_signal(&lock->trx->lock.cond);
+					continue;
+				}
+			}
 			if (c_trx->lock.wait_trx
 			    && innodb_deadlock_detect
 			    && Deadlock::to_check.emplace(c_trx).second) {
@@ -4022,7 +4348,52 @@ lock_update_discard(
 
 /*************************************************************//**
 Updates the lock table when a new user record is inserted. */
-void
+static dberr_t mylite_ownerless_innodb_lock_finalize_insert(
+    const buf_block_t *block,
+    const rec_t *rec)
+{
+  auto &pending= mylite_ownerless_pending_insert_locks;
+  const index_id_t index_id= btr_page_get_index_id(block->page.frame);
+  size_t reservation_index= pending.count;
+  while (reservation_index != 0 &&
+         pending.locks[reservation_index - 1].index_id != index_id)
+    --reservation_index;
+  if (reservation_index == 0)
+    return DB_SUCCESS;
+
+  --reservation_index;
+  const mylite_ownerless_insert_lock_reservation reservation=
+      pending.locks[reservation_index];
+  for (size_t i= reservation_index + 1; i < pending.count; ++i)
+    pending.locks[i - 1]= pending.locks[i];
+  pending.locks[--pending.count]= {};
+  const page_id_t id{block->page.id()};
+  const ulint heap_no= lock_get_heap_no(*block, rec);
+  int finalize_result= mylite_ownerless_innodb_lock_finalize_insert_record(
+      reservation.trx,
+      reservation.index,
+      id.space(),
+      id.page_no(),
+      static_cast<uint32_t>(heap_no));
+  if (finalize_result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
+    return DB_SUCCESS;
+
+  const int cancel_result= mylite_ownerless_innodb_lock_cancel_insert_record(
+      reservation.trx, reservation.index);
+  if (cancel_result != MYLITE_OWNERLESS_INNODB_LOCK_OK)
+    finalize_result= MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
+  mylite_ownerless_innodb_lock_apply_wait_result(
+      reservation.trx, finalize_result);
+  const dberr_t error=
+      mylite_ownerless_innodb_lock_dberr_from_result(finalize_result);
+  /* A coordination fault is reported by the ownerless runtime after SQL
+  execution, preserving its API-level diagnostic with no fabricated MariaDB
+  errno. Retryable lock outcomes must travel through the B-tree result so
+  native statement rollback removes the just-inserted record. */
+  return error == DB_ERROR ? DB_SUCCESS : error;
+}
+
+dberr_t
 lock_update_insert(
 /*===============*/
 	const buf_block_t*	block,	/*!< in: buffer block containing rec */
@@ -4034,6 +4405,9 @@ lock_update_insert(
 	ut_ad(block->page.frame == page_align(rec));
 	ut_ad(!page_rec_is_metadata(rec));
 
+	const dberr_t ownerless_result=
+		mylite_ownerless_innodb_lock_finalize_insert(block, rec);
+
 	/* Inherit the gap-locking locks for rec, in gap mode, from the next
 	record */
 
@@ -4041,20 +4415,21 @@ lock_update_insert(
 		receiver_heap_no = rec_get_heap_no_new(rec);
 		rec = page_rec_next_get<true>(block->page.frame, rec);
 		if (UNIV_UNLIKELY(!rec)) {
-			return;
+			return ownerless_result;
 		}
 		donator_heap_no = rec_get_heap_no_new(rec);
 	} else {
 		receiver_heap_no = rec_get_heap_no_old(rec);
 		rec = page_rec_next_get<false>(block->page.frame, rec);
 		if (UNIV_UNLIKELY(!rec)) {
-			return;
+			return ownerless_result;
 		}
 		donator_heap_no = rec_get_heap_no_old(rec);
 	}
 
 	lock_rec_inherit_to_gap_if_gap_lock(
 		block, receiver_heap_no, donator_heap_no);
+	return ownerless_result;
 }
 
 /*************************************************************//**
@@ -4063,7 +4438,8 @@ void
 lock_update_delete(
 /*===============*/
 	const buf_block_t*	block,	/*!< in: buffer block containing rec */
-	const rec_t*		rec)	/*!< in: the record to be removed */
+	const rec_t*		rec,	/*!< in: the record to be removed */
+	trx_t*			trx)	/*!< in: transaction, if any */
 {
 	const page_t*	page = block->page.frame;
 	ulint		heap_no;
@@ -4085,6 +4461,24 @@ lock_update_delete(
 	}
 
 	const page_id_t id{block->page.id()};
+	if (UNIV_UNLIKELY(
+		    mylite_ownerless_innodb_lock_hooks_enabled_fast())) {
+		if (trx != nullptr && trx->in_rollback) {
+			const int release_result =
+				mylite_ownerless_innodb_lock_release_rollback_insert_record(
+					trx,
+					btr_page_get_index_id(block->page.frame),
+					id.space(),
+					id.page_no(),
+					static_cast<uint32_t>(heap_no));
+			if (UNIV_UNLIKELY(
+				    release_result !=
+				    MYLITE_OWNERLESS_INNODB_LOCK_OK)) {
+				trx->mylite_ownerless_coordination_fault = true;
+				trx->error_state = DB_ERROR;
+			}
+		}
+	}
 	LockGuard g{lock_sys.rec_hash, id};
 
 	/* Let the next record inherit the locks from rec, in gap mode */
@@ -4350,11 +4744,27 @@ lock_table_enqueue_waiting(
 
 	/* Enqueue the lock request that will wait to be granted */
 	lock_t *lock= lock_table_create(table, mode | LOCK_WAIT, trx, c_lock);
-	mylite_ownerless_innodb_lock_apply_wait_result(
-		trx,
-		mylite_ownerless_innodb_lock_publish_table_wait(lock, c_lock));
-
 	trx->lock.wait_thr = thr;
+	if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_hooks_enabled_fast())) {
+		const int test_result=
+			mylite_ownerless_innodb_lock_test_wait_publish_result(true);
+		const int ownerless_result=
+			test_result >= 0
+				? test_result
+				: mylite_ownerless_innodb_lock_publish_table_wait(lock, c_lock);
+		if (ownerless_result != MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+			const dberr_t error=
+				mylite_ownerless_innodb_lock_dberr_from_result(
+					ownerless_result);
+			mysql_mutex_lock(&lock_sys.wait_mutex);
+			lock_cancel_waiting_and_release<false, false>(lock);
+			mysql_mutex_unlock(&lock_sys.wait_mutex);
+			mylite_ownerless_innodb_lock_apply_wait_result(
+				trx, ownerless_result);
+			return error;
+		}
+	}
+
         /* Apart from Galera, only transactions that have waiting lock
         may be chosen as deadlock victims. Only one lock can be waited for at a
         time, and a transaction is associated with a single thread. That is why
@@ -4493,7 +4903,13 @@ dberr_t lock_table(dict_table_t *table, dict_table_t *const*fktable,
 
   if ((mode == LOCK_IX || mode == LOCK_X) &&
       !trx->read_only && !trx->rsegs.m_redo.rseg)
-    trx_set_rw_mode(trx);
+  {
+    const dberr_t err= trx_state_eq(trx, TRX_STATE_NOT_STARTED)
+      ? trx_start_if_not_started(trx, true)
+      : trx_set_rw_mode(trx);
+    if (UNIV_UNLIKELY(err != DB_SUCCESS))
+      return err;
+  }
 
 #ifdef WITH_WSREP
   if (trx->is_wsrep())
@@ -4608,9 +5024,15 @@ static dberr_t mylite_ownerless_innodb_lock_try_grant_external_wait(
     if (const lock_t *c_lock= lock_table_has_to_wait_in_queue(wait_lock))
     {
       trx->lock.wait_trx= c_lock->trx;
-      mylite_ownerless_innodb_lock_apply_wait_result(
-          trx,
-          mylite_ownerless_innodb_lock_publish_table_wait(wait_lock, c_lock));
+      const int ownerless_result=
+          mylite_ownerless_innodb_lock_publish_table_wait(wait_lock, c_lock);
+      if (ownerless_result != MYLITE_OWNERLESS_INNODB_LOCK_OK)
+      {
+        mylite_ownerless_innodb_lock_apply_wait_result(trx, ownerless_result);
+        table->lock_mutex_unlock();
+        return mylite_ownerless_innodb_lock_dberr_from_result(
+            ownerless_result);
+      }
       table->lock_mutex_unlock();
       return DB_LOCK_WAIT;
     }
@@ -4651,10 +5073,16 @@ static dberr_t mylite_ownerless_innodb_lock_try_grant_external_wait(
   if (c_lock_info.conflicting)
   {
     trx->lock.wait_trx= c_lock_info.conflicting->trx;
-    mylite_ownerless_innodb_lock_apply_wait_result(
-        trx,
+    const int ownerless_result=
         mylite_ownerless_innodb_lock_publish_record_wait(
-            wait_lock, c_lock_info.conflicting));
+            wait_lock, c_lock_info.conflicting);
+    if (ownerless_result != MYLITE_OWNERLESS_INNODB_LOCK_OK)
+    {
+      mylite_ownerless_innodb_lock_apply_wait_result(trx, ownerless_result);
+      lock_sys.wr_unlock();
+      return mylite_ownerless_innodb_lock_dberr_from_result(
+          ownerless_result);
+    }
     lock_sys.wr_unlock();
     return DB_LOCK_WAIT;
   }
@@ -4702,23 +5130,65 @@ static dberr_t mylite_ownerless_innodb_lock_wait_for_external_grant(
     const unsigned timeout_ms=
         mylite_ownerless_innodb_lock_remaining_wait_ms(
             no_timeout, suspend_time, innodb_lock_wait_timeout);
+    const bool preserve_local_page=
+        mylite_ownerless_innodb_lock_wait_page_has_local_changes(
+            trx, snapshot);
 
     mysql_mutex_unlock(&lock_sys.wait_mutex);
-    if (snapshot.kind == MYLITE_OWNERLESS_INNODB_LOCK_EXTERNAL_WAIT_RECORD)
-      mylite_ownerless_innodb_lock_release_page_write(
+    int release_result= MYLITE_OWNERLESS_INNODB_LOCK_OK;
+    if (snapshot.kind == MYLITE_OWNERLESS_INNODB_LOCK_EXTERNAL_WAIT_RECORD &&
+        !preserve_local_page)
+      release_result= mylite_ownerless_innodb_lock_cancel_record_page_write(
           trx, snapshot.space_id, snapshot.page_no);
+    const dberr_t release_err=
+        mylite_ownerless_innodb_lock_dberr_from_result(release_result);
+    if (release_err != DB_SUCCESS)
+    {
+      mysql_mutex_lock(&lock_sys.wait_mutex);
+      return release_err;
+    }
     const dberr_t wait_err= mylite_ownerless_innodb_lock_dberr_from_result(
         mylite_ownerless_innodb_lock_wait_for_external(&snapshot, timeout_ms));
-    const dberr_t refresh_err= wait_err == DB_SUCCESS
-        ? mylite_ownerless_innodb_lock_dberr_from_result(
-              mylite_ownerless_innodb_refresh_external_wait_page(&snapshot))
-        : DB_SUCCESS;
+    dberr_t page_write_err= DB_SUCCESS;
+    if (wait_err == DB_SUCCESS &&
+        snapshot.kind == MYLITE_OWNERLESS_INNODB_LOCK_EXTERNAL_WAIT_RECORD &&
+        !preserve_local_page)
+    {
+      uint32_t acquire_flags= 0;
+      const int page_write_result=
+          mylite_ownerless_innodb_lock_acquire_page_write(
+              trx, snapshot.space_id, snapshot.page_no,
+              mylite_ownerless_innodb_lock_remaining_wait_ms(
+                  no_timeout, suspend_time, innodb_lock_wait_timeout),
+              &acquire_flags);
+      if (page_write_result != MYLITE_OWNERLESS_INNODB_LOCK_OK)
+        mylite_ownerless_innodb_lock_apply_wait_result(
+            trx, page_write_result);
+      page_write_err=
+          mylite_ownerless_innodb_lock_dberr_from_result(page_write_result);
+    }
+    const dberr_t refresh_err=
+        wait_err == DB_SUCCESS && page_write_err == DB_SUCCESS &&
+                !preserve_local_page
+            ? mylite_ownerless_innodb_lock_dberr_from_result(
+                  mylite_ownerless_innodb_refresh_external_wait_page(&snapshot))
+            : DB_SUCCESS;
+    dberr_t cancel_err= DB_SUCCESS;
+    if (refresh_err != DB_SUCCESS &&
+        snapshot.kind == MYLITE_OWNERLESS_INNODB_LOCK_EXTERNAL_WAIT_RECORD)
+      cancel_err= mylite_ownerless_innodb_lock_dberr_from_result(
+          mylite_ownerless_innodb_lock_cancel_record_page_write(
+              trx, snapshot.space_id, snapshot.page_no));
     mysql_mutex_lock(&lock_sys.wait_mutex);
     if (wait_err == DB_DEADLOCK)
       trx->lock.was_chosen_as_deadlock_victim= true;
 
+    if (cancel_err != DB_SUCCESS)
+      return cancel_err;
     if (refresh_err != DB_SUCCESS)
       return refresh_err;
+    if (page_write_err != DB_SUCCESS)
+      return page_write_err;
     if (wait_err == DB_LOCK_WAIT_TIMEOUT ||
         wait_err == DB_DEADLOCK ||
         wait_err == DB_LOCK_TABLE_FULL ||
@@ -4743,32 +5213,26 @@ static dberr_t mylite_ownerless_innodb_lock_refresh_wait_page_after_grant(
   if (snapshot.kind != MYLITE_OWNERLESS_INNODB_LOCK_EXTERNAL_WAIT_RECORD)
     return DB_SUCCESS;
 
-  bool skip_tracked_page= false;
-  if (trx != nullptr)
-  {
-    const uint64_t packed_page=
-        (uint64_t{snapshot.space_id} << 32) | snapshot.page_no;
-    const trx_t::mylite_ownerless_page_vector *pages=
-        trx->mylite_ownerless_dirty_pages_for_read();
-    if (pages != nullptr)
-      for (uint64_t modified_page : *pages)
-        if (modified_page == packed_page)
-        {
-          if (trx->undo_no != 0 || trx->dict_operation ||
-              !trx->mod_tables.empty())
-          {
-            skip_tracked_page= true;
-            break;
-          }
-          break;
-        }
-  }
-
-  if (skip_tracked_page)
+  if (mylite_ownerless_innodb_lock_wait_page_has_local_changes(
+          trx, snapshot))
     return DB_SUCCESS;
 
   return mylite_ownerless_innodb_lock_dberr_from_result(
       mylite_ownerless_innodb_refresh_external_wait_page(&snapshot));
+}
+
+static bool mylite_ownerless_innodb_lock_wait_page_has_local_changes(
+    const trx_t *trx,
+    const mylite_ownerless_innodb_lock_external_wait &snapshot)
+{
+  if (trx == nullptr ||
+      snapshot.kind != MYLITE_OWNERLESS_INNODB_LOCK_EXTERNAL_WAIT_RECORD)
+    return false;
+
+  const uint64_t packed_page=
+      (uint64_t{snapshot.space_id} << 32) | snapshot.page_no;
+  return trx->mylite_ownerless_dirty_page_contains(packed_page) &&
+         (trx->undo_no != 0 || trx->dict_operation || !trx->mod_tables.empty());
 }
 
 static unsigned mylite_ownerless_innodb_lock_remaining_wait_ms(
@@ -4859,13 +5323,23 @@ static void lock_table_dequeue(lock_t *in_lock, bool owns_wait_mutex)
 
 		ut_ad(lock->trx->lock.wait_lock);
 
-		if (const lock_t* c = lock_table_has_to_wait_in_queue(lock)) {
-			trx_t* c_trx = c->trx;
-			lock->trx->lock.wait_trx = c_trx;
-			mylite_ownerless_innodb_lock_apply_wait_result(
-				lock->trx,
-				mylite_ownerless_innodb_lock_publish_table_wait(
-					lock, c));
+			if (const lock_t* c = lock_table_has_to_wait_in_queue(lock)) {
+				trx_t* c_trx = c->trx;
+				lock->trx->lock.wait_trx = c_trx;
+				if (UNIV_UNLIKELY(
+					mylite_ownerless_innodb_lock_hooks_enabled_fast())) {
+					const int ownerless_result=
+						mylite_ownerless_innodb_lock_publish_table_wait(
+							lock, c);
+					if (ownerless_result !=
+					    MYLITE_OWNERLESS_INNODB_LOCK_OK) {
+						mylite_ownerless_innodb_lock_apply_wait_result(
+							lock->trx, ownerless_result);
+						lock->trx->lock.wait_trx = nullptr;
+						pthread_cond_signal(&lock->trx->lock.cond);
+						continue;
+					}
+				}
 			if (c_trx->lock.wait_trx
 			    && innodb_deadlock_detect
 			    && Deadlock::to_check.emplace(c_trx).second) {
@@ -5061,10 +5535,19 @@ static void lock_rec_rebuild_waiting_queue(
     if (c_lock_info.conflicting)
     {
       lock->trx->lock.wait_trx= c_lock_info.conflicting->trx;
-      mylite_ownerless_innodb_lock_apply_wait_result(
-          lock->trx,
-          mylite_ownerless_innodb_lock_publish_record_wait(
-              lock, c_lock_info.conflicting));
+      if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_hooks_enabled_fast()))
+      {
+        const int ownerless_result=
+            mylite_ownerless_innodb_lock_publish_record_wait(
+                lock, c_lock_info.conflicting);
+        if (ownerless_result != MYLITE_OWNERLESS_INNODB_LOCK_OK)
+        {
+          mylite_ownerless_innodb_lock_apply_wait_result(
+              lock->trx, ownerless_result);
+          lock->trx->lock.wait_trx= nullptr;
+          pthread_cond_signal(&lock->trx->lock.cond);
+        }
+      }
     }
     else
     {
@@ -6612,14 +7095,16 @@ lock_rec_insert_check_and_lock(
   if (UNIV_LIKELY(comp != 0))
   {
     next_rec= page_rec_next_get<true>(block->page.frame, rec);
-    if (UNIV_UNLIKELY(!next_rec || rec_is_metadata(next_rec, TRUE)))
+    if (UNIV_UNLIKELY(!next_rec || rec_is_metadata(next_rec, TRUE))) {
       return DB_CORRUPTION;
+    }
   }
   else
   {
     next_rec= page_rec_next_get<false>(block->page.frame, rec);
-    if (UNIV_UNLIKELY(!next_rec || rec_is_metadata(next_rec, FALSE)))
+    if (UNIV_UNLIKELY(!next_rec || rec_is_metadata(next_rec, FALSE))) {
       return DB_CORRUPTION;
+    }
   }
 
   dberr_t err= DB_SUCCESS;
@@ -6628,6 +7113,18 @@ lock_rec_insert_check_and_lock(
   const ulint heap_no= comp
     ? rec_get_heap_no_new(next_rec) : rec_get_heap_no_old(next_rec);
   const page_id_t id{block->page.id()};
+  bool new_page_write_reservation= false;
+
+  if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_hooks_enabled_fast()))
+  {
+    err= mylite_ownerless_innodb_lock_acquire_record_space_gate(trx, index);
+    if (err != DB_SUCCESS)
+      return err;
+    err= mylite_ownerless_innodb_lock_reserve_page_for_grant(
+        trx, block, &new_page_write_reservation);
+    if (err != DB_SUCCESS)
+      return err;
+  }
 
   {
     LockGuard g{lock_sys.rec_hash, id};
@@ -6690,6 +7187,15 @@ lock_rec_insert_check_and_lock(
       }
       else if (ownerless_err != DB_SUCCESS)
         err= ownerless_err;
+
+      if (err == DB_SUCCESS)
+      {
+        err= mylite_ownerless_innodb_lock_reserve_insert_for_grant(trx, index);
+        if (err == DB_SUCCESS)
+        {
+          *inherit= true;
+        }
+      }
     }
   }
 
@@ -6724,7 +7230,8 @@ lock_rec_insert_check_and_lock(
   }
 #endif /* UNIV_DEBUG */
 
-  return err;
+  return mylite_ownerless_innodb_lock_finish_page_grant(
+      trx, id, new_page_write_reservation, err);
 }
 
 /** Create an explicit record lock for a transaction that currently only
@@ -6744,6 +7251,15 @@ static trx_t *lock_rec_convert_impl_to_expl_for_trx(trx_t *trx,
     ut_ad(trx->is_referenced());
     ut_ad(page_rec_is_leaf(rec));
     ut_ad(!rec_is_metadata(rec, *index));
+    if (UNIV_UNLIKELY(trx->mylite_ownerless_remote_recovered))
+    {
+      /* The shared ownerless registry, not this startup proxy, owns the
+      remote transaction's lock lifetime. Converting the proxy's implicit
+      ownership to a local explicit lock would outlive the remote commit and
+      block the local statement that must observe it. */
+      trx->release_reference();
+      return nullptr;
+    }
 
     const ulint heap_no= lock_get_heap_no(block, rec);
     const page_id_t id{block.page.id()};
@@ -6945,14 +7461,29 @@ lock_clust_rec_modify_check_and_lock(
 	for it */
 
 	trx_t *trx = thr_get_trx(thr);
+	const page_id_t page_id{block->page.id()};
+	bool new_page_write_reservation = false;
+	if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_hooks_enabled_fast())) {
+		err = mylite_ownerless_innodb_lock_acquire_record_space_gate(
+			trx, index);
+		if (err != DB_SUCCESS) {
+			return err;
+		}
+		err = mylite_ownerless_innodb_lock_reserve_page_for_grant(
+			trx, block, &new_page_write_reservation);
+		if (err != DB_SUCCESS) {
+			return err;
+		}
+	}
 	if (lock_rec_convert_impl_to_expl<true>(trx, *block,
 						rec, index, offsets) == trx) {
 		if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_hooks_enabled_fast())) {
 			err = mylite_ownerless_innodb_lock_reserve_record_for_grant(
-				trx, index, block->page.id(), heap_no,
+				trx, index, page_id, heap_no,
 				LOCK_X | LOCK_REC_NOT_GAP);
 			if (err != DB_SUCCESS) {
-				return err;
+				return mylite_ownerless_innodb_lock_finish_page_grant(
+					trx, page_id, new_page_write_reservation, err);
 			}
 		}
 		/* We already hold an exclusive lock. */
@@ -6969,7 +7500,8 @@ lock_clust_rec_modify_check_and_lock(
 		err = DB_SUCCESS;
 	}
 
-	return(err);
+	return(mylite_ownerless_innodb_lock_finish_page_grant(
+		trx, page_id, new_page_write_reservation, err));
 }
 
 /*********************************************************************//**
@@ -7008,9 +7540,18 @@ lock_sec_rec_modify_check_and_lock(
 	ut_ad(!index->table->is_temporary());
 
 	heap_no = lock_get_heap_no(*block, rec);
+	trx_t *trx = thr_get_trx(thr);
+	const page_id_t page_id{block->page.id()};
+	bool new_page_write_reservation = false;
+	if (UNIV_UNLIKELY(mylite_ownerless_innodb_lock_hooks_enabled_fast())) {
+		err = mylite_ownerless_innodb_lock_reserve_page_for_grant(
+			trx, block, &new_page_write_reservation);
+		if (err != DB_SUCCESS) {
+			return err;
+		}
+	}
 
 #ifdef WITH_WSREP
-	trx_t *trx= thr_get_trx(thr);
 	/* If transaction scanning an unique secondary key is wsrep
 	high priority thread (brute force) this scanning may involve
 	GAP-locking in the index. As this locking happens also when
@@ -7065,7 +7606,8 @@ lock_sec_rec_modify_check_and_lock(
 		err = DB_SUCCESS;
 	}
 
-	return(err);
+	return(mylite_ownerless_innodb_lock_finish_page_grant(
+		trx, page_id, new_page_write_reservation, err));
 }
 
 /*********************************************************************//**
@@ -7214,8 +7756,15 @@ lock_clust_rec_read_check_and_lock(
 	    && trx->read_view.is_open()) {
 		trx_id_t trx_id= trx_read_trx_id(rec +
 						 row_trx_id_offset(rec, index));
+		bool remote_active= false;
+		const dberr_t remote_active_err=
+			mylite_ownerless_innodb_remote_trx_is_active(
+				trx_id, &remote_active);
+		if (remote_active_err != DB_SUCCESS)
+			return remote_active_err;
 		if (!trx_sys.is_registered(trx, trx_id)
-		    && !trx->read_view.changes_visible(trx_id)
+			    && !remote_active
+			    && !trx->read_view.changes_visible(trx_id)
 		    && IF_WSREP(!(trx->is_wsrep()
 			&& wsrep_thd_skip_locking(trx->mysql_thd)), true)) {
 			return DB_RECORD_CHANGED;
@@ -7312,7 +7861,7 @@ static void lock_release_autoinc_locks(trx_t *trx)
 }
 
 /** Cancel a waiting lock request and release possibly waiting transactions */
-template <bool from_deadlock= false, bool inner_trx_lock= true>
+template <bool from_deadlock, bool inner_trx_lock>
 static void lock_cancel_waiting_and_release(lock_t *lock) noexcept
 {
   lock_sys.assert_locked(*lock);

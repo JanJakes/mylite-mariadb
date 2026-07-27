@@ -14,6 +14,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02111 - 1301 USA*/
 
 #pragma once
+#include <chrono>
 #include <memory> /* unique_ptr */
 #include <condition_variable>
 #include <mutex>
@@ -127,6 +128,7 @@ public:
   TPOOL_SUPPRESS_TSAN bool is_running() { return get_ref_count() > 0; }
   TPOOL_SUPPRESS_TSAN int get_ref_count() {return m_ref_count;}
   void wait();
+  bool wait_until(std::chrono::steady_clock::time_point deadline);
   void disable();
   void enable();
   virtual ~waitable_task() {};

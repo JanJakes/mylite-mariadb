@@ -278,6 +278,9 @@ row_undo_mod_clust(
 
 	if (err != DB_SUCCESS) {
 		btr_pcur_commit_specify_mtr(pcur, &mtr);
+		if (UNIV_UNLIKELY(mtr.ownerless_error() != DB_SUCCESS)) {
+			goto func_exit;
+		}
 
 		/* We may have to modify tree structure: do a pessimistic
 		descent down the index tree */
@@ -307,6 +310,12 @@ row_undo_mod_clust(
 	      == node->new_trx_id);
 
 	btr_pcur_commit_specify_mtr(pcur, &mtr);
+	if (UNIV_UNLIKELY(mtr.ownerless_error() != DB_SUCCESS)) {
+		if (err == DB_SUCCESS) {
+			err = mtr.ownerless_error();
+		}
+		goto func_exit;
+	}
 	DEBUG_SYNC_C("rollback_undo_pk");
 
 	if (err != DB_SUCCESS) {
@@ -337,9 +346,14 @@ row_undo_mod_clust(
 			if (err != DB_FAIL) {
 				goto mtr_commit_exit;
 			}
-			err = DB_SUCCESS;
-			btr_pcur_commit_specify_mtr(pcur, &mtr);
-		} else {
+				err = DB_SUCCESS;
+				btr_pcur_commit_specify_mtr(pcur, &mtr);
+				if (UNIV_UNLIKELY(mtr.ownerless_error()
+						   != DB_SUCCESS)) {
+					err = mtr.ownerless_error();
+					goto func_exit;
+				}
+			} else {
 			index->set_modified(mtr);
 			if (!row_undo_mod_must_purge(*node)) {
 				goto mtr_commit_exit;
@@ -349,9 +363,14 @@ row_undo_mod_clust(
 			if (err != DB_FAIL) {
 				goto mtr_commit_exit;
 			}
-			err = DB_SUCCESS;
-			btr_pcur_commit_specify_mtr(pcur, &mtr);
-		}
+				err = DB_SUCCESS;
+				btr_pcur_commit_specify_mtr(pcur, &mtr);
+				if (UNIV_UNLIKELY(mtr.ownerless_error()
+						   != DB_SUCCESS)) {
+					err = mtr.ownerless_error();
+					goto func_exit;
+				}
+			}
 
 		mtr.start();
 		if (pcur->restore_position(BTR_PURGE_TREE, &mtr) !=
@@ -461,6 +480,9 @@ row_undo_mod_clust(
 
 mtr_commit_exit:
 	btr_pcur_commit_specify_mtr(pcur, &mtr);
+	if (err == DB_SUCCESS) {
+		err = mtr.ownerless_error();
+	}
 
 func_exit:
 	if (offsets_heap) {
@@ -730,7 +752,10 @@ found:
 
 func_exit:
 	btr_pcur_close(&pcur);
-	mtr_commit(&mtr);
+	const dberr_t commit_error = mtr_commit(&mtr);
+	if (err == DB_SUCCESS) {
+		err = commit_error;
+	}
 
 	return(err);
 }
@@ -825,7 +850,10 @@ try_again:
 		if (mode != orig_mode && btr_cur->rtr_info->fd_del) {
 			mode = orig_mode;
 			btr_pcur_close(&pcur);
-			mtr.commit();
+			err = mtr.commit();
+			if (UNIV_UNLIKELY(err != DB_SUCCESS)) {
+				return(err);
+			}
 			goto try_again;
 		}
 
@@ -933,7 +961,10 @@ found:
 
 func_exit:
 	btr_pcur_close(&pcur);
-	mtr_commit(&mtr);
+	const dberr_t commit_error = mtr_commit(&mtr);
+	if (err == DB_SUCCESS) {
+		err = commit_error;
+	}
 
 	return(err);
 }
@@ -1312,7 +1343,7 @@ row_undo_mod(
 	const bool dict_locked = node->trx->dict_operation_lock_mode;
 
 	if (!row_undo_mod_parse_undo_rec(node, dict_locked)) {
-		return DB_SUCCESS;
+		return node->trx->error_state;
 	}
 
 	ut_ad(node->table->is_temporary()

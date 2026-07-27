@@ -19,4 +19,17 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/pdo_api_test.php"
     -d "extension=$<TARGET_FILE:mylite_pdo_php_extension>"
   )
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    mylite_add_php_test(
+      php-ext-pdo-mylite.ownerless
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/pdo_ownerless_test.php"
+      -d "extension=$<TARGET_FILE:mylite_pdo_php_extension>"
+    )
+    set_tests_properties(php-ext-pdo-mylite.ownerless PROPERTIES
+      ENVIRONMENT
+        "MYLITE_PHP_CORE_EXTENSION=$<TARGET_FILE:mylite_php_extension>;MYLITE_PHP_PDO_EXTENSION=$<TARGET_FILE:mylite_pdo_php_extension>"
+      LABELS "php;compat.integration;compat.ownerless-application"
+      TIMEOUT 120
+    )
+  endif()
 endif()

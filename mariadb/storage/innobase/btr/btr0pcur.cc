@@ -29,6 +29,20 @@ Created 2/23/1996 Heikki Tuuri
 #include "btr0sea.h"
 #include "rem0cmp.h"
 #include "ibuf0ibuf.h"
+#include "lock0lock.h"
+
+static bool btr_pcur_ownerless_record_page_required(
+    const btr_pcur_t *cursor, btr_latch_mode latch_mode, const mtr_t *mtr)
+{
+  if (UNIV_LIKELY(!mylite_ownerless_innodb_lock_hooks_enabled_fast()) ||
+      mtr->trx == nullptr || cursor->index()->table->is_temporary())
+    return false;
+
+	const auto rw_latch= rw_lock_type_t(
+		latch_mode & (RW_X_LATCH | RW_S_LATCH));
+	return rw_latch == RW_X_LATCH ||
+		mylite_ownerless_innodb_statement_plain_read() == 0;
+}
 
 /**************************************************************//**
 Resets a persistent cursor object, freeing ::old_rec_buf if it is
@@ -339,7 +353,9 @@ btr_pcur_t::restore_position(btr_latch_mode restore_latch_mode, mtr_t *mtr)
 
 	static_assert(int{BTR_SEARCH_PREV} == (4 | BTR_SEARCH_LEAF), "");
 
-	if ((restore_latch_mode | 4) == BTR_SEARCH_PREV) {
+	if ((restore_latch_mode | 4) == BTR_SEARCH_PREV
+	    && !btr_pcur_ownerless_record_page_required(
+		this, restore_latch_mode, mtr)) {
 		/* Try optimistic restoration. */
 		if (btr_pcur_optimistic_latch_leaves(this, &restore_latch_mode,
 						     mtr)) {
@@ -492,7 +508,13 @@ btr_pcur_move_to_next_page(
 	ut_ad(cursor->latch_mode != BTR_NO_LATCHES);
 	ut_ad(btr_pcur_is_after_last_on_page(cursor));
 
-	cursor->old_rec = nullptr;
+	const bool ownerless_restartable=
+		btr_pcur_ownerless_record_page_required(
+			cursor, cursor->latch_mode, mtr);
+	if (ownerless_restartable)
+		btr_pcur_store_position(cursor, mtr);
+	else
+		cursor->old_rec = nullptr;
 
 	const page_t* page = btr_pcur_get_page(cursor);
 	const uint32_t next_page_no = btr_page_get_next(page);
@@ -509,7 +531,7 @@ btr_pcur_move_to_next_page(
 		return DB_CORRUPTION;
 	}
 
-	dberr_t err;
+	dberr_t err = DB_SUCCESS;
 	bool first_access = false;
 	buf_block_t* next_block = btr_block_get(
 		*cursor->index(), next_page_no,
@@ -518,6 +540,40 @@ btr_pcur_move_to_next_page(
 
 	if (UNIV_UNLIKELY(!next_block)) {
 		return err;
+	}
+
+	bool ownerless_restart = false;
+	if (ownerless_restartable)
+		err = mylite_ownerless_innodb_lock_prepare_record_page(
+			mtr->trx, next_block, &ownerless_restart);
+	if (UNIV_UNLIKELY(err != DB_SUCCESS))
+		return err;
+	if (ownerless_restart) {
+		const btr_latch_mode restore_latch_mode = cursor->latch_mode;
+		mtr_commit(mtr);
+		mtr_start(mtr);
+		if (cursor->restore_position(restore_latch_mode, mtr)
+		    == btr_pcur_t::CORRUPTED)
+			return DB_CORRUPTION;
+
+		/* BTR_PCUR_AFTER restoration can remain on the predecessor page's
+		supremum. Cross into the already reserved page before resuming. If the
+		search instead selected the successor directly, leave the cursor just
+		before it so all callers retain the normal page-transition contract. */
+		if (btr_pcur_is_after_last_on_page(cursor)) {
+			if (btr_pcur_is_after_last_in_tree(cursor))
+				return DB_CORRUPTION;
+			const dberr_t move_err =
+				btr_pcur_move_to_next_page(cursor, mtr);
+			if (move_err != DB_SUCCESS)
+				return move_err;
+			cursor->pos_state = BTR_PCUR_IS_POSITIONED;
+		} else if (!btr_pcur_is_before_first_on_page(cursor)
+			   && !btr_pcur_move_to_prev_on_page(cursor)) {
+			return DB_CORRUPTION;
+		}
+		cursor->old_rec = nullptr;
+		return DB_SUCCESS;
 	}
 
 	const page_t* next_page = buf_block_get_frame(next_block);
@@ -565,7 +621,7 @@ btr_pcur_move_backward_from_page(
 	mtr_commit(mtr);
 
 	mtr_start(mtr);
-
+restore_from_root:
 	if (UNIV_UNLIKELY(cursor->restore_position(BTR_SEARCH_PREV, mtr)
 			  == btr_pcur_t::CORRUPTED)) {
 		return true;
@@ -583,6 +639,22 @@ btr_pcur_move_backward_from_page(
 
 	if (page_has_prev(page)) {
 		buf_block_t* const left_block = mtr->at_savepoint(1);
+		bool ownerless_restart = false;
+		if (btr_pcur_ownerless_record_page_required(
+			cursor, BTR_SEARCH_PREV, mtr)) {
+			const dberr_t err =
+				mylite_ownerless_innodb_lock_prepare_record_page(
+					mtr->trx, left_block, &ownerless_restart);
+			if (UNIV_UNLIKELY(err != DB_SUCCESS)) {
+				mtr->trx->error_state = err;
+				return true;
+			}
+			if (ownerless_restart) {
+				mtr_commit(mtr);
+				mtr_start(mtr);
+				goto restore_from_root;
+			}
+		}
 		ut_ad(!memcmp_aligned<4>(page + FIL_PAGE_OFFSET,
 					 left_block->page.frame
 					 + FIL_PAGE_NEXT, 4));

@@ -1,5 +1,8 @@
 #include "ownerless_page_index.h"
 
+#include "ownerless_process_registry.h"
+
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -41,6 +44,7 @@ void require_wal_scan(unsigned char *index);
 void require_wal_scan_for_overflow(unsigned char *index);
 void trust_wal_scan_entries(unsigned char *index);
 void clear_entries_locked(unsigned char *index, std::uint32_t count);
+void invalidate_entries_after_owner_death(unsigned char *index, std::uint32_t count);
 int publish_entry_locked(
     unsigned char *index,
     std::uint32_t count,
@@ -71,6 +75,14 @@ bool entry_is_better_version(
     std::uint64_t best_record_offset
 );
 int latch_result_to_index_result(int result);
+int finish_index_operation(
+    mylite_ownerless_latch *latch,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
+    int operation_result,
+    bool operation_applied
+);
+bool generation_can_advance(const unsigned char *index, std::uint64_t amount);
 
 } // namespace
 
@@ -129,12 +141,24 @@ int mylite_ownerless_page_index_publish(
     }
 
     const std::uint32_t count = entry_count(bytes);
-    int result = MYLITE_OWNERLESS_PAGE_INDEX_OK;
-    result =
-        publish_entry_locked(bytes, count, space_id, page_no, commit_lsn, page_lsn, record_offset);
+    const int result = generation_can_advance(bytes, 1U) ? publish_entry_locked(
+                                                               bytes,
+                                                               count,
+                                                               space_id,
+                                                               page_no,
+                                                               commit_lsn,
+                                                               page_lsn,
+                                                               record_offset
+                                                           )
+                                                         : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
 
-    const int release_result = mylite_ownerless_latch_release(latch, owner_id, owner_generation);
-    return release_result == MYLITE_OWNERLESS_LATCH_OK ? result : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+    return finish_index_operation(
+        latch,
+        owner_id,
+        owner_generation,
+        result,
+        result == MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
 }
 
 int mylite_ownerless_page_index_require_wal_scan(
@@ -165,11 +189,19 @@ int mylite_ownerless_page_index_require_wal_scan(
         return latch_result_to_index_result(acquire_result);
     }
 
-    require_wal_scan(bytes);
+    const int result = generation_can_advance(bytes, 1U) ? MYLITE_OWNERLESS_PAGE_INDEX_OK
+                                                         : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+    if (result == MYLITE_OWNERLESS_PAGE_INDEX_OK) {
+        require_wal_scan(bytes);
+    }
 
-    const int release_result = mylite_ownerless_latch_release(latch, owner_id, owner_generation);
-    return release_result == MYLITE_OWNERLESS_LATCH_OK ? MYLITE_OWNERLESS_PAGE_INDEX_OK
-                                                       : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+    return finish_index_operation(
+        latch,
+        owner_id,
+        owner_generation,
+        result,
+        result == MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
 }
 
 int mylite_ownerless_page_index_clear(
@@ -200,11 +232,19 @@ int mylite_ownerless_page_index_clear(
         return latch_result_to_index_result(acquire_result);
     }
 
-    clear_entries_locked(bytes, entry_count(bytes));
+    const int result = generation_can_advance(bytes, 1U) ? MYLITE_OWNERLESS_PAGE_INDEX_OK
+                                                         : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+    if (result == MYLITE_OWNERLESS_PAGE_INDEX_OK) {
+        clear_entries_locked(bytes, entry_count(bytes));
+    }
 
-    const int release_result = mylite_ownerless_latch_release(latch, owner_id, owner_generation);
-    return release_result == MYLITE_OWNERLESS_LATCH_OK ? MYLITE_OWNERLESS_PAGE_INDEX_OK
-                                                       : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+    return finish_index_operation(
+        latch,
+        owner_id,
+        owner_generation,
+        result,
+        result == MYLITE_OWNERLESS_PAGE_INDEX_OK
+    );
 }
 
 int mylite_ownerless_page_index_replace(
@@ -245,9 +285,20 @@ int mylite_ownerless_page_index_replace(
     }
 
     const std::uint32_t count = entry_count(bytes);
-    clear_entries_locked(bytes, count);
-    int result = MYLITE_OWNERLESS_PAGE_INDEX_OK;
+    const std::uint64_t required_generations =
+        record_count >= std::numeric_limits<std::uint64_t>::max() - 2U
+            ? std::numeric_limits<std::uint64_t>::max()
+            : static_cast<std::uint64_t>(record_count) + 2U;
+    int result = generation_can_advance(bytes, required_generations)
+                     ? MYLITE_OWNERLESS_PAGE_INDEX_OK
+                     : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+    if (result == MYLITE_OWNERLESS_PAGE_INDEX_OK) {
+        clear_entries_locked(bytes, count);
+    }
     for (std::size_t record_index = 0; record_index < record_count; ++record_index) {
+        if (result != MYLITE_OWNERLESS_PAGE_INDEX_OK) {
+            break;
+        }
         const mylite_ownerless_page_index_record &record = records[record_index];
         result = publish_entry_locked(
             bytes,
@@ -262,14 +313,13 @@ int mylite_ownerless_page_index_replace(
             break;
         }
     }
-    if (result != MYLITE_OWNERLESS_PAGE_INDEX_OK) {
+    if (result != MYLITE_OWNERLESS_PAGE_INDEX_OK && generation_can_advance(bytes, 1U)) {
         require_wal_scan(bytes);
     } else if (wal_scan_required(bytes)) {
         trust_wal_scan_entries(bytes);
     }
 
-    const int release_result = mylite_ownerless_latch_release(latch, owner_id, owner_generation);
-    return release_result == MYLITE_OWNERLESS_LATCH_OK ? result : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+    return finish_index_operation(latch, owner_id, owner_generation, result, true);
 }
 
 int mylite_ownerless_page_index_find(
@@ -386,8 +436,7 @@ int mylite_ownerless_page_index_find_with_generation(
         result = MYLITE_OWNERLESS_PAGE_INDEX_SCAN_REQUIRED;
     }
 
-    const int release_result = mylite_ownerless_latch_release(latch, owner_id, owner_generation);
-    return release_result == MYLITE_OWNERLESS_LATCH_OK ? result : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+    return finish_index_operation(latch, owner_id, owner_generation, result, false);
 }
 
 int mylite_ownerless_page_index_generation(
@@ -406,6 +455,91 @@ int mylite_ownerless_page_index_generation(
 
     *out_index_generation = load64(bytes, k_header_generation_offset);
     return MYLITE_OWNERLESS_PAGE_INDEX_OK;
+}
+
+int mylite_ownerless_page_index_finish_pending_release(
+    void *index,
+    std::size_t index_size,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation
+) {
+    if (index == nullptr || owner_id == 0U || owner_generation == 0U) {
+        return MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+    }
+    auto *bytes = static_cast<unsigned char *>(index);
+    if (!index_valid(bytes, index_size)) {
+        return MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+    }
+    mylite_ownerless_latch *latch = index_latch(bytes);
+    const int acquire_result = mylite_ownerless_latch_acquire(
+        latch,
+        owner_id,
+        owner_generation,
+        nullptr,
+        nullptr,
+        k_latch_timeout_ms
+    );
+    if (acquire_result != MYLITE_OWNERLESS_LATCH_OK) {
+        return latch_result_to_index_result(acquire_result);
+    }
+    return finish_index_operation(
+        latch,
+        owner_id,
+        owner_generation,
+        MYLITE_OWNERLESS_PAGE_INDEX_OK,
+        false
+    );
+}
+
+int mylite_ownerless_page_index_recover_dead_latch(
+    void *index,
+    std::size_t index_size,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
+    const mylite_ownerless_process_registry_liveness_context *liveness
+) {
+    if (index == nullptr || owner_id == 0U || owner_generation == 0U || liveness == nullptr) {
+        return MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+    }
+    auto *bytes = static_cast<unsigned char *>(index);
+    if (!index_valid(bytes, index_size)) {
+        return MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+    }
+
+    mylite_ownerless_latch_dead_owner dead_owner = {};
+    const int latch_result = mylite_ownerless_latch_acquire_recoverable(
+        index_latch(bytes),
+        owner_id,
+        owner_generation,
+        mylite_ownerless_process_registry_latch_owner_is_alive,
+        const_cast<mylite_ownerless_process_registry_liveness_context *>(liveness),
+        k_latch_timeout_ms,
+        &dead_owner
+    );
+    if (latch_result == MYLITE_OWNERLESS_LATCH_RECOVERY_REQUIRED) {
+        /*
+         * Existing-entry publication changes three words. Their intermediate
+         * combinations are not interpretable, but this index is rebuildable;
+         * invalidate it and force the durable WAL scan instead of guessing.
+         */
+        invalidate_entries_after_owner_death(bytes, entry_count(bytes));
+        if (mylite_ownerless_latch_mark_consistent(
+                index_latch(bytes),
+                owner_id,
+                owner_generation
+            ) != MYLITE_OWNERLESS_LATCH_OK) {
+            return MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+        }
+    } else if (latch_result != MYLITE_OWNERLESS_LATCH_OK) {
+        return latch_result_to_index_result(latch_result);
+    }
+    return finish_index_operation(
+        index_latch(bytes),
+        owner_id,
+        owner_generation,
+        MYLITE_OWNERLESS_PAGE_INDEX_OK,
+        latch_result == MYLITE_OWNERLESS_LATCH_RECOVERY_REQUIRED
+    );
 }
 
 namespace {
@@ -501,15 +635,35 @@ void trust_wal_scan_entries(unsigned char *index) {
 }
 
 void clear_entries_locked(unsigned char *index, std::uint32_t count) {
-    std::memset(
-        index + MYLITE_OWNERLESS_PAGE_INDEX_HEADER_SIZE,
-        0,
-        static_cast<std::size_t>(count) * MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE
-    );
+    for (std::uint32_t entry_index = 0; entry_index < count; ++entry_index) {
+        unsigned char *entry = entry_at(index, entry_index);
+        store32(entry, k_entry_state_offset, k_entry_state_empty);
+        std::memset(entry, 0, MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE);
+    }
     store32(index, k_header_active_count_offset, 0U);
     store32(index, k_header_wal_scan_required_offset, 0U);
     store32(index, k_header_wal_scan_entries_trusted_offset, 0U);
     store64(index, k_header_generation_offset, load64(index, k_header_generation_offset) + 1U);
+}
+
+void invalidate_entries_after_owner_death(unsigned char *index, std::uint32_t count) {
+    std::uint64_t generation = load64(index, k_header_generation_offset);
+    for (std::uint32_t entry_index = 0; entry_index < count; ++entry_index) {
+        unsigned char *entry = entry_at(index, entry_index);
+        generation = std::max(generation, load64(entry, k_entry_generation_offset));
+        store32(entry, k_entry_state_offset, k_entry_state_empty);
+    }
+    for (std::uint32_t entry_index = 0; entry_index < count; ++entry_index) {
+        std::memset(entry_at(index, entry_index), 0, MYLITE_OWNERLESS_PAGE_INDEX_ENTRY_SIZE);
+    }
+    store32(index, k_header_active_count_offset, 0U);
+    store32(index, k_header_wal_scan_entries_trusted_offset, 0U);
+    store32(index, k_header_wal_scan_required_offset, 1U);
+    store64(
+        index,
+        k_header_generation_offset,
+        generation == std::numeric_limits<std::uint64_t>::max() ? generation : generation + 1U
+    );
 }
 
 int publish_entry_locked(
@@ -537,7 +691,6 @@ int publish_entry_locked(
                 k_entry_generation_offset,
                 load64(index, k_header_generation_offset) + 1U
             );
-            store32(entry, k_entry_state_offset, k_entry_state_active);
             store32(
                 index,
                 k_header_active_count_offset,
@@ -548,6 +701,7 @@ int publish_entry_locked(
                 k_header_generation_offset,
                 load64(index, k_header_generation_offset) + 1U
             );
+            store32(entry, k_entry_state_offset, k_entry_state_active);
             result = MYLITE_OWNERLESS_PAGE_INDEX_OK;
             break;
         }
@@ -638,8 +792,47 @@ bool entry_is_better_version(
 }
 
 int latch_result_to_index_result(int result) {
-    (void)result;
+    if (result == MYLITE_OWNERLESS_LATCH_TIMEOUT) {
+        return MYLITE_OWNERLESS_PAGE_INDEX_TIMEOUT;
+    }
+    if (result == MYLITE_OWNERLESS_LATCH_OWNER_DEAD ||
+        result == MYLITE_OWNERLESS_LATCH_NOT_RECOVERABLE) {
+        return MYLITE_OWNERLESS_PAGE_INDEX_OWNER_DEAD;
+    }
     return MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+}
+
+int finish_index_operation(
+    mylite_ownerless_latch *latch,
+    std::uint32_t owner_id,
+    std::uint64_t owner_generation,
+    int operation_result,
+    bool operation_applied
+) {
+    const int release_result = mylite_ownerless_latch_release(latch, owner_id, owner_generation);
+    if (release_result == MYLITE_OWNERLESS_LATCH_OK) {
+        return operation_result;
+    }
+    if (!operation_applied && release_result == MYLITE_OWNERLESS_LATCH_RELEASE_PENDING &&
+        mylite_ownerless_latch_acquire(
+            latch,
+            owner_id,
+            owner_generation,
+            nullptr,
+            nullptr,
+            k_latch_timeout_ms
+        ) == MYLITE_OWNERLESS_LATCH_OK &&
+        mylite_ownerless_latch_release(latch, owner_id, owner_generation) ==
+            MYLITE_OWNERLESS_LATCH_OK) {
+        return operation_result;
+    }
+    return operation_applied ? MYLITE_OWNERLESS_PAGE_INDEX_APPLIED_RELEASE_PENDING
+                             : MYLITE_OWNERLESS_PAGE_INDEX_ERROR;
+}
+
+bool generation_can_advance(const unsigned char *index, std::uint64_t amount) {
+    return amount <=
+           std::numeric_limits<std::uint64_t>::max() - load64(index, k_header_generation_offset);
 }
 
 } // namespace
