@@ -28,6 +28,10 @@ Relevant upstream-derived source:
   directory synchronization as a platform-dependent operation.
 - `mariadb/libmysqld/CMakeLists.txt` builds the static embedded target as
   `libmariadbd.a` on Unix and `mysqlserver.lib` on Windows.
+- `mariadb/cmake/libutils.cmake` merges MariaDB's component archives into that
+  embedded target. The MSVC path must pass every component archive to
+  `lib.exe`; merely attaching static target dependencies produces an
+  incomplete carrier archive.
 
 Relevant MyLite source:
 
@@ -227,8 +231,8 @@ removed before open continues.
    - kills a writer and verifies dead-process cleanup;
    - reports the detected admitted filesystem.
 6. Run the smoke test on GitHub macOS/APFS and Windows/NTFS runners.
-7. On macOS, run the ownerless primitive suite and a focused SQL subset that
-   does not depend on Linux-only namespace tools.
+7. On macOS, run a focused platform-capability primitive gate and a focused SQL
+   subset that does not depend on Linux-only namespace tools.
 8. On Windows, run native platform primitive coverage plus the portable
    cross-process smoke test.
 9. Run formatting, tidy/static checks where supported, production-build policy,

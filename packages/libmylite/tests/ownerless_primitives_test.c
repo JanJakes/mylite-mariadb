@@ -673,6 +673,11 @@ int main(int argc, char **argv) {
         test_process_registry_rejects_generation_saturation();
         return 0;
     }
+    if (test_filter != NULL && strcmp(test_filter, "platform-gate") == 0) {
+        test_platform_probe_records_required_primitives();
+        test_directory_probe_records_required_primitives();
+        return 0;
+    }
 
     test_mmap_shared_visibility_across_processes();
     test_fcntl_byte_range_lock_conflict();

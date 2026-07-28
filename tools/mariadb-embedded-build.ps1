@@ -82,6 +82,21 @@ function Build-MariaDB {
     if (-not (Test-Path $Archive)) {
         throw "MariaDB embedded archive was not produced: $Archive"
     }
+
+    $Dumpbin = Get-Command dumpbin.exe -ErrorAction SilentlyContinue
+    if (-not $Dumpbin) {
+        throw "MariaDB embedded archive verification requires dumpbin.exe"
+    }
+    $ArchiveSymbols = (& $Dumpbin.Source /LINKERMEMBER:1 $Archive) -join "`n"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to inspect the MariaDB embedded archive: $Archive"
+    }
+    foreach ($RequiredSymbol in @("mysql_server_init", "my_crc32c")) {
+        if (-not $ArchiveSymbols.Contains($RequiredSymbol)) {
+            throw "MariaDB embedded archive is incomplete: missing $RequiredSymbol"
+        }
+    }
+
     Write-Output "archive=$Archive"
     Write-Output "size_bytes=$((Get-Item $Archive).Length)"
 }

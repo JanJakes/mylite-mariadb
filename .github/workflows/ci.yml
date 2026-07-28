@@ -117,7 +117,8 @@ jobs:
       - name: Run macOS APFS ownerless platform gate
         run: |
           set -euo pipefail
-          build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_primitives_test
+          MYLITE_OWNERLESS_PRIMITIVES_TEST_FILTER=platform-gate \
+            build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_primitives_test
           build/ownerless-test-hooks/packages/libmylite/mylite_embedded_open_close_test baseline
           build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test different-rows
           build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test crash-writer
