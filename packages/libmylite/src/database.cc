@@ -6752,7 +6752,7 @@ int validate_open_args(
 
 bool shared_readonly_open_available(void) {
 #if MYLITE_WITH_MARIADB_EMBEDDED && (defined(__linux__) || defined(__APPLE__) || defined(_WIN32))
-    return true;
+    return sizeof(void *) == sizeof(std::uint64_t);
 #else
     return false;
 #endif
@@ -6760,7 +6760,7 @@ bool shared_readonly_open_available(void) {
 
 bool ownerless_rw_open_available(void) {
 #if MYLITE_WITH_MARIADB_EMBEDDED && (defined(__linux__) || defined(__APPLE__) || defined(_WIN32))
-    return true;
+    return sizeof(void *) == sizeof(std::uint64_t);
 #else
     return false;
 #endif
