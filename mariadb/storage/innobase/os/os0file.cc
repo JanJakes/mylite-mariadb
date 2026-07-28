@@ -1877,6 +1877,14 @@ ulint os_file_get_last_error(bool report_all_errors, bool on_error_silent)
 	return(OS_FILE_ERROR_MAX + err);
 }
 
+/** Let ownerless peers hold writable native data-file handles concurrently.
+MyLite's directory coordination replaces the normal single-server exclusion. */
+static DWORD mylite_ownerless_file_share_mode(DWORD share_mode) noexcept
+{
+	return mylite_ownerless_managed_file_locks
+		? share_mode | FILE_SHARE_WRITE
+		: share_mode;
+}
 
 /** NOTE! Use the corresponding macro os_file_create_simple(), not directly
 this function!
@@ -1930,12 +1938,15 @@ os_file_create_simple_func(
 	if (!fil_system.is_buffered())
 		attributes |= FILE_FLAG_NO_BUFFERING;
 
+	DWORD		share_mode = mylite_ownerless_file_share_mode(
+		FILE_SHARE_READ | FILE_SHARE_DELETE);
+
 	for (;;) {
 		/* Use default security attributes and no template file. */
 
 		file = CreateFile(
 			(LPCTSTR) name, access,
-			FILE_SHARE_READ | FILE_SHARE_DELETE,
+			share_mode,
 			my_win_file_secattr(), create_flag, attributes, NULL);
 
 		if (file != INVALID_HANDLE_VALUE) {
@@ -2017,9 +2028,9 @@ os_file_create_func(
 	);
 
 	DWORD		create_flag = OPEN_EXISTING;
-	DWORD		share_mode = read_only
+	DWORD		share_mode = mylite_ownerless_file_share_mode(read_only
 		? FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE
-		: FILE_SHARE_READ | FILE_SHARE_DELETE;
+		: FILE_SHARE_READ | FILE_SHARE_DELETE);
 
 	switch (create_mode) {
 	case OS_FILE_OPEN_RAW:
@@ -2128,7 +2139,8 @@ os_file_create_simple_no_error_handling_func(
 	DWORD		access = GENERIC_READ;
 	DWORD		create_flag = OPEN_EXISTING;
 	DWORD		attributes	= 0;
-	DWORD		share_mode = FILE_SHARE_READ | FILE_SHARE_DELETE;
+	DWORD		share_mode = mylite_ownerless_file_share_mode(
+		FILE_SHARE_READ | FILE_SHARE_DELETE);
 
 	ut_a(name);
 
@@ -2153,9 +2165,8 @@ os_file_create_simple_no_error_handling_func(
 			freedom to do what it likes with the file */
 			share_mode |= FILE_SHARE_DELETE | FILE_SHARE_WRITE
 				| FILE_SHARE_READ;
+			}
 		}
-	}
-
 	file = CreateFile((LPCTSTR) name,
 			  access,
 			  share_mode,
