@@ -14,11 +14,19 @@ $Profile = if ($env:PROFILE) { $env:PROFILE } else {
 }
 
 function Configure-MariaDB {
+    $Bison = Get-Command bison.exe -ErrorAction SilentlyContinue
+    if (-not $Bison) {
+        $Bison = Get-Command win_bison.exe -ErrorAction SilentlyContinue
+    }
+    if (-not $Bison) {
+        throw "MariaDB embedded configure requires bison.exe or win_bison.exe"
+    }
     & cmake --fresh `
         -S (Join-Path $Root "mariadb") `
         -B $BuildDir `
         -G Ninja `
         -C $Profile `
+        "-DBISON_EXECUTABLE=$($Bison.Source)" `
         @CMakeArgs
     if ($LASTEXITCODE -ne 0) {
         throw "MariaDB embedded configure failed"

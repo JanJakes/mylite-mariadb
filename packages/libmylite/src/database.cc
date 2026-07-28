@@ -623,8 +623,6 @@ constexpr unsigned k_known_open_flags =
     MYLITE_OPEN_URI | MYLITE_OPEN_SHARED_READONLY | MYLITE_OPEN_OWNERLESS_RW;
 constexpr const char *k_sqlstate_ok = "00000";
 constexpr const char *k_sqlstate_general = "HY000";
-constexpr unsigned k_mariadb_server_gone_errno = 2006U;
-constexpr const char *k_mariadb_server_gone_message = "Server has gone away";
 constexpr const char *k_not_an_error = "not an error";
 constexpr const char *k_bad_db_handle = "bad database handle";
 constexpr const char *k_memory_database_path = ":memory:";
@@ -632,6 +630,8 @@ constexpr int k_decimal_base = 10;
 constexpr std::uint64_t k_statement_lock_wait_timeout_ms = 60000U;
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
+constexpr unsigned k_mariadb_server_gone_errno = 2006U;
+constexpr const char *k_mariadb_server_gone_message = "Server has gone away";
 constexpr unsigned k_mariadb_error_during_commit_errno = 1180;
 constexpr unsigned k_mariadb_lock_deadlock_errno = 1213;
 constexpr unsigned k_mariadb_storage_engine_error_errno = 1030;

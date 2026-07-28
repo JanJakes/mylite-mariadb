@@ -57,11 +57,13 @@ app.mylite/
   run/
   concurrency/
     mylite-concurrency.meta
+    mylite-ownerless-platform.meta
     mylite-concurrency.lock
     mylite-runtime-startup.lock
     mylite-concurrency.shm
     mylite-concurrency.wal
     mylite-concurrency.ckpt
+    *.mylite-range-locks/       # macOS only, created lazily
 ```
 
 - `mylite.meta` records MyLite directory version, base MariaDB version,
@@ -79,12 +81,23 @@ app.mylite/
   generation seed for future ownerless coordination. It does not enable
   shared read-only or ownerless read/write opens by itself.
 - `concurrency/mylite-ownerless-platform.meta` records a successful
-  database-directory ownerless primitive probe for the directory device that was
-  tested. Ownerless read/write and shared read-only opens can skip the full
-  probe while this proof matches, and must re-probe if the proof is absent,
-  malformed, or bound to another filesystem device.
-- `concurrency/mylite-concurrency.lock` is the future byte-range lock anchor.
-  The current exclusive mode uses its `PERSISTED_CONFIG`, `RECOVERY`,
+  database-directory ownerless primitive probe for the platform, admitted
+  filesystem, and volume that were tested. The current format is:
+
+  ```text
+  format=2
+  platform=<linux|macos|windows>
+  filesystem=<ext4|xfs|tmpfs|overlay|apfs|ntfs>
+  volume_identity=<unsigned decimal>
+  required_primitives=1
+  process_identity=1
+  ```
+
+  Ownerless read/write and shared read-only opens can skip the full probe while
+  this proof matches. They re-probe if it is absent, malformed, in the legacy
+  format, or bound to another platform, filesystem, or volume.
+- `concurrency/mylite-concurrency.lock` is the ownerless byte-range lock anchor.
+  The current modes use its `PERSISTED_CONFIG`, `RECOVERY`,
   `SHM_RESIZE`, and `OPEN_REGISTRY` ranges while creating or validating
   concurrency metadata, shared-memory layout, stale `.shm` rebuilds, and the
   process and transaction registries. Shared-memory preparation takes
@@ -106,6 +119,14 @@ app.mylite/
   10.8 checkpoint pages pass InnoDB's startup rule, or the captured prefix
   fallback, before a bounded retry under this lock; small native redo-file size
   drift is tolerated only within the bounded prefix-backup check.
+- On macOS, `*.mylite-range-locks/` directories hold one persistent sidecar
+  file for each one-byte ownerless lock range used on that coordination file.
+  Darwin process-scoped `F_SETLK` locks are not safe for ownerless anchors
+  because closing an unrelated descriptor releases them. MyLite instead uses
+  shared/exclusive `flock()` on a dedicated descriptor per range, preserving
+  range independence, close isolation, and process-exit release. These
+  internal artifacts stay within the MyLite directory and can remain after a
+  clean close.
 - `concurrency/mylite-concurrency.shm` is a grow-only file-backed shared-memory
   file. It starts with a fixed 128-byte MyLite header containing a magic value,
   format markers, byte-order marker, clean/dirty/rebuilding state, mapping

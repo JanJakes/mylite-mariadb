@@ -135,6 +135,10 @@ jobs:
         shell: bash
         run: tools/check-ci-production-builds
 
+      - name: Install Windows embedded build tools
+        shell: pwsh
+        run: choco install winflexbison3 --yes --no-progress
+
       - uses: ilammy/msvc-dev-cmd@v1
 
       - name: Build Windows MariaDB embedded archive
@@ -1966,7 +1970,10 @@ jobs:
       - name: Install clang tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang clang-format clang-tidy ninja-build
+          sudo apt-get install -y clang clang-tidy ninja-build python3-venv
+          python3 -m venv "$RUNNER_TEMP/clang-format"
+          "$RUNNER_TEMP/clang-format/bin/pip" install clang-format==22.1.5
+          echo "$RUNNER_TEMP/clang-format/bin" >> "$GITHUB_PATH"
 
       - name: Configure
         env:

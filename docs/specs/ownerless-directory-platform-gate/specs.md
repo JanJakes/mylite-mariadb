@@ -1,5 +1,11 @@
 # Ownerless Directory Platform Gate
 
+> Historical slice: this format-1 Linux gate was completed and later
+> superseded by
+> [Ownerless Cross-Platform Filesystems](../ownerless-cross-platform-filesystems/specs.md),
+> which adds APFS/NTFS backends, format-2 platform/filesystem/volume proofs,
+> pre-creation admission, and explicit unsupported-platform/filesystem errors.
+
 ## Problem
 
 Ownerless coordination depends on filesystem semantics, not just compiled

@@ -58,10 +58,18 @@ typedef enum mylite_result {
   MYLITE_FULL = 13,
   MYLITE_CONSTRAINT = 19,
   MYLITE_MISUSE = 21,
+  MYLITE_UNSUPPORTED_FILESYSTEM = 24,
+  MYLITE_UNSUPPORTED_PLATFORM = 25,
   MYLITE_ROW = 100,
   MYLITE_DONE = 101
 } mylite_result;
 ```
+
+`MYLITE_UNSUPPORTED_FILESYSTEM` means an ownerless or shared-read-only open
+targeted a remote, unknown, or otherwise unadmitted filesystem.
+`MYLITE_UNSUPPORTED_PLATFORM` means the build has no ownerless backend for its
+operating system or architecture. These results are returned directly by
+`mylite_open()` even though a failed open leaves `*out_db == NULL`.
 
 ## Opening And Closing
 
@@ -153,21 +161,35 @@ ordinary and ownerless runtimes cannot overlap regardless of which mode wins
 the open race.
 `mylite_capabilities()` reports the compiled and currently available
 concurrency modes. Embedded builds report
-`MYLITE_CAP_SAME_PROCESS_CONCURRENCY`; only embedded Linux builds currently
-report `MYLITE_CAP_SHARED_READONLY` and `MYLITE_CAP_OWNERLESS_RW`. Each
-ownerless or shared-read-only open then admits only a validated local ext4,
-XFS, tmpfs, or overlay filesystem after the database-directory primitive
-checks pass. Ownerless read/write is experimental and incomplete. Its current
-admitted SQL surface is persistent InnoDB application tables plus the DML and
-DDL shapes explicitly enumerated in the compatibility matrix. Unclassified DDL
-fails closed with `MYLITE_ERROR`; ownerless opens reject existing persistent
-non-InnoDB application tables and existing FULLTEXT or SPATIAL indexes. The
-shipped no-vector profile rejects vector DDL before an index can exist;
-profile-enabled VECTOR ownerless admission is not part of this claim. Ownerless
-SQL rejects non-InnoDB engine requests, special-index DDL, and session
-storage-engine defaults or overrides. Unsupported platforms,
-filesystems, and server/global SQL surfaces remain explicit errors rather than
-participating accidentally in ownerless coordination.
+`MYLITE_CAP_SAME_PROCESS_CONCURRENCY`; 64-bit embedded Linux, macOS, and
+Windows builds also report `MYLITE_CAP_SHARED_READONLY` and
+`MYLITE_CAP_OWNERLESS_RW`. Each ownerless or shared-read-only open then admits
+only a validated local filesystem from this matrix after the
+database-directory primitive checks pass:
+
+| Platform | Admitted filesystems |
+| --- | --- |
+| Linux | ext4, XFS, tmpfs, overlay |
+| macOS | APFS |
+| Windows | NTFS |
+
+NFS, SMB/CIFS, AFP, WebDAV, FUSE, HFS/HFS+, ReFS, FAT/exFAT, remote volumes,
+unknown filesystems, and unlisted local filesystems return
+`MYLITE_UNSUPPORTED_FILESYSTEM`. Admission for a new database is checked
+against its nearest existing parent before the database directory is created.
+Ordinary exclusive opens do not require ownerless filesystem semantics and
+remain outside this gate.
+
+The completed admitted SQL surface is persistent InnoDB application tables
+plus the DML and DDL shapes explicitly enumerated in the compatibility matrix.
+Unclassified DDL fails closed with `MYLITE_ERROR`; ownerless opens reject
+existing persistent non-InnoDB application tables and existing FULLTEXT or
+SPATIAL indexes. The shipped no-vector profile rejects vector DDL before an
+index can exist; profile-enabled VECTOR ownerless admission is not part of
+this claim. Ownerless SQL rejects non-InnoDB engine requests, special-index
+DDL, and session storage-engine defaults or overrides. Unsupported
+server/global SQL surfaces remain explicit errors rather than participating
+accidentally in ownerless coordination.
 If a process dies while it still owns native transaction, undo, redo, record-lock,
 or page-write recovery state, MyLite fails closed while any peer runtime remains
 live. New ownerless read/write and shared-read-only opens return `MYLITE_BUSY`;
@@ -187,6 +209,7 @@ options, ignores ambient option files with `--no-defaults`, establishes the
 requested MyLite database directory, and creates the baseline layout:
 `mylite.meta`, `mylite.lock`, `datadir/`, `tmp/`, `run/`,
 `concurrency/mylite-concurrency.meta`,
+`concurrency/mylite-ownerless-platform.meta`,
 `concurrency/mylite-concurrency.lock`,
 `concurrency/mylite-runtime-startup.lock`,
 `concurrency/mylite-concurrency.shm`,
