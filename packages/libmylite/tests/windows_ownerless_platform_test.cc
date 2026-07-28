@@ -225,6 +225,8 @@ void test_unsupported_filesystem_contract(
 void run_parent(void) {
     print_phase("capabilities");
     const unsigned long long capabilities = mylite_capabilities();
+    std::fprintf(stderr, "windows-ownerless capabilities=0x%llx\n", capabilities);
+    std::fflush(stderr);
     assert((capabilities & MYLITE_CAP_OWNERLESS_RW) != 0U);
     assert((capabilities & MYLITE_CAP_SHARED_READONLY) != 0U);
 
@@ -243,6 +245,16 @@ void run_parent(void) {
         mylite_ownerless_probe_filesystem(root.string().c_str(), &filesystem) ==
         MYLITE_OWNERLESS_PROBE_OK
     );
+    std::fprintf(
+        stderr,
+        "windows-ownerless filesystem=%s kind=%u local=%u admitted=%u volume=%llu\n",
+        filesystem.name,
+        filesystem.kind,
+        filesystem.is_local,
+        filesystem.is_admitted,
+        static_cast<unsigned long long>(filesystem.volume_identity)
+    );
+    std::fflush(stderr);
     assert(filesystem.kind == MYLITE_OWNERLESS_FILESYSTEM_NTFS);
     assert(filesystem.is_local == 1U);
     assert(filesystem.is_admitted == 1U);
@@ -253,6 +265,20 @@ void run_parent(void) {
     assert(
         mylite_ownerless_probe_directory(root.string().c_str(), &probe) == MYLITE_OWNERLESS_PROBE_OK
     );
+    std::fprintf(
+        stderr,
+        "windows-ownerless primitives mmap=%u locks=%u exit=%u isolation=%u grow=%u wait=%u "
+        "identity=%u required=%u\n",
+        probe.mmap_shared_visibility,
+        probe.byte_range_locks,
+        probe.lock_release_on_exit,
+        probe.lock_close_isolation,
+        probe.grow_remap,
+        probe.wait_backend,
+        probe.process_identity,
+        probe.required_primitives
+    );
+    std::fflush(stderr);
     assert(probe.required_primitives == 1U);
     assert(probe.lock_close_isolation == 1U);
 
