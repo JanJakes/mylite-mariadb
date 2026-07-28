@@ -42927,6 +42927,9 @@ std::vector<std::string> runtime_arguments(
         std::string("--lc-messages-dir=") + MYLITE_MARIADB_MESSAGES_DIR,
         std::string("--character-sets-dir=") + MYLITE_MARIADB_CHARSETS_DIR,
     };
+#  ifdef _WIN32
+    arguments.emplace_back("--console");
+#  endif
     if (readonly_open) {
         arguments.emplace_back("--read-only=ON");
     }
