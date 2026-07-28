@@ -329,7 +329,22 @@ static rpl_binlog_state rpl_global_gtid_binlog_state;
 
 void setup_log_handling()
 {
+#ifdef _WIN32
+  const char *mylite_trace= getenv("MYLITE_OWNERLESS_TEST_TRACE_OPEN");
+  if (mylite_trace && !strcmp(mylite_trace, "1"))
+  {
+    fprintf(stderr, "mylite-ownerless log-setup-stage=gtid-init-begin\n");
+    fflush(stderr);
+  }
+#endif
   rpl_global_gtid_binlog_state.init();
+#ifdef _WIN32
+  if (mylite_trace && !strcmp(mylite_trace, "1"))
+  {
+    fprintf(stderr, "mylite-ownerless log-setup-stage=gtid-init-complete\n");
+    fflush(stderr);
+  }
+#endif
 }
 
 
