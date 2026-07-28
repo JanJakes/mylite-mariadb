@@ -102,20 +102,6 @@ sig_handler my_pipe_sig_handler(int sig);
 static my_bool mysql_client_init= 0;
 static my_bool org_my_init_done= 0;
 
-static void mylite_trace_server_init_stage(const char *stage)
-{
-#ifdef _WIN32
-  const char *trace= getenv("MYLITE_OWNERLESS_TEST_TRACE_OPEN");
-  if (trace && !strcmp(trace, "1"))
-  {
-    fprintf(stderr, "mylite-ownerless server-init-stage=%s\n", stage);
-    fflush(stderr);
-  }
-#else
-  (void) stage;
-#endif
-}
-
 typedef struct st_mysql_stmt_extension
 {
   MEM_ROOT fields_mem_root;
@@ -155,7 +141,6 @@ int STDCALL mysql_server_init(int argc __attribute__((unused)),
     mysql_client_init=1;
     org_my_init_done=my_init_done;
     mylite_stage_start= mylite_embedded_startup_perf_start_ns();
-    mylite_trace_server_init_stage("my-init-begin");
     if (my_init())				/* Will init threads */
     {
       mylite_embedded_startup_perf_add_elapsed(
@@ -169,16 +154,12 @@ int STDCALL mysql_server_init(int argc __attribute__((unused)),
     mylite_embedded_startup_perf_add_elapsed(
         MYLITE_EMBEDDED_STARTUP_PERF_SERVER_INIT_MY_INIT_NS,
         mylite_stage_start);
-    mylite_trace_server_init_stage("my-init-complete");
     mylite_stage_start= mylite_embedded_startup_perf_start_ns();
-    mylite_trace_server_init_stage("client-errors-begin");
     init_client_errs();
     mylite_embedded_startup_perf_add_elapsed(
         MYLITE_EMBEDDED_STARTUP_PERF_SERVER_INIT_CLIENT_ERRS_NS,
         mylite_stage_start);
-    mylite_trace_server_init_stage("client-errors-complete");
     mylite_stage_start= mylite_embedded_startup_perf_start_ns();
-    mylite_trace_server_init_stage("client-plugins-begin");
     if (mysql_client_plugin_init())
     {
       mylite_embedded_startup_perf_add_elapsed(
@@ -192,9 +173,7 @@ int STDCALL mysql_server_init(int argc __attribute__((unused)),
     mylite_embedded_startup_perf_add_elapsed(
         MYLITE_EMBEDDED_STARTUP_PERF_SERVER_INIT_CLIENT_PLUGIN_INIT_NS,
         mylite_stage_start);
-    mylite_trace_server_init_stage("client-plugins-complete");
     mylite_stage_start= mylite_embedded_startup_perf_start_ns();
-    mylite_trace_server_init_stage("ports-begin");
     if (!mysql_port)
     {
       char *env;
@@ -236,9 +215,7 @@ int STDCALL mysql_server_init(int argc __attribute__((unused)),
     mylite_embedded_startup_perf_add_elapsed(
         MYLITE_EMBEDDED_STARTUP_PERF_SERVER_INIT_PORTS_NS,
         mylite_stage_start);
-    mylite_trace_server_init_stage("ports-complete");
     mylite_stage_start= mylite_embedded_startup_perf_start_ns();
-    mylite_trace_server_init_stage("debug-signal-begin");
     mysql_debug(NullS);
 #if defined(SIGPIPE) && !defined(_WIN32)
     (void) signal(SIGPIPE, SIG_IGN);
@@ -246,14 +223,11 @@ int STDCALL mysql_server_init(int argc __attribute__((unused)),
     mylite_embedded_startup_perf_add_elapsed(
         MYLITE_EMBEDDED_STARTUP_PERF_SERVER_INIT_DEBUG_SIGNAL_NS,
         mylite_stage_start);
-    mylite_trace_server_init_stage("debug-signal-complete");
 #ifdef EMBEDDED_LIBRARY
     if (argc > -1)
     {
        mylite_stage_start= mylite_embedded_startup_perf_start_ns();
-       mylite_trace_server_init_stage("embedded-server-begin");
        result= init_embedded_server(argc, argv, groups);
-       mylite_trace_server_init_stage("embedded-server-complete");
        mylite_embedded_startup_perf_add_elapsed(
            MYLITE_EMBEDDED_STARTUP_PERF_SERVER_INIT_EMBEDDED_SERVER_NS,
            mylite_stage_start);

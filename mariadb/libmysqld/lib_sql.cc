@@ -48,20 +48,6 @@ static my_bool emb_read_query_result(MYSQL *mysql);
 static void free_embedded_thd(MYSQL *mysql);
 static bool embedded_print_errors= 0;
 
-static void mylite_trace_embedded_server_stage(const char *stage)
-{
-#ifdef _WIN32
-  const char *trace= getenv("MYLITE_OWNERLESS_TEST_TRACE_OPEN");
-  if (trace && !strcmp(trace, "1"))
-  {
-    fprintf(stderr, "mylite-ownerless embedded-server-stage=%s\n", stage);
-    fflush(stderr);
-  }
-#else
-  (void) stage;
-#endif
-}
-
 extern "C" void unireg_clear(int exit_code)
 {
   DBUG_ENTER("unireg_clear");
@@ -564,7 +550,6 @@ int init_embedded_server(int argc, char **argv, char **groups)
   DBUG_ASSERT(mysql_embedded_init == 0);
   embedded_print_errors= 1;
   mylite_stage_start= mylite_embedded_startup_perf_start_ns();
-  mylite_trace_embedded_server_stage("thread-init-begin");
   if (my_thread_init())
   {
     mylite_embedded_startup_perf_add_elapsed(
@@ -578,10 +563,8 @@ int init_embedded_server(int argc, char **argv, char **groups)
   mylite_embedded_startup_perf_add_elapsed(
       MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_THREAD_INIT_NS,
       mylite_stage_start);
-  mylite_trace_embedded_server_stage("thread-init-complete");
 
   mylite_stage_start= mylite_embedded_startup_perf_start_ns();
-  mylite_trace_embedded_server_stage("early-variables-begin");
   if (init_early_variables())
   {
     mylite_embedded_startup_perf_add_elapsed(
@@ -595,7 +578,6 @@ int init_embedded_server(int argc, char **argv, char **groups)
   mylite_embedded_startup_perf_add_elapsed(
       MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_EARLY_VARIABLES_NS,
       mylite_stage_start);
-  mylite_trace_embedded_server_stage("early-variables-complete");
 
   if (!argc)
   {
@@ -616,7 +598,6 @@ int init_embedded_server(int argc, char **argv, char **groups)
     MY_INIT, as it initializes mutexes. Log tables are inited later.
   */
   mylite_stage_start= mylite_embedded_startup_perf_start_ns();
-  mylite_trace_embedded_server_stage("load-defaults-begin");
   logger.init_base();
 
   orig_argc= *argcp;
@@ -638,11 +619,9 @@ int init_embedded_server(int argc, char **argv, char **groups)
   mylite_embedded_startup_perf_add_elapsed(
       MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_LOAD_DEFAULTS_NS,
       mylite_stage_start);
-  mylite_trace_embedded_server_stage("load-defaults-complete");
 
   /* Must be initialized early for comparison of options name */
   mylite_stage_start= mylite_embedded_startup_perf_start_ns();
-  mylite_trace_embedded_server_stage("sysvar-options-begin");
   system_charset_info= &my_charset_utf8mb3_general_ci;
   sys_var_init();
 
@@ -660,18 +639,14 @@ int init_embedded_server(int argc, char **argv, char **groups)
   mylite_embedded_startup_perf_add_elapsed(
       MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_SYSVAR_OPTIONS_NS,
       mylite_stage_start);
-  mylite_trace_embedded_server_stage("sysvar-options-complete");
 
   mylite_stage_start= mylite_embedded_startup_perf_start_ns();
-  mylite_trace_embedded_server_stage("timer-begin");
   my_timer_init(&sys_timer_info);
   mylite_embedded_startup_perf_add_elapsed(
       MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_TIMER_NS,
       mylite_stage_start);
-  mylite_trace_embedded_server_stage("timer-complete");
 
   mylite_stage_start= mylite_embedded_startup_perf_start_ns();
-  mylite_trace_embedded_server_stage("common-variables-begin");
   if (init_common_variables())
   {
     mylite_embedded_startup_perf_add_elapsed(
@@ -686,13 +661,11 @@ int init_embedded_server(int argc, char **argv, char **groups)
   mylite_embedded_startup_perf_add_elapsed(
       MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_COMMON_VARIABLES_NS,
       mylite_stage_start);
-  mylite_trace_embedded_server_stage("common-variables-complete");
 
   mysql_data_home= mysql_real_data_home;
   mysql_data_home_len= mysql_real_data_home_len;
 
   mylite_stage_start= mylite_embedded_startup_perf_start_ns();
-  mylite_trace_embedded_server_stage("tmpdir-ssl-umask-begin");
   /* Get default temporary directory */
   opt_mysql_tmpdir=getenv("TMPDIR");	/* Use this if possible */
 #if defined(_WIN32)
@@ -709,9 +682,7 @@ int init_embedded_server(int argc, char **argv, char **groups)
   mylite_embedded_startup_perf_add_elapsed(
       MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_TMPDIR_SSL_UMASK_NS,
       mylite_stage_start);
-  mylite_trace_embedded_server_stage("tmpdir-ssl-umask-complete");
   mylite_stage_start= mylite_embedded_startup_perf_start_ns();
-  mylite_trace_embedded_server_stage("components-begin");
   if (init_server_components())
   {
     mylite_embedded_startup_perf_add_elapsed(
@@ -726,7 +697,6 @@ int init_embedded_server(int argc, char **argv, char **groups)
   mylite_embedded_startup_perf_add_elapsed(
       MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_COMPONENTS_NS,
       mylite_stage_start);
-  mylite_trace_embedded_server_stage("components-complete");
 
   /* 
     set error_handler_hook to embedded_error_handler wrapper.
@@ -734,7 +704,6 @@ int init_embedded_server(int argc, char **argv, char **groups)
   error_handler_hook= embedded_error_handler;
 
   mylite_stage_start= mylite_embedded_startup_perf_start_ns();
-  mylite_trace_embedded_server_stage("acl-grant-begin");
   acl_error= 0;
 #ifndef NO_EMBEDDED_ACCESS_CHECKS
   if (!(acl_error= acl_init(opt_noacl)) &&
@@ -744,9 +713,7 @@ int init_embedded_server(int argc, char **argv, char **groups)
   mylite_embedded_startup_perf_add_elapsed(
       MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_ACL_GRANT_NS,
       mylite_stage_start);
-  mylite_trace_embedded_server_stage("acl-grant-complete");
   mylite_stage_start= mylite_embedded_startup_perf_start_ns();
-  mylite_trace_embedded_server_stage("timezone-begin");
   if (acl_error || my_tz_init((THD *)0, default_tz_name, opt_bootstrap))
   {
     mylite_embedded_startup_perf_add_elapsed(
@@ -761,10 +728,8 @@ int init_embedded_server(int argc, char **argv, char **groups)
   mylite_embedded_startup_perf_add_elapsed(
       MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_TIMEZONE_NS,
       mylite_stage_start);
-  mylite_trace_embedded_server_stage("timezone-complete");
 
   mylite_stage_start= mylite_embedded_startup_perf_start_ns();
-  mylite_trace_embedded_server_stage("status-udf-filters-begin");
   init_max_user_conn();
   init_update_queries();
 
@@ -785,10 +750,8 @@ int init_embedded_server(int argc, char **argv, char **groups)
   mylite_embedded_startup_perf_add_elapsed(
       MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_STATUS_UDF_FILTERS_NS,
       mylite_stage_start);
-  mylite_trace_embedded_server_stage("status-udf-filters-complete");
 
   mylite_stage_start= mylite_embedded_startup_perf_start_ns();
-  mylite_trace_embedded_server_stage("init-file-begin");
   if (opt_init_file)
   {
     if (read_init_file(opt_init_file))
@@ -806,10 +769,8 @@ int init_embedded_server(int argc, char **argv, char **groups)
   mylite_embedded_startup_perf_add_elapsed(
       MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_INIT_FILE_NS,
       mylite_stage_start);
-  mylite_trace_embedded_server_stage("init-file-complete");
 
   mylite_stage_start= mylite_embedded_startup_perf_start_ns();
-  mylite_trace_embedded_server_stage("ddl-recovery-begin");
   if (ddl_log_execute_recovery() > 0)
   {
     mylite_embedded_startup_perf_add_elapsed(
@@ -824,7 +785,6 @@ int init_embedded_server(int argc, char **argv, char **groups)
   mylite_embedded_startup_perf_add_elapsed(
       MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_DDL_RECOVERY_NS,
       mylite_stage_start);
-  mylite_trace_embedded_server_stage("ddl-recovery-complete");
   mysql_embedded_init= 1;
   mylite_embedded_startup_perf_add_elapsed(
       MYLITE_EMBEDDED_STARTUP_PERF_EMBEDDED_SERVER_TOTAL_NS,
