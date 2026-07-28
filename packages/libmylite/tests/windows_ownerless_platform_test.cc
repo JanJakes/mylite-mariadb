@@ -5,9 +5,6 @@
 
 #include <windows.h>
 
-#include <dbghelp.h>
-
-#include <array>
 #include <cassert>
 #include <chrono>
 #include <cstdio>
@@ -23,99 +20,6 @@ namespace {
 struct ChildProcess {
     PROCESS_INFORMATION info = {};
 };
-
-void print_stack_symbol(HANDLE process, DWORD64 address) {
-    alignas(SYMBOL_INFO) std::array<unsigned char, sizeof(SYMBOL_INFO) + MAX_SYM_NAME> storage = {};
-    auto *symbol = reinterpret_cast<SYMBOL_INFO *>(storage.data());
-    symbol->SizeOfStruct = sizeof(*symbol);
-    symbol->MaxNameLen = MAX_SYM_NAME;
-    DWORD64 displacement = 0U;
-    if (SymFromAddr(process, address, &displacement, symbol) != FALSE) {
-        std::fprintf(
-            stderr,
-            "windows-ownerless stack address=0x%llx symbol=%s+0x%llx\n",
-            static_cast<unsigned long long>(address),
-            symbol->Name,
-            static_cast<unsigned long long>(displacement)
-        );
-    } else {
-        std::fprintf(
-            stderr,
-            "windows-ownerless stack address=0x%llx\n",
-            static_cast<unsigned long long>(address)
-        );
-    }
-}
-
-void print_exception(EXCEPTION_POINTERS *exception) {
-    if (exception == nullptr || exception->ExceptionRecord == nullptr ||
-        exception->ContextRecord == nullptr) {
-        return;
-    }
-    std::fprintf(
-        stderr,
-        "windows-ownerless exception=0x%08lx address=%p\n",
-        exception->ExceptionRecord->ExceptionCode,
-        exception->ExceptionRecord->ExceptionAddress
-    );
-    std::fflush(stderr);
-
-#if defined(_M_X64) || defined(__x86_64__)
-    CONTEXT context = *exception->ContextRecord;
-    STACKFRAME64 frame = {};
-    frame.AddrPC.Offset = context.Rip;
-    frame.AddrPC.Mode = AddrModeFlat;
-    frame.AddrStack.Offset = context.Rsp;
-    frame.AddrStack.Mode = AddrModeFlat;
-    frame.AddrFrame.Offset = context.Rbp;
-    frame.AddrFrame.Mode = AddrModeFlat;
-
-    HANDLE process = GetCurrentProcess();
-    HANDLE thread = GetCurrentThread();
-    SymSetOptions(SYMOPT_DEFERRED_LOADS | SYMOPT_UNDNAME);
-    const bool symbols_initialized = SymInitialize(process, nullptr, TRUE) != FALSE;
-    print_stack_symbol(process, frame.AddrPC.Offset);
-    for (unsigned depth = 1U; depth < 64U; ++depth) {
-        if (StackWalk64(
-                IMAGE_FILE_MACHINE_AMD64,
-                process,
-                thread,
-                &frame,
-                &context,
-                nullptr,
-                SymFunctionTableAccess64,
-                SymGetModuleBase64,
-                nullptr
-            ) == FALSE ||
-            frame.AddrPC.Offset == 0U) {
-            break;
-        }
-        print_stack_symbol(process, frame.AddrPC.Offset);
-    }
-    if (symbols_initialized) {
-        static_cast<void>(SymCleanup(process));
-    }
-#endif
-    std::fflush(stderr);
-}
-
-LONG WINAPI print_unhandled_exception(EXCEPTION_POINTERS *exception) {
-    print_exception(exception);
-    return EXCEPTION_EXECUTE_HANDLER;
-}
-
-LONG CALLBACK print_vectored_exception(EXCEPTION_POINTERS *exception) {
-    if (exception == nullptr || exception->ExceptionRecord == nullptr ||
-        (exception->ExceptionRecord->ExceptionCode != EXCEPTION_ACCESS_VIOLATION &&
-         exception->ExceptionRecord->ExceptionCode != EXCEPTION_ARRAY_BOUNDS_EXCEEDED &&
-         exception->ExceptionRecord->ExceptionCode != EXCEPTION_ILLEGAL_INSTRUCTION &&
-         exception->ExceptionRecord->ExceptionCode != EXCEPTION_IN_PAGE_ERROR &&
-         exception->ExceptionRecord->ExceptionCode != EXCEPTION_STACK_OVERFLOW)) {
-        return EXCEPTION_CONTINUE_SEARCH;
-    }
-    print_exception(exception);
-    return EXCEPTION_CONTINUE_SEARCH;
-}
 
 void print_phase(const char *phase) {
     std::fprintf(stderr, "windows-ownerless phase=%s\n", phase);
@@ -264,6 +168,32 @@ int run_update_child(
     return 0;
 }
 
+int run_busy_open_child(
+    const std::filesystem::path &database_path,
+    const std::filesystem::path &runtime_path
+) {
+    print_phase("busy-open-child");
+    mylite_open_config config = open_config(runtime_path);
+    mylite_db *db = nullptr;
+    const int result = mylite_open(
+        database_path.string().c_str(),
+        &db,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+        &config
+    );
+    std::fprintf(
+        stderr,
+        "windows-ownerless busy-open-result=%d db=%p\n",
+        result,
+        static_cast<void *>(db)
+    );
+    std::fflush(stderr);
+    if (db != nullptr) {
+        static_cast<void>(mylite_close(db));
+    }
+    return result == MYLITE_BUSY && db == nullptr ? 0 : 3;
+}
+
 int run_dead_writer_child(
     const std::filesystem::path &database_path,
     const std::filesystem::path &runtime_path,
@@ -314,7 +244,6 @@ void test_unsupported_filesystem_contract(
     assert(!std::filesystem::exists(unsupported_path));
 
     print_phase("unsupported-filesystem-ordinary-open");
-    assert(_putenv_s("MYLITE_OWNERLESS_TEST_TRACE_OPEN", "1") == 0);
     const int ordinary_result = mylite_open(
         unsupported_path.string().c_str(),
         &db,
@@ -331,7 +260,6 @@ void test_unsupported_filesystem_contract(
     assert(ordinary_result == MYLITE_OK);
     print_phase("unsupported-filesystem-ordinary-close");
     assert(mylite_close(db) == MYLITE_OK);
-    assert(_putenv_s("MYLITE_OWNERLESS_TEST_TRACE_OPEN", "") == 0);
     std::filesystem::remove_all(unsupported_path);
     assert(_putenv_s("MYLITE_OWNERLESS_TEST_FILESYSTEM", "") == 0);
     print_phase("unsupported-filesystem-complete");
@@ -400,9 +328,7 @@ void run_parent(void) {
     test_unsupported_filesystem_contract(root, runtime_path);
 
     print_phase("parent-open");
-    assert(_putenv_s("MYLITE_OWNERLESS_TEST_TRACE_OPEN", "1") == 0);
     mylite_db *parent = open_ownerless(database_path, runtime_path, true);
-    assert(_putenv_s("MYLITE_OWNERLESS_TEST_TRACE_OPEN", "") == 0);
     print_phase("schema");
     exec_ok(parent, "CREATE DATABASE app");
     exec_ok(
@@ -432,17 +358,8 @@ void run_parent(void) {
     assert(TerminateProcess(dead_writer.info.hProcess, 99U) != FALSE);
     assert(wait_for_child(dead_writer) == 99U);
 
-    mylite_open_config blocked_config = open_config(runtime_path);
-    mylite_db *blocked = nullptr;
-    assert(
-        mylite_open(
-            database_path.string().c_str(),
-            &blocked,
-            MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
-            &blocked_config
-        ) == MYLITE_BUSY
-    );
-    assert(blocked == nullptr);
+    ChildProcess blocked = spawn_child("busy-open", database_path, runtime_path);
+    assert(wait_for_child(blocked) == 0U);
     print_phase("parent-close");
     assert(mylite_close(parent) == MYLITE_OK);
 
@@ -462,11 +379,12 @@ void run_parent(void) {
 } // namespace
 
 int main(int argc, char **argv) {
-    assert(AddVectoredExceptionHandler(1U, print_vectored_exception) != nullptr);
-    SetUnhandledExceptionFilter(print_unhandled_exception);
     test_platform_io_does_not_rewrite_cpp_streams();
     if (argc >= 4 && std::string(argv[1]) == "update") {
         return run_update_child(argv[2], argv[3]);
+    }
+    if (argc >= 4 && std::string(argv[1]) == "busy-open") {
+        return run_busy_open_child(argv[2], argv[3]);
     }
     if (argc >= 5 && std::string(argv[1]) == "dead-writer") {
         return run_dead_writer_child(argv[2], argv[3], argv[4]);

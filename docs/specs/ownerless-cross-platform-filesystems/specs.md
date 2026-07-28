@@ -169,6 +169,13 @@ backed by the coordination file through `CreateFileMapping()` and
 `MapViewOfFile()`. `FlushViewOfFile()` plus `FlushFileBuffers()` supplies the
 mapping/file durability boundary.
 
+Windows normally opens writable InnoDB files without `FILE_SHARE_WRITE`,
+enforcing MariaDB's single-server exclusion at the native file handle. While
+MyLite's ownerless-managed file-lock policy is active, the patched InnoDB open
+paths add `FILE_SHARE_WRITE` so independently coordinated processes can hold
+the same native data files open. Ordinary MariaDB/MyLite opens retain the
+upstream sharing mode; this exception is scoped to ownerless coordination.
+
 Positioned reads and writes must remain 64-bit and must not depend on a shared
 CRT file position. File and mapping wrappers preserve the existing ownerless
 page-log ordering.

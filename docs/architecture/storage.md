@@ -127,6 +127,10 @@ app.mylite/
   range independence, close isolation, and process-exit release. These
   internal artifacts stay within the MyLite directory and can remain after a
   clean close.
+- On Windows, ownerless-managed InnoDB file opens add `FILE_SHARE_WRITE` to
+  the native `CreateFile()` sharing mode. The ownerless coordination and page
+  protocols provide the mutual-exclusion boundary between processes; ordinary
+  MariaDB/MyLite opens retain InnoDB's upstream single-server sharing mode.
 - `concurrency/mylite-concurrency.shm` is a grow-only file-backed shared-memory
   file. It starts with a fixed 128-byte MyLite header containing a magic value,
   format markers, byte-order marker, clean/dirty/rebuilding state, mapping

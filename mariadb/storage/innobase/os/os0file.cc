@@ -2165,8 +2165,9 @@ os_file_create_simple_no_error_handling_func(
 			freedom to do what it likes with the file */
 			share_mode |= FILE_SHARE_DELETE | FILE_SHARE_WRITE
 				| FILE_SHARE_READ;
-			}
 		}
+	}
+
 	file = CreateFile((LPCTSTR) name,
 			  access,
 			  share_mode,
