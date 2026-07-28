@@ -5,6 +5,9 @@
 
 #include <windows.h>
 
+#include <dbghelp.h>
+
+#include <array>
 #include <cassert>
 #include <chrono>
 #include <cstdio>
@@ -20,6 +23,81 @@ namespace {
 struct ChildProcess {
     PROCESS_INFORMATION info = {};
 };
+
+void print_stack_symbol(HANDLE process, DWORD64 address) {
+    alignas(SYMBOL_INFO) std::array<unsigned char, sizeof(SYMBOL_INFO) + MAX_SYM_NAME> storage = {};
+    auto *symbol = reinterpret_cast<SYMBOL_INFO *>(storage.data());
+    symbol->SizeOfStruct = sizeof(*symbol);
+    symbol->MaxNameLen = MAX_SYM_NAME;
+    DWORD64 displacement = 0U;
+    if (SymFromAddr(process, address, &displacement, symbol) != FALSE) {
+        std::fprintf(
+            stderr,
+            "windows-ownerless stack address=0x%llx symbol=%s+0x%llx\n",
+            static_cast<unsigned long long>(address),
+            symbol->Name,
+            static_cast<unsigned long long>(displacement)
+        );
+    } else {
+        std::fprintf(
+            stderr,
+            "windows-ownerless stack address=0x%llx\n",
+            static_cast<unsigned long long>(address)
+        );
+    }
+}
+
+LONG WINAPI print_unhandled_exception(EXCEPTION_POINTERS *exception) {
+    if (exception == nullptr || exception->ExceptionRecord == nullptr ||
+        exception->ContextRecord == nullptr) {
+        return EXCEPTION_EXECUTE_HANDLER;
+    }
+    std::fprintf(
+        stderr,
+        "windows-ownerless exception=0x%08lx address=%p\n",
+        exception->ExceptionRecord->ExceptionCode,
+        exception->ExceptionRecord->ExceptionAddress
+    );
+
+#if defined(_M_X64) || defined(__x86_64__)
+    CONTEXT context = *exception->ContextRecord;
+    STACKFRAME64 frame = {};
+    frame.AddrPC.Offset = context.Rip;
+    frame.AddrPC.Mode = AddrModeFlat;
+    frame.AddrStack.Offset = context.Rsp;
+    frame.AddrStack.Mode = AddrModeFlat;
+    frame.AddrFrame.Offset = context.Rbp;
+    frame.AddrFrame.Mode = AddrModeFlat;
+
+    HANDLE process = GetCurrentProcess();
+    HANDLE thread = GetCurrentThread();
+    SymSetOptions(SYMOPT_DEFERRED_LOADS | SYMOPT_UNDNAME);
+    const bool symbols_initialized = SymInitialize(process, nullptr, TRUE) != FALSE;
+    print_stack_symbol(process, frame.AddrPC.Offset);
+    for (unsigned depth = 1U; depth < 64U; ++depth) {
+        if (StackWalk64(
+                IMAGE_FILE_MACHINE_AMD64,
+                process,
+                thread,
+                &frame,
+                &context,
+                nullptr,
+                SymFunctionTableAccess64,
+                SymGetModuleBase64,
+                nullptr
+            ) == FALSE ||
+            frame.AddrPC.Offset == 0U) {
+            break;
+        }
+        print_stack_symbol(process, frame.AddrPC.Offset);
+    }
+    if (symbols_initialized) {
+        static_cast<void>(SymCleanup(process));
+    }
+#endif
+    std::fflush(stderr);
+    return EXCEPTION_EXECUTE_HANDLER;
+}
 
 void print_phase(const char *phase) {
     std::fprintf(stderr, "windows-ownerless phase=%s\n", phase);
@@ -198,28 +276,45 @@ void test_unsupported_filesystem_contract(
     assert(_putenv_s("MYLITE_OWNERLESS_TEST_FILESYSTEM", "unsupported") == 0);
     mylite_open_config config = open_config(runtime_path);
     mylite_db *db = nullptr;
-    assert(
-        mylite_open(
-            unsupported_path.string().c_str(),
-            &db,
-            MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE | MYLITE_OPEN_OWNERLESS_RW,
-            &config
-        ) == MYLITE_UNSUPPORTED_FILESYSTEM
+    print_phase("unsupported-filesystem-ownerless-open");
+    const int unsupported_result = mylite_open(
+        unsupported_path.string().c_str(),
+        &db,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE | MYLITE_OPEN_OWNERLESS_RW,
+        &config
     );
+    std::fprintf(
+        stderr,
+        "windows-ownerless unsupported-result=%d db=%p exists=%u\n",
+        unsupported_result,
+        static_cast<void *>(db),
+        std::filesystem::exists(unsupported_path) ? 1U : 0U
+    );
+    std::fflush(stderr);
+    assert(unsupported_result == MYLITE_UNSUPPORTED_FILESYSTEM);
     assert(db == nullptr);
     assert(!std::filesystem::exists(unsupported_path));
 
-    assert(
-        mylite_open(
-            unsupported_path.string().c_str(),
-            &db,
-            MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE,
-            &config
-        ) == MYLITE_OK
+    print_phase("unsupported-filesystem-ordinary-open");
+    const int ordinary_result = mylite_open(
+        unsupported_path.string().c_str(),
+        &db,
+        MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE,
+        &config
     );
+    std::fprintf(
+        stderr,
+        "windows-ownerless ordinary-result=%d db=%p\n",
+        ordinary_result,
+        static_cast<void *>(db)
+    );
+    std::fflush(stderr);
+    assert(ordinary_result == MYLITE_OK);
+    print_phase("unsupported-filesystem-ordinary-close");
     assert(mylite_close(db) == MYLITE_OK);
     std::filesystem::remove_all(unsupported_path);
     assert(_putenv_s("MYLITE_OWNERLESS_TEST_FILESYSTEM", "") == 0);
+    print_phase("unsupported-filesystem-complete");
 }
 
 void run_parent(void) {
@@ -345,6 +440,7 @@ void run_parent(void) {
 } // namespace
 
 int main(int argc, char **argv) {
+    SetUnhandledExceptionFilter(print_unhandled_exception);
     test_platform_io_does_not_rewrite_cpp_streams();
     if (argc >= 4 && std::string(argv[1]) == "update") {
         return run_update_child(argv[2], argv[3]);
