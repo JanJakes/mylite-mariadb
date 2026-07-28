@@ -2348,7 +2348,9 @@ void build_concurrency_shm_header(
     std::string_view database_uuid,
     std::uint64_t recovery_generation
 );
-ConcurrencyShmFileIdentity concurrency_shm_file_identity(const struct stat &shm_stat);
+ConcurrencyShmFileIdentity concurrency_shm_file_identity(
+    const mylite_ownerless_file_info &shm_stat
+);
 int initialize_concurrency_shm_segments(
     int shm_fd,
     int page_log_fd,
@@ -4646,7 +4648,8 @@ struct ScopedOwnerlessRuntimeStatement {
 
 #if MYLITE_WITH_MARIADB_EMBEDDED && MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 extern "C" int mylite_ownerless_test_seed_saturated_checkpoint_records(int checkpoint_fd) {
-    if (checkpoint_fd < 0 || ::ftruncate(checkpoint_fd, k_concurrency_checkpoint_file_end) != 0) {
+    if (checkpoint_fd < 0 ||
+        mylite_ownerless_ftruncate(checkpoint_fd, k_concurrency_checkpoint_file_end) != 0) {
         return 0;
     }
 
@@ -12588,7 +12591,8 @@ int acquire_concurrency_lock(
     std::uint64_t timeout_ms
 ) {
     const std::string lock_name = lock_path.string();
-    const int lock_fd = ::open(lock_name.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+    const int lock_fd =
+        mylite_ownerless_open(lock_name.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
     if (lock_fd < 0) {
         return -1;
     }
@@ -12596,7 +12600,7 @@ int acquire_concurrency_lock(
     if (acquire_fd_range_lock(lock_fd, start, length, lock_type, timeout_ms)) {
         return lock_fd;
     }
-    static_cast<void>(::close(lock_fd));
+    static_cast<void>(mylite_ownerless_close(lock_fd));
     return -1;
 }
 
@@ -12611,7 +12615,7 @@ bool acquire_fd_range_lock(
         return false;
     }
 
-    struct flock lock = {};
+    mylite_ownerless_file_lock lock = {};
     lock.l_type = lock_type;
     lock.l_whence = SEEK_SET;
     lock.l_start = start;
@@ -12624,7 +12628,7 @@ bool acquire_fd_range_lock(
     constexpr int lock_command = F_SETLK;
 #  endif
     for (;;) {
-        if (::fcntl(fd, lock_command, &lock) == 0) {
+        if (mylite_ownerless_fcntl(fd, lock_command, &lock) == 0) {
             return true;
         }
         if (errno != EACCES && errno != EAGAIN && errno != EINTR) {
@@ -12653,7 +12657,7 @@ void release_concurrency_lock(int lock_fd, off_t start, off_t length) {
         return;
     }
 
-    struct flock lock = {};
+    mylite_ownerless_file_lock lock = {};
     lock.l_type = F_UNLCK;
     lock.l_whence = SEEK_SET;
     lock.l_start = start;
@@ -12663,8 +12667,8 @@ void release_concurrency_lock(int lock_fd, off_t start, off_t length) {
 #  else
     constexpr int lock_command = F_SETLK;
 #  endif
-    static_cast<void>(::fcntl(lock_fd, lock_command, &lock));
-    static_cast<void>(::close(lock_fd));
+    static_cast<void>(mylite_ownerless_fcntl(lock_fd, lock_command, &lock));
+    static_cast<void>(mylite_ownerless_close(lock_fd));
 }
 
 int prepare_concurrency_shared_memory(
@@ -12709,41 +12713,41 @@ int prepare_concurrency_shared_memory(
     };
 
     const std::string shm_name = shm_path.string();
-    const int shm_fd = ::open(shm_name.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+    const int shm_fd = mylite_ownerless_open(shm_name.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
     if (shm_fd < 0) {
         release_layout_locks();
         return MYLITE_IOERR;
     }
     const std::string wal_name = wal_path.string();
-    const int wal_fd = ::open(wal_name.c_str(), O_RDWR | O_CLOEXEC);
+    const int wal_fd = mylite_ownerless_open(wal_name.c_str(), O_RDWR | O_CLOEXEC);
     if (wal_fd < 0) {
-        static_cast<void>(::close(shm_fd));
+        static_cast<void>(mylite_ownerless_close(shm_fd));
         release_layout_locks();
         return MYLITE_IOERR;
     }
     const std::string checkpoint_name = checkpoint_path.string();
-    const int checkpoint_fd = ::open(checkpoint_name.c_str(), O_RDWR | O_CLOEXEC);
+    const int checkpoint_fd = mylite_ownerless_open(checkpoint_name.c_str(), O_RDWR | O_CLOEXEC);
     if (checkpoint_fd < 0) {
-        static_cast<void>(::close(wal_fd));
-        static_cast<void>(::close(shm_fd));
+        static_cast<void>(mylite_ownerless_close(wal_fd));
+        static_cast<void>(mylite_ownerless_close(shm_fd));
         release_layout_locks();
         return MYLITE_IOERR;
     }
 
-    struct stat shm_stat = {};
-    if (::fstat(shm_fd, &shm_stat) != 0) {
-        static_cast<void>(::close(checkpoint_fd));
-        static_cast<void>(::close(wal_fd));
-        static_cast<void>(::close(shm_fd));
+    mylite_ownerless_file_info shm_stat = {};
+    if (mylite_ownerless_fstat(shm_fd, &shm_stat) != 0) {
+        static_cast<void>(mylite_ownerless_close(checkpoint_fd));
+        static_cast<void>(mylite_ownerless_close(wal_fd));
+        static_cast<void>(mylite_ownerless_close(shm_fd));
         release_layout_locks();
         return MYLITE_IOERR;
     }
     const bool initial_shared_memory = shm_stat.st_size == 0;
     if (shm_stat.st_size < k_minimum_concurrency_shm_size &&
-        ::ftruncate(shm_fd, k_minimum_concurrency_shm_size) != 0) {
-        static_cast<void>(::close(checkpoint_fd));
-        static_cast<void>(::close(wal_fd));
-        static_cast<void>(::close(shm_fd));
+        mylite_ownerless_ftruncate(shm_fd, k_minimum_concurrency_shm_size) != 0) {
+        static_cast<void>(mylite_ownerless_close(checkpoint_fd));
+        static_cast<void>(mylite_ownerless_close(wal_fd));
+        static_cast<void>(mylite_ownerless_close(shm_fd));
         release_layout_locks();
         return MYLITE_IOERR;
     }
@@ -12762,16 +12766,16 @@ int prepare_concurrency_shared_memory(
         initial_shared_memory
     );
     if (layout_result != MYLITE_OK) {
-        static_cast<void>(::close(checkpoint_fd));
-        static_cast<void>(::close(wal_fd));
-        static_cast<void>(::close(shm_fd));
+        static_cast<void>(mylite_ownerless_close(checkpoint_fd));
+        static_cast<void>(mylite_ownerless_close(wal_fd));
+        static_cast<void>(mylite_ownerless_close(shm_fd));
         release_layout_locks();
         return layout_result;
     }
 
-    static_cast<void>(::close(checkpoint_fd));
-    static_cast<void>(::close(wal_fd));
-    static_cast<void>(::close(shm_fd));
+    static_cast<void>(mylite_ownerless_close(checkpoint_fd));
+    static_cast<void>(mylite_ownerless_close(wal_fd));
+    static_cast<void>(mylite_ownerless_close(shm_fd));
     release_layout_locks();
     return MYLITE_OK;
 }
@@ -12831,23 +12835,24 @@ int prepare_concurrency_checkpoint_file(
     }
 
     const std::string file_name = file_path.string();
-    const int file_fd = ::open(file_name.c_str(), O_RDWR | O_CLOEXEC);
+    const int file_fd = mylite_ownerless_open(file_name.c_str(), O_RDWR | O_CLOEXEC);
     if (file_fd < 0) {
         return MYLITE_IOERR;
     }
-    struct stat file_stat = {};
-    if (::fstat(file_fd, &file_stat) != 0) {
-        static_cast<void>(::close(file_fd));
+    mylite_ownerless_file_info file_stat = {};
+    if (mylite_ownerless_fstat(file_fd, &file_stat) != 0) {
+        static_cast<void>(mylite_ownerless_close(file_fd));
         return MYLITE_IOERR;
     }
     const bool checkpoint_file_needs_resize = file_stat.st_size < k_concurrency_checkpoint_file_end;
     if (checkpoint_file_needs_resize) {
-        if (::ftruncate(file_fd, k_concurrency_checkpoint_file_end) != 0 || ::fsync(file_fd) != 0) {
-            static_cast<void>(::close(file_fd));
+        if (mylite_ownerless_ftruncate(file_fd, k_concurrency_checkpoint_file_end) != 0 ||
+            mylite_ownerless_fsync(file_fd) != 0) {
+            static_cast<void>(mylite_ownerless_close(file_fd));
             return MYLITE_IOERR;
         }
     }
-    static_cast<void>(::close(file_fd));
+    static_cast<void>(mylite_ownerless_close(file_fd));
     return MYLITE_OK;
 }
 
@@ -12857,36 +12862,41 @@ int prepare_concurrency_recovery_file(
     std::string_view database_uuid
 ) {
     const std::string file_name = file_path.string();
-    const int file_fd = ::open(file_name.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+    const int file_fd =
+        mylite_ownerless_open(file_name.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
     if (file_fd < 0) {
         return MYLITE_IOERR;
     }
 
-    struct stat file_stat = {};
-    if (::fstat(file_fd, &file_stat) != 0) {
-        static_cast<void>(::close(file_fd));
+    mylite_ownerless_file_info file_stat = {};
+    if (mylite_ownerless_fstat(file_fd, &file_stat) != 0) {
+        static_cast<void>(mylite_ownerless_close(file_fd));
         return MYLITE_IOERR;
     }
     if (file_stat.st_size < static_cast<off_t>(k_concurrency_recovery_header_size) &&
-        ::ftruncate(file_fd, static_cast<off_t>(k_concurrency_recovery_header_size)) != 0) {
-        static_cast<void>(::close(file_fd));
+        mylite_ownerless_ftruncate(
+            file_fd,
+            static_cast<off_t>(k_concurrency_recovery_header_size)
+        ) != 0) {
+        static_cast<void>(mylite_ownerless_close(file_fd));
         return MYLITE_IOERR;
     }
 
     std::array<unsigned char, k_concurrency_recovery_header_size> header = {};
     if (!read_exact_at(file_fd, header.data(), header.size(), 0)) {
-        static_cast<void>(::close(file_fd));
+        static_cast<void>(mylite_ownerless_close(file_fd));
         return MYLITE_IOERR;
     }
     if (!concurrency_recovery_header_matches(header, magic, database_uuid)) {
         build_concurrency_recovery_header(header, magic, database_uuid);
-        if (!write_exact_at(file_fd, header.data(), header.size(), 0) || ::fsync(file_fd) != 0) {
-            static_cast<void>(::close(file_fd));
+        if (!write_exact_at(file_fd, header.data(), header.size(), 0) ||
+            mylite_ownerless_fsync(file_fd) != 0) {
+            static_cast<void>(mylite_ownerless_close(file_fd));
             return MYLITE_IOERR;
         }
     }
 
-    static_cast<void>(::close(file_fd));
+    static_cast<void>(mylite_ownerless_close(file_fd));
     return MYLITE_OK;
 }
 
@@ -13090,8 +13100,8 @@ int prepare_concurrency_shm_layout(
             bool stale_reader_can_discard_page_log =
                 stale_reader_rebuild && !rebuild_wal_has_user_records;
             if (stale_reader_can_discard_page_log) {
-                struct stat page_log_stat = {};
-                if (::fstat(page_log_fd, &page_log_stat) != 0) {
+                mylite_ownerless_file_info page_log_stat = {};
+                if (mylite_ownerless_fstat(page_log_fd, &page_log_stat) != 0) {
                     return MYLITE_IOERR;
                 }
                 stale_reader_can_discard_page_log =
@@ -13214,8 +13224,8 @@ int replay_concurrency_tablespaces(
 }
 
 int discard_stale_reader_page_log(int page_log_fd) {
-    struct stat page_log_stat = {};
-    if (::fstat(page_log_fd, &page_log_stat) != 0) {
+    mylite_ownerless_file_info page_log_stat = {};
+    if (mylite_ownerless_fstat(page_log_fd, &page_log_stat) != 0) {
         return MYLITE_IOERR;
     }
     if (page_log_stat.st_size <= static_cast<off_t>(k_empty_ownerless_page_log_size)) {
@@ -13910,7 +13920,7 @@ bool concurrency_shm_has_stale_reader_state_without_recovery(int shm_fd, off_t s
     }
 
     const std::size_t mapping_size = static_cast<std::size_t>(shm_size);
-    void *mapping = ::mmap(nullptr, mapping_size, PROT_READ, MAP_SHARED, shm_fd, 0);
+    void *mapping = mylite_ownerless_mmap(nullptr, mapping_size, PROT_READ, MAP_SHARED, shm_fd, 0);
     if (mapping == MAP_FAILED) {
         return false;
     }
@@ -13967,7 +13977,7 @@ bool concurrency_shm_has_stale_reader_state_without_recovery(int shm_fd, off_t s
             page_write_lock_occupied_limit;
     if (!reader_state_is_valid || !lock_state_is_valid ||
         (read_view_active_count == 0U && page_pin_active_count == 0U)) {
-        static_cast<void>(::munmap(mapping, mapping_size));
+        static_cast<void>(mylite_ownerless_munmap(mapping, mapping_size));
         return false;
     }
 
@@ -13995,7 +14005,7 @@ bool concurrency_shm_has_stale_reader_state_without_recovery(int shm_fd, off_t s
         !dictionary_is_idle || !redo_is_idle;
     const bool stale_reader_state = !has_native_write_state;
 
-    if (::munmap(mapping, mapping_size) != 0) {
+    if (mylite_ownerless_munmap(mapping, mapping_size) != 0) {
         return false;
     }
     return stale_reader_state;
@@ -14012,7 +14022,7 @@ bool concurrency_shm_rebuild_requires_recovery(int shm_fd, off_t shm_size) {
     }
 
     const std::size_t mapping_size = static_cast<std::size_t>(shm_size);
-    void *mapping = ::mmap(nullptr, mapping_size, PROT_READ, MAP_SHARED, shm_fd, 0);
+    void *mapping = mylite_ownerless_mmap(nullptr, mapping_size, PROT_READ, MAP_SHARED, shm_fd, 0);
     if (mapping == MAP_FAILED) {
         return true;
     }
@@ -14063,7 +14073,7 @@ bool concurrency_shm_rebuild_requires_recovery(int shm_fd, off_t shm_size) {
             redo_snapshot.progress_latch_state == MYLITE_OWNERLESS_LATCH_STATE_LOCKED;
     }
 
-    if (::munmap(mapping, mapping_size) != 0) {
+    if (mylite_ownerless_munmap(mapping, mapping_size) != 0) {
         return true;
     }
     return requires_recovery;
@@ -14152,7 +14162,9 @@ void build_concurrency_shm_header(
     store_le64(header.data(), k_concurrency_shm_inode_offset, shm_identity.inode);
 }
 
-ConcurrencyShmFileIdentity concurrency_shm_file_identity(const struct stat &shm_stat) {
+ConcurrencyShmFileIdentity concurrency_shm_file_identity(
+    const mylite_ownerless_file_info &shm_stat
+) {
     return ConcurrencyShmFileIdentity{
         static_cast<std::uint64_t>(shm_stat.st_dev),
         static_cast<std::uint64_t>(shm_stat.st_ino),
@@ -15243,8 +15255,8 @@ bool ownerless_page_log_payload_bytes(RuntimeState &runtime, std::uint64_t *out_
         return false;
     }
 
-    struct stat wal_stat = {};
-    if (::fstat(runtime.concurrency_wal_fd, &wal_stat) != 0) {
+    mylite_ownerless_file_info wal_stat = {};
+    if (mylite_ownerless_fstat(runtime.concurrency_wal_fd, &wal_stat) != 0) {
         return false;
     }
     set_ownerless_page_log_known_end_offset(
@@ -15278,8 +15290,8 @@ bool ownerless_page_log_has_uncheckpointed_records(RuntimeState &runtime) {
         return false;
     }
 
-    struct stat wal_stat = {};
-    return ::fstat(runtime.concurrency_wal_fd, &wal_stat) == 0 &&
+    mylite_ownerless_file_info wal_stat = {};
+    return mylite_ownerless_fstat(runtime.concurrency_wal_fd, &wal_stat) == 0 &&
            wal_stat.st_size > static_cast<off_t>(k_empty_ownerless_page_log_size);
 }
 
@@ -15288,8 +15300,8 @@ bool ownerless_page_log_has_payload_records(RuntimeState &runtime) {
         return false;
     }
 
-    struct stat wal_stat = {};
-    if (::fstat(runtime.concurrency_wal_fd, &wal_stat) != 0 ||
+    mylite_ownerless_file_info wal_stat = {};
+    if (mylite_ownerless_fstat(runtime.concurrency_wal_fd, &wal_stat) != 0 ||
         wal_stat.st_size <= static_cast<off_t>(k_empty_ownerless_page_log_size)) {
         return false;
     }
@@ -16024,20 +16036,20 @@ bool publish_ownerless_native_system_space_dictionary_boundary_pages(
     const std::filesystem::path file_path =
         ownerless_native_space_file_path(runtime.database_path, 0U);
     const std::string file_name = file_path.string();
-    const int fd = ::open(file_name.c_str(), O_RDONLY | O_CLOEXEC);
+    const int fd = mylite_ownerless_open(file_name.c_str(), O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
         return false;
     }
 
-    struct stat file_stat = {};
-    if (::fstat(fd, &file_stat) != 0 || file_stat.st_size <= 0) {
-        static_cast<void>(::close(fd));
+    mylite_ownerless_file_info file_stat = {};
+    if (mylite_ownerless_fstat(fd, &file_stat) != 0 || file_stat.st_size <= 0) {
+        static_cast<void>(mylite_ownerless_close(fd));
         return false;
     }
     const auto file_size = static_cast<std::uint64_t>(file_stat.st_size);
     const std::uint64_t page_count = file_size / k_innodb_page_size;
     if (page_count == 0U) {
-        static_cast<void>(::close(fd));
+        static_cast<void>(mylite_ownerless_close(fd));
         return false;
     }
 
@@ -16047,7 +16059,7 @@ bool publish_ownerless_native_system_space_dictionary_boundary_pages(
         const std::uint64_t page_offset = page_index * k_innodb_page_size;
         if (page_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) ||
             !read_exact_at(fd, page.data(), page.size(), static_cast<off_t>(page_offset))) {
-            static_cast<void>(::close(fd));
+            static_cast<void>(mylite_ownerless_close(fd));
             return false;
         }
 
@@ -16080,7 +16092,7 @@ bool publish_ownerless_native_system_space_dictionary_boundary_pages(
             &record_offset
         );
         if (append_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
-            static_cast<void>(::close(fd));
+            static_cast<void>(mylite_ownerless_close(fd));
             return false;
         }
         appended_record = true;
@@ -16105,7 +16117,7 @@ bool publish_ownerless_native_system_space_dictionary_boundary_pages(
             ));
         }
     }
-    static_cast<void>(::close(fd));
+    static_cast<void>(mylite_ownerless_close(fd));
 
     return !appended_record || mylite_ownerless_page_log_sync_initialized_at(
                                    hook->page_log_fd,
@@ -17490,8 +17502,8 @@ bool ownerless_page_log_header_scan_has_user_page_records(
         return false;
     }
 
-    struct stat wal_stat = {};
-    if (::fstat(page_log_fd, &wal_stat) != 0) {
+    mylite_ownerless_file_info wal_stat = {};
+    if (mylite_ownerless_fstat(page_log_fd, &wal_stat) != 0) {
         return false;
     }
     if (wal_stat.st_size <= static_cast<off_t>(k_empty_ownerless_page_log_size)) {
@@ -19585,8 +19597,8 @@ int read_concurrency_process_active_count(int shm_fd, std::uint64_t *out_active_
         return MYLITE_IOERR;
     }
 
-    struct stat shm_stat = {};
-    if (::fstat(shm_fd, &shm_stat) != 0 ||
+    mylite_ownerless_file_info shm_stat = {};
+    if (mylite_ownerless_fstat(shm_fd, &shm_stat) != 0 ||
         shm_stat.st_size <
             static_cast<off_t>(
                 k_concurrency_process_registry_offset + k_concurrency_process_registry_size
@@ -19596,7 +19608,7 @@ int read_concurrency_process_active_count(int shm_fd, std::uint64_t *out_active_
         return MYLITE_IOERR;
     }
 
-    void *mapping = ::mmap(
+    void *mapping = mylite_ownerless_mmap(
         nullptr,
         static_cast<std::size_t>(shm_stat.st_size),
         PROT_READ | PROT_WRITE,
@@ -19611,7 +19623,7 @@ int read_concurrency_process_active_count(int shm_fd, std::uint64_t *out_active_
     const auto *registry =
         static_cast<const unsigned char *>(mapping) + k_concurrency_process_registry_offset;
     *out_active_count = mylite_ownerless_process_registry_active_count(registry);
-    if (::munmap(mapping, static_cast<std::size_t>(shm_stat.st_size)) != 0) {
+    if (mylite_ownerless_munmap(mapping, static_cast<std::size_t>(shm_stat.st_size)) != 0) {
         return MYLITE_IOERR;
     }
     return MYLITE_OK;
@@ -19640,8 +19652,8 @@ int read_concurrency_process_live_count(int shm_fd, std::uint64_t *out_live_coun
         return MYLITE_IOERR;
     }
 
-    struct stat shm_stat = {};
-    if (::fstat(shm_fd, &shm_stat) != 0 ||
+    mylite_ownerless_file_info shm_stat = {};
+    if (mylite_ownerless_fstat(shm_fd, &shm_stat) != 0 ||
         shm_stat.st_size <
             static_cast<off_t>(
                 k_concurrency_process_registry_offset + k_concurrency_process_registry_size
@@ -19667,7 +19679,7 @@ int read_concurrency_process_live_count(int shm_fd, std::uint64_t *out_live_coun
         return MYLITE_IOERR;
     }
 
-    void *mapping = ::mmap(
+    void *mapping = mylite_ownerless_mmap(
         nullptr,
         static_cast<std::size_t>(shm_stat.st_size),
         PROT_READ | PROT_WRITE,
@@ -19697,7 +19709,8 @@ int read_concurrency_process_live_count(int shm_fd, std::uint64_t *out_live_coun
     if (registry_result != MYLITE_OWNERLESS_PROCESS_REGISTRY_OK) {
         return MYLITE_IOERR;
     }
-    const int unmap_result = ::munmap(mapping, static_cast<std::size_t>(shm_stat.st_size));
+    const int unmap_result =
+        mylite_ownerless_munmap(mapping, static_cast<std::size_t>(shm_stat.st_size));
     if (unmap_result != 0) {
         return MYLITE_IOERR;
     }
@@ -19750,8 +19763,8 @@ int read_concurrency_process_legacy_pid_live_count(int shm_fd, std::uint64_t *ou
         return MYLITE_IOERR;
     }
 
-    struct stat shm_stat = {};
-    if (::fstat(shm_fd, &shm_stat) != 0 ||
+    mylite_ownerless_file_info shm_stat = {};
+    if (mylite_ownerless_fstat(shm_fd, &shm_stat) != 0 ||
         shm_stat.st_size <
             static_cast<off_t>(
                 k_concurrency_process_registry_offset + k_concurrency_process_registry_size
@@ -19777,7 +19790,7 @@ int read_concurrency_process_legacy_pid_live_count(int shm_fd, std::uint64_t *ou
         return MYLITE_IOERR;
     }
 
-    void *mapping = ::mmap(
+    void *mapping = mylite_ownerless_mmap(
         nullptr,
         static_cast<std::size_t>(shm_stat.st_size),
         PROT_READ,
@@ -19807,7 +19820,8 @@ int read_concurrency_process_legacy_pid_live_count(int shm_fd, std::uint64_t *ou
         }
     }
 
-    const int unmap_result = ::munmap(mapping, static_cast<std::size_t>(shm_stat.st_size));
+    const int unmap_result =
+        mylite_ownerless_munmap(mapping, static_cast<std::size_t>(shm_stat.st_size));
     if (unmap_result != 0) {
         return MYLITE_IOERR;
     }
@@ -19822,8 +19836,8 @@ int validate_concurrency_shm_mapping(
     std::string_view database_uuid,
     bool strict_segments
 ) {
-    struct stat shm_stat = {};
-    if (::fstat(shm_fd, &shm_stat) != 0) {
+    mylite_ownerless_file_info shm_stat = {};
+    if (mylite_ownerless_fstat(shm_fd, &shm_stat) != 0) {
         return MYLITE_IOERR;
     }
     const ConcurrencyShmFileIdentity shm_identity = concurrency_shm_file_identity(shm_stat);
@@ -19834,7 +19848,8 @@ int validate_concurrency_shm_mapping(
     }
 
     const std::size_t mapping_size = static_cast<std::size_t>(shm_size);
-    void *mapping = ::mmap(nullptr, mapping_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    void *mapping =
+        mylite_ownerless_mmap(nullptr, mapping_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
     if (mapping == MAP_FAILED) {
         return MYLITE_IOERR;
     }
@@ -19847,7 +19862,7 @@ int validate_concurrency_shm_mapping(
     const bool valid =
         concurrency_shm_header_matches(header, shm_size, shm_identity, database_uuid) &&
         segment_layout_valid;
-    const int unmap_result = ::munmap(mapping, mapping_size);
+    const int unmap_result = mylite_ownerless_munmap(mapping, mapping_size);
     return valid && unmap_result == 0 ? MYLITE_OK : MYLITE_IOERR;
 }
 
@@ -19858,27 +19873,28 @@ int map_concurrency_shared_memory_for_runtime(
     const std::filesystem::path shm_path =
         database_path / k_concurrency_dir_name / k_concurrency_shm_filename;
     const std::string shm_name = shm_path.string();
-    const int shm_fd = ::open(shm_name.c_str(), O_RDWR | O_CLOEXEC);
+    const int shm_fd = mylite_ownerless_open(shm_name.c_str(), O_RDWR | O_CLOEXEC);
     if (shm_fd < 0) {
         return MYLITE_IOERR;
     }
 
-    struct stat shm_stat = {};
-    if (::fstat(shm_fd, &shm_stat) != 0 ||
+    mylite_ownerless_file_info shm_stat = {};
+    if (mylite_ownerless_fstat(shm_fd, &shm_stat) != 0 ||
         shm_stat.st_size < static_cast<off_t>(
                                k_concurrency_page_pin_registry_offset +
                                k_concurrency_page_pin_registry_segment_size
                            ) ||
         static_cast<std::uintmax_t>(shm_stat.st_size) >
             static_cast<std::uintmax_t>(std::numeric_limits<std::size_t>::max())) {
-        static_cast<void>(::close(shm_fd));
+        static_cast<void>(mylite_ownerless_close(shm_fd));
         return MYLITE_IOERR;
     }
 
     const std::size_t mapping_size = static_cast<std::size_t>(shm_stat.st_size);
-    void *mapping = ::mmap(nullptr, mapping_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    void *mapping =
+        mylite_ownerless_mmap(nullptr, mapping_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
     if (mapping == MAP_FAILED) {
-        static_cast<void>(::close(shm_fd));
+        static_cast<void>(mylite_ownerless_close(shm_fd));
         return MYLITE_IOERR;
     }
 
@@ -19932,7 +19948,7 @@ int open_concurrency_page_log_for_runtime(
     const std::filesystem::path concurrency_path = database_path / k_concurrency_dir_name;
     const std::filesystem::path wal_path = concurrency_path / k_concurrency_wal_filename;
     const std::string wal_name = wal_path.string();
-    const int wal_fd = ::open(wal_name.c_str(), O_RDWR | O_CLOEXEC);
+    const int wal_fd = mylite_ownerless_open(wal_name.c_str(), O_RDWR | O_CLOEXEC);
     if (wal_fd < 0) {
         return MYLITE_IOERR;
     }
@@ -19941,23 +19957,23 @@ int open_concurrency_page_log_for_runtime(
         concurrency_path / k_concurrency_wal_checkpoint_stage_filename;
     const std::string checkpoint_stage_name = checkpoint_stage_path.string();
     const int checkpoint_stage_fd =
-        ::open(checkpoint_stage_name.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+        mylite_ownerless_open(checkpoint_stage_name.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
     if (checkpoint_stage_fd < 0 || !ownerless_sync_directory(concurrency_path) ||
         mylite_ownerless_page_log_register_checkpoint_stage(wal_fd, checkpoint_stage_fd) !=
             MYLITE_OWNERLESS_PAGE_LOG_OK) {
         if (checkpoint_stage_fd >= 0) {
-            static_cast<void>(::close(checkpoint_stage_fd));
+            static_cast<void>(mylite_ownerless_close(checkpoint_stage_fd));
         }
-        static_cast<void>(::close(wal_fd));
+        static_cast<void>(mylite_ownerless_close(wal_fd));
         return MYLITE_IOERR;
     }
-    static_cast<void>(::close(checkpoint_stage_fd));
+    static_cast<void>(mylite_ownerless_close(checkpoint_stage_fd));
 
     const int log_result =
         mylite_ownerless_page_log_initialize_at(wal_fd, k_concurrency_recovery_header_size);
     if (log_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
         mylite_ownerless_page_log_unregister_checkpoint_stage(wal_fd);
-        static_cast<void>(::close(wal_fd));
+        static_cast<void>(mylite_ownerless_close(wal_fd));
         return MYLITE_IOERR;
     }
 
@@ -19981,7 +19997,7 @@ int open_concurrency_checkpoint_for_runtime(
     const std::filesystem::path checkpoint_path =
         database_path / k_concurrency_dir_name / k_concurrency_checkpoint_filename;
     const std::string checkpoint_name = checkpoint_path.string();
-    const int checkpoint_fd = ::open(checkpoint_name.c_str(), O_RDWR | O_CLOEXEC);
+    const int checkpoint_fd = mylite_ownerless_open(checkpoint_name.c_str(), O_RDWR | O_CLOEXEC);
     if (checkpoint_fd < 0) {
         return MYLITE_IOERR;
     }
@@ -19990,7 +20006,7 @@ int open_concurrency_checkpoint_for_runtime(
     std::uint64_t latest_lsn = 0;
     std::uint64_t visible_lsn = 0;
     if (!read_concurrency_checkpoint_lsn(checkpoint_fd, &latest_lsn, &visible_lsn)) {
-        static_cast<void>(::close(checkpoint_fd));
+        static_cast<void>(mylite_ownerless_close(checkpoint_fd));
         return MYLITE_IOERR;
     }
     if (mylite_ownerless_redo_state_seed_checkpoint(
@@ -19999,7 +20015,7 @@ int open_concurrency_checkpoint_for_runtime(
             latest_lsn,
             visible_lsn
         ) != MYLITE_OWNERLESS_REDO_STATE_OK) {
-        static_cast<void>(::close(checkpoint_fd));
+        static_cast<void>(mylite_ownerless_close(checkpoint_fd));
         return MYLITE_IOERR;
     }
 
@@ -21523,8 +21539,8 @@ int read_ownerless_pressure_state(mylite_db &db, OwnerlessPressureState &state) 
             return MYLITE_IOERR;
         }
     }
-    struct stat page_log_stat = {};
-    if (::fstat(page_log_fd, &page_log_stat) != 0 || page_log_stat.st_size < 0) {
+    mylite_ownerless_file_info page_log_stat = {};
+    if (mylite_ownerless_fstat(page_log_fd, &page_log_stat) != 0 || page_log_stat.st_size < 0) {
         set_error(db, MYLITE_IOERR, "ownerless page-version WAL size could not be read");
         return MYLITE_IOERR;
     }
@@ -29721,7 +29737,8 @@ int ownerless_statement_lock_fd(mylite_db &db) {
     }
 
     const std::string lock_name = lock_path.string();
-    const int lock_fd = ::open(lock_name.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+    const int lock_fd =
+        mylite_ownerless_open(lock_name.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
     if (lock_fd < 0) {
         set_error(db, MYLITE_IOERR, "ownerless statement lock file could not be opened");
         return -1;
@@ -29739,7 +29756,8 @@ int ownerless_runtime_statement_lock_fd(RuntimeState &runtime) {
     const std::filesystem::path lock_path = std::filesystem::path(runtime.database_path) /
                                             k_concurrency_dir_name / k_statement_lock_filename;
     const std::string lock_name = lock_path.string();
-    const int lock_fd = ::open(lock_name.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+    const int lock_fd =
+        mylite_ownerless_open(lock_name.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
     if (lock_fd < 0) {
         return -1;
     }
@@ -31287,8 +31305,10 @@ bool unmap_concurrency_shared_memory_for_runtime(RuntimeState &runtime) {
     }
 
     if (runtime.concurrency_shm_mapping != nullptr) {
-        const int unmap_result =
-            ::munmap(runtime.concurrency_shm_mapping, runtime.concurrency_shm_mapping_size);
+        const int unmap_result = mylite_ownerless_munmap(
+            runtime.concurrency_shm_mapping,
+            runtime.concurrency_shm_mapping_size
+        );
         if (unmap_result != 0) {
             runtime.release_pending = true;
             return false;
@@ -31297,19 +31317,19 @@ bool unmap_concurrency_shared_memory_for_runtime(RuntimeState &runtime) {
         runtime.concurrency_shm_mapping_size = 0;
     }
     if (runtime.concurrency_shm_fd >= 0) {
-        static_cast<void>(::close(runtime.concurrency_shm_fd));
+        static_cast<void>(mylite_ownerless_close(runtime.concurrency_shm_fd));
         runtime.concurrency_shm_fd = -1;
     }
     if (runtime.concurrency_wal_fd >= 0) {
-        static_cast<void>(::close(runtime.concurrency_wal_fd));
+        static_cast<void>(mylite_ownerless_close(runtime.concurrency_wal_fd));
         runtime.concurrency_wal_fd = -1;
     }
     if (runtime.concurrency_checkpoint_fd >= 0) {
-        static_cast<void>(::close(runtime.concurrency_checkpoint_fd));
+        static_cast<void>(mylite_ownerless_close(runtime.concurrency_checkpoint_fd));
         runtime.concurrency_checkpoint_fd = -1;
     }
     if (runtime.ownerless_statement_lock_fd >= 0) {
-        static_cast<void>(::close(runtime.ownerless_statement_lock_fd));
+        static_cast<void>(mylite_ownerless_close(runtime.ownerless_statement_lock_fd));
         runtime.ownerless_statement_lock_fd = -1;
     }
     return true;
@@ -37337,7 +37357,7 @@ extern "C" int mylite_ownerless_database_test_update_checkpoint_lsn_repeated(
                                                   k_concurrency_dir_name /
                                                   k_concurrency_checkpoint_filename;
     const std::string checkpoint_name = checkpoint_path.string();
-    const int checkpoint_fd = ::open(checkpoint_name.c_str(), O_RDWR | O_CLOEXEC);
+    const int checkpoint_fd = mylite_ownerless_open(checkpoint_name.c_str(), O_RDWR | O_CLOEXEC);
     if (checkpoint_fd < 0) {
         return MYLITE_IOERR;
     }
@@ -37359,7 +37379,7 @@ extern "C" int mylite_ownerless_database_test_update_checkpoint_lsn_repeated(
 
     reset_ownerless_checkpoint_lsn_sync_anchor();
     reset_ownerless_checkpoint_lsn_generation_cache();
-    if (::close(checkpoint_fd) != 0 && result == MYLITE_OK) {
+    if (mylite_ownerless_close(checkpoint_fd) != 0 && result == MYLITE_OK) {
         result = MYLITE_IOERR;
     }
     return result;
@@ -37406,7 +37426,7 @@ bool read_concurrency_checkpoint_lsn_records(
         std::array<unsigned char, k_concurrency_checkpoint_lsn_record_size> bytes = {};
         ssize_t bytes_read = 0;
         do {
-            bytes_read = ::pread(
+            bytes_read = mylite_ownerless_pread(
                 checkpoint_fd,
                 bytes.data(),
                 bytes.size(),
@@ -37459,7 +37479,7 @@ bool read_concurrency_checkpoint_legacy_lsn(
     std::array<unsigned char, 16> payload = {};
     ssize_t bytes_read = 0;
     do {
-        bytes_read = ::pread(
+        bytes_read = mylite_ownerless_pread(
             checkpoint_fd,
             payload.data(),
             payload.size(),
@@ -37507,7 +37527,7 @@ bool read_concurrency_native_file_op_checkpoint_records_at(
         std::array<unsigned char, k_concurrency_checkpoint_native_file_op_record_size> bytes = {};
         ssize_t bytes_read = 0;
         do {
-            bytes_read = ::pread(
+            bytes_read = mylite_ownerless_pread(
                 checkpoint_fd,
                 bytes.data(),
                 bytes.size(),
@@ -37689,7 +37709,7 @@ bool write_concurrency_native_file_op_checkpoint_locked_at(
             static_cast<off_t>(k_concurrency_checkpoint_native_file_op_needed_offset)
         );
     }
-    return ok && ::fsync(checkpoint_fd) == 0;
+    return ok && mylite_ownerless_fsync(checkpoint_fd) == 0;
 }
 
 bool read_concurrency_native_file_op_checkpoint_legacy_needed(int checkpoint_fd, bool *out_needed) {
@@ -37700,7 +37720,7 @@ bool read_concurrency_native_file_op_checkpoint_legacy_needed(int checkpoint_fd,
     std::array<unsigned char, sizeof(std::uint64_t)> payload = {};
     ssize_t bytes_read = 0;
     do {
-        bytes_read = ::pread(
+        bytes_read = mylite_ownerless_pread(
             checkpoint_fd,
             payload.data(),
             payload.size(),
@@ -37968,7 +37988,7 @@ unsigned ownerless_file_lock_wait_timeout_ms() {
 }
 
 void release_fd_lock(int fd, off_t start, off_t length) {
-    struct flock lock = {};
+    mylite_ownerless_file_lock lock = {};
     lock.l_type = F_UNLCK;
     lock.l_whence = SEEK_SET;
     lock.l_start = start;
@@ -37978,7 +37998,7 @@ void release_fd_lock(int fd, off_t start, off_t length) {
 #  else
     constexpr int lock_command = F_SETLK;
 #  endif
-    static_cast<void>(::fcntl(fd, lock_command, &lock));
+    static_cast<void>(mylite_ownerless_fcntl(fd, lock_command, &lock));
 }
 
 std::uint64_t current_time_milliseconds(void) {
@@ -37990,7 +38010,7 @@ std::uint64_t current_time_milliseconds(void) {
 
 bool read_exact_at(int fd, unsigned char *data, std::size_t length, off_t offset) {
     while (length > 0U) {
-        const ssize_t bytes_read = ::pread(fd, data, length, offset);
+        const ssize_t bytes_read = mylite_ownerless_pread(fd, data, length, offset);
         if (bytes_read < 0) {
             if (errno == EINTR) {
                 continue;
@@ -38009,7 +38029,7 @@ bool read_exact_at(int fd, unsigned char *data, std::size_t length, off_t offset
 
 bool write_exact_at(int fd, const unsigned char *data, std::size_t length, off_t offset) {
     while (length > 0U) {
-        const ssize_t bytes_written = ::pwrite(fd, data, length, offset);
+        const ssize_t bytes_written = mylite_ownerless_pwrite(fd, data, length, offset);
         if (bytes_written < 0) {
             if (errno == EINTR) {
                 continue;
@@ -38028,9 +38048,9 @@ bool write_exact_at(int fd, const unsigned char *data, std::size_t length, off_t
 
 bool sync_fd_data(int fd) {
 #  if defined(_POSIX_SYNCHRONIZED_IO) && _POSIX_SYNCHRONIZED_IO > 0
-    while (::fdatasync(fd) != 0) {
+    while (mylite_ownerless_fdatasync(fd) != 0) {
 #  else
-    while (::fsync(fd) != 0) {
+    while (mylite_ownerless_fsync(fd) != 0) {
 #  endif
         if (errno != EINTR) {
             return false;
@@ -38071,33 +38091,33 @@ bool read_ownerless_native_page_from_file(
     const std::filesystem::path file_path =
         ownerless_native_space_file_path(database_path, space_id);
     const std::string file_name = file_path.string();
-    const int fd = ::open(file_name.c_str(), O_RDONLY | O_CLOEXEC);
+    const int fd = mylite_ownerless_open(file_name.c_str(), O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
         return false;
     }
 
-    struct stat file_stat = {};
-    if (::fstat(fd, &file_stat) != 0 || file_stat.st_size <= 0) {
-        static_cast<void>(::close(fd));
+    mylite_ownerless_file_info file_stat = {};
+    if (mylite_ownerless_fstat(fd, &file_stat) != 0 || file_stat.st_size <= 0) {
+        static_cast<void>(mylite_ownerless_close(fd));
         return false;
     }
     const auto file_size = static_cast<std::uint64_t>(file_stat.st_size);
     const std::uint64_t page_count = file_size / k_innodb_page_size;
     if (page_count == 0U || static_cast<std::uint64_t>(page_no) >= page_count) {
-        static_cast<void>(::close(fd));
+        static_cast<void>(mylite_ownerless_close(fd));
         return false;
     }
     const std::uint64_t page_offset =
         static_cast<std::uint64_t>(page_no) * static_cast<std::uint64_t>(k_innodb_page_size);
     if (page_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
-        static_cast<void>(::close(fd));
+        static_cast<void>(mylite_ownerless_close(fd));
         return false;
     }
 
     page.assign(k_innodb_page_size, 0U);
     const bool read_ok =
         read_exact_at(fd, page.data(), page.size(), static_cast<off_t>(page_offset));
-    static_cast<void>(::close(fd));
+    static_cast<void>(mylite_ownerless_close(fd));
     if (!read_ok) {
         page.clear();
         return false;
@@ -38129,14 +38149,14 @@ bool ownerless_native_file_max_page_lsn(
     }
 
     const std::string file_name = file_path.string();
-    const int fd = ::open(file_name.c_str(), O_RDONLY | O_CLOEXEC);
+    const int fd = mylite_ownerless_open(file_name.c_str(), O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
         return false;
     }
 
-    struct stat file_stat = {};
-    if (::fstat(fd, &file_stat) != 0 || file_stat.st_size < 0) {
-        static_cast<void>(::close(fd));
+    mylite_ownerless_file_info file_stat = {};
+    if (mylite_ownerless_fstat(fd, &file_stat) != 0 || file_stat.st_size < 0) {
+        static_cast<void>(mylite_ownerless_close(fd));
         return false;
     }
 
@@ -38147,14 +38167,14 @@ bool ownerless_native_file_max_page_lsn(
         const std::uint64_t page_offset = page_no * static_cast<std::uint64_t>(k_innodb_page_size);
         if (page_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) ||
             !read_exact_at(fd, page.data(), page.size(), static_cast<off_t>(page_offset))) {
-            static_cast<void>(::close(fd));
+            static_cast<void>(mylite_ownerless_close(fd));
             return false;
         }
         *in_out_max_page_lsn =
             std::max(*in_out_max_page_lsn, load_be64(page.data(), k_innodb_fil_page_lsn_offset));
     }
 
-    static_cast<void>(::close(fd));
+    static_cast<void>(mylite_ownerless_close(fd));
     return true;
 }
 
@@ -38402,7 +38422,8 @@ bool write_ownerless_redo_header_backup(
 
     const std::filesystem::path backup_path = ownerless_redo_header_backup_path(database_path);
     const std::string backup_name = backup_path.string();
-    const int fd = ::open(backup_name.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    const int fd =
+        mylite_ownerless_open(backup_name.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
     if (fd < 0) {
         return false;
     }
@@ -38414,8 +38435,8 @@ bool write_ownerless_redo_header_backup(
                         k_ownerless_redo_startup_prefix_size,
                         static_cast<off_t>(k_ownerless_redo_header_backup_payload_offset)
                     ) &&
-                    ::fsync(fd) == 0;
-    static_cast<void>(::close(fd));
+                    mylite_ownerless_fsync(fd) == 0;
+    static_cast<void>(mylite_ownerless_close(fd));
     return ok;
 }
 
@@ -38433,7 +38454,7 @@ bool read_ownerless_redo_header_backup(
 
     const std::filesystem::path backup_path = ownerless_redo_header_backup_path(database_path);
     const std::string backup_name = backup_path.string();
-    const int fd = ::open(backup_name.c_str(), O_RDONLY | O_CLOEXEC);
+    const int fd = mylite_ownerless_open(backup_name.c_str(), O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
         return false;
     }
@@ -38441,9 +38462,9 @@ bool read_ownerless_redo_header_backup(
     const off_t minimum_size = static_cast<off_t>(
         k_ownerless_redo_header_backup_payload_offset + k_ownerless_redo_startup_prefix_size
     );
-    struct stat backup_stat = {};
-    if (::fstat(fd, &backup_stat) != 0 || backup_stat.st_size < minimum_size) {
-        static_cast<void>(::close(fd));
+    mylite_ownerless_file_info backup_stat = {};
+    if (mylite_ownerless_fstat(fd, &backup_stat) != 0 || backup_stat.st_size < minimum_size) {
+        static_cast<void>(mylite_ownerless_close(fd));
         return false;
     }
 
@@ -38456,7 +38477,7 @@ bool read_ownerless_redo_header_backup(
                              k_ownerless_redo_startup_prefix_size,
                              static_cast<off_t>(k_ownerless_redo_header_backup_payload_offset)
                          );
-    static_cast<void>(::close(fd));
+    static_cast<void>(mylite_ownerless_close(fd));
     if (!read_ok) {
         return false;
     }
@@ -38500,22 +38521,23 @@ bool read_ownerless_redo_header_backup(
 
 bool ownerless_redo_header_backup_is_valid(const std::filesystem::path &database_path) {
     const std::filesystem::path backup_path = ownerless_redo_header_backup_path(database_path);
-    struct stat backup_stat = {};
-    if (::stat(backup_path.string().c_str(), &backup_stat) != 0) {
+    mylite_ownerless_file_info backup_stat = {};
+    if (mylite_ownerless_stat(backup_path.string().c_str(), &backup_stat) != 0) {
         return false;
     }
 
     const std::filesystem::path redo_path =
         database_path / k_datadir_name / k_innodb_redo_log_filename;
-    struct stat redo_stat = {};
+    mylite_ownerless_file_info redo_stat = {};
     OwnerlessRedoStartupPrefixSnapshot snapshot = {};
-    return ::stat(redo_path.string().c_str(), &redo_stat) == 0 && read_ownerless_redo_header_backup(
-                                                                      database_path,
-                                                                      redo_path,
-                                                                      redo_stat.st_size,
-                                                                      snapshot,
-                                                                      false
-                                                                  );
+    return mylite_ownerless_stat(redo_path.string().c_str(), &redo_stat) == 0 &&
+           read_ownerless_redo_header_backup(
+               database_path,
+               redo_path,
+               redo_stat.st_size,
+               snapshot,
+               false
+           );
 }
 
 int capture_ownerless_redo_startup_prefix(
@@ -38528,27 +38550,27 @@ int capture_ownerless_redo_startup_prefix(
     const std::filesystem::path redo_path =
         database_path / k_datadir_name / k_innodb_redo_log_filename;
     const std::string redo_name = redo_path.string();
-    const int fd = ::open(redo_name.c_str(), O_RDONLY | O_CLOEXEC);
+    const int fd = mylite_ownerless_open(redo_name.c_str(), O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
         return errno == ENOENT ? MYLITE_OK : MYLITE_IOERR;
     }
 
-    struct stat redo_stat = {};
-    if (::fstat(fd, &redo_stat) != 0) {
-        static_cast<void>(::close(fd));
+    mylite_ownerless_file_info redo_stat = {};
+    if (mylite_ownerless_fstat(fd, &redo_stat) != 0) {
+        static_cast<void>(mylite_ownerless_close(fd));
         return MYLITE_IOERR;
     }
     if (redo_stat.st_size < static_cast<off_t>(k_ownerless_redo_startup_prefix_size)) {
-        static_cast<void>(::close(fd));
+        static_cast<void>(mylite_ownerless_close(fd));
         return MYLITE_OK;
     }
 
     std::array<unsigned char, k_ownerless_redo_startup_prefix_size> prefix = {};
     if (!read_exact_at(fd, prefix.data(), prefix.size(), 0)) {
-        static_cast<void>(::close(fd));
+        static_cast<void>(mylite_ownerless_close(fd));
         return MYLITE_IOERR;
     }
-    static_cast<void>(::close(fd));
+    static_cast<void>(mylite_ownerless_close(fd));
 
     if (ownerless_redo_prefix_has_valid_current_checkpoint(prefix.data())) {
         snapshot.captured = true;
@@ -38580,7 +38602,7 @@ bool validate_ownerless_current_redo(
     const std::filesystem::path redo_path =
         database_path / k_datadir_name / k_innodb_redo_log_filename;
     const std::string redo_name = redo_path.string();
-    const int fd = ::open(redo_name.c_str(), O_RDONLY | O_CLOEXEC);
+    const int fd = mylite_ownerless_open(redo_name.c_str(), O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
         return false;
     }
@@ -38591,7 +38613,7 @@ bool validate_ownerless_current_redo(
         ownerless_redo_prefix_has_valid_current_checkpoint(current_prefix.data()) &&
         (!require_native_page_coverage ||
          ownerless_redo_prefix_covers_native_page_lsns(database_path, current_prefix.data()));
-    static_cast<void>(::close(fd));
+    static_cast<void>(mylite_ownerless_close(fd));
 #  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
     if (ownerless_test_final_cleanup_failure_is_configured("redo-prefix")) {
         return false;
@@ -39693,9 +39715,9 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
                 }
                 const std::filesystem::path redo_path = std::filesystem::path(db.database_path) /
                                                         k_datadir_name / k_innodb_redo_log_filename;
-                struct stat redo_stat = {};
+                mylite_ownerless_file_info redo_stat = {};
                 OwnerlessRedoStartupPrefixSnapshot backup_redo_prefix = {};
-                if (::stat(redo_path.string().c_str(), &redo_stat) == 0 &&
+                if (mylite_ownerless_stat(redo_path.string().c_str(), &redo_stat) == 0 &&
                     read_ownerless_redo_header_backup(
                         db.database_path,
                         redo_path,
@@ -40661,7 +40683,7 @@ bool release_runtime(void) {
     if (redo_shutdown_repair_candidate) {
         const std::filesystem::path redo_path = std::filesystem::path(g_runtime.database_path) /
                                                 k_datadir_name / k_innodb_redo_log_filename;
-        struct stat redo_stat = {};
+        mylite_ownerless_file_info redo_stat = {};
         OwnerlessRedoStartupPrefixSnapshot startup_redo_prefix = {};
         bool have_startup_redo_prefix = false;
         bool retained_ownerless_user_page_log_before_shutdown = false;
@@ -40718,7 +40740,7 @@ bool release_runtime(void) {
             !ownerless_page_log_has_uncheckpointed_records(g_runtime);
         if (!current_native_redo_is_authoritative && startup_lock_fd >= 0 &&
             redo_prefix_result == MYLITE_OK &&
-            ::stat(redo_path.string().c_str(), &redo_stat) == 0) {
+            mylite_ownerless_stat(redo_path.string().c_str(), &redo_stat) == 0) {
             have_startup_redo_prefix = read_ownerless_redo_header_backup(
                 g_runtime.database_path,
                 redo_path,
@@ -42608,7 +42630,8 @@ int acquire_database_lock(
 ) {
     const std::filesystem::path lock_path = database_path / k_lock_filename;
     const std::string lock_name = lock_path.string();
-    const int lock_fd = ::open(lock_name.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+    const int lock_fd =
+        mylite_ownerless_open(lock_name.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
     if (lock_fd < 0) {
         set_error(db, MYLITE_IOERR, "database lock file could not be opened");
         return -1;
@@ -42637,7 +42660,7 @@ int wait_for_database_lock(DatabaseLockWait wait) {
     const auto timeout = std::chrono::milliseconds(wait.busy_timeout_ms);
     unsigned poll_interval_ms = k_lock_poll_initial_interval_ms;
     for (;;) {
-        if (::flock(wait.lock_fd, wait.lock_operation | LOCK_NB) == 0) {
+        if (mylite_ownerless_flock(wait.lock_fd, wait.lock_operation | LOCK_NB) == 0) {
             return MYLITE_OK;
         }
         if (errno != EWOULDBLOCK && errno != EAGAIN) {
@@ -42653,8 +42676,8 @@ int wait_for_database_lock(DatabaseLockWait wait) {
 
 void release_database_lock(int lock_fd) {
     if (lock_fd >= 0) {
-        static_cast<void>(::flock(lock_fd, LOCK_UN));
-        static_cast<void>(::close(lock_fd));
+        static_cast<void>(mylite_ownerless_flock(lock_fd, LOCK_UN));
+        static_cast<void>(mylite_ownerless_close(lock_fd));
     }
 }
 
@@ -42691,9 +42714,10 @@ void pause_for_ownerless_test_fault(const char *fault_name) {
         if (end != ready_fd_value && *end == '\0' && ready_fd >= 0 &&
             ready_fd <= std::numeric_limits<int>::max()) {
             const char value = 'x';
-            const auto bytes_written = ::write(static_cast<int>(ready_fd), &value, sizeof(value));
+            const auto bytes_written =
+                mylite_ownerless_write(static_cast<int>(ready_fd), &value, sizeof(value));
             static_cast<void>(bytes_written);
-            static_cast<void>(::close(static_cast<int>(ready_fd)));
+            static_cast<void>(mylite_ownerless_close(static_cast<int>(ready_fd)));
         }
     }
 
@@ -42706,9 +42730,10 @@ void pause_for_ownerless_test_fault(const char *fault_name) {
             char value = '\0';
             ssize_t bytes_read = -1;
             do {
-                bytes_read = ::read(static_cast<int>(release_fd), &value, sizeof(value));
+                bytes_read =
+                    mylite_ownerless_read(static_cast<int>(release_fd), &value, sizeof(value));
             } while (bytes_read < 0 && errno == EINTR);
-            static_cast<void>(::close(static_cast<int>(release_fd)));
+            static_cast<void>(mylite_ownerless_close(static_cast<int>(release_fd)));
             if (bytes_read == sizeof(value)) {
                 return;
             }

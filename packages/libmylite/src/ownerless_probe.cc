@@ -129,8 +129,9 @@ int mylite_ownerless_probe_filesystem(
 
 #if defined(__linux__)
     struct statfs filesystem = {};
-    struct stat directory_stat = {};
-    if (statfs(directory, &filesystem) != 0 || stat(directory, &directory_stat) != 0) {
+    mylite_ownerless_file_info directory_stat = {};
+    if (statfs(directory, &filesystem) != 0 ||
+        mylite_ownerless_stat(directory, &directory_stat) != 0) {
         return MYLITE_OWNERLESS_PROBE_ERROR;
     }
 
@@ -160,8 +161,9 @@ int mylite_ownerless_probe_filesystem(
     return MYLITE_OWNERLESS_PROBE_OK;
 #elif defined(__APPLE__)
     struct statfs filesystem = {};
-    struct stat directory_stat = {};
-    if (statfs(directory, &filesystem) != 0 || stat(directory, &directory_stat) != 0) {
+    mylite_ownerless_file_info directory_stat = {};
+    if (statfs(directory, &filesystem) != 0 ||
+        mylite_ownerless_stat(directory, &directory_stat) != 0) {
         return MYLITE_OWNERLESS_PROBE_ERROR;
     }
 
@@ -266,7 +268,7 @@ bool probe_mmap_shared_visibility(const std::string &root) {
         close_pipe(parent_to_child[1]);
         close_pipe(child_to_parent[0]);
         close_pipe(child_to_parent[1]);
-        static_cast<void>(close(fd));
+        static_cast<void>(mylite_ownerless_close(fd));
         cleanup_probe_file(path);
         return false;
     }
@@ -277,12 +279,12 @@ bool probe_mmap_shared_visibility(const std::string &root) {
         close_pipe(parent_to_child[1]);
         close_pipe(child_to_parent[0]);
         close_pipe(child_to_parent[1]);
-        static_cast<void>(close(fd));
+        static_cast<void>(mylite_ownerless_close(fd));
         cleanup_probe_file(path);
         return false;
     }
     words[0] = 0x11223344U;
-    static_cast<void>(msync(words, sizeof(words[0]), MS_SYNC));
+    static_cast<void>(mylite_ownerless_msync(words, sizeof(words[0]), MS_SYNC));
 
     const pid_t child = fork();
     if (child < 0) {
@@ -290,8 +292,8 @@ bool probe_mmap_shared_visibility(const std::string &root) {
         close_pipe(parent_to_child[1]);
         close_pipe(child_to_parent[0]);
         close_pipe(child_to_parent[1]);
-        static_cast<void>(munmap(words, k_probe_page_size));
-        static_cast<void>(close(fd));
+        static_cast<void>(mylite_ownerless_munmap(words, k_probe_page_size));
+        static_cast<void>(mylite_ownerless_close(fd));
         cleanup_probe_file(path);
         return false;
     }
@@ -308,14 +310,14 @@ bool probe_mmap_shared_visibility(const std::string &root) {
         }
         auto *child_words = static_cast<std::uint32_t *>(map_file(child_fd, k_probe_page_size));
         if (child_words == nullptr) {
-            static_cast<void>(close(child_fd));
+            static_cast<void>(mylite_ownerless_close(child_fd));
             _exit(1);
         }
         const bool ok = child_words[0] == 0x55667788U;
         child_words[1] = 0x99AABBCCU;
-        static_cast<void>(msync(child_words, k_probe_page_size, MS_SYNC));
-        static_cast<void>(munmap(child_words, k_probe_page_size));
-        static_cast<void>(close(child_fd));
+        static_cast<void>(mylite_ownerless_msync(child_words, k_probe_page_size, MS_SYNC));
+        static_cast<void>(mylite_ownerless_munmap(child_words, k_probe_page_size));
+        static_cast<void>(mylite_ownerless_close(child_fd));
         if (!ok || !signal_pipe(child_to_parent[1])) {
             _exit(1);
         }
@@ -325,7 +327,7 @@ bool probe_mmap_shared_visibility(const std::string &root) {
     close_pipe(parent_to_child[0]);
     close_pipe(child_to_parent[1]);
     words[0] = 0x55667788U;
-    static_cast<void>(msync(words, sizeof(words[0]), MS_SYNC));
+    static_cast<void>(mylite_ownerless_msync(words, sizeof(words[0]), MS_SYNC));
     const bool signal_ok = signal_pipe(parent_to_child[1]);
     bool child_signal_ok = false;
     if (signal_ok) {
@@ -336,8 +338,8 @@ bool probe_mmap_shared_visibility(const std::string &root) {
     const bool child_ok = wait_for_child_success(child);
     const bool ok = signal_ok && child_signal_ok && child_ok && words[1] == 0x99AABBCCU;
 
-    static_cast<void>(munmap(words, k_probe_page_size));
-    static_cast<void>(close(fd));
+    static_cast<void>(mylite_ownerless_munmap(words, k_probe_page_size));
+    static_cast<void>(mylite_ownerless_close(fd));
     cleanup_probe_file(path);
     return ok;
 }
@@ -349,7 +351,7 @@ bool probe_byte_range_locks(const std::string &root) {
         return false;
     }
     if (!truncate_file(fd, k_probe_page_size_offset) || !set_write_lock(fd, 11, 1)) {
-        static_cast<void>(close(fd));
+        static_cast<void>(mylite_ownerless_close(fd));
         cleanup_probe_file(path);
         return false;
     }
@@ -357,7 +359,7 @@ bool probe_byte_range_locks(const std::string &root) {
     const pid_t child = fork();
     if (child < 0) {
         static_cast<void>(unlock_range(fd, 11, 1));
-        static_cast<void>(close(fd));
+        static_cast<void>(mylite_ownerless_close(fd));
         cleanup_probe_file(path);
         return false;
     }
@@ -367,13 +369,13 @@ bool probe_byte_range_locks(const std::string &root) {
             _exit(1);
         }
         const int lock_result = try_write_lock(child_fd, 11, 1);
-        static_cast<void>(close(child_fd));
+        static_cast<void>(mylite_ownerless_close(child_fd));
         _exit(lock_result == EAGAIN || lock_result == EACCES ? 0 : 1);
     }
 
     const bool ok = wait_for_child_success(child);
     static_cast<void>(unlock_range(fd, 11, 1));
-    static_cast<void>(close(fd));
+    static_cast<void>(mylite_ownerless_close(fd));
     cleanup_probe_file(path);
     return ok;
 }
@@ -388,7 +390,7 @@ bool probe_lock_release_on_exit(const std::string &root) {
     if (!truncate_file(fd, k_probe_page_size_offset) || pipe(ready_pipe) != 0) {
         close_pipe(ready_pipe[0]);
         close_pipe(ready_pipe[1]);
-        static_cast<void>(close(fd));
+        static_cast<void>(mylite_ownerless_close(fd));
         cleanup_probe_file(path);
         return false;
     }
@@ -397,7 +399,7 @@ bool probe_lock_release_on_exit(const std::string &root) {
     if (child < 0) {
         close_pipe(ready_pipe[0]);
         close_pipe(ready_pipe[1]);
-        static_cast<void>(close(fd));
+        static_cast<void>(mylite_ownerless_close(fd));
         cleanup_probe_file(path);
         return false;
     }
@@ -406,7 +408,7 @@ bool probe_lock_release_on_exit(const std::string &root) {
         const int child_fd = open_probe_file(path);
         if (child_fd < 0 || !set_write_lock(child_fd, 23, 1) || !signal_pipe(ready_pipe[1])) {
             if (child_fd >= 0) {
-                static_cast<void>(close(child_fd));
+                static_cast<void>(mylite_ownerless_close(child_fd));
             }
             _exit(1);
         }
@@ -419,7 +421,7 @@ bool probe_lock_release_on_exit(const std::string &root) {
     const bool released = ready && child_ok && set_write_lock(fd, 23, 1) && unlock_range(fd, 23, 1);
     const bool ok = ready && child_ok && released;
 
-    static_cast<void>(close(fd));
+    static_cast<void>(mylite_ownerless_close(fd));
     cleanup_probe_file(path);
     return ok;
 }
@@ -430,26 +432,26 @@ bool probe_lock_close_isolation(const std::string &root) {
     const int unrelated_fd = open_probe_file(path);
     if (lock_fd < 0 || unrelated_fd < 0) {
         if (lock_fd >= 0) {
-            static_cast<void>(close(lock_fd));
+            static_cast<void>(mylite_ownerless_close(lock_fd));
         }
         if (unrelated_fd >= 0) {
-            static_cast<void>(close(unrelated_fd));
+            static_cast<void>(mylite_ownerless_close(unrelated_fd));
         }
         cleanup_probe_file(path);
         return false;
     }
     if (!set_write_lock(lock_fd, 41, 1)) {
-        static_cast<void>(close(unrelated_fd));
-        static_cast<void>(close(lock_fd));
+        static_cast<void>(mylite_ownerless_close(unrelated_fd));
+        static_cast<void>(mylite_ownerless_close(lock_fd));
         cleanup_probe_file(path);
         return false;
     }
-    static_cast<void>(close(unrelated_fd));
+    static_cast<void>(mylite_ownerless_close(unrelated_fd));
 
     const pid_t child = fork();
     if (child < 0) {
         static_cast<void>(unlock_range(lock_fd, 41, 1));
-        static_cast<void>(close(lock_fd));
+        static_cast<void>(mylite_ownerless_close(lock_fd));
         cleanup_probe_file(path);
         return false;
     }
@@ -459,13 +461,13 @@ bool probe_lock_close_isolation(const std::string &root) {
             _exit(1);
         }
         const int lock_result = try_write_lock(child_fd, 41, 1);
-        static_cast<void>(close(child_fd));
+        static_cast<void>(mylite_ownerless_close(child_fd));
         _exit(lock_result == EACCES || lock_result == EAGAIN ? 0 : 1);
     }
 
     const bool child_ok = wait_for_child_success(child);
     const bool unlock_ok = unlock_range(lock_fd, 41, 1);
-    static_cast<void>(close(lock_fd));
+    static_cast<void>(mylite_ownerless_close(lock_fd));
     cleanup_probe_file(path);
     return child_ok && unlock_ok;
 }
@@ -477,35 +479,35 @@ bool probe_grow_remap(const std::string &root) {
         return false;
     }
     if (!truncate_file(fd, k_probe_page_size_offset)) {
-        static_cast<void>(close(fd));
+        static_cast<void>(mylite_ownerless_close(fd));
         cleanup_probe_file(path);
         return false;
     }
 
     auto *first_mapping = static_cast<std::uint32_t *>(map_file(fd, k_probe_page_size));
     if (first_mapping == nullptr) {
-        static_cast<void>(close(fd));
+        static_cast<void>(mylite_ownerless_close(fd));
         cleanup_probe_file(path);
         return false;
     }
     first_mapping[0] = 0xCAFEBABEU;
-    static_cast<void>(msync(first_mapping, sizeof(first_mapping[0]), MS_SYNC));
-    static_cast<void>(munmap(first_mapping, k_probe_page_size));
+    static_cast<void>(mylite_ownerless_msync(first_mapping, sizeof(first_mapping[0]), MS_SYNC));
+    static_cast<void>(mylite_ownerless_munmap(first_mapping, k_probe_page_size));
 
     if (!truncate_file(fd, k_probe_page_size_offset * 2)) {
-        static_cast<void>(close(fd));
+        static_cast<void>(mylite_ownerless_close(fd));
         cleanup_probe_file(path);
         return false;
     }
     auto *second_mapping = static_cast<std::uint32_t *>(map_file(fd, k_probe_page_size * 2U));
     if (second_mapping == nullptr) {
-        static_cast<void>(close(fd));
+        static_cast<void>(mylite_ownerless_close(fd));
         cleanup_probe_file(path);
         return false;
     }
     const bool ok = second_mapping[0] == 0xCAFEBABEU;
-    static_cast<void>(munmap(second_mapping, k_probe_page_size * 2U));
-    static_cast<void>(close(fd));
+    static_cast<void>(mylite_ownerless_munmap(second_mapping, k_probe_page_size * 2U));
+    static_cast<void>(mylite_ownerless_close(fd));
     cleanup_probe_file(path);
     return ok;
 }
@@ -520,7 +522,7 @@ bool probe_wait_backend(const std::string &root) {
     if (!truncate_file(fd, k_probe_page_size_offset) || pipe(child_ready) != 0) {
         close_pipe(child_ready[0]);
         close_pipe(child_ready[1]);
-        static_cast<void>(close(fd));
+        static_cast<void>(mylite_ownerless_close(fd));
         cleanup_probe_file(path);
         return false;
     }
@@ -529,7 +531,7 @@ bool probe_wait_backend(const std::string &root) {
     if (word == nullptr) {
         close_pipe(child_ready[0]);
         close_pipe(child_ready[1]);
-        static_cast<void>(close(fd));
+        static_cast<void>(mylite_ownerless_close(fd));
         cleanup_probe_file(path);
         return false;
     }
@@ -539,8 +541,8 @@ bool probe_wait_backend(const std::string &root) {
     if (child < 0) {
         close_pipe(child_ready[0]);
         close_pipe(child_ready[1]);
-        static_cast<void>(munmap(word, k_probe_page_size));
-        static_cast<void>(close(fd));
+        static_cast<void>(mylite_ownerless_munmap(word, k_probe_page_size));
+        static_cast<void>(mylite_ownerless_close(fd));
         cleanup_probe_file(path);
         return false;
     }
@@ -553,12 +555,12 @@ bool probe_wait_backend(const std::string &root) {
         auto *child_word =
             static_cast<mylite_ownerless_wait_word *>(map_file(child_fd, k_probe_page_size));
         if (child_word == nullptr) {
-            static_cast<void>(close(child_fd));
+            static_cast<void>(mylite_ownerless_close(child_fd));
             _exit(1);
         }
         if (!signal_pipe(child_ready[1])) {
-            static_cast<void>(munmap(child_word, k_probe_page_size));
-            static_cast<void>(close(child_fd));
+            static_cast<void>(mylite_ownerless_munmap(child_word, k_probe_page_size));
+            static_cast<void>(mylite_ownerless_close(child_fd));
             _exit(1);
         }
         const int wait_result = mylite_ownerless_wait_for_change(
@@ -568,8 +570,8 @@ bool probe_wait_backend(const std::string &root) {
         );
         const bool ok =
             wait_result == MYLITE_OWNERLESS_WAIT_OK && mylite_ownerless_wait_load(child_word) == 1U;
-        static_cast<void>(munmap(child_word, k_probe_page_size));
-        static_cast<void>(close(child_fd));
+        static_cast<void>(mylite_ownerless_munmap(child_word, k_probe_page_size));
+        static_cast<void>(mylite_ownerless_close(child_fd));
         _exit(ok ? 0 : 1);
     }
 
@@ -582,8 +584,8 @@ bool probe_wait_backend(const std::string &root) {
     }
     const bool child_ok = wait_for_child_success(child);
     const bool ok = ready && wake_ok && child_ok;
-    static_cast<void>(munmap(word, k_probe_page_size));
-    static_cast<void>(close(fd));
+    static_cast<void>(mylite_ownerless_munmap(word, k_probe_page_size));
+    static_cast<void>(mylite_ownerless_close(fd));
     cleanup_probe_file(path);
     return ok;
 }
@@ -608,26 +610,26 @@ bool set_write_lock(int fd, off_t start, off_t length) {
 }
 
 int try_write_lock(int fd, off_t start, off_t length) {
-    struct flock lock = {};
+    mylite_ownerless_file_lock lock = {};
     lock.l_type = F_WRLCK;
     lock.l_whence = SEEK_SET;
     lock.l_start = start;
     lock.l_len = length;
 
-    if (fcntl(fd, ownerless_lock_command(), &lock) == 0) {
+    if (mylite_ownerless_fcntl(fd, ownerless_lock_command(), &lock) == 0) {
         return 0;
     }
     return errno;
 }
 
 bool unlock_range(int fd, off_t start, off_t length) {
-    struct flock lock = {};
+    mylite_ownerless_file_lock lock = {};
     lock.l_type = F_UNLCK;
     lock.l_whence = SEEK_SET;
     lock.l_start = start;
     lock.l_len = length;
 
-    return fcntl(fd, ownerless_lock_command(), &lock) == 0;
+    return mylite_ownerless_fcntl(fd, ownerless_lock_command(), &lock) == 0;
 }
 
 int ownerless_lock_command() {
@@ -659,22 +661,22 @@ std::string path_join(const std::string &directory, const char *name) {
 }
 
 int open_probe_file(const std::string &path) {
-    return open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, k_probe_file_mode);
+    return mylite_ownerless_open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, k_probe_file_mode);
 }
 
 bool truncate_file(int fd, off_t size) {
-    return ftruncate(fd, size) == 0;
+    return mylite_ownerless_ftruncate(fd, size) == 0;
 }
 
 void *map_file(int fd, std::size_t size) {
-    void *mapping = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    void *mapping = mylite_ownerless_mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 
     return mapping == MAP_FAILED ? nullptr : mapping;
 }
 
 bool signal_pipe(int pipe_fd) {
     const char value = 'x';
-    const ssize_t written = write(pipe_fd, &value, sizeof(value));
+    const ssize_t written = mylite_ownerless_write(pipe_fd, &value, sizeof(value));
     close_pipe(pipe_fd);
     return written == static_cast<ssize_t>(sizeof(value));
 }
@@ -694,7 +696,7 @@ bool wait_for_pipe(int pipe_fd) {
     }
 
     char value = '\0';
-    const ssize_t read_size = read(pipe_fd, &value, sizeof(value));
+    const ssize_t read_size = mylite_ownerless_read(pipe_fd, &value, sizeof(value));
     close_pipe(pipe_fd);
     return read_size == static_cast<ssize_t>(sizeof(value)) && value == 'x';
 }
@@ -711,7 +713,7 @@ bool wait_for_child_success(pid_t child) {
 
 void close_pipe(int pipe_fd) {
     if (pipe_fd >= 0) {
-        static_cast<void>(close(pipe_fd));
+        static_cast<void>(mylite_ownerless_close(pipe_fd));
     }
 }
 

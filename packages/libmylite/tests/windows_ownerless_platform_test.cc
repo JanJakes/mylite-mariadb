@@ -1,5 +1,6 @@
 #include <mylite/mylite.h>
 
+#include "ownerless_platform_io.h"
 #include "ownerless_probe.h"
 
 #include <windows.h>
@@ -9,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -18,6 +20,13 @@ namespace {
 struct ChildProcess {
     PROCESS_INFORMATION info = {};
 };
+
+void test_platform_io_does_not_rewrite_cpp_streams(void) {
+    std::istringstream input("x");
+    char value = '\0';
+    input.read(&value, 1);
+    assert(input.gcount() == 1 && value == 'x');
+}
 
 std::string quote_argument(const std::string &argument) {
     return "\"" + argument + "\"";
@@ -289,6 +298,7 @@ void run_parent(void) {
 } // namespace
 
 int main(int argc, char **argv) {
+    test_platform_io_does_not_rewrite_cpp_streams();
     if (argc >= 4 && std::string(argv[1]) == "update") {
         return run_update_child(argv[2], argv[3]);
     }

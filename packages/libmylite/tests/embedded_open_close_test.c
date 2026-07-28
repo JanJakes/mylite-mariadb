@@ -397,7 +397,7 @@ static int run_selected_tests(const char *selector) {
 
 static void run_all_tests(void) {
     run_baseline_tests();
-#if defined(__linux__) || defined(__APPLE__) || defined(_WIN32)
+#if (defined(__linux__) || defined(__APPLE__) || defined(_WIN32)) && UINTPTR_MAX == UINT64_MAX
     run_ownerless_directory_tests();
     run_ownerless_product_hook_tests();
     test_ownerless_innodb_lock_registry_handles_large_transactions();
@@ -455,7 +455,7 @@ static void test_capabilities(void) {
     mylite_db *db = NULL;
 
     assert((capabilities & MYLITE_CAP_SAME_PROCESS_CONCURRENCY) != 0U);
-#if defined(__linux__)
+#if (defined(__linux__) || defined(__APPLE__) || defined(_WIN32)) && UINTPTR_MAX == UINT64_MAX
     assert((capabilities & MYLITE_CAP_OWNERLESS_RW) != 0U);
     assert((capabilities & MYLITE_CAP_SHARED_READONLY) != 0U);
 #else

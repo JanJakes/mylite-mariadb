@@ -12,20 +12,23 @@
 using mylite_ownerless_offset_t = std::int64_t;
 using mylite_ownerless_ssize_t = std::int64_t;
 
-struct mylite_ownerless_stat {
+struct mylite_ownerless_stat_record {
     mylite_ownerless_offset_t st_size;
     std::uint64_t st_dev;
     std::uint64_t st_ino;
     unsigned st_mode;
 };
 
-struct mylite_ownerless_flock {
+struct mylite_ownerless_flock_record {
     short l_type;
     short l_whence;
     mylite_ownerless_offset_t l_start;
     mylite_ownerless_offset_t l_len;
     int l_pid;
 };
+
+using mylite_ownerless_file_info = struct mylite_ownerless_stat_record;
+using mylite_ownerless_file_lock = struct mylite_ownerless_flock_record;
 
 #  ifndef O_RDONLY
 #    define O_RDONLY _O_RDONLY
@@ -125,8 +128,8 @@ mylite_ownerless_ssize_t mylite_ownerless_pwrite(
 int mylite_ownerless_fsync(int fd);
 int mylite_ownerless_fdatasync(int fd);
 int mylite_ownerless_ftruncate(int fd, mylite_ownerless_offset_t size);
-int mylite_ownerless_fstat(int fd, struct mylite_ownerless_stat *out_info);
-int mylite_ownerless_stat(const char *path, struct mylite_ownerless_stat *out_info);
+int mylite_ownerless_fstat(int fd, mylite_ownerless_file_info *out_info);
+int mylite_ownerless_stat(const char *path, mylite_ownerless_file_info *out_info);
 void *mylite_ownerless_mmap(
     void *address,
     std::size_t size,
@@ -144,22 +147,6 @@ bool mylite_ownerless_process_id_is_alive(std::uint64_t process_id);
 bool mylite_ownerless_sync_directory_path(const char *path);
 
 #  if !defined(MYLITE_OWNERLESS_PLATFORM_IO_IMPLEMENTATION)
-#    define open(...) mylite_ownerless_open(__VA_ARGS__)
-#    define close(...) mylite_ownerless_close(__VA_ARGS__)
-#    define read(...) mylite_ownerless_read(__VA_ARGS__)
-#    define write(...) mylite_ownerless_write(__VA_ARGS__)
-#    define pread(...) mylite_ownerless_pread(__VA_ARGS__)
-#    define pwrite(...) mylite_ownerless_pwrite(__VA_ARGS__)
-#    define fsync(...) mylite_ownerless_fsync(__VA_ARGS__)
-#    define fdatasync(...) mylite_ownerless_fdatasync(__VA_ARGS__)
-#    define ftruncate(...) mylite_ownerless_ftruncate(__VA_ARGS__)
-#    define fstat(...) mylite_ownerless_fstat(__VA_ARGS__)
-#    define stat mylite_ownerless_stat
-#    define mmap(...) mylite_ownerless_mmap(__VA_ARGS__)
-#    define munmap(...) mylite_ownerless_munmap(__VA_ARGS__)
-#    define msync(...) mylite_ownerless_msync(__VA_ARGS__)
-#    define fcntl(...) mylite_ownerless_fcntl(__VA_ARGS__)
-#    define flock mylite_ownerless_flock
 #    define off_t mylite_ownerless_offset_t
 #    define ssize_t mylite_ownerless_ssize_t
 #  endif
@@ -179,6 +166,87 @@ using mylite_ownerless_offset_t = off_t;
 using mylite_ownerless_ssize_t = ssize_t;
 using mylite_ownerless_file_info = struct stat;
 using mylite_ownerless_file_lock = struct flock;
+
+inline int mylite_ownerless_open(const char *path, int flags) {
+    return ::open(path, flags);
+}
+
+inline int mylite_ownerless_open(const char *path, int flags, mode_t mode) {
+    return ::open(path, flags, mode);
+}
+
+inline mylite_ownerless_ssize_t mylite_ownerless_read(int fd, void *data, std::size_t size) {
+    return ::read(fd, data, size);
+}
+
+inline mylite_ownerless_ssize_t mylite_ownerless_write(int fd, const void *data, std::size_t size) {
+    return ::write(fd, data, size);
+}
+
+inline mylite_ownerless_ssize_t mylite_ownerless_pread(
+    int fd,
+    void *data,
+    std::size_t size,
+    mylite_ownerless_offset_t offset
+) {
+    return ::pread(fd, data, size, offset);
+}
+
+inline mylite_ownerless_ssize_t mylite_ownerless_pwrite(
+    int fd,
+    const void *data,
+    std::size_t size,
+    mylite_ownerless_offset_t offset
+) {
+    return ::pwrite(fd, data, size, offset);
+}
+
+inline int mylite_ownerless_fsync(int fd) {
+    return ::fsync(fd);
+}
+
+inline int mylite_ownerless_fdatasync(int fd) {
+#  if defined(__APPLE__)
+    return ::fsync(fd);
+#  else
+    return ::fdatasync(fd);
+#  endif
+}
+
+inline int mylite_ownerless_ftruncate(int fd, mylite_ownerless_offset_t size) {
+    return ::ftruncate(fd, size);
+}
+
+inline int mylite_ownerless_fstat(int fd, mylite_ownerless_file_info *out_info) {
+    return ::fstat(fd, out_info);
+}
+
+inline int mylite_ownerless_stat(const char *path, mylite_ownerless_file_info *out_info) {
+    return ::stat(path, out_info);
+}
+
+inline void *mylite_ownerless_mmap(
+    void *address,
+    std::size_t size,
+    int protection,
+    int flags,
+    int fd,
+    mylite_ownerless_offset_t offset
+) {
+    return ::mmap(address, size, protection, flags, fd, offset);
+}
+
+inline int mylite_ownerless_munmap(void *address, std::size_t size) {
+    return ::munmap(address, size);
+}
+
+inline int mylite_ownerless_msync(void *address, std::size_t size, int flags) {
+    return ::msync(address, size, flags);
+}
+
+inline int mylite_ownerless_flock(int fd, int operation) {
+    return ::flock(fd, operation);
+}
 
 inline std::uint64_t mylite_ownerless_current_process_id(void) {
     return static_cast<std::uint64_t>(::getpid());
@@ -220,11 +288,19 @@ inline bool mylite_ownerless_sync_directory_path(const char *path) {
 int mylite_ownerless_close(int fd);
 int mylite_ownerless_fcntl(int fd, int command, ...);
 void mylite_ownerless_cleanup_range_lock_artifacts(const char *path);
+#  else
+inline int mylite_ownerless_close(int fd) {
+    return ::close(fd);
+}
 
-#    if !defined(MYLITE_OWNERLESS_PLATFORM_IO_IMPLEMENTATION)
-#      define close(...) mylite_ownerless_close(__VA_ARGS__)
-#      define fcntl(...) mylite_ownerless_fcntl(__VA_ARGS__)
-#    endif
+inline int mylite_ownerless_fcntl(int fd, int command) {
+    return ::fcntl(fd, command);
+}
+
+template <typename Argument>
+inline int mylite_ownerless_fcntl(int fd, int command, Argument argument) {
+    return ::fcntl(fd, command, argument);
+}
 #  endif
 
 #endif

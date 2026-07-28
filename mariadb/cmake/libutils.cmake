@@ -192,13 +192,20 @@ MACRO(MERGE_STATIC_LIBS TARGET OUTPUT_NAME LIBS_TO_MERGE)
     DEPENDS ${STATIC_TGTS})
 
   IF(MSVC)
-    # To merge libs, just pass them to lib.exe command line.
-    SET(LINKER_EXTRA_FLAGS "")
-    FOREACH(LIB ${STATIC_LIBS})
-      SET(LINKER_EXTRA_FLAGS "${LINKER_EXTRA_FLAGS} ${LIB}")
-    ENDFOREACH()
-    SET_TARGET_PROPERTIES(${TARGET} PROPERTIES STATIC_LIBRARY_FLAGS 
-      "${LINKER_EXTRA_FLAGS}")
+    # Ninja does not expand target-file generator expressions in
+    # STATIC_LIBRARY_FLAGS. Merge the completed carrier archive and its
+    # component archives explicitly, where generator expressions are
+    # supported.
+    SET(MERGED_LIBRARY
+      "$<TARGET_FILE_DIR:${TARGET}>/${OUTPUT_NAME}-merged${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    ADD_CUSTOM_COMMAND(TARGET ${TARGET} POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E rm -f "${MERGED_LIBRARY}"
+      COMMAND ${CMAKE_AR} /NOLOGO "/OUT:${MERGED_LIBRARY}"
+        "$<TARGET_FILE:${TARGET}>" ${STATIC_LIBS}
+      COMMAND ${CMAKE_COMMAND} -E rename
+        "${MERGED_LIBRARY}" "$<TARGET_FILE:${TARGET}>"
+      COMMAND_EXPAND_LISTS
+      VERBATIM)
   ELSE()
     IF(APPLE)
       # Use OSX's libtool to merge archives (ihandles universal 

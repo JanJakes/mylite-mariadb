@@ -108,6 +108,10 @@ First-party ownerless code gains a narrow internal OS layer for:
 - filesystem identity, volume identity, and local/remote classification;
 - process spawning used by the cross-platform integration test.
 
+Call sites use the explicit ownerless platform API rather than POSIX-name
+preprocessor aliases. This keeps Windows portability shims from rewriting C++
+standard-library members such as `std::istream::read`.
+
 Linux uses its native POSIX interfaces. macOS uses POSIX file and mapping
 interfaces, with one-byte ownerless range-lock records mapped to handle-scoped
 `flock()` sidecar files because Darwin `F_SETLK` locks are process-scoped and

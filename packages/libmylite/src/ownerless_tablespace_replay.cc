@@ -176,7 +176,7 @@ class TablespaceResolver {
     ~TablespaceResolver() {
         for (auto &entry : m_open_files) {
             if (entry.second.fd >= 0) {
-                static_cast<void>(::close(entry.second.fd));
+                static_cast<void>(mylite_ownerless_close(entry.second.fd));
             }
         }
     }
@@ -184,7 +184,7 @@ class TablespaceResolver {
     int sync() {
         for (auto &entry : m_open_files) {
             if (entry.second.fd >= 0 && entry.second.dirty) {
-                if (::fsync(entry.second.fd) != 0) {
+                if (mylite_ownerless_fsync(entry.second.fd) != 0) {
                     return MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR;
                 }
                 entry.second.dirty = false;
@@ -212,8 +212,12 @@ class TablespaceResolver {
         }
 
         std::array<unsigned char, k_innodb_page_size_max> disk_page = {};
-        const ssize_t read_result =
-            ::pread(file->fd, disk_page.data(), page.page_size(), static_cast<off_t>(offset));
+        const ssize_t read_result = mylite_ownerless_pread(
+            file->fd,
+            disk_page.data(),
+            page.page_size(),
+            static_cast<off_t>(offset)
+        );
         if (read_result == static_cast<ssize_t>(page.page_size())) {
             const bool disk_page_matches = innodb_page_header_matches(
                 disk_page.data(),
@@ -238,12 +242,12 @@ class TablespaceResolver {
             return MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR;
         }
 
-        struct stat file_stat = {};
-        if (::fstat(file->fd, &file_stat) != 0) {
+        mylite_ownerless_file_info file_stat = {};
+        if (mylite_ownerless_fstat(file->fd, &file_stat) != 0) {
             return MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR;
         }
         if (file_stat.st_size < static_cast<off_t>(end_offset) &&
-            ::ftruncate(file->fd, static_cast<off_t>(end_offset)) != 0) {
+            mylite_ownerless_ftruncate(file->fd, static_cast<off_t>(end_offset)) != 0) {
             return MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR;
         }
         if (!write_exact_at(
@@ -290,7 +294,7 @@ class TablespaceResolver {
         }
 
         const ssize_t read_result =
-            ::pread(file->fd, out_page, page_size, static_cast<off_t>(offset));
+            mylite_ownerless_pread(file->fd, out_page, page_size, static_cast<off_t>(offset));
         if (read_result < 0) {
             return MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR;
         }
@@ -337,7 +341,7 @@ class TablespaceResolver {
         }
 
         const std::string path_name = path.string();
-        const int fd = ::open(path_name.c_str(), O_RDWR | O_CLOEXEC);
+        const int fd = mylite_ownerless_open(path_name.c_str(), O_RDWR | O_CLOEXEC);
         if (fd < 0) {
             return nullptr;
         }
@@ -390,14 +394,14 @@ class TablespaceResolver {
         std::uint32_t page_size
     ) {
         const std::string path_name = path.string();
-        const int fd = ::open(path_name.c_str(), O_RDONLY | O_CLOEXEC);
+        const int fd = mylite_ownerless_open(path_name.c_str(), O_RDONLY | O_CLOEXEC);
         if (fd < 0) {
             return false;
         }
 
         std::array<unsigned char, k_innodb_page_size_max> page = {};
-        const ssize_t read_result = ::pread(fd, page.data(), page_size, 0);
-        static_cast<void>(::close(fd));
+        const ssize_t read_result = mylite_ownerless_pread(fd, page.data(), page_size, 0);
+        static_cast<void>(mylite_ownerless_close(fd));
         return read_result == static_cast<ssize_t>(page_size) &&
                innodb_tablespace_page_zero_matches(page.data(), page_size, space_id);
     }
@@ -523,7 +527,8 @@ bool write_exact_at(int fd, const void *buffer, std::size_t size, off_t offset) 
     std::size_t written = 0;
     while (written < size) {
         const off_t write_offset = offset + static_cast<off_t>(written);
-        const ssize_t result = ::pwrite(fd, bytes + written, size - written, write_offset);
+        const ssize_t result =
+            mylite_ownerless_pwrite(fd, bytes + written, size - written, write_offset);
         if (result < 0) {
             if (errno == EINTR) {
                 continue;

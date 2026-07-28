@@ -220,7 +220,7 @@ struct CheckpointStageFd {
 
     ~CheckpointStageFd() {
         if (fd >= 0) {
-            static_cast<void>(::close(fd));
+            static_cast<void>(mylite_ownerless_close(fd));
         }
     }
 
@@ -256,7 +256,7 @@ struct PageLogProcessFileLock {
 
     ~PageLogProcessFileLock() {
         if (lock_fd >= 0) {
-            static_cast<void>(::close(lock_fd));
+            static_cast<void>(mylite_ownerless_close(lock_fd));
         }
     }
 
@@ -331,27 +331,27 @@ void reset_page_log_process_state_after_fork_locked() {
     page_log_process_state_pid = current_pid;
 }
 
-int open_page_log_lock_fd(int fd, const struct stat &expected_stat) {
+int open_page_log_lock_fd(int fd, const mylite_ownerless_file_info &expected_stat) {
 #if defined(__linux__) && defined(F_OFD_SETLK)
-    const int status_flags = ::fcntl(fd, F_GETFL);
+    const int status_flags = mylite_ownerless_fcntl(fd, F_GETFL);
     char proc_path[64] = {};
     if (status_flags < 0 ||
         std::snprintf(proc_path, sizeof(proc_path), "/proc/self/fd/%d", fd) <= 0) {
         return -1;
     }
-    const int lock_fd = ::open(proc_path, (status_flags & O_ACCMODE) | O_CLOEXEC);
-    struct stat lock_stat = {};
-    if (lock_fd < 0 || ::fstat(lock_fd, &lock_stat) != 0 ||
+    const int lock_fd = mylite_ownerless_open(proc_path, (status_flags & O_ACCMODE) | O_CLOEXEC);
+    mylite_ownerless_file_info lock_stat = {};
+    if (lock_fd < 0 || mylite_ownerless_fstat(lock_fd, &lock_stat) != 0 ||
         lock_stat.st_dev != expected_stat.st_dev || lock_stat.st_ino != expected_stat.st_ino) {
         if (lock_fd >= 0) {
-            static_cast<void>(::close(lock_fd));
+            static_cast<void>(mylite_ownerless_close(lock_fd));
         }
         return -1;
     }
     return lock_fd;
 #else
     static_cast<void>(expected_stat);
-    return ::fcntl(fd, F_DUPFD_CLOEXEC, 0);
+    return mylite_ownerless_fcntl(fd, F_DUPFD_CLOEXEC, 0);
 #endif
 }
 
@@ -1021,12 +1021,16 @@ std::shared_ptr<CheckpointStageFd> registered_checkpoint_stage_locked(
     std::uint64_t log_device,
     std::uint64_t log_inode
 );
-bool recover_checkpoint_stage_locked(int fd, int stage_fd, const struct stat &log_stat);
+bool recover_checkpoint_stage_locked(
+    int fd,
+    int stage_fd,
+    const mylite_ownerless_file_info &log_stat
+);
 bool recover_checkpoint_stage_exclusive(
     int fd,
     int lock_fd,
     int stage_fd,
-    const struct stat &log_stat,
+    const mylite_ownerless_file_info &log_stat,
     std::chrono::steady_clock::time_point deadline
 );
 void maybe_wait_for_test_fault(const char *fault_name);
@@ -1054,7 +1058,7 @@ bool prepare_checkpoint_stage(
     int fd,
     int stage_fd,
     off_t log_offset,
-    const struct stat &file_stat,
+    const mylite_ownerless_file_info &file_stat,
     CheckpointStageBuild *out_build
 );
 int append_checkpoint_stage_record(
@@ -1514,19 +1518,19 @@ int mylite_ownerless_page_log_initialize(int fd) {
 }
 
 int mylite_ownerless_page_log_register_checkpoint_stage(int fd, int stage_fd) {
-    struct stat log_stat = {};
-    struct stat stage_stat = {};
-    if (fd < 0 || stage_fd < 0 || ::fstat(fd, &log_stat) != 0 ||
-        ::fstat(stage_fd, &stage_stat) != 0 || !S_ISREG(log_stat.st_mode) ||
+    mylite_ownerless_file_info log_stat = {};
+    mylite_ownerless_file_info stage_stat = {};
+    if (fd < 0 || stage_fd < 0 || mylite_ownerless_fstat(fd, &log_stat) != 0 ||
+        mylite_ownerless_fstat(stage_fd, &stage_stat) != 0 || !S_ISREG(log_stat.st_mode) ||
         !S_ISREG(stage_stat.st_mode) ||
         (log_stat.st_dev == stage_stat.st_dev && log_stat.st_ino == stage_stat.st_ino)) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
-    const int access_mode = ::fcntl(stage_fd, F_GETFL);
+    const int access_mode = mylite_ownerless_fcntl(stage_fd, F_GETFL);
     if (access_mode < 0 || (access_mode & O_ACCMODE) == O_RDONLY) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
-    const int registered_fd = ::fcntl(stage_fd, F_DUPFD_CLOEXEC, 0);
+    const int registered_fd = mylite_ownerless_fcntl(stage_fd, F_DUPFD_CLOEXEC, 0);
     if (registered_fd < 0) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
@@ -1534,7 +1538,7 @@ int mylite_ownerless_page_log_register_checkpoint_stage(int fd, int stage_fd) {
     try {
         registered_stage = std::make_shared<CheckpointStageFd>(registered_fd);
     } catch (const std::bad_alloc &) {
-        static_cast<void>(::close(registered_fd));
+        static_cast<void>(mylite_ownerless_close(registered_fd));
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
 
@@ -1578,8 +1582,8 @@ int mylite_ownerless_page_log_register_checkpoint_stage(int fd, int stage_fd) {
 }
 
 void mylite_ownerless_page_log_unregister_checkpoint_stage(int fd) {
-    struct stat log_stat = {};
-    if (fd < 0 || ::fstat(fd, &log_stat) != 0) {
+    mylite_ownerless_file_info log_stat = {};
+    if (fd < 0 || mylite_ownerless_fstat(fd, &log_stat) != 0) {
         return;
     }
     std::lock_guard<std::mutex> guard(page_log_process_state_mutex);
@@ -1597,8 +1601,8 @@ void mylite_ownerless_page_log_unregister_checkpoint_stage(int fd) {
 }
 
 int mylite_ownerless_page_log_retire_process_lock(int fd) {
-    struct stat log_stat = {};
-    if (fd < 0 || ::fstat(fd, &log_stat) != 0) {
+    mylite_ownerless_file_info log_stat = {};
+    if (fd < 0 || mylite_ownerless_fstat(fd, &log_stat) != 0) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
     const auto log_device = static_cast<std::uint64_t>(log_stat.st_dev);
@@ -1654,8 +1658,8 @@ int mylite_ownerless_page_log_initialize_at(int fd, std::uint64_t log_offset) {
         result = repair_torn_tail_locked(fd, static_cast<off_t>(log_offset));
     }
     if (result == MYLITE_OWNERLESS_PAGE_LOG_OK) {
-        struct stat file_stat = {};
-        if (::fstat(fd, &file_stat) == 0) {
+        mylite_ownerless_file_info file_stat = {};
+        if (mylite_ownerless_fstat(fd, &file_stat) == 0) {
             invalidate_index_delta_bases_for_log(
                 static_cast<std::uint64_t>(file_stat.st_dev),
                 static_cast<std::uint64_t>(file_stat.st_ino),
@@ -2204,7 +2208,7 @@ int mylite_ownerless_page_log_append_session_begin_initialized_at(
     );
 
     const auto offset = static_cast<off_t>(log_offset);
-    struct stat file_stat = {};
+    mylite_ownerless_file_info file_stat = {};
     PageLogHeader header = {};
     off_t records_offset = 0;
     if (repair_torn_tail_locked(fd, offset) != MYLITE_OWNERLESS_PAGE_LOG_OK) {
@@ -2212,7 +2216,7 @@ int mylite_ownerless_page_log_append_session_begin_initialized_at(
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
     stage_start_ns = append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
-    const int fstat_result = ::fstat(fd, &file_stat);
+    const int fstat_result = mylite_ownerless_fstat(fd, &file_stat);
     page_log_append_perf_add_elapsed_if_enabled(
         append_stats_enabled,
         PAGE_LOG_APPEND_PERF_FSTAT_NS,
@@ -2652,12 +2656,12 @@ int mylite_ownerless_page_log_sync_initialized_if_changed_at(
 
     const auto offset = static_cast<off_t>(log_offset);
     int result = MYLITE_OWNERLESS_PAGE_LOG_OK;
-    struct stat file_stat = {};
+    mylite_ownerless_file_info file_stat = {};
     PageLogHeader header = {};
     off_t header_end = 0;
     stage_start_ns = page_log_sync_perf_stats_are_enabled() ? page_log_append_perf_now_ns() : 0U;
     const int repair_result = repair_torn_tail_locked(fd, offset);
-    const bool stat_ok = ::fstat(fd, &file_stat) == 0;
+    const bool stat_ok = mylite_ownerless_fstat(fd, &file_stat) == 0;
     const bool header_end_ok =
         offset_adds(offset, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE, &header_end);
     const bool header_size_ok = stat_ok && header_end_ok && file_stat.st_size >= header_end;
@@ -2841,10 +2845,10 @@ int mylite_ownerless_page_log_record_next_offset_at(
     off_t records_offset = 0;
     off_t payload_offset = 0;
     off_t next_record_offset = 0;
-    struct stat file_stat = {};
+    mylite_ownerless_file_info file_stat = {};
     PageRecordHeader record = {};
     if (validate_existing_header(fd, physical_log_offset) != MYLITE_OWNERLESS_PAGE_LOG_OK ||
-        ::fstat(fd, &file_stat) != 0 ||
+        mylite_ownerless_fstat(fd, &file_stat) != 0 ||
         !offset_adds(physical_log_offset, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE, &records_offset) ||
         physical_record_offset < records_offset ||
         !offset_adds(
@@ -2876,10 +2880,10 @@ int mylite_ownerless_page_log_has_readable_page_records_at(
     }
 
     const auto physical_log_offset = static_cast<off_t>(log_offset);
-    struct stat file_stat = {};
+    mylite_ownerless_file_info file_stat = {};
     off_t records_offset = 0;
     if (validate_existing_header(fd, physical_log_offset) != MYLITE_OWNERLESS_PAGE_LOG_OK ||
-        ::fstat(fd, &file_stat) != 0 ||
+        mylite_ownerless_fstat(fd, &file_stat) != 0 ||
         !offset_adds(physical_log_offset, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE, &records_offset) ||
         file_stat.st_size < records_offset) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
@@ -4090,8 +4094,8 @@ int mylite_ownerless_page_log_checkpoint_if_safe_at(
 namespace {
 
 int validate_or_create_header(int fd, off_t log_offset) {
-    struct stat file_stat = {};
-    if (::fstat(fd, &file_stat) != 0) {
+    mylite_ownerless_file_info file_stat = {};
+    if (mylite_ownerless_fstat(fd, &file_stat) != 0) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
     if (file_stat.st_size < log_offset) {
@@ -4116,9 +4120,9 @@ int validate_or_create_header(int fd, off_t log_offset) {
 }
 
 int validate_existing_header(int fd, off_t log_offset) {
-    struct stat file_stat = {};
+    mylite_ownerless_file_info file_stat = {};
     off_t header_end = 0;
-    if (::fstat(fd, &file_stat) != 0 ||
+    if (mylite_ownerless_fstat(fd, &file_stat) != 0 ||
         !offset_adds(log_offset, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE, &header_end) ||
         file_stat.st_size < header_end) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
@@ -4131,9 +4135,9 @@ int validate_existing_header(int fd, off_t log_offset) {
 }
 
 int validate_existing_header_size(int fd, off_t log_offset) {
-    struct stat file_stat = {};
+    mylite_ownerless_file_info file_stat = {};
     off_t header_end = 0;
-    if (::fstat(fd, &file_stat) != 0 ||
+    if (mylite_ownerless_fstat(fd, &file_stat) != 0 ||
         !offset_adds(log_offset, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE, &header_end) ||
         file_stat.st_size < header_end) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
@@ -4171,10 +4175,10 @@ int append_locked(
     if (repair_torn_tail_locked(fd, log_offset) != MYLITE_OWNERLESS_PAGE_LOG_OK) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
-    struct stat file_stat = {};
+    mylite_ownerless_file_info file_stat = {};
     PageLogHeader header = {};
     const std::uint64_t fstat_start_ns = append_stats_enabled ? page_log_append_perf_now_ns() : 0U;
-    const int fstat_result = ::fstat(fd, &file_stat);
+    const int fstat_result = mylite_ownerless_fstat(fd, &file_stat);
     page_log_append_perf_add_elapsed_if_enabled(
         append_stats_enabled,
         PAGE_LOG_APPEND_PERF_FSTAT_NS,
@@ -4674,10 +4678,10 @@ int snapshot_locked_with_generation(
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
 
-    struct stat file_stat = {};
+    mylite_ownerless_file_info file_stat = {};
     off_t records_offset = 0;
     PageLogHeader header = {};
-    if (::fstat(fd, &file_stat) != 0 ||
+    if (mylite_ownerless_fstat(fd, &file_stat) != 0 ||
         !offset_adds(log_offset, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE, &records_offset) ||
         file_stat.st_size < records_offset || !read_header(fd, log_offset, header) ||
         !header_matches(header)) {
@@ -4797,14 +4801,14 @@ int find_latest_in_snapshot_range(
     };
     page_log_scan_perf_add(PAGE_LOG_SCAN_PERF_CALLS, 1U);
 
-    struct stat file_stat = {};
+    mylite_ownerless_file_info file_stat = {};
     off_t records_offset = 0;
     const int header_result = validate_existing_header(fd, log_offset);
     if (header_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
         publish_scan_perf(PAGE_LOG_SCAN_PERF_ERRORS);
         return header_result;
     }
-    if (::fstat(fd, &file_stat) != 0 ||
+    if (mylite_ownerless_fstat(fd, &file_stat) != 0 ||
         !offset_adds(log_offset, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE, &records_offset) ||
         file_stat.st_size < records_offset || snapshot_end_offset < records_offset ||
         snapshot_end_offset > file_stat.st_size) {
@@ -4947,12 +4951,12 @@ int read_record_at_locked(
         return result;
     }
 
-    struct stat file_stat = {};
+    mylite_ownerless_file_info file_stat = {};
     off_t records_offset = 0;
     off_t payload_offset = 0;
     off_t next_record_offset = 0;
     PageRecordHeader record = {};
-    if (::fstat(fd, &file_stat) != 0 ||
+    if (mylite_ownerless_fstat(fd, &file_stat) != 0 ||
         !offset_adds(log_offset, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE, &records_offset) ||
         physical_record_offset < records_offset ||
         !offset_adds(
@@ -4999,13 +5003,13 @@ int replay_in_snapshot(
     void *context,
     bool include_proof_only
 ) {
-    struct stat file_stat = {};
+    mylite_ownerless_file_info file_stat = {};
     off_t records_offset = 0;
     const int header_result = validate_existing_header(fd, log_offset);
     if (header_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
         return header_result;
     }
-    if (::fstat(fd, &file_stat) != 0 ||
+    if (mylite_ownerless_fstat(fd, &file_stat) != 0 ||
         !offset_adds(log_offset, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE, &records_offset) ||
         file_stat.st_size < records_offset || snapshot_end_offset < records_offset ||
         snapshot_end_offset > file_stat.st_size) {
@@ -5077,9 +5081,9 @@ int checkpoint_locked(
     mylite_ownerless_page_log_checkpoint_complete_callback complete_callback,
     void *context
 ) {
-    struct stat file_stat = {};
+    mylite_ownerless_file_info file_stat = {};
     off_t records_offset = 0;
-    if (::fstat(fd, &file_stat) != 0 ||
+    if (mylite_ownerless_fstat(fd, &file_stat) != 0 ||
         !offset_adds(log_offset, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE, &records_offset) ||
         file_stat.st_size < records_offset) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
@@ -5183,9 +5187,9 @@ int checkpoint_preserving_oldest_snapshot_locked(
     mylite_ownerless_page_log_checkpoint_complete_callback complete_callback,
     void *context
 ) {
-    struct stat file_stat = {};
+    mylite_ownerless_file_info file_stat = {};
     off_t records_offset = 0;
-    if (::fstat(fd, &file_stat) != 0 ||
+    if (mylite_ownerless_fstat(fd, &file_stat) != 0 ||
         !offset_adds(log_offset, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE, &records_offset) ||
         file_stat.st_size < records_offset) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
@@ -5343,9 +5347,9 @@ int checkpoint_if_safe_locked(
     std::uint64_t safe_commit_lsn,
     int *out_checkpointed
 ) {
-    struct stat file_stat = {};
+    mylite_ownerless_file_info file_stat = {};
     off_t records_offset = 0;
-    if (::fstat(fd, &file_stat) != 0 ||
+    if (mylite_ownerless_fstat(fd, &file_stat) != 0 ||
         !offset_adds(log_offset, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE, &records_offset) ||
         file_stat.st_size < records_offset) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
@@ -5484,7 +5488,7 @@ bool set_log_range_lock(int fd, short lock_type, off_t lock_start, bool wait) {
         );
     }
 
-    struct flock lock = {};
+    mylite_ownerless_file_lock lock = {};
     lock.l_type = lock_type;
     lock.l_whence = SEEK_SET;
     lock.l_start = lock_start;
@@ -5496,7 +5500,7 @@ bool set_log_range_lock(int fd, short lock_type, off_t lock_start, bool wait) {
        flock sidecars so an unrelated descriptor close cannot release them. */
     constexpr int lock_command = F_SETLK;
 #endif
-    while (::fcntl(fd, lock_command, &lock) != 0) {
+    while (mylite_ownerless_fcntl(fd, lock_command, &lock) != 0) {
         if (errno != EINTR) {
             return false;
         }
@@ -5510,7 +5514,7 @@ bool set_log_range_lock_until(
     off_t lock_start,
     std::chrono::steady_clock::time_point deadline
 ) {
-    struct flock lock = {};
+    mylite_ownerless_file_lock lock = {};
     lock.l_type = lock_type;
     lock.l_whence = SEEK_SET;
     lock.l_start = lock_start;
@@ -5522,7 +5526,7 @@ bool set_log_range_lock_until(
 #endif
     unsigned poll_interval_ms = k_file_lock_poll_initial_interval_ms;
     for (;;) {
-        if (::fcntl(fd, lock_command, &lock) == 0) {
+        if (mylite_ownerless_fcntl(fd, lock_command, &lock) == 0) {
             return true;
         }
         if (errno != EACCES && errno != EAGAIN && errno != EINTR) {
@@ -5575,8 +5579,8 @@ std::shared_ptr<CheckpointStageFd> registered_checkpoint_stage_locked(
 }
 
 std::shared_ptr<CheckpointStageFd> registered_checkpoint_stage(int fd) {
-    struct stat log_stat = {};
-    if (::fstat(fd, &log_stat) != 0) {
+    mylite_ownerless_file_info log_stat = {};
+    if (mylite_ownerless_fstat(fd, &log_stat) != 0) {
         return nullptr;
     }
     std::lock_guard<std::mutex> guard(page_log_process_state_mutex);
@@ -5591,7 +5595,7 @@ bool recover_checkpoint_stage_exclusive(
     int fd,
     int lock_fd,
     int stage_fd,
-    const struct stat &log_stat,
+    const mylite_ownerless_file_info &log_stat,
     std::chrono::steady_clock::time_point deadline
 ) {
     if (!set_log_range_lock_until(lock_fd, F_WRLCK, k_checkpoint_lock_start, deadline)) {
@@ -5613,8 +5617,8 @@ bool acquire_log_lock(int fd, short lock_type, off_t lock_start) {
         (lock_start != k_append_lock_start && lock_start != k_checkpoint_lock_start)) {
         return false;
     }
-    struct stat log_stat = {};
-    if (::fstat(fd, &log_stat) != 0) {
+    mylite_ownerless_file_info log_stat = {};
+    if (mylite_ownerless_fstat(fd, &log_stat) != 0) {
         return false;
     }
     const auto log_device = static_cast<std::uint64_t>(log_stat.st_dev);
@@ -5647,7 +5651,7 @@ bool acquire_log_lock(int fd, short lock_type, off_t lock_start) {
             page_log_process_file_locks.push_back(file_lock);
         } catch (const std::bad_alloc &) {
             if (file_lock == nullptr) {
-                static_cast<void>(::close(lock_fd));
+                static_cast<void>(mylite_ownerless_close(lock_fd));
             }
             return false;
         }
@@ -5699,10 +5703,10 @@ bool acquire_log_lock(int fd, short lock_type, off_t lock_start) {
                 k_checkpoint_lock_start,
                 deadline
             );
-            struct stat stage_stat = {};
+            mylite_ownerless_file_info stage_stat = {};
             bool stage_recovery_required = false;
             if (stage_inspected) {
-                stage_inspected = ::fstat(registered_stage->fd, &stage_stat) == 0;
+                stage_inspected = mylite_ownerless_fstat(registered_stage->fd, &stage_stat) == 0;
                 stage_recovery_required = stage_inspected && stage_stat.st_size != 0;
                 stage_inspected = set_log_range_lock(
                                       file_lock->lock_fd,
@@ -5810,8 +5814,8 @@ bool release_log_lock(int fd, off_t lock_start) {
     if (fd < 0 || (lock_start != k_append_lock_start && lock_start != k_checkpoint_lock_start)) {
         return false;
     }
-    struct stat log_stat = {};
-    if (::fstat(fd, &log_stat) != 0) {
+    mylite_ownerless_file_info log_stat = {};
+    if (mylite_ownerless_fstat(fd, &log_stat) != 0) {
         return false;
     }
     return release_log_lock(
@@ -5936,7 +5940,7 @@ bool release_log_lock(std::uint64_t log_device, std::uint64_t log_inode, off_t l
 }
 
 bool clear_checkpoint_stage(int stage_fd) {
-    return ::ftruncate(stage_fd, 0) == 0 && sync_file(stage_fd);
+    return mylite_ownerless_ftruncate(stage_fd, 0) == 0 && sync_file(stage_fd);
 }
 
 std::uint64_t checkpoint_stage_state_sequence(std::uint32_t state) {
@@ -6174,7 +6178,7 @@ bool prepare_checkpoint_stage(
     int fd,
     int stage_fd,
     off_t log_offset,
-    const struct stat &file_stat,
+    const mylite_ownerless_file_info &file_stat,
     CheckpointStageBuild *out_build
 ) {
     if (out_build == nullptr || file_stat.st_size < log_offset) {
@@ -6325,7 +6329,7 @@ bool publish_checkpoint_stage(int fd, CheckpointStageBuild *build) {
             build->header.target_size,
             &stage_end
         ) ||
-        ::ftruncate(build->stage_fd, stage_end) != 0 ||
+        mylite_ownerless_ftruncate(build->stage_fd, stage_end) != 0 ||
         !checksum_file_range_legacy(
             build->stage_fd,
             static_cast<off_t>(build->header.data_offset),
@@ -6396,7 +6400,7 @@ bool install_checkpoint_stage(int fd, int stage_fd, const CheckpointStageHeader 
     maybe_pause_for_test_fault("checkpoint-install-before-truncate");
     off_t target_end = 0;
     if (!offset_adds(log_offset, header.target_size, &target_end) ||
-        ::ftruncate(fd, target_end) != 0) {
+        mylite_ownerless_ftruncate(fd, target_end) != 0) {
         return false;
     }
     maybe_pause_for_test_fault("checkpoint-install-before-sync");
@@ -6424,9 +6428,13 @@ int finish_checkpoint_stage(
                                                    : MYLITE_OWNERLESS_PAGE_LOG_ERROR;
 }
 
-bool recover_checkpoint_stage_locked(int fd, int stage_fd, const struct stat &log_stat) {
-    struct stat stage_stat = {};
-    if (::fstat(stage_fd, &stage_stat) != 0) {
+bool recover_checkpoint_stage_locked(
+    int fd,
+    int stage_fd,
+    const mylite_ownerless_file_info &log_stat
+) {
+    mylite_ownerless_file_info stage_stat = {};
+    if (mylite_ownerless_fstat(stage_fd, &stage_stat) != 0) {
         return false;
     }
     if (stage_stat.st_size == 0) {
@@ -6445,8 +6453,8 @@ bool recover_checkpoint_stage_locked(int fd, int stage_fd, const struct stat &lo
         return false;
     }
     const auto log_offset = static_cast<off_t>(header.log_offset);
-    struct stat current_stat = {};
-    if (::fstat(fd, &current_stat) != 0 || current_stat.st_dev != log_stat.st_dev ||
+    mylite_ownerless_file_info current_stat = {};
+    if (mylite_ownerless_fstat(fd, &current_stat) != 0 || current_stat.st_dev != log_stat.st_dev ||
         current_stat.st_ino != log_stat.st_ino) {
         return false;
     }
@@ -6502,10 +6510,10 @@ bool recover_checkpoint_stage_locked(int fd, int stage_fd, const struct stat &lo
 }
 
 int repair_torn_tail_locked(int fd, off_t log_offset) {
-    struct stat file_stat = {};
+    mylite_ownerless_file_info file_stat = {};
     off_t records_offset = 0;
     PageLogHeader header = {};
-    if (::fstat(fd, &file_stat) != 0 ||
+    if (mylite_ownerless_fstat(fd, &file_stat) != 0 ||
         !offset_adds(log_offset, MYLITE_OWNERLESS_PAGE_LOG_HEADER_SIZE, &records_offset) ||
         file_stat.st_size < records_offset || !read_header(fd, log_offset, header) ||
         !header_matches(header)) {
@@ -6527,7 +6535,7 @@ int repair_torn_tail_locked(int fd, off_t log_offset) {
             record_offset < acknowledged_end_offset) {
             return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
         }
-        return ::ftruncate(fd, record_offset) == 0 && sync_file(fd)
+        return mylite_ownerless_ftruncate(fd, record_offset) == 0 && sync_file(fd)
                    ? MYLITE_OWNERLESS_PAGE_LOG_OK
                    : MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     };
@@ -6592,15 +6600,15 @@ void maybe_wait_for_test_fault(const char *fault_name) {
     const int ready_fd = configured_fd("MYLITE_OWNERLESS_TEST_FAULT_READY_FD");
     if (ready_fd >= 0) {
         const char value = 'x';
-        const auto bytes_written = ::write(ready_fd, &value, sizeof(value));
+        const auto bytes_written = mylite_ownerless_write(ready_fd, &value, sizeof(value));
         static_cast<void>(bytes_written);
-        static_cast<void>(::close(ready_fd));
+        static_cast<void>(mylite_ownerless_close(ready_fd));
     }
     const int release_fd = configured_fd("MYLITE_OWNERLESS_TEST_FAULT_RELEASE_FD");
     if (release_fd >= 0) {
         char value = 0;
-        while (::read(release_fd, &value, sizeof(value)) < 0 && errno == EINTR) {}
-        static_cast<void>(::close(release_fd));
+        while (mylite_ownerless_read(release_fd, &value, sizeof(value)) < 0 && errno == EINTR) {}
+        static_cast<void>(mylite_ownerless_close(release_fd));
     }
 #else
     (void)fault_name;
@@ -6621,9 +6629,10 @@ void maybe_pause_for_test_fault(const char *fault_name) {
         if (end != ready_fd_value && *end == '\0' && ready_fd >= 0 &&
             ready_fd <= std::numeric_limits<int>::max()) {
             const char value = 'x';
-            const auto bytes_written = ::write(static_cast<int>(ready_fd), &value, sizeof(value));
+            const auto bytes_written =
+                mylite_ownerless_write(static_cast<int>(ready_fd), &value, sizeof(value));
             static_cast<void>(bytes_written);
-            static_cast<void>(::close(static_cast<int>(ready_fd)));
+            static_cast<void>(mylite_ownerless_close(static_cast<int>(ready_fd)));
         }
     }
 
@@ -6725,9 +6734,9 @@ PageLogAcknowledgedBoundary page_log_acknowledged_boundary(
 }
 
 bool acknowledge_page_log_locked(int fd, off_t log_offset, bool data_already_synced) {
-    struct stat file_stat = {};
+    mylite_ownerless_file_info file_stat = {};
     PageLogHeader header = {};
-    if (::fstat(fd, &file_stat) != 0 || file_stat.st_size < log_offset ||
+    if (mylite_ownerless_fstat(fd, &file_stat) != 0 || file_stat.st_size < log_offset ||
         !read_header(fd, log_offset, header) || !header_matches(header)) {
         return false;
     }
@@ -6829,7 +6838,8 @@ bool write_exact_at(int fd, const void *buffer, std::size_t size, off_t offset) 
         if (!next_io_offset(offset, written, &io_offset)) {
             return false;
         }
-        const ssize_t result = ::pwrite(fd, bytes + written, size - written, io_offset);
+        const ssize_t result =
+            mylite_ownerless_pwrite(fd, bytes + written, size - written, io_offset);
         if (result < 0) {
             if (errno == EINTR) {
                 continue;
@@ -6852,7 +6862,7 @@ bool read_exact_at(int fd, void *buffer, std::size_t size, off_t offset) {
         if (!next_io_offset(offset, read, &io_offset)) {
             return false;
         }
-        const ssize_t result = ::pread(fd, bytes + read, size - read, io_offset);
+        const ssize_t result = mylite_ownerless_pread(fd, bytes + read, size - read, io_offset);
         if (result < 0) {
             if (errno == EINTR) {
                 continue;
@@ -6868,7 +6878,7 @@ bool read_exact_at(int fd, void *buffer, std::size_t size, off_t offset) {
 }
 
 bool sync_file(int fd) {
-    while (::fsync(fd) != 0) {
+    while (mylite_ownerless_fsync(fd) != 0) {
         if (errno != EINTR) {
             return false;
         }
@@ -6878,9 +6888,9 @@ bool sync_file(int fd) {
 
 bool sync_file_data(int fd) {
 #if defined(_POSIX_SYNCHRONIZED_IO) && _POSIX_SYNCHRONIZED_IO > 0
-    while (::fdatasync(fd) != 0) {
+    while (mylite_ownerless_fdatasync(fd) != 0) {
 #else
-    while (::fsync(fd) != 0) {
+    while (mylite_ownerless_fsync(fd) != 0) {
 #endif
         if (errno != EINTR) {
             return false;
@@ -9038,8 +9048,8 @@ bool decoded_delta_base_cache_load(
     const PageRecordHeader &record,
     void *out_page
 ) {
-    struct stat file_stat = {};
-    if (::fstat(fd, &file_stat) != 0) {
+    mylite_ownerless_file_info file_stat = {};
+    if (mylite_ownerless_fstat(fd, &file_stat) != 0) {
         return false;
     }
     const std::size_t slot_index =
@@ -9061,8 +9071,8 @@ void decoded_delta_base_cache_store(
     const PageRecordHeader &record,
     const void *page
 ) {
-    struct stat file_stat = {};
-    if (::fstat(fd, &file_stat) != 0) {
+    mylite_ownerless_file_info file_stat = {};
+    if (mylite_ownerless_fstat(fd, &file_stat) != 0) {
         return;
     }
     const std::size_t slot_index =

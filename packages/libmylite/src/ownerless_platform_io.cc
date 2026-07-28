@@ -316,7 +316,7 @@ int mylite_ownerless_ftruncate(int fd, mylite_ownerless_offset_t size) {
     return 0;
 }
 
-int mylite_ownerless_fstat(int fd, struct mylite_ownerless_stat *out_info) {
+int mylite_ownerless_fstat(int fd, mylite_ownerless_file_info *out_info) {
     if (out_info == nullptr) {
         errno = EINVAL;
         return -1;
@@ -341,7 +341,7 @@ int mylite_ownerless_fstat(int fd, struct mylite_ownerless_stat *out_info) {
     return 0;
 }
 
-int mylite_ownerless_stat(const char *path, struct mylite_ownerless_stat *out_info) {
+int mylite_ownerless_stat(const char *path, mylite_ownerless_file_info *out_info) {
     const int fd = mylite_ownerless_open(path, O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
         return -1;
@@ -432,7 +432,7 @@ int mylite_ownerless_fcntl(int fd, int command, ...) {
         return duplicate;
     }
 
-    auto *lock = va_arg(arguments, struct mylite_ownerless_flock *);
+    auto *lock = va_arg(arguments, mylite_ownerless_file_lock *);
     va_end(arguments);
     if ((command != F_SETLK && command != F_OFD_SETLK) || lock == nullptr ||
         lock->l_whence != SEEK_SET || lock->l_start < 0 || lock->l_len < 0) {

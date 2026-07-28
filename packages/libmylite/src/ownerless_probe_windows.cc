@@ -44,26 +44,42 @@ std::filesystem::path make_probe_root(const std::filesystem::path &parent) {
 }
 
 int open_probe_file(const std::filesystem::path &path) {
-    return ::open(path.string().c_str(), O_RDWR | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    return mylite_ownerless_open(
+        path.string().c_str(),
+        O_RDWR | O_CREAT | O_TRUNC | O_CLOEXEC,
+        0600
+    );
 }
 
 bool probe_mmap_shared_visibility(const std::filesystem::path &file) {
     const int first_fd = open_probe_file(file);
-    if (first_fd < 0 || ::ftruncate(first_fd, k_probe_page_size) != 0) {
+    if (first_fd < 0 || mylite_ownerless_ftruncate(first_fd, k_probe_page_size) != 0) {
         if (first_fd >= 0) {
-            ::close(first_fd);
+            mylite_ownerless_close(first_fd);
         }
         return false;
     }
-    const int second_fd = ::open(file.string().c_str(), O_RDWR | O_CLOEXEC);
+    const int second_fd = mylite_ownerless_open(file.string().c_str(), O_RDWR | O_CLOEXEC);
     if (second_fd < 0) {
-        ::close(first_fd);
+        mylite_ownerless_close(first_fd);
         return false;
     }
-    void *first =
-        ::mmap(nullptr, k_probe_page_size, PROT_READ | PROT_WRITE, MAP_SHARED, first_fd, 0);
-    void *second =
-        ::mmap(nullptr, k_probe_page_size, PROT_READ | PROT_WRITE, MAP_SHARED, second_fd, 0);
+    void *first = mylite_ownerless_mmap(
+        nullptr,
+        k_probe_page_size,
+        PROT_READ | PROT_WRITE,
+        MAP_SHARED,
+        first_fd,
+        0
+    );
+    void *second = mylite_ownerless_mmap(
+        nullptr,
+        k_probe_page_size,
+        PROT_READ | PROT_WRITE,
+        MAP_SHARED,
+        second_fd,
+        0
+    );
     bool ok = first != MAP_FAILED && second != MAP_FAILED;
     if (ok) {
         auto *first_bytes = static_cast<unsigned char *>(first);
@@ -72,37 +88,37 @@ bool probe_mmap_shared_visibility(const std::filesystem::path &file) {
         ok = second_bytes[0] == 0x5aU;
         second_bytes[1] = 0xa5U;
         ok = ok && first_bytes[1] == 0xa5U;
-        ok = ok && ::msync(first, k_probe_page_size, MS_SYNC) == 0;
+        ok = ok && mylite_ownerless_msync(first, k_probe_page_size, MS_SYNC) == 0;
     }
     if (first != MAP_FAILED) {
-        ::munmap(first, k_probe_page_size);
+        mylite_ownerless_munmap(first, k_probe_page_size);
     }
     if (second != MAP_FAILED) {
-        ::munmap(second, k_probe_page_size);
+        mylite_ownerless_munmap(second, k_probe_page_size);
     }
-    ::close(second_fd);
-    ::close(first_fd);
+    mylite_ownerless_close(second_fd);
+    mylite_ownerless_close(first_fd);
     return ok;
 }
 
 bool set_lock(int fd, short type) {
-    struct flock lock = {};
+    mylite_ownerless_file_lock lock = {};
     lock.l_type = type;
     lock.l_whence = SEEK_SET;
     lock.l_start = 0;
     lock.l_len = 1;
-    return ::fcntl(fd, F_OFD_SETLK, &lock) == 0;
+    return mylite_ownerless_fcntl(fd, F_OFD_SETLK, &lock) == 0;
 }
 
 bool probe_byte_range_locks(const std::filesystem::path &file) {
     const int first = open_probe_file(file);
-    const int second = ::open(file.string().c_str(), O_RDWR | O_CLOEXEC);
+    const int second = mylite_ownerless_open(file.string().c_str(), O_RDWR | O_CLOEXEC);
     if (first < 0 || second < 0) {
         if (first >= 0) {
-            ::close(first);
+            mylite_ownerless_close(first);
         }
         if (second >= 0) {
-            ::close(second);
+            mylite_ownerless_close(second);
         }
         return false;
     }
@@ -114,84 +130,97 @@ bool probe_byte_range_locks(const std::filesystem::path &file) {
     if (acquired_after_unlock) {
         set_lock(second, F_UNLCK);
     }
-    ::close(second);
-    ::close(first);
+    mylite_ownerless_close(second);
+    mylite_ownerless_close(first);
     return locked && conflict && unlocked && acquired_after_unlock;
 }
 
 bool probe_lock_release_on_close(const std::filesystem::path &file) {
     int first = open_probe_file(file);
-    const int second = ::open(file.string().c_str(), O_RDWR | O_CLOEXEC);
+    const int second = mylite_ownerless_open(file.string().c_str(), O_RDWR | O_CLOEXEC);
     if (first < 0 || second < 0) {
         if (first >= 0) {
-            ::close(first);
+            mylite_ownerless_close(first);
         }
         if (second >= 0) {
-            ::close(second);
+            mylite_ownerless_close(second);
         }
         return false;
     }
     const bool locked = set_lock(first, F_WRLCK);
-    ::close(first);
+    mylite_ownerless_close(first);
     first = -1;
     const bool released = set_lock(second, F_WRLCK);
     if (released) {
         set_lock(second, F_UNLCK);
     }
-    ::close(second);
+    mylite_ownerless_close(second);
     return locked && released;
 }
 
 bool probe_lock_close_isolation(const std::filesystem::path &file) {
     const int lock_fd = open_probe_file(file);
-    const int unrelated_fd = ::open(file.string().c_str(), O_RDWR | O_CLOEXEC);
+    const int unrelated_fd = mylite_ownerless_open(file.string().c_str(), O_RDWR | O_CLOEXEC);
     if (lock_fd < 0 || unrelated_fd < 0) {
         if (lock_fd >= 0) {
-            ::close(lock_fd);
+            mylite_ownerless_close(lock_fd);
         }
         if (unrelated_fd >= 0) {
-            ::close(unrelated_fd);
+            mylite_ownerless_close(unrelated_fd);
         }
         return false;
     }
     const bool locked = set_lock(lock_fd, F_WRLCK);
-    ::close(unrelated_fd);
-    const int peer_fd = ::open(file.string().c_str(), O_RDWR | O_CLOEXEC);
+    mylite_ownerless_close(unrelated_fd);
+    const int peer_fd = mylite_ownerless_open(file.string().c_str(), O_RDWR | O_CLOEXEC);
     errno = 0;
     const bool retained =
         peer_fd >= 0 && !set_lock(peer_fd, F_WRLCK) && (errno == EAGAIN || errno == EACCES);
     set_lock(lock_fd, F_UNLCK);
     if (peer_fd >= 0) {
-        ::close(peer_fd);
+        mylite_ownerless_close(peer_fd);
     }
-    ::close(lock_fd);
+    mylite_ownerless_close(lock_fd);
     return locked && retained;
 }
 
 bool probe_grow_remap(const std::filesystem::path &file) {
     const int fd = open_probe_file(file);
-    if (fd < 0 || ::ftruncate(fd, k_probe_page_size) != 0) {
+    if (fd < 0 || mylite_ownerless_ftruncate(fd, k_probe_page_size) != 0) {
         if (fd >= 0) {
-            ::close(fd);
+            mylite_ownerless_close(fd);
         }
         return false;
     }
-    void *first = ::mmap(nullptr, k_probe_page_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    void *first = mylite_ownerless_mmap(
+        nullptr,
+        k_probe_page_size,
+        PROT_READ | PROT_WRITE,
+        MAP_SHARED,
+        fd,
+        0
+    );
     if (first == MAP_FAILED) {
-        ::close(fd);
+        mylite_ownerless_close(fd);
         return false;
     }
     static_cast<unsigned char *>(first)[0] = 0x6dU;
-    const bool first_sync = ::msync(first, k_probe_page_size, MS_SYNC) == 0;
-    ::munmap(first, k_probe_page_size);
-    const bool grew = ::ftruncate(fd, k_probe_page_size * 2U) == 0;
-    void *second =
-        ::mmap(nullptr, k_probe_page_size * 2U, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    const bool first_sync = mylite_ownerless_msync(first, k_probe_page_size, MS_SYNC) == 0;
+    mylite_ownerless_munmap(first, k_probe_page_size);
+    const bool grew = mylite_ownerless_ftruncate(fd, k_probe_page_size * 2U) == 0;
+    void *second = mylite_ownerless_mmap(
+        nullptr,
+        k_probe_page_size * 2U,
+        PROT_READ | PROT_WRITE,
+        MAP_SHARED,
+        fd,
+        0
+    );
     const bool remapped = second != MAP_FAILED && static_cast<unsigned char *>(second)[0] == 0x6dU;
     if (second != MAP_FAILED) {
-        ::munmap(second, k_probe_page_size * 2U);
+        mylite_ownerless_munmap(second, k_probe_page_size * 2U);
     }
-    ::close(fd);
+    mylite_ownerless_close(fd);
     return first_sync && grew && remapped;
 }
 
