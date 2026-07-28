@@ -16,7 +16,7 @@ $WolfSSLDir = Join-Path $Root "mariadb/extra/wolfssl/wolfssl"
 $WolfSSLCommit = "59f4fa568615396fbf381b073b220d1e8d61e4c2"
 
 function Ensure-WolfSSL {
-    $WolfSSLMarker = Join-Path $WolfSSLDir "wolfssl/src/crl.c"
+    $WolfSSLMarker = Join-Path $WolfSSLDir "src/crl.c"
     if (Test-Path $WolfSSLMarker) {
         $ActualCommit = (& git -C $WolfSSLDir rev-parse HEAD).Trim()
         if (($LASTEXITCODE -ne 0) -or ($ActualCommit -ne $WolfSSLCommit)) {
