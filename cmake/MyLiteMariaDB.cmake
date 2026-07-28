@@ -103,8 +103,11 @@ function(mylite_add_mariadb_embedded_target)
         bcrypt
         crypt32
         dbghelp
+        icuin
+        icuuc
         iphlpapi
         kernel32
+        secur32
         shlwapi
         synchronization
         ws2_32
