@@ -16,6 +16,10 @@
 #include "ownerless_tablespace_replay.h"
 #include "ownerless_trx_registry.h"
 
+#if defined(_WIN32)
+#  include <windows.h>
+#endif
+
 #include <algorithm>
 #include <array>
 #include <atomic>
