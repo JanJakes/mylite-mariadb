@@ -156,6 +156,7 @@ jobs:
       - uses: ilammy/msvc-dev-cmd@v1
 
       - name: Cache Windows MariaDB embedded build
+        id: windows-mariadb-cache
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -164,6 +165,11 @@ jobs:
           key: windows-mariadb-embedded-v1-${{ runner.arch }}-${{ hashFiles('cmake/mariadb-embedded-*.cmake', 'tools/mariadb-embedded-build.ps1', 'mariadb/**') }}
           restore-keys: |
             windows-mariadb-embedded-v1-${{ runner.arch }}-
+
+      - name: Normalize exact Windows MariaDB cache source mtimes
+        if: steps.windows-mariadb-cache.outputs.cache-hit == 'true'
+        shell: bash
+        run: tools/normalize-mariadb-embedded-cache-mtimes
 
       - name: Build Windows MariaDB embedded archive
         shell: pwsh
