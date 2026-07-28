@@ -163,7 +163,7 @@ jobs:
         shell: pwsh
         run: >
           ctest --test-dir build/windows-ownerless --output-on-failure
-          -R "^libmylite\\.windows-ownerless-platform$"
+          --no-tests=error -R "windows-ownerless-platform"
 
   embedded:
     name: ubuntu-embedded
