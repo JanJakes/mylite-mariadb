@@ -8,6 +8,9 @@ CMakeFiles/
 compile_commands.json
 CMakeUserPresets.json
 
+# Pinned MariaDB dependency materialized by the Windows build wrapper
+/mariadb/extra/wolfssl/wolfssl/
+
 # Local editor and OS metadata
 .DS_Store
 .idea/

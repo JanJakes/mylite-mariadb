@@ -40,6 +40,22 @@ MariaDB source tree or `cmake/mariadb-embedded-baseline.cmake`. Rebuild the
 archive with `tools/mariadb-embedded-build build` before rerunning embedded
 targets after MariaDB source changes.
 
+On Windows, run:
+
+```powershell
+tools/mariadb-embedded-build.ps1 all
+```
+
+The Windows wrapper applies `cmake/mariadb-embedded-windows.cmake`, builds
+`mysqlserver.lib` with MSVC's DLL runtime, and uses MariaDB's bundled WolfSSL
+configuration because a native system OpenSSL installation is not assumed.
+The initial MariaDB import omits nested submodule payloads, so the wrapper
+materializes WolfSSL commit
+`59f4fa568615396fbf381b073b220d1e8d61e4c2`, the exact gitlink recorded by
+MariaDB 11.8.6, before configure. An existing dependency checkout must match
+that commit; an incomplete or conflicting tree fails with an explicit error
+instead of being replaced. The initial fetch requires Git and network access.
+
 ## Profile
 
 The committed baseline cache sets:

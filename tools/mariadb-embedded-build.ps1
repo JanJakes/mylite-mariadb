@@ -12,8 +12,48 @@ $BuildDir = if ($env:BUILD_DIR) { $env:BUILD_DIR } else {
 $Profile = if ($env:PROFILE) { $env:PROFILE } else {
     Join-Path $Root "cmake/mariadb-embedded-windows.cmake"
 }
+$WolfSSLDir = Join-Path $Root "mariadb/extra/wolfssl/wolfssl"
+$WolfSSLCommit = "59f4fa568615396fbf381b073b220d1e8d61e4c2"
+
+function Ensure-WolfSSL {
+    $WolfSSLMarker = Join-Path $WolfSSLDir "wolfssl/src/crl.c"
+    if (Test-Path $WolfSSLMarker) {
+        $ActualCommit = (& git -C $WolfSSLDir rev-parse HEAD).Trim()
+        if (($LASTEXITCODE -ne 0) -or ($ActualCommit -ne $WolfSSLCommit)) {
+            throw "WolfSSL source must be the MariaDB 11.8.6 commit $WolfSSLCommit; found $ActualCommit"
+        }
+        return
+    }
+
+    if (Test-Path $WolfSSLDir) {
+        $ExistingEntry = Get-ChildItem -Force $WolfSSLDir | Select-Object -First 1
+        if ($ExistingEntry) {
+            throw "Incomplete WolfSSL source exists at $WolfSSLDir; remove that dependency directory and retry"
+        }
+    } else {
+        New-Item -ItemType Directory -Path $WolfSSLDir | Out-Null
+    }
+
+    & git -C $WolfSSLDir init
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to initialize the WolfSSL dependency directory"
+    }
+    & git -C $WolfSSLDir remote add origin https://github.com/wolfSSL/wolfssl.git
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to configure the WolfSSL dependency remote"
+    }
+    & git -C $WolfSSLDir fetch --depth=1 origin $WolfSSLCommit
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to fetch WolfSSL commit $WolfSSLCommit"
+    }
+    & git -C $WolfSSLDir checkout --detach FETCH_HEAD
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to check out WolfSSL commit $WolfSSLCommit"
+    }
+}
 
 function Configure-MariaDB {
+    Ensure-WolfSSL
     $Bison = Get-Command bison.exe -ErrorAction SilentlyContinue
     if (-not $Bison) {
         $Bison = Get-Command win_bison.exe -ErrorAction SilentlyContinue

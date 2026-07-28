@@ -204,7 +204,9 @@ removed before open continues.
 - No new third-party dependency is introduced.
 - The macOS embedded archive uses the existing Unix baseline build wrapper.
 - The Windows embedded archive path and native system-library linkage are made
-  explicit in CMake.
+  explicit in CMake. Its build wrapper fetches and verifies WolfSSL commit
+  `59f4fa568615396fbf381b073b220d1e8d61e4c2`, the bundled dependency gitlink
+  pinned by MariaDB 11.8.6 and omitted from the initial source import.
 - Platform-only code is selected at compile time.
 - Final archive sizes are recorded per platform by CI; Linux size regression
   remains subject to the existing production measurement.
