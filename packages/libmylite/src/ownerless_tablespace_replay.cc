@@ -460,7 +460,7 @@ bool read_page_image(
         page_log_offset,
         metadata.record_offset(),
         bytes.data(),
-        bytes.size(),
+        static_cast<std::uint32_t>(bytes.size()),
         &page_size,
         &page_lsn,
         &commit_lsn

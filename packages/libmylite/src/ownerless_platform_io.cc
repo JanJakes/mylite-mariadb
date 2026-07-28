@@ -602,7 +602,12 @@ int mylite_ownerless_fcntl(int fd, int command, ...) {
 
     auto *lock = va_arg(arguments, struct flock *);
     va_end(arguments);
-    if (command != F_SETLK || lock == nullptr || lock->l_whence != SEEK_SET || lock->l_start < 0 ||
+    const bool is_set_lock = command == F_SETLK
+#  if defined(F_OFD_SETLK)
+                             || command == F_OFD_SETLK
+#  endif
+        ;
+    if (!is_set_lock || lock == nullptr || lock->l_whence != SEEK_SET || lock->l_start < 0 ||
         lock->l_len != 1 ||
         (lock->l_type != F_RDLCK && lock->l_type != F_WRLCK && lock->l_type != F_UNLCK)) {
         errno = EINVAL;

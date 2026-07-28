@@ -1,4 +1,8 @@
 #define _POSIX_C_SOURCE 200809L
+#if defined(_WIN32)
+#  define WIN32_LEAN_AND_MEAN
+#  define _CRT_SECURE_NO_WARNINGS
+#endif
 
 #include <mylite/mylite.h>
 
@@ -6,20 +10,41 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <time.h>
+
+#if defined(_WIN32)
+#  include <direct.h>
+#  include <windows.h>
+#else
+#  include <sys/stat.h>
+#  include <time.h>
+#endif
 
 static double monotonic_ms(void) {
+#if defined(_WIN32)
+    LARGE_INTEGER frequency;
+    LARGE_INTEGER counter;
+    if (!QueryPerformanceFrequency(&frequency) || !QueryPerformanceCounter(&counter)) {
+        fputs("QueryPerformanceCounter failed\n", stderr);
+        exit(2);
+    }
+    return (double)counter.QuadPart * 1000.0 / (double)frequency.QuadPart;
+#else
     struct timespec ts;
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
         perror("clock_gettime");
         exit(2);
     }
     return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1000000.0;
+#endif
 }
 
 static void ensure_directory(const char *path) {
-    if (mkdir(path, 0700) != 0 && errno != EEXIST) {
+#if defined(_WIN32)
+    const int result = _mkdir(path);
+#else
+    const int result = mkdir(path, 0700);
+#endif
+    if (result != 0 && errno != EEXIST) {
         fprintf(stderr, "mkdir(%s): %s\n", path, strerror(errno));
         exit(2);
     }

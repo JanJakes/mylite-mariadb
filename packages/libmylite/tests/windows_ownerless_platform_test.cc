@@ -161,7 +161,8 @@ int run_dead_writer_child(
     exec_ok(db, "START TRANSACTION");
     exec_ok(db, "UPDATE app.platform_probe SET value = value + 1000 WHERE id = 1");
     {
-        FILE *marker = std::fopen(marker_path.string().c_str(), "wb");
+        FILE *marker = nullptr;
+        assert(fopen_s(&marker, marker_path.string().c_str(), "wb") == 0);
         assert(marker != nullptr);
         assert(std::fputs("ready", marker) >= 0);
         assert(std::fclose(marker) == 0);
