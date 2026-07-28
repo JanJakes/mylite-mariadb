@@ -6,6 +6,7 @@
 
 #if defined(_WIN32)
 
+#  include <cerrno>
 #  include <fcntl.h>
 #  include <sys/stat.h>
 

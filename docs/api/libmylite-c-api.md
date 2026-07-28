@@ -630,11 +630,12 @@ flushes to the periodic timeout. The default is full durability.
 - Ordinary cross-process read/write opens are rejected with `MYLITE_BUSY` while
   another process owns the directory lock.
 - Cross-process ownerless read/write opens opt into `MYLITE_OPEN_OWNERLESS_RW`.
-  On embedded Linux and a validated local filesystem, the enumerated persistent
-  InnoDB paths coordinate through directory-backed shared memory, byte-range
-  locks, page-version WAL, and checkpoint files. The mode remains experimental
-  and incomplete where the compatibility matrix marks hook, stress, DDL, or
-  recovery release gates as pending.
+  On 64-bit embedded Linux, macOS, and Windows with an admitted local
+  filesystem, the enumerated persistent InnoDB paths coordinate through
+  directory-backed shared memory, byte-range locks, page-version WAL, and
+  checkpoint files. The mode remains experimental and incomplete where the
+  compatibility matrix marks hook, stress, DDL, or recovery release gates as
+  pending.
 - Database handles, prepared statements, and inherited embedded-runtime state
   cannot be used in a child after `fork()`. The child must `exec()` before using
   MyLite; inherited operations fail with `MYLITE_MISUSE`.

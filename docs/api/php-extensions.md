@@ -85,11 +85,13 @@ $db->real_connect('/path/app.mylite');
 
 Replacement-mode builds also expose the compatible global constant
 `MYSQLI_OPT_MYLITE_OWNERLESS_RW`. Changing the option after `real_connect()` is
-an error. Ownerless mode is currently Linux-only, admits only validated local
-ext4, XFS, tmpfs, or overlay directories, and supports the persistent InnoDB
-application-table surface listed in the compatibility matrix. It is
-experimental and incomplete; unsupported engines, existing special indexes,
-unclassified DDL, and server/global SQL fail explicitly.
+an error. Ownerless mode is available on 64-bit Linux, macOS, and Windows and
+admits only validated local ext4/XFS/tmpfs/overlay, APFS, and NTFS directories,
+respectively. Other filesystems fail with `MYLITE_UNSUPPORTED_FILESYSTEM`. The
+mode supports the persistent InnoDB application-table surface listed in the
+compatibility matrix. It is experimental and incomplete; unsupported engines,
+existing special indexes, unclassified DDL, and server/global SQL fail
+explicitly.
 
 For performance attribution runs, `mysqli_mylite` can emit process-local
 adapter counters when `MYLITE_MYSQLI_PROFILE=1` is present in the PHP process
