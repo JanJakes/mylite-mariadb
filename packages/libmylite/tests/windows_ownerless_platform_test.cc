@@ -47,10 +47,10 @@ void print_stack_symbol(HANDLE process, DWORD64 address) {
     }
 }
 
-LONG WINAPI print_unhandled_exception(EXCEPTION_POINTERS *exception) {
+void print_exception(EXCEPTION_POINTERS *exception) {
     if (exception == nullptr || exception->ExceptionRecord == nullptr ||
         exception->ContextRecord == nullptr) {
-        return EXCEPTION_EXECUTE_HANDLER;
+        return;
     }
     std::fprintf(
         stderr,
@@ -96,7 +96,24 @@ LONG WINAPI print_unhandled_exception(EXCEPTION_POINTERS *exception) {
     }
 #endif
     std::fflush(stderr);
+}
+
+LONG WINAPI print_unhandled_exception(EXCEPTION_POINTERS *exception) {
+    print_exception(exception);
     return EXCEPTION_EXECUTE_HANDLER;
+}
+
+LONG CALLBACK print_vectored_exception(EXCEPTION_POINTERS *exception) {
+    if (exception == nullptr || exception->ExceptionRecord == nullptr ||
+        (exception->ExceptionRecord->ExceptionCode != EXCEPTION_ACCESS_VIOLATION &&
+         exception->ExceptionRecord->ExceptionCode != EXCEPTION_ARRAY_BOUNDS_EXCEEDED &&
+         exception->ExceptionRecord->ExceptionCode != EXCEPTION_ILLEGAL_INSTRUCTION &&
+         exception->ExceptionRecord->ExceptionCode != EXCEPTION_IN_PAGE_ERROR &&
+         exception->ExceptionRecord->ExceptionCode != EXCEPTION_STACK_OVERFLOW)) {
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+    print_exception(exception);
+    return EXCEPTION_CONTINUE_SEARCH;
 }
 
 void print_phase(const char *phase) {
@@ -440,6 +457,7 @@ void run_parent(void) {
 } // namespace
 
 int main(int argc, char **argv) {
+    assert(AddVectoredExceptionHandler(1U, print_vectored_exception) != nullptr);
     SetUnhandledExceptionFilter(print_unhandled_exception);
     test_platform_io_does_not_rewrite_cpp_streams();
     if (argc >= 4 && std::string(argv[1]) == "update") {
