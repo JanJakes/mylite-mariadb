@@ -162,7 +162,7 @@ jobs:
           path: |
             build/mariadb-embedded
             mariadb/extra/wolfssl/wolfssl
-          key: windows-mariadb-embedded-v1-${{ runner.arch }}-${{ hashFiles('cmake/mariadb-embedded-*.cmake', 'tools/mariadb-embedded-build.ps1', 'mariadb/**') }}
+          key: windows-mariadb-embedded-v1-${{ runner.arch }}-${{ hashFiles('cmake/mariadb-embedded-*.cmake', 'tools/mariadb-embedded-build.ps1', 'mariadb/**', '!mariadb/extra/wolfssl/wolfssl/**') }}
           restore-keys: |
             windows-mariadb-embedded-v1-${{ runner.arch }}-
 
@@ -188,7 +188,7 @@ jobs:
           path: |
             build/mariadb-embedded
             mariadb/extra/wolfssl/wolfssl
-          key: windows-mariadb-embedded-v1-${{ runner.arch }}-${{ hashFiles('cmake/mariadb-embedded-*.cmake', 'tools/mariadb-embedded-build.ps1', 'mariadb/**') }}
+          key: windows-mariadb-embedded-v1-${{ runner.arch }}-${{ hashFiles('cmake/mariadb-embedded-*.cmake', 'tools/mariadb-embedded-build.ps1', 'mariadb/**', '!mariadb/extra/wolfssl/wolfssl/**') }}
 
       - name: Configure Windows ownerless platform gate
         shell: pwsh
