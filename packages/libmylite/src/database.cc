@@ -43,6 +43,10 @@
 #include <utility>
 #include <vector>
 
+#if defined(_WIN32)
+#  include <bcrypt.h>
+#endif
+
 #if MYLITE_WITH_MARIADB_EMBEDDED
 #  include "mylite_ownerless_dictionary_hooks.h"
 #  include "mylite_ownerless_innodb_lock_hooks.h"
@@ -42524,6 +42528,16 @@ std::string generate_database_uuid(void) {
 }
 
 void fill_database_uuid_bytes(std::array<unsigned char, 16> &bytes) {
+#  if defined(_WIN32)
+    if (BCryptGenRandom(
+            nullptr,
+            bytes.data(),
+            static_cast<ULONG>(bytes.size()),
+            BCRYPT_USE_SYSTEM_PREFERRED_RNG
+        ) == 0) {
+        return;
+    }
+#  else
     std::ifstream random("/dev/urandom", std::ios::binary);
     if (random.read(
             reinterpret_cast<char *>(bytes.data()),
@@ -42531,6 +42545,7 @@ void fill_database_uuid_bytes(std::array<unsigned char, 16> &bytes) {
         )) {
         return;
     }
+#  endif
     fill_database_uuid_bytes_from_fallback(bytes);
 }
 
