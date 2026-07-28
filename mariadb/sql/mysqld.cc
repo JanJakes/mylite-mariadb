@@ -5175,6 +5175,20 @@ static int adjust_optimizer_costs(const LEX_CSTRING *, OPTIMIZER_COSTS *oc, TABL
   { option, OPT_REMOVED_OPTION, \
    0, 0, 0, 0, GET_STR, OPT_ARG, 0, 0, 0, 0, 0, 0 }
 
+static void mylite_trace_server_components_stage(const char *stage)
+{
+#ifdef _WIN32
+  const char *trace= getenv("MYLITE_OWNERLESS_TEST_TRACE_OPEN");
+  if (trace && !strcmp(trace, "1"))
+  {
+    fprintf(stderr, "mylite-ownerless server-components-stage=%s\n", stage);
+    fflush(stderr);
+  }
+#else
+  (void) stage;
+#endif
+}
+
 static int init_server_components()
 {
   uint64_t mylite_startup_start, mylite_stage_start;
@@ -5184,6 +5198,7 @@ static int init_server_components()
       MYLITE_EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_CALLS);
   mylite_startup_start= mylite_embedded_startup_perf_start_ns();
   mylite_stage_start= mylite_embedded_startup_perf_start_ns();
+  mylite_trace_server_components_stage("core-begin");
   /*
     We need to call each of these following functions to ensure that
     all things are initialized so that unireg_abort() doesn't fail
@@ -5221,10 +5236,12 @@ static int init_server_components()
   mylite_embedded_startup_perf_add_elapsed(
       MYLITE_EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_CORE_NS,
       mylite_stage_start);
+  mylite_trace_server_components_stage("core-complete");
 
   /* Setup logs */
 
   mylite_stage_start= mylite_embedded_startup_perf_start_ns();
+  mylite_trace_server_components_stage("logging-begin");
   setup_log_handling();
 
   /*
@@ -5314,7 +5331,9 @@ static int init_server_components()
   mylite_embedded_startup_perf_add_elapsed(
       MYLITE_EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_LOGGING_NS,
       mylite_stage_start);
+  mylite_trace_server_components_stage("logging-complete");
   mylite_stage_start= mylite_embedded_startup_perf_start_ns();
+  mylite_trace_server_components_stage("pre-plugin-begin");
 
   /*
     Do not open binlong when doing bootstrap.
@@ -5551,6 +5570,7 @@ static int init_server_components()
   mylite_embedded_startup_perf_add_elapsed(
       MYLITE_EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_PRE_PLUGIN_NS,
       mylite_stage_start);
+  mylite_trace_server_components_stage("pre-plugin-complete");
 
   /*
     Plugins may not be completed because system table DDLs are only
@@ -5561,6 +5581,7 @@ static int init_server_components()
     all plugins have been initialised.
   */
   mylite_stage_start= mylite_embedded_startup_perf_start_ns();
+  mylite_trace_server_components_stage("plugin-init-begin");
   if (plugin_init(&remaining_argc, remaining_argv,
                   (opt_noacl ? PLUGIN_INIT_SKIP_PLUGIN_TABLE : 0) |
                   (opt_abort ? PLUGIN_INIT_SKIP_INITIALIZATION : 0)))
@@ -5577,6 +5598,7 @@ static int init_server_components()
   mylite_embedded_startup_perf_add_elapsed(
       MYLITE_EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_PLUGIN_INIT_NS,
       mylite_stage_start);
+  mylite_trace_server_components_stage("plugin-init-complete");
   plugins_are_initialized= TRUE;  /* Don't separate from init function */
 
 #ifdef HAVE_REPLICATION
@@ -5754,6 +5776,7 @@ static int init_server_components()
 
   /* We have to initialize the storage engines before CSV logging */
   mylite_stage_start= mylite_embedded_startup_perf_start_ns();
+  mylite_trace_server_components_stage("ha-init-begin");
   if (ha_init())
   {
     mylite_embedded_startup_perf_add_elapsed(
@@ -5768,8 +5791,10 @@ static int init_server_components()
   mylite_embedded_startup_perf_add_elapsed(
       MYLITE_EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_HA_INIT_NS,
       mylite_stage_start);
+  mylite_trace_server_components_stage("ha-init-complete");
 
   mylite_stage_start= mylite_embedded_startup_perf_start_ns();
+  mylite_trace_server_components_stage("default-engines-begin");
   if (opt_bootstrap)
     log_output_options= LOG_FILE;
   else
@@ -5826,6 +5851,7 @@ static int init_server_components()
   mylite_embedded_startup_perf_add_elapsed(
       MYLITE_EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_DEFAULT_ENGINES_NS,
       mylite_stage_start);
+  mylite_trace_server_components_stage("default-engines-complete");
 
 #ifdef USE_ARIA_FOR_TMP_TABLES
   if (!ha_storage_engine_is_enabled(maria_hton) && !opt_bootstrap)
@@ -5860,6 +5886,7 @@ static int init_server_components()
 #endif
 
   mylite_stage_start= mylite_embedded_startup_perf_start_ns();
+  mylite_trace_server_components_stage("tc-log-recovery-begin");
   tc_log= get_tc_log_implementation();
 
   if (tc_log->open(opt_bin_log ? opt_bin_logname : opt_tc_log_file))
@@ -5914,7 +5941,9 @@ static int init_server_components()
   mylite_embedded_startup_perf_add_elapsed(
       MYLITE_EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_TC_LOG_RECOVERY_NS,
       mylite_stage_start);
+  mylite_trace_server_components_stage("tc-log-recovery-complete");
   mylite_stage_start= mylite_embedded_startup_perf_start_ns();
+  mylite_trace_server_components_stage("ddl-recovery-begin");
 
   if (ddl_log_execute_recovery() > 0)
     unireg_abort(1);
@@ -5922,6 +5951,7 @@ static int init_server_components()
   mylite_embedded_startup_perf_add_elapsed(
       MYLITE_EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_DDL_RECOVERY_NS,
       mylite_stage_start);
+  mylite_trace_server_components_stage("ddl-recovery-complete");
 
   if (opt_myisam_log)
     (void) mi_log(1);
@@ -5965,6 +5995,7 @@ static int init_server_components()
 #endif
 
   mylite_stage_start= mylite_embedded_startup_perf_start_ns();
+  mylite_trace_server_components_stage("final-status-begin");
   ft_init_stopwords();
 
   init_max_user_conn();
@@ -5979,6 +6010,7 @@ static int init_server_components()
   mylite_embedded_startup_perf_add_elapsed(
       MYLITE_EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_FINAL_STATUS_NS,
       mylite_stage_start);
+  mylite_trace_server_components_stage("final-status-complete");
   mylite_embedded_startup_perf_add_elapsed(
       MYLITE_EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_TOTAL_NS,
       mylite_startup_start);
