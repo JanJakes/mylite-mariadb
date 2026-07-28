@@ -54,31 +54,36 @@ template <typename T> void mylite_ownerless_atomic_store_n(T *target, T value, i
     }
 }
 
-template <typename T> T mylite_ownerless_atomic_add_fetch(T *target, T value, int order) {
+template <typename T, typename U>
+T mylite_ownerless_atomic_add_fetch(T *target, U value, int order) {
     (void)order;
     static_assert(std::is_integral_v<T>, "ownerless atomics require integral words");
+    static_assert(std::is_integral_v<U>, "ownerless atomic increments require integral values");
     static_assert(sizeof(T) == 4U || sizeof(T) == 8U, "unsupported ownerless atomic word");
+    const T converted_value = static_cast<T>(value);
     if constexpr (sizeof(T) == 4U) {
         return static_cast<T>(
             _InterlockedExchangeAdd(
                 reinterpret_cast<volatile long *>(target),
-                static_cast<long>(value)
+                static_cast<long>(converted_value)
             ) +
-            static_cast<long>(value)
+            static_cast<long>(converted_value)
         );
     } else {
         return static_cast<T>(
             _InterlockedExchangeAdd64(
                 reinterpret_cast<volatile long long *>(target),
-                static_cast<long long>(value)
+                static_cast<long long>(converted_value)
             ) +
-            static_cast<long long>(value)
+            static_cast<long long>(converted_value)
         );
     }
 }
 
-template <typename T> T mylite_ownerless_atomic_sub_fetch(T *target, T value, int order) {
-    return mylite_ownerless_atomic_add_fetch(target, static_cast<T>(0U - value), order);
+template <typename T, typename U>
+T mylite_ownerless_atomic_sub_fetch(T *target, U value, int order) {
+    const T converted_value = static_cast<T>(value);
+    return mylite_ownerless_atomic_add_fetch(target, static_cast<T>(T{0} - converted_value), order);
 }
 
 template <typename T>

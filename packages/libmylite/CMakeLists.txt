@@ -43,7 +43,12 @@ target_include_directories(mylite
     "$<INSTALL_INTERFACE:include>"
 )
 if(WIN32)
-  target_compile_definitions(mylite PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
+  target_compile_definitions(mylite PRIVATE
+    NOMINMAX
+    WIN32_LEAN_AND_MEAN
+    _CRT_SECURE_NO_WARNINGS
+    _WIN32_WINNT=0x0A00
+  )
 endif()
 
 mylite_configure_c_target(mylite)

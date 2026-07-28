@@ -6592,7 +6592,8 @@ void maybe_wait_for_test_fault(const char *fault_name) {
     const int ready_fd = configured_fd("MYLITE_OWNERLESS_TEST_FAULT_READY_FD");
     if (ready_fd >= 0) {
         const char value = 'x';
-        static_cast<void>(::write(ready_fd, &value, sizeof(value)));
+        const auto bytes_written = ::write(ready_fd, &value, sizeof(value));
+        static_cast<void>(bytes_written);
         static_cast<void>(::close(ready_fd));
     }
     const int release_fd = configured_fd("MYLITE_OWNERLESS_TEST_FAULT_RELEASE_FD");
@@ -6620,13 +6621,14 @@ void maybe_pause_for_test_fault(const char *fault_name) {
         if (end != ready_fd_value && *end == '\0' && ready_fd >= 0 &&
             ready_fd <= std::numeric_limits<int>::max()) {
             const char value = 'x';
-            static_cast<void>(::write(static_cast<int>(ready_fd), &value, sizeof(value)));
+            const auto bytes_written = ::write(static_cast<int>(ready_fd), &value, sizeof(value));
+            static_cast<void>(bytes_written);
             static_cast<void>(::close(static_cast<int>(ready_fd)));
         }
     }
 
     for (;;) {
-        ::pause();
+        std::this_thread::sleep_for(std::chrono::hours(24));
     }
 #else
     (void)fault_name;

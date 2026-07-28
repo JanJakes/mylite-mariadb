@@ -22603,9 +22603,10 @@ int repair_ownerless_stale_innodb_dictionary_names(mylite_db &db) {
             }
             const std::filesystem::path target_path =
                 ownerless_innodb_dictionary_name_to_ibd_path(db.database_path, state.name);
+            const std::string target_path_name = target_path.string();
             const int pending_rename_target =
                 !target_path.empty()
-                    ? mylite_ownerless_innodb_pending_file_rename_target(target_path.c_str())
+                    ? mylite_ownerless_innodb_pending_file_rename_target(target_path_name.c_str())
                     : 0;
             if (pending_rename_target != 0) {
                 continue;
@@ -42691,7 +42692,8 @@ void pause_for_ownerless_test_fault(const char *fault_name) {
         if (end != ready_fd_value && *end == '\0' && ready_fd >= 0 &&
             ready_fd <= std::numeric_limits<int>::max()) {
             const char value = 'x';
-            static_cast<void>(::write(static_cast<int>(ready_fd), &value, sizeof(value)));
+            const auto bytes_written = ::write(static_cast<int>(ready_fd), &value, sizeof(value));
+            static_cast<void>(bytes_written);
             static_cast<void>(::close(static_cast<int>(ready_fd)));
         }
     }
@@ -42715,7 +42717,7 @@ void pause_for_ownerless_test_fault(const char *fault_name) {
     }
 
     for (;;) {
-        ::pause();
+        std::this_thread::sleep_for(std::chrono::hours(24));
     }
 #  else
     (void)fault_name;
@@ -42747,7 +42749,11 @@ bool ownerless_test_consumes_runtime_startup_failure_after_init_fault(void) {
     if (written <= 0 || static_cast<std::size_t>(written) >= buffer.size()) {
         return false;
     }
+#    if defined(_WIN32)
+    return ::_putenv_s("MYLITE_OWNERLESS_TEST_FAULT_COUNT", buffer.data()) == 0;
+#    else
     return ::setenv("MYLITE_OWNERLESS_TEST_FAULT_COUNT", buffer.data(), 1) == 0;
+#    endif
 #  else
     return false;
 #  endif

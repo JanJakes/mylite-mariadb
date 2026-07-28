@@ -14251,8 +14251,8 @@ static void test_ownerless_remote_implicit_insert_blocks_current_reads_and_write
             "UPDATE app.ownerless_implicit_insert SET value = 71 WHERE id = 7",
             "DELETE FROM app.ownerless_implicit_insert WHERE id = 7",
             "INSERT INTO app.ownerless_implicit_insert VALUES (7, 70)",
-            "INSERT INTO app.ownerless_implicit_insert VALUES (7, 70) "
-            "ON DUPLICATE KEY UPDATE value = VALUES(value)",
+            ("INSERT INTO app.ownerless_implicit_insert VALUES (7, 70) "
+             "ON DUPLICATE KEY UPDATE value = VALUES(value)"),
         };
         for (size_t index = 0; index < sizeof(conflicting_writes) / sizeof(conflicting_writes[0]);
              ++index) {
@@ -83797,7 +83797,7 @@ static void update_first_row_until_record_lock_grant_fault(
 
 static void hold_ownerless_open_until_released(open_database_paths paths, child_pipes pipes) {
     mylite_db *db;
-    mylite_result close_result = MYLITE_IOERR;
+    int close_result = MYLITE_IOERR;
     uint64_t close_deadline_ms;
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
