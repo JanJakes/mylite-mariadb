@@ -58,6 +58,7 @@ void print_exception(EXCEPTION_POINTERS *exception) {
         exception->ExceptionRecord->ExceptionCode,
         exception->ExceptionRecord->ExceptionAddress
     );
+    std::fflush(stderr);
 
 #if defined(_M_X64) || defined(__x86_64__)
     CONTEXT context = *exception->ContextRecord;
@@ -313,6 +314,7 @@ void test_unsupported_filesystem_contract(
     assert(!std::filesystem::exists(unsupported_path));
 
     print_phase("unsupported-filesystem-ordinary-open");
+    assert(_putenv_s("MYLITE_OWNERLESS_TEST_TRACE_OPEN", "1") == 0);
     const int ordinary_result = mylite_open(
         unsupported_path.string().c_str(),
         &db,
@@ -329,6 +331,7 @@ void test_unsupported_filesystem_contract(
     assert(ordinary_result == MYLITE_OK);
     print_phase("unsupported-filesystem-ordinary-close");
     assert(mylite_close(db) == MYLITE_OK);
+    assert(_putenv_s("MYLITE_OWNERLESS_TEST_TRACE_OPEN", "") == 0);
     std::filesystem::remove_all(unsupported_path);
     assert(_putenv_s("MYLITE_OWNERLESS_TEST_FILESYSTEM", "") == 0);
     print_phase("unsupported-filesystem-complete");

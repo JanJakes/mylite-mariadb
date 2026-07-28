@@ -6378,6 +6378,18 @@ bool allocate_ownerless_page_observation_token(std::uint64_t *out_token) {
         }
     }
 }
+
+void trace_ownerless_test_open_stage(const char *stage) {
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    const char *trace = std::getenv("MYLITE_OWNERLESS_TEST_TRACE_OPEN");
+    if (trace != nullptr && std::strcmp(trace, "1") == 0) {
+        std::fprintf(stderr, "mylite-ownerless open-stage=%s\n", stage);
+        std::fflush(stderr);
+    }
+#  else
+    (void)stage;
+#  endif
+}
 #endif
 
 int open_impl(
@@ -6406,6 +6418,7 @@ int open_impl(
     std::unique_ptr<mylite_db> db;
     bool runtime_started = false;
     try {
+        trace_ownerless_test_open_stage("allocate-begin");
         stage_start_ns = embedded_open_perf_start_ns();
         db.reset(new mylite_db());
         db->database_path = normalize_database_path(path).string();
@@ -6429,34 +6442,43 @@ int open_impl(
             EMBEDDED_OPEN_PERF_OPEN_ALLOCATE_NORMALIZE_NS,
             stage_start_ns
         );
+        trace_ownerless_test_open_stage("allocate-complete");
 
+        trace_ownerless_test_open_stage("runtime-path-begin");
         stage_start_ns = embedded_open_perf_start_ns();
         const int runtime_path_result = validate_runtime_database_path(*db);
         embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_OPEN_RUNTIME_PATH_NS, stage_start_ns);
+        trace_ownerless_test_open_stage("runtime-path-complete");
         if (runtime_path_result != MYLITE_OK) {
             return runtime_path_result;
         }
 
+        trace_ownerless_test_open_stage("filesystem-begin");
         stage_start_ns = embedded_open_perf_start_ns();
         const int ownerless_filesystem_result = validate_ownerless_filesystem_for_database(*db);
         embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_OPEN_PLATFORM_PROBE_NS, stage_start_ns);
+        trace_ownerless_test_open_stage("filesystem-complete");
         if (ownerless_filesystem_result != MYLITE_OK) {
             return ownerless_filesystem_result;
         }
 
+        trace_ownerless_test_open_stage("prepare-directory-begin");
         stage_start_ns = embedded_open_perf_start_ns();
         const int directory_result = prepare_database_directory(db->database_path, flags);
         embedded_open_perf_add_elapsed(
             EMBEDDED_OPEN_PERF_OPEN_PREPARE_DIRECTORY_NS,
             stage_start_ns
         );
+        trace_ownerless_test_open_stage("prepare-directory-complete");
         if (directory_result != MYLITE_OK) {
             return directory_result;
         }
 
+        trace_ownerless_test_open_stage("platform-begin");
         stage_start_ns = embedded_open_perf_start_ns();
         const int ownerless_platform_result = validate_ownerless_platform_for_database(*db);
         embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_OPEN_PLATFORM_PROBE_NS, stage_start_ns);
+        trace_ownerless_test_open_stage("platform-complete");
         if (ownerless_platform_result != MYLITE_OK) {
             return ownerless_platform_result;
         }
@@ -6498,12 +6520,14 @@ int open_impl(
                                                       ? k_ownerless_runtime_startup_attempts
                                                       : 1U;
         for (unsigned attempt = 0U; attempt < runtime_startup_attempts; ++attempt) {
+            trace_ownerless_test_open_stage("start-runtime-begin");
             stage_start_ns = embedded_open_perf_start_ns();
             runtime_result = start_runtime(*db, flags, config);
             embedded_open_perf_add_elapsed(
                 EMBEDDED_OPEN_PERF_OPEN_START_RUNTIME_NS,
                 stage_start_ns
             );
+            trace_ownerless_test_open_stage("start-runtime-complete");
             if (runtime_result == MYLITE_OK) {
                 break;
             }
@@ -6518,18 +6542,22 @@ int open_impl(
             return runtime_result;
         }
         runtime_started = true;
+        trace_ownerless_test_open_stage("connect-runtime-begin");
         stage_start_ns = embedded_open_perf_start_ns();
         const int connect_result = connect_runtime(*db);
         embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_OPEN_CONNECT_RUNTIME_NS, stage_start_ns);
+        trace_ownerless_test_open_stage("connect-runtime-complete");
         if (connect_result != MYLITE_OK) {
             close_connection(*db);
             finish_ownerless_runtime_open_initialization(*db);
             release_runtime();
             return connect_result;
         }
+        trace_ownerless_test_open_stage("system-tables-begin");
         stage_start_ns = embedded_open_perf_start_ns();
         const int system_tables_result = ensure_core_system_tables(*db);
         embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_OPEN_SYSTEM_TABLES_NS, stage_start_ns);
+        trace_ownerless_test_open_stage("system-tables-complete");
         if (system_tables_result != MYLITE_OK) {
             close_connection(*db);
             finish_ownerless_runtime_open_initialization(*db);
@@ -38752,6 +38780,7 @@ bool database_directory_is_empty(
 }
 
 int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *config) {
+    trace_ownerless_test_open_stage("runtime-entry");
     EmbeddedOpenPerfScope start_scope(EMBEDDED_OPEN_PERF_START_RUNTIME_TOTAL_NS);
     embedded_open_perf_add(EMBEDDED_OPEN_PERF_START_RUNTIME_CALLS, 1U);
     const std::uint64_t process_id = current_process_id();
@@ -38815,9 +38844,11 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
     const bool skip_database_lock = unsafe_disable_database_lock_for_tests();
     int lock_fd = -1;
     if (!memory_database && !skip_database_lock) {
+        trace_ownerless_test_open_stage("database-lock-begin");
         const std::uint64_t stage_start_ns = embedded_open_perf_start_ns();
         lock_fd = acquire_database_lock(db, db.database_path, config, ownerless_runtime_open);
         embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_START_DATABASE_LOCK_NS, stage_start_ns);
+        trace_ownerless_test_open_stage("database-lock-complete");
         if (lock_fd < 0) {
             return db.errcode;
         }
@@ -38894,11 +38925,13 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
         }
 
         std::uint64_t stage_start_ns = embedded_open_perf_start_ns();
+        trace_ownerless_test_open_stage("runtime-layout-begin");
         layout = create_runtime_layout(
             db.database_path,
             config,
             !ownerless_runtime_open && !skip_database_lock
         );
+        trace_ownerless_test_open_stage("runtime-arguments-begin");
         g_runtime.arguments =
             runtime_arguments(layout, ownerless_runtime_open, db.readonly_open, durability);
         g_runtime.argv = mutable_arguments(g_runtime.arguments);
@@ -38913,6 +38946,7 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
             EMBEDDED_OPEN_PERF_START_LAYOUT_ARGUMENTS_NS,
             stage_start_ns
         );
+        trace_ownerless_test_open_stage("runtime-layout-complete");
 
         if (ownerless_concurrency_runtime_needed) {
             stage_start_ns = embedded_open_perf_start_ns();
@@ -39672,11 +39706,13 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
             mylite_ownerless_innodb_set_startup_lsn_advance_limit(startup_lsn_advance_limit);
             ownerless_startup_lsn_advance_enabled = true;
         }
+        trace_ownerless_test_open_stage("mysql-server-init-begin");
         int init_result = mysql_server_init(
             static_cast<int>(g_runtime.argv.size()),
             g_runtime.argv.data(),
             groups
         );
+        trace_ownerless_test_open_stage("mysql-server-init-complete");
         if (init_result == 0 && ownerless_startup_lsn_advance_enabled &&
             post_init_lsn_advance_target != 0U &&
             mylite_ownerless_innodb_advance_external_lsn(post_init_lsn_advance_target) !=
