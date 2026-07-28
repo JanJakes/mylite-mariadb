@@ -332,6 +332,8 @@ void setup_log_handling()
 #if !defined(EMBEDDED_LIBRARY) || !defined(MYLITE_WITH_GTID_STATE) || \
     MYLITE_WITH_GTID_STATE
   rpl_global_gtid_binlog_state.init();
+#else
+  /* Disabled embedded GTID state has no initialization contract. */
 #endif
 }
 

@@ -79,12 +79,6 @@ set_touch_args
 normalize_tree "${root_dir}/mariadb"
 touch_one "${root_dir}/cmake/mariadb-embedded-baseline.cmake"
 touch_one "${root_dir}/tools/mariadb-embedded-build"
-if [ -f "${root_dir}/cmake/mariadb-embedded-windows.cmake" ]; then
-  touch_one "${root_dir}/cmake/mariadb-embedded-windows.cmake"
-fi
-if [ -f "${root_dir}/tools/mariadb-embedded-build.ps1" ]; then
-  touch_one "${root_dir}/tools/mariadb-embedded-build.ps1"
-fi
 
 echo "mariadb_embedded_source_mtime_epoch=${epoch}"
 echo "mariadb_embedded_source_mtime_stamp=${touch_stamp}"
