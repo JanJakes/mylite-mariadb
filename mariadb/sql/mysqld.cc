@@ -5243,6 +5243,7 @@ static int init_server_components()
   mylite_stage_start= mylite_embedded_startup_perf_start_ns();
   mylite_trace_server_components_stage("logging-begin");
   setup_log_handling();
+  mylite_trace_server_components_stage("logging-gtid-complete");
 
   /*
     Enable old-fashioned error log, except when the user has requested
@@ -5253,7 +5254,9 @@ static int init_server_components()
   if (opt_console)
    opt_error_log= false;
 #endif
+  mylite_trace_server_components_stage("logging-console-complete");
 
+  mylite_trace_server_components_stage("logging-error-log-begin");
   if (opt_error_log && !opt_abort)
   {
     if (!log_error_file_ptr[0])
@@ -5288,6 +5291,7 @@ static int init_server_components()
 #endif
     }
   }
+  mylite_trace_server_components_stage("logging-error-log-complete");
 
   /* set up the hook before initializing plugins which may use it */
   error_handler_hook= my_message_sql;
@@ -5295,16 +5299,19 @@ static int init_server_components()
 
   /* Set up hook to handle disk full */
   my_sleep_for_space= mariadb_sleep_for_space;
+  mylite_trace_server_components_stage("logging-hooks-complete");
 
   /*
     Print source revision hash, as one of the first lines, if not the
     first in error log, for troubleshooting and debugging purposes
   */
+  mylite_trace_server_components_stage("logging-startup-message-begin");
   if (!opt_help)
     sql_print_information("Starting MariaDB %s source revision %s "
                           "server_uid %s as process %lu",
                           server_version, SOURCE_REVISION, server_uid,
                           (ulong) getpid());
+  mylite_trace_server_components_stage("logging-startup-message-complete");
 
 #ifdef WITH_PERFSCHEMA_STORAGE_ENGINE
   /*
@@ -5317,6 +5324,7 @@ static int init_server_components()
   buffered_logs.print();
   buffered_logs.cleanup();
 #endif /* WITH_PERFSCHEMA_STORAGE_ENGINE */
+  mylite_trace_server_components_stage("logging-buffered-complete");
 
 #ifndef EMBEDDED_LIBRARY
   /*
@@ -5327,7 +5335,9 @@ static int init_server_components()
   my_charset_error_reporter= charset_error_reporter;
 #endif
 
+  mylite_trace_server_components_stage("logging-xid-begin");
   xid_cache_init();
+  mylite_trace_server_components_stage("logging-xid-complete");
   mylite_embedded_startup_perf_add_elapsed(
       MYLITE_EMBEDDED_STARTUP_PERF_SERVER_COMPONENTS_LOGGING_NS,
       mylite_stage_start);

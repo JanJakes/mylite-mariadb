@@ -155,6 +155,10 @@ jobs:
 
       - uses: ilammy/msvc-dev-cmd@v1
 
+      - name: Normalize Windows MariaDB archive source mtimes
+        shell: bash
+        run: tools/normalize-mariadb-embedded-cache-mtimes
+
       - name: Cache Windows MariaDB embedded build
         uses: actions/cache/restore@v4
         with:
