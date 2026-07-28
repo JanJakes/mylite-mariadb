@@ -1076,14 +1076,14 @@ corresponding transient lock.
 
 Current platform support is explicit and fail closed:
 
-- Ownerless read/write and shared read-only capabilities are exposed only by
-  embedded Linux builds.
-- The current filesystem allowlist is local ext4, XFS, tmpfs, and overlayfs.
-  Unknown, network, FUSE, and all other filesystem types are rejected before
-  the runtime primitive probe.
-- macOS/APFS and Windows ownerless modes are unsupported until platform-specific
-  process identity, wait/wake, mapping, locking, and mounted-filesystem evidence
-  exists. Those builds do not advertise ownerless capability bits.
+- Ownerless read/write and shared read-only capabilities are exposed by 64-bit
+  embedded Linux, macOS, and Windows builds.
+- The filesystem allowlist is local ext4, XFS, tmpfs, and overlay on Linux;
+  local APFS on macOS; and local NTFS on Windows. Unknown, network, FUSE, and
+  all other filesystem types are rejected before the runtime primitive probe
+  with `MYLITE_UNSUPPORTED_FILESYSTEM`.
+- Builds without a supported 64-bit ownerless platform backend reject
+  ownerless modes with `MYLITE_UNSUPPORTED_PLATFORM`.
 - Network filesystems remain unsupported unless a later slice proves mmap
   coherence, byte-range locks, fsync semantics, and stale-client behavior.
 
@@ -1096,20 +1096,22 @@ The open path must run a capability probe before enabling ownerless mode:
 - verify file growth/remap behavior,
 - reject the mode with a precise diagnostic if any required primitive fails.
 
-Current implementation first checks the Linux filesystem type against the
-allowlist, then runs this probe under the prepared database directory before
-the ownerless startup lock and embedded MariaDB runtime startup. A
-successful probe writes `concurrency/mylite-ownerless-platform.meta` with the
-database-directory device id and `required_primitives=1`; later ownerless opens
-reuse that proof and re-probe when the proof is absent or the database directory
-is on a different filesystem. The opener also remembers successful proofs per
-filesystem device inside the current process; a later fresh MyLite directory on
-the same device may skip the child-process probe, but it still writes its own
-directory-local proof metadata before ownerless mode is accepted. Unsafe
-probe-failure hooks bypass the process cache so negative coverage still
-exercises the real probe path. The open gate requires the correctness
-primitives; the fast wait backend remains high-performance evidence rather
-than a correctness requirement.
+Current implementation first checks the platform-specific filesystem type
+against the allowlist, then runs this probe under the prepared database
+directory before the ownerless startup lock and embedded MariaDB runtime
+startup. A successful format-2
+`concurrency/mylite-ownerless-platform.meta` proof binds the platform,
+filesystem kind, volume identity, required primitives, and process identity;
+later ownerless opens reuse that proof and re-probe when any bound identity
+changes. The opener also remembers successful proofs per filesystem volume
+inside the current process; a later fresh MyLite directory on the same volume
+may skip the child-process probe, but it still writes its own directory-local
+proof metadata before ownerless mode is accepted. Unsafe probe-failure hooks
+bypass the process cache so negative coverage still exercises the real probe
+path. The open gate requires the correctness primitives; the fast wait backend
+remains high-performance evidence rather than a correctness requirement. The
+detailed platform contracts and evidence are specified in
+[Ownerless Cross-Platform Filesystems](../ownerless-cross-platform-filesystems/specs.md).
 
 ## Architecture Options
 

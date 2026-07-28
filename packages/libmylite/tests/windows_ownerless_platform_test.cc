@@ -21,6 +21,11 @@ struct ChildProcess {
     PROCESS_INFORMATION info = {};
 };
 
+void print_phase(const char *phase) {
+    std::fprintf(stderr, "windows-ownerless phase=%s\n", phase);
+    std::fflush(stderr);
+}
+
 void test_platform_io_does_not_rewrite_cpp_streams(void) {
     std::istringstream input("x");
     char value = '\0';
@@ -153,11 +158,13 @@ int run_update_child(
     const std::filesystem::path &database_path,
     const std::filesystem::path &runtime_path
 ) {
+    print_phase("update-child-open");
     mylite_db *db = open_ownerless(database_path, runtime_path, false);
     for (unsigned iteration = 0; iteration < 25U; ++iteration) {
         exec_ok(db, "UPDATE app.platform_probe SET value = value + 1 WHERE id = 1");
     }
     assert(mylite_close(db) == MYLITE_OK);
+    print_phase("update-child-complete");
     return 0;
 }
 
@@ -166,6 +173,7 @@ int run_dead_writer_child(
     const std::filesystem::path &runtime_path,
     const std::filesystem::path &marker_path
 ) {
+    print_phase("dead-writer-child-open");
     mylite_db *db = open_ownerless(database_path, runtime_path, false);
     exec_ok(db, "START TRANSACTION");
     exec_ok(db, "UPDATE app.platform_probe SET value = value + 1000 WHERE id = 1");
@@ -176,6 +184,7 @@ int run_dead_writer_child(
         assert(std::fputs("ready", marker) >= 0);
         assert(std::fclose(marker) == 0);
     }
+    print_phase("dead-writer-child-ready");
     Sleep(INFINITE);
     return 2;
 }
@@ -184,6 +193,7 @@ void test_unsupported_filesystem_contract(
     const std::filesystem::path &root,
     const std::filesystem::path &runtime_path
 ) {
+    print_phase("unsupported-filesystem");
     const std::filesystem::path unsupported_path = root / "unsupported.mylite";
     assert(_putenv_s("MYLITE_OWNERLESS_TEST_FILESYSTEM", "unsupported") == 0);
     mylite_open_config config = open_config(runtime_path);
@@ -213,6 +223,7 @@ void test_unsupported_filesystem_contract(
 }
 
 void run_parent(void) {
+    print_phase("capabilities");
     const unsigned long long capabilities = mylite_capabilities();
     assert((capabilities & MYLITE_CAP_OWNERLESS_RW) != 0U);
     assert((capabilities & MYLITE_CAP_SHARED_READONLY) != 0U);
@@ -226,6 +237,7 @@ void run_parent(void) {
     std::filesystem::remove_all(root);
     assert(std::filesystem::create_directories(runtime_path));
 
+    print_phase("filesystem");
     mylite_ownerless_filesystem_info filesystem = {};
     assert(
         mylite_ownerless_probe_filesystem(root.string().c_str(), &filesystem) ==
@@ -236,6 +248,7 @@ void run_parent(void) {
     assert(filesystem.is_admitted == 1U);
     assert(filesystem.volume_identity != 0U);
 
+    print_phase("primitives");
     mylite_ownerless_probe_result probe = {};
     assert(
         mylite_ownerless_probe_directory(root.string().c_str(), &probe) == MYLITE_OWNERLESS_PROBE_OK
@@ -245,7 +258,9 @@ void run_parent(void) {
 
     test_unsupported_filesystem_contract(root, runtime_path);
 
+    print_phase("parent-open");
     mylite_db *parent = open_ownerless(database_path, runtime_path, true);
+    print_phase("schema");
     exec_ok(parent, "CREATE DATABASE app");
     exec_ok(
         parent,
@@ -255,12 +270,14 @@ void run_parent(void) {
     );
     exec_ok(parent, "INSERT INTO app.platform_probe VALUES (1, 1)");
 
+    print_phase("concurrent-updates");
     ChildProcess first = spawn_child("update", database_path, runtime_path);
     ChildProcess second = spawn_child("update", database_path, runtime_path);
     assert(wait_for_child(first) == 0U);
     assert(wait_for_child(second) == 0U);
     assert(query_unsigned(parent, "SELECT value FROM app.platform_probe WHERE id = 1") == 51U);
 
+    print_phase("dead-writer");
     ChildProcess dead_writer =
         spawn_child("dead-writer", database_path, runtime_path, dead_writer_marker);
     const auto marker_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
@@ -283,16 +300,20 @@ void run_parent(void) {
         ) == MYLITE_BUSY
     );
     assert(blocked == nullptr);
+    print_phase("parent-close");
     assert(mylite_close(parent) == MYLITE_OK);
 
+    print_phase("recovery-open");
     mylite_db *recovery = open_ownerless(database_path, runtime_path, false);
     assert(query_unsigned(recovery, "SELECT value FROM app.platform_probe WHERE id = 1") == 51U);
     assert(mylite_close(recovery) == MYLITE_OK);
 
+    print_phase("durable-reopen");
     mylite_db *reopened = open_ownerless(database_path, runtime_path, false);
     assert(query_unsigned(reopened, "SELECT value FROM app.platform_probe WHERE id = 1") == 51U);
     assert(mylite_close(reopened) == MYLITE_OK);
     std::filesystem::remove_all(root);
+    print_phase("complete");
 }
 
 } // namespace

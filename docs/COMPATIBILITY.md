@@ -3392,15 +3392,16 @@ that completed after older snapshot pins while those older pins still retain
 their original WAL boundary.
 
 The current experimental ownerless read/write surface admits persistent InnoDB
-application tables only on embedded Linux and a validated local ext4, XFS,
-tmpfs, or overlay filesystem. Persistent non-InnoDB application tables are
-rejected at `MYLITE_OPEN_OWNERLESS_RW` open time, and ownerless SQL rejects non-InnoDB
+application tables on 64-bit embedded Linux with a validated local ext4, XFS,
+tmpfs, or overlay filesystem; macOS with local APFS; and Windows with local
+NTFS. Persistent non-InnoDB application tables are rejected at
+`MYLITE_OPEN_OWNERLESS_RW` open time, and ownerless SQL rejects non-InnoDB
 `ENGINE=` clauses, non-InnoDB storage-engine default/override assignments,
 non-InnoDB `LIKE` and CTAS sources including derived CTAS sources,
 replacement-copy sources, and non-InnoDB-to-InnoDB conversion attempts before
-MariaDB executes them. MyISAM,
-Aria, MEMORY, CSV, and other non-InnoDB durable engines remain exclusive-mode
-surfaces until a per-engine ownerless coordination design exists.
+MariaDB executes them. MyISAM, Aria, MEMORY, CSV, and other non-InnoDB durable
+engines remain exclusive-mode surfaces until a per-engine ownerless
+coordination design exists.
 
 Ownerless DDL is an enumerated fail-closed surface. The recovery classifier
 admits only the DDL shapes represented by focused compatibility and crash

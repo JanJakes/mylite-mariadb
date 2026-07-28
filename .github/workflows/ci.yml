@@ -161,7 +161,9 @@ jobs:
 
       - name: Run Windows NTFS ownerless platform gate
         shell: pwsh
-        run: ctest --test-dir build/windows-ownerless --output-on-failure
+        run: >
+          ctest --test-dir build/windows-ownerless --output-on-failure
+          -R "^libmylite\\.windows-ownerless-platform$"
 
   embedded:
     name: ubuntu-embedded
