@@ -400,7 +400,9 @@ void run_parent(void) {
     test_unsupported_filesystem_contract(root, runtime_path);
 
     print_phase("parent-open");
+    assert(_putenv_s("MYLITE_OWNERLESS_TEST_TRACE_OPEN", "1") == 0);
     mylite_db *parent = open_ownerless(database_path, runtime_path, true);
+    assert(_putenv_s("MYLITE_OWNERLESS_TEST_TRACE_OPEN", "") == 0);
     print_phase("schema");
     exec_ok(parent, "CREATE DATABASE app");
     exec_ok(

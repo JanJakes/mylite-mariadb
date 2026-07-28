@@ -171,11 +171,18 @@ jobs:
         shell: bash
         run: tools/normalize-mariadb-embedded-cache-mtimes
 
-      - name: Build Windows MariaDB embedded archive
+      - name: Reuse exact Windows MariaDB embedded archive
+        if: steps.windows-mariadb-cache.outputs.cache-hit == 'true'
+        shell: pwsh
+        run: tools/mariadb-embedded-build.ps1 ensure
+
+      - name: Build changed Windows MariaDB embedded archive
+        if: steps.windows-mariadb-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: tools/mariadb-embedded-build.ps1 all
 
       - name: Save Windows MariaDB embedded build cache
+        if: steps.windows-mariadb-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: |
