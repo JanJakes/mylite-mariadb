@@ -13,9 +13,20 @@
 #include <cstring>
 #include <limits>
 
-#include <fcntl.h>
-#include <signal.h>
-#include <unistd.h>
+#if defined(_WIN32)
+#  include <windows.h>
+#elif defined(__APPLE__)
+#  include <libproc.h>
+#  include <signal.h>
+#  include <sys/proc.h>
+#  include <sys/sysctl.h>
+#  include <sys/time.h>
+#  include <unistd.h>
+#else
+#  include <fcntl.h>
+#  include <signal.h>
+#  include <unistd.h>
+#endif
 
 namespace {
 
@@ -34,7 +45,10 @@ constexpr std::size_t k_slot_start_time_offset = 40;
 constexpr std::size_t k_slot_boot_id_hash_offset = 48;
 constexpr std::uint32_t k_bootstrap_latch_owner_flag = 0x80000000U;
 constexpr std::uint32_t k_bootstrap_latch_owner_pid_mask = 0x7fffffffU;
-#if defined(__linux__)
+#if defined(_WIN32)
+constexpr std::uint64_t k_windows_process_identity_epoch = 0x57494e46494c4554ULL;
+#endif
+#if defined(__linux__) || defined(__APPLE__)
 constexpr std::uint64_t k_fnv_offset_basis = 14695981039346656037ULL;
 constexpr std::uint64_t k_fnv_prime = 1099511628211ULL;
 #endif
@@ -100,7 +114,7 @@ mylite_ownerless_process_identity slot_identity(const unsigned char *slot);
 bool read_process_start_time(std::uint64_t pid, std::uint64_t *out_start_time);
 bool read_current_boot_id_hash(std::uint64_t *out_boot_id_hash);
 bool process_is_zombie(std::uint64_t pid);
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
 std::uint64_t hash_bytes(const char *bytes, std::size_t size);
 #endif
 void clear_slot_locked(unsigned char *registry, unsigned char *slot);
@@ -129,8 +143,14 @@ int mylite_ownerless_process_identity_for_pid(
     std::uint64_t pid,
     mylite_ownerless_process_identity *out_identity
 ) {
-    if (out_identity == nullptr || pid == 0U ||
-        pid > static_cast<std::uint64_t>(std::numeric_limits<pid_t>::max())) {
+    if (
+        out_identity == nullptr || pid == 0U
+#if defined(_WIN32)
+        || pid > MAXDWORD
+#else
+        || pid > static_cast<std::uint64_t>(std::numeric_limits<pid_t>::max())
+#endif
+    ) {
         return MYLITE_OWNERLESS_PROCESS_REGISTRY_ERROR;
     }
 
@@ -148,10 +168,12 @@ int mylite_ownerless_process_identity_for_pid(
 }
 
 int mylite_ownerless_current_process_identity(mylite_ownerless_process_identity *out_identity) {
-    return mylite_ownerless_process_identity_for_pid(
-        static_cast<std::uint64_t>(::getpid()),
-        out_identity
-    );
+#if defined(_WIN32)
+    const std::uint64_t pid = GetCurrentProcessId();
+#else
+    const std::uint64_t pid = static_cast<std::uint64_t>(::getpid());
+#endif
+    return mylite_ownerless_process_identity_for_pid(pid, out_identity);
 }
 
 int mylite_ownerless_process_identity_is_alive(
@@ -161,7 +183,11 @@ int mylite_ownerless_process_identity_is_alive(
     (void)ctx;
     if (identity == nullptr || identity->pid == 0U || identity->start_time == 0U ||
         identity->boot_id_hash == 0U ||
+#if defined(_WIN32)
+        identity->pid > MAXDWORD) {
+#else
         identity->pid > static_cast<std::uint64_t>(std::numeric_limits<pid_t>::max())) {
+#endif
         return 0;
     }
 
@@ -179,11 +205,15 @@ int mylite_ownerless_process_identity_is_alive(
         return 0;
     }
 
+#if defined(_WIN32)
+    return 0;
+#else
     const pid_t process_id = static_cast<pid_t>(identity->pid);
     if (::kill(process_id, 0) == 0) {
         return 1;
     }
     return errno == EPERM ? 1 : 0;
+#endif
 }
 
 int mylite_ownerless_process_registry_latch_owner_is_alive(
@@ -921,12 +951,35 @@ mylite_ownerless_process_identity slot_identity(const unsigned char *slot) {
 }
 
 bool read_process_start_time(std::uint64_t pid, std::uint64_t *out_start_time) {
-    if (out_start_time == nullptr || pid == 0U ||
-        pid > static_cast<std::uint64_t>(std::numeric_limits<pid_t>::max())) {
+    if (
+        out_start_time == nullptr || pid == 0U
+#if defined(_WIN32)
+        || pid > MAXDWORD
+#else
+        || pid > static_cast<std::uint64_t>(std::numeric_limits<pid_t>::max())
+#endif
+    ) {
         return false;
     }
 
-#if defined(__linux__)
+#if defined(_WIN32)
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, static_cast<DWORD>(pid));
+    if (process == nullptr) {
+        return false;
+    }
+    FILETIME creation = {};
+    FILETIME exit = {};
+    FILETIME kernel = {};
+    FILETIME user = {};
+    const bool queried = GetProcessTimes(process, &creation, &exit, &kernel, &user) != FALSE;
+    CloseHandle(process);
+    if (!queried) {
+        return false;
+    }
+    *out_start_time =
+        (static_cast<std::uint64_t>(creation.dwHighDateTime) << 32U) | creation.dwLowDateTime;
+    return *out_start_time != 0U;
+#elif defined(__linux__)
     char stat_path[64];
     char stat_buffer[512];
     const int path_length = std::snprintf(
@@ -979,6 +1032,26 @@ bool read_process_start_time(std::uint64_t pid, std::uint64_t *out_start_time) {
             return false;
         }
     }
+#elif defined(__APPLE__)
+    proc_bsdinfo info = {};
+    const int bytes = proc_pidinfo(
+        static_cast<int>(pid),
+        PROC_PIDTBSDINFO,
+        0,
+        &info,
+        static_cast<int>(sizeof(info))
+    );
+    if (bytes != static_cast<int>(sizeof(info))) {
+        return false;
+    }
+    const std::uint64_t seconds = static_cast<std::uint64_t>(info.pbi_start_tvsec);
+    const std::uint64_t microseconds = static_cast<std::uint64_t>(info.pbi_start_tvusec);
+    if (seconds == 0U || microseconds >= 1000000U ||
+        seconds > (std::numeric_limits<std::uint64_t>::max() - microseconds) / 1000000U) {
+        return false;
+    }
+    *out_start_time = seconds * 1000000U + microseconds;
+    return *out_start_time != 0U;
 #else
     (void)pid;
 #endif
@@ -991,7 +1064,15 @@ bool read_current_boot_id_hash(std::uint64_t *out_boot_id_hash) {
         return false;
     }
 
-#if defined(__linux__)
+#if defined(_WIN32)
+    /*
+     * Windows process creation times are absolute FILETIME values. Unlike
+     * Linux start ticks, they already distinguish PID reuse across boots, so
+     * the epoch marker only identifies that interpretation of start_time.
+     */
+    *out_boot_id_hash = k_windows_process_identity_epoch;
+    return true;
+#elif defined(__linux__)
     const int fd = ::open("/proc/sys/kernel/random/boot_id", O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
         return false;
@@ -1008,17 +1089,42 @@ bool read_current_boot_id_hash(std::uint64_t *out_boot_id_hash) {
 
     *out_boot_id_hash = hash_bytes(buffer, static_cast<std::size_t>(bytes_read));
     return *out_boot_id_hash != 0U;
+#elif defined(__APPLE__)
+    int mib[2] = {CTL_KERN, KERN_BOOTTIME};
+    timeval boot_time = {};
+    std::size_t boot_time_size = sizeof(boot_time);
+    if (sysctl(mib, 2, &boot_time, &boot_time_size, nullptr, 0) != 0 ||
+        boot_time_size != sizeof(boot_time)) {
+        return false;
+    }
+    *out_boot_id_hash = hash_bytes(reinterpret_cast<const char *>(&boot_time), sizeof(boot_time));
+    return *out_boot_id_hash != 0U;
 #else
     return false;
 #endif
 }
 
 bool process_is_zombie(std::uint64_t pid) {
-    if (pid == 0U || pid > static_cast<std::uint64_t>(std::numeric_limits<pid_t>::max())) {
+    if (
+        pid == 0U
+#if defined(_WIN32)
+        || pid > MAXDWORD
+#else
+        || pid > static_cast<std::uint64_t>(std::numeric_limits<pid_t>::max())
+#endif
+    ) {
         return false;
     }
 
-#if defined(__linux__)
+#if defined(_WIN32)
+    HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(pid));
+    if (process == nullptr) {
+        return true;
+    }
+    const DWORD wait = WaitForSingleObject(process, 0);
+    CloseHandle(process);
+    return wait != WAIT_TIMEOUT;
+#elif defined(__linux__)
     char stat_path[64];
     char stat_buffer[512];
     const int path_length = std::snprintf(
@@ -1046,13 +1152,23 @@ bool process_is_zombie(std::uint64_t pid) {
 
     const char *close_paren = std::strrchr(stat_buffer, ')');
     return close_paren != nullptr && close_paren[1] == ' ' && close_paren[2] == 'Z';
+#elif defined(__APPLE__)
+    proc_bsdinfo info = {};
+    const int bytes = proc_pidinfo(
+        static_cast<int>(pid),
+        PROC_PIDTBSDINFO,
+        0,
+        &info,
+        static_cast<int>(sizeof(info))
+    );
+    return bytes == static_cast<int>(sizeof(info)) && info.pbi_status == SZOMB;
 #else
     (void)pid;
     return false;
 #endif
 }
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
 std::uint64_t hash_bytes(const char *bytes, std::size_t size) {
     std::uint64_t hash = k_fnv_offset_basis;
     for (std::size_t index = 0; index < size; ++index) {

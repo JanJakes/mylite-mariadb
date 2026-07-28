@@ -397,7 +397,7 @@ static int run_selected_tests(const char *selector) {
 
 static void run_all_tests(void) {
     run_baseline_tests();
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__) || defined(_WIN32)
     run_ownerless_directory_tests();
     run_ownerless_product_hook_tests();
     test_ownerless_innodb_lock_registry_handles_large_transactions();
@@ -479,6 +479,15 @@ static void test_capabilities(void) {
 }
 
 static void test_ownerless_filesystem_type_policy(void) {
+    char *root = make_temp_root();
+    mylite_ownerless_filesystem_info filesystem = {0};
+
+    assert(mylite_ownerless_probe_filesystem(root, &filesystem) == MYLITE_OWNERLESS_PROBE_OK);
+    assert(filesystem.size == sizeof(filesystem));
+    assert(filesystem.is_local == 1U);
+    assert(filesystem.is_admitted == 1U);
+    assert(filesystem.volume_identity != 0U);
+    assert(filesystem.name[0] != '\0');
 #if defined(__linux__)
     assert(mylite_ownerless_filesystem_type_is_validated_local(0xEF53U) == 1);
     assert(mylite_ownerless_filesystem_type_is_validated_local(0x58465342U) == 1);
@@ -488,7 +497,13 @@ static void test_ownerless_filesystem_type_policy(void) {
     assert(mylite_ownerless_filesystem_type_is_validated_local(0xFF534D42U) == 0);
     assert(mylite_ownerless_filesystem_type_is_validated_local(0x65735546U) == 0);
     assert(mylite_ownerless_filesystem_type_is_validated_local(0U) == 0);
+#elif defined(__APPLE__)
+    assert(filesystem.kind == MYLITE_OWNERLESS_FILESYSTEM_APFS);
+#elif defined(_WIN32)
+    assert(filesystem.kind == MYLITE_OWNERLESS_FILESYSTEM_NTFS);
 #endif
+    remove_tree(root);
+    free(root);
 }
 
 static void test_forked_handles_are_rejected(void) {

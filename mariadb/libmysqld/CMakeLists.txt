@@ -555,12 +555,14 @@ ADD_CONVENIENCE_LIBRARY(sql_embedded ${SQL_EMBEDDED_SOURCES})
 # MyLite omits server topology surfaces, dynamic UDF runtime, and embedded
 # SFORMAT(), keeping the profile serverless and exception-free. Unwind tables
 # are non-semantic in this target.
-TARGET_COMPILE_OPTIONS(sql_embedded PRIVATE
-  "$<$<COMPILE_LANGUAGE:C>:-fno-asynchronous-unwind-tables>"
-  "$<$<COMPILE_LANGUAGE:CXX>:-fno-asynchronous-unwind-tables>"
-  "$<$<COMPILE_LANGUAGE:C>:-fno-unwind-tables>"
-  "$<$<COMPILE_LANGUAGE:CXX>:-fno-unwind-tables>"
-  "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>")
+IF(NOT MSVC)
+  TARGET_COMPILE_OPTIONS(sql_embedded PRIVATE
+    "$<$<COMPILE_LANGUAGE:C>:-fno-asynchronous-unwind-tables>"
+    "$<$<COMPILE_LANGUAGE:CXX>:-fno-asynchronous-unwind-tables>"
+    "$<$<COMPILE_LANGUAGE:C>:-fno-unwind-tables>"
+    "$<$<COMPILE_LANGUAGE:CXX>:-fno-unwind-tables>"
+    "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>")
+ENDIF()
 DTRACE_INSTRUMENT(sql_embedded)
 ADD_DEPENDENCIES(sql_embedded GenError GenServerSource)
 IF(TARGET pcre2)

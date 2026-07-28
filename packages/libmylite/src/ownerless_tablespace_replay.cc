@@ -1,6 +1,7 @@
 #include "ownerless_tablespace_replay.h"
 
 #include "ownerless_page_log.h"
+#include "ownerless_platform_io.h"
 
 #include <algorithm>
 #include <array>
@@ -8,12 +9,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <fcntl.h>
 #include <filesystem>
 #include <map>
 #include <string>
-#include <sys/stat.h>
-#include <unistd.h>
 #include <utility>
 #include <vector>
 

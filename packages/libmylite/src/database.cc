@@ -9,6 +9,7 @@
 #include "ownerless_page_index.h"
 #include "ownerless_page_log.h"
 #include "ownerless_page_pin_registry.h"
+#include "ownerless_platform_io.h"
 #include "ownerless_process_registry.h"
 #include "ownerless_read_view_registry.h"
 #include "ownerless_redo_state.h"
@@ -41,13 +42,6 @@
 #include <thread>
 #include <utility>
 #include <vector>
-
-#include <fcntl.h>
-#include <signal.h>
-#include <sys/file.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
 #  include "mylite_ownerless_dictionary_hooks.h"
@@ -689,6 +683,7 @@ constexpr const char *k_innodb_temp_tablespace_filename = "ibtmp1";
 constexpr const char *k_statement_lock_filename = "mylite-statements.lock";
 constexpr const char *k_mariadb_base_ref = "mariadb-11.8.6";
 constexpr const char *k_metadata_format_line = "format=1";
+constexpr const char *k_ownerless_platform_metadata_format_line = "format=2";
 constexpr const char *k_concurrency_mode_line = "mode=exclusive";
 constexpr const char *k_innodb_log_file_size = "16777216";
 constexpr const char *k_innodb_temp_data_file_path = "ibtmp1:12M:autoextend";
@@ -1708,6 +1703,11 @@ struct RuntimeState {
 
 RuntimeState g_runtime;
 #if MYLITE_WITH_MARIADB_EMBEDDED
+struct OwnerlessPlatformProbeCacheKey {
+    std::uint32_t filesystem_kind = MYLITE_OWNERLESS_FILESYSTEM_UNKNOWN;
+    std::uint64_t volume_identity = 0;
+};
+
 std::mutex g_system_table_mutex;
 std::mutex g_ownerless_page_log_sync_anchor_mutex;
 OwnerlessPageLogSyncAnchor g_ownerless_page_log_sync_anchor;
@@ -1716,7 +1716,7 @@ OwnerlessCheckpointLsnSyncAnchor g_ownerless_checkpoint_lsn_sync_anchor;
 std::mutex g_ownerless_checkpoint_lsn_generation_cache_mutex;
 OwnerlessCheckpointLsnGenerationCache g_ownerless_checkpoint_lsn_generation_cache;
 std::mutex g_ownerless_platform_probe_device_cache_mutex;
-std::vector<std::uint64_t> g_ownerless_platform_probe_device_cache;
+std::vector<OwnerlessPlatformProbeCacheKey> g_ownerless_platform_probe_device_cache;
 std::atomic<std::uint64_t> g_ownerless_next_page_observation_token{1};
 #endif
 
@@ -2175,7 +2175,7 @@ namespace {
 constexpr char k_after_fork_error[] = "database handle cannot be used after fork";
 
 std::uint64_t current_process_id() {
-    return static_cast<std::uint64_t>(::getpid());
+    return mylite_ownerless_current_process_id();
 }
 
 bool database_handle_belongs_to_current_process(const mylite_db *db) {
@@ -2226,6 +2226,7 @@ bool ownerless_rw_open_available(void);
 #if MYLITE_WITH_MARIADB_EMBEDDED
 int validate_runtime_database_path(mylite_db &db);
 int prepare_database_directory(const std::filesystem::path &database_path, unsigned flags);
+int validate_ownerless_filesystem_for_database(mylite_db &db);
 int validate_ownerless_platform_for_database(mylite_db &db);
 int prepare_existing_database_directory(const std::filesystem::path &database_path, unsigned flags);
 int validate_database_layout(const std::filesystem::path &database_path);
@@ -2234,14 +2235,18 @@ int validate_database_metadata(const std::filesystem::path &metadata_path);
 bool ownerless_concurrency_runtime_files_exist(const std::filesystem::path &database_path);
 bool ownerless_platform_probe_proof_matches(
     const std::filesystem::path &metadata_path,
-    std::uint64_t database_device
+    const mylite_ownerless_filesystem_info &filesystem
 );
-bool ownerless_platform_probe_device_cache_matches(std::uint64_t database_device);
-void remember_ownerless_platform_probe_device(std::uint64_t database_device);
+bool ownerless_platform_probe_device_cache_matches(
+    const mylite_ownerless_filesystem_info &filesystem
+);
+void remember_ownerless_platform_probe_device(const mylite_ownerless_filesystem_info &filesystem);
 bool ownerless_platform_probe_test_failure_configured();
+bool ownerless_filesystem_test_failure_configured();
+const char *ownerless_platform_name();
 int write_ownerless_platform_probe_proof(
     const std::filesystem::path &metadata_path,
-    std::uint64_t database_device
+    const mylite_ownerless_filesystem_info &filesystem
 );
 int prepare_concurrency_metadata(const std::filesystem::path &database_path);
 int prepare_concurrency_shared_memory(
@@ -6432,6 +6437,13 @@ int open_impl(
         }
 
         stage_start_ns = embedded_open_perf_start_ns();
+        const int ownerless_filesystem_result = validate_ownerless_filesystem_for_database(*db);
+        embedded_open_perf_add_elapsed(EMBEDDED_OPEN_PERF_OPEN_PLATFORM_PROBE_NS, stage_start_ns);
+        if (ownerless_filesystem_result != MYLITE_OK) {
+            return ownerless_filesystem_result;
+        }
+
+        stage_start_ns = embedded_open_perf_start_ns();
         const int directory_result = prepare_database_directory(db->database_path, flags);
         embedded_open_perf_add_elapsed(
             EMBEDDED_OPEN_PERF_OPEN_PREPARE_DIRECTORY_NS,
@@ -6707,11 +6719,11 @@ int validate_open_args(
     }
 
     if ((flags & MYLITE_OPEN_SHARED_READONLY) != 0U && !shared_readonly_open_available()) {
-        return MYLITE_MISUSE;
+        return MYLITE_UNSUPPORTED_PLATFORM;
     }
 
     if ((flags & MYLITE_OPEN_OWNERLESS_RW) != 0U && !ownerless_rw_open_available()) {
-        return MYLITE_MISUSE;
+        return MYLITE_UNSUPPORTED_PLATFORM;
     }
 
     if (config != nullptr && config->size > 0U) {
@@ -6739,7 +6751,7 @@ int validate_open_args(
 }
 
 bool shared_readonly_open_available(void) {
-#if MYLITE_WITH_MARIADB_EMBEDDED && defined(__linux__)
+#if MYLITE_WITH_MARIADB_EMBEDDED && (defined(__linux__) || defined(__APPLE__) || defined(_WIN32))
     return true;
 #else
     return false;
@@ -6747,7 +6759,7 @@ bool shared_readonly_open_available(void) {
 }
 
 bool ownerless_rw_open_available(void) {
-#if MYLITE_WITH_MARIADB_EMBEDDED && defined(__linux__)
+#if MYLITE_WITH_MARIADB_EMBEDDED && (defined(__linux__) || defined(__APPLE__) || defined(_WIN32))
     return true;
 #else
     return false;
@@ -6755,6 +6767,44 @@ bool ownerless_rw_open_available(void) {
 }
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
+int validate_ownerless_filesystem_for_database(mylite_db &db) {
+    if (!db.ownerless_rw_open || is_memory_database_path(db.database_path)) {
+        return MYLITE_OK;
+    }
+
+    std::filesystem::path probe_path(db.database_path);
+    std::error_code error;
+    while (!std::filesystem::exists(probe_path, error)) {
+        if (error) {
+            set_error(db, MYLITE_IOERR, "database filesystem could not be inspected");
+            return MYLITE_IOERR;
+        }
+        const std::filesystem::path parent = probe_path.parent_path();
+        if (parent.empty() || parent == probe_path) {
+            set_error(db, MYLITE_IOERR, "database filesystem could not be inspected");
+            return MYLITE_IOERR;
+        }
+        probe_path = parent;
+    }
+    if (error) {
+        set_error(db, MYLITE_IOERR, "database filesystem could not be inspected");
+        return MYLITE_IOERR;
+    }
+
+    mylite_ownerless_filesystem_info filesystem = {};
+    const std::string probe_path_name = probe_path.string();
+    if (mylite_ownerless_probe_filesystem(probe_path_name.c_str(), &filesystem) !=
+        MYLITE_OWNERLESS_PROBE_OK) {
+        set_error(db, MYLITE_IOERR, "database filesystem could not be inspected");
+        return MYLITE_IOERR;
+    }
+    if (ownerless_filesystem_test_failure_configured() || filesystem.is_admitted == 0U) {
+        set_error(db, MYLITE_UNSUPPORTED_FILESYSTEM, "unsupported ownerless filesystem");
+        return MYLITE_UNSUPPORTED_FILESYSTEM;
+    }
+    return MYLITE_OK;
+}
+
 int validate_ownerless_platform_for_database(mylite_db &db) {
     if (!db.ownerless_rw_open || is_memory_database_path(db.database_path)) {
         return MYLITE_OK;
@@ -6762,21 +6812,15 @@ int validate_ownerless_platform_for_database(mylite_db &db) {
 
     const std::filesystem::path database_path(db.database_path);
     const std::string database_path_name = database_path.string();
-    struct stat database_stat = {};
-    if (::stat(database_path_name.c_str(), &database_stat) != 0) {
-        set_error(db, MYLITE_IOERR, "database directory could not be inspected");
-        return MYLITE_IOERR;
-    }
-    const std::uint64_t database_device = static_cast<std::uint64_t>(database_stat.st_dev);
-    std::uint64_t filesystem_type = 0U;
-    if (mylite_ownerless_probe_filesystem_type(database_path_name.c_str(), &filesystem_type) !=
+    mylite_ownerless_filesystem_info filesystem = {};
+    if (mylite_ownerless_probe_filesystem(database_path_name.c_str(), &filesystem) !=
         MYLITE_OWNERLESS_PROBE_OK) {
         set_error(db, MYLITE_IOERR, "database filesystem could not be inspected");
         return MYLITE_IOERR;
     }
-    if (mylite_ownerless_filesystem_type_is_validated_local(filesystem_type) == 0) {
-        set_error(db, MYLITE_ERROR, "ownerless mode requires a validated local filesystem");
-        return MYLITE_ERROR;
+    if (filesystem.is_admitted == 0U) {
+        set_error(db, MYLITE_UNSUPPORTED_FILESYSTEM, "unsupported ownerless filesystem");
+        return MYLITE_UNSUPPORTED_FILESYSTEM;
     }
 
     const std::filesystem::path concurrency_directory = database_path / k_concurrency_dir_name;
@@ -6793,15 +6837,15 @@ int validate_ownerless_platform_for_database(mylite_db &db) {
 
     const std::filesystem::path probe_metadata_path =
         concurrency_directory / k_ownerless_platform_probe_meta_filename;
-    if (ownerless_platform_probe_proof_matches(probe_metadata_path, database_device)) {
-        remember_ownerless_platform_probe_device(database_device);
+    if (ownerless_platform_probe_proof_matches(probe_metadata_path, filesystem)) {
+        remember_ownerless_platform_probe_device(filesystem);
         return MYLITE_OK;
     }
 
     if (!ownerless_platform_probe_test_failure_configured() &&
-        ownerless_platform_probe_device_cache_matches(database_device)) {
+        ownerless_platform_probe_device_cache_matches(filesystem)) {
         const int write_result =
-            write_ownerless_platform_probe_proof(probe_metadata_path, database_device);
+            write_ownerless_platform_probe_proof(probe_metadata_path, filesystem);
         if (write_result != MYLITE_OK) {
             set_error(
                 db,
@@ -6824,10 +6868,9 @@ int validate_ownerless_platform_for_database(mylite_db &db) {
         );
         return MYLITE_ERROR;
     }
-    remember_ownerless_platform_probe_device(database_device);
+    remember_ownerless_platform_probe_device(filesystem);
 
-    const int write_result =
-        write_ownerless_platform_probe_proof(probe_metadata_path, database_device);
+    const int write_result = write_ownerless_platform_probe_proof(probe_metadata_path, filesystem);
     if (write_result != MYLITE_OK) {
         set_error(
             db,
@@ -6842,7 +6885,7 @@ int validate_ownerless_platform_for_database(mylite_db &db) {
 
 bool ownerless_platform_probe_proof_matches(
     const std::filesystem::path &metadata_path,
-    std::uint64_t database_device
+    const mylite_ownerless_filesystem_info &filesystem
 ) {
     std::ifstream metadata(metadata_path, std::ios::binary);
     if (!metadata) {
@@ -6850,12 +6893,22 @@ bool ownerless_platform_probe_proof_matches(
     }
 
     bool has_format = false;
-    bool has_matching_device = false;
+    bool has_matching_platform = false;
+    bool has_matching_filesystem = false;
+    bool has_matching_volume = false;
     bool has_required_primitives = false;
     bool has_process_identity = false;
     for (std::string line; std::getline(metadata, line);) {
-        if (line == k_metadata_format_line) {
+        if (line == k_ownerless_platform_metadata_format_line) {
             has_format = true;
+            continue;
+        }
+        if (line == std::string("platform=") + ownerless_platform_name()) {
+            has_matching_platform = true;
+            continue;
+        }
+        if (line == std::string("filesystem=") + filesystem.name) {
+            has_matching_filesystem = true;
             continue;
         }
         if (line == "required_primitives=1") {
@@ -6866,11 +6919,11 @@ bool ownerless_platform_probe_proof_matches(
             has_process_identity = true;
             continue;
         }
-        if (line.rfind("database_device=", 0) == 0) {
+        if (line.rfind("volume_identity=", 0) == 0) {
             const std::string value = line.substr(16U);
             if (is_unsigned_decimal(value)) {
-                const unsigned long long device = std::strtoull(value.c_str(), nullptr, 10);
-                has_matching_device = device == database_device;
+                const unsigned long long volume = std::strtoull(value.c_str(), nullptr, 10);
+                has_matching_volume = volume == filesystem.volume_identity;
             }
         }
     }
@@ -6878,28 +6931,39 @@ bool ownerless_platform_probe_proof_matches(
         return false;
     }
 
-    return has_format && has_matching_device && has_required_primitives && has_process_identity;
+    return has_format && has_matching_platform && has_matching_filesystem && has_matching_volume &&
+           has_required_primitives && has_process_identity;
 }
 
-bool ownerless_platform_probe_device_cache_matches(std::uint64_t database_device) {
+bool ownerless_platform_probe_device_cache_matches(
+    const mylite_ownerless_filesystem_info &filesystem
+) {
     std::lock_guard<std::mutex> guard(g_ownerless_platform_probe_device_cache_mutex);
-    return std::find(
-               g_ownerless_platform_probe_device_cache.begin(),
-               g_ownerless_platform_probe_device_cache.end(),
-               database_device
-           ) != g_ownerless_platform_probe_device_cache.end();
+    return std::any_of(
+        g_ownerless_platform_probe_device_cache.begin(),
+        g_ownerless_platform_probe_device_cache.end(),
+        [&](const OwnerlessPlatformProbeCacheKey &key) {
+            return key.filesystem_kind == filesystem.kind &&
+                   key.volume_identity == filesystem.volume_identity;
+        }
+    );
 }
 
-void remember_ownerless_platform_probe_device(std::uint64_t database_device) {
+void remember_ownerless_platform_probe_device(const mylite_ownerless_filesystem_info &filesystem) {
     std::lock_guard<std::mutex> guard(g_ownerless_platform_probe_device_cache_mutex);
-    if (std::find(
+    if (std::any_of(
             g_ownerless_platform_probe_device_cache.begin(),
             g_ownerless_platform_probe_device_cache.end(),
-            database_device
-        ) != g_ownerless_platform_probe_device_cache.end()) {
+            [&](const OwnerlessPlatformProbeCacheKey &key) {
+                return key.filesystem_kind == filesystem.kind &&
+                       key.volume_identity == filesystem.volume_identity;
+            }
+        )) {
         return;
     }
-    g_ownerless_platform_probe_device_cache.push_back(database_device);
+    g_ownerless_platform_probe_device_cache.push_back(
+        OwnerlessPlatformProbeCacheKey{filesystem.kind, filesystem.volume_identity}
+    );
 }
 
 bool ownerless_platform_probe_test_failure_configured() {
@@ -6911,17 +6975,40 @@ bool ownerless_platform_probe_test_failure_configured() {
 #  endif
 }
 
+bool ownerless_filesystem_test_failure_configured() {
+#  if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    const char *failure = std::getenv("MYLITE_OWNERLESS_TEST_FILESYSTEM");
+    return failure != nullptr && std::strcmp(failure, "unsupported") == 0;
+#  else
+    return false;
+#  endif
+}
+
+const char *ownerless_platform_name() {
+#  if defined(__linux__)
+    return "linux";
+#  elif defined(__APPLE__)
+    return "macos";
+#  elif defined(_WIN32)
+    return "windows";
+#  else
+    return "unsupported";
+#  endif
+}
+
 int write_ownerless_platform_probe_proof(
     const std::filesystem::path &metadata_path,
-    std::uint64_t database_device
+    const mylite_ownerless_filesystem_info &filesystem
 ) {
     std::ofstream metadata(metadata_path, std::ios::binary | std::ios::trunc);
     if (!metadata) {
         return MYLITE_IOERR;
     }
 
-    metadata << k_metadata_format_line << "\n";
-    metadata << "database_device=" << database_device << "\n";
+    metadata << k_ownerless_platform_metadata_format_line << "\n";
+    metadata << "platform=" << ownerless_platform_name() << "\n";
+    metadata << "filesystem=" << filesystem.name << "\n";
+    metadata << "volume_identity=" << filesystem.volume_identity << "\n";
     metadata << "required_primitives=1\n";
     metadata << "process_identity=1\n";
     return metadata ? MYLITE_OK : MYLITE_IOERR;
@@ -12534,8 +12621,13 @@ bool acquire_fd_range_lock(
     lock.l_len = length;
     const auto deadline = ownerless_lock_deadline_after_ms(timeout_ms);
     unsigned poll_interval_ms = k_lock_poll_initial_interval_ms;
+#  if defined(F_OFD_SETLK)
+    constexpr int lock_command = F_OFD_SETLK;
+#  else
+    constexpr int lock_command = F_SETLK;
+#  endif
     for (;;) {
-        if (::fcntl(fd, F_SETLK, &lock) == 0) {
+        if (::fcntl(fd, lock_command, &lock) == 0) {
             return true;
         }
         if (errno != EACCES && errno != EAGAIN && errno != EINTR) {
@@ -12569,7 +12661,12 @@ void release_concurrency_lock(int lock_fd, off_t start, off_t length) {
     lock.l_whence = SEEK_SET;
     lock.l_start = start;
     lock.l_len = length;
-    static_cast<void>(::fcntl(lock_fd, F_SETLK, &lock));
+#  if defined(F_OFD_SETLK)
+    constexpr int lock_command = F_OFD_SETLK;
+#  else
+    constexpr int lock_command = F_SETLK;
+#  endif
+    static_cast<void>(::fcntl(lock_fd, lock_command, &lock));
     static_cast<void>(::close(lock_fd));
 }
 
@@ -19298,7 +19395,7 @@ int replay_concurrency_page_index(void *page_index, std::size_t page_index_size,
     context.page_index = page_index;
     context.page_index_size = page_index_size;
     context.owner_id = k_concurrency_bootstrap_latch_owner_id;
-    context.owner_generation = static_cast<std::uint64_t>(::getpid());
+    context.owner_generation = mylite_ownerless_current_process_id();
     const int replay_result = mylite_ownerless_page_log_replay_at(
         page_log_fd,
         k_concurrency_recovery_header_size,
@@ -20324,7 +20421,7 @@ int allocate_concurrency_process_slot(RuntimeState &runtime) {
     const int cleanup_result = ownerless_cleanup_dead_process_slots(
         runtime,
         k_concurrency_bootstrap_latch_owner_id,
-        static_cast<std::uint64_t>(::getpid()),
+        mylite_ownerless_current_process_id(),
         cleanup_live_peer_present,
         false,
         &cleaned_slots,
@@ -21745,27 +21842,7 @@ OwnerlessInnoDBFileState &ownerless_innodb_file_state_for_name(
 }
 
 bool ownerless_sync_directory(const std::filesystem::path &path) {
-    const int fd = ::open(path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    if (fd < 0) {
-        return false;
-    }
-
-    bool ok = true;
-    while (::fsync(fd) != 0) {
-        if (errno == EINTR) {
-            continue;
-        }
-        ok = false;
-        break;
-    }
-    while (::close(fd) != 0) {
-        if (errno == EINTR) {
-            continue;
-        }
-        ok = false;
-        break;
-    }
-    return ok;
+    return mylite_ownerless_sync_directory_path(path.string().c_str());
 }
 
 bool ownerless_rename_innodb_file_for_dictionary_repair(
@@ -35944,7 +36021,7 @@ mylite_ownerless_process_identity ownerless_process_identity_from_slot(const uns
 
 int ownerless_pid_is_alive(std::uint64_t pid, void *ctx) {
     (void)ctx;
-    if (pid == 0U || pid > static_cast<std::uint64_t>(std::numeric_limits<pid_t>::max())) {
+    if (pid == 0U) {
         return 0;
     }
     mylite_ownerless_process_identity identity = {};
@@ -35952,11 +36029,7 @@ int ownerless_pid_is_alive(std::uint64_t pid, void *ctx) {
         MYLITE_OWNERLESS_PROCESS_REGISTRY_OK) {
         return mylite_ownerless_process_identity_is_alive(&identity, nullptr);
     }
-    const pid_t process_id = static_cast<pid_t>(pid);
-    if (::kill(process_id, 0) == 0) {
-        return 1;
-    }
-    return errno == EPERM ? 1 : 0;
+    return mylite_ownerless_process_id_is_alive(pid) ? 1 : 0;
 }
 
 bool ownerless_runtime_has_dead_owner_state_requiring_recovery(RuntimeState &runtime) {
@@ -37902,7 +37975,12 @@ void release_fd_lock(int fd, off_t start, off_t length) {
     lock.l_whence = SEEK_SET;
     lock.l_start = start;
     lock.l_len = length;
-    static_cast<void>(::fcntl(fd, F_SETLK, &lock));
+#  if defined(F_OFD_SETLK)
+    constexpr int lock_command = F_OFD_SETLK;
+#  else
+    constexpr int lock_command = F_SETLK;
+#  endif
+    static_cast<void>(::fcntl(fd, lock_command, &lock));
 }
 
 std::uint64_t current_time_milliseconds(void) {
@@ -37960,6 +38038,7 @@ bool sync_fd_data(int fd) {
             return false;
         }
     }
+
     return true;
 }
 
@@ -42377,7 +42456,7 @@ void fill_database_uuid_bytes_from_fallback(std::array<unsigned char, 16> &bytes
     std::uint64_t state = static_cast<std::uint64_t>(
         std::chrono::high_resolution_clock::now().time_since_epoch().count()
     );
-    state ^= static_cast<std::uint64_t>(::getpid()) << 32U;
+    state ^= mylite_ownerless_current_process_id() << 32U;
     state ^= static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(&bytes));
 
     for (unsigned char &byte : bytes) {

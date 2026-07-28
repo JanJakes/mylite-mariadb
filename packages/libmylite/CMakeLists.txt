@@ -4,6 +4,12 @@ configure_file(
   @ONLY
 )
 
+if(WIN32)
+  set(mylite_ownerless_probe_source src/ownerless_probe_windows.cc)
+else()
+  set(mylite_ownerless_probe_source src/ownerless_probe.cc)
+endif()
+
 add_library(mylite STATIC
   src/database.cc
   src/ownerless_autoinc_registry.cc
@@ -15,8 +21,9 @@ add_library(mylite STATIC
   src/ownerless_page_index.cc
   src/ownerless_page_log.cc
   src/ownerless_page_pin_registry.cc
+  src/ownerless_platform_io.cc
   src/ownerless_process_registry.cc
-  src/ownerless_probe.cc
+  ${mylite_ownerless_probe_source}
   src/ownerless_read_view_registry.cc
   src/ownerless_redo_state.cc
   src/ownerless_tablespace_replay.cc
@@ -35,9 +42,17 @@ target_include_directories(mylite
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>"
     "$<INSTALL_INTERFACE:include>"
 )
+if(WIN32)
+  target_compile_definitions(mylite PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
+endif()
 
 mylite_configure_c_target(mylite)
 mylite_configure_cxx_target(mylite)
+if(MSVC)
+  target_compile_options(mylite PRIVATE
+    "$<$<COMPILE_LANGUAGE:CXX>:/FI${CMAKE_CURRENT_SOURCE_DIR}/src/ownerless_atomic_windows.h>"
+  )
+endif()
 mylite_link_mariadb_embedded(mylite)
 if(MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS)
   target_compile_definitions(mylite PRIVATE
@@ -106,6 +121,32 @@ if(BUILD_TESTING)
   add_test(NAME libmylite.api COMMAND mylite_api_test)
   add_test(NAME libmylite.version COMMAND mylite_version_test)
 
+  if(WIN32)
+    if(MYLITE_WITH_MARIADB_EMBEDDED)
+      add_executable(mylite_windows_ownerless_platform_test
+        tests/windows_ownerless_platform_test.cc
+      )
+      target_link_libraries(mylite_windows_ownerless_platform_test PRIVATE MyLite::mylite)
+      mylite_configure_cxx_target(mylite_windows_ownerless_platform_test)
+      mylite_enable_c_test_assertions(mylite_windows_ownerless_platform_test)
+      target_include_directories(mylite_windows_ownerless_platform_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+      )
+      target_compile_definitions(mylite_windows_ownerless_platform_test PRIVATE
+        NOMINMAX
+        WIN32_LEAN_AND_MEAN
+        _WIN32_WINNT=0x0A00
+      )
+      add_test(
+        NAME libmylite.windows-ownerless-platform
+        COMMAND mylite_windows_ownerless_platform_test
+      )
+      set_tests_properties(libmylite.windows-ownerless-platform PROPERTIES
+        LABELS "compat.concurrency;compat.platform;compat.filesystem;compat.crash-reopen"
+        TIMEOUT 300
+      )
+    endif()
+  else()
   add_executable(mylite_ownerless_mdl_session_test
     tests/ownerless_mdl_session_test.cc
     src/ownerless_latch.cc
@@ -3080,5 +3121,6 @@ if(BUILD_TESTING)
         endif()
       endforeach()
     endif()
+  endif()
   endif()
 endif()

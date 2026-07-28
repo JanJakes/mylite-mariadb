@@ -83895,11 +83895,16 @@ static void test_ownerless_rejects_directory_probe_failure(void) {
     char *database_path = path_join(root, "ownerless-platform-probe-failure.mylite");
     char *concurrency_path = path_join(database_path, "concurrency");
     char *probe_metadata_path = path_join(concurrency_path, "mylite-ownerless-platform.meta");
+    char *unsupported_database_path = path_join(root, "ownerless-unsupported-filesystem.mylite");
     open_database_paths primer_paths = {
         .database_path = primer_database_path,
         .runtime_root = runtime_root
     };
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    open_database_paths unsupported_paths = {
+        .database_path = unsupported_database_path,
+        .runtime_root = runtime_root
+    };
     mylite_db *db = NULL;
     struct stat database_stat;
     FILE *probe_metadata = NULL;
@@ -83966,8 +83971,47 @@ static void test_ownerless_rejects_directory_probe_failure(void) {
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(mylite_close(db) == MYLITE_OK);
     assert(path_exists(probe_metadata_path));
+
+    print_ownerless_platform_probe_phase("reject-unsupported-filesystem-before-create");
+    assert(setenv("MYLITE_OWNERLESS_TEST_FILESYSTEM", "unsupported", 1) == 0);
+    assert(
+        open_database_result(
+            unsupported_paths,
+            MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE | MYLITE_OPEN_OWNERLESS_RW,
+            &db
+        ) == MYLITE_UNSUPPORTED_FILESYSTEM
+    );
+    assert(db == NULL);
+    assert(!path_exists(unsupported_database_path));
+
+    print_ownerless_platform_probe_phase("ordinary-open-ignores-filesystem-hook");
+    db = open_database(unsupported_paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(path_exists(unsupported_database_path));
+    assert(
+        open_database_result(
+            unsupported_paths,
+            MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
+            &db
+        ) == MYLITE_UNSUPPORTED_FILESYSTEM
+    );
+    assert(db == NULL);
+    assert(
+        open_database_result(
+            unsupported_paths,
+            MYLITE_OPEN_READONLY | MYLITE_OPEN_SHARED_READONLY,
+            &db
+        ) == MYLITE_UNSUPPORTED_FILESYSTEM
+    );
+    assert(db == NULL);
+    assert(unsetenv("MYLITE_OWNERLESS_TEST_FILESYSTEM") == 0);
+
+    print_ownerless_platform_probe_phase("ownerless-open-after-filesystem-rejection");
+    db = open_database(unsupported_paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    assert(mylite_close(db) == MYLITE_OK);
     print_ownerless_platform_probe_phase("complete");
 
+    free(unsupported_database_path);
     free(primer_probe_metadata_path);
     free(primer_concurrency_path);
     free(primer_database_path);

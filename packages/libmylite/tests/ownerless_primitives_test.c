@@ -1203,6 +1203,7 @@ static void test_platform_probe_records_required_primitives(void) {
     assert(probe.size == sizeof(probe));
     assert(probe.mmap_shared_visibility == 1U);
     assert(probe.byte_range_locks == 1U);
+    assert(probe.lock_close_isolation == 1U);
     assert(probe.lock_release_on_exit == 1U);
     assert(probe.grow_remap == 1U);
     assert(probe.wait_backend == 1U);
@@ -1219,6 +1220,7 @@ static void test_directory_probe_records_required_primitives(void) {
     assert(probe.size == sizeof(probe));
     assert(probe.mmap_shared_visibility == 1U);
     assert(probe.byte_range_locks == 1U);
+    assert(probe.lock_close_isolation == 1U);
     assert(probe.lock_release_on_exit == 1U);
     assert(probe.grow_remap == 1U);
     assert(probe.wait_backend == 1U);

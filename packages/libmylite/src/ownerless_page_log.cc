@@ -1,5 +1,7 @@
 #include "ownerless_page_log.h"
 
+#include "ownerless_platform_io.h"
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -11,15 +13,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <fcntl.h>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <new>
-#include <sys/stat.h>
-#include <sys/types.h>
 #include <thread>
-#include <unistd.h>
 #include <unordered_map>
 #include <vector>
 
@@ -5494,8 +5492,8 @@ bool set_log_range_lock(int fd, short lock_type, off_t lock_start, bool wait) {
 #if defined(F_OFD_SETLK)
     constexpr int lock_command = F_OFD_SETLK;
 #else
-    /* Ownerless mode is currently exposed only by the Linux backend. Keep the
-       classic command as a build-only fallback for unsupported platforms. */
+    /* The macOS platform layer maps these one-byte records to handle-scoped
+       flock sidecars so an unrelated descriptor close cannot release them. */
     constexpr int lock_command = F_SETLK;
 #endif
     while (::fcntl(fd, lock_command, &lock) != 0) {

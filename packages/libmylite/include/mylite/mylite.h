@@ -40,6 +40,8 @@ typedef enum mylite_result {
     MYLITE_FULL = 13,
     MYLITE_CONSTRAINT = 19,
     MYLITE_MISUSE = 21,
+    MYLITE_UNSUPPORTED_FILESYSTEM = 24,
+    MYLITE_UNSUPPORTED_PLATFORM = 25,
     MYLITE_ROW = 100,
     MYLITE_DONE = 101
 } mylite_result;

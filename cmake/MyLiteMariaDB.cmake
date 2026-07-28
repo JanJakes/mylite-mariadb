@@ -15,13 +15,31 @@ set(MYLITE_MARIADB_CHARSETS_DIR
   CACHE PATH
   "MariaDB character set directory"
 )
+if(WIN32)
+  set(mylite_default_mariadb_profile
+    "${PROJECT_SOURCE_DIR}/cmake/mariadb-embedded-windows.cmake"
+  )
+else()
+  set(mylite_default_mariadb_profile
+    "${PROJECT_SOURCE_DIR}/cmake/mariadb-embedded-baseline.cmake"
+  )
+endif()
+set(MYLITE_MARIADB_PROFILE
+  "${mylite_default_mariadb_profile}"
+  CACHE FILEPATH
+  "MariaDB embedded initial-cache profile"
+)
 
 function(mylite_add_mariadb_embedded_target)
   if(NOT MYLITE_WITH_MARIADB_EMBEDDED)
     return()
   endif()
 
-  set(mariadb_embedded_archive "${MYLITE_MARIADB_BUILD_DIR}/libmysqld/libmariadbd.a")
+  if(WIN32)
+    set(mariadb_embedded_archive "${MYLITE_MARIADB_BUILD_DIR}/libmysqld/mysqlserver.lib")
+  else()
+    set(mariadb_embedded_archive "${MYLITE_MARIADB_BUILD_DIR}/libmysqld/libmariadbd.a")
+  endif()
   if(NOT EXISTS "${mariadb_embedded_archive}")
     message(FATAL_ERROR
       "MYLITE_WITH_MARIADB_EMBEDDED requires ${mariadb_embedded_archive}. "
@@ -41,17 +59,19 @@ function(mylite_add_mariadb_embedded_target)
     )
   endif()
 
-  find_package(OpenSSL REQUIRED)
-  find_package(PkgConfig REQUIRED)
   find_package(Threads REQUIRED)
-  pkg_check_modules(MYLITE_PCRE2 REQUIRED IMPORTED_TARGET libpcre2-8)
+  if(NOT WIN32)
+    find_package(OpenSSL REQUIRED)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(MYLITE_PCRE2 REQUIRED IMPORTED_TARGET libpcre2-8)
+  endif()
 
   if(NOT TARGET MyLite::MariaDBEmbedded)
     add_custom_target(mylite_mariadb_embedded_freshness
       COMMAND "${CMAKE_COMMAND}"
         "-DMYLITE_MARIADB_SOURCE_DIR=${PROJECT_SOURCE_DIR}/mariadb"
         "-DMYLITE_MARIADB_ARCHIVE=${mariadb_embedded_archive}"
-        "-DMYLITE_MARIADB_PROFILE=${PROJECT_SOURCE_DIR}/cmake/mariadb-embedded-baseline.cmake"
+        "-DMYLITE_MARIADB_PROFILE=${MYLITE_MARIADB_PROFILE}"
         -P "${PROJECT_SOURCE_DIR}/cmake/check-mariadb-embedded-freshness.cmake"
       COMMENT "Checking MariaDB embedded archive freshness"
       VERBATIM
@@ -76,15 +96,29 @@ function(mylite_add_mariadb_embedded_target)
         "${PROJECT_SOURCE_DIR}/mariadb/include;${MYLITE_MARIADB_BUILD_DIR}/include;${PROJECT_SOURCE_DIR}/mariadb/libmysqld;${PROJECT_SOURCE_DIR}/mariadb/sql;${PROJECT_SOURCE_DIR}/mariadb/storage/innobase/include"
     )
     target_compile_definitions(mylite_mariadb_embedded INTERFACE EMBEDDED_LIBRARY)
-    target_link_libraries(mylite_mariadb_embedded INTERFACE
-      OpenSSL::Crypto
-      PkgConfig::MYLITE_PCRE2
-      Threads::Threads
-    )
-    if(mylite_mariadb_with_vio_tls)
-      target_link_libraries(mylite_mariadb_embedded INTERFACE OpenSSL::SSL)
+    target_link_libraries(mylite_mariadb_embedded INTERFACE Threads::Threads)
+    if(WIN32)
+      target_link_libraries(mylite_mariadb_embedded INTERFACE
+        advapi32
+        bcrypt
+        crypt32
+        dbghelp
+        iphlpapi
+        kernel32
+        shlwapi
+        synchronization
+        ws2_32
+      )
+    else()
+      target_link_libraries(mylite_mariadb_embedded INTERFACE
+        OpenSSL::Crypto
+        PkgConfig::MYLITE_PCRE2
+      )
+      if(mylite_mariadb_with_vio_tls)
+        target_link_libraries(mylite_mariadb_embedded INTERFACE OpenSSL::SSL)
+      endif()
     endif()
-    if(NOT APPLE)
+    if(NOT APPLE AND NOT WIN32)
       target_link_libraries(mylite_mariadb_embedded INTERFACE dl m)
       check_function_exists(crypt MYLITE_HAVE_CRYPT_IN_LIBC)
       if(NOT MYLITE_HAVE_CRYPT_IN_LIBC)

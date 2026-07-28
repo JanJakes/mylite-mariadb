@@ -63,6 +63,101 @@ jobs:
           tools/require-cmake-release-build build/prod
           ctest --preset prod
 
+  macos-ownerless-platform:
+    name: macos-ownerless-apfs
+    runs-on: macos-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Audit CI production build configuration
+        run: tools/check-ci-production-builds
+
+      - name: Install embedded build tools
+        run: brew install bison ninja openssl@3 pcre2 pkg-config
+
+      - name: Normalize macOS MariaDB archive source mtimes
+        run: tools/normalize-mariadb-embedded-cache-mtimes
+
+      - name: Cache macOS MariaDB embedded archive build
+        uses: actions/cache@v4
+        with:
+          path: build/mariadb-embedded
+          key: ${{ runner.os }}-ownerless-platform-${{ hashFiles('mariadb/**', 'cmake/mariadb-embedded-baseline.cmake', 'tools/mariadb-embedded-build') }}
+
+      - name: Build macOS MariaDB embedded archive
+        run: |
+          OPENSSL_PREFIX="$(brew --prefix openssl@3)"
+          export CMAKE_PREFIX_PATH="$OPENSSL_PREFIX"
+          export OPENSSL_ROOT_DIR="$OPENSSL_PREFIX"
+          export PKG_CONFIG_PATH="$OPENSSL_PREFIX/lib/pkgconfig"
+          tools/mariadb-embedded-build ensure
+
+      - name: Configure macOS ownerless platform gate
+        run: |
+          OPENSSL_PREFIX="$(brew --prefix openssl@3)"
+          export CMAKE_PREFIX_PATH="$OPENSSL_PREFIX"
+          export OPENSSL_ROOT_DIR="$OPENSSL_PREFIX"
+          export PKG_CONFIG_PATH="$OPENSSL_PREFIX/lib/pkgconfig"
+          cmake --preset ownerless-test-hooks
+
+      - name: Verify macOS ownerless production build types
+        run: |
+          tools/require-cmake-build-type MinSizeRel build/mariadb-embedded
+          tools/require-cmake-release-build build/ownerless-test-hooks
+
+      - name: Build macOS ownerless platform gate
+        run: |
+          cmake --build --preset ownerless-test-hooks --target \
+            mylite_ownerless_primitives_test \
+            mylite_embedded_open_close_test \
+            mylite_ownerless_cross_process_sql_test
+
+      - name: Run macOS APFS ownerless platform gate
+        run: |
+          set -euo pipefail
+          build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_primitives_test
+          build/ownerless-test-hooks/packages/libmylite/mylite_embedded_open_close_test baseline
+          build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test different-rows
+          build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test crash-writer
+          build/ownerless-test-hooks/packages/libmylite/mylite_ownerless_cross_process_sql_test platform-probe-failure
+
+  windows-ownerless-platform:
+    name: windows-ownerless-ntfs
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Audit CI production build configuration
+        shell: bash
+        run: tools/check-ci-production-builds
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build Windows MariaDB embedded archive
+        shell: pwsh
+        run: tools/mariadb-embedded-build.ps1 all
+
+      - name: Configure Windows ownerless platform gate
+        shell: pwsh
+        run: >
+          cmake -S . -B build/windows-ownerless -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DMYLITE_WITH_MARIADB_EMBEDDED=ON
+          -DMYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS=ON
+          -DMYLITE_WARNINGS_AS_ERRORS=ON
+
+      - name: Build Windows ownerless platform gate
+        shell: pwsh
+        run: cmake --build build/windows-ownerless
+
+      - name: Run Windows NTFS ownerless platform gate
+        shell: pwsh
+        run: ctest --test-dir build/windows-ownerless --output-on-failure
+
   embedded:
     name: ubuntu-embedded
     runs-on: ubuntu-24.04

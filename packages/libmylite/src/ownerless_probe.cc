@@ -1,5 +1,6 @@
 #include "ownerless_probe.h"
 
+#include "ownerless_platform_io.h"
 #include "ownerless_process_registry.h"
 #include "ownerless_wait.h"
 
@@ -22,6 +23,8 @@
 #if defined(__linux__)
 #  include <linux/magic.h>
 #  include <sys/vfs.h>
+#elif defined(__APPLE__)
+#  include <sys/mount.h>
 #endif
 
 #ifndef MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
@@ -41,12 +44,14 @@ void compute_ownerless_probe_summary(mylite_ownerless_probe_result &result);
 bool probe_mmap_shared_visibility(const std::string &root);
 bool probe_byte_range_locks(const std::string &root);
 bool probe_lock_release_on_exit(const std::string &root);
+bool probe_lock_close_isolation(const std::string &root);
 bool probe_grow_remap(const std::string &root);
 bool probe_wait_backend(const std::string &root);
 bool probe_process_identity();
 bool set_write_lock(int fd, off_t start, off_t length);
 int try_write_lock(int fd, off_t start, off_t length);
 bool unlock_range(int fd, off_t start, off_t length);
+int ownerless_lock_command();
 std::string make_temp_root(void);
 std::string make_temp_root_under(const std::string &parent);
 std::string path_join(const std::string &directory, const char *name);
@@ -111,6 +116,69 @@ int mylite_ownerless_probe_filesystem_type(const char *directory, uint64_t *out_
 #endif
 }
 
+int mylite_ownerless_probe_filesystem(
+    const char *directory,
+    mylite_ownerless_filesystem_info *out_info
+) {
+    if (directory == nullptr || directory[0] == '\0' || out_info == nullptr) {
+        return MYLITE_OWNERLESS_PROBE_ERROR;
+    }
+
+    std::memset(out_info, 0, sizeof(*out_info));
+    out_info->size = static_cast<std::uint32_t>(sizeof(*out_info));
+
+#if defined(__linux__)
+    struct statfs filesystem = {};
+    struct stat directory_stat = {};
+    if (statfs(directory, &filesystem) != 0 || stat(directory, &directory_stat) != 0) {
+        return MYLITE_OWNERLESS_PROBE_ERROR;
+    }
+
+    out_info->is_local = 1U;
+    out_info->volume_identity = static_cast<std::uint64_t>(directory_stat.st_dev);
+    if (filesystem.f_type == EXT4_SUPER_MAGIC) {
+        out_info->kind = MYLITE_OWNERLESS_FILESYSTEM_EXT4;
+        std::strncpy(out_info->name, "ext4", sizeof(out_info->name) - 1U);
+    } else if (filesystem.f_type == XFS_SUPER_MAGIC) {
+        out_info->kind = MYLITE_OWNERLESS_FILESYSTEM_XFS;
+        std::strncpy(out_info->name, "xfs", sizeof(out_info->name) - 1U);
+    } else if (filesystem.f_type == TMPFS_MAGIC) {
+        out_info->kind = MYLITE_OWNERLESS_FILESYSTEM_TMPFS;
+        std::strncpy(out_info->name, "tmpfs", sizeof(out_info->name) - 1U);
+    } else if (filesystem.f_type == OVERLAYFS_SUPER_MAGIC) {
+        out_info->kind = MYLITE_OWNERLESS_FILESYSTEM_OVERLAY;
+        std::strncpy(out_info->name, "overlay", sizeof(out_info->name) - 1U);
+    } else {
+        std::snprintf(
+            out_info->name,
+            sizeof(out_info->name),
+            "linux-0x%llx",
+            static_cast<unsigned long long>(filesystem.f_type)
+        );
+    }
+    out_info->is_admitted = out_info->kind != MYLITE_OWNERLESS_FILESYSTEM_UNKNOWN ? 1U : 0U;
+    return MYLITE_OWNERLESS_PROBE_OK;
+#elif defined(__APPLE__)
+    struct statfs filesystem = {};
+    struct stat directory_stat = {};
+    if (statfs(directory, &filesystem) != 0 || stat(directory, &directory_stat) != 0) {
+        return MYLITE_OWNERLESS_PROBE_ERROR;
+    }
+
+    out_info->is_local = (filesystem.f_flags & MNT_LOCAL) != 0U ? 1U : 0U;
+    out_info->volume_identity = static_cast<std::uint64_t>(directory_stat.st_dev);
+    std::strncpy(out_info->name, filesystem.f_fstypename, sizeof(out_info->name) - 1U);
+    if (out_info->is_local != 0U && std::strcmp(filesystem.f_fstypename, "apfs") == 0) {
+        out_info->kind = MYLITE_OWNERLESS_FILESYSTEM_APFS;
+        out_info->is_admitted = 1U;
+    }
+    return MYLITE_OWNERLESS_PROBE_OK;
+#else
+    (void)directory;
+    return MYLITE_OWNERLESS_PROBE_ERROR;
+#endif
+}
+
 int mylite_ownerless_filesystem_type_is_validated_local(uint64_t filesystem_type) {
 #if defined(__linux__)
     return filesystem_type == static_cast<std::uint64_t>(EXT4_SUPER_MAGIC) ||
@@ -134,6 +202,7 @@ int run_ownerless_probe(const std::string &root, mylite_ownerless_probe_result *
     result->mmap_shared_visibility = probe_mmap_shared_visibility(root) ? 1U : 0U;
     result->byte_range_locks = probe_byte_range_locks(root) ? 1U : 0U;
     result->lock_release_on_exit = probe_lock_release_on_exit(root) ? 1U : 0U;
+    result->lock_close_isolation = probe_lock_close_isolation(root) ? 1U : 0U;
     result->grow_remap = probe_grow_remap(root) ? 1U : 0U;
     result->wait_backend = probe_wait_backend(root) ? 1U : 0U;
     result->fast_wait_backend = mylite_ownerless_wait_backend_is_fast() != 0 ? 1U : 0U;
@@ -154,6 +223,8 @@ void apply_ownerless_probe_test_failures(mylite_ownerless_probe_result &result) 
         result.byte_range_locks = 0U;
     } else if (std::strcmp(failure, "lock-release-on-exit") == 0) {
         result.lock_release_on_exit = 0U;
+    } else if (std::strcmp(failure, "lock-close-isolation") == 0) {
+        result.lock_close_isolation = 0U;
     } else if (std::strcmp(failure, "grow-remap") == 0) {
         result.grow_remap = 0U;
     } else if (std::strcmp(failure, "wait-backend") == 0) {
@@ -172,8 +243,9 @@ void apply_ownerless_probe_test_failures(mylite_ownerless_probe_result &result) 
 void compute_ownerless_probe_summary(mylite_ownerless_probe_result &result) {
     result.required_primitives =
         result.mmap_shared_visibility != 0U && result.byte_range_locks != 0U &&
-                result.lock_release_on_exit != 0U && result.grow_remap != 0U &&
-                result.wait_backend != 0U && result.process_identity != 0U
+                result.lock_release_on_exit != 0U && result.lock_close_isolation != 0U &&
+                result.grow_remap != 0U && result.wait_backend != 0U &&
+                result.process_identity != 0U
             ? 1U
             : 0U;
     result.platform_candidate =
@@ -276,7 +348,7 @@ bool probe_byte_range_locks(const std::string &root) {
     if (fd < 0) {
         return false;
     }
-    if (!truncate_file(fd, k_probe_page_size_offset) || !set_write_lock(fd, 11, 7)) {
+    if (!truncate_file(fd, k_probe_page_size_offset) || !set_write_lock(fd, 11, 1)) {
         static_cast<void>(close(fd));
         cleanup_probe_file(path);
         return false;
@@ -284,7 +356,7 @@ bool probe_byte_range_locks(const std::string &root) {
 
     const pid_t child = fork();
     if (child < 0) {
-        static_cast<void>(unlock_range(fd, 11, 7));
+        static_cast<void>(unlock_range(fd, 11, 1));
         static_cast<void>(close(fd));
         cleanup_probe_file(path);
         return false;
@@ -294,13 +366,13 @@ bool probe_byte_range_locks(const std::string &root) {
         if (child_fd < 0) {
             _exit(1);
         }
-        const int lock_result = try_write_lock(child_fd, 11, 7);
+        const int lock_result = try_write_lock(child_fd, 11, 1);
         static_cast<void>(close(child_fd));
         _exit(lock_result == EAGAIN || lock_result == EACCES ? 0 : 1);
     }
 
     const bool ok = wait_for_child_success(child);
-    static_cast<void>(unlock_range(fd, 11, 7));
+    static_cast<void>(unlock_range(fd, 11, 1));
     static_cast<void>(close(fd));
     cleanup_probe_file(path);
     return ok;
@@ -332,7 +404,7 @@ bool probe_lock_release_on_exit(const std::string &root) {
     if (child == 0) {
         close_pipe(ready_pipe[0]);
         const int child_fd = open_probe_file(path);
-        if (child_fd < 0 || !set_write_lock(child_fd, 23, 5) || !signal_pipe(ready_pipe[1])) {
+        if (child_fd < 0 || !set_write_lock(child_fd, 23, 1) || !signal_pipe(ready_pipe[1])) {
             if (child_fd >= 0) {
                 static_cast<void>(close(child_fd));
             }
@@ -344,12 +416,58 @@ bool probe_lock_release_on_exit(const std::string &root) {
     close_pipe(ready_pipe[1]);
     const bool ready = wait_for_pipe(ready_pipe[0]);
     const bool child_ok = wait_for_child_success(child);
-    const bool released = ready && child_ok && set_write_lock(fd, 23, 5) && unlock_range(fd, 23, 5);
+    const bool released = ready && child_ok && set_write_lock(fd, 23, 1) && unlock_range(fd, 23, 1);
     const bool ok = ready && child_ok && released;
 
     static_cast<void>(close(fd));
     cleanup_probe_file(path);
     return ok;
+}
+
+bool probe_lock_close_isolation(const std::string &root) {
+    const std::string path = path_join(root, "lock-close-isolation.bin");
+    const int lock_fd = open_probe_file(path);
+    const int unrelated_fd = open_probe_file(path);
+    if (lock_fd < 0 || unrelated_fd < 0) {
+        if (lock_fd >= 0) {
+            static_cast<void>(close(lock_fd));
+        }
+        if (unrelated_fd >= 0) {
+            static_cast<void>(close(unrelated_fd));
+        }
+        cleanup_probe_file(path);
+        return false;
+    }
+    if (!set_write_lock(lock_fd, 41, 1)) {
+        static_cast<void>(close(unrelated_fd));
+        static_cast<void>(close(lock_fd));
+        cleanup_probe_file(path);
+        return false;
+    }
+    static_cast<void>(close(unrelated_fd));
+
+    const pid_t child = fork();
+    if (child < 0) {
+        static_cast<void>(unlock_range(lock_fd, 41, 1));
+        static_cast<void>(close(lock_fd));
+        cleanup_probe_file(path);
+        return false;
+    }
+    if (child == 0) {
+        const int child_fd = open_probe_file(path);
+        if (child_fd < 0) {
+            _exit(1);
+        }
+        const int lock_result = try_write_lock(child_fd, 41, 1);
+        static_cast<void>(close(child_fd));
+        _exit(lock_result == EACCES || lock_result == EAGAIN ? 0 : 1);
+    }
+
+    const bool child_ok = wait_for_child_success(child);
+    const bool unlock_ok = unlock_range(lock_fd, 41, 1);
+    static_cast<void>(close(lock_fd));
+    cleanup_probe_file(path);
+    return child_ok && unlock_ok;
 }
 
 bool probe_grow_remap(const std::string &root) {
@@ -496,7 +614,7 @@ int try_write_lock(int fd, off_t start, off_t length) {
     lock.l_start = start;
     lock.l_len = length;
 
-    if (fcntl(fd, F_SETLK, &lock) == 0) {
+    if (fcntl(fd, ownerless_lock_command(), &lock) == 0) {
         return 0;
     }
     return errno;
@@ -509,7 +627,15 @@ bool unlock_range(int fd, off_t start, off_t length) {
     lock.l_start = start;
     lock.l_len = length;
 
-    return fcntl(fd, F_SETLK, &lock) == 0;
+    return fcntl(fd, ownerless_lock_command(), &lock) == 0;
+}
+
+int ownerless_lock_command() {
+#if defined(F_OFD_SETLK)
+    return F_OFD_SETLK;
+#else
+    return F_SETLK;
+#endif
 }
 
 std::string make_temp_root(void) {
@@ -590,6 +716,9 @@ void close_pipe(int pipe_fd) {
 }
 
 void cleanup_probe_file(const std::string &path) {
+#if defined(__APPLE__)
+    mylite_ownerless_cleanup_range_lock_artifacts(path.c_str());
+#endif
     static_cast<void>(unlink(path.c_str()));
 }
 

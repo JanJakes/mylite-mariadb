@@ -87,7 +87,18 @@ static void assert_open_validation(void) {
                 &db,
                 MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
                 NULL
-            ) == MYLITE_MISUSE
+            ) == MYLITE_UNSUPPORTED_PLATFORM
+        );
+        assert(db == NULL);
+    }
+    if ((capabilities & MYLITE_CAP_SHARED_READONLY) == 0U) {
+        assert(
+            mylite_open(
+                "unused.mylite",
+                &db,
+                MYLITE_OPEN_READONLY | MYLITE_OPEN_SHARED_READONLY,
+                NULL
+            ) == MYLITE_UNSUPPORTED_PLATFORM
         );
         assert(db == NULL);
     }
