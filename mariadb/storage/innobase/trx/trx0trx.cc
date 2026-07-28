@@ -78,7 +78,8 @@ static bool mylite_ownerless_consume_rollback_serialization_fault()
       std::getenv("MYLITE_OWNERLESS_TEST_FAULT_COUNT");
   if (remaining_value == nullptr)
   {
-    static_cast<void>(unsetenv("MYLITE_OWNERLESS_TEST_FAULT"));
+    static_cast<void>(mylite_ownerless_innodb_test_unsetenv(
+        "MYLITE_OWNERLESS_TEST_FAULT"));
     return true;
   }
 
@@ -89,8 +90,10 @@ static bool mylite_ownerless_consume_rollback_serialization_fault()
 
   if (remaining == 1)
   {
-    static_cast<void>(unsetenv("MYLITE_OWNERLESS_TEST_FAULT"));
-    static_cast<void>(unsetenv("MYLITE_OWNERLESS_TEST_FAULT_COUNT"));
+    static_cast<void>(mylite_ownerless_innodb_test_unsetenv(
+        "MYLITE_OWNERLESS_TEST_FAULT"));
+    static_cast<void>(mylite_ownerless_innodb_test_unsetenv(
+        "MYLITE_OWNERLESS_TEST_FAULT_COUNT"));
   }
   else
   {
@@ -98,7 +101,8 @@ static bool mylite_ownerless_consume_rollback_serialization_fault()
     const int length=
         std::snprintf(next_value, sizeof(next_value), "%lu", remaining - 1);
     if (length <= 0 || static_cast<size_t>(length) >= sizeof(next_value) ||
-        setenv("MYLITE_OWNERLESS_TEST_FAULT_COUNT", next_value, 1))
+        mylite_ownerless_innodb_test_setenv(
+            "MYLITE_OWNERLESS_TEST_FAULT_COUNT", next_value))
       return false;
   }
   return true;
@@ -2415,7 +2419,8 @@ inline dberr_t trx_t::write_serialisation_history(mtr_t *mtr)
               mylite_ownerless_innodb_test_fault_is_configured(
                   "trx-commit-history-page-deadlock")))
         {
-          static_cast<void>(unsetenv("MYLITE_OWNERLESS_TEST_FAULT"));
+          static_cast<void>(mylite_ownerless_innodb_test_unsetenv(
+              "MYLITE_OWNERLESS_TEST_FAULT"));
           ownerless_history_lock_result=
             MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK;
         }
@@ -3714,7 +3719,8 @@ TRANSACTIONAL_TARGET dberr_t trx_t::commit_persist() noexcept
       made the transaction durable.  Clear the one-shot hook before releasing
       the empty mini-transaction so rollback follows the normal ownerless path.
       */
-      static_cast<void>(unsetenv("MYLITE_OWNERLESS_TEST_FAULT"));
+      static_cast<void>(mylite_ownerless_innodb_test_unsetenv(
+          "MYLITE_OWNERLESS_TEST_FAULT"));
       error_state= DB_DEADLOCK;
       const dberr_t terminal_error= mtr.commit();
       if (UNIV_UNLIKELY(terminal_error != DB_SUCCESS))

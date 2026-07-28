@@ -1183,7 +1183,7 @@ extern "C" void mylite_ownerless_innodb_test_fault(const char *fault_name)
   }
 
   for (;;)
-    pause();
+    std::this_thread::sleep_for(std::chrono::hours(24));
 }
 
 extern "C" void mylite_ownerless_innodb_set_page_write_refresh_stats_enabled(

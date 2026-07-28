@@ -104,7 +104,8 @@ bool mtr_t::ownerless_page_write_prepare_checked(
               packed_page)));
     if (!page_write_already_held)
     {
-      static_cast<void>(unsetenv("MYLITE_OWNERLESS_TEST_FAULT"));
+      static_cast<void>(mylite_ownerless_innodb_test_unsetenv(
+          "MYLITE_OWNERLESS_TEST_FAULT"));
       ownerless_fail(DB_ERROR, false);
       return false;
     }
@@ -130,7 +131,8 @@ static int ownerless_test_space_write_result()
   for (const result_mapping &mapping : mappings)
     if (mylite_ownerless_innodb_test_fault_is_configured(mapping.name))
     {
-      static_cast<void>(unsetenv("MYLITE_OWNERLESS_TEST_FAULT"));
+      static_cast<void>(mylite_ownerless_innodb_test_unsetenv(
+          "MYLITE_OWNERLESS_TEST_FAULT"));
       return mapping.result;
     }
   return -1;

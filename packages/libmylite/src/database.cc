@@ -746,7 +746,6 @@ constexpr unsigned k_concurrency_lock_wait_timeout_ms = 5000;
 constexpr unsigned k_system_tables_lock_wait_timeout_ms = 60000;
 constexpr unsigned k_ownerless_runtime_startup_attempts = 60;
 constexpr unsigned k_ownerless_runtime_startup_retry_delay_ms = 100;
-constexpr std::size_t k_ownerless_redo_header_prefix_size = 4096;
 constexpr std::size_t k_ownerless_redo_startup_prefix_size = 12288;
 constexpr std::size_t k_ownerless_redo_header_checksum_offset = 508;
 constexpr std::size_t k_ownerless_redo_checkpoint_1_offset = 4096;
@@ -816,7 +815,6 @@ constexpr std::size_t k_innodb_trx_sys_rsegs_offset =
     k_innodb_fil_page_data_offset + 8U + k_innodb_fseg_header_size;
 constexpr std::size_t k_innodb_trx_sys_rseg_slot_size = 8;
 constexpr std::size_t k_innodb_trx_sys_rseg_slot_count = 128;
-constexpr std::size_t k_innodb_trx_rseg_history_size_offset = k_innodb_fil_page_data_offset + 4U;
 constexpr std::size_t k_innodb_trx_rseg_history_offset = k_innodb_fil_page_data_offset + 8U;
 constexpr std::size_t k_innodb_flst_len_offset = 0;
 constexpr std::size_t k_innodb_flst_first_offset = 4;

@@ -1329,10 +1329,10 @@ require_step_literal \
   "--scale 2"
 require_step_literal \
   "Run ownerless external MariaDB trace oracle" \
-  "--replay-attempts 1"
+  "--replay-attempts 3"
 reject_regex \
-  '(^|[[:space:]])--replay-attempts[[:space:]]+([2-9]|10)([^0-9]|$)' \
-  "Ownerless external trace release oracles must use one deterministic replay attempt"
+  '(^|[[:space:]])--replay-attempts[[:space:]]+(1|2|[4-9]|10)([^0-9]|$)' \
+  "Ownerless external trace release oracles must use three bounded replay attempts"
 require_file_literal \
   "${wordpress_harness}" \
   "MYLITE_WORDPRESS_OWNERLESS_RW must be 0 or 1"

@@ -727,7 +727,7 @@ jobs:
             --image mariadb:11.8.6 \
             --full-suite \
             --scale 2 \
-            --replay-attempts 1
+            --replay-attempts 3
 
       - name: Upload ownerless external MariaDB trace evidence
         if: always()

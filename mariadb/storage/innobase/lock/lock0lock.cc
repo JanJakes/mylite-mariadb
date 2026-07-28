@@ -1464,7 +1464,8 @@ static int mylite_ownerless_innodb_lock_test_wait_publish_result(bool table)
              table ? "table" : "record", mapping.suffix);
     if (mylite_ownerless_innodb_test_fault_is_configured(name))
     {
-      static_cast<void>(unsetenv("MYLITE_OWNERLESS_TEST_FAULT"));
+      static_cast<void>(mylite_ownerless_innodb_test_unsetenv(
+          "MYLITE_OWNERLESS_TEST_FAULT"));
       return mapping.result;
     }
   }

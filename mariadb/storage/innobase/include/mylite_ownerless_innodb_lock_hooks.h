@@ -10,6 +10,7 @@ struct buf_block_t;
 
 #ifdef __cplusplus
 #include <atomic>
+#include <cstdlib>
 
 extern std::atomic<bool> mylite_ownerless_innodb_lock_hooks_enabled;
 extern std::atomic<bool> mylite_ownerless_innodb_lock_hooks_ever_enabled;
@@ -36,6 +37,25 @@ static inline int mylite_ownerless_innodb_autoinc_hooks_enabled_fast(void)
 static inline int mylite_ownerless_innodb_test_faults_enabled_fast(void)
 {
     return mylite_ownerless_innodb_test_faults_enabled.load(std::memory_order_relaxed) ? 1 : 0;
+}
+
+static inline int mylite_ownerless_innodb_test_setenv(
+    const char *name, const char *value)
+{
+#ifdef _WIN32
+    return _putenv_s(name, value);
+#else
+    return setenv(name, value, 1);
+#endif
+}
+
+static inline int mylite_ownerless_innodb_test_unsetenv(const char *name)
+{
+#ifdef _WIN32
+    return _putenv_s(name, "");
+#else
+    return unsetenv(name);
+#endif
 }
 
 extern "C" {
