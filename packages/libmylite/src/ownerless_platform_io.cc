@@ -1,3 +1,4 @@
+#define MYLITE_OWNERLESS_PLATFORM_IO_IMPLEMENTATION
 #include "ownerless_platform_io.h"
 
 #if defined(__APPLE__)

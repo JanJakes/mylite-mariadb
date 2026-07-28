@@ -11704,7 +11704,6 @@ int drain_remaining_statement_results(mylite_stmt &stmt) {
             return MYLITE_ERROR;
         }
     }
-    return MYLITE_OK;
 }
 
 int refresh_dirty_result_binds(mylite_stmt &stmt) {

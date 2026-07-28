@@ -356,6 +356,13 @@ if(BUILD_TESTING)
       tests/ownerless_cross_process_sql_test.c
     )
     mylite_configure_embedded_c_test(mylite_ownerless_cross_process_sql_test)
+    if(APPLE)
+      # The focused macOS gate reuses portable selectors from this Linux-primary
+      # harness; Linux-only child helpers are intentionally unreferenced there.
+      target_compile_options(mylite_ownerless_cross_process_sql_test PRIVATE
+        -Wno-unused-function
+      )
+    endif()
     if(MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS)
       target_compile_definitions(mylite_ownerless_cross_process_sql_test PRIVATE
         MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS=1

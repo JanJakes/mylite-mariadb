@@ -143,24 +143,26 @@ std::uint64_t mylite_ownerless_current_process_id(void);
 bool mylite_ownerless_process_id_is_alive(std::uint64_t process_id);
 bool mylite_ownerless_sync_directory_path(const char *path);
 
-#  define open(...) mylite_ownerless_open(__VA_ARGS__)
-#  define close(...) mylite_ownerless_close(__VA_ARGS__)
-#  define read(...) mylite_ownerless_read(__VA_ARGS__)
-#  define write(...) mylite_ownerless_write(__VA_ARGS__)
-#  define pread(...) mylite_ownerless_pread(__VA_ARGS__)
-#  define pwrite(...) mylite_ownerless_pwrite(__VA_ARGS__)
-#  define fsync(...) mylite_ownerless_fsync(__VA_ARGS__)
-#  define fdatasync(...) mylite_ownerless_fdatasync(__VA_ARGS__)
-#  define ftruncate(...) mylite_ownerless_ftruncate(__VA_ARGS__)
-#  define fstat(...) mylite_ownerless_fstat(__VA_ARGS__)
-#  define stat mylite_ownerless_stat
-#  define mmap(...) mylite_ownerless_mmap(__VA_ARGS__)
-#  define munmap(...) mylite_ownerless_munmap(__VA_ARGS__)
-#  define msync(...) mylite_ownerless_msync(__VA_ARGS__)
-#  define fcntl(...) mylite_ownerless_fcntl(__VA_ARGS__)
-#  define flock mylite_ownerless_flock
-#  define off_t mylite_ownerless_offset_t
-#  define ssize_t mylite_ownerless_ssize_t
+#  if !defined(MYLITE_OWNERLESS_PLATFORM_IO_IMPLEMENTATION)
+#    define open(...) mylite_ownerless_open(__VA_ARGS__)
+#    define close(...) mylite_ownerless_close(__VA_ARGS__)
+#    define read(...) mylite_ownerless_read(__VA_ARGS__)
+#    define write(...) mylite_ownerless_write(__VA_ARGS__)
+#    define pread(...) mylite_ownerless_pread(__VA_ARGS__)
+#    define pwrite(...) mylite_ownerless_pwrite(__VA_ARGS__)
+#    define fsync(...) mylite_ownerless_fsync(__VA_ARGS__)
+#    define fdatasync(...) mylite_ownerless_fdatasync(__VA_ARGS__)
+#    define ftruncate(...) mylite_ownerless_ftruncate(__VA_ARGS__)
+#    define fstat(...) mylite_ownerless_fstat(__VA_ARGS__)
+#    define stat mylite_ownerless_stat
+#    define mmap(...) mylite_ownerless_mmap(__VA_ARGS__)
+#    define munmap(...) mylite_ownerless_munmap(__VA_ARGS__)
+#    define msync(...) mylite_ownerless_msync(__VA_ARGS__)
+#    define fcntl(...) mylite_ownerless_fcntl(__VA_ARGS__)
+#    define flock mylite_ownerless_flock
+#    define off_t mylite_ownerless_offset_t
+#    define ssize_t mylite_ownerless_ssize_t
+#  endif
 
 #else
 
@@ -219,8 +221,10 @@ int mylite_ownerless_close(int fd);
 int mylite_ownerless_fcntl(int fd, int command, ...);
 void mylite_ownerless_cleanup_range_lock_artifacts(const char *path);
 
-#    define close(...) mylite_ownerless_close(__VA_ARGS__)
-#    define fcntl(...) mylite_ownerless_fcntl(__VA_ARGS__)
+#    if !defined(MYLITE_OWNERLESS_PLATFORM_IO_IMPLEMENTATION)
+#      define close(...) mylite_ownerless_close(__VA_ARGS__)
+#      define fcntl(...) mylite_ownerless_fcntl(__VA_ARGS__)
+#    endif
 #  endif
 
 #endif

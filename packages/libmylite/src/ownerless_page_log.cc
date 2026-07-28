@@ -310,13 +310,13 @@ struct PageLogAcknowledgedBoundary {
 
 std::vector<CheckpointStageRegistration> checkpoint_stage_registrations;
 std::vector<std::shared_ptr<PageLogProcessFileLock>> page_log_process_file_locks;
-pid_t page_log_process_state_pid = 0;
+std::uint64_t page_log_process_state_pid = 0;
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 std::atomic<unsigned> page_log_unlock_failures_to_inject{0U};
 #endif
 
 void reset_page_log_process_state_after_fork_locked() {
-    const pid_t current_pid = ::getpid();
+    const std::uint64_t current_pid = mylite_ownerless_current_process_id();
     if (page_log_process_state_pid == current_pid) {
         return;
     }

@@ -1056,7 +1056,9 @@ bool read_process_start_time(std::uint64_t pid, std::uint64_t *out_start_time) {
     (void)pid;
 #endif
 
+#if !defined(_WIN32)
     return false;
+#endif
 }
 
 bool read_current_boot_id_hash(std::uint64_t *out_boot_id_hash) {
