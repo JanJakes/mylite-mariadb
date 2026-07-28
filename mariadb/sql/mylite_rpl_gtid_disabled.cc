@@ -88,22 +88,7 @@ rpl_binlog_state::~rpl_binlog_state()
 
 void rpl_binlog_state::init()
 {
-#ifdef _WIN32
-  const char *mylite_trace= getenv("MYLITE_OWNERLESS_TEST_TRACE_OPEN");
-  if (mylite_trace && !strcmp(mylite_trace, "1"))
-  {
-    fprintf(stderr, "mylite-ownerless gtid-init-stage=base-begin\n");
-    fflush(stderr);
-  }
-#endif
   rpl_binlog_state_base::init();
-#ifdef _WIN32
-  if (mylite_trace && !strcmp(mylite_trace, "1"))
-  {
-    fprintf(stderr, "mylite-ownerless gtid-init-stage=base-complete\n");
-    fflush(stderr);
-  }
-#endif
 }
 
 void rpl_binlog_state::reset()
