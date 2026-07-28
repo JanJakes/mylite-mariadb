@@ -42912,6 +42912,7 @@ std::vector<std::string> runtime_arguments(
             (ownerless_runtime_open && !readonly_open ? "2" : "1"),
         "--innodb-buffer-pool-dump-at-shutdown=OFF",
         "--innodb-buffer-pool-load-at-startup=OFF",
+        "--skip-log-error",
         "--log-output=NONE",
         "--max-digest-length=0",
         "--use-stat-tables=never",
