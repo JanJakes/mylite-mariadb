@@ -14611,7 +14611,7 @@ int initialize_concurrency_redo_state(int shm_fd, int checkpoint_fd) {
 }
 
 int initialize_concurrency_page_index(int shm_fd, int page_log_fd) {
-    std::array<unsigned char, k_concurrency_page_index_segment_size> page_index = {};
+    std::vector<unsigned char> page_index(k_concurrency_page_index_segment_size);
     if (mylite_ownerless_page_index_initialize(
             page_index.data(),
             page_index.size(),
