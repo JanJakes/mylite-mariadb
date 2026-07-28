@@ -12532,11 +12532,14 @@ int prepare_concurrency_metadata(const std::filesystem::path &database_path) {
     const std::filesystem::path lock_path = concurrency_directory / k_concurrency_lock_filename;
     std::error_code error;
 
+    trace_ownerless_test_open_stage("concurrency-metadata-directory-begin");
     std::filesystem::create_directories(concurrency_directory, error);
     if (error) {
         return MYLITE_IOERR;
     }
+    trace_ownerless_test_open_stage("concurrency-metadata-directory-complete");
 
+    trace_ownerless_test_open_stage("concurrency-metadata-lock-begin");
     const int lock_fd = acquire_concurrency_lock(
         lock_path,
         k_persisted_config_lock_start,
@@ -12545,7 +12548,9 @@ int prepare_concurrency_metadata(const std::filesystem::path &database_path) {
     if (lock_fd < 0) {
         return MYLITE_IOERR;
     }
+    trace_ownerless_test_open_stage("concurrency-metadata-lock-complete");
 
+    trace_ownerless_test_open_stage("concurrency-metadata-exists-begin");
     const bool metadata_exists = std::filesystem::exists(metadata_path, error);
     if (error) {
         release_concurrency_lock(
@@ -12555,9 +12560,12 @@ int prepare_concurrency_metadata(const std::filesystem::path &database_path) {
         );
         return MYLITE_IOERR;
     }
+    trace_ownerless_test_open_stage("concurrency-metadata-exists-complete");
     if (!metadata_exists) {
         try {
+            trace_ownerless_test_open_stage("concurrency-metadata-write-begin");
             write_concurrency_metadata(metadata_path);
+            trace_ownerless_test_open_stage("concurrency-metadata-write-complete");
         } catch (...) {
             release_concurrency_lock(
                 lock_fd,
@@ -12711,35 +12719,44 @@ int prepare_concurrency_shared_memory(
     const std::filesystem::path checkpoint_path =
         concurrency_directory / k_concurrency_checkpoint_filename;
     std::string database_uuid;
+    trace_ownerless_test_open_stage("concurrency-shared-memory-uuid-begin");
     const int uuid_result = read_concurrency_database_uuid(metadata_path, database_uuid);
     if (uuid_result != MYLITE_OK) {
         return uuid_result;
     }
+    trace_ownerless_test_open_stage("concurrency-shared-memory-uuid-complete");
 
+    trace_ownerless_test_open_stage("concurrency-shared-memory-recovery-lock-begin");
     const int recovery_lock_fd =
         acquire_concurrency_lock(lock_path, k_recovery_lock_start, k_recovery_lock_length);
     if (recovery_lock_fd < 0) {
         return MYLITE_IOERR;
     }
+    trace_ownerless_test_open_stage("concurrency-shared-memory-recovery-lock-complete");
 
+    trace_ownerless_test_open_stage("concurrency-shared-memory-recovery-files-begin");
     const int recovery_files_result =
         prepare_concurrency_recovery_files(concurrency_directory, database_uuid);
     if (recovery_files_result != MYLITE_OK || !ownerless_sync_directory(concurrency_directory)) {
         release_concurrency_lock(recovery_lock_fd, k_recovery_lock_start, k_recovery_lock_length);
         return recovery_files_result != MYLITE_OK ? recovery_files_result : MYLITE_IOERR;
     }
+    trace_ownerless_test_open_stage("concurrency-shared-memory-recovery-files-complete");
 
+    trace_ownerless_test_open_stage("concurrency-shared-memory-resize-lock-begin");
     const int resize_lock_fd =
         acquire_concurrency_lock(lock_path, k_shm_resize_lock_start, k_shm_resize_lock_length);
     if (resize_lock_fd < 0) {
         release_concurrency_lock(recovery_lock_fd, k_recovery_lock_start, k_recovery_lock_length);
         return MYLITE_IOERR;
     }
+    trace_ownerless_test_open_stage("concurrency-shared-memory-resize-lock-complete");
     const auto release_layout_locks = [&]() {
         release_concurrency_lock(resize_lock_fd, k_shm_resize_lock_start, k_shm_resize_lock_length);
         release_concurrency_lock(recovery_lock_fd, k_recovery_lock_start, k_recovery_lock_length);
     };
 
+    trace_ownerless_test_open_stage("concurrency-shared-memory-files-begin");
     const std::string shm_name = shm_path.string();
     const int shm_fd = mylite_ownerless_open(shm_name.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
     if (shm_fd < 0) {
@@ -12761,7 +12778,9 @@ int prepare_concurrency_shared_memory(
         release_layout_locks();
         return MYLITE_IOERR;
     }
+    trace_ownerless_test_open_stage("concurrency-shared-memory-files-complete");
 
+    trace_ownerless_test_open_stage("concurrency-shared-memory-stat-begin");
     mylite_ownerless_file_info shm_stat = {};
     if (mylite_ownerless_fstat(shm_fd, &shm_stat) != 0) {
         static_cast<void>(mylite_ownerless_close(checkpoint_fd));
@@ -12782,6 +12801,8 @@ int prepare_concurrency_shared_memory(
     const off_t shm_size =
         std::max(shm_stat.st_size, static_cast<off_t>(k_minimum_concurrency_shm_size));
     const ConcurrencyShmFileIdentity shm_identity = concurrency_shm_file_identity(shm_stat);
+    trace_ownerless_test_open_stage("concurrency-shared-memory-stat-complete");
+    trace_ownerless_test_open_stage("concurrency-shared-memory-layout-begin");
     const int layout_result = prepare_concurrency_shm_layout(
         database_path,
         shm_fd,
@@ -12793,6 +12814,7 @@ int prepare_concurrency_shared_memory(
         allow_recovery_rebuild,
         initial_shared_memory
     );
+    trace_ownerless_test_open_stage("concurrency-shared-memory-layout-complete");
     if (layout_result != MYLITE_OK) {
         static_cast<void>(mylite_ownerless_close(checkpoint_fd));
         static_cast<void>(mylite_ownerless_close(wal_fd));
@@ -38896,7 +38918,9 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
     try {
         if (ownerless_concurrency_runtime_needed) {
             std::uint64_t stage_start_ns = embedded_open_perf_start_ns();
+            trace_ownerless_test_open_stage("concurrency-metadata-begin");
             const int concurrency_result = prepare_concurrency_metadata(db.database_path);
+            trace_ownerless_test_open_stage("concurrency-metadata-complete");
             embedded_open_perf_add_elapsed(
                 EMBEDDED_OPEN_PERF_START_CONCURRENCY_METADATA_NS,
                 stage_start_ns
@@ -38907,8 +38931,10 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
                 return concurrency_result;
             }
             stage_start_ns = embedded_open_perf_start_ns();
+            trace_ownerless_test_open_stage("concurrency-shared-memory-begin");
             const int shared_memory_result =
                 prepare_concurrency_shared_memory(db.database_path, !db.readonly_open);
+            trace_ownerless_test_open_stage("concurrency-shared-memory-complete");
             embedded_open_perf_add_elapsed(
                 EMBEDDED_OPEN_PERF_START_SHARED_MEMORY_PREPARE_NS,
                 stage_start_ns
