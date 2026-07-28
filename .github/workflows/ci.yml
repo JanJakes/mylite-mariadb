@@ -138,7 +138,20 @@ jobs:
 
       - name: Install Windows embedded build tools
         shell: pwsh
-        run: choco install winflexbison3 --yes --no-progress
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "win_flex_bison-2.5.25.zip"
+          $destination = Join-Path $env:RUNNER_TEMP "win_flex_bison-2.5.25"
+          curl.exe --fail --location --retry 5 --retry-all-errors `
+            --output $archive `
+            https://github.com/lexxmark/winflexbison/releases/download/v2.5.25/win_flex_bison-2.5.25.zip
+          $actualHash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          $expectedHash = "8d324b62be33604b2c45ad1dd34ab93d722534448f55a16ca7292de32b6ac135"
+          if ($actualHash -ne $expectedHash) {
+            throw "win_flex_bison archive hash mismatch: $actualHash"
+          }
+          Expand-Archive -Path $archive -DestinationPath $destination -Force
+          $destination | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & (Join-Path $destination "win_bison.exe") --version
 
       - uses: ilammy/msvc-dev-cmd@v1
 
