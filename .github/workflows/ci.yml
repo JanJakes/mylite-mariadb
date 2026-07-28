@@ -156,7 +156,7 @@ jobs:
       - uses: ilammy/msvc-dev-cmd@v1
 
       - name: Cache Windows MariaDB embedded build
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             build/mariadb-embedded
@@ -168,6 +168,14 @@ jobs:
       - name: Build Windows MariaDB embedded archive
         shell: pwsh
         run: tools/mariadb-embedded-build.ps1 all
+
+      - name: Save Windows MariaDB embedded build cache
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            build/mariadb-embedded
+            mariadb/extra/wolfssl/wolfssl
+          key: windows-mariadb-embedded-v1-${{ runner.arch }}-${{ hashFiles('cmake/mariadb-embedded-*.cmake', 'tools/mariadb-embedded-build.ps1', 'mariadb/**') }}
 
       - name: Configure Windows ownerless platform gate
         shell: pwsh
