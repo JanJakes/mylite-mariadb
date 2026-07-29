@@ -42090,7 +42090,8 @@ bool release_runtime(void) {
         retained_ownerless_user_page_log_before_shutdown_for_shutdown_mode &&
         ownerless_native_file_op_marker_needed_shutdown &&
         g_runtime.concurrency_checkpoint_fd >= 0 && final_no_live_ownerless_shutdown &&
-        !ownerless_deferred_native_recovery_pending_shutdown) {
+        !ownerless_deferred_native_recovery_pending_shutdown &&
+        !defer_final_older_tablespace_recovery) {
         const bool recovered_rollback_drained =
             wait_for_ownerless_native_recovered_transactions_to_drain(
                 k_system_tables_lock_wait_timeout_ms
