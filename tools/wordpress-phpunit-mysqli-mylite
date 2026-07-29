@@ -3114,16 +3114,26 @@ PHP_KEEPALIVE
               ],
               ["%s", "%s", "%s"]
           );
+          if ($write === false) {
+              fprintf(
+                  STDERR,
+                  "Live ownerless WordPress wpdb peer write failed: expected=%s errno=%d error=%s\n",
+                  var_export($value, true),
+                  mysqli_errno($wpdb->dbh),
+                  $wpdb->last_error
+              );
+              exit(1);
+          }
           $observed = $wpdb->get_var(
               $wpdb->prepare(
                   "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s",
                   "mylite_ownerless_peer"
               )
           );
-          if ($write === false || $observed !== $value) {
+          if ($observed !== $value) {
               fprintf(
                   STDERR,
-                  "Live ownerless WordPress wpdb peer write/read failed: write=%s expected=%s observed=%s errno=%d error=%s\n",
+                  "Live ownerless WordPress wpdb peer read-back failed: write=%s expected=%s observed=%s errno=%d error=%s\n",
                   var_export($write, true),
                   var_export($value, true),
                   var_export($observed, true),
