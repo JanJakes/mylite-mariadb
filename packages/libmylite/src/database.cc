@@ -69,6 +69,7 @@ extern "C" int mylite_embedded_connection_was_released(MYSQL *mysql);
 extern "C" int mylite_embedded_recover_ownerless_transaction_for_close(THD *thd);
 extern "C" int mylite_embedded_cleanup_idle_ownerless_transaction(THD *thd);
 extern "C" int mylite_embedded_clear_ownerless_rollback_read_state(THD *thd);
+extern "C" int mylite_embedded_consume_ownerless_retryable_deadlock(THD *thd);
 extern unsigned int srv_fast_shutdown;
 #endif
 
@@ -3223,6 +3224,11 @@ bool ownerless_stale_engine_error_allows_retry(
     const SqlPolicyTokens &tokens,
     bool statement_started_in_explicit_transaction
 );
+bool ownerless_internal_deadlock_allows_retry(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    bool statement_started_in_explicit_transaction
+);
 bool ownerless_stale_engine_error(const mylite_db &db);
 bool ownerless_temporary_table_ddl_statement(const SqlPolicyTokens &tokens);
 bool ownerless_temporary_table_recovery_statement(
@@ -5383,7 +5389,10 @@ int mylite_step(mylite_stmt *stmt) {
             ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
         my_ulonglong ownerless_prepared_affected_rows = static_cast<my_ulonglong>(-1);
         if (stmt->ownerless_native_prepare_per_step) {
-            const int query_result = mysql_real_query(
+            static_cast<void>(mylite_embedded_consume_ownerless_retryable_deadlock(
+                static_cast<THD *>(stmt->db->mysql.thd)
+            ));
+            int query_result = mysql_real_query(
                 &stmt->db->mysql,
                 ownerless_prepared_text_sql.data(),
                 static_cast<unsigned long>(ownerless_prepared_text_sql.size())
@@ -5421,6 +5430,63 @@ int mylite_step(mylite_stmt *stmt) {
                     ownerless_stage_start
                 );
                 set_mariadb_error(*stmt->db);
+                if (ownerless_internal_deadlock_allows_retry(
+                        *stmt->db,
+                        policy_tokens,
+                        statement_started_in_explicit_transaction
+                    )) {
+                    rollback_active_transaction_after_deadlock(*stmt->db);
+                    set_ok(*stmt->db);
+                    if (ownerless_pending_runtime_fault_exists()) {
+                        clear_statement_ownerless_page_visibility(*stmt);
+                        return report_ownerless_pending_runtime_fault(
+                            *stmt->db,
+                            policy_tokens,
+                            statement_started_in_explicit_transaction,
+                            false
+                        );
+                    }
+                    const int retry_runtime_fault_result =
+                        fail_if_ownerless_runtime_faulted(*stmt->db);
+                    if (retry_runtime_fault_result != MYLITE_OK) {
+                        clear_statement_ownerless_page_visibility(*stmt);
+                        return retry_runtime_fault_result;
+                    }
+                    ownerless_stage_start = ownerless_database_perf_stats_are_enabled()
+                                                ? ownerless_database_perf_now_ns()
+                                                : 0U;
+                    query_result = mysql_real_query(
+                        &stmt->db->mysql,
+                        ownerless_prepared_text_sql.data(),
+                        static_cast<unsigned long>(ownerless_prepared_text_sql.size())
+                    );
+                    if (query_result == 0) {
+                        observe_native_connection_release(*stmt->db);
+                    }
+                    static_cast<void>(visible_fast_path.finish());
+                    observe_ownerless_innodb_coordination_fault();
+                    if (ownerless_pending_runtime_fault_exists()) {
+                        ownerless_database_perf_add_elapsed(
+                            OWNERLESS_DATABASE_PERF_PREPARED_STEP_MYSQL_EXECUTE_NS,
+                            ownerless_stage_start
+                        );
+                        clear_statement_ownerless_page_visibility(*stmt);
+                        return report_ownerless_pending_runtime_fault(
+                            *stmt->db,
+                            policy_tokens,
+                            statement_started_in_explicit_transaction,
+                            query_result == 0
+                        );
+                    }
+                    if (query_result == 0) {
+                        goto ownerless_prepared_text_execute_success;
+                    }
+                    ownerless_database_perf_add_elapsed(
+                        OWNERLESS_DATABASE_PERF_PREPARED_STEP_MYSQL_EXECUTE_NS,
+                        ownerless_stage_start
+                    );
+                    set_mariadb_error(*stmt->db);
+                }
                 disqualify_ownerless_explicit_transaction_visible_fast_proof_after_failed_sql(
                     *stmt->db,
                     policy_tokens,
@@ -5458,6 +5524,7 @@ int mylite_step(mylite_stmt *stmt) {
                 clear_statement_ownerless_page_visibility(*stmt);
                 return MYLITE_ERROR;
             }
+        ownerless_prepared_text_execute_success:
             bool has_text_result = false;
             const int drain_result =
                 store_and_emit_result(*stmt->db, nullptr, nullptr, nullptr, &has_text_result);
@@ -5532,6 +5599,9 @@ int mylite_step(mylite_stmt *stmt) {
             stmt->db->last_insert_id =
                 static_cast<unsigned long long>(mysql_insert_id(&stmt->db->mysql));
         } else {
+            static_cast<void>(mylite_embedded_consume_ownerless_retryable_deadlock(
+                static_cast<THD *>(stmt->db->mysql.thd)
+            ));
             const int execute_result = mysql_stmt_execute(stmt->stmt);
             if (execute_result == 0) {
                 observe_native_connection_release(*stmt->db);
@@ -5563,12 +5633,26 @@ int mylite_step(mylite_stmt *stmt) {
                     policy_tokens,
                     statement_started_in_explicit_transaction
                 );
-                if (ownerless_stale_engine_error_allows_retry(
+                const bool retryable_internal_deadlock = ownerless_internal_deadlock_allows_retry(
+                    *stmt->db,
+                    policy_tokens,
+                    statement_started_in_explicit_transaction
+                );
+                bool retry_execute = false;
+                if (retryable_internal_deadlock) {
+                    rollback_active_transaction_after_deadlock(*stmt->db);
+                    retry_execute = true;
+                } else if (
+                    ownerless_stale_engine_error_allows_retry(
                         *stmt->db,
                         policy_tokens,
                         statement_started_in_explicit_transaction
                     ) &&
-                    retry_ownerless_prepared_execute_after_stale_engine_error(*stmt) == MYLITE_OK) {
+                    retry_ownerless_prepared_execute_after_stale_engine_error(*stmt) == MYLITE_OK
+                ) {
+                    retry_execute = true;
+                }
+                if (retry_execute) {
                     set_ok(*stmt->db);
                     if (ownerless_pending_runtime_fault_exists()) {
                         clear_statement_ownerless_page_visibility(*stmt);
@@ -7533,6 +7617,9 @@ int exec_result_impl(
     std::uint64_t stage_start_ns = exec_result_perf_start_ns();
     ownerless_stage_start =
         ownerless_database_perf_stats_are_enabled() ? ownerless_database_perf_now_ns() : 0U;
+    static_cast<void>(
+        mylite_embedded_consume_ownerless_retryable_deadlock(static_cast<THD *>(db->mysql.thd))
+    );
     const int query_result = mysql_query(&db->mysql, ownerless_native_sql);
     if (query_result == 0) {
         observe_native_connection_release(*db);
@@ -7583,12 +7670,26 @@ int exec_result_impl(
             policy_tokens,
             statement_started_in_explicit_transaction
         );
-        if (ownerless_stale_engine_error_allows_retry(
+        const bool retryable_internal_deadlock = ownerless_internal_deadlock_allows_retry(
+            *db,
+            policy_tokens,
+            statement_started_in_explicit_transaction
+        );
+        bool retry_query = false;
+        if (retryable_internal_deadlock) {
+            rollback_active_transaction_after_deadlock(*db);
+            retry_query = true;
+        } else if (
+            ownerless_stale_engine_error_allows_retry(
                 *db,
                 policy_tokens,
                 statement_started_in_explicit_transaction
             ) &&
-            refresh_ownerless_dictionary_cache_after_stale_engine_error(*db) == MYLITE_OK) {
+            refresh_ownerless_dictionary_cache_after_stale_engine_error(*db) == MYLITE_OK
+        ) {
+            retry_query = true;
+        }
+        if (retry_query) {
             set_ok(*db);
             if (ownerless_pending_runtime_fault_exists()) {
                 if (page_version_reads_enabled) {
@@ -23575,6 +23676,25 @@ bool ownerless_stale_engine_error(const mylite_db &db) {
     }
     return db.mariadb_errno == k_mariadb_storage_engine_error_errno &&
            db.errmsg.find(k_innodb_missing_tablespace_error) != std::string::npos;
+}
+
+bool ownerless_internal_deadlock_allows_retry(
+    mylite_db &db,
+    const SqlPolicyTokens &tokens,
+    bool statement_started_in_explicit_transaction
+) {
+    if (!db.ownerless_rw_open || db.mariadb_errno != k_mariadb_lock_deadlock_errno) {
+        return false;
+    }
+
+    const bool internal_deadlock =
+        mylite_embedded_consume_ownerless_retryable_deadlock(static_cast<THD *>(db.mysql.thd)) != 0;
+    if (!internal_deadlock || statement_started_in_explicit_transaction) {
+        return false;
+    }
+
+    const std::string_view first = identifier_token_at(tokens, 0);
+    return token_in(first, "DELETE", "INSERT", "REPLACE", "UPDATE");
 }
 
 bool ownerless_stale_engine_error_allows_retry(

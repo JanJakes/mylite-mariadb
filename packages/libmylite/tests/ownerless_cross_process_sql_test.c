@@ -840,6 +840,9 @@ static void test_ownerless_concurrent_savepoint_same_page_rollback_handoff(void)
 static void test_ownerless_concurrent_savepoint_same_table_rollback_handoff(void);
 static void test_ownerless_concurrent_savepoint_same_row_rollback_handoff(void);
 static void test_ownerless_post_savepoint_timeout_keeps_prewrite_hidden(void);
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void test_ownerless_autocommit_replace_survives_peer_rollback_handoff(void);
+#endif
 static void test_ownerless_random_savepoint_same_table_schedule(void);
 static void test_ownerless_serializable_read_blocks_peer_update(void);
 static void test_ownerless_serializable_prevents_write_skew(void);
@@ -1580,6 +1583,16 @@ static void hold_ownerless_post_savepoint_timeout_writer_until_released(
 static void read_ownerless_post_savepoint_timeout_after_refresh(
     open_database_paths paths,
     child_pipes pipes
+);
+static void rollback_wordpress_like_transaction_until_native_row_undo_released(
+    open_database_paths paths,
+    child_pipes transaction_pipes,
+    child_pipes fault_pipes
+);
+static void replace_wordpress_like_option_after_signal(
+    open_database_paths paths,
+    int ready_write_fd,
+    int prepared
 );
 #endif
 static void update_concurrent_savepoint_same_table_rollback_until_released(
@@ -8268,6 +8281,9 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_concurrent_savepoint_same_table_rollback_handoff),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_concurrent_savepoint_same_row_rollback_handoff),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_post_savepoint_timeout_keeps_prewrite_hidden),
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_autocommit_replace_survives_peer_rollback_handoff),
+#endif
     OWNERLESS_SQL_TEST_CASE(test_ownerless_random_savepoint_same_table_schedule),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_serializable_read_blocks_peer_update),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_serializable_prevents_write_skew),
@@ -11773,6 +11789,147 @@ static void test_ownerless_post_savepoint_timeout_keeps_prewrite_hidden(void) {
     free(root);
 #endif
 }
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void test_ownerless_autocommit_replace_survives_peer_rollback_handoff(void) {
+#  if defined(__linux__)
+    for (int prepared = 0; prepared <= 2; ++prepared) {
+        char *root = make_temp_root();
+        char *runtime_root = path_join(root, "runtime");
+        char *database_path = path_join(
+            root,
+            prepared == 2 ? "ownerless-prepared-returning-replace-peer-rollback-handoff.mylite"
+                          : (prepared ? "ownerless-prepared-replace-peer-rollback-handoff.mylite"
+                                      : "ownerless-replace-peer-rollback-handoff.mylite")
+        );
+        open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+        int transaction_ready_pipe[2];
+        int rollback_start_pipe[2];
+        int fault_ready_pipe[2];
+        int fault_release_pipe[2];
+        int replace_ready_pipe[2];
+        pid_t transaction_child;
+        pid_t replace_child;
+        mylite_db *db;
+
+        assert(mkdir(runtime_root, 0700) == 0);
+        initialize_database(paths);
+
+        db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+        exec_ok(
+            db,
+            "CREATE TABLE app.ownerless_replace_peer_rollback ("
+            "id BIGINT UNSIGNED NOT NULL PRIMARY KEY, "
+            "option_name VARCHAR(191) NOT NULL, "
+            "option_value BIGINT UNSIGNED NOT NULL, "
+            "UNIQUE KEY ownerless_replace_peer_rollback_name (option_name)"
+            ") ENGINE=InnoDB"
+        );
+        exec_ok(
+            db,
+            "INSERT INTO app.ownerless_replace_peer_rollback VALUES "
+            "(1, 'transaction-row', 10), "
+            "(2, 'ownerless-peer', 34)"
+        );
+        assert(mylite_close(db) == MYLITE_OK);
+
+        assert(pipe(transaction_ready_pipe) == 0);
+        assert(pipe(rollback_start_pipe) == 0);
+        assert(pipe(fault_ready_pipe) == 0);
+        assert(pipe(fault_release_pipe) == 0);
+        assert(pipe(replace_ready_pipe) == 0);
+
+        transaction_child = fork();
+        assert(transaction_child >= 0);
+        if (transaction_child == 0) {
+            close(transaction_ready_pipe[0]);
+            close(rollback_start_pipe[1]);
+            close(fault_ready_pipe[0]);
+            close(fault_release_pipe[1]);
+            close(replace_ready_pipe[0]);
+            close(replace_ready_pipe[1]);
+            rollback_wordpress_like_transaction_until_native_row_undo_released(
+                paths,
+                (child_pipes){
+                    .ready_write_fd = transaction_ready_pipe[1],
+                    .release_read_fd = rollback_start_pipe[0],
+                },
+                (child_pipes){
+                    .ready_write_fd = fault_ready_pipe[1],
+                    .release_read_fd = fault_release_pipe[0],
+                }
+            );
+        }
+
+        close(transaction_ready_pipe[1]);
+        close(rollback_start_pipe[0]);
+        close(fault_ready_pipe[1]);
+        close(fault_release_pipe[0]);
+        wait_for_pipe(transaction_ready_pipe[0]);
+        close(transaction_ready_pipe[0]);
+
+        replace_child = fork();
+        assert(replace_child >= 0);
+        if (replace_child == 0) {
+            close(rollback_start_pipe[1]);
+            close(fault_ready_pipe[0]);
+            close(fault_release_pipe[1]);
+            close(replace_ready_pipe[0]);
+            replace_wordpress_like_option_after_signal(paths, replace_ready_pipe[1], prepared);
+        }
+
+        close(replace_ready_pipe[1]);
+        wait_for_pipe(replace_ready_pipe[0]);
+        close(replace_ready_pipe[0]);
+        assert(wait_for_concurrency_ownerless_write_waiting_count(database_path, 1U, 5000U) >= 1U);
+
+        signal_pipe(rollback_start_pipe[1]);
+        close(rollback_start_pipe[1]);
+        wait_for_pipe(fault_ready_pipe[0]);
+        close(fault_ready_pipe[0]);
+        assert(wait_for_concurrency_ownerless_write_waiting_count(database_path, 1U, 5000U) >= 1U);
+
+        signal_pipe(fault_release_pipe[1]);
+        close(fault_release_pipe[1]);
+        wait_for_child(transaction_child);
+        wait_for_child(replace_child);
+        assert(wait_for_concurrency_ownerless_write_waiting_count(database_path, 0U, 5000U) == 0U);
+
+        db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+        assert(
+            query_unsigned(
+                db,
+                "SELECT option_value FROM app.ownerless_replace_peer_rollback "
+                "WHERE option_name = 'transaction-row'"
+            ) == 10U
+        );
+        assert(
+            query_unsigned(
+                db,
+                "SELECT option_value FROM app.ownerless_replace_peer_rollback "
+                "WHERE option_name = 'ownerless-peer'"
+            ) == 35U
+        );
+        assert(mylite_close(db) == MYLITE_OK);
+
+        remove_concurrency_shm(database_path);
+        db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+        assert(
+            query_unsigned(
+                db,
+                "SELECT SUM(option_value) FROM app.ownerless_replace_peer_rollback"
+            ) == 45U
+        );
+        assert(mylite_close(db) == MYLITE_OK);
+
+        free(database_path);
+        free(runtime_root);
+        remove_tree(root);
+        free(root);
+    }
+#  endif
+}
+#endif
 
 static void test_ownerless_concurrent_savepoint_same_table_rollback_handoff(void) {
 #if defined(__linux__)
@@ -84759,6 +84916,111 @@ static void read_ownerless_post_savepoint_timeout_after_refresh(
     assert(unsetenv("MYLITE_OWNERLESS_TEST_FAULT") == 0);
     assert(unsetenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD") == 0);
     assert(unsetenv("MYLITE_OWNERLESS_TEST_FAULT_RELEASE_FD") == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
+static void rollback_wordpress_like_transaction_until_native_row_undo_released(
+    open_database_paths paths,
+    child_pipes transaction_pipes,
+    child_pipes fault_pipes
+) {
+    mylite_db *db;
+    char fault_ready_fd_value[32];
+    char fault_release_fd_value[32];
+
+    assert(
+        snprintf(
+            fault_ready_fd_value,
+            sizeof(fault_ready_fd_value),
+            "%d",
+            fault_pipes.ready_write_fd
+        ) > 0
+    );
+    assert(
+        snprintf(
+            fault_release_fd_value,
+            sizeof(fault_release_fd_value),
+            "%d",
+            fault_pipes.release_read_fd
+        ) > 0
+    );
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
+    exec_ok(db, "START TRANSACTION");
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_replace_peer_rollback "
+        "SET option_value = 11 WHERE option_name = 'transaction-row'"
+    );
+    signal_pipe(transaction_pipes.ready_write_fd);
+    close(transaction_pipes.ready_write_fd);
+    wait_for_pipe(transaction_pipes.release_read_fd);
+    close(transaction_pipes.release_read_fd);
+
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT", "rollback-after-native-row-undo", 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD", fault_ready_fd_value, 1) == 0);
+    assert(setenv("MYLITE_OWNERLESS_TEST_FAULT_RELEASE_FD", fault_release_fd_value, 1) == 0);
+    exec_ok(db, "ROLLBACK");
+    assert(unsetenv("MYLITE_OWNERLESS_TEST_FAULT") == 0);
+    assert(unsetenv("MYLITE_OWNERLESS_TEST_FAULT_READY_FD") == 0);
+    assert(unsetenv("MYLITE_OWNERLESS_TEST_FAULT_RELEASE_FD") == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    _exit(0);
+}
+
+static void replace_wordpress_like_option_after_signal(
+    open_database_paths paths,
+    int ready_write_fd,
+    int prepared
+) {
+    mylite_db *db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+
+    exec_ok(db, "SET SESSION innodb_lock_wait_timeout = 30");
+    signal_pipe(ready_write_fd);
+    close(ready_write_fd);
+    if (prepared) {
+        mylite_stmt *stmt = NULL;
+        const char *tail = NULL;
+
+        assert(
+            mylite_prepare(
+                db,
+                prepared == 2 ? "REPLACE INTO app.ownerless_replace_peer_rollback "
+                                "(id, option_name, option_value) VALUES (2, 'ownerless-peer', 35) "
+                                "RETURNING option_value"
+                              : "REPLACE INTO app.ownerless_replace_peer_rollback "
+                                "(id, option_name, option_value) VALUES (2, 'ownerless-peer', 35)",
+                MYLITE_NUL_TERMINATED,
+                &stmt,
+                &tail
+            ) == MYLITE_OK
+        );
+        assert(stmt != NULL);
+        assert(tail != NULL && *tail == '\0');
+        if (prepared == 2) {
+            assert(mylite_step(stmt) == MYLITE_ROW);
+            assert(mylite_column_int64(stmt, 0) == 35);
+            assert(mylite_step(stmt) == MYLITE_DONE);
+        } else {
+            assert(mylite_step(stmt) == MYLITE_DONE);
+        }
+        assert(mylite_finalize(stmt) == MYLITE_OK);
+    } else {
+        exec_ok(
+            db,
+            "REPLACE INTO app.ownerless_replace_peer_rollback "
+            "(id, option_name, option_value) VALUES (2, 'ownerless-peer', 35)"
+        );
+    }
+    assert(
+        query_unsigned(
+            db,
+            "SELECT option_value FROM app.ownerless_replace_peer_rollback "
+            "WHERE option_name = 'ownerless-peer'"
+        ) == 35U
+    );
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);
 }

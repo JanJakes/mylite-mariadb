@@ -213,6 +213,7 @@ std::atomic<uint64_t> startup_native_support_page_visible_lsn{0};
 thread_local uint64_t page_visible_lsn= 0;
 thread_local bool page_visible_lsn_is_current= false;
 thread_local bool page_visible_lsn_is_retained= false;
+thread_local bool ownerless_retryable_deadlock= false;
 thread_local unsigned redo_depth= 0;
 thread_local uint64_t redo_latest_lsn= 0;
 thread_local trx_id_t page_write_lock_trx_id= 0;
@@ -940,6 +941,13 @@ extern "C" void mylite_ownerless_innodb_clear_coordination_error_for_recovery(vo
   ownerless_coordination_error.store(false, std::memory_order_release);
 }
 
+extern "C" int mylite_ownerless_innodb_consume_retryable_deadlock(void)
+{
+  const bool retryable= ownerless_retryable_deadlock;
+  ownerless_retryable_deadlock= false;
+  return retryable ? 1 : 0;
+}
+
 extern "C" void mylite_ownerless_innodb_set_checkpoint_suppression(int suppressed)
 {
   checkpoint_suppressed.store(suppressed != 0, std::memory_order_release);
@@ -1542,9 +1550,12 @@ extern "C" int mylite_ownerless_innodb_lock_wait_for_external(
     if (hook == nullptr)
       return missing_required_hook_result(nullptr);
 
-    return normalize_required_hook_result(
+    const int result= normalize_required_hook_result(
         nullptr, hook(snapshot->trx_id, snapshot->table_id, snapshot->mode,
                       timeout_ms, context));
+    if (result == MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK)
+      ownerless_retryable_deadlock= true;
+    return result;
   }
 
   if (snapshot->kind != MYLITE_OWNERLESS_INNODB_LOCK_EXTERNAL_WAIT_RECORD)
@@ -1555,11 +1566,14 @@ extern "C" int mylite_ownerless_innodb_lock_wait_for_external(
   if (hook == nullptr)
     return missing_required_hook_result(nullptr);
 
-  return normalize_required_hook_result(
+  const int result= normalize_required_hook_result(
       nullptr,
       hook(snapshot->trx_id, snapshot->index_id, snapshot->space_id,
            snapshot->page_no, snapshot->heap_no, snapshot->mode,
            snapshot->flags, timeout_ms, context));
+  if (result == MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK)
+    ownerless_retryable_deadlock= true;
+  return result;
 }
 
 extern "C" int mylite_ownerless_innodb_lock_reserve_record(
@@ -2069,6 +2083,8 @@ static int mylite_ownerless_innodb_lock_acquire_page_write_low(
                 timeout_ms,
                 out_acquire_flags,
                 context));
+  if (result == MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK)
+    ownerless_retryable_deadlock= true;
   if (internal_rollback_wait)
     mylite_ownerless_innodb_end_internal_lock_wait();
   if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK &&

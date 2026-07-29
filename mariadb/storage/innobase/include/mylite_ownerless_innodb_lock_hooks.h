@@ -367,6 +367,7 @@ int mylite_ownerless_innodb_write_coordination_enabled(void);
 int mylite_ownerless_innodb_coordination_error(void);
 void mylite_ownerless_innodb_note_coordination_error(void);
 void mylite_ownerless_innodb_clear_coordination_error_for_recovery(void);
+int mylite_ownerless_innodb_consume_retryable_deadlock(void);
 void mylite_ownerless_innodb_set_startup_lsn_advance_limit(uint64_t max_lsn);
 void mylite_ownerless_innodb_clear_startup_lsn_advance_limit(void);
 void mylite_ownerless_innodb_set_checkpoint_suppression(int suppressed);

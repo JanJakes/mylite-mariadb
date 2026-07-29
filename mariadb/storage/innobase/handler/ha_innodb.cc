@@ -1928,6 +1928,13 @@ extern "C" int mylite_embedded_clear_ownerless_rollback_read_state(THD *thd)
   return 1;
 }
 
+extern "C" int mylite_embedded_consume_ownerless_retryable_deadlock(THD *thd)
+{
+  return thd != nullptr
+             ? mylite_ownerless_innodb_consume_retryable_deadlock()
+             : 0;
+}
+
 extern "C" int mylite_embedded_recover_ownerless_transaction_for_close(THD *thd)
 {
   trx_t *trx= thd != nullptr ? thd_to_trx(thd) : nullptr;

@@ -405,6 +405,13 @@ LIKE`, `CREATE TABLE ... SELECT`, standalone index DDL, representative
 `ALTER TABLE` column and index changes, CHECK constraints, foreign keys, and
 generated columns; more specialized DDL remains later work.
 
+Ownerless autocommit `DELETE`, `INSERT`, `REPLACE`, and `UPDATE` execution
+retries the complete statement at most once when InnoDB identifies errno
+`1213` as an ownerless external-wait or page-write coordination deadlock. The
+same bounded rule applies to prepared execution. Explicit transactions,
+locking reads, DDL, and untagged MariaDB or ownerless wait-publication
+deadlocks are not retried, and their diagnostics remain visible to the caller.
+
 For an ownerless explicit transaction, a pre-serialization `COMMIT` failure may
 be returned after MariaDB has automatically rolled the transaction back. When
 that rollback and ownerless cleanup complete, MyLite preserves the original
