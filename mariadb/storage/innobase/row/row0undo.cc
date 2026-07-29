@@ -273,7 +273,8 @@ static buf_block_t* row_undo_rec_get(undo_node_t* node)
 		trx->pages_undone = 0;
     /* Ownerless rollback can wait on a peer page owner here while the
     logical row undo still holds transaction-owned pages.  Tail truncation
-    is optional; terminal undo cleanup remains authoritative. */
+    is deferred to trx_t::rollback_finish(), after those page writes have
+    been made durable and released. */
     if (!mylite_ownerless_innodb_lock_has_hooks())
     {
       trx_undo_try_truncate(trx);

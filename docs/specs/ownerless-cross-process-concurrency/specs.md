@@ -619,7 +619,8 @@ active segments are a fixed process registry with 16 fixed-size slots, a fixed
 wait-channel table with 16 fixed-size channels, a format-12 fixed MDL lock-table
 segment with 80-byte scheduling entries,
 a fixed transaction-registry segment with 64 transaction slots, a fixed
-read-view registry, a fixed InnoDB table/record lock registry, a
+read-view registry, a fixed InnoDB table/record lock registry with 16,384
+slots, a
 redo-visibility state segment, a page-version index segment, a
 dictionary-generation segment, and a separate page-write lock registry for
 internal X/SX page-latch write ownership, plus an ownerless AUTO_INCREMENT
@@ -1865,6 +1866,12 @@ Tasks:
    native grant. Insert-intention checks that do not normally create a granted
    native lock now probe the shared registry before inserting so peer
    gap/next-key locks can block and time out with MariaDB error 1205.
+   The table/record registry is deliberately bounded at 16,384 fixed 128-byte
+   slots inside a 4 MiB minimum volatile shared-memory mapping. Exhaustion
+   remains an explicit MariaDB lock-table-full error rather than an
+   out-of-bounds write or silent loss of conflict tracking. The lock-registry
+   segment is version 6; a no-live opener rebuilds older volatile layouts
+   instead of interpreting their 4,096-slot registry with the new offsets.
    Ownerless write commits now publish transaction-owned dirty page images
    before releasing shared lock-registry entries. MTR-proven autocommit commits
    can publish the page-visible LSN directly from the durably synced
@@ -8311,6 +8318,12 @@ subsystems that this mode needs:
   `14m59s`; all tiers completed `4 * rounds` worker rounds with zero exhausted
   terminal-cleanup retries.
 
+  The concurrent foreign-key graph gate applies the same bounded native
+  `1205`/`1213` contract to `COMMIT` as well as to each DML step. InnoDB can
+  select a transaction as the deadlock victim while serializing its commit, so
+  a retryable commit diagnostic rolls back the attempt and replays the whole
+  transaction; it never treats the failed commit as a successful round.
+
   Deterministic concurrent autocommit setup traffic follows the same exact
   retry contract. Independent-table, concurrent-DDL insert, and
   AUTO_INCREMENT workers retry only MariaDB `1205` or `1213`, require
@@ -8358,7 +8371,7 @@ subsystems that this mode needs:
      child cleanup `5/5` in `1677.33s`; pressure `4/4` in `170.39s`; ext4, XFS,
      tmpfs, and overlay mounts; explicit unsupported-filesystem rejection;
      native macOS/APFS and Windows/NTFS gates; focused WordPress `7/7` with `22`
-     assertions and `71` peer writes; external MariaDB traces `12/12`; and `32`
+     assertions and `76` peer writes; external MariaDB traces `12/12`; and `32`
      seeds each for random transactions, DDL, and FK graphs. Production-build
      policy, Release/MinSizeRel checks, formatting, clang-tidy, whitespace, and
      the linked bundle audit also pass.

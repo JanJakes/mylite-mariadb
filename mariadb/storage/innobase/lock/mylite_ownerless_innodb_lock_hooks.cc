@@ -7525,7 +7525,7 @@ bool transaction_should_track_page_write(trx_t *trx,
     return false;
   if (trx->read_only || trx->dict_operation)
     return false;
-  if (trx->mysql_thd == nullptr && trx->undo_no == 0 &&
+  if (trx->mysql_thd == nullptr && !trx->has_logged() && trx->undo_no == 0 &&
       trx->mod_tables.empty())
     return false;
   if (trx->mysql_thd != nullptr)

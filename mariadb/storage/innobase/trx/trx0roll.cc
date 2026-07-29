@@ -126,6 +126,18 @@ bool trx_t::rollback_finish() noexcept
         in_rollback= false;
         return false;
       }
+      /* Ownerless row undo defers intermediate tail truncation because a
+      truncation wait must not retain transaction-owned application pages.
+      Those pages are durable and released now, so finish the deferred
+      truncation before commit_empty() validates the empty undo segment. */
+      const dberr_t truncate_error= trx_undo_try_truncate(this);
+      if (UNIV_UNLIKELY(truncate_error != DB_SUCCESS))
+      {
+        mylite_ownerless_coordination_fault= true;
+        error_state= truncate_error;
+        in_rollback= false;
+        return false;
+      }
     }
     const bool coordination_fault= commit();
     if (ownerless_rollback)

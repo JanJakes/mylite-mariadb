@@ -1681,8 +1681,8 @@ static bool ownerless_page_write_holds_for_transaction(const buf_page_t &page)
 
 static bool ownerless_page_write_lock_only_transaction(const trx_t *trx)
 {
-  return trx != nullptr && trx->mysql_thd == nullptr && trx->undo_no == 0 &&
-         !trx->dict_operation && trx->mod_tables.empty();
+  return trx != nullptr && trx->mysql_thd == nullptr && !trx->has_logged() &&
+         trx->undo_no == 0 && !trx->dict_operation && trx->mod_tables.empty();
 }
 
 static bool
@@ -3136,8 +3136,8 @@ mtr_t::ownerless_page_write_enter(const buf_block_t &block, bool allow_refresh,
       }
       if (result == MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK)
       {
-        if (ownerless_trx != nullptr && ownerless_trx->undo_no == 0 &&
-            !m_modifications &&
+        if (ownerless_trx != nullptr && !ownerless_trx->has_logged() &&
+            ownerless_trx->undo_no == 0 && !m_modifications &&
             !ownerless_page_write_transaction_has_modified_pages(ownerless_trx))
         {
           mylite_ownerless_innodb_lock_release_transaction_page_writes(
@@ -3243,8 +3243,8 @@ mtr_t::ownerless_page_write_enter(const buf_block_t &block, bool allow_refresh,
     }
     if (result == MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK)
     {
-      if (ownerless_trx != nullptr && ownerless_trx->undo_no == 0 &&
-          !m_modifications &&
+      if (ownerless_trx != nullptr && !ownerless_trx->has_logged() &&
+          ownerless_trx->undo_no == 0 && !m_modifications &&
           !ownerless_page_write_transaction_has_modified_pages(ownerless_trx))
       {
         /* This hook has no error return path. If we have not dirtied a
@@ -3535,8 +3535,8 @@ mtr_t::ownerless_space_write_enter(fil_space_t *space,
       return OWNERLESS_SPACE_WRITE_SKIPPED;
     if (result == MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK &&
         test_result < 0 &&
-        ownerless_trx != nullptr && ownerless_trx->undo_no == 0 &&
-        !m_modifications &&
+        ownerless_trx != nullptr && !ownerless_trx->has_logged() &&
+        ownerless_trx->undo_no == 0 && !m_modifications &&
         !ownerless_page_write_transaction_has_modified_pages(ownerless_trx))
     {
       mylite_ownerless_innodb_lock_release_transaction_page_writes(

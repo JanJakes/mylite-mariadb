@@ -1707,17 +1707,19 @@ dberr_t mylite_ownerless_innodb_lock_prepare_record_page(
     result= mylite_ownerless_innodb_lock_reserve_record_page_write(
         trx, block, remaining_timeout_ms, &acquire_flags);
     if (result != MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK ||
-        trx->undo_no != 0 || !trx->mylite_ownerless_dirty_pages_empty())
+        trx->has_logged() || trx->undo_no != 0 ||
+        !trx->mylite_ownerless_dirty_pages_empty())
       break;
 
     /*
-    The B-tree has not changed a persistent page yet. A peer can hold this
-    record page while waiting for one of our clean page reservations or
-    tablespace gates, so selecting this transaction as a SQL deadlock victim
-    would expose a false deadlock between independent user writes. Release the
-    pre-write reservations and retry; the successful reservation refreshes the
-    page and asks restart-capable B-tree callers to repeat their search. Keep
-    all retries inside the transaction's original lock-wait timeout.
+    The transaction has neither allocated native undo nor changed a persistent
+    page yet. A peer can hold this record page while waiting for one of our
+    clean page reservations or tablespace gates, so selecting this transaction
+    as a SQL deadlock victim would expose a false deadlock between independent
+    user writes. Release the pre-write reservations and retry; the successful
+    reservation refreshes the page and asks restart-capable B-tree callers to
+    repeat their search. Keep all retries inside the transaction's original
+    lock-wait timeout.
     */
     mylite_ownerless_innodb_lock_release_transaction_page_writes(trx);
     if (mylite_ownerless_innodb_coordination_error())

@@ -818,6 +818,7 @@ static void test_two_processes_update_same_innodb_row(void);
 static void test_ownerless_autocommit_off_first_write_holds_locks(void);
 static void test_ownerless_autocommit_off_repeatable_read_snapshot(void);
 static void test_two_processes_update_different_innodb_tables(void);
+static void test_ownerless_large_rollback_truncates_undo_tail(void);
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
 static void test_ownerless_runtime_fault_propagation_durability(void);
 static void test_ownerless_runtime_fault_propagation_mtr(void);
@@ -8236,6 +8237,7 @@ static const ownerless_sql_test_case ownerless_sql_test_cases[] = {
     OWNERLESS_SQL_TEST_CASE(test_ownerless_autocommit_off_first_write_holds_locks),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_autocommit_off_repeatable_read_snapshot),
     OWNERLESS_SQL_TEST_CASE(test_two_processes_update_different_innodb_tables),
+    OWNERLESS_SQL_TEST_CASE(test_ownerless_large_rollback_truncates_undo_tail),
 #if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
     OWNERLESS_SQL_TEST_CASE(test_ownerless_runtime_fault_propagation_durability),
     OWNERLESS_SQL_TEST_CASE(test_ownerless_runtime_fault_propagation_mtr),
@@ -10495,6 +10497,117 @@ static void test_ownerless_visible_skip_releases_deferred_page_batch(void) {
     free(root);
 }
 #endif
+
+static void test_ownerless_large_rollback_truncates_undo_tail(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "ownerless-large-rollback.mylite");
+    open_database_paths paths = {
+        .database_path = database_path,
+        .runtime_root = runtime_root,
+    };
+    static const unsigned offsets[] = {1U, 2U, 4U, 8U, 16U, 32U};
+    char insert_sql[512];
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    initialize_database(paths);
+
+    mylite_db *db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(
+        db,
+        "CREATE TABLE app.ownerless_large_rollback ("
+        "id INT UNSIGNED NOT NULL PRIMARY KEY,"
+        "payload_a VARBINARY(1024) NOT NULL,"
+        "payload_b VARBINARY(1024) NOT NULL,"
+        "payload_c VARBINARY(1024) NOT NULL,"
+        "payload_d VARBINARY(1024) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    exec_ok(
+        db,
+        "INSERT INTO app.ownerless_large_rollback VALUES "
+        "(1,REPEAT('a',1024),REPEAT('a',1024),REPEAT('a',1024),REPEAT('a',1024))"
+    );
+    for (size_t index = 0U; index < sizeof(offsets) / sizeof(offsets[0]); ++index) {
+        const int length = snprintf(
+            insert_sql,
+            sizeof(insert_sql),
+            "INSERT INTO app.ownerless_large_rollback "
+            "SELECT id+%u,payload_a,payload_b,payload_c,payload_d "
+            "FROM app.ownerless_large_rollback WHERE id<=%u",
+            offsets[index],
+            offsets[index]
+        );
+        assert(length > 0 && (size_t)length < sizeof(insert_sql));
+        exec_ok(db, insert_sql);
+    }
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_large_rollback") == 64U);
+
+    exec_ok(db, "START TRANSACTION");
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_large_rollback SET "
+        "payload_a=REPEAT('b',1024),"
+        "payload_b=REPEAT('b',1024),"
+        "payload_c=REPEAT('b',1024),"
+        "payload_d=REPEAT('b',1024)"
+    );
+    exec_ok(db, "ROLLBACK");
+    assert(query_unsigned(db, "SELECT @@in_transaction") == 0U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_large_rollback "
+            "WHERE payload_a=REPEAT('a',1024) "
+            "AND payload_b=REPEAT('a',1024) "
+            "AND payload_c=REPEAT('a',1024) "
+            "AND payload_d=REPEAT('a',1024)"
+        ) == 64U
+    );
+
+    exec_ok(db, "START TRANSACTION");
+    exec_ok(db, "SAVEPOINT before_large_update");
+    exec_ok(
+        db,
+        "UPDATE app.ownerless_large_rollback SET "
+        "payload_a=REPEAT('b',1024),"
+        "payload_b=REPEAT('b',1024),"
+        "payload_c=REPEAT('b',1024),"
+        "payload_d=REPEAT('b',1024)"
+    );
+    exec_ok(db, "ROLLBACK TO SAVEPOINT before_large_update");
+    exec_ok(db, "COMMIT");
+    assert(query_unsigned(db, "SELECT @@in_transaction") == 0U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_large_rollback "
+            "WHERE payload_a=REPEAT('a',1024) "
+            "AND payload_b=REPEAT('a',1024) "
+            "AND payload_c=REPEAT('a',1024) "
+            "AND payload_d=REPEAT('a',1024)"
+        ) == 64U
+    );
+
+    exec_ok(db, "UPDATE app.ownerless_large_rollback SET payload_a=REPEAT('c',1024) WHERE id=1");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
+    assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_large_rollback") == 64U);
+    assert(
+        query_unsigned(
+            db,
+            "SELECT COUNT(*) FROM app.ownerless_large_rollback "
+            "WHERE id=1 AND payload_a=REPEAT('c',1024)"
+        ) == 1U
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
 
 static unsigned wait_for_commit_race_ready_barrier(
     const char *database_path,
@@ -86820,7 +86933,21 @@ static void run_ownerless_fk_graph_stress_worker(
                 ownerless_fk_graph_stress_retry_pause(worker_id, round, attempt);
                 continue;
             }
-            exec_ok(db, "COMMIT");
+            if (!ownerless_fk_graph_stress_exec_retryable(
+                    db,
+                    "COMMIT",
+                    worker_id,
+                    round,
+                    attempt,
+                    "commit",
+                    cascade_root,
+                    setnull_root,
+                    restrict_root
+                )) {
+                exec_ok(db, "ROLLBACK");
+                ownerless_fk_graph_stress_retry_pause(worker_id, round, attempt);
+                continue;
+            }
             cascade_root = next_cascade_root;
             setnull_root = next_setnull_root;
             round_finished = 1;
@@ -86900,7 +87027,21 @@ static void run_ownerless_fk_graph_stress_worker(
             ownerless_fk_graph_stress_retry_pause(worker_id, rounds, attempt);
             continue;
         }
-        exec_ok(db, "COMMIT");
+        if (!ownerless_fk_graph_stress_exec_retryable(
+                db,
+                "COMMIT",
+                worker_id,
+                rounds,
+                attempt,
+                "setnull-root-delete-commit",
+                cascade_root,
+                setnull_root,
+                restrict_root
+            )) {
+            exec_ok(db, "ROLLBACK");
+            ownerless_fk_graph_stress_retry_pause(worker_id, rounds, attempt);
+            continue;
+        }
         setnull_root = 0U;
         break;
     }

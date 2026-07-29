@@ -595,6 +595,17 @@ if(BUILD_TESTING)
         random-savepoint-same-table-schedule
     )
     add_test(
+      NAME libmylite.ownerless-large-rollback-undo-tail
+      COMMAND
+        mylite_ownerless_cross_process_sql_test
+        sql-case
+        test_ownerless_large_rollback_truncates_undo_tail
+    )
+    set_tests_properties(libmylite.ownerless-large-rollback-undo-tail PROPERTIES
+      LABELS "compat.concurrency;compat.ownerless-cross-process-sql;compat.ownerless-transaction"
+      TIMEOUT 300
+    )
+    add_test(
       NAME libmylite.ownerless-killed-savepoint-dml-marker-recovery
       COMMAND
         mylite_ownerless_cross_process_sql_test

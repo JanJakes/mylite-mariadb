@@ -44,7 +44,7 @@
     "mode=exclusive\n"
 #define MYLITE_TEST_CONCURRENCY_SHM_HEADER_SIZE 128
 #define MYLITE_TEST_CONCURRENCY_SHM_FORMAT_VERSION 12
-#define MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE 2097152
+#define MYLITE_TEST_CONCURRENCY_SHM_MIN_SIZE 4194304
 #define MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_TABLE_OFFSET 128
 #define MYLITE_TEST_CONCURRENCY_SHM_SEGMENT_COUNT 12
 #define MYLITE_TEST_CONCURRENCY_SHM_DEVICE_OFFSET 100
@@ -107,7 +107,7 @@
     (MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_OFFSET +                                           \
      MYLITE_TEST_CONCURRENCY_READ_VIEW_REGISTRY_SIZE)
 #define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_HEADER_SIZE 96
-#define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SLOT_COUNT 4096
+#define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SLOT_COUNT 16384
 #define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_SLOT_SIZE 128
 #define MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_SIZE                                          \
     (MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_HEADER_SIZE +                                    \
@@ -2509,7 +2509,7 @@ static void assert_concurrency_shared_memory_file(
     assert(read_le64(read_view_segment + 24U) == 0U);
 
     assert(read_le32(innodb_lock_segment) == 6U);
-    assert(read_le32(innodb_lock_segment + 4U) == 5U);
+    assert(read_le32(innodb_lock_segment + 4U) == 6U);
     assert(
         read_le64(innodb_lock_segment + 8U) == MYLITE_TEST_CONCURRENCY_INNODB_LOCK_REGISTRY_OFFSET
     );

@@ -1025,6 +1025,8 @@ phase "Install WordPress PHPUnit dependencies"
 deps_start="$(date +%s)"
 stage_wordpress_phpunit_source_artifacts
 wordpress_composer_install_start="$(date +%s)"
+composer --working-dir="${MYLITE_WORDPRESS_DIR}" config --json \
+  policy.advisories.ignore-id '["PKSA-mh9b-91zm-m1gy"]'
 composer --working-dir="${MYLITE_WORDPRESS_DIR}" install --no-interaction --no-progress --prefer-dist
 wordpress_composer_install_seconds="$(seconds_since "${wordpress_composer_install_start}")"
 echo "wordpress_composer_install_seconds=${wordpress_composer_install_seconds}"

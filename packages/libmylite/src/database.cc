@@ -844,7 +844,7 @@ constexpr std::uint16_t k_innodb_fil_page_type_fsp_hdr = 8;
 constexpr std::uint16_t k_innodb_fil_page_type_xdes = 9;
 constexpr std::uint32_t k_innodb_page_size = 16384;
 constexpr std::uint32_t k_innodb_page_size_max = 65536;
-constexpr off_t k_minimum_concurrency_shm_size = 2097152;
+constexpr off_t k_minimum_concurrency_shm_size = 4194304;
 constexpr std::array<unsigned char, 8> k_concurrency_shm_magic = {
     'M',
     'Y',
@@ -1017,7 +1017,7 @@ constexpr std::uint32_t k_concurrency_trx_registry_segment_version = 2;
 constexpr std::uint32_t k_concurrency_read_view_registry_segment_type = 5;
 constexpr std::uint32_t k_concurrency_read_view_registry_segment_version = 2;
 constexpr std::uint32_t k_concurrency_innodb_lock_registry_segment_type = 6;
-constexpr std::uint32_t k_concurrency_innodb_lock_registry_segment_version = 5;
+constexpr std::uint32_t k_concurrency_innodb_lock_registry_segment_version = 6;
 constexpr std::uint32_t k_concurrency_redo_state_segment_type = 7;
 constexpr std::uint32_t k_concurrency_redo_state_segment_version = 10;
 constexpr std::uint32_t k_concurrency_page_index_segment_type = 8;
@@ -1080,7 +1080,7 @@ constexpr std::size_t k_concurrency_innodb_lock_registry_offset =
     k_concurrency_read_view_registry_offset + k_concurrency_read_view_registry_segment_size;
 constexpr std::size_t k_concurrency_innodb_lock_registry_header_size =
     MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_HEADER_SIZE;
-constexpr std::uint32_t k_concurrency_innodb_lock_slot_count = 4096;
+constexpr std::uint32_t k_concurrency_innodb_lock_slot_count = 16384;
 constexpr std::size_t k_concurrency_innodb_lock_slot_size =
     MYLITE_OWNERLESS_INNODB_LOCK_REGISTRY_SLOT_SIZE;
 constexpr std::size_t k_concurrency_innodb_lock_registry_segment_size =

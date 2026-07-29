@@ -72,8 +72,22 @@ Base: MariaDB 11.8 LTS import `mariadb-11.8.6`
 - Ownerless physical page reservations include clean B-tree pages and
   tablespace gates. A cycle among only clean pre-write reservations is safe to
   break by releasing the selected transaction's reservations and restarting
-  its B-tree search. Once the transaction has undo or a dirty ownerless page,
-  the cycle is a real SQL deadlock and must retain MariaDB's victim semantics.
+  its B-tree search. Once the transaction has allocated a native undo log,
+  advanced its undo sequence, or dirtied an ownerless page, the cycle is a real
+  SQL deadlock and must retain MariaDB's victim semantics. An allocated undo
+  log remains authoritative even when statement rollback has returned
+  `undo_no` to zero.
+- Ownerless row undo defers intermediate undo-tail truncation because waiting
+  for its history pages while retaining transaction-owned application pages
+  can create a physical ownership cycle. The terminal rollback path must
+  perform that deferred truncation after restored application pages are
+  durable and released, before `commit_empty()` validates the empty undo
+  segment.
+- The original 4,096-slot shared table/record-lock registry can reach its
+  bounded capacity during the 5,000-row transactional performance probe.
+  Capacity exhaustion must remain an explicit lock-table-full condition, while
+  the release workload needs a versioned layout large enough for its admitted
+  transaction size.
 
 ## Design
 
@@ -103,10 +117,18 @@ the tests:
    depends on it, including no-live replacement updates, startup replay, and
    the final native-shutdown checkpoint observed before unmapping.
 9. If the physical page reservation layer selects a transaction that has
-   neither undo nor dirty ownerless pages as a deadlock victim, release its
-   clean page reservations and tablespace gates and retry the reservation.
-   Preserve the deadlock result for transactions that have begun a persistent
-   change.
+   neither an allocated native undo log, an advanced undo sequence, nor dirty
+   ownerless pages as a deadlock victim, release its clean page reservations
+   and tablespace gates and retry the reservation. Preserve the deadlock result
+   for transactions that have begun a persistent change.
+10. At terminal ownerless rollback, first publish and flush the restored
+    application pages, release their transaction page-write ownership, and
+    then call `trx_undo_try_truncate()` before entering the native empty-commit
+    path. Treat failure of that required cleanup as a coordination fault.
+11. Expand the fixed table/record-lock registry to 16,384 slots in a 4 MiB
+    minimum `.shm` mapping and increment its segment version. Continue to
+    return MariaDB's explicit lock-table-full diagnostic if the new bound is
+    exhausted; do not claim unbounded transaction size.
 
 The implementation must continue to fail closed when required native state is
 missing or cannot be reconciled. It must not convert corruption into a retry,
@@ -124,6 +146,9 @@ In scope:
 - recovery-anchor ordering at the native shutdown boundary,
 - clean pre-write reservation-cycle handling without weakening real
   transaction deadlock detection,
+- multi-page ownerless rollback terminal cleanup and connection reuse,
+- a versioned lock-registry capacity sufficient for the 5,000-row release
+  transaction while preserving explicit bounded-capacity failure,
 - compatibility and roadmap notes if the supported behavior changes.
 
 Out of scope:
@@ -167,6 +192,12 @@ movement must be measured by the existing release gates.
   native CI jobs again on the pushed final commit.
 - Repeat the checkpoint-anchor commit race and run true row, gap-lock, and
   independent-table deadlock coverage around the physical-cycle repair.
+- Run a focused ownerless transaction that creates a multi-page update-undo
+  tail, covers both full rollback and rollback-to-savepoint followed by commit,
+  reuses the same connection, and reopens natively.
+- Run the exact 5,000-row transactional performance probe against the expanded
+  lock registry and verify the generated `.shm` layout through the embedded
+  open/close tests.
 - Run the full local production/native CI gates, format/tidy checks,
   `git diff --check`, and the macOS/APFS and Windows/NTFS native jobs after
   pushing the fix.
@@ -189,6 +220,11 @@ movement must be measured by the existing release gates.
 - Independent-table clean pre-write cycles restart without surfacing errno
   `1213`, while conflicting row and gap-lock transactions retain MariaDB
   deadlock behavior.
+- Multi-page ownerless rollback truncates its empty native undo tail before
+  native empty-commit validation and leaves the connection reusable.
+- The release performance transaction completes inside the 16,384-slot
+  version-6 record-lock registry; exhaustion beyond that bound remains an
+  explicit lock-table-full error.
 - Interrupted DDL retains the native file-operation checkpoint marker while a
   live peer still requires it, and the final no-live recovery clears it.
 - Multi-table rename rollback restores both native tablespaces and dictionary
@@ -219,17 +255,33 @@ The stabilization is complete for the admitted ownerless surface:
 - every durable ownerless checkpoint is preceded by a shared redo-anchor
   publication, including the final native shutdown checkpoint,
 - clean pre-write physical reservation cycles restart inside the original lock
-  wait budget, while transactions with undo or dirty pages preserve MariaDB
-  deadlock semantics, and
+  wait budget, while transactions with allocated native undo, an advanced undo
+  sequence, or dirty pages preserve MariaDB deadlock semantics, and
+- terminal ownerless rollback truncates deferred multi-page native undo only
+  after restored application-page ownership is durable and released,
+- the version-6 shared table/record-lock registry provides 16,384 slots in the
+  4 MiB minimum volatile `.shm` layout, with explicit bounded-capacity failure
+  retained, and
+- the concurrent foreign-key graph gate retries the complete transaction when
+  MariaDB reports native `1205`/`1213` contention at `COMMIT`, matching its
+  existing per-statement retry contract, and
 - peer-page and dictionary refresh now fail closed if required page
   materialization cannot be completed.
 
 Final-source evidence passes `65/65` ordinary production tests, `2/2` PHP
-ownerless adapter tests, all `16` weighted SQL shards, all `269` hook release
-tests, the `5/5` workload and `5/5` randomized presets, the `4/4` pressure
-preset, mounted ext4/XFS/tmpfs/overlay qualification, explicit unsupported
-filesystem rejection, focused WordPress `7/7` with `22` assertions and `71`
-peer writes, the `12/12` MariaDB trace oracle, and `32` seeds each for random
-transactions, DDL, and FK graphs. Native CI supplies the corresponding final
-macOS/APFS and Windows/NTFS proof. Format, clang-tidy, build-policy, build-type,
-whitespace, and bundle-size gates also pass.
+ownerless adapter tests, all `16` weighted SQL shards, all `270` hook release
+tests across sixteen deterministic CI shards, the `5/5` workload and `5/5`
+randomized presets, the `4/4` pressure preset, mounted
+ext4/XFS/tmpfs/overlay qualification, explicit unsupported-filesystem
+rejection, focused WordPress `7/7` with `22` assertions and `76` peer writes,
+the `12/12` MariaDB trace oracle, and `32` seeds each for random transactions,
+DDL, and FK graphs. Native CI supplies the corresponding final macOS/APFS and
+Windows/NTFS proof. Format, clang-tidy, build-policy, build-type, whitespace,
+and bundle-size gates also pass.
+
+The pinned WordPress source requires the test-only
+`wp-coding-standards/wpcs 3.3.0` package. Composer's later advisory-blocking
+default rejects that exact package for advisory `PKSA-mh9b-91zm-m1gy`, before
+the ownerless gate can run. The harness records an exact-ID exception for that
+pinned coding-standard dependency while leaving Composer's broader advisory
+blocking enabled; the CI production-build audit requires the narrow exception.

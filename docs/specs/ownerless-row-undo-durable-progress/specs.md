@@ -31,13 +31,21 @@ process can be treated as a supported crash boundary.
 
 ## Design
 
-For ownerless mode only, `row_undo()` now turns each successful native row-undo
+For ownerless mode only, `row_undo()` turns each successful native row-undo
 record into a durable restart point before the unsafe test hook can pause:
 
 1. Apply the native row undo.
-2. Truncate the native undo tail with `trx_undo_try_truncate(node->trx)`.
-3. Flush current redo with `log_buffer_flush_to_disk()`.
-4. Fire `rollback-after-native-row-undo` if unsafe hooks are enabled.
+2. Publish and flush the rollback proof pages and current redo.
+3. Fire `rollback-after-native-row-undo` if unsafe hooks are enabled.
+
+Intermediate tail truncation is deliberately deferred: it can wait on an
+ownerless history page while logical rollback still retains
+transaction-owned application pages. On terminal full rollback,
+`trx_t::rollback_finish()` first makes the restored application pages durable,
+releases their page-write ownership, and then calls
+`trx_undo_try_truncate()` before native empty-commit validation. This preserves
+the durable per-row crash boundary without creating the physical ownership
+cycle, and it correctly collapses multi-page empty undo segments.
 
 The guard is `mylite_ownerless_innodb_lock_has_hooks()`, so ordinary embedded
 InnoDB rollback keeps MariaDB's original progress cadence. The cost is limited
@@ -48,7 +56,8 @@ to ownerless rollback, not normal commit paths.
 No SQL syntax, C API, storage format, or directory-layout change. The behavior
 change is stronger crash durability for ownerless native rollback progress.
 Large ownerless rollbacks can pay additional redo flush cost per row-undo
-record; this is a correctness tradeoff for process-kill recovery boundaries.
+record plus one terminal tail truncation; this is a correctness tradeoff for
+process-kill recovery boundaries.
 
 ## Scope And Non-Goals
 
@@ -94,6 +103,9 @@ Out of scope:
   recover after peer release.
 - Forced `.shm` rebuild, ordinary native reopen, and follow-up native writes
   observe the recovered original state.
+- A multi-page update-undo tail supports full rollback and
+  rollback-to-savepoint followed by commit, leaves the same ownerless
+  connection reusable, and survives ordinary native reopen.
 
 ## Verification Results
 
