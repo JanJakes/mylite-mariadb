@@ -87360,6 +87360,12 @@ static int ownerless_ddl_stress_statement_lock_retryable(mylite_db *db, unsigned
     return mylite_errcode(db) == MYLITE_BUSY && mariadb_errno == 0U;
 }
 
+static int ownerless_ddl_stress_error_retryable(mylite_db *db, unsigned mariadb_errno) {
+    return ownerless_ddl_stress_statement_lock_retryable(db, mariadb_errno) ||
+           mariadb_errno == MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO ||
+           mariadb_errno == MYLITE_TEST_DEADLOCK_ERRNO;
+}
+
 static int ownerless_ddl_stress_exec_retryable(
     mylite_db *db,
     const char *sql,
@@ -87374,7 +87380,7 @@ static int ownerless_ddl_stress_exec_retryable(
     if (result == MYLITE_OK) {
         return 1;
     }
-    if (ownerless_ddl_stress_statement_lock_retryable(db, mariadb_errno)) {
+    if (ownerless_ddl_stress_error_retryable(db, mariadb_errno)) {
         return 0;
     }
 
@@ -87470,7 +87476,7 @@ static unsigned long long ownerless_ddl_stress_query_unsigned(
             assert(errmsg == NULL);
             return result.value;
         }
-        const int retryable = mylite_errcode(db) == MYLITE_BUSY && mylite_mariadb_errno(db) == 0U;
+        const int retryable = ownerless_ddl_stress_error_retryable(db, mylite_mariadb_errno(db));
         if (!retryable || monotonic_milliseconds() >= deadline_ms) {
             fprintf(
                 stderr,

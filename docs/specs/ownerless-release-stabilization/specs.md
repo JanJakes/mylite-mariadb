@@ -265,6 +265,9 @@ The stabilization is complete for the admitted ownerless surface:
 - the concurrent foreign-key graph gate retries the complete transaction when
   MariaDB reports native `1205`/`1213` contention at `COMMIT`, matching its
   existing per-statement retry contract, and
+- the concurrent DDL/DML stress gate applies that same bounded native
+  `1205`/`1213` contract to its autocommit statements and read-only polls, in
+  addition to pre-execution MyLite statement-lock contention, and
 - peer-page and dictionary refresh now fail closed if required page
   materialization cannot be completed.
 

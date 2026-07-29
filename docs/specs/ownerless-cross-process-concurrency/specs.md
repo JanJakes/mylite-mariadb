@@ -8213,15 +8213,16 @@ subsystems that this mode needs:
   AUTO_INCREMENT gap preservation, forced `.shm` rebuild, and ordinary native
   reopen.
 
-  Ownerless DDL stress now treats pre-execution MyLite statement-lock
-  `MYLITE_BUSY` as bounded retryable harness contention while keeping native
-  lock-timeout, deadlock, metadata, and storage errors fatal. A focused
-  short-timeout stress selector forces immediate ownerless statement-lock
-  misses to exercise that retry path, then relaxes each affected worker session
-  to the harness default `30` second statement-lock wait after the first forced
-  miss so the remaining run proves the ordinary DDL/DML workload instead of
-  relying on repeated outer retry loops. The regular ownerless-stress DDL CTest
-  also caps its statement-lock
+  Ownerless DDL stress treats pre-execution MyLite statement-lock
+  `MYLITE_BUSY` as bounded retryable harness contention. Its autocommit DDL/DML
+  executor and read-only poller also retry native MariaDB `1205` lock-wait and
+  `1213` deadlock outcomes inside the same deadline; metadata, storage, and
+  other errors remain fatal. A focused short-timeout stress selector forces
+  immediate ownerless statement-lock misses to exercise that retry path, then
+  relaxes each affected worker session to the harness default `30` second
+  statement-lock wait after the first forced miss so the remaining run proves
+  the ordinary DDL/DML workload instead of relying on repeated outer retry
+  loops. The regular ownerless-stress DDL CTest also caps its statement-lock
   wait at `1` second so the same eight-round workload uses repeated short
   retries inside the harness deadline instead of six long `30` second waits.
   This stabilizes evidence collection for the existing DDL/DML stress
