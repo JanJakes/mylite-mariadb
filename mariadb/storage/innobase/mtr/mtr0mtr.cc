@@ -2374,21 +2374,6 @@ ownerless_page_write_transaction_has_modified_page(const trx_t *trx,
   return trx->mylite_ownerless_dirty_page_contains(packed_page);
 }
 
-static void ownerless_page_write_forget_transaction_gate(trx_t *trx)
-{
-  if (trx == nullptr)
-    return;
-
-  trx_t::mylite_ownerless_page_vector *pages=
-      trx->mylite_ownerless_modified_pages;
-  if (pages == nullptr)
-    return;
-  pages->erase(std::remove_if(pages->begin(), pages->end(),
-                              ownerless_page_write_is_transaction_gate),
-               pages->end());
-  trx->mylite_ownerless_rebuild_modified_page_set();
-}
-
 void mtr_t::finisher_update()
 {
   ut_ad(log_sys.latch_have_wr());
@@ -3136,25 +3121,6 @@ mtr_t::ownerless_page_write_enter(const buf_block_t &block, bool allow_refresh,
       }
       if (result == MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK)
       {
-        if (ownerless_trx != nullptr && !ownerless_trx->has_logged() &&
-            ownerless_trx->undo_no == 0 && !m_modifications &&
-            !ownerless_page_write_transaction_has_modified_pages(ownerless_trx))
-        {
-          mylite_ownerless_innodb_lock_release_transaction_page_writes(
-              ownerless_trx);
-          if (mylite_ownerless_innodb_coordination_error())
-          {
-            ownerless_fail(DB_ERROR, true);
-            return holds_for_transaction;
-          }
-          ownerless_page_write_forget_transaction_gate(ownerless_trx);
-          if (allow_refresh)
-            ownerless_page_write_refresh(block, true, true);
-          if (ownerless_failed())
-            return holds_for_transaction;
-          page_write_waited= true;
-          continue;
-        }
         ownerless_page_write_note_deadlock(ownerless_trx);
         ownerless_fail(DB_DEADLOCK, false);
         return holds_for_transaction;
@@ -3243,27 +3209,6 @@ mtr_t::ownerless_page_write_enter(const buf_block_t &block, bool allow_refresh,
     }
     if (result == MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK)
     {
-      if (ownerless_trx != nullptr && !ownerless_trx->has_logged() &&
-          ownerless_trx->undo_no == 0 && !m_modifications &&
-          !ownerless_page_write_transaction_has_modified_pages(ownerless_trx))
-      {
-        /* This hook has no error return path. If we have not dirtied a
-        persistent page yet, break the physical-page cycle and retry. */
-        mylite_ownerless_innodb_lock_release_transaction_page_writes(
-            ownerless_trx);
-        if (mylite_ownerless_innodb_coordination_error())
-        {
-          ownerless_fail(DB_ERROR, true);
-          return holds_for_transaction;
-        }
-        ownerless_page_write_forget_transaction_gate(ownerless_trx);
-        if (allow_refresh)
-          ownerless_page_write_refresh(block, true, true);
-        if (ownerless_failed())
-          return holds_for_transaction;
-        page_write_waited= true;
-        continue;
-      }
       page_write_waited= true;
       ownerless_page_write_note_deadlock(ownerless_trx);
       ownerless_fail(DB_DEADLOCK, false);
@@ -3294,8 +3239,13 @@ mtr_t::ownerless_page_write_enter(const buf_block_t &block, bool allow_refresh,
 
   if (page_write_waited)
   {
+    /*
+    The page-write token is now exclusive and this transaction has not yet
+    modified the page. Import the latest committed peer image even when the
+    pre-wait buffer was tentatively associated with this transaction.
+    */
     const bool refreshed=
-        !allow_refresh || ownerless_page_write_refresh(block, true, true);
+        !allow_refresh || ownerless_page_write_refresh(block, true, false);
     if (refreshed && !ownerless_failed() && page_write_acquired)
       ownerless_page_write_publish_boundary(block.page);
     if (ownerless_trx != nullptr)
@@ -3533,22 +3483,6 @@ mtr_t::ownerless_space_write_enter(fil_space_t *space,
     }
     if (ownerless_page_write_in_startup_or_recovery())
       return OWNERLESS_SPACE_WRITE_SKIPPED;
-    if (result == MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK &&
-        test_result < 0 &&
-        ownerless_trx != nullptr && !ownerless_trx->has_logged() &&
-        ownerless_trx->undo_no == 0 && !m_modifications &&
-        !ownerless_page_write_transaction_has_modified_pages(ownerless_trx))
-    {
-      mylite_ownerless_innodb_lock_release_transaction_page_writes(
-          ownerless_trx);
-      if (mylite_ownerless_innodb_coordination_error())
-      {
-        ownerless_fail(DB_ERROR, true);
-        return OWNERLESS_SPACE_WRITE_ERROR;
-      }
-      ownerless_page_write_forget_transaction_gate(ownerless_trx);
-      continue;
-    }
     if (result == MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK)
     {
       ownerless_page_write_note_deadlock(ownerless_trx);
@@ -4164,9 +4098,11 @@ mtr_t::ownerless_page_write_publish_boundary(const buf_page_t &bpage) noexcept
   }
 
   mylite_ownerless_innodb_begin_page_publish_batch();
-  const int publish_result= mylite_ownerless_innodb_publish_page_version(
+  const int publish_result=
+      mylite_ownerless_innodb_publish_page_version_with_flags(
       id.space(), id.page_no(), source_page_lsn, boundary_lsn, page,
-      static_cast<uint32_t>(page_source.page_size));
+      static_cast<uint32_t>(page_source.page_size),
+      MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_HANDOFF_BOUNDARY);
   mylite_ownerless_innodb_end_page_publish_batch();
   ownerless_page_publish_scratch_buffer.release(page, retained_page_buffer);
   if (publish_result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
@@ -4371,8 +4307,12 @@ void mtr_t::ownerless_page_write_capture_dirty_transaction_page(
     return;
   }
 
-  if (page_lsn < image->page_lsn)
-    return;
+  /*
+  Captures are synchronous and ordered by this transaction's MTR execution.
+  Ownerless redo handoff can legitimately give a later MTR a lower physical
+  page LSN, so numeric LSN order must not retain an earlier transaction image.
+  The most recently captured bytes are the transaction's commit state.
+  */
   image->page_lsn= page_lsn;
   image->page_size= page_source.page_size;
   image->compressed= page_source.compressed;

@@ -70,13 +70,12 @@ Base: MariaDB 11.8 LTS import `mariadb-11.8.6`
   every durable ownerless checkpoint update and once more before the shared
   mapping and native hook context are removed.
 - Ownerless physical page reservations include clean B-tree pages and
-  tablespace gates. A cycle among only clean pre-write reservations is safe to
-  break by releasing the selected transaction's reservations and restarting
-  its B-tree search. Once the transaction has allocated a native undo log,
-  advanced its undo sequence, or dirtied an ownerless page, the cycle is a real
-  SQL deadlock and must retain MariaDB's victim semantics. An allocated undo
-  log remains authoritative even when statement rollback has returned
-  `undo_no` to zero.
+  tablespace gates. A clean reservation can already belong to an open cursor or
+  mini-transaction that will modify the page later. A physical reservation
+  cycle must therefore abort the current SQL attempt with MariaDB deadlock
+  semantics; releasing every transaction reservation and resuming the current
+  B-tree operation can let that operation write a page after a peer acquires
+  its ownerless reservation.
 - Ownerless row undo defers intermediate undo-tail truncation because waiting
   for its history pages while retaining transaction-owned application pages
   can create a physical ownership cycle. The terminal rollback path must
@@ -116,11 +115,11 @@ the tests:
 8. Publish the shared redo recovery anchor before any durable checkpoint that
    depends on it, including no-live replacement updates, startup replay, and
    the final native-shutdown checkpoint observed before unmapping.
-9. If the physical page reservation layer selects a transaction that has
-   neither an allocated native undo log, an advanced undo sequence, nor dirty
-   ownerless pages as a deadlock victim, release its clean page reservations
-   and tablespace gates and retry the reservation. Preserve the deadlock result
-   for transactions that have begun a persistent change.
+9. Propagate physical page-reservation deadlocks to the SQL transaction
+   boundary even when every reservation is still clean. Stress callers may
+   retry the complete transaction after MariaDB `1213`; no path may release
+   transaction reservations and resume an already-open cursor or
+   mini-transaction.
 10. At terminal ownerless rollback, first publish and flush the restored
     application pages, release their transaction page-write ownership, and
     then call `trx_undo_try_truncate()` before entering the native empty-commit
@@ -144,8 +143,8 @@ In scope:
 - multi-rename rollback file identity,
 - deterministic regression tests or diagnostics needed to prove the fix,
 - recovery-anchor ordering at the native shutdown boundary,
-- clean pre-write reservation-cycle handling without weakening real
-  transaction deadlock detection,
+- transaction-boundary handling for clean pre-write reservation cycles without
+  resuming an invalidated B-tree operation,
 - multi-page ownerless rollback terminal cleanup and connection reuse,
 - a versioned lock-registry capacity sufficient for the 5,000-row release
   transaction while preserving explicit bounded-capacity failure,
@@ -217,9 +216,9 @@ movement must be measured by the existing release gates.
   and the fix does not classify mutating statements as post-error retryable.
 - A clean native shutdown never leaves the durable checkpoint visibility ahead
   of the shared redo recovery anchor.
-- Independent-table clean pre-write cycles restart without surfacing errno
-  `1213`, while conflicting row and gap-lock transactions retain MariaDB
-  deadlock behavior.
+- Clean pre-write cycles surface MariaDB errno `1213` at the SQL transaction
+  boundary, while bounded stress callers retry the complete transaction and
+  conflicting row and gap-lock transactions retain MariaDB deadlock behavior.
 - Multi-page ownerless rollback truncates its empty native undo tail before
   native empty-commit validation and leaves the connection reusable.
 - The release performance transaction completes inside the 16,384-slot
@@ -254,17 +253,24 @@ The stabilization is complete for the admitted ownerless surface:
   before mutation without introducing post-execution write replay,
 - every durable ownerless checkpoint is preceded by a shared redo-anchor
   publication, including the final native shutdown checkpoint,
-- clean pre-write physical reservation cycles restart inside the original lock
-  wait budget, while transactions with allocated native undo, an advanced undo
-  sequence, or dirty pages preserve MariaDB deadlock semantics, and
+- page-write reservation deadlocks abort the current SQL attempt instead of
+  releasing every transaction-owned page and resuming an already-open
+  mini-transaction; the bounded stress callers retry the complete transaction,
+  preserving MariaDB deadlock semantics without an unlocked page mutation, and
 - terminal ownerless rollback truncates deferred multi-page native undo only
   after restored application-page ownership is durable and released,
+- terminal rollback records a page-scoped native-read barrier at each restored
+  user page's prior committed boundary, retains that barrier through page-index
+  rebuild/checkpoint replacement, and preserves the handle's monotonic
+  pre-transaction committed read boundary,
 - the version-6 shared table/record-lock registry provides 16,384 slots in the
   4 MiB minimum volatile `.shm` layout, with explicit bounded-capacity failure
   retained, and
 - the concurrent foreign-key graph gate retries the complete transaction when
   MariaDB reports native `1205`/`1213` contention at `COMMIT`, matching its
-  existing per-statement retry contract, and
+  existing per-statement retry contract, serializes only post-conflict final
+  delete retries, and proves a forced cascade-parent full rollback against
+  exact parent/child values, and
 - the concurrent DDL/DML stress gate applies that same bounded native
   `1205`/`1213` contract to its autocommit statements and read-only polls, in
   addition to pre-execution MyLite statement-lock contention, and

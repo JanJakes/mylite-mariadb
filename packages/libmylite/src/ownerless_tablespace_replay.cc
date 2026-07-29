@@ -67,6 +67,12 @@ class PageRecordMetadata {
         return (m_metadata_flags & MYLITE_OWNERLESS_PAGE_LOG_RECORD_SNAPSHOT_BOUNDARY) != 0U;
     }
 
+    bool rollback_barrier() const {
+        return (m_metadata_flags & MYLITE_OWNERLESS_PAGE_LOG_RECORD_ROLLBACK_BARRIER) != 0U &&
+               (m_metadata_flags & MYLITE_OWNERLESS_PAGE_LOG_RECORD_PROOF_ONLY) != 0U &&
+               (m_metadata_flags & MYLITE_OWNERLESS_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE) == 0U;
+    }
+
   private:
     std::uint32_t m_space_id;
     std::uint32_t m_page_no;
@@ -434,6 +440,13 @@ int collect_visible_record_metadata(
         ) != MYLITE_OWNERLESS_PAGE_LOG_OK) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
+    const bool proof_only = (metadata_flags & MYLITE_OWNERLESS_PAGE_LOG_RECORD_PROOF_ONLY) != 0U;
+    const bool rollback_barrier =
+        (metadata_flags & MYLITE_OWNERLESS_PAGE_LOG_RECORD_ROLLBACK_BARRIER) != 0U &&
+        (metadata_flags & MYLITE_OWNERLESS_PAGE_LOG_RECORD_NATIVE_SUPPORT_STATE) == 0U;
+    if (proof_only && !rollback_barrier) {
+        return MYLITE_OWNERLESS_PAGE_LOG_OK;
+    }
 
     try {
         metadata->records
@@ -603,7 +616,7 @@ int mylite_ownerless_tablespace_replay_apply_with_flags(
     ReplayMetadataContext context = {};
     context.page_log_fd = page_log_fd;
     context.visible_lsn = visible_lsn;
-    const int replay_result = mylite_ownerless_page_log_replay_at(
+    const int replay_result = mylite_ownerless_page_log_replay_at_including_proof_only(
         page_log_fd,
         page_log_offset,
         collect_visible_record_metadata,
@@ -634,6 +647,9 @@ int mylite_ownerless_tablespace_replay_apply_with_flags(
     const bool keep_native_same_lsn_snapshot_boundary =
         (flags & MYLITE_OWNERLESS_TABLESPACE_REPLAY_KEEP_NATIVE_SAME_LSN_SNAPSHOT_BOUNDARY) != 0U;
     for (const auto &entry : latest_records) {
+        if (entry.second.rollback_barrier()) {
+            continue;
+        }
         PageImage page = {};
         if (!read_page_image(page_log_fd, page_log_offset, entry.second, page)) {
             return MYLITE_OWNERLESS_TABLESPACE_REPLAY_ERROR;

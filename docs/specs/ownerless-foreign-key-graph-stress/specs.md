@@ -77,7 +77,17 @@ referential-action locks, each worker retries the whole round after MariaDB
 lock-wait timeout or deadlock errors (1205/1213) and only advances its
 deterministic local oracle after commit. At the end each worker deletes its
 set-null parent so final assertions must observe the nullable child foreign key
-set to `NULL`.
+set to `NULL`. If concurrent final deletes conflict, the first failed attempt
+enters a process-shared retry lane and keeps it through the successful retry;
+this preserves the concurrent first attempt while preventing all victims from
+retrying in phase indefinitely.
+
+One worker also performs a deterministic sentinel update of its cascade parent
+after a committed prefix, rolls the entire transaction back, and immediately
+checks both the parent and cascaded child. The sentinel is deliberately outside
+the normal value range, so replaying either the uncommitted update or an older
+page-log predecessor is an exact failure rather than an aggregate-only signal.
+Each worker checks its cascade child again before close.
 
 The parent now waits for the worker group through the shared ownerless stress
 child collector. If any worker exits nonzero or by signal, the collector reports
@@ -102,6 +112,13 @@ and secondary page publication under a boundary that covers their observed page
 LSNs before ownerless page-write locks are released, and refreshes clean local
 pages for DML current reads so parent `UPDATE ... WHERE id = ...` statements do
 not silently miss peer-committed root rows inside explicit transactions.
+
+A shared page-write deadlock is a whole-attempt retry boundary. MyLite must not
+break the cycle by releasing all transaction page ownership and then resume an
+already-open mini-transaction: a clean reservation can belong to a cursor that
+has not marked its page dirty yet but will mutate it later. Returning MariaDB
+1213 lets the worker roll back and repeat the full deterministic round with
+fresh page reservations.
 
 The final oracle checks row counts, version sums, child reference sums,
 `NULL` counts, referential-constraint rules, and aggregate values through:
@@ -160,6 +177,10 @@ code only.
 - Set-null parent deletes leave nullable child references `NULL`.
 - Restricted parent deletes fail with errno 1451 and leave rows intact.
 - Missing-parent inserts fail with errno 1452.
+- The forced cascade-parent rollback preserves the exact previously committed
+  parent and child values and versions.
+- Final set-null retries make progress after a native 1205/1213 conflict
+  without weakening the first concurrent attempt.
 - Final row, reference, constraint, and value oracles survive ownerless/native
   reopen before and after forced `.shm` rebuild.
 

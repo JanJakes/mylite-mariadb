@@ -2331,11 +2331,14 @@ Tasks:
    `FIL_PAGE_LSN` outruns the commit boundary is published at that page LSN,
    but the global page-visible LSN is not promoted beyond the transaction
    boundary.
-   Deferred ownerless page-write locks must never continue after a dirty
-   deadlock without owning the directory-backed page-write resource. Guarded
-   dirty-page paths therefore retry dirty page-write deadlocks instead of
-   returning unlocked, and ownerless page-write ownership is acquired only when
-   a persistent page becomes dirty, not for every X/SX page latch. Mini-
+   Deferred ownerless page-write locks must never continue after a physical
+   deadlock without owning the directory-backed page-write resource. A clean
+   reservation can already belong to an open B-tree cursor, so page-write
+   deadlocks escape to the SQL transaction boundary and bounded callers retry
+   the whole attempt; the current mini-transaction is never resumed after all
+   of its transaction reservations are released. Ownerless page-write ownership
+   is acquired only when a persistent page becomes dirty, not for every X/SX
+   page latch. Mini-
    transaction-local acquisitions are tracked separately so `MTR_LOG_NONE`
    paths release transient page-write locks even when no `MTR_MEMO_MODIFY`
    memo remains. Rollback-segment history commit waits also treat shared
@@ -7898,10 +7901,14 @@ subsystems that this mode needs:
   explicit transactions retain page-write ownership until transaction end,
   active page-write pages are skipped by background publication, COMMIT
   publishes only validated transaction page images plus rollback-segment/undo
-  history proof, and full ROLLBACK refreshes tracked transaction pages from
-  native storage instead of publishing rollback images or advancing visible
-  LSN. SQL-layer rollback with local writes clears page-version read state and
-  installs a native-read fence, while reader-only no-live close remains
+  history proof, and full ROLLBACK durably restores tracked transaction pages
+  without publishing them as committed payload or advancing visible LSN.
+  Terminal user-page proof records act as page-scoped native-read barriers at
+  the exact prior committed page boundary; later committed payload supersedes
+  them, older snapshots do not see them, and native-support terminal images
+  close the rollback-history crash proof as payload. SQL-layer rollback with
+  local writes clears transient visibility state but preserves the handle's
+  monotonic previously committed read LSN, while reader-only no-live close remains
   proof-gated before it can materialize peer WAL appended after that runtime
   opened. Focused live snapshot reader-close coverage, including the
   synthesized native-boundary variant, now proves that the live pin retains peer

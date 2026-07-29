@@ -283,6 +283,7 @@ struct ownerless_external_page_observation_entry {
   uint32_t space_id;
   uint32_t page_no;
   uint64_t commit_lsn;
+  bool rollback_barrier;
 };
 
 std::atomic<bool> ownerless_page_write_refresh_stats_enabled{false};
@@ -583,7 +584,8 @@ int refresh_page_for_write(const buf_block_t &block,
                            bool skip_page_version= false,
                            bool preserve_local_transaction_page= true,
                            bool allow_native_disk_regression= false,
-                           bool allow_dirty_committed_page_refresh= false);
+                           bool allow_dirty_committed_page_refresh= false,
+                           bool allow_current_logical_page_version= false);
 fil_node_t *find_file_node_for_page(fil_space_t &space, uint32_t *page_no);
 int refresh_buffer_pool_page(uint32_t space_id, uint32_t page_no,
                              bool load_if_missing,
@@ -2936,7 +2938,7 @@ static transaction_page_image_buffer_state transaction_page_image_buffer(
 
 static uint64_t publish_transaction_pages_to_lsn(
     trx_t *trx, uint64_t visible_lsn, bool publish_rollback_images,
-    bool publish_rollback_proof_only)
+    bool publish_terminal_rollback_barriers)
 {
   if (trx != nullptr && !publish_rollback_images)
     trx->mylite_ownerless_page_write_deferred_pages_published= false;
@@ -3015,21 +3017,22 @@ static uint64_t publish_transaction_pages_to_lsn(
       const uint64_t publish_lsn= image_visible_lsn;
       mylite_ownerless_innodb_deep_perf_count(
           MYLITE_OWNERLESS_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_IMAGE_ATTEMPTS);
-      const bool rollback_proof_publish=
-          publish_rollback_images &&
-          (publish_rollback_proof_only || trx->roll_limit != 0);
+      const bool rollback_proof_publish= publish_rollback_images;
       const uint32_t publish_flags=
           rollback_proof_publish
-              ? MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_PROOF_ONLY
+              ? MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_PROOF_ONLY |
+                    (publish_terminal_rollback_barriers
+                         ? MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_ROLLBACK_BARRIER
+                         : 0U)
               : 0U;
       const int result=
           rollback_proof_publish || transaction_page_image_has_native_support(page)
-          ? mylite_ownerless_innodb_try_publish_page_version_with_flags(
-              space_id, page_no, image.page_lsn, publish_lsn, page,
-              image.page_size, publish_flags)
-          : mylite_ownerless_innodb_publish_page_version_with_flags(
-              space_id, page_no, image.page_lsn, publish_lsn, page,
-              image.page_size, publish_flags);
+              ? mylite_ownerless_innodb_try_publish_page_version_with_flags(
+                    space_id, page_no, image.page_lsn, publish_lsn, page,
+                    image.page_size, publish_flags)
+              : mylite_ownerless_innodb_publish_page_version_with_flags(
+                    space_id, page_no, image.page_lsn, publish_lsn, page,
+                    image.page_size, publish_flags);
       if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
       {
         mylite_ownerless_innodb_deep_perf_count(
@@ -3049,8 +3052,7 @@ static uint64_t publish_transaction_pages_to_lsn(
                                  successful_image_pages.end());
   }
   const bool rollback_proof_publish=
-      trx->in_rollback && publish_rollback_images &&
-      (publish_rollback_proof_only || trx->roll_limit != 0);
+      trx->in_rollback && publish_rollback_images;
   for (uint64_t packed_page : pages)
   {
     if (!successful_image_pages.empty() &&
@@ -3063,9 +3065,10 @@ static uint64_t publish_transaction_pages_to_lsn(
     transaction-private image cache.  A later buffer-pool snapshot can include
     an uncommitted or rolled-back local image for the same page; if the private
     image is missing, the commit path falls back to native flush visibility.
-	    Savepoint and in-flight rollback crash proof remain proof-only and are
-	    skipped by normal readers. Completed full rollback publishes replayable
-	    images from the final cleanup boundary.
+    Rollback images are durability proof only and are skipped by normal readers
+    and tablespace replay. A restored predecessor page must not become a
+    replayable committed version: native redo could otherwise apply the
+    already-committed predecessor changes over it again.
     */
     if (!publish_rollback_images)
       continue;
@@ -3077,7 +3080,10 @@ static uint64_t publish_transaction_pages_to_lsn(
         MYLITE_OWNERLESS_INNODB_DEEP_PAGE_PUBLISH_TRANSACTION_BUFFER_ATTEMPTS);
     const uint32_t publish_flags=
         rollback_proof_publish
-            ? MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_PROOF_ONLY
+            ? MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_PROOF_ONLY |
+                  (publish_terminal_rollback_barriers
+                       ? MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_ROLLBACK_BARRIER
+                       : 0U)
             : 0U;
     const lsn_t observed_lsn= buf_flush_publish_ownerless_page_to_lsn(
         space_id, page_no, static_cast<lsn_t>(visible_lsn), false,
@@ -3152,7 +3158,7 @@ extern "C" uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
   return publish_transaction_pages_to_lsn(trx, visible_lsn, false, false);
 }
 
-extern "C" uint64_t mylite_ownerless_innodb_publish_rollback_pages_to_lsn(
+extern "C" uint64_t mylite_ownerless_innodb_publish_rollback_proof_pages_to_lsn(
     trx_t *trx, uint64_t visible_lsn)
 {
   if (visible_lsn == 0)
@@ -3160,7 +3166,7 @@ extern "C" uint64_t mylite_ownerless_innodb_publish_rollback_pages_to_lsn(
   return publish_transaction_pages_to_lsn(trx, visible_lsn, true, false);
 }
 
-extern "C" uint64_t mylite_ownerless_innodb_publish_rollback_proof_pages_to_lsn(
+extern "C" uint64_t mylite_ownerless_innodb_publish_rollback_barrier_pages_to_lsn(
     trx_t *trx, uint64_t visible_lsn)
 {
   if (visible_lsn == 0)
@@ -4584,7 +4590,8 @@ static int refresh_page_for_write_force(
     page_visible_lsn= effective_lsn;
     const int refresh_result=
         refresh_page_for_write(*block, true, true, true, false, false, false,
-                               preserve_local_transaction_page);
+                               preserve_local_transaction_page, false, false,
+                               true);
     page_visible_lsn= previous_visible_lsn;
     return refresh_result;
   }
@@ -4804,8 +4811,9 @@ extern "C" void mylite_ownerless_innodb_clear_external_page_observations(void)
   ownerless_external_page_observations_clear();
 }
 
-extern "C" void mylite_ownerless_innodb_note_external_page_observed(
-    uint32_t space_id, uint32_t page_no, uint64_t commit_lsn)
+static void ownerless_note_external_page_observation(
+    uint32_t space_id, uint32_t page_no, uint64_t commit_lsn,
+    bool rollback_barrier)
 {
   if (commit_lsn == 0 || ownerless_external_page_observation_token == 0)
     return;
@@ -4831,7 +4839,11 @@ retry:
             entry, ownerless_external_page_observation_token, context,
             space_id, page_no))
     {
-      entry.commit_lsn= std::max(entry.commit_lsn, commit_lsn);
+      if (commit_lsn >= entry.commit_lsn)
+      {
+        entry.commit_lsn= commit_lsn;
+        entry.rollback_barrier= rollback_barrier;
+      }
       return;
     }
     if (reusable_slot == capacity &&
@@ -4853,25 +4865,38 @@ retry:
     entry.space_id= space_id;
     entry.page_no= page_no;
     entry.commit_lsn= commit_lsn;
+    entry.rollback_barrier= rollback_barrier;
     return;
   }
   if (capacity < k_external_page_observation_max_entries &&
       ownerless_external_page_observations_resize(
           std::min(capacity * 2, k_external_page_observation_max_entries)))
-    goto retry;
+      goto retry;
 }
 
-extern "C" int mylite_ownerless_innodb_external_page_observed_at_or_after(
+extern "C" void mylite_ownerless_innodb_note_external_page_observed(
     uint32_t space_id, uint32_t page_no, uint64_t commit_lsn)
 {
-  if (commit_lsn == 0 || ownerless_external_page_observation_token == 0)
+  ownerless_note_external_page_observation(
+      space_id, page_no, commit_lsn, false);
+}
+
+extern "C" void
+mylite_ownerless_innodb_note_external_page_rollback_barrier(
+    uint32_t space_id, uint32_t page_no, uint64_t commit_lsn)
+{
+  ownerless_note_external_page_observation(
+      space_id, page_no, commit_lsn, true);
+}
+
+static uint64_t ownerless_external_page_observed_commit_lsn(
+    uint32_t space_id, uint32_t page_no)
+{
+  if (ownerless_external_page_observation_token == 0)
     return 0;
 
   void *context= callback_context.load(std::memory_order_acquire);
-  if (context == nullptr)
-    return 0;
-
-  if (ownerless_external_page_observations == nullptr ||
+  if (context == nullptr || ownerless_external_page_observations == nullptr ||
       ownerless_external_page_observation_capacity == 0)
     return 0;
 
@@ -4886,13 +4911,50 @@ extern "C" int mylite_ownerless_innodb_external_page_observed_at_or_after(
     if (ownerless_external_page_observation_matches(
             entry, ownerless_external_page_observation_token, context,
             space_id, page_no))
-    {
-      return entry.commit_lsn >= commit_lsn ? 1 : 0;
-    }
+      return entry.commit_lsn;
     if (entry.token == 0 || entry.context == nullptr)
       return 0;
   }
   return 0;
+}
+
+extern "C" int mylite_ownerless_innodb_external_page_is_rollback_barrier(
+    uint32_t space_id, uint32_t page_no)
+{
+  if (ownerless_external_page_observation_token == 0)
+    return 0;
+
+  void *context= callback_context.load(std::memory_order_acquire);
+  if (context == nullptr || ownerless_external_page_observations == nullptr ||
+      ownerless_external_page_observation_capacity == 0)
+    return 0;
+
+  const size_t capacity= ownerless_external_page_observation_capacity;
+  const size_t start_slot=
+      ownerless_external_page_observation_slot(space_id, page_no, capacity);
+  for (size_t probe= 0; probe < capacity; ++probe)
+  {
+    const size_t slot= (start_slot + probe) & (capacity - 1);
+    const ownerless_external_page_observation_entry &entry=
+        ownerless_external_page_observations[slot];
+    if (ownerless_external_page_observation_matches(
+            entry, ownerless_external_page_observation_token, context,
+            space_id, page_no))
+      return entry.rollback_barrier ? 1 : 0;
+    if (entry.token == 0 || entry.context == nullptr)
+      return 0;
+  }
+  return 0;
+}
+
+extern "C" int mylite_ownerless_innodb_external_page_observed_at_or_after(
+    uint32_t space_id, uint32_t page_no, uint64_t commit_lsn)
+{
+  return commit_lsn != 0 &&
+                 ownerless_external_page_observed_commit_lsn(
+                     space_id, page_no) >= commit_lsn
+             ? 1
+             : 0;
 }
 
 extern "C" uint64_t mylite_ownerless_innodb_push_external_page_visibility(
@@ -5514,6 +5576,22 @@ static int mylite_ownerless_innodb_read_page_version_at_lsn(
   {
     if (out_page_size != nullptr)
       *out_page_size= page_size;
+    if (out_page_lsn != nullptr)
+      *out_page_lsn= page_lsn;
+    if (out_commit_lsn != nullptr)
+      *out_commit_lsn= commit_lsn;
+    if (out_record_flags != nullptr)
+      *out_record_flags= record_flags;
+  }
+  else if (result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE &&
+           (record_flags &
+            MYLITE_OWNERLESS_INNODB_PAGE_VERSION_ROLLBACK_BARRIER) != 0)
+  {
+    /*
+    A terminal rollback barrier deliberately has no page payload. Preserve
+    its page-local ordering metadata so the refresh path can replace a newer
+    uncommitted buffer image with the restored native page.
+    */
     if (out_page_lsn != nullptr)
       *out_page_lsn= page_lsn;
     if (out_commit_lsn != nullptr)
@@ -6493,7 +6571,8 @@ int refresh_page_for_write(const buf_block_t &block,
                            bool skip_page_version,
                            bool preserve_local_transaction_page,
                            bool allow_native_disk_regression,
-                           bool allow_dirty_committed_page_refresh)
+                           bool allow_dirty_committed_page_refresh,
+                           bool allow_current_logical_page_version)
 {
   ownerless_page_write_refresh_count(
       OWNERLESS_PAGE_WRITE_REFRESH_STAT_CALLS);
@@ -6597,6 +6676,7 @@ int refresh_page_for_write(const buf_block_t &block,
   }
 
   int result= MYLITE_OWNERLESS_INNODB_LOCK_OK;
+  uint64_t observed_current_rollback_barrier_commit_lsn= 0;
   bool fil_mutex_locked= false;
   auto unlock_fil_system= [&]() {
     if (fil_mutex_locked)
@@ -6627,32 +6707,41 @@ int refresh_page_for_write(const buf_block_t &block,
     const uint32_t space_flags= space->flags;
 
     uint64_t page_version_commit_lsn= 0;
+    uint64_t page_version_page_lsn= 0;
     uint32_t page_version_record_flags= 0;
     int page_version_result= MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE;
     bool page_version_proved_no_newer= false;
     bool page_version_same_image_observed= false;
-	    if (!skip_page_version)
-	    {
+    if (!skip_page_version)
+    {
       ownerless_page_write_refresh_count(
           OWNERLESS_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_READ_CALLS);
       const uint64_t page_version_read_start_ns=
           ownerless_page_write_refresh_stats_on() ?
               ownerless_page_write_refresh_now_ns() :
               0;
-	      page_version_result=
-	        mylite_ownerless_innodb_read_page_version_at_lsn(
-	            id.space(), id.page_no(), page_visible_lsn, external_page,
-	            page_size, nullptr, nullptr, &page_version_commit_lsn,
-	            &page_version_record_flags,
-	            local_page_type == FIL_PAGE_TYPE_SYS &&
-	                    (id.space() == TRX_SYS_SPACE ||
-	                     srv_is_undo_tablespace(id.space()))
-	                ? MYLITE_OWNERLESS_INNODB_PAGE_READ_HISTORY_RSEG_DELTA
-	                : 0);
-	      ownerless_page_write_refresh_add_elapsed(
-	          OWNERLESS_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_READ_NS,
-	          page_version_read_start_ns);
-	    }
+      page_version_result=
+          mylite_ownerless_innodb_read_page_version_at_lsn(
+              id.space(), id.page_no(), page_visible_lsn, external_page,
+              page_size, nullptr, &page_version_page_lsn,
+              &page_version_commit_lsn,
+              &page_version_record_flags,
+              local_page_type == FIL_PAGE_TYPE_SYS &&
+                      (id.space() == TRX_SYS_SPACE ||
+                       srv_is_undo_tablespace(id.space()))
+                  ? MYLITE_OWNERLESS_INNODB_PAGE_READ_HISTORY_RSEG_DELTA
+                  : 0);
+      ownerless_page_write_refresh_add_elapsed(
+          OWNERLESS_PAGE_WRITE_REFRESH_STAT_PAGE_VERSION_READ_NS,
+          page_version_read_start_ns);
+    }
+    if ((page_version_record_flags &
+         MYLITE_OWNERLESS_INNODB_PAGE_VERSION_ROLLBACK_BARRIER) != 0 &&
+        page_visible_lsn_is_current && page_version_commit_lsn != 0 &&
+        page_version_commit_lsn <= page_visible_lsn)
+    {
+      observed_current_rollback_barrier_commit_lsn= page_version_commit_lsn;
+    }
     if (page_version_result == MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
     {
       if (!skip_page_version)
@@ -6706,6 +6795,34 @@ int refresh_page_for_write(const buf_block_t &block,
       const bool page_version_snapshot_boundary=
           (page_version_record_flags &
            MYLITE_OWNERLESS_INNODB_PAGE_VERSION_SNAPSHOT_BOUNDARY) != 0;
+      const bool page_version_rollback_barrier=
+          (page_version_record_flags &
+           MYLITE_OWNERLESS_INNODB_PAGE_VERSION_ROLLBACK_BARRIER) != 0;
+      const uint64_t local_observed_commit_lsn=
+          ownerless_external_page_observed_commit_lsn(
+              id.space(), id.page_no());
+      /*
+      Physical page LSNs are not a total order across ownerless processes. A
+      peer can commit a logically newer image whose page LSN is below a local
+      image. Permit that regression only when this handle has already tied the
+      local image to an observed commit and the candidate is strictly newer
+      than every commit observed for the page. This excludes uncommitted local
+      images and stale retry payloads while allowing a post-rollback peer
+      commit to replace the restored predecessor page.
+      */
+      const bool current_logically_newer_user_page_version=
+          ownerless_user_page &&
+          (page_visible_lsn_is_current ||
+           allow_current_logical_page_version) &&
+          !page_visible_lsn_is_retained && !page_version_snapshot_boundary &&
+          !local_transaction_page && page_version_commit_lsn != 0 &&
+          (page_version_commit_lsn >= local_lsn ||
+           (page_version_rollback_barrier &&
+            page_version_page_lsn >= local_lsn)) &&
+          (page_version_commit_lsn > local_observed_commit_lsn ||
+           (allow_current_logical_page_version &&
+            !page_version_older_than_observed)) &&
+          page_version_commit_lsn <= page_visible_lsn;
       const bool retained_native_write_scrub_page=
           retained_user_page && page_visible_lsn_is_current &&
           page_visible_lsn_is_retained &&
@@ -6733,11 +6850,13 @@ int refresh_page_for_write(const buf_block_t &block,
       const bool page_version_would_regress_dirty_local_page=
           local_page_dirty && !page_version_matches_local &&
           !retained_current_unobserved_page &&
-          !allow_dirty_committed_page_refresh;
+          !allow_dirty_committed_page_refresh &&
+          !current_logically_newer_user_page_version;
       const bool current_read_would_regress_physical_page=
           page_version_lsn < local_lsn &&
           !page_version_boundary_newer_than_local &&
           !committed_boundary_newer_than_local &&
+          !current_logically_newer_user_page_version &&
           (!retained_user_page ||
            (local_page_already_observed && !retained_native_write_scrub_page));
       const bool visible_boundary_allowed=
@@ -6755,7 +6874,8 @@ int refresh_page_for_write(const buf_block_t &block,
           !page_version_older_than_observed &&
           !retained_current_snapshot_boundary &&
           !current_read_would_regress_physical_page &&
-          page_version_boundary_newer_than_local;
+          (page_version_boundary_newer_than_local ||
+           current_logically_newer_user_page_version);
       const bool observed_same_lsn_boundary=
           (page_version_already_observed ||
            retained_current_snapshot_boundary) &&
@@ -6905,6 +7025,20 @@ int refresh_page_for_write(const buf_block_t &block,
     const bool disk_boundary_would_regress_dirty_local_page=
         local_page_dirty && !disk_page_matches_local &&
         !allow_dirty_committed_page_refresh;
+    const bool rollback_barrier_native_exact=
+        (page_version_record_flags &
+         MYLITE_OWNERLESS_INNODB_PAGE_VERSION_ROLLBACK_BARRIER) != 0 &&
+        page_visible_lsn_is_current && page_version_commit_lsn != 0 &&
+        page_version_commit_lsn <= page_visible_lsn &&
+        /*
+        A barrier proves the exact restored native page, not every older disk
+        image. Accepting a lower LSN can resurrect a pre-rollback clustered
+        page after later peer commits have deleted or updated its records.
+        */
+        page_version_page_lsn != 0 && disk_page_lsn == page_version_page_lsn &&
+        disk_page_is_visible;
+    const bool rollback_barrier_native_fallback=
+        rollback_barrier_native_exact && !disk_page_matches_local;
     const bool current_read_disk_boundary_would_regress=
         disk_page_lsn < local_lsn;
     const bool local_blob_page=
@@ -6942,10 +7076,10 @@ int refresh_page_for_write(const buf_block_t &block,
         result= MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
       goto exit;
     }
-
     bool should_store_negative_cache= false;
     bool should_refresh_space_header= id.page_no() == 0 && disk_page_is_visible;
-	    if (disk_page_newer_and_visible ||
+    if (rollback_barrier_native_fallback ||
+        disk_page_newer_and_visible ||
         (disk_page_same_lsn_different_image &&
          !disk_boundary_would_regress_dirty_local_page) ||
         (disk_visible_boundary_allowed &&
@@ -6963,7 +7097,8 @@ int refresh_page_for_write(const buf_block_t &block,
         result= MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
         goto exit;
       }
-      if (disk_page_is_visible && disk_page_lsn != 0)
+      if (disk_page_is_visible && disk_page_lsn != 0 &&
+          !rollback_barrier_native_exact)
       {
         mylite_ownerless_innodb_note_external_page_observed(
             id.space(), id.page_no(), disk_page_lsn);
@@ -6994,6 +7129,18 @@ int refresh_page_for_write(const buf_block_t &block,
 exit:
   unlock_fil_system();
   aligned_free(external_page);
+  if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK &&
+      observed_current_rollback_barrier_commit_lsn != 0)
+  {
+    /*
+    Preserve the semantic identity of the restored native image. A later MTR
+    handoff boundary must not turn this rollback proof into an ordinary
+    readable page version.
+    */
+    mylite_ownerless_innodb_note_external_page_rollback_barrier(
+        id.space(), id.page_no(),
+        observed_current_rollback_barrier_commit_lsn);
+  }
   if (!use_current_visibility)
     page_visible_lsn= previous_visible_lsn;
   if (ownerless_lock_result_is_coordination_failure(result))

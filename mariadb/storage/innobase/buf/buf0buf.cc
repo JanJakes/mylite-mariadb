@@ -394,13 +394,6 @@ mylite_ownerless_buf_preread_page_write_lock(trx_t *trx,
       {
         return state;
       }
-      if (result == MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK &&
-          !trx->has_logged() && trx->undo_no == 0 &&
-          trx->mylite_ownerless_dirty_pages_empty())
-      {
-        mylite_ownerless_innodb_lock_release_transaction_page_writes(trx);
-        continue;
-      }
       if (result == MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK)
       {
         state.error= DB_DEADLOCK;
@@ -499,18 +492,6 @@ mylite_ownerless_buf_preread_page_write_lock(trx_t *trx,
     }
     if (result == MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK)
     {
-      if (trx != nullptr && !trx->has_logged() && trx->undo_no == 0 &&
-          trx->mylite_ownerless_dirty_pages_empty())
-      {
-        mylite_ownerless_innodb_lock_release_transaction_page_writes(trx);
-        if (mylite_ownerless_innodb_coordination_error())
-        {
-          state.error= DB_ERROR;
-          mylite_ownerless_buf_record_failure(trx, state.error, true);
-          return state;
-        }
-        continue;
-      }
       if (trx != nullptr)
       {
         trx->mylite_ownerless_page_write_waited_before_preread= true;

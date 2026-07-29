@@ -1698,44 +1698,15 @@ dberr_t mylite_ownerless_innodb_lock_prepare_record_page(
   }
 
   const unsigned timeout_ms= mylite_ownerless_innodb_lock_timeout_ms(trx);
-  const ulint wait_started_ms= ut_time_ms();
-  unsigned remaining_timeout_ms= timeout_ms;
   uint32_t acquire_flags= 0U;
-  int result;
-  for (;;)
-  {
-    result= mylite_ownerless_innodb_lock_reserve_record_page_write(
-        trx, block, remaining_timeout_ms, &acquire_flags);
-    if (result != MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK ||
-        trx->has_logged() || trx->undo_no != 0 ||
-        !trx->mylite_ownerless_dirty_pages_empty())
-      break;
-
-    /*
-    The transaction has neither allocated native undo nor changed a persistent
-    page yet. A peer can hold this record page while waiting for one of our
-    clean page reservations or tablespace gates, so selecting this transaction
-    as a SQL deadlock victim would expose a false deadlock between independent
-    user writes. Release the pre-write reservations and retry; the successful
-    reservation refreshes the page and asks restart-capable B-tree callers to
-    repeat their search. Keep all retries inside the transaction's original
-    lock-wait timeout.
-    */
-    mylite_ownerless_innodb_lock_release_transaction_page_writes(trx);
-    if (mylite_ownerless_innodb_coordination_error())
-    {
-      result= MYLITE_OWNERLESS_INNODB_LOCK_ERROR;
-      break;
-    }
-    const ulint elapsed_ms= ut_time_ms() - wait_started_ms;
-    if (elapsed_ms >= timeout_ms)
-    {
-      result= MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT;
-      break;
-    }
-    remaining_timeout_ms= timeout_ms - static_cast<unsigned>(elapsed_ms);
-    acquire_flags= 0U;
-  }
+  /*
+  Do not release all transaction page-write reservations and resume this
+  operation after a physical-page deadlock. A clean reservation can already
+  belong to an open B-tree cursor that will modify the page later in the same
+  MTR. Return DB_DEADLOCK so the SQL transaction restarts from a valid boundary.
+  */
+  const int result= mylite_ownerless_innodb_lock_reserve_record_page_write(
+      trx, block, timeout_ms, &acquire_flags);
   if (result == MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK ||
       result == MYLITE_OWNERLESS_INNODB_LOCK_FULL ||
       result == MYLITE_OWNERLESS_INNODB_LOCK_ERROR)

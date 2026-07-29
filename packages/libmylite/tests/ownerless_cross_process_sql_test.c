@@ -1674,6 +1674,14 @@ static void run_ownerless_random_savepoint_schedule_reader(
     open_database_paths paths,
     child_pipes pipes
 );
+static void ownerless_fk_graph_stress_force_prefix_rollback(
+    mylite_db *db,
+    unsigned worker_id,
+    unsigned round,
+    unsigned cascade_root,
+    unsigned setnull_root,
+    unsigned restrict_root
+);
 static void run_ownerless_fk_graph_stress_worker(
     open_database_paths paths,
     unsigned worker_id,
@@ -86769,6 +86777,17 @@ static void run_ownerless_fk_graph_stress_worker(
         const unsigned long long delta = ownerless_fk_graph_stress_delta(worker_id, round);
         int round_finished = 0;
 
+        if (worker_id == 2U && rounds >= 3U && round == 1U + (rounds / 3U)) {
+            ownerless_fk_graph_stress_force_prefix_rollback(
+                db,
+                worker_id,
+                round,
+                cascade_root,
+                setnull_root,
+                restrict_root
+            );
+        }
+
         for (unsigned attempt = 1U; attempt <= MYLITE_TEST_FK_GRAPH_STRESS_MAX_ATTEMPTS;
              ++attempt) {
             const unsigned next_cascade_root = cascade_root + 1U;
@@ -87002,6 +87021,12 @@ static void run_ownerless_fk_graph_stress_worker(
         }
     }
 
+    char *retry_lock_path =
+        path_join(paths.database_path, "run/ownerless-fk-graph-final-retry.lock");
+    const int retry_lock_fd = open(retry_lock_path, O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+    int retry_lock_held = 0;
+
+    assert(retry_lock_fd >= 0);
     for (unsigned attempt = 1U; attempt <= MYLITE_TEST_FK_GRAPH_STRESS_MAX_ATTEMPTS; ++attempt) {
         exec_ok(db, "START TRANSACTION");
         assert(
@@ -87024,6 +87049,7 @@ static void run_ownerless_fk_graph_stress_worker(
                 restrict_root
             )) {
             exec_ok(db, "ROLLBACK");
+            ownerless_random_tx_stress_acquire_retry_lock(retry_lock_fd, &retry_lock_held);
             ownerless_fk_graph_stress_retry_pause(worker_id, rounds, attempt);
             continue;
         }
@@ -87039,12 +87065,17 @@ static void run_ownerless_fk_graph_stress_worker(
                 restrict_root
             )) {
             exec_ok(db, "ROLLBACK");
+            ownerless_random_tx_stress_acquire_retry_lock(retry_lock_fd, &retry_lock_held);
             ownerless_fk_graph_stress_retry_pause(worker_id, rounds, attempt);
             continue;
         }
         setnull_root = 0U;
+        ownerless_random_tx_stress_release_retry_lock(retry_lock_fd, &retry_lock_held);
         break;
     }
+    ownerless_random_tx_stress_release_retry_lock(retry_lock_fd, &retry_lock_held);
+    assert(close(retry_lock_fd) == 0);
+    free(retry_lock_path);
     if (setnull_root != 0U) {
         fprintf(
             stderr,
@@ -87054,9 +87085,174 @@ static void run_ownerless_fk_graph_stress_worker(
         fflush(stderr);
     }
     assert(setnull_root == 0U);
+    assert(
+        snprintf(
+            sql,
+            sizeof(sql),
+            "SELECT value FROM app.ownerless_fk_graph_cascade_child "
+            "WHERE worker_id = %u",
+            worker_id
+        ) > 0
+    );
+    const unsigned long long cascade_value = query_unsigned(db, sql);
+    assert(
+        snprintf(
+            sql,
+            sizeof(sql),
+            "SELECT version FROM app.ownerless_fk_graph_cascade_child "
+            "WHERE worker_id = %u",
+            worker_id
+        ) > 0
+    );
+    const unsigned long long cascade_version = query_unsigned(db, sql);
+    const unsigned long long expected_cascade_value =
+        ownerless_fk_graph_stress_delta_sum(worker_id, rounds);
+    if (cascade_value != expected_cascade_value || cascade_version != rounds) {
+        fprintf(
+            stderr,
+            "ownerless fk graph worker final cascade mismatch: "
+            "worker=%u value=%llu/%llu version=%llu/%u\n",
+            worker_id,
+            cascade_value,
+            expected_cascade_value,
+            cascade_version,
+            rounds
+        );
+        fflush(stderr);
+    }
+    assert(cascade_value == expected_cascade_value);
+    assert(cascade_version == rounds);
 
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);
+}
+
+static void ownerless_fk_graph_stress_force_prefix_rollback(
+    mylite_db *db,
+    unsigned worker_id,
+    unsigned round,
+    unsigned cascade_root,
+    unsigned setnull_root,
+    unsigned restrict_root
+) {
+    char sql[512];
+
+    for (unsigned attempt = 1U; attempt <= MYLITE_TEST_FK_GRAPH_STRESS_MAX_ATTEMPTS; ++attempt) {
+        exec_ok(db, "START TRANSACTION");
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "UPDATE app.ownerless_fk_graph_root "
+                "SET value = value + 900000000, version = version + 1 "
+                "WHERE id = %u",
+                cascade_root
+            ) > 0
+        );
+        if (!ownerless_fk_graph_stress_exec_retryable(
+                db,
+                sql,
+                worker_id,
+                round,
+                attempt,
+                "forced-prefix-rollback-update",
+                cascade_root,
+                setnull_root,
+                restrict_root
+            )) {
+            exec_ok(db, "ROLLBACK");
+            ownerless_fk_graph_stress_retry_pause(worker_id, round, attempt);
+            continue;
+        }
+        assert(mylite_changes(db) == 1);
+        exec_ok(db, "ROLLBACK");
+
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "SELECT value FROM app.ownerless_fk_graph_root WHERE id = %u",
+                cascade_root
+            ) > 0
+        );
+        const unsigned long long root_value = query_unsigned(db, sql);
+        const unsigned long long expected_root_value =
+            ownerless_fk_graph_stress_delta_sum(worker_id, round - 1U);
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "SELECT version FROM app.ownerless_fk_graph_root WHERE id = %u",
+                cascade_root
+            ) > 0
+        );
+        const unsigned long long root_version = query_unsigned(db, sql);
+        if (root_value != expected_root_value || root_version != round - 1U) {
+            fprintf(
+                stderr,
+                "ownerless fk graph forced rollback root mismatch: "
+                "worker=%u round=%u value=%llu/%llu version=%llu/%u\n",
+                worker_id,
+                round,
+                root_value,
+                expected_root_value,
+                root_version,
+                round - 1U
+            );
+            fflush(stderr);
+        }
+        assert(root_value == expected_root_value);
+        assert(root_version == round - 1U);
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "SELECT value FROM app.ownerless_fk_graph_cascade_child "
+                "WHERE worker_id = %u",
+                worker_id
+            ) > 0
+        );
+        const unsigned long long cascade_value = query_unsigned(db, sql);
+        assert(
+            snprintf(
+                sql,
+                sizeof(sql),
+                "SELECT version FROM app.ownerless_fk_graph_cascade_child "
+                "WHERE worker_id = %u",
+                worker_id
+            ) > 0
+        );
+        const unsigned long long cascade_version = query_unsigned(db, sql);
+        const unsigned long long expected_cascade_value =
+            ownerless_fk_graph_stress_delta_sum(worker_id, round - 1U);
+        if (cascade_value != expected_cascade_value || cascade_version != round - 1U) {
+            fprintf(
+                stderr,
+                "ownerless fk graph forced rollback changed cascade child: "
+                "worker=%u round=%u value=%llu/%llu version=%llu/%u\n",
+                worker_id,
+                round,
+                cascade_value,
+                expected_cascade_value,
+                cascade_version,
+                round - 1U
+            );
+            fflush(stderr);
+        }
+        assert(cascade_value == expected_cascade_value);
+        assert(cascade_version == round - 1U);
+        return;
+    }
+
+    fprintf(
+        stderr,
+        "ownerless fk graph stress exhausted forced rollback retries: "
+        "worker=%u round=%u\n",
+        worker_id,
+        round
+    );
+    fflush(stderr);
+    assert(0);
 }
 
 static unsigned ownerless_stress_iterations(void) {
@@ -87351,7 +87547,10 @@ static void ownerless_checksum_stress_retry_pause(
     unsigned round,
     unsigned attempt
 ) {
-    const unsigned delay = 1000U * (1U + ((worker_id * 19U + round * 11U + attempt * 5U) % 20U));
+    const unsigned backoff_step = attempt < 20U ? attempt : 20U;
+    const unsigned jitter = 1000U * (1U + ((worker_id * 19U + round * 11U + attempt * 5U) % 20U));
+    const unsigned delay =
+        jitter + (2000U * backoff_step * backoff_step) + (3000U * worker_id * backoff_step);
 
     sleep_microseconds(delay);
 }

@@ -110,6 +110,8 @@ constexpr std::uint32_t k_record_flag_metadata_checksum =
     MYLITE_OWNERLESS_PAGE_LOG_RECORD_METADATA_CHECKSUM;
 constexpr std::uint32_t k_record_flag_history_rseg_pair =
     MYLITE_OWNERLESS_PAGE_LOG_RECORD_HISTORY_RSEG_PAIR;
+constexpr std::uint32_t k_record_flag_rollback_barrier =
+    MYLITE_OWNERLESS_PAGE_LOG_RECORD_ROLLBACK_BARRIER;
 constexpr std::uint32_t k_record_encoding_flags =
     k_record_flag_trailing_zero_payload | k_record_flag_sparse_zero_payload |
     k_record_flag_compact_sparse_zero_payload | k_record_flag_varint_compact_sparse_zero_payload |
@@ -118,14 +120,16 @@ constexpr std::uint32_t k_record_encoding_flags =
 constexpr std::uint32_t k_record_metadata_flags =
     k_record_flag_snapshot_boundary | k_record_flag_external_snapshot_lineage |
     k_record_flag_native_support_state | k_record_flag_proof_only |
-    k_record_flag_metadata_checksum | k_record_flag_history_rseg_pair;
+    k_record_flag_metadata_checksum | k_record_flag_history_rseg_pair |
+    k_record_flag_rollback_barrier;
 constexpr std::uint32_t k_record_flags_known_mask =
     k_record_encoding_flags | k_record_metadata_flags;
 constexpr std::uint32_t k_append_options_known_mask =
     MYLITE_OWNERLESS_PAGE_LOG_APPEND_HISTORY_RSEG_DELTA |
     MYLITE_OWNERLESS_PAGE_LOG_APPEND_NATIVE_SUPPORT_STATE |
     MYLITE_OWNERLESS_PAGE_LOG_APPEND_PROOF_ONLY |
-    MYLITE_OWNERLESS_PAGE_LOG_APPEND_HISTORY_RSEG_PAIR;
+    MYLITE_OWNERLESS_PAGE_LOG_APPEND_HISTORY_RSEG_PAIR |
+    MYLITE_OWNERLESS_PAGE_LOG_APPEND_ROLLBACK_BARRIER;
 constexpr unsigned char k_fill_sparse_run_kind_raw = 0U;
 constexpr unsigned char k_fill_sparse_run_kind_fill = 1U;
 constexpr std::uint32_t k_fill_sparse_min_fill_run_size = 8U;
@@ -915,7 +919,8 @@ int find_latest_in_snapshot(
     std::uint64_t *out_commit_lsn,
     std::uint32_t *out_record_flags,
     std::uint64_t *out_record_offset,
-    bool include_history_rseg_delta
+    bool include_history_rseg_delta,
+    bool include_rollback_barrier
 );
 int find_latest_in_snapshot_range(
     int fd,
@@ -933,7 +938,8 @@ int find_latest_in_snapshot_range(
     std::uint32_t *out_record_flags,
     std::uint64_t *out_record_offset,
     int *out_saw_page_record,
-    bool include_history_rseg_delta
+    bool include_history_rseg_delta,
+    bool include_rollback_barrier
 );
 int replay_in_snapshot(
     int fd,
@@ -3074,8 +3080,10 @@ int mylite_ownerless_page_log_find_latest_under_read_lock_at_with_flags_and_opti
         out_page_lsn == nullptr || out_commit_lsn == nullptr || out_record_flags == nullptr) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
+    constexpr std::uint32_t known_find_options = MYLITE_OWNERLESS_PAGE_LOG_FIND_HISTORY_RSEG_DELTA |
+                                                 MYLITE_OWNERLESS_PAGE_LOG_FIND_ROLLBACK_BARRIER;
     if (log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) ||
-        (find_options & ~MYLITE_OWNERLESS_PAGE_LOG_FIND_HISTORY_RSEG_DELTA) != 0U) {
+        (find_options & ~known_find_options) != 0U) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
 
@@ -3103,7 +3111,8 @@ int mylite_ownerless_page_log_find_latest_under_read_lock_at_with_flags_and_opti
         out_commit_lsn,
         out_record_flags,
         nullptr,
-        (find_options & MYLITE_OWNERLESS_PAGE_LOG_FIND_HISTORY_RSEG_DELTA) != 0U
+        (find_options & MYLITE_OWNERLESS_PAGE_LOG_FIND_HISTORY_RSEG_DELTA) != 0U,
+        (find_options & MYLITE_OWNERLESS_PAGE_LOG_FIND_ROLLBACK_BARRIER) != 0U
     );
 }
 
@@ -3191,6 +3200,7 @@ int mylite_ownerless_page_log_find_latest_under_read_lock_at(
         out_commit_lsn,
         nullptr,
         nullptr,
+        false,
         false
     );
 }
@@ -3263,6 +3273,7 @@ int mylite_ownerless_page_log_find_latest_in_snapshot_at(
         out_commit_lsn,
         nullptr,
         nullptr,
+        false,
         false
     );
     return release_log_lock(fd, k_checkpoint_lock_start) ? result : MYLITE_OWNERLESS_PAGE_LOG_ERROR;
@@ -3309,6 +3320,7 @@ int mylite_ownerless_page_log_find_latest_in_snapshot_from_under_read_lock_at(
         nullptr,
         nullptr,
         out_saw_page_record,
+        false,
         false
     );
 }
@@ -3359,6 +3371,7 @@ int mylite_ownerless_page_log_find_latest_in_snapshot_from_under_read_lock_at_wi
         out_record_flags,
         nullptr,
         out_saw_page_record,
+        false,
         false
     );
 }
@@ -3388,10 +3401,12 @@ int mylite_ownerless_page_log_find_latest_in_snapshot_from_under_read_lock_at_wi
         out_saw_page_record == nullptr) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
+    constexpr std::uint32_t known_find_options = MYLITE_OWNERLESS_PAGE_LOG_FIND_HISTORY_RSEG_DELTA |
+                                                 MYLITE_OWNERLESS_PAGE_LOG_FIND_ROLLBACK_BARRIER;
     if (log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) ||
         scan_start_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) ||
         snapshot_end_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) ||
-        (find_options & ~MYLITE_OWNERLESS_PAGE_LOG_FIND_HISTORY_RSEG_DELTA) != 0U) {
+        (find_options & ~known_find_options) != 0U) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
 
@@ -3411,7 +3426,8 @@ int mylite_ownerless_page_log_find_latest_in_snapshot_from_under_read_lock_at_wi
         out_record_flags,
         nullptr,
         out_saw_page_record,
-        (find_options & MYLITE_OWNERLESS_PAGE_LOG_FIND_HISTORY_RSEG_DELTA) != 0U
+        (find_options & MYLITE_OWNERLESS_PAGE_LOG_FIND_HISTORY_RSEG_DELTA) != 0U,
+        (find_options & MYLITE_OWNERLESS_PAGE_LOG_FIND_ROLLBACK_BARRIER) != 0U
     );
 }
 
@@ -3465,6 +3481,7 @@ int mylite_ownerless_page_log_find_latest_in_snapshot_from_under_read_lock_at_wi
         out_record_flags,
         out_record_offset,
         out_saw_page_record,
+        false,
         false
     );
 }
@@ -3498,10 +3515,12 @@ int mylite_ownerless_page_log_find_latest_in_snapshot_from_under_read_lock_at_wi
         out_record_offset == nullptr || out_saw_page_record == nullptr) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
+    constexpr std::uint32_t known_find_options = MYLITE_OWNERLESS_PAGE_LOG_FIND_HISTORY_RSEG_DELTA |
+                                                 MYLITE_OWNERLESS_PAGE_LOG_FIND_ROLLBACK_BARRIER;
     if (log_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) ||
         scan_start_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) ||
         snapshot_end_offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) ||
-        (find_options & ~MYLITE_OWNERLESS_PAGE_LOG_FIND_HISTORY_RSEG_DELTA) != 0U) {
+        (find_options & ~known_find_options) != 0U) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
 
@@ -3521,7 +3540,8 @@ int mylite_ownerless_page_log_find_latest_in_snapshot_from_under_read_lock_at_wi
         out_record_flags,
         out_record_offset,
         out_saw_page_record,
-        (find_options & MYLITE_OWNERLESS_PAGE_LOG_FIND_HISTORY_RSEG_DELTA) != 0U
+        (find_options & MYLITE_OWNERLESS_PAGE_LOG_FIND_HISTORY_RSEG_DELTA) != 0U,
+        (find_options & MYLITE_OWNERLESS_PAGE_LOG_FIND_ROLLBACK_BARRIER) != 0U
     );
 }
 
@@ -3792,7 +3812,7 @@ int mylite_ownerless_page_log_replay_stable_with_completion_at(
             static_cast<off_t>(snapshot_end_offset),
             callback,
             context,
-            false
+            true
         );
     }
     if (replay_result == MYLITE_OWNERLESS_PAGE_LOG_OK && complete_callback != nullptr) {
@@ -4255,6 +4275,13 @@ int append_record_at_locked(
     std::uint64_t observed_standalone_payload_size = 0U;
     const bool proof_only_record =
         (append_options & MYLITE_OWNERLESS_PAGE_LOG_APPEND_PROOF_ONLY) != 0U;
+    const bool rollback_barrier_record =
+        (append_options & MYLITE_OWNERLESS_PAGE_LOG_APPEND_ROLLBACK_BARRIER) != 0U;
+    const bool native_support_record =
+        (append_options & MYLITE_OWNERLESS_PAGE_LOG_APPEND_NATIVE_SUPPORT_STATE) != 0U;
+    if (rollback_barrier_record && (!proof_only_record || native_support_record)) {
+        return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+    }
     if (proof_only_record && page_lsn == 0U) {
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
@@ -4554,6 +4581,9 @@ int append_record_at_locked(
     if (proof_only_record) {
         metadata_record_flags |= k_record_flag_proof_only;
     }
+    if (rollback_barrier_record) {
+        metadata_record_flags |= k_record_flag_rollback_barrier;
+    }
     record.space_id = space_id;
     record.page_no = page_no;
     record.page_size = page_size;
@@ -4734,7 +4764,8 @@ int find_latest_in_snapshot(
     std::uint64_t *out_commit_lsn,
     std::uint32_t *out_record_flags,
     std::uint64_t *out_record_offset,
-    bool include_history_rseg_delta
+    bool include_history_rseg_delta,
+    bool include_rollback_barrier
 ) {
     return find_latest_in_snapshot_range(
         fd,
@@ -4752,7 +4783,8 @@ int find_latest_in_snapshot(
         out_record_flags,
         out_record_offset,
         nullptr,
-        include_history_rseg_delta
+        include_history_rseg_delta,
+        include_rollback_barrier
     );
 }
 
@@ -4772,7 +4804,8 @@ int find_latest_in_snapshot_range(
     std::uint32_t *out_record_flags,
     std::uint64_t *out_record_offset,
     int *out_saw_page_record,
-    bool include_history_rseg_delta
+    bool include_history_rseg_delta,
+    bool include_rollback_barrier
 ) {
     if (out_saw_page_record != nullptr) {
         *out_saw_page_record = 0;
@@ -4858,11 +4891,14 @@ int find_latest_in_snapshot_range(
             *out_saw_page_record = 1;
         }
         ++scanned_page_records;
-        if (record_is_proof_only(record)) {
+        if (record.commit_lsn > max_commit_lsn) {
             record_offset = next_record_offset;
             continue;
         }
-        if (record.commit_lsn > max_commit_lsn) {
+        const bool rollback_barrier = include_rollback_barrier && record_is_proof_only(record) &&
+                                      (record.flags & k_record_flag_rollback_barrier) != 0U &&
+                                      (record.flags & k_record_flag_native_support_state) == 0U;
+        if (record_is_proof_only(record) && !rollback_barrier) {
             record_offset = next_record_offset;
             continue;
         }
@@ -4910,6 +4946,19 @@ int find_latest_in_snapshot_range(
     if (record_page_too_large(best, page_capacity)) {
         publish_scan_perf(PAGE_LOG_SCAN_PERF_ERRORS);
         return MYLITE_OWNERLESS_PAGE_LOG_FULL;
+    }
+    if (record_is_proof_only(best)) {
+        *out_page_size = best.page_size;
+        *out_page_lsn = best.page_lsn;
+        *out_commit_lsn = best.commit_lsn;
+        if (out_record_flags != nullptr) {
+            *out_record_flags = best.flags;
+        }
+        if (out_record_offset != nullptr) {
+            *out_record_offset = static_cast<std::uint64_t>(best_record_offset);
+        }
+        publish_scan_perf(PAGE_LOG_SCAN_PERF_FOUND);
+        return MYLITE_OWNERLESS_PAGE_LOG_ROLLBACK_BARRIER;
     }
     if (!read_record_page_payload(fd, best_payload_offset, best, out_page, page_capacity)) {
         publish_scan_perf(PAGE_LOG_SCAN_PERF_ERRORS);
@@ -5149,7 +5198,7 @@ int checkpoint_locked(
                 if (stage_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
                     return stage_result;
                 }
-            } else if (retained_record_callback != nullptr && !record_is_proof_only(record)) {
+            } else if (retained_record_callback != nullptr) {
                 const int callback_result = retained_record_callback(
                     record.space_id,
                     record.page_no,
@@ -5322,7 +5371,7 @@ int checkpoint_preserving_oldest_snapshot_locked(
             if (stage_result != MYLITE_OWNERLESS_PAGE_LOG_OK) {
                 return stage_result;
             }
-        } else if (retained_record_callback != nullptr && !record_is_proof_only(record)) {
+        } else if (retained_record_callback != nullptr) {
             const int callback_result = retained_record_callback(
                 record.space_id,
                 record.page_no,
@@ -6293,7 +6342,7 @@ int append_checkpoint_stage_record(
         return MYLITE_OWNERLESS_PAGE_LOG_ERROR;
     }
     maybe_pause_for_test_fault("checkpoint-stage-record");
-    if (retained_record_callback != nullptr && !record_is_proof_only(retained_record)) {
+    if (retained_record_callback != nullptr) {
         off_t target_record_offset = 0;
         if (!offset_adds(
                 build->log_offset,
@@ -8998,6 +9047,11 @@ void invalidate_index_delta_bases_for_log(
 
 bool record_payload_shape_valid(const PageRecordHeader &record) {
     if (record.page_size == 0U || (record.flags & ~k_record_flags_known_mask) != 0U) {
+        return false;
+    }
+    const bool rollback_barrier = (record.flags & k_record_flag_rollback_barrier) != 0U;
+    if (rollback_barrier && (!record_is_proof_only(record) ||
+                             (record.flags & k_record_flag_native_support_state) != 0U)) {
         return false;
     }
     const std::uint32_t encoding_flags = record.flags & k_record_encoding_flags;

@@ -249,24 +249,10 @@ static bool ownerless_retry_commit_boundary(trx_t *trx) noexcept
   case trx_t::MYLITE_OWNERLESS_COMMIT_RETRY_NONE:
     return true;
   case trx_t::MYLITE_OWNERLESS_COMMIT_RETRY_ROLLBACK_REFRESH:
-  {
     if (mylite_ownerless_innodb_refresh_transaction_pages_from_native(trx) !=
         MYLITE_OWNERLESS_INNODB_LOCK_OK)
       return false;
-
-    const uint64_t rollback_lsn=
-      mylite_ownerless_innodb_publish_rollback_pages_to_lsn(
-          trx, trx->mylite_ownerless_commit_retry_lsn);
-    if (rollback_lsn != 0)
-    {
-      mylite_ownerless_innodb_flush_dirty_pages_for_page_writes(rollback_lsn);
-      uint64_t exact_flushed_pages= 0;
-      uint64_t fallback_rounds= 0;
-      mylite_ownerless_innodb_flush_transaction_pages_for_page_writes(
-          trx, rollback_lsn, &exact_flushed_pages, &fallback_rounds);
-    }
     break;
-  }
   case trx_t::MYLITE_OWNERLESS_COMMIT_RETRY_PUBLISH_VISIBLE:
     if (mylite_ownerless_innodb_publish_pages_visible_lsn(
             trx->mylite_ownerless_commit_retry_lsn) !=
@@ -3076,6 +3062,13 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
     uint64_t ownerless_stage_start= 0;
     if (in_rollback)
     {
+      /*
+      rollback_finish() flushed the restored pages and published their
+      terminal barriers while the transaction still owned the page-write
+      gates. A peer commit published afterward must supersede those barriers.
+      Refresh the retiring transaction's buffers from native storage, but do
+      not re-publish a barrier at a later peer's page-local boundary.
+      */
       const int ownerless_refresh_result=
         mylite_ownerless_innodb_refresh_transaction_pages_from_native(this);
       if (UNIV_UNLIKELY(ownerless_refresh_result !=
@@ -3083,44 +3076,6 @@ TRANSACTIONAL_INLINE inline void trx_t::commit_in_memory(mtr_t *mtr)
         ownerless_commit_boundary_failed(
             this, MYLITE_OWNERLESS_COMMIT_RETRY_ROLLBACK_REFRESH,
             ownerless_commit_lsn);
-      else
-      {
-        ownerless_stage_start=
-          ownerless_visibility_start != 0 ? ownerless_commit_visibility_now_ns() : 0;
-        const uint64_t ownerless_rollback_lsn=
-          mylite_ownerless_innodb_publish_rollback_pages_to_lsn(
-              this, ownerless_commit_lsn);
-        ownerless_commit_visibility_add_elapsed(
-            ownerless_commit_visibility_publish_transaction_pages_ns,
-            ownerless_stage_start);
-        if (ownerless_rollback_lsn != 0)
-        {
-          ownerless_commit_lsn=
-            std::max<lsn_t>(ownerless_commit_lsn, ownerless_rollback_lsn);
-          ownerless_stage_start=
-            ownerless_visibility_start != 0 ? ownerless_commit_visibility_now_ns() : 0;
-          mylite_ownerless_innodb_flush_dirty_pages_for_page_writes(
-              ownerless_rollback_lsn);
-          uint64_t ownerless_exact_flush_pages= 0;
-          uint64_t ownerless_fallback_rounds= 0;
-          const uint64_t ownerless_transaction_flush_pages=
-            mylite_ownerless_innodb_flush_transaction_pages_for_page_writes(
-                this, ownerless_rollback_lsn, &ownerless_exact_flush_pages,
-                &ownerless_fallback_rounds);
-          mylite_ownerless_innodb_deep_perf_add(
-            MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_FLUSH_PAGES,
-            ownerless_transaction_flush_pages);
-          mylite_ownerless_innodb_deep_perf_add(
-            MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_PAGES,
-            ownerless_exact_flush_pages);
-          mylite_ownerless_innodb_deep_perf_add(
-            MYLITE_OWNERLESS_INNODB_DEEP_TRX_COMMIT_PERSIST_WRITE_HISTORY_OWNERLESS_EXACT_FLUSH_FALLBACK_ROUNDS,
-            ownerless_fallback_rounds);
-          ownerless_commit_visibility_add_elapsed(
-              ownerless_commit_visibility_flush_dirty_pages_ns,
-              ownerless_stage_start);
-        }
-      }
     }
     else
     {

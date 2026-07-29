@@ -653,7 +653,19 @@ into later statements, and preserves the pre-transaction row after forced
 stress now also covers explicit savepoints, bounded `1205`/`1213` retries,
 full transaction rollback, same-process rollback refresh, and native reopen
 handoff; rollback no longer publishes or flushes transaction page images as a
-committed ownerless visibility boundary. Reader-only no-live close remains
+committed ownerless visibility boundary. Post-undo native user pages are
+flushed before ownership release and receive zero-payload page-scoped rollback
+barriers at their prior committed page boundaries; older snapshots remain
+unchanged, later committed payload supersedes the barrier, and a handle keeps
+the monotonic committed read boundary it observed before rollback. A barrier
+also sorts after any discarded attempted-commit image at the same page-local
+boundary and remains a semantic user-page record until no-live durability
+proof reclaims it.
+Page-write reservation deadlocks now return MariaDB 1213 for a whole SQL
+attempt retry. MyLite does not release transaction-owned pages and resume an
+already-open mini-transaction, because a clean reservation may still belong to
+a cursor that will mutate the page later.
+Reader-only no-live close remains
 proof-gated before it can materialize peer page-version WAL appended after that
 runtime opened; focused live snapshot reader-close coverage, including the
 synthesized native-boundary variant, now verifies retention while the pin is

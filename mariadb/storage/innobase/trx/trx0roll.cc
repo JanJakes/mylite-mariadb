@@ -87,17 +87,19 @@ bool trx_t::rollback_finish() noexcept
       physical ownership. Record locks and the shared transaction entry stay
       live until commit() serializes the undo history. This avoids a cycle
       where a peer holds the history page while waiting for one of our
-      already-restored application pages. */
+      already-restored application pages. A successful rollback creates no
+      replayable committed user-page version and must not advance the committed
+      visible boundary. Its proof-only records are page-scoped barriers: peers
+      use the restored native page instead of replaying an older page-log image. */
       const bool restored_pages= !mylite_ownerless_dirty_pages_empty() ||
                                  (mylite_ownerless_page_images != nullptr &&
                                   !mylite_ownerless_page_images->empty());
       if (restored_pages)
       {
         log_buffer_flush_to_disk();
-        const uint64_t rollback_lsn=
-            mylite_ownerless_innodb_publish_rollback_pages_to_lsn(
-                this, mylite_ownerless_innodb_current_lsn());
-        if (UNIV_UNLIKELY(rollback_lsn == 0))
+        const uint64_t rollback_flush_lsn=
+            mylite_ownerless_innodb_current_lsn();
+        if (UNIV_UNLIKELY(rollback_flush_lsn == 0))
         {
           mylite_ownerless_coordination_fault= true;
           error_state= DB_ERROR;
@@ -105,12 +107,18 @@ bool trx_t::rollback_finish() noexcept
           return false;
         }
         mylite_ownerless_innodb_flush_dirty_pages_for_page_writes(
-            rollback_lsn);
+            rollback_flush_lsn);
         mylite_ownerless_innodb_flush_transaction_pages_for_page_writes(
-            this, rollback_lsn, nullptr, nullptr);
-        if (UNIV_UNLIKELY(mylite_ownerless_innodb_publish_pages_visible_lsn(
-                              rollback_lsn) !=
-                          MYLITE_OWNERLESS_INNODB_LOCK_OK))
+            this, rollback_flush_lsn, nullptr, nullptr);
+        /*
+        Native flushing can publish a readable copy of the restored page.
+        Append the semantic barrier afterward so it remains the page-local
+        winner and invalidates every attempted transaction image.
+        */
+        const uint64_t rollback_lsn=
+            mylite_ownerless_innodb_publish_rollback_barrier_pages_to_lsn(
+                this, mylite_ownerless_innodb_current_lsn());
+        if (UNIV_UNLIKELY(rollback_lsn == 0))
         {
           mylite_ownerless_coordination_fault= true;
           error_state= DB_ERROR;

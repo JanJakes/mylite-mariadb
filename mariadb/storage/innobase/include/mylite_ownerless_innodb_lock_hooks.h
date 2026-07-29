@@ -95,10 +95,13 @@ extern "C" {
 #define MYLITE_OWNERLESS_INNODB_PAGE_VERSION_EXTERNAL_SNAPSHOT_LINEAGE 2U
 #define MYLITE_OWNERLESS_INNODB_PAGE_VERSION_NATIVE_SUPPORT_STATE 4U
 #define MYLITE_OWNERLESS_INNODB_PAGE_VERSION_HISTORY_RSEG_DELTA 8U
+#define MYLITE_OWNERLESS_INNODB_PAGE_VERSION_ROLLBACK_BARRIER 16U
 
 #define MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_HISTORY_RSEG 1U
 #define MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_PROOF_ONLY 2U
 #define MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_HISTORY_RSEG_PAIR 4U
+#define MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_ROLLBACK_BARRIER 8U
+#define MYLITE_OWNERLESS_INNODB_PAGE_PUBLISH_HANDOFF_BOUNDARY 16U
 
 #define MYLITE_OWNERLESS_INNODB_PAGE_READ_HISTORY_RSEG_DELTA 1U
 
@@ -545,9 +548,9 @@ int mylite_ownerless_innodb_set_statement_suppress_native_lifecycle_refresh(int 
 int mylite_ownerless_innodb_statement_suppress_native_lifecycle_refresh(void);
 uint64_t mylite_ownerless_innodb_publish_transaction_pages_to_lsn(
     struct trx_t *trx, uint64_t visible_lsn);
-uint64_t mylite_ownerless_innodb_publish_rollback_pages_to_lsn(
-    struct trx_t *trx, uint64_t visible_lsn);
 uint64_t mylite_ownerless_innodb_publish_rollback_proof_pages_to_lsn(
+    struct trx_t *trx, uint64_t visible_lsn);
+uint64_t mylite_ownerless_innodb_publish_rollback_barrier_pages_to_lsn(
     struct trx_t *trx, uint64_t visible_lsn);
 uint64_t mylite_ownerless_innodb_publish_transaction_buffer_pages_to_lsn(
     struct trx_t *trx, uint64_t visible_lsn);
@@ -670,10 +673,17 @@ void mylite_ownerless_innodb_note_external_page_observed(
     uint32_t space_id,
     uint32_t page_no,
     uint64_t commit_lsn);
+void mylite_ownerless_innodb_note_external_page_rollback_barrier(
+    uint32_t space_id,
+    uint32_t page_no,
+    uint64_t commit_lsn);
 int mylite_ownerless_innodb_external_page_observed_at_or_after(
     uint32_t space_id,
     uint32_t page_no,
     uint64_t commit_lsn);
+int mylite_ownerless_innodb_external_page_is_rollback_barrier(
+    uint32_t space_id,
+    uint32_t page_no);
 uint64_t mylite_ownerless_innodb_push_external_page_visibility(uint64_t latest_lsn);
 void mylite_ownerless_innodb_restore_external_page_visibility(uint64_t previous_lsn);
 void mylite_ownerless_innodb_clear_external_page_visibility(void);
