@@ -3096,6 +3096,7 @@ PHP_KEEPALIVE
       require $wpdbPath;
       mysqli_report(MYSQLI_REPORT_OFF);
       $wpdb = new wpdb(DB_USER, DB_PASSWORD, DB_NAME, DB_HOST);
+      $wpdb->suppress_errors(true);
       if (!$wpdb->ready || $wpdb->set_prefix($table_prefix) instanceof WP_Error) {
           fwrite(STDERR, "Could not open live ownerless WordPress wpdb peer: " . $wpdb->last_error . PHP_EOL);
           exit(1);
