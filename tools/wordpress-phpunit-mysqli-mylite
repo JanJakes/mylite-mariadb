@@ -3136,7 +3136,7 @@ PHP_KEEPALIVE
               fwrite(STDERR, "Could not publish live ownerless WordPress peer readiness\n");
               exit(1);
           }
-          usleep(1000);
+          usleep(100000);
       } while (!file_exists($stop));
       if ($wpdb->delete(
           $wpdb->options,
