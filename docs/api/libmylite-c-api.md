@@ -633,9 +633,9 @@ flushes to the periodic timeout. The default is full durability.
   On 64-bit embedded Linux, macOS, and Windows with an admitted local
   filesystem, the enumerated persistent InnoDB paths coordinate through
   directory-backed shared memory, byte-range locks, page-version WAL, and
-  checkpoint files. The mode remains experimental and incomplete where the
-  compatibility matrix marks hook, stress, DDL, or recovery release gates as
-  pending.
+  checkpoint files. This enumerated surface is release-qualified by the
+  compatibility matrix. Unlisted engines, SQL shapes, platforms, and
+  filesystems are not implied by that claim and continue to fail closed.
 - Database handles, prepared statements, and inherited embedded-runtime state
   cannot be used in a child after `fork()`. The child must `exec()` before using
   MyLite; inherited operations fail with `MYLITE_MISUSE`.

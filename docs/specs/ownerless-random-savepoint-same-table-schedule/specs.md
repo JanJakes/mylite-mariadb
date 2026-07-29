@@ -61,7 +61,11 @@ savepoint, updates a second row, sometimes rolls back to the savepoint, updates
 a third row, and then either commits or fully rolls back. Row order differs by
 worker and round, including reversed row orders that can produce row-lock waits
 or deadlocks. Retryable `1205` and `1213` errors roll back the whole attempt
-and retry the deterministic transaction.
+and retry the deterministic transaction. After a successful round, the worker
+leaves an acquisition window longer than the configured one-second lock wait
+before starting its next transaction. This keeps the bounded schedule focused
+on wait/retry and rollback correctness instead of making exhaustive unfair-lock
+starvation an accidental acceptance criterion.
 
 All committed updates are additive, so the final oracle is independent of
 commit order. The test checks row count, value sum, version sum, and weighted

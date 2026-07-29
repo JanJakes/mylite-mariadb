@@ -33,9 +33,9 @@ ALTER TABLE child
   InnoDB FK add/drop as schema-only alter operations.
 - `mariadb/storage/innobase/handler/handler0alter.cc:10046-10133` updates
   InnoDB FK dictionary definitions during ALTER completion.
-- `packages/libmylite/src/database.cc` already treats the existing FK ADD and
-  FK DROP recovery kinds as metadata-only and skips native file-operation
-  checkpoint markers for them.
+- `packages/libmylite/src/database.cc` treats the existing FK ADD and FK DROP
+  recovery kinds as metadata-only. The release-stabilization follow-up prearms
+  native dictionary checkpoint evidence before those statements.
 
 ## Scope And Non-Goals
 
@@ -46,8 +46,8 @@ In scope:
   REFERENCES ...` clause.
 - Preserve the existing ordinary-table generated-column guard for the child and
   referenced tables.
-- Reuse the existing metadata-only FK recovery lane because the statement text
-  is replayed by MariaDB and the recovery kind controls MyLite marker policy.
+- Reuse the existing metadata-only FK recovery lane because the recovery kind
+  controls MyLite live-peer cleanup and native dictionary marker policy.
 - Add a focused unsafe hook CTest selector that crashes at
   `dictionary-before-finish` while a live ownerless peer remains open.
 
@@ -75,9 +75,10 @@ pure DROP recognizers:
 
 The classifier returns
 `MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_ADD_FOREIGN_KEY` for accepted
-mixed FK-only statements. That kind is already metadata-only and already skips
-native file-operation checkpoint marking. No durable enum, shared-state format,
-or SQL rewrite changes are needed.
+mixed FK-only statements. That kind is metadata-only but prearms native
+dictionary checkpoint evidence until a successful ownerless dictionary finish
+or recovery-capable no-live drain. No durable enum, shared-state format, or SQL
+rewrite changes are needed.
 
 ## Compatibility Impact
 
@@ -112,7 +113,8 @@ documentation.
   - retained and added FK metadata present;
   - dropped-parent violations allowed;
   - retained and added parent violations rejected;
-  - native file-operation checkpoint marker clear;
+  - native dictionary checkpoint marker retained until recovery-capable
+    no-live drain;
   - ownerless reopen, native reopen, and forced `.shm` rebuild preserve state.
 - Run production format/build guards and `git diff --check`.
 
@@ -120,8 +122,9 @@ documentation.
 
 - FK-only mixed ADD/DROP ALTER statements are marked recoverable before
   dictionary finish.
-- The native file-operation checkpoint marker remains clear for this
-  metadata-only recovery class.
+- The native file-operation checkpoint marker remains set for this crashed
+  metadata-only recovery class because committed InnoDB dictionary redo still
+  needs startup authority.
 - The focused hook CTest passes and proves recovered metadata and enforcement
   while a peer is live and after ownerless/native reopen.
 - Existing pure FK ADD/DROP recognizers and generated-column rejection behavior

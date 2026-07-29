@@ -1795,6 +1795,13 @@ fil_delete_file(
 	const char*	path)	/*!< in: filepath of the ibd tablespace */
 	noexcept;
 
+/** Read a valid tablespace identifier from a file's page 0.
+@param path      tablespace file path
+@param space_id output tablespace identifier
+@return whether the file contains a valid page 0 */
+bool mylite_ownerless_fil_read_tablespace_page0_space_id(
+    const char *path, uint32_t *space_id) noexcept;
+
 /** Check whether a file contains a valid page 0 for a tablespace.
 This is used to make ownerless file-rename recovery idempotent.
 @param path  tablespace file path

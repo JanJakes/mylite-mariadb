@@ -583,6 +583,10 @@ void mylite_ownerless_innodb_refresh_buffer_pool_pages_force_native_current_no_s
     uint64_t visible_lsn);
 void mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_visible_boundary_no_skip(
     uint64_t visible_lsn);
+void mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_visible_boundary_dirty_no_skip(
+    uint64_t visible_lsn);
+void mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_visible_boundary_dirty_user_no_skip(
+    uint64_t visible_lsn);
 void mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_visible_boundary_preserve_clean_no_skip(
     uint64_t visible_lsn);
 void mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_retained_no_skip(

@@ -42,8 +42,8 @@ Add a hook-build SQL test that:
    `ADD CONSTRAINT ... FOREIGN KEY` succeed natively.
 3. Keeps another ownerless peer live during recovery.
 4. Verifies the new table comment, dropped/retained/added FK metadata, FK
-   enforcement, clear native file-operation markers, ownerless/native reopen,
-   and forced `.shm` rebuild behavior.
+   enforcement, native dictionary marker retention and final drain,
+   ownerless/native reopen, and forced `.shm` rebuild behavior.
 
 ## Scope And Non-Goals
 
@@ -72,9 +72,9 @@ one supported MariaDB ALTER shape.
 ## Directory, Lifecycle, And Native Storage Impact
 
 No durable layout change. The covered ALTER shape is metadata-only from the
-ownerless native file-operation perspective, so recovery must leave the native
-file-operation checkpoint marker clear while a peer remains live and after
-final no-live cleanup.
+ownerless native file-operation perspective, but recovery retains the prearmed
+native-dictionary checkpoint marker while a peer remains live. The marker
+drains only after a recovery-capable no-live handoff.
 
 ## Public API, Build, Size, License
 
@@ -96,7 +96,8 @@ No public API, build-profile, dependency, binary-size, or license change.
 - Live-peer recovery observes the recovered table comment and FK metadata.
 - Dropped FK enforcement is absent while retained/added FK enforcement remains
   active.
-- Native file-operation markers stay clear.
+- The native dictionary checkpoint marker stays set through live recovery and
+  drains at the final recovery-capable boundary.
 - Ownerless/native reopen and forced `.shm` rebuild preserve the recovered
   state.
 

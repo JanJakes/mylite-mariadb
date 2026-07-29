@@ -722,6 +722,18 @@ static bool mylite_ownerless_absolute_file_name(const std::string &name)
 #endif
 }
 
+static bool mylite_ownerless_temporary_table_file_name(
+    const std::string &name)
+{
+  size_t base= 0;
+  for (size_t i= 0; i < name.size(); i++)
+  {
+    if (mylite_ownerless_path_separator(name[i]))
+      base= i + 1;
+  }
+  return name.size() - base >= 4 && name.compare(base, 4, "#sql") == 0;
+}
+
 static std::string mylite_ownerless_recovery_file_name(const char *name,
                                                        ulint len)
 {
@@ -883,14 +895,59 @@ retry:
     {
       const uint32_t space_id{d->first};
       recv_sys_t::map::iterator p{recv_sys.pages.lower_bound({space_id,0})};
+      bool ownerless_missing_table_metadata= false;
+      bool ownerless_path_owned_by_replacement= false;
+      if (!d->second.deleted &&
+          mylite_ownerless_innodb_uncheckpointed_file_rename_recovery())
+      {
+        bool ibd_exists= false;
+        os_file_type_t ibd_type;
+        std::string frm_name{d->second.file_name};
+        if (frm_name.size() >= 4 &&
+            frm_name.compare(frm_name.size() - 4, 4, DOT_IBD) == 0)
+          frm_name.replace(frm_name.size() - 4, 4, ".frm");
+        bool frm_exists= false;
+        os_file_type_t frm_type;
+        ownerless_missing_table_metadata=
+            os_file_status(d->second.file_name.c_str(), &ibd_exists,
+                           &ibd_type) && !ibd_exists &&
+            os_file_status(frm_name.c_str(), &frm_exists, &frm_type) &&
+            !frm_exists;
+        uint32_t file_space_id= 0;
+        const bool file_space_id_valid=
+            mylite_ownerless_fil_read_tablespace_page0_space_id(
+                d->second.file_name.c_str(), &file_space_id);
+        if (file_space_id_valid && file_space_id != space_id)
+        {
+          /*
+            The valid on-disk page 0 belongs to a later replacement
+            than this retained redo prefix knows about. Reconstructing
+            the old space at the same path would destroy that replacement.
+            If its dictionary identity is not valid, normal dictionary
+            startup will still reject it.
+          */
+          ownerless_path_owned_by_replacement= true;
+        }
+        mysql_mutex_lock(&fil_system.mutex);
+        const fil_space_t *path_owner=
+            fil_system.find(d->second.file_name.c_str());
+        ownerless_path_owned_by_replacement=
+            ownerless_path_owned_by_replacement ||
+            (path_owner != nullptr && path_owner->id != space_id);
+        mysql_mutex_unlock(&fil_system.mutex);
+      }
 
-      if (d->second.deleted ||
+      if (d->second.deleted || ownerless_missing_table_metadata ||
+          ownerless_path_owned_by_replacement ||
           p == recv_sys.pages.end() || p->first.space() != space_id)
       {
         /* We found a FILE_DELETE record for the tablespace, or
-        there were no buffered records. Either way, we must create a
-        dummy tablespace with the latest known name,
-        for dict_drop_index_tree(). */
+        MyLite recovered a file operation whose SQL metadata is also
+        absent or whose final path is already owned by a replacement
+        space, or there were no buffered records. In the first three
+        cases the page records belong to a dropped or replaced table.
+        Otherwise, we must create a dummy tablespace with the latest
+        known name, for dict_drop_index_tree(). */
         recv_sys.pages_it_invalidate(space_id);
         while (p != recv_sys.pages.end() && p->first.space() == space_id)
         {
@@ -901,6 +958,9 @@ retry:
         recv_spaces_t::iterator it{recv_spaces.find(space_id)};
         if (it != recv_spaces.end())
         {
+          if (ownerless_missing_table_metadata ||
+              ownerless_path_owned_by_replacement)
+            goto processed;
           const std::string *name= &d->second.file_name;
           if (d->second.deleted)
           {
@@ -4587,13 +4647,23 @@ next:
 		case file_name_t::NORMAL:
 			goto next;
 		case file_name_t::MISSING:
-			if (srv_operation != SRV_OPERATION_NORMAL) {
+			if (mylite_ownerless_innodb_uncheckpointed_file_rename_recovery()
+			    && mylite_ownerless_temporary_table_file_name(
+				    i->second.name)) {
+				/* A completed rebuilding ALTER can remove its
+				#sql intermediate tablespace before a live peer
+				checkpoints the file-operation redo. The later
+				replacement tablespace is authoritative. */
+				i->second.status = file_name_t::DELETED;
+				/* fall through */
+			} else if (srv_operation != SRV_OPERATION_NORMAL) {
 			} else if (const lsn_t c = i->second.create_lsn) {
 				deferred_spaces.add(space, i->second.name, c);
 				goto next;
+			} else {
+				err = recv_init_missing_space(err, i);
+				i->second.status = file_name_t::DELETED;
 			}
-			err = recv_init_missing_space(err, i);
-			i->second.status = file_name_t::DELETED;
 			/* fall through */
 		case file_name_t::DELETED:
 			recv_sys_t::map::iterator r = p++;

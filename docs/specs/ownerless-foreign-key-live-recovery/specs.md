@@ -60,16 +60,19 @@ nor the referenced table has generated columns:
 - pure comma-separated lists of the same FK DROP clause form.
 
 These are treated as metadata-only ownerless recovery kinds because the covered
-boundary changes SQL/InnoDB dictionary metadata rather than creating, deleting,
-renaming, truncating, or rebuilding native table files. The existing native
-file-operation marker remains clear, and file-operation DDL remains on the
-marker-retaining recovery lane.
+boundary changes SQL/InnoDB dictionary metadata rather than necessarily
+creating, deleting, renaming, truncating, or rebuilding native table files.
+MyLite nevertheless prearms the native dictionary checkpoint marker before the
+ALTER because metadata-only InnoDB dictionary redo also needs startup authority
+if the process dies before ownerless dictionary finish. A successful finish
+clears a statement-local prearm; a crash retains it through live recovery.
 
 InnoDB can still publish a file-operation redo observation while committing
 foreign-key metadata. The ownerless dictionary finish path consumes that
-observation for these two recovery kinds without writing the MyLite
-native-file checkpoint-needed marker; the recoverable dictionary marker is the
-durable proof used by live-peer cleanup.
+observation for these two recovery kinds. A normal successful finish clears
+the statement-local prearm when no independent physical file operation
+requires it; a crash leaves the native dictionary checkpoint marker as the
+durable startup-authority proof used by live-peer cleanup.
 
 The ADD classifier resolves the referenced table from the statement text. The
 DROP classifier resolves it from `information_schema.referential_constraints`
@@ -84,7 +87,8 @@ In scope:
 - ordinary FK ADD and DROP prefinish crash recovery while a peer remains live,
 - pure comma-separated ordinary FK-only ADD and DROP list prefinish crash
   recovery while a peer remains live,
-- marker-clear assertions for each covered ordinary live-recovery boundary,
+- marker-retention and final-drain assertions for each covered ordinary
+  live-recovery boundary,
 - direct CTest registrations for the ordinary focused FK crash selectors,
 - regression coverage proving generated-column FK ADD and DROP remain
   conservative and recover only after the live peer exits.
@@ -150,8 +154,9 @@ No public API, build profile, binary-size, license, or dependency changes.
 - Each covered FK crash selector kills the writer at
   `dictionary-before-finish`, opens a new ownerless connection while another
   peer remains live, and observes the completed FK metadata change.
-- The native file-operation checkpoint-needed marker remains clear before and
-  after ordinary FK live recovery.
+- The native file-operation checkpoint-needed marker remains set across the
+  crashed ordinary FK boundary and live recovery, then drains after the
+  recovery-capable no-live handoff.
 - Ordinary FK ADD recovery preserves FK metadata and enforcement.
 - Ordinary FK DROP recovery preserves FK metadata absence and permits
   post-drop orphan/parent writes.

@@ -37,7 +37,7 @@ Keep recovery classification unchanged:
 - mixed FK plus `ADD COLUMN` continues to select add-column/file-operation
   recovery;
 - mixed FK plus table `COMMENT` or column-default changes remains metadata-only
-  FK recovery with a clear native file-operation marker;
+  FK recovery with a prearmed native-dictionary marker;
 - generated-column FK tables remain excluded by the existing child/referenced
   table generated-column guards.
 
@@ -61,7 +61,8 @@ ownerless WAL/checkpoint and shared-memory state are reused.
   drops FK A, changes `note` to default `7`, and adds FK C while a live peer is
   held open.
 - Kill the writer at the deterministic `dictionary-before-finish` fault.
-- Verify the native file-operation marker remains clear, the live peer recovery
+- Verify the native file-operation marker remains set through live recovery
+  and drains at the recovery-capable no-live boundary; the live peer recovery
   sees default `7`, FK A is absent, FK B and FK C enforce, inserts omitting
   `note` use default `7`, and ownerless/native reopen plus forced `.shm`
   rebuild preserve the state.
@@ -71,8 +72,8 @@ ownerless WAL/checkpoint and shared-memory state are reused.
 ## Acceptance Criteria
 
 - The mixed default ALTER list is accepted by ownerless dictionary recovery.
-- Live-peer recovery does not retain a native file-operation marker for this
-  metadata-only shape.
+- Live-peer recovery retains the prearmed native-dictionary marker for this
+  metadata-only shape until recovery-capable no-live drain.
 - Recovered default metadata and FK enforcement survive ownerless reopen,
   ordinary native reopen, and forced shared-memory rebuild.
 

@@ -31,9 +31,10 @@ single-clause forms.
   InnoDB FK add/drop as schema-only alter operations.
 - `mariadb/storage/innobase/handler/handler0alter.cc:10046-10133` updates
   InnoDB FK definitions in dictionary tables/caches during ALTER completion.
-- Before this slice, `packages/libmylite/src/database.cc` marked single ordinary FK
-  add/drop recovery as metadata-only and skips native file-op checkpoint
-  markers for those two recovery kinds.
+- Before this slice, `packages/libmylite/src/database.cc` marked single
+  ordinary FK add/drop recovery as metadata-only. The release-stabilization
+  follow-up now prearms native dictionary checkpoint evidence for those
+  recovery kinds.
 - Before this slice, `packages/libmylite/src/database.cc` rejected commas inside
   `ownerless_alter_table_add_foreign_key_recovery_statement()` and only accepts
   one `DROP FOREIGN KEY` clause in
@@ -51,8 +52,8 @@ In scope:
   generated columns remain outside the metadata-only FK live-recovery lane.
 - Add hook crash coverage for one two-FK add list and one two-FK drop list,
   killed at `dictionary-before-finish` while a live ownerless peer remains open.
-- Verify recovered metadata, enforcement or absence, native marker clear,
-  ownerless/native reopen, and forced `.shm` rebuild.
+- Verify recovered metadata, enforcement or absence, native marker retention
+  and final drain, ownerless/native reopen, and forced `.shm` rebuild.
 
 Out of scope:
 
@@ -84,7 +85,9 @@ Successful pure add lists reuse
 `MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_ADD_FOREIGN_KEY`; successful
 pure drop lists reuse
 `MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_DROP_FOREIGN_KEY`. Both stay
-metadata-only and keep the native file-operation checkpoint-needed marker clear.
+metadata-only, but prearm the native-dictionary checkpoint marker so a crash
+before ownerless dictionary finish cannot lose committed InnoDB dictionary
+redo.
 
 ## Compatibility Impact
 
@@ -127,10 +130,11 @@ adds parser helpers, focused hook tests, CTest registration, and documentation.
   mixed comma-separated FK/non-FK ALTER lists are not claimed by this slice.
 - A crash after native multi-FK ADD and before ownerless dictionary finish
   recovers both constraints while a live peer remains open, with the native
-  file-op marker clear.
+  file-op marker retained.
 - A crash after native multi-FK DROP and before ownerless dictionary finish
   recovers both absent constraints while a live peer remains open, with the
-  native file-op marker clear.
+  native file-op marker retained.
+- Recovery-capable no-live startup drains the retained marker.
 - Ownerless reopen, native reopen, and forced `.shm` rebuild observe the
   recovered FK state.
 

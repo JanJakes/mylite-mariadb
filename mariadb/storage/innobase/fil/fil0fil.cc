@@ -82,9 +82,6 @@ static const char *mylite_ownerless_file_op_redo_path(
              : path;
 }
 
-static bool mylite_ownerless_read_tablespace_page0_space_id(
-    const char *path, uint32_t *space_id) noexcept;
-
 ATTRIBUTE_COLD bool fil_space_t::set_corrupted() const noexcept
 {
   if (!is_stopping() && !is_corrupted.test_and_set())
@@ -1738,7 +1735,8 @@ fil_space_t *fil_space_t::drop(uint32_t id, pfs_os_file_t *detached_handle)
     if (guard_result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
     {
       uint32_t file_space_id= 0;
-      const bool page0_valid= mylite_ownerless_read_tablespace_page0_space_id(
+      const bool page0_valid=
+          mylite_ownerless_fil_read_tablespace_page0_space_id(
           space->chain.start->name, &file_space_id);
       if (page0_valid && file_space_id != id)
       {
@@ -1981,7 +1979,7 @@ static inline char *fil_make_dirpath(const char *path) noexcept
   return fil_make_filepath_low(path, fil_space_t::name_type{}, NO_EXT, true);
 }
 
-static bool mylite_ownerless_read_tablespace_page0_space_id(
+bool mylite_ownerless_fil_read_tablespace_page0_space_id(
     const char *path, uint32_t *space_id) noexcept
 {
   if (space_id == nullptr)
@@ -2024,7 +2022,7 @@ bool mylite_ownerless_fil_path_has_tablespace_page0(
     const char *path, uint32_t space_id) noexcept
 {
   uint32_t file_space_id= 0;
-  return mylite_ownerless_read_tablespace_page0_space_id(
+  return mylite_ownerless_fil_read_tablespace_page0_space_id(
              path, &file_space_id) &&
          file_space_id == space_id;
 }

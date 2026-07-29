@@ -72,8 +72,8 @@ The rename selector:
   ownerless_index_rename_crash_new_idx` under the
   `dictionary-before-finish` fault,
 - kills the writer at the hook,
-- recovers through a new ownerless opener while the peer is live and keeps the
-  native file-operation marker clear,
+- recovers through a new ownerless opener while the peer is live and retains
+  the prearmed native file-operation marker until the last live peer exits,
 - verifies recovered metadata: old index absent, new
   index present, old `FORCE INDEX` rejected, new `FORCE INDEX` usable,
   subsequent DML accepted,
@@ -99,8 +99,8 @@ The ignorability selector:
 
 - creates an InnoDB table with rows and a secondary index,
 - kills a writer after `ALTER INDEX ... IGNORED` but before dictionary finish,
-- recovers through a new ownerless opener while the peer is live and keeps the
-  native file-operation marker clear,
+- recovers through a new ownerless opener while the peer is live and retains
+  the prearmed native file-operation marker until the last live peer exits,
 - verifies the recovered `information_schema.statistics.IGNORED = 'YES'`
   state and later DML while the index is ignored,
 - kills a second writer after `ALTER INDEX ... NOT IGNORED` but before
@@ -118,7 +118,7 @@ In scope:
 - crash-at-`dictionary-before-finish` coverage for completed secondary-index
   unique replacement, rename, and ignorability metadata ALTERs,
 - live-peer recovery behavior,
-- marker-retaining physical unique replacement and marker-clear metadata-only
+- marker-retaining physical unique replacement and prearmed-marker
   rename/ignorability recovery,
 - ownerless/native reopen of final metadata.
 
@@ -145,10 +145,14 @@ operations.
 
 ## DDL Metadata Routing Impact
 
-The covered statements use MariaDB's native ALTER TABLE metadata pipeline. The
-slice only proves that MyLite's ownerless dictionary-generation boundary can be
-recovered after the native metadata has changed and before MyLite publishes the
-stable generation.
+The covered statements use MariaDB's native ALTER TABLE metadata pipeline.
+Even a metadata-only ALTER can commit native dictionary redo before MyLite
+publishes its stable dictionary generation. MyLite therefore keeps the
+conservative marker that was armed before the statement until the ownerless
+dictionary finish becomes durable. A crash before that finish leaves the
+marker available to force native recovery; a successful finish clears a marker
+that the statement introduced when no physical file operation independently
+requires it.
 
 ## Directory And Lifecycle Impact
 
@@ -191,8 +195,10 @@ dependency changes.
 
 - Focused selectors reach the dictionary fault hook and do not hang.
 - Recovery succeeds while another ownerless peer remains live.
-- Physical unique replacement retains the native file-operation marker until
-  final no-live recovery, while rename and ignored/not-ignored keep it clear.
+- Physical unique replacement and crashed prearmed metadata changes retain the
+  native file-operation marker until final no-live recovery. A normally
+  completed metadata-only rename or ignored/not-ignored change clears its
+  statement-local prearm after the durable ownerless dictionary finish.
 - Recovered rename metadata has the old index absent and new index usable.
 - Recovered unique replacement metadata has the replacement key part and
   enforces replacement-key duplicates while old-key duplicates are allowed.

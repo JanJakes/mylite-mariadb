@@ -241,13 +241,13 @@ app.mylite/
   initialized from the durable page-version records in `mylite-concurrency.wal`.
   The embedded runtime disables InnoDB buffer-pool dump/load so concurrent
   processes do not race on the advisory `ib_buffer_pool` file in `datadir/`.
-  Experimental ownerless read/write is available through
-  `MYLITE_OPEN_OWNERLESS_RW` for the currently admitted persistent InnoDB
-  application-table surface. Non-InnoDB ownerless
-  durable tables, server/global SQL surfaces, network-filesystem semantics, and
-  broader external-oracle long-running stress remain outside that admitted
-  surface until separately designed and validated. The compatibility release
-  gates remain authoritative for graduation from experimental status.
+  Release-qualified ownerless read/write is available through
+  `MYLITE_OPEN_OWNERLESS_RW` for the enumerated persistent InnoDB
+  application-table surface on admitted local filesystems. Non-InnoDB
+  ownerless durable tables, server/global SQL surfaces, network-filesystem
+  semantics, and unclassified SQL remain outside that admitted surface until
+  separately designed and validated. The compatibility release gates define
+  the exact bounded claim.
 - `concurrency/mylite-concurrency.wal` and
   `concurrency/mylite-concurrency.ckpt` are durable coordination-log and
   checkpoint anchors for future ownerless recovery. They contain fixed headers
@@ -456,10 +456,11 @@ Minimum MyLite responsibilities:
 
 Exclusive read/write opens remain the default. `MYLITE_OPEN_OWNERLESS_RW` enables
 the tested ownerless InnoDB cross-process subset without a daemon or owner
-process. Broader DDL invalidation, purge/undo-free coordination, transaction-aware
-page-version reads, DDL/file-lifecycle tablespace replay, external-oracle
-long-running stress, background active-reader checkpoint scheduling, and
-non-InnoDB ownerless engines remain planned work.
+process. The admitted surface includes the classified DML, DDL, transaction,
+page-version, tablespace lifecycle, active-reader, and crash-recovery paths
+listed in the compatibility matrix. Non-InnoDB ownerless engines, unclassified
+DDL, remote filesystems, and broader platform/filesystem admission remain
+separate future slices rather than implied support.
 
 ## Temporary Data
 

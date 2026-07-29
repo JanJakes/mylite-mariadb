@@ -75,7 +75,7 @@ The mysqli host argument is interpreted as the MyLite database directory path.
 User, password, port, socket, and server authentication parameters do not start
 a network connection.
 
-Experimental ownerless read/write mode must be selected before connecting:
+Ownerless read/write mode must be selected before connecting:
 
 ```php
 $db = MyLite\mysqli_init();
@@ -89,9 +89,9 @@ an error. Ownerless mode is available on 64-bit Linux, macOS, and Windows and
 admits only validated local ext4/XFS/tmpfs/overlay, APFS, and NTFS directories,
 respectively. Other filesystems fail with `MYLITE_UNSUPPORTED_FILESYSTEM`. The
 mode supports the persistent InnoDB application-table surface listed in the
-compatibility matrix. It is experimental and incomplete; unsupported engines,
-existing special indexes, unclassified DDL, and server/global SQL fail
-explicitly.
+compatibility matrix. That enumerated surface is release-qualified;
+unsupported engines, existing special indexes, unclassified DDL, and
+server/global SQL fail explicitly.
 
 For performance attribution runs, `mysqli_mylite` can emit process-local
 adapter counters when `MYLITE_MYSQLI_PROFILE=1` is present in the PHP process
@@ -143,9 +143,9 @@ $ownerless = new PDO('mylite:path=/path/app.mylite;mode=ownerless_rw');
 ```
 
 The optional DSN `mode` is `default` or `ownerless_rw`. The ownerless value has
-the same Linux, filesystem, InnoDB-only, experimental-status, and explicit
-failure contract as the mysqli option above. Any other value fails connection
-creation with PDO diagnostics.
+the same platform, filesystem, InnoDB-only, bounded release qualification, and
+explicit failure contract as the mysqli option above. Any other value fails
+connection creation with PDO diagnostics.
 
 The first driver supports direct execution, queries, transactions, quoting,
 `lastInsertId()`, SQLSTATE/errorInfo, and native prepared statements with

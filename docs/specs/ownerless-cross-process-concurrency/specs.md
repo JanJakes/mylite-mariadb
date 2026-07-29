@@ -312,8 +312,8 @@ Roles:
   image idempotently; without a stage file, a checkpoint that would mutate the
   WAL returns busy. Linux locking uses a stable per-inode descriptor with OFD
   byte-range locks and bounded waits, so closing another descriptor for the WAL
-  cannot release cross-process exclusion. The experimental ownerless protocol
-  has no format-1-to-format-2 migration; an older nonempty WAL is rejected
+  cannot release cross-process exclusion. The ownerless protocol has no
+  format-1-to-format-2 migration; an older nonempty WAL is rejected
   without modification.
   Guarded ownerless SQL can use page-version reads for direct or prepared
   `SELECT`/`WITH` statements at a live page-version read LSN, while the
@@ -741,8 +741,13 @@ against a peer-created file-per-table InnoDB table, direct and prepared
 unused InnoDB dictionary-cache entries, clear MyLite's ownerless FK cache, and
 retry once. Prepared retry uses the saved SQL text and parameter bindings to
 prepare a replacement native statement before the second execute. Mutating
-statements, DDL, locking reads, and explicit-transaction statements do not use
-this retry path.
+statements are never retried after execution begins. Instead, immediately after
+an exact peer dictionary-generation refresh, parsed-target autocommit
+`INSERT`/`REPLACE`/`UPDATE`/`DELETE` statements issue a zero-row native read of
+their target while the statement dictionary read lock is already held. A
+`1932` from that read repairs the native and SQL dictionary caches before the
+mutation starts. Unparsed mutation shapes, DDL, locking reads, and
+explicit-transaction statements do not use this preflight path.
 
 ### Mapping Lifecycle
 
@@ -1201,9 +1206,12 @@ Define a portable MyLite lock and wait abstraction:
 - Hot path: MyLite-owned fixed-width latch words in `mmap` shared memory, with
   explicit memory ordering and no opaque system object in the stable ABI.
 - Linux: futex wait/wake on the latch words.
-- macOS: validate the byte-range-lock/backoff backend first; add a better wait
-  primitive only after platform stress coverage exists.
-- Windows: file mapping, byte-range lock, and wait backend in a later port.
+- macOS: POSIX shared mappings, handle-scoped `flock()` sidecars for the
+  one-byte lock ranges, and bounded adaptive backoff.
+- Windows: native file mappings, handle-scoped `LockFileEx()` byte-range locks,
+  and bounded adaptive backoff.
+- A native process-shared macOS or Windows wake accelerator remains a
+  performance expansion; correctness does not depend on one.
 - Process-shared robust `pthread_mutex_t` / `pthread_cond_t` can be evaluated
   as a backend-specific volatile optimization, but not as the portable shared
   format.
@@ -2832,8 +2840,9 @@ Tasks:
    ignored/not-ignored writers after MariaDB returns success but before
    ownerless dictionary finish, recovers while a peer remains live, retains the
    native file-operation marker for physical index create/drop/replacement
-   until no-live drain, keeps the marker clear for metadata-only rename and
-   ignored/not-ignored changes, and verifies key-part metadata, unique
+   until no-live drain, retains the prearmed marker for real rename and
+   ignored/not-ignored changes until no-live drain, and verifies key-part
+   metadata, unique
    enforcement, post-recovery writes, ownerless/native reopen, and forced
    `.shm` rebuild.
    Primary-key coverage now verifies initial
@@ -3416,8 +3425,9 @@ Tasks:
    native index metadata changes but before ownerless dictionary finish, then
    verifies live-peer recovery while another ownerless peer remains open,
    native file-operation marker retention for physical index
-   create/drop/replacement until final no-live drain, metadata-only
-   marker-clear recovery for rename and ignored/not-ignored changes, and the
+   create/drop/replacement until final no-live drain, prearmed marker retention
+   for real rename and ignored/not-ignored changes until final no-live drain,
+   and the
    recovered present/absent, replacement unique-key, dropped unique-key,
    renamed, and ignored/not-ignored index states remain visible through
    ownerless/native reopen before and after forced `.shm` rebuild.
@@ -3437,20 +3447,21 @@ Tasks:
    Foreign-key crash coverage now kills an
    `ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY` writer after native
    foreign-key metadata creation but before ownerless dictionary finish, then
-   verifies metadata-only live-peer recovery with the native file-operation
-   marker clear, recovered FK metadata, orphan-row rejection, valid child
-   writes, and ownerless/native reopen before and after forced `.shm` rebuild.
+   verifies live-peer recovery with the prearmed native file-operation marker
+   retained until final no-live drain, recovered FK metadata, orphan-row
+   rejection, valid child writes, and ownerless/native reopen before and after
+   forced `.shm` rebuild.
    Foreign-key DROP crash coverage now kills an
    `ALTER TABLE ... DROP FOREIGN KEY` writer after native foreign-key metadata
-   removal but before ownerless dictionary finish, then verifies metadata-only
-   live-peer recovery with the native file-operation marker clear, recovered
-   FK metadata absence, orphan-row writes, parent deletes, and ownerless/native
-   reopen before and after forced `.shm` rebuild.
+   removal but before ownerless dictionary finish, then verifies live-peer
+   recovery with the prearmed native file-operation marker retained until final
+   no-live drain, recovered FK metadata absence, orphan-row writes, parent
+   deletes, and ownerless/native reopen before and after forced `.shm` rebuild.
    Pure comma-separated foreign-key ADD and DROP list crash coverage now kills
-   two-FK ALTER writers at the same boundary, keeps the metadata-only native
-   file-operation marker clear, and verifies both recovered constraints or both
-   recovered absent constraints through enforcement, ownerless/native reopen,
-   and forced `.shm` rebuild.
+   two-FK ALTER writers at the same boundary, retains the prearmed native
+   file-operation marker until final no-live drain, and verifies both recovered
+   constraints or both recovered absent constraints through enforcement,
+   ownerless/native reopen, and forced `.shm` rebuild.
    CHECK constraint crash coverage now kills an
    `ALTER TABLE ... ADD CONSTRAINT ... CHECK` writer after native
    table-definition mutation but before ownerless dictionary finish, then
@@ -3781,15 +3792,17 @@ Tasks:
    metadata, retained rows, and post-recovery writes through ownerless and
    native reopen. Hook-build crash coverage also kills
    `ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY` before ownerless dictionary
-   finish and verifies metadata-only live-peer recovery with the native
-   file-operation marker clear, recovered FK metadata, orphan-row rejection
-   without a pending rejected child row surviving to `COMMIT`, and valid child
-   writes through ownerless and native reopen. Hook-build crash coverage
+   finish and verifies metadata-only live-peer recovery with the prearmed native
+   dictionary marker retained until final no-live drain, recovered FK metadata,
+   orphan-row rejection without a pending rejected child row surviving to
+   `COMMIT`, and valid child writes through ownerless and native reopen.
+   Hook-build crash coverage
    also kills
    `ALTER TABLE ... DROP FOREIGN KEY` before ownerless dictionary finish and
-   verifies metadata-only live-peer recovery with the native file-operation
-   marker clear, recovered FK metadata absence plus post-drop orphan child
-   writes and parent deletes through ownerless and native reopen. Hook-build crash coverage
+   verifies metadata-only live-peer recovery with the prearmed native
+   dictionary marker retained until final no-live drain, recovered FK metadata
+   absence plus post-drop orphan child writes and parent deletes through
+   ownerless and native reopen. Hook-build crash coverage
    also kills standalone `ALTER TABLE ... ADD CONSTRAINT ... CHECK` before
    ownerless dictionary finish and verifies live-peer recovery with recovered
    CHECK metadata, errno 4025 enforcement, native file-operation marker
@@ -5774,8 +5787,9 @@ Minimum suites before support can be claimed:
     ignored/not-ignored metadata changes but before ownerless dictionary
     finish; hook coverage proves live-peer recovery for physical index
     create/drop/online add/drop/replacement with the native file-operation
-    marker retained until no-live drain, metadata-only live recovery for index
-    rename and ignored/not-ignored changes with that marker clear, and the
+    marker retained until no-live drain, and retains the statement-prearmed
+    marker for crashed index rename and ignored/not-ignored changes until the
+    same no-live drain; the
     recovered present/absent, unique-enforced, renamed, and ignored/not-ignored
     index states remain correct,
   - after ordinary column-add, column-drop, column-modify, and column-rename
@@ -6020,13 +6034,14 @@ identity and discards/rebuilds volatile segments when it differs; copying an
 open directory is unsupported until an ownerless backup protocol coordinates
 reader slots, checkpoints, and page-version retention.
 
-Compatibility status should stay partial until at least Phase 9 passes. Shared
-read-only opens can be claimed for the tested SQL policy and committed-read
-visibility surface, including prepared `SELECT` execution, read-only
-transaction first-read/repeatable-snapshot behavior, reads inside transactions
-after local writes, and no-live-process page-version replay; true
-InnoDB `innodb_read_only` startup, ownerless cross-process dirty reads, and full
-live-peer DDL/file-lifecycle tablespace crash recovery remain planned.
+Compatibility remains qualified per row rather than implying universal
+MySQL/MariaDB coverage. Shared read-only opens are covered for the tested SQL
+policy and committed-read visibility surface, including prepared `SELECT`
+execution, read-only transaction first-read/repeatable-snapshot behavior, reads
+inside transactions after local writes, and no-live-process page-version
+replay. True InnoDB `innodb_read_only` startup and ownerless cross-process dirty
+reads remain outside the admitted surface; classified live-peer
+DDL/file-lifecycle recovery is covered, while unclassified DDL fails closed.
 Ownerless read/write prepared plain reads now also share the one-shot stale
 InnoDB dictionary-cache `1932` recovery path with direct plain reads for the
 tested trigger DDL peer-created tablespace case.
@@ -6161,13 +6176,12 @@ successful generated-column CREATE TABLE, generated-column ALTER TABLE ...
 ADD COLUMN, generated-column secondary-index, and generated-column
 child/referenced-column FK ADD/DROP writers after native metadata completion or
 removal but before ownerless dictionary finish, and verifies live-peer recovery
-for the generated-column FK ADD/DROP metadata-only lane with the native
-file-operation marker clear plus no-live ownerless/native reopen of the
-recovered table, generated-column, index, foreign-key, or schema states,
-including recovered old/new index-name and ignored/not-ignored metadata, but
-MyLite still lacks durable file lifecycle metadata for broader DDL recovery.
-Ordinary and generated-column FK ADD/DROP are classified as metadata-only live
-recoverable.
+for the generated-column FK ADD/DROP metadata-only lane with the prearmed native
+dictionary marker retained until no-live drain, plus no-live ownerless/native
+reopen of the recovered table, generated-column, index, foreign-key, or schema
+states, including recovered old/new index-name and ignored/not-ignored
+metadata. Ordinary and generated-column FK ADD/DROP are classified as
+metadata-only live recoverable; unclassified DDL continues to fail closed.
 
 ## Binary Size Impact
 
@@ -8310,16 +8324,17 @@ subsystems that this mode needs:
 
   Current status for this branch:
 
-  1. Ownerless read/write is complete for the admitted surface: embedded Linux
-     on a validated local ext4, XFS, tmpfs, or overlay filesystem, persistent
-     InnoDB application tables, and the DML and DDL shapes explicitly
-     classified and covered in this specification. The implementation includes
-     directory-backed process registration, statement/metadata/record/page-write
-     coordination, page-version WAL, checkpoint state, native redo/checkpoint
-     handoff, active-reader retention, dead-owner cleanup, and deterministic
-     recovery for the enumerated paths. This is a precise bounded completion
-     claim, not a claim that arbitrary engines, platforms, filesystems, or
-     server-oriented SQL can participate.
+  1. Ownerless read/write is complete for the admitted surface: 64-bit
+     embedded Linux on validated local ext4, XFS, tmpfs, or overlay; macOS on
+     local APFS; Windows on local NTFS; persistent InnoDB application tables;
+     and the DML and DDL shapes explicitly classified and covered in this
+     specification. The implementation includes directory-backed process
+     registration, statement/metadata/record/page-write coordination,
+     page-version WAL, checkpoint state, native redo/checkpoint handoff,
+     active-reader retention, dead-owner cleanup, and deterministic recovery
+     for the enumerated paths. This is a precise bounded completion claim, not
+     a claim that arbitrary engines, platforms, filesystems, or server-oriented
+     SQL can participate.
   2. Non-InnoDB durable application tables are deliberately outside the
      ownerless protocol. Ownerless opens reject existing persistent non-InnoDB
      application tables, and ownerless SQL rejects explicit non-InnoDB engine
@@ -8328,22 +8343,25 @@ subsystems that this mode needs:
      non-InnoDB-to-InnoDB conversion attempts.
   3. Unclassified DDL, existing or newly requested special indexes, unsupported
      server/global SQL, unsupported platforms, and unvalidated filesystems fail
-     closed. The release gate mounts ext4 and XFS loop filesystems plus tmpfs
-     and overlay and runs the two-process InnoDB write/read/reopen case on each
-     admitted filesystem. Longer external randomized/RQG-style stress, more
-     exhaustive edge-case matrices, and future per-engine ownerless designs
-     remain validation and roadmap work; none is part of the current admitted
-     ownerless read/write surface.
+     closed. The Linux release gate mounts ext4 and XFS loop filesystems plus
+     tmpfs and overlay and runs the two-process InnoDB write/read/reopen case on
+     each admitted filesystem. Native CI runs the corresponding cross-process
+     lifecycle and crash gates on macOS/APFS and Windows/NTFS. Longer external
+     randomized/RQG-style stress, more exhaustive edge-case matrices, and
+     future per-engine ownerless designs remain validation and roadmap work;
+     none is part of the current admitted ownerless read/write surface.
   4. Final release evidence passed all gates on the completed branch state:
      ordinary production tests `65/65`; PHP ownerless adapters `2/2`; weighted
-     production SQL shards `16/16` in `581.13s`; hook-enabled coverage
-     `269/269` in `4097.55s`; bounded workload `5/5` in `2320.93s`; randomized
+     production SQL shards `16/16` in `474.97s`; hook-enabled coverage
+     `269/269` in `2659.62s`; bounded workload `5/5` in `2287.00s`; randomized
      rollback, checksum, exact `120`-round transaction, `48`-round FK graph, and
-     child-cleanup gates; pressure `4/4` in `234.37s`; ext4, XFS, tmpfs, and
-     overlay mounts; focused WordPress `7/7` with `22` assertions and `66` peer
-     writes; external MariaDB traces `12/12`; and `32` seeds each for random
-     transactions, DDL, and FK graphs. Production-build policy, formatting,
-     clang-tidy, and whitespace checks also pass.
+     child cleanup `5/5` in `1677.33s`; pressure `4/4` in `170.39s`; ext4, XFS,
+     tmpfs, and overlay mounts; explicit unsupported-filesystem rejection;
+     native macOS/APFS and Windows/NTFS gates; focused WordPress `7/7` with `22`
+     assertions and `71` peer writes; external MariaDB traces `12/12`; and `32`
+     seeds each for random transactions, DDL, and FK graphs. Production-build
+     policy, Release/MinSizeRel checks, formatting, clang-tidy, whitespace, and
+     the linked bundle audit also pass.
 
   SQL-level local table-wait fault injection is no longer listed as a primary
   completion gate for supported ownerless SQL: ownerless `LOCK TABLES` and

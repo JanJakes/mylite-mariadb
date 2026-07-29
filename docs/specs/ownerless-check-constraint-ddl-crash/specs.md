@@ -62,7 +62,8 @@ Add one unsafe-hook selector:
   finish,
 - prove ownerless recovery succeeds while the live peer remains open and the
   native file-operation marker stays retained,
-- release the peer and prove final no-live recovery drains the marker,
+- release the older peer, prove it preserves the marker, and prove one
+  isolated latest-generation recovery drains it,
 - verify recovered `information_schema.check_constraints` metadata contains
   both table-level CHECK constraints,
 - verify CHECK enforcement rejects invalid rows with errno 4025 and accepts a
@@ -126,7 +127,8 @@ No public API, build-profile, binary-size, license, or dependency changes.
 
 - The focused selector reaches the dictionary fault hook and does not hang.
 - Live-peer recovery succeeds while the native file-operation marker remains
-  retained until final no-live recovery.
+  retained. The final older survivor preserves the obligation, and one
+  isolated latest-generation recovery drains it.
 - Recovered metadata includes both named CHECK constraints in
   `information_schema.check_constraints` with table-level scope.
 - Invalid rows fail with MariaDB errno 4025 after recovery, while valid writes

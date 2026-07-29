@@ -47,9 +47,10 @@ metadata validation.
 The implementation reuses
 `MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_INDEX_IGNORABILITY`, which is
 metadata-only in live-peer dead-owner recovery. Standalone index ignorability
-keeps the marker clear, but the focused mixed FK plus index-ignorability ALTER
-emits native file-operation evidence in the hook test. The live-peer recovery
-path must therefore recover through the ignorability dictionary lane while
+retains its prearmed native-dictionary marker across a crash, while the focused
+mixed FK plus index-ignorability ALTER also emits native file-operation
+evidence in the hook test. The live-peer recovery path must therefore recover
+through the ignorability dictionary lane while
 retaining the native file-operation checkpoint marker until final no-live
 drain.
 

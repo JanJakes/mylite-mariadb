@@ -582,7 +582,8 @@ int refresh_page_for_write(const buf_block_t &block,
                            bool preserve_retained_user_page= false,
                            bool skip_page_version= false,
                            bool preserve_local_transaction_page= true,
-                           bool allow_native_disk_regression= false);
+                           bool allow_native_disk_regression= false,
+                           bool allow_dirty_committed_page_refresh= false);
 fil_node_t *find_file_node_for_page(fil_space_t &space, uint32_t *page_no);
 int refresh_buffer_pool_page(uint32_t space_id, uint32_t page_no,
                              bool load_if_missing,
@@ -593,7 +594,8 @@ int refresh_buffer_pool_page(uint32_t space_id, uint32_t page_no,
                              bool preserve_retained_user_page= false,
                              bool skip_page_version= false,
                              bool preserve_local_transaction_page= true,
-                             bool allow_native_disk_regression= false);
+                             bool allow_native_disk_regression= false,
+                             bool allow_dirty_committed_page_refresh= false);
 void refresh_buffer_pool_pages(bool force_page_version= false,
                                bool evict_clean_pages= true,
                                bool allow_boundary_newer= false,
@@ -601,7 +603,9 @@ void refresh_buffer_pool_pages(bool force_page_version= false,
                                bool preserve_retained_user_page= false,
                                bool skip_page_version= false,
                                bool preserve_local_transaction_page= true,
-                               bool allow_native_disk_regression= false);
+                               bool allow_native_disk_regression= false,
+                               bool allow_dirty_committed_page_refresh= false,
+                               bool user_tablespaces_only= false);
 void refresh_replaceable_buffer_pool_pages();
 bool record_bit_set(const ib_lock_t *lock, uint32_t heap_no);
 trx_id_t lock_transaction_id(const ib_lock_t *lock, bool create_transient);
@@ -3540,6 +3544,40 @@ mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_visible_bou
 }
 
 extern "C" void
+mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_visible_boundary_dirty_no_skip(
+    uint64_t visible_lsn)
+{
+  if (!mylite_ownerless_innodb_lock_has_hooks() || visible_lsn == 0)
+    return;
+
+  const uint64_t previous_visible_lsn= page_visible_lsn;
+  const bool previous_current= page_visible_lsn_is_current;
+  page_visible_lsn= visible_lsn;
+  page_visible_lsn_is_current= true;
+  refresh_buffer_pool_pages(true, true, true, true, false, false, false,
+                            false, true);
+  page_visible_lsn= previous_visible_lsn;
+  page_visible_lsn_is_current= previous_current;
+}
+
+extern "C" void
+mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_visible_boundary_dirty_user_no_skip(
+    uint64_t visible_lsn)
+{
+  if (!mylite_ownerless_innodb_lock_has_hooks() || visible_lsn == 0)
+    return;
+
+  const uint64_t previous_visible_lsn= page_visible_lsn;
+  const bool previous_current= page_visible_lsn_is_current;
+  page_visible_lsn= visible_lsn;
+  page_visible_lsn_is_current= true;
+  refresh_buffer_pool_pages(true, true, true, true, false, false, false,
+                            false, true, true);
+  page_visible_lsn= previous_visible_lsn;
+  page_visible_lsn_is_current= previous_current;
+}
+
+extern "C" void
 mylite_ownerless_innodb_refresh_buffer_pool_pages_force_current_read_retained_no_skip(
     uint64_t visible_lsn)
 {
@@ -6454,7 +6492,8 @@ int refresh_page_for_write(const buf_block_t &block,
                            bool preserve_retained_user_page,
                            bool skip_page_version,
                            bool preserve_local_transaction_page,
-                           bool allow_native_disk_regression)
+                           bool allow_native_disk_regression,
+                           bool allow_dirty_committed_page_refresh)
 {
   ownerless_page_write_refresh_count(
       OWNERLESS_PAGE_WRITE_REFRESH_STAT_CALLS);
@@ -6688,12 +6727,17 @@ int refresh_page_for_write(const buf_block_t &block,
       const bool retained_current_unobserved_page=
           retained_user_page && page_visible_lsn_is_current &&
           page_visible_lsn_is_retained && !local_page_already_observed;
+      const bool committed_boundary_newer_than_local=
+          allow_dirty_committed_page_refresh &&
+          page_version_commit_lsn > local_lsn;
       const bool page_version_would_regress_dirty_local_page=
           local_page_dirty && !page_version_matches_local &&
-          !retained_current_unobserved_page;
+          !retained_current_unobserved_page &&
+          !allow_dirty_committed_page_refresh;
       const bool current_read_would_regress_physical_page=
           page_version_lsn < local_lsn &&
           !page_version_boundary_newer_than_local &&
+          !committed_boundary_newer_than_local &&
           (!retained_user_page ||
            (local_page_already_observed && !retained_native_write_scrub_page));
       const bool visible_boundary_allowed=
@@ -6859,7 +6903,8 @@ int refresh_page_for_write(const buf_block_t &block,
         !page_version_covers_disk_page && !disk_page_older_than_observed &&
         !disk_page_matches_local;
     const bool disk_boundary_would_regress_dirty_local_page=
-        local_page_dirty && !disk_page_matches_local;
+        local_page_dirty && !disk_page_matches_local &&
+        !allow_dirty_committed_page_refresh;
     const bool current_read_disk_boundary_would_regress=
         disk_page_lsn < local_lsn;
     const bool local_blob_page=
@@ -7012,7 +7057,9 @@ void refresh_buffer_pool_pages(bool force_page_version, bool evict_clean_pages,
                                bool preserve_retained_user_page,
                                bool skip_page_version,
                                bool preserve_local_transaction_page,
-                               bool allow_native_disk_regression)
+                               bool allow_native_disk_regression,
+                               bool allow_dirty_committed_page_refresh,
+                               bool user_tablespaces_only)
 {
   std::vector<uint64_t> pages;
   collect_buffer_pool_file_pages(pages);
@@ -7023,11 +7070,14 @@ void refresh_buffer_pool_pages(bool force_page_version, bool evict_clean_pages,
   {
     const uint32_t space_id= static_cast<uint32_t>(packed_page >> 32);
     const uint32_t page_no= static_cast<uint32_t>(packed_page);
+    if (user_tablespaces_only && space_id <= 3)
+      continue;
     const int result= refresh_buffer_pool_page(
         space_id, page_no, false, force_page_version, evict_clean_pages,
         allow_boundary_newer, allow_visible_boundary,
         preserve_retained_user_page, skip_page_version,
-        preserve_local_transaction_page, allow_native_disk_regression);
+        preserve_local_transaction_page, allow_native_disk_regression,
+        allow_dirty_committed_page_refresh);
     if (result != MYLITE_OWNERLESS_INNODB_LOCK_OK &&
         result != MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE)
       break;
@@ -7078,7 +7128,8 @@ int refresh_buffer_pool_page(uint32_t space_id, uint32_t page_no,
                              bool preserve_retained_user_page,
                              bool skip_page_version,
                              bool preserve_local_transaction_page,
-                             bool allow_native_disk_regression)
+                             bool allow_native_disk_regression,
+                             bool allow_dirty_committed_page_refresh)
 {
   const page_id_t id(space_id, page_no);
 
@@ -7113,7 +7164,8 @@ int refresh_buffer_pool_page(uint32_t space_id, uint32_t page_no,
           *block, force_page_version, force_page_version,
           allow_boundary_newer, allow_visible_boundary,
           preserve_retained_user_page, skip_page_version,
-          preserve_local_transaction_page, allow_native_disk_regression);
+          preserve_local_transaction_page, allow_native_disk_regression,
+          allow_dirty_committed_page_refresh);
   }
   else if (get_mode == BUF_GET && err != DB_SUCCESS)
   {

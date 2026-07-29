@@ -48,9 +48,10 @@ Base: MariaDB 11.8 LTS import `mariadb-11.8.6`
 - `packages/libmylite/src/database.cc:20080-20160` classifies bounded
   generated-column FK DROP statements by proving the existing named FK metadata
   involves a generated child or referenced column.
-- `packages/libmylite/src/database.cc:13096-13118` skips the native
-  file-operation checkpoint marker for FK metadata recovery, so generated-column
-  FK DROP recovery must prove the metadata-only live-recovery lane.
+- MyLite prearms bounded FK recovery because even a metadata-only native
+  dictionary change needs startup authority after a crash. MariaDB's actual
+  native file-operation callback remains an additional authoritative signal
+  when the selected generated-column FK ALTER rebuilds a tablespace.
 
 ## Design
 
@@ -70,9 +71,13 @@ For each shape, the selector first proves the constraint is present and
 enforced. It then runs an ownerless writer under the existing
 `dictionary-before-finish` hook, kills the writer after native DROP FOREIGN KEY
 completion, opens recovery while the live peer remains open, and verifies the
-completed native metadata removal before releasing the peer. The selector also
-asserts the native file-operation checkpoint marker stays clear before and
-after live recovery.
+completed native metadata removal before releasing the peer. The selector
+asserts that MariaDB's actual file-operation callback retains the structural
+marker through live recovery for the generated child-column DROP. The generated
+referenced-column DROP takes MariaDB's metadata-only path, but retains its
+prearmed native-dictionary marker across the crash for the same startup
+authority. Final no-live peer shutdown drains either marker when the tablespace
+identity remains unchanged.
 
 After recovery, verify:
 
@@ -93,7 +98,8 @@ In scope:
   DROP,
 - crash-at-`dictionary-before-finish` recovery for a generated referenced-column
   FK DROP,
-- metadata-only live-peer recovery with the native file-operation marker clear,
+- live-peer recovery with marker retention for both physical and metadata-only
+  native dictionary changes,
 - recovered absence of generated-column FK metadata and enforcement,
 - ownerless/native reopen before and after forced shared-memory rebuild.
 
@@ -155,8 +161,11 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - Each killed DROP writer reaches `dictionary-before-finish` without hanging.
 - A live ownerless peer remains open while recovery exposes each completed FK
   DROP.
-- The native file-operation checkpoint marker remains clear for both generated
-  child-column and generated referenced-column FK DROP recovery boundaries.
+- The generated child-column FK DROP marker remains set through live recovery
+  and clears when the final peer closes with unchanged tablespace identity.
+  The generated referenced-column FK DROP retains its prearmed marker through
+  live recovery even though MariaDB emits no native file operation, then clears
+  at the same final no-live boundary.
 - Recovered generated child-column FK metadata is absent and orphan writes are
   accepted.
 - Recovered generated referenced-column FK metadata is absent and parent deletes

@@ -44,9 +44,10 @@ Base: MariaDB 11.8 LTS import `mariadb-11.8.6`
 - `packages/libmylite/src/database.cc:19650-19820` classifies bounded
   generated-column FK ADD statements by parsing the child and referenced
   column lists and proving at least one participating column is generated.
-- `packages/libmylite/src/database.cc:13096-13118` skips the native
-  file-operation checkpoint marker for FK metadata recovery, so generated-column
-  FK ADD recovery must prove the metadata-only live-recovery lane.
+- MyLite prearms bounded FK recovery because even a metadata-only native
+  dictionary change needs startup authority after a crash. MariaDB's actual
+  native file-operation callback remains an additional authoritative signal
+  when the selected generated-column FK ALTER rebuilds a tablespace.
 
 ## Design
 
@@ -66,9 +67,10 @@ two representative accepted shapes:
 
 Each writer runs with a live ownerless peer and is killed at
 `dictionary-before-finish`. Recovery now opens and validates the completed
-native metadata while that peer remains open. The selector also asserts the
-native file-operation checkpoint marker stays clear before and after live
-recovery.
+native metadata while that peer remains open. The selector asserts that
+MariaDB's actual file-operation callback retains the structural marker through
+live recovery and the older peer's close, then that one isolated
+latest-generation recovery drains it.
 
 After recovery, verify:
 
@@ -86,7 +88,8 @@ In scope:
 
 - crash-at-`dictionary-before-finish` recovery for a generated child-column FK,
 - crash-at-`dictionary-before-finish` recovery for a generated referenced-column FK,
-- metadata-only live-peer recovery with the native file-operation marker clear,
+- live-peer recovery with native file-operation marker retention for the
+  tablespace rebuild MariaDB actually selected,
 - generated values and referential enforcement while the peer remains live,
 - ownerless/native reopen before and after forced shared-memory rebuild.
 
@@ -150,8 +153,9 @@ No public API, build-profile, binary-size, license, or dependency changes.
 - Each killed writer reaches `dictionary-before-finish` without hanging.
 - A live ownerless peer remains open while recovery exposes each completed FK
   ADD.
-- The native file-operation checkpoint marker remains clear for both generated
-  child-column and generated referenced-column FK ADD recovery boundaries.
+- The native file-operation checkpoint marker remains set for both generated
+  child-column and generated referenced-column FK ADD recovery boundaries,
+  survives the older-peer handoff, and clears after isolated recovery.
 - Recovered generated child-column FK metadata is present and enforced.
 - Recovered generated referenced-column FK metadata is present and enforced.
 - Generated values remain correct before and after cascaded deletes and valid

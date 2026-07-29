@@ -58,7 +58,9 @@ unsupported special index families on the existing explicit rejection path.
 Durable state remains in the MyLite database directory. Physical secondary
 index build/drop/replacement retains the native file-operation checkpoint marker
 while a peer is live and drains it on final no-live recovery. Metadata-only
-rename and ignored/not-ignored recovery keeps that marker clear.
+rename and ignored/not-ignored normally clear a statement-local prearm after
+successful ownerless dictionary finish, but retain it across a crash until
+native dictionary recovery is authoritative.
 
 ## Tests
 

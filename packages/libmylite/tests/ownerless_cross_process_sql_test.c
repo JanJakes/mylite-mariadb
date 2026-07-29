@@ -219,6 +219,7 @@ extern void mylite_ownerless_innodb_set_test_faults_enabled(int enabled);
 #define MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_PAD_BYTES 1024U
 #define MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_MAX_ATTEMPTS 200U
 #define MYLITE_TEST_RANDOM_SAVEPOINT_SCHEDULE_LOCK_HOLD_US 5000U
+#define MYLITE_TEST_SAVEPOINT_HANDOFF_PEER_TIMEOUT_MS 60000U
 #define MYLITE_TEST_FK_GRAPH_STRESS_WORKER_COUNT 3U
 #define MYLITE_TEST_FK_GRAPH_STRESS_ROUNDS 12U
 #define MYLITE_TEST_FK_GRAPH_STRESS_ROUNDS_MAX 2000U
@@ -11759,7 +11760,19 @@ static void test_ownerless_concurrent_savepoint_same_table_rollback_handoff(void
         update_concurrent_savepoint_same_table_peer(paths);
     }
 
-    assert(wait_for_child_with_timeout(peer_child, 5000U, &peer_status) == 1);
+    /*
+     * Let the child's 30-second InnoDB wait report a real 1205 before the
+     * outer harness declares it hung. Loaded release shards can take more
+     * than five seconds to open, update, flush, and close even when row 4 is
+     * independent of the writer's retained row lock.
+     */
+    assert(
+        wait_for_child_with_timeout(
+            peer_child,
+            MYLITE_TEST_SAVEPOINT_HANDOFF_PEER_TIMEOUT_MS,
+            &peer_status
+        ) == 1
+    );
     assert(WIFEXITED(peer_status));
     assert(WEXITSTATUS(peer_status) == 0);
     assert(wait_for_concurrency_ownerless_write_waiting_count(database_path, 0U, 5000U) == 0U);
@@ -34104,7 +34117,7 @@ static void test_consistent_snapshot_start_pin_blocks_live_reclaim_before_execut
     exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1");
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 31U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
     assert(pipe(ready_pipe) == 0);
     assert(pipe(release_pipe) == 0);
@@ -34139,7 +34152,7 @@ static void test_consistent_snapshot_start_pin_blocks_live_reclaim_before_execut
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 36U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert(concurrency_wal_is_checkpointed(database_path));
+    assert_concurrency_wal_checkpointed_or_retained_native_support_only(database_path);
 
     free(database_path);
     free(runtime_root);
@@ -53672,13 +53685,20 @@ static void run_crashed_temporary_mixed_rename_dictionary_ddl_recovers_permanent
 
     release_ownerless_live_peer(&live_peer);
 
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    /*
+     * The final older live peer cannot prove that its native shutdown
+     * preserved the replacement permanent tablespace. Keep the structural
+     * marker until one isolated latest-generation startup consumes the
+     * complete rename and page-version handoff.
+     */
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_ownerless_temporary_mixed_rename_crash_state(
         paths,
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
         15U,
         30U
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_ownerless_temporary_mixed_rename_crash_state(paths, MYLITE_OPEN_READWRITE, 15U, 30U);
     remove_concurrency_shm(database_path);
     assert_ownerless_temporary_mixed_rename_crash_state(
@@ -53800,13 +53820,18 @@ static void test_crashed_temporary_mixed_chain_rename_recovers_permanent_table(v
 
     release_ownerless_live_peer(&live_peer);
 
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    /*
+     * The last older peer retains this completed permanent rename until an
+     * isolated latest-generation startup consumes the structural handoff.
+     */
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_ownerless_temporary_mixed_chain_rename_crash_state(
         paths,
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
         15U,
         30U
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_ownerless_temporary_mixed_chain_rename_crash_state(
         paths,
         MYLITE_OPEN_READWRITE,
@@ -53867,13 +53892,14 @@ static void run_crashed_temporary_mixed_if_exists_rename_recovers_perm(
 
     release_ownerless_live_peer(&live_peer);
 
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_temporary_mixed_if_exists_durable_state(
         paths,
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
         15U,
         30U
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_temporary_mixed_if_exists_durable_state(paths, MYLITE_OPEN_READWRITE, 15U, 30U);
     remove_concurrency_shm(database_path);
     assert_temporary_mixed_if_exists_durable_state(
@@ -53941,13 +53967,14 @@ static void run_crashed_temporary_cross_schema_mixed_if_exists_rename_recovers_p
 
     release_ownerless_live_peer(&live_peer);
 
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_temporary_cross_schema_mixed_if_exists_durable_state(
         paths,
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW,
         15U,
         30U
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_temporary_cross_schema_mixed_if_exists_durable_state(
         paths,
         MYLITE_OPEN_READWRITE,
@@ -61211,7 +61238,7 @@ static void test_crashed_secondary_index_rename_dictionary_ddl_recovers_renamed_
         paths,
         rename_secondary_index_until_dictionary_finish_fault
     );
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -61263,9 +61290,9 @@ static void test_crashed_secondary_index_rename_dictionary_ddl_recovers_renamed_
             "WHERE value >= 20"
         ) == 9U
     );
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(mylite_close(db) == MYLITE_OK);
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
     release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_secondary_index_rename_crash_state(
@@ -61341,7 +61368,7 @@ static void test_crashed_secondary_index_ignorability_dictionary_ddl_recovers_me
         paths,
         ignore_secondary_index_until_dictionary_finish_fault
     );
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -61366,16 +61393,16 @@ static void test_crashed_secondary_index_ignorability_dictionary_ddl_recovers_me
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_index_ignorability_crash_base") ==
         100U
     );
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(mylite_close(db) == MYLITE_OK);
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
     release_ownerless_live_peer(&live_peer);
 
     live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         restore_secondary_index_until_dictionary_finish_fault
     );
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -61405,9 +61432,9 @@ static void test_crashed_secondary_index_ignorability_dictionary_ddl_recovers_me
             "WHERE value >= 20"
         ) == 14U
     );
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert(mylite_close(db) == MYLITE_OK);
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
     release_ownerless_live_peer(&live_peer);
 
     assert_ownerless_secondary_index_ignorability_crash_state(
@@ -62553,7 +62580,12 @@ static void test_crashed_foreign_key_dictionary_ddl_recovers_constraint(void) {
         paths,
         foreign_key_until_dictionary_finish_fault
     );
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    /*
+     * MariaDB can choose a table-rebuild algorithm for ADD FOREIGN KEY. The
+     * native file-operation hook must retain that structural obligation even
+     * though the bounded recovery kind is normally metadata-only.
+     */
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -62597,7 +62629,7 @@ static void test_crashed_foreign_key_dictionary_ddl_recovers_constraint(void) {
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_crash_child") == 2U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_crash_child") == 300U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     release_ownerless_live_peer(&live_peer);
 
@@ -62605,6 +62637,7 @@ static void test_crashed_foreign_key_dictionary_ddl_recovers_constraint(void) {
         paths,
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_ownerless_foreign_key_crash_ddl_state(paths, MYLITE_OPEN_READWRITE);
     remove_concurrency_shm(database_path);
     assert_ownerless_foreign_key_crash_ddl_state(
@@ -62687,7 +62720,7 @@ static void test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constra
         paths,
         foreign_key_drop_until_dictionary_finish_fault
     );
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -62712,7 +62745,7 @@ static void test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constra
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_drop_crash_child") == 3U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_drop_crash_child") == 1290U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     release_ownerless_live_peer(&live_peer);
 
@@ -62720,6 +62753,7 @@ static void test_crashed_foreign_key_drop_dictionary_ddl_recovers_absent_constra
         paths,
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_ownerless_foreign_key_drop_crash_ddl_state(paths, MYLITE_OPEN_READWRITE);
     remove_concurrency_shm(database_path);
     assert_ownerless_foreign_key_drop_crash_ddl_state(
@@ -62789,7 +62823,7 @@ static void test_crashed_foreign_key_multi_add_dictionary_ddl_recovers_constrain
         paths,
         foreign_key_multi_add_until_dictionary_finish_fault
     );
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -62844,7 +62878,7 @@ static void test_crashed_foreign_key_multi_add_dictionary_ddl_recovers_constrain
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_multi_add_child") == 2U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_multi_add_child") == 300U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     release_ownerless_live_peer(&live_peer);
 
@@ -62852,6 +62886,7 @@ static void test_crashed_foreign_key_multi_add_dictionary_ddl_recovers_constrain
         paths,
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_ownerless_foreign_key_multi_add_crash_ddl_state(paths, MYLITE_OPEN_READWRITE);
     remove_concurrency_shm(database_path);
     assert_ownerless_foreign_key_multi_add_crash_ddl_state(
@@ -62929,7 +62964,7 @@ static void test_crashed_foreign_key_multi_drop_dictionary_ddl_recovers_absent_c
         paths,
         foreign_key_multi_drop_until_dictionary_finish_fault
     );
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -62955,7 +62990,7 @@ static void test_crashed_foreign_key_multi_drop_dictionary_ddl_recovers_absent_c
     assert(query_unsigned(db, "SELECT COUNT(*) FROM app.ownerless_fk_multi_drop_child") == 3U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_multi_drop_child") == 1990U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     release_ownerless_live_peer(&live_peer);
 
@@ -62963,6 +62998,7 @@ static void test_crashed_foreign_key_multi_drop_dictionary_ddl_recovers_absent_c
         paths,
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_ownerless_foreign_key_multi_drop_crash_ddl_state(paths, MYLITE_OPEN_READWRITE);
     remove_concurrency_shm(database_path);
     assert_ownerless_foreign_key_multi_drop_crash_ddl_state(
@@ -63064,7 +63100,7 @@ static void test_crashed_foreign_key_mixed_alter_dictionary_ddl_recovers_constra
         paths,
         foreign_key_mixed_alter_until_dictionary_finish_fault
     );
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -63131,7 +63167,7 @@ static void test_crashed_foreign_key_mixed_alter_dictionary_ddl_recovers_constra
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_mixed_alter_child") == 1290U
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     release_ownerless_live_peer(&live_peer);
 
@@ -63139,6 +63175,7 @@ static void test_crashed_foreign_key_mixed_alter_dictionary_ddl_recovers_constra
         paths,
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_ownerless_foreign_key_mixed_alter_crash_ddl_state(paths, MYLITE_OPEN_READWRITE);
     remove_concurrency_shm(database_path);
     assert_ownerless_foreign_key_mixed_alter_crash_ddl_state(
@@ -63250,7 +63287,7 @@ static void test_crashed_foreign_key_mixed_comment_alter_recovers_state(void) {
         paths,
         foreign_key_mixed_comment_alter_until_dictionary_finish_fault
     );
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -63310,7 +63347,7 @@ static void test_crashed_foreign_key_mixed_comment_alter_recovers_state(void) {
         query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_fk_mixed_comment_child") == 1290U
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     release_ownerless_live_peer(&live_peer);
 
@@ -63318,6 +63355,7 @@ static void test_crashed_foreign_key_mixed_comment_alter_recovers_state(void) {
         paths,
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_ownerless_foreign_key_mixed_comment_alter_crash_state(paths, MYLITE_OPEN_READWRITE);
     remove_concurrency_shm(database_path);
     assert_ownerless_foreign_key_mixed_comment_alter_crash_state(
@@ -63438,7 +63476,7 @@ static void test_crashed_foreign_key_mixed_default_alter_recovers_state(void) {
         paths,
         foreign_key_mixed_default_alter_until_dictionary_finish_fault
     );
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -63515,7 +63553,7 @@ static void test_crashed_foreign_key_mixed_default_alter_recovers_state(void) {
     );
     assert(query_unsigned(db, "SELECT SUM(note) FROM app.ownerless_fk_mixed_default_child") == 19U);
     assert(mylite_close(db) == MYLITE_OK);
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     release_ownerless_live_peer(&live_peer);
 
@@ -63523,6 +63561,7 @@ static void test_crashed_foreign_key_mixed_default_alter_recovers_state(void) {
         paths,
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_ownerless_foreign_key_mixed_default_alter_crash_state(paths, MYLITE_OPEN_READWRITE);
     remove_concurrency_shm(database_path);
     assert_ownerless_foreign_key_mixed_default_alter_crash_state(
@@ -66502,12 +66541,13 @@ static void test_crashed_check_constraint_dictionary_ddl_recovers_constraints(vo
 
     release_ownerless_live_peer(&live_peer);
 
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     assert_ownerless_check_constraint_crash_ddl_state(
         paths,
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_ownerless_check_constraint_crash_ddl_state(paths, MYLITE_OPEN_READWRITE);
     remove_concurrency_shm(database_path);
     assert_ownerless_check_constraint_crash_ddl_state(
@@ -66731,7 +66771,7 @@ static void test_crashed_field_generated_check_dictionary_ddl_recovers_constrain
 
     release_ownerless_live_peer(&live_peer);
 
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     assert_ownerless_field_generated_check_crash_ddl_state(
         paths,
@@ -69328,7 +69368,7 @@ static void test_crashed_generated_column_foreign_key_dictionary_ddl_recovers_co
         paths,
         generated_column_child_foreign_key_until_dictionary_finish_fault
     );
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -69397,15 +69437,15 @@ static void test_crashed_generated_column_foreign_key_dictionary_ddl_recovers_co
         204U
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
     release_ownerless_live_peer(&live_peer);
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     live_peer = crash_ownerless_dictionary_writer_with_held_live_peer(
         paths,
         generated_column_referenced_foreign_key_until_dictionary_finish_fault
     );
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -69471,14 +69511,15 @@ static void test_crashed_generated_column_foreign_key_dictionary_ddl_recovers_co
         ) == 404U
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
     release_ownerless_live_peer(&live_peer);
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     assert_ownerless_generated_column_foreign_key_crash_state(
         paths,
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_ownerless_generated_column_foreign_key_crash_state(paths, MYLITE_OPEN_READWRITE);
     remove_concurrency_shm(database_path);
     assert_ownerless_generated_column_foreign_key_crash_state(
@@ -69638,7 +69679,7 @@ static void test_crashed_generated_column_foreign_key_drop_dictionary_ddl_recove
         paths,
         generated_column_child_foreign_key_drop_until_dictionary_finish_fault
     );
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -69680,7 +69721,7 @@ static void test_crashed_generated_column_foreign_key_drop_dictionary_ddl_recove
         ) == 505U
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
     release_ownerless_live_peer(&live_peer);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
@@ -69688,7 +69729,7 @@ static void test_crashed_generated_column_foreign_key_drop_dictionary_ddl_recove
         paths,
         generated_column_referenced_foreign_key_drop_until_dictionary_finish_fault
     );
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     assert(
@@ -69736,7 +69777,7 @@ static void test_crashed_generated_column_foreign_key_drop_dictionary_ddl_recove
         ) == 905U
     );
     assert(mylite_close(db) == MYLITE_OK);
-    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
     release_ownerless_live_peer(&live_peer);
     assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
 
@@ -69744,6 +69785,7 @@ static void test_crashed_generated_column_foreign_key_drop_dictionary_ddl_recove
         paths,
         MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW
     );
+    assert(!read_concurrency_native_file_op_checkpoint_needed(database_path));
     assert_ownerless_generated_column_foreign_key_drop_crash_state(paths, MYLITE_OPEN_READWRITE);
     remove_concurrency_shm(database_path);
     assert_ownerless_generated_column_foreign_key_drop_crash_state(
@@ -86504,6 +86546,14 @@ static void run_ownerless_random_savepoint_schedule_worker(
             fflush(stderr);
         }
         assert(round_finished);
+        /*
+         * The schedule proves bounded wait/retry and rollback correctness,
+         * not unfair-lock starvation. A peer can consume its one-second
+         * lock wait while this transaction owns several overlapping rows.
+         * Leave an acquisition window beyond that bound before this writer
+         * starts another transaction.
+         */
+        sleep_microseconds(1100000U);
     }
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);

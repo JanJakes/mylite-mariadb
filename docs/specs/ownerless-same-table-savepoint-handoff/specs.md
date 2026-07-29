@@ -73,7 +73,10 @@ Writer B updates row 4 in the same table. The parent requires bounded peer
 completion with no ownerless waiter leak, verifies that B is visible while A
 remains open and A is not, releases A, and then verifies that final reopen paths
 see row 1 plus row 4 but not row 2's rolled-back image, with no stale native
-file-operation markers after no-live recovery.
+file-operation markers after no-live recovery. The parent completion watchdog
+is longer than Writer B's 30-second InnoDB lock timeout, so a loaded runner
+cannot kill a healthy open/update/flush/close sequence after five seconds and a
+real unexpected wait still reports MariaDB errno `1205` from the child.
 
 ## Compatibility Impact
 

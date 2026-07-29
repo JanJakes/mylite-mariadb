@@ -43,8 +43,9 @@ In scope:
 - Keep duplicate CHECK ADD and missing CHECK DROP outside the live-recovery
   classifier by using pre-execution metadata checks.
 - Convert the standalone CHECK ADD and CHECK DROP crash selectors to prove
-  live-peer recovery, marker retention while the peer remains open, final
-  no-live marker drain, ownerless/native reopen, and forced `.shm` rebuild.
+  live-peer recovery, marker retention while the peer remains open,
+  identity-sensitive final drain, ownerless/native reopen, and forced `.shm`
+  rebuild.
 - Register both selectors as focused hook CTests.
 
 Out of scope:
@@ -70,7 +71,9 @@ lists whose comma-separated clauses are all:
 The classifier returns the existing
 `MYLITE_OWNERLESS_DICTIONARY_RECOVERY_ALTER_TABLE_CHECK_CONSTRAINT` kind. That
 kind remains on the native file-operation marker lane, so the marker stays
-durable while a peer is live and drains during final no-live recovery.
+durable while a peer is live. A final older survivor preserves it when the
+ALTER changed the file-per-table identity; metadata-only cases with unchanged
+identity may drain it as that final peer closes.
 
 ## Compatibility Impact
 
@@ -86,8 +89,9 @@ No directory layout or native file format changes are introduced. CHECK
 metadata remains MariaDB table-definition state for an InnoDB table inside the
 MyLite database directory. The tests prove recovered metadata and enforcement
 survive ownerless reopen, ordinary native reopen, and forced shared-memory
-rebuild, while the native file-operation checkpoint marker drains only after
-the final live peer exits.
+rebuild. The native file-operation checkpoint marker drains at final no-live
+shutdown when the file-per-table identity is unchanged, or after the following
+isolated recovery when an older survivor observed an identity change.
 
 ## Public API, Build, Size, License
 
@@ -118,7 +122,9 @@ code.
 - A new ownerless opener recovers CHECK metadata while another ownerless peer
   remains live after the writer is killed.
 - The native file-operation checkpoint marker remains set while the peer is
-  live and clears after final no-live recovery.
+  live. CHECK DROP drains it at final no-live shutdown; a CHECK ADD rebuild
+  whose tablespace identity changed preserves it through the older survivor
+  and clears after isolated latest-generation recovery.
 - Recovered CHECK ADD rejects invalid rows with MariaDB errno 4025 and accepts
   valid rows.
 - Recovered CHECK DROP allows formerly invalid rows.

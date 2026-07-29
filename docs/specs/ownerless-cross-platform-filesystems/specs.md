@@ -278,3 +278,39 @@ removed before open continues.
 - Power-loss testing is distinct from process-crash testing. This slice
   preserves the existing durability protocol but does not claim a new
   hardware-power-loss certification.
+
+## Future Expansion
+
+Additional local filesystems should be admitted one family at a time, not by
+relaxing the unknown-filesystem rejection. Each candidate needs native CI or
+hardware coverage for filesystem identification, volume identity, shared-map
+coherence, handle-isolated byte-range locks, grow/remap, flush ordering,
+process-crash release, reopen recovery, and the concurrent InnoDB smoke test.
+Likely candidates include Linux Btrfs and ZFS, macOS HFS+ where still relevant,
+and Windows ReFS. FAT and exFAT require especially careful durability and
+locking evaluation and should remain rejected unless they can meet the same
+contract.
+
+Remote and distributed filesystems are a separate architecture project. An
+NFS, SMB, clustered, or cloud-backed mount can report familiar file APIs while
+providing different cache coherence, lock failover, lease expiry, fencing, and
+`fsync` durability semantics. Supporting one therefore requires a documented
+coordination and stale-client recovery model, partition/failover testing, and
+possibly an explicit lease or fencing protocol; passing the local primitive
+probe alone is not enough.
+
+Platform coverage can expand across older supported macOS and Windows releases,
+Windows Server, Linux architectures beyond the current 64-bit target, and
+case-sensitive versus case-insensitive volume configurations. Those additions
+need both build coverage and the native cross-process lifecycle test because
+compiler success alone does not qualify ownerless behavior.
+
+Native process-shared wake primitives on macOS or Windows could replace bounded
+backoff after correctness is already established. That would reduce
+lock-contention latency and CPU use but would not change the durable shared-file
+format or filesystem admission rules.
+
+Finally, real power-loss qualification needs storage-hardware and filesystem
+fault campaigns that cut power or emulate lost/reordered flushes. The existing
+process-kill tests prove owner death and recovery boundaries, not controller,
+drive-cache, or filesystem behavior during sudden power loss.
