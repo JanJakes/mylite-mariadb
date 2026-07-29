@@ -3121,14 +3121,22 @@ PHP_KEEPALIVE
               )
           );
           if ($write === false || $observed !== $value) {
-              fwrite(STDERR, "Live ownerless WordPress wpdb peer write/read failed: " . $wpdb->last_error . PHP_EOL);
+              fprintf(
+                  STDERR,
+                  "Live ownerless WordPress wpdb peer write/read failed: write=%s expected=%s observed=%s errno=%d error=%s\n",
+                  var_export($write, true),
+                  var_export($value, true),
+                  var_export($observed, true),
+                  mysqli_errno($wpdb->dbh),
+                  $wpdb->last_error
+              );
               exit(1);
           }
           if ($queryCount === 1 && file_put_contents($ready, "ready\n") === false) {
               fwrite(STDERR, "Could not publish live ownerless WordPress peer readiness\n");
               exit(1);
           }
-          usleep(100000);
+          usleep(1000);
       } while (!file_exists($stop));
       if ($wpdb->delete(
           $wpdb->options,
