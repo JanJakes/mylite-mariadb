@@ -35172,18 +35172,38 @@ OwnerlessBoundaryPageVersionState ownerless_page_log_boundary_page_version_state
     }
     note_ownerless_stable_page_index_result(hook, index_result, index_generation);
     if (index_result == MYLITE_OWNERLESS_PAGE_INDEX_OK) {
-        bool metadata_error = false;
-        if (ownerless_page_log_record_is_rollback_barrier_at(
-                hook->page_log_fd,
-                record_offset,
-                &metadata_error
-            )) {
-            return OwnerlessBoundaryPageVersionState::Missing;
+        /*
+         * A checkpoint can rewrite the WAL after the page-index lookup,
+         * leaving the observed physical offset stale. Validate both the page
+         * identity and its indexed LSNs before trusting the fast-path hit.
+         * Proof-only rollback barriers deliberately have no readable payload,
+         * so they fall through to the stable scan below.
+         */
+        std::unique_ptr<unsigned char[]> indexed_page(
+            new (std::nothrow) unsigned char[page_capacity]
+        );
+        std::uint32_t indexed_page_size = 0U;
+        std::uint64_t indexed_page_lsn = 0U;
+        std::uint64_t indexed_commit_lsn = 0U;
+        const int indexed_read_result = indexed_page != nullptr
+                                            ? mylite_ownerless_page_log_read_page_at(
+                                                  hook->page_log_fd,
+                                                  hook->page_log_offset,
+                                                  record_offset,
+                                                  space_id,
+                                                  page_no,
+                                                  indexed_page.get(),
+                                                  page_capacity,
+                                                  &indexed_page_size,
+                                                  &indexed_page_lsn,
+                                                  &indexed_commit_lsn
+                                              )
+                                            : MYLITE_OWNERLESS_PAGE_LOG_ERROR;
+        if (indexed_read_result == MYLITE_OWNERLESS_PAGE_LOG_OK && indexed_page_size != 0U &&
+            indexed_page_lsn == page_lsn && indexed_commit_lsn == commit_lsn) {
+            return OwnerlessBoundaryPageVersionState::Exists;
         }
-        if (metadata_error) {
-            return OwnerlessBoundaryPageVersionState::Unknown;
-        }
-        return OwnerlessBoundaryPageVersionState::Exists;
+        index_result = MYLITE_OWNERLESS_PAGE_INDEX_SCAN_REQUIRED;
     }
     if (index_result == MYLITE_OWNERLESS_PAGE_INDEX_NOT_FOUND) {
         return OwnerlessBoundaryPageVersionState::Missing;
@@ -35252,7 +35272,7 @@ OwnerlessBoundaryPageVersionState ownerless_page_log_boundary_page_version_state
     std::uint64_t found_record_offset = 0U;
     int saw_page_record = 0;
     const int scan_result =
-        mylite_ownerless_page_log_find_latest_in_snapshot_from_under_read_lock_at_with_flags_and_offset(
+        mylite_ownerless_page_log_find_latest_in_snapshot_from_under_read_lock_at_with_flags_and_offset_and_options(
             hook->page_log_fd,
             hook->page_log_offset,
             scan_start_offset,
@@ -35267,7 +35287,8 @@ OwnerlessBoundaryPageVersionState ownerless_page_log_boundary_page_version_state
             &found_commit_lsn,
             &record_flags,
             &found_record_offset,
-            &saw_page_record
+            &saw_page_record,
+            MYLITE_OWNERLESS_PAGE_LOG_FIND_ROLLBACK_BARRIER
         );
     if (!ownerless_page_log_end_read_checked(hook->page_log_fd)) {
         return OwnerlessBoundaryPageVersionState::Unknown;
@@ -35287,6 +35308,9 @@ OwnerlessBoundaryPageVersionState ownerless_page_log_boundary_page_version_state
             );
         }
         return OwnerlessBoundaryPageVersionState::Exists;
+    }
+    if (scan_result == MYLITE_OWNERLESS_PAGE_LOG_ROLLBACK_BARRIER) {
+        return OwnerlessBoundaryPageVersionState::Missing;
     }
     if (scan_result == MYLITE_OWNERLESS_PAGE_LOG_NOT_FOUND) {
         ownerless_page_log_negative_cache_store(
