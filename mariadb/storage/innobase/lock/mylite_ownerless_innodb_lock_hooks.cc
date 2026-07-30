@@ -1143,6 +1143,12 @@ extern "C" int mylite_ownerless_innodb_test_fault_is_configured(
   return fault_name == nullptr || !std::strcmp(configured_fault, fault_name);
 }
 
+extern "C" void mylite_ownerless_innodb_test_flush_log_buffer(void)
+{
+  if (mylite_ownerless_innodb_test_faults_enabled_fast())
+    log_buffer_flush_to_disk();
+}
+
 extern "C" void mylite_ownerless_innodb_test_fault(const char *fault_name)
 {
   if (!mylite_ownerless_innodb_test_faults_enabled.load(

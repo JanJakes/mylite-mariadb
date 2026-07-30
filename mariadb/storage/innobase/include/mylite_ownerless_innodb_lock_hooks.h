@@ -389,6 +389,7 @@ void mylite_ownerless_innodb_set_test_faults_enabled(int enabled);
 int mylite_ownerless_innodb_test_fault_is_configured(const char *fault_name);
 int mylite_ownerless_innodb_test_fault_will_pause(const char *fault_name);
 void mylite_ownerless_innodb_test_fault(const char *fault_name);
+void mylite_ownerless_innodb_test_flush_log_buffer(void);
 void mylite_ownerless_innodb_test_note_mtr_memmove(int index_page);
 void mylite_ownerless_innodb_test_reset_mtr_memmove_count(void);
 uint64_t mylite_ownerless_innodb_test_mtr_memmove_count(void);

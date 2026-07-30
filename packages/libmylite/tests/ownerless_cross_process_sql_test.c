@@ -243,6 +243,7 @@ extern uint64_t mylite_ownerless_innodb_checkpoint_lsn(void);
 extern int mylite_ownerless_innodb_make_checkpoint(void);
 extern int mylite_ownerless_innodb_checkpoint_covers_lsn(uint64_t lsn);
 extern int mylite_ownerless_innodb_has_recovered_active_transactions(int *out_has_recovered);
+extern void mylite_ownerless_innodb_test_flush_log_buffer(void);
 extern void mylite_ownerless_innodb_note_file_op_redo(void);
 extern int mylite_ownerless_innodb_take_file_op_redo(void);
 extern void mylite_ownerless_innodb_refresh_buffer_pool_pages(uint64_t visible_lsn);
@@ -1458,6 +1459,12 @@ static void update_first_row_with_autocommit_off_until_released(
     int prepared
 );
 static void update_first_row_without_commit_until_killed(open_database_paths paths, int ready_fd);
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void update_first_row_without_commit_and_flush_until_killed(
+    open_database_paths paths,
+    int ready_fd
+);
+#endif
 static void update_first_row_and_exit(open_database_paths paths, int ready_fd);
 static void update_killed_dml_marker_row_and_exit(open_database_paths paths, int ready_fd);
 static void update_uncommitted_dml_marker_row_until_killed(open_database_paths paths, int ready_fd);
@@ -83238,6 +83245,48 @@ static void test_crashed_ownerless_writer_blocks_peer_cleanup_until_reopen_rebui
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
     assert(mylite_close(db) == MYLITE_OK);
 
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+    {
+        char *retry_database_path = path_join(root, "ownerless-recovered-rollback-retry.mylite");
+        open_database_paths retry_paths = {
+            .database_path = retry_database_path,
+            .runtime_root = runtime_root,
+        };
+        int retry_writer_ready_pipe[2];
+        pid_t retry_writer_child;
+
+        initialize_database(retry_paths);
+        assert(pipe(retry_writer_ready_pipe) == 0);
+        retry_writer_child = fork();
+        assert(retry_writer_child >= 0);
+        if (retry_writer_child == 0) {
+            close(retry_writer_ready_pipe[0]);
+            update_first_row_without_commit_and_flush_until_killed(
+                retry_paths,
+                retry_writer_ready_pipe[1]
+            );
+        }
+
+        close(retry_writer_ready_pipe[1]);
+        wait_for_pipe(retry_writer_ready_pipe[0]);
+        assert(kill(retry_writer_child, SIGKILL) == 0);
+        wait_for_signaled_child(retry_writer_child, SIGKILL);
+        assert(
+            setenv("MYLITE_OWNERLESS_TEST_FAULT", "recovered-rollback-coordination-fault", 1) == 0
+        );
+
+        db = open_database(retry_paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+        assert(getenv("MYLITE_OWNERLESS_TEST_FAULT") == NULL);
+        assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+        assert(mylite_close(db) == MYLITE_OK);
+        db = open_database(retry_paths, MYLITE_OPEN_READWRITE);
+        assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_sql") == 30U);
+        assert(mylite_close(db) == MYLITE_OK);
+
+        free(retry_database_path);
+    }
+#endif
+
     free(database_path);
     free(runtime_root);
     remove_tree(root);
@@ -83432,6 +83481,24 @@ static void update_first_row_without_commit_until_killed(open_database_paths pat
         pause();
     }
 }
+
+#if MYLITE_ENABLE_UNSAFE_OWNERLESS_TEST_HOOKS
+static void update_first_row_without_commit_and_flush_until_killed(
+    open_database_paths paths,
+    int ready_fd
+) {
+    mylite_db *db;
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
+    exec_ok(db, "START TRANSACTION");
+    exec_ok(db, "UPDATE app.ownerless_sql SET value = value + 1 WHERE id = 1");
+    mylite_ownerless_innodb_test_flush_log_buffer();
+    signal_pipe(ready_fd);
+    for (;;) {
+        pause();
+    }
+}
+#endif
 
 static void update_first_row_and_exit(open_database_paths paths, int ready_fd) {
     mylite_db *db;
@@ -84160,6 +84227,16 @@ static void hold_ownerless_open_and_expect_dead_writer_busy(
         NULL,
         &errmsg
     );
+    if (result != MYLITE_BUSY) {
+        fprintf(
+            stderr,
+            "ownerless dead-writer peer fence failed: result=%d errcode=%d message=%s\n",
+            result,
+            mylite_errcode(db),
+            errmsg != NULL ? errmsg : mylite_errmsg(db)
+        );
+        fflush(stderr);
+    }
     assert(result == MYLITE_BUSY);
     assert(mylite_errcode(db) == MYLITE_BUSY);
     assert(errmsg != NULL && strstr(errmsg, "close and reopen recovery") != NULL);

@@ -34,7 +34,7 @@ cache checks, and `MinSizeRel` MariaDB embedded cache checks.
 | Embedded lifecycle | `ctest --preset embedded-dev -L compat.lifecycle` |
 | Directory-boundary detection | `ctest --preset embedded-dev -L compat.directory-boundary` |
 | MariaDB-reference SQL results | `ctest --preset embedded-dev -L compat.mariadb-comparison` |
-| Crash/reopen behavior | `ctest --preset embedded-dev -L compat.crash-reopen` |
+| Crash/reopen behavior | `ctest --preset embedded-dev -L compat.crash-reopen`; ownerless killed-writer coverage also proves a live peer stays fenced, final no-live recovery restores the pre-transaction rows, and a recovered rollback carrying an explicit MyLite coordination fault can be resubmitted without entering InnoDB's query graph with a stale error state |
 | Concurrency | `ctest --preset embedded-dev -L compat.concurrency` |
 | Ownerless primitives | `ctest --preset embedded-dev -L compat.ownerless-primitives` |
 | Ownerless directory lifecycle | `ctest --preset embedded-dev -R libmylite.embedded-ownerless-directory-lifecycle` |

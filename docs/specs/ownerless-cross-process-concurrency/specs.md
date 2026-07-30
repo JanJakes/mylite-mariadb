@@ -8287,6 +8287,20 @@ subsystems that this mode needs:
   directory transaction state reaches zero, the original write stays rolled
   back, and the same connection can commit a later transaction.
 
+  Recovered rollback resubmission now has the same provenance discipline. A
+  no-live startup may make partial native undo progress and then lose a
+  transient ownerless shared-page coordination race. The recovery waiter may
+  resubmit that recovered transaction, but only a transaction carrying the
+  explicit MyLite coordination-fault bit has its stale shared wait edge,
+  process coordination bit, and InnoDB error state cleared before a fresh undo
+  query graph is built. Other InnoDB errors remain terminal. The killed-writer
+  crash/reopen regression injects one such recovered-rollback failure in the
+  unsafe-hook build and requires the same open to complete recovery, retain the
+  pre-transaction row values, close cleanly, and reopen through the native
+  path. The production build also repeats the scheduler-sensitive crash/reopen
+  case 50 times because the pre-fix failure alternated between an
+  `trx->error_state == DB_SUCCESS` assertion and shutdown waiting indefinitely.
+
   Insert-record ownership now distinguishes a transient heap-number collision
   from shared-registry corruption. A failed foreign-key insert can retain its
   finalized synthetic record lock until native statement undo deletes the

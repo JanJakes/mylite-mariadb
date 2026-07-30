@@ -501,6 +501,30 @@ trx_rollback_active(
 /*================*/
 	trx_t*	trx)	/*!< in/out: transaction */
 {
+	if (UNIV_UNLIKELY(trx->mylite_ownerless_coordination_fault)) {
+		/*
+		A recovered ownerless rollback can lose a transient shared-page
+		coordination race after some undo progress. The bounded recovery
+		waiter resubmits the rollback task. Clear only that transaction's
+		explicit coordination-fault provenance before rebuilding its query
+		graph; arbitrary InnoDB errors remain visible.
+		*/
+		mylite_ownerless_innodb_lock_clear_transaction_wait(trx);
+		mylite_ownerless_innodb_clear_coordination_error_for_recovery();
+		trx->mylite_ownerless_coordination_fault = false;
+		trx->error_state = DB_SUCCESS;
+	}
+	if (UNIV_UNLIKELY(
+		    mylite_ownerless_innodb_test_fault_is_configured(
+			    "recovered-rollback-coordination-fault"))) {
+		static_cast<void>(mylite_ownerless_innodb_test_unsetenv(
+			"MYLITE_OWNERLESS_TEST_FAULT"));
+		trx->mylite_ownerless_coordination_fault = true;
+		trx->error_state = DB_ERROR;
+		mylite_ownerless_innodb_note_coordination_error();
+		return;
+	}
+
 	mem_heap_t*	heap;
 	que_fork_t*	fork;
 	que_thr_t*	thr;
