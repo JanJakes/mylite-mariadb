@@ -183,7 +183,16 @@ app.mylite/
   the mapped registry wait word without holding InnoDB local latches, refreshes
   redo visibility after wake, retries native grant, maps shared-registry
   timeout to the normal InnoDB lock-wait error, and maps cross-process wait
-  cycles to the normal InnoDB deadlock error under guarded SQL coverage. Before
+  cycles to the normal InnoDB deadlock error under guarded SQL coverage.
+  Ownerless cycles found while the native transaction is still NOT_STARTED
+  report that deadlock without setting InnoDB's native victim marker or
+  transaction error state, because no native wait exists to cancel. When an
+  active operation unwinds to NOT_STARTED with native deadlock state still
+  present, successful transaction-end cleanup first proves that the transaction
+  has no native lock, wait, read-view, registration, or reference ownership,
+  releases its transient ownerless registrations, and then clears that result.
+  This prevents either form from poisoning later statements on the same
+  connection. Before
   ownerless write locks are released on commit, dirty pages are flushed through
   the transaction commit LSN so the current test-gated visibility bridge does
   not need a whole-buffer-pool sync for every commit. Redo append ranges are

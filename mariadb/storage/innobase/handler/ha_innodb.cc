@@ -1906,11 +1906,43 @@ extern "C" int mylite_embedded_cleanup_idle_ownerless_transaction(THD *thd)
   if (trx == nullptr)
     return 0;
   if (trx->state != TRX_STATE_NOT_STARTED || trx->is_registered ||
-      trx->read_view.is_open())
+      trx->read_view.is_open() || trx->is_referenced() ||
+      trx->lock.wait_lock != nullptr || trx->lock.wait_thr != nullptr ||
+      UT_LIST_GET_LEN(trx->lock.trx_locks) != 0 ||
+      !trx->lock.table_locks.empty() || !trx->autoinc_locks.empty())
+    return 1;
+
+  const bool retryable_native_error=
+      trx->error_state == DB_LOCK_WAIT_TIMEOUT ||
+      trx->error_state == DB_DEADLOCK ||
+      trx->error_state == DB_LOCK_TABLE_FULL;
+  if (trx->lock.was_chosen_as_deadlock_victim &&
+      trx->error_state != DB_SUCCESS && !retryable_native_error)
     return 1;
 
   mylite_ownerless_innodb_lock_forget_transaction(trx);
-  return mylite_ownerless_innodb_coordination_error() ? 1 : 0;
+  if (mylite_ownerless_innodb_coordination_error() ||
+      trx->mylite_ownerless_lock_trx_id != 0 ||
+      trx->mylite_ownerless_page_write_trx_id != 0)
+    return 1;
+
+  /*
+  The ownerless coordinator can detect a deadlock while a B-tree operation
+  still uses a transient transaction identifier. InnoDB can subsequently
+  return the transaction to NOT_STARTED without running the normal native
+  rollback cleanup. A successful SQL transaction end is the safe boundary for
+  clearing that stale native result before the connection is reused.
+  */
+  const bool stale_native_result=
+      trx->lock.was_chosen_as_deadlock_victim || retryable_native_error;
+  if (!trx->mylite_ownerless_coordination_fault && stale_native_result)
+  {
+    if (retryable_native_error)
+      trx->error_state= DB_SUCCESS;
+    trx->lock.was_chosen_as_deadlock_victim= false;
+    trx->will_lock= false;
+  }
+  return trx->mylite_ownerless_coordination_fault ? 1 : 0;
 }
 
 extern "C" int mylite_embedded_clear_ownerless_rollback_read_state(THD *thd)
@@ -17004,9 +17036,23 @@ set_lock:
 				DBUG_RETURN(convert_error_code_to_mysql(
 					DB_LOCK_WAIT_TIMEOUT, 0, thd));
 			case MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK:
-				trx->lock.was_chosen_as_deadlock_victim = true;
-				trx->error_state = DB_DEADLOCK;
-				trx->rollback();
+				/*
+				An ownerless cycle can be detected before InnoDB
+				starts the native transaction.  There is no native
+				lock wait to cancel in that state, and retaining
+				native deadlock state would poison the next statement
+				that reuses this connection.
+				*/
+				if (trx->state == TRX_STATE_NOT_STARTED) {
+					trx->lock.was_chosen_as_deadlock_victim =
+						false;
+					trx->error_state = DB_SUCCESS;
+				} else {
+					trx->lock.was_chosen_as_deadlock_victim =
+						true;
+					trx->error_state = DB_DEADLOCK;
+					trx->rollback();
+				}
 				DBUG_RETURN(convert_error_code_to_mysql(
 					DB_DEADLOCK, 0, thd));
 			case MYLITE_OWNERLESS_INNODB_LOCK_FULL:

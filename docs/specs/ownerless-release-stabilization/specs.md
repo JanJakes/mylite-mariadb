@@ -20,7 +20,11 @@ failures cluster around successful or crash-interrupted InnoDB dictionary DDL:
   shared redo recovery anchor, and
 - four independent-table autocommit writers can form a physical pre-write
   reservation cycle and surface MariaDB errno `1213` even though no
-  transaction has changed a persistent page.
+  transaction has changed a persistent page, and
+- a physical-page cycle detected while the InnoDB transaction is still
+  `TRX_STATE_NOT_STARTED` can leave the native deadlock-victim marker and
+  `DB_DEADLOCK` error state set,
+  causing every later InnoDB statement on that connection to return `1213`.
 
 Several SQL failures reproduce as isolated selectors, so this is product
 lifecycle behavior rather than only weighted-shard ordering or test
@@ -87,6 +91,12 @@ Base: MariaDB 11.8 LTS import `mariadb-11.8.6`
   Capacity exhaustion must remain an explicit lock-table-full condition, while
   the release workload needs a versioned layout large enough for its admitted
   transaction size.
+- MariaDB's native deadlock-victim marker describes a native lock wait. An
+  ownerless cycle discovered before the native transaction starts has no such
+  wait to cancel. A cycle discovered during an active operation can also unwind
+  to NOT_STARTED before the transaction-end path observes it. Retaining either
+  form of native deadlock state violates the idle transaction invariant and
+  poisons connection reuse even after SQL `ROLLBACK`.
 
 ## Design
 
@@ -128,6 +138,13 @@ the tests:
     minimum `.shm` mapping and increment its segment version. Continue to
     return MariaDB's explicit lock-table-full diagnostic if the new bound is
     exhausted; do not claim unbounded transaction size.
+12. Report an ownerless cycle as `DB_DEADLOCK`, but set InnoDB's native
+    deadlock-victim marker and native `DB_DEADLOCK` error state only after the
+    native transaction has started. A pre-start cycle leaves both clear. If an
+    active cycle subsequently returns to NOT_STARTED, successful transaction
+    end must prove that no native lock, wait, read view, registration, or
+    reference remains, release transient ownerless registrations, and only
+    then clear the native result so later statements can reuse the connection.
 
 The implementation must continue to fail closed when required native state is
 missing or cannot be reconciled. It must not convert corruption into a retry,
@@ -191,6 +208,10 @@ movement must be measured by the existing release gates.
   native CI jobs again on the pushed final commit.
 - Repeat the checkpoint-anchor commit race and run true row, gap-lock, and
   independent-table deadlock coverage around the physical-cycle repair.
+- Repeat the pseudo-random same-table savepoint schedule that exposed the
+  pre-start victim-marker leak, and require the deterministic two-process
+  deadlock victim to execute an InnoDB locking read in a fresh transaction on
+  the same connection before exiting.
 - Run a focused ownerless transaction that creates a multi-page update-undo
   tail, covers both full rollback and rollback-to-savepoint followed by commit,
   reuses the same connection, and reopens natively.
@@ -219,6 +240,11 @@ movement must be measured by the existing release gates.
 - Clean pre-write cycles surface MariaDB errno `1213` at the SQL transaction
   boundary, while bounded stress callers retry the complete transaction and
   conflicting row and gap-lock transactions retain MariaDB deadlock behavior.
+- A pre-start ownerless deadlock never sets a native victim marker or
+  `DB_DEADLOCK` error state, and successful transaction end safely clears
+  either value left by an active operation that has returned to NOT_STARTED;
+  explicit rollback followed by another InnoDB transaction succeeds without a
+  repeated synthetic `1213`.
 - Multi-page ownerless rollback truncates its empty native undo tail before
   native empty-commit validation and leaves the connection reusable.
 - The release performance transaction completes inside the 16,384-slot

@@ -84616,7 +84616,10 @@ static void update_table_pair_after_signal(
             assert(query_unsigned(db, "SELECT @@in_transaction") == 0U);
             exec_ok(db, "START TRANSACTION");
             assert(query_unsigned(db, "SELECT @@in_transaction") == 1U);
-            assert(query_unsigned(db, "SELECT 1") == 1U);
+            assert(
+                query_unsigned(db, "SELECT value FROM app.ownerless_sql WHERE id = 1 FOR UPDATE") ==
+                10U
+            );
             exec_ok(db, "ROLLBACK");
             (void)mylite_close(db);
             _exit(MYLITE_TEST_CHILD_DEADLOCK);
@@ -84650,7 +84653,9 @@ static void update_table_pair_after_signal(
         assert(query_unsigned(db, "SELECT @@in_transaction") == 0U);
         exec_ok(db, "START TRANSACTION");
         assert(query_unsigned(db, "SELECT @@in_transaction") == 1U);
-        assert(query_unsigned(db, "SELECT 1") == 1U);
+        assert(
+            query_unsigned(db, "SELECT value FROM app.ownerless_sql WHERE id = 1 FOR UPDATE") == 10U
+        );
         exec_ok(db, "ROLLBACK");
         if (assert_deadlock_file_op_discard) {
             assert(!mylite_ownerless_innodb_take_file_op_redo());

@@ -411,6 +411,13 @@ retries the complete statement at most once when InnoDB identifies errno
 same bounded rule applies to prepared execution. Explicit transactions,
 locking reads, DDL, and untagged MariaDB or ownerless wait-publication
 deadlocks are not retried, and their diagnostics remain visible to the caller.
+If an explicit transaction receives an ownerless page-coordination deadlock
+before InnoDB starts its native transaction, or the native transaction returns
+to idle while unwinding the deadlock, `ROLLBACK` leaves the handle reusable.
+MyLite releases any transient ownerless registrations and clears the native
+deadlock result only after verifying that the transaction is idle and owns no
+native lock or wait state; the reported `1213` does not become a persistent
+deadlock-victim or `DB_DEADLOCK` state on later statements.
 
 For an ownerless explicit transaction, a pre-serialization `COMMIT` failure may
 be returned after MariaDB has automatically rolled the transaction back. When

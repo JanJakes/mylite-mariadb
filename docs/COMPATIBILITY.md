@@ -669,6 +669,15 @@ transaction-owned pages and resume an already-open mini-transaction, because a
 clean reservation may still belong to a cursor that will mutate the page
 later. Explicit transactions and untagged MariaDB or ownerless
 wait-publication deadlocks remain visible to the caller.
+An ownerless page cycle detected while the native InnoDB transaction is still
+NOT_STARTED now reports `1213` without setting InnoDB's native deadlock-victim
+marker or `DB_DEADLOCK` transaction error state. If a cycle detected during an
+active operation returns the native transaction to NOT_STARTED, successful
+transaction-end cleanup releases its transient ownerless registrations and
+clears the native deadlock result after verifying that no native locks, wait,
+read view, registration, or transaction references remain. The caller can
+roll back and reuse the same connection instead of every later InnoDB
+statement inheriting a synthetic `1213`.
 Reader-only no-live close remains
 proof-gated before it can materialize peer page-version WAL appended after that
 runtime opened; focused live snapshot reader-close coverage, including the
@@ -685,7 +694,9 @@ Deadlock victims after
 local explicit-transaction writes now use the same discard rule after MyLite's
 internal deadlock rollback; focused
 two-process SQL coverage proves the victim process clears its process-local
-file-op redo latch while the winning transaction can still commit; accepted
+file-op redo latch while the winning transaction can still commit, then starts
+a fresh transaction and completes an InnoDB locking read on the same
+connection; accepted
 1205 timeout victims prove the same discard after explicit rollback, matching
 MariaDB's timeout transaction lifetime. A later no-live ownerless close after
 both children are reaped now drains committed DML marker/WAL evidence after

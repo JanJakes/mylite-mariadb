@@ -1481,8 +1481,25 @@ static void mylite_ownerless_innodb_lock_apply_wait_result(
   case MYLITE_OWNERLESS_INNODB_LOCK_UNAVAILABLE:
     return;
   case MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK:
-    trx->lock.was_chosen_as_deadlock_victim= true;
-    trx->error_state= DB_DEADLOCK;
+    /*
+    The ownerless coordinator can discover a physical-page cycle while the
+    B-tree search is still using a transient transaction identifier.  In that
+    NOT_STARTED state there is no native lock wait to cancel.  Marking the
+    transaction as a native deadlock victim, or retaining DB_DEADLOCK in its
+    native error state, would survive the SQL error path and make every later
+    statement on the connection report DB_DEADLOCK. The caller propagates the
+    return value independently.
+    */
+    if (trx->state == TRX_STATE_NOT_STARTED)
+    {
+      trx->lock.was_chosen_as_deadlock_victim= false;
+      trx->error_state= DB_SUCCESS;
+    }
+    else
+    {
+      trx->lock.was_chosen_as_deadlock_victim= true;
+      trx->error_state= DB_DEADLOCK;
+    }
     return;
   case MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT:
     trx->error_state= DB_LOCK_WAIT_TIMEOUT;
@@ -5188,7 +5205,8 @@ static dberr_t mylite_ownerless_innodb_lock_wait_for_external_grant(
               trx, snapshot.space_id, snapshot.page_no));
     mysql_mutex_lock(&lock_sys.wait_mutex);
     if (wait_err == DB_DEADLOCK)
-      trx->lock.was_chosen_as_deadlock_victim= true;
+      mylite_ownerless_innodb_lock_apply_wait_result(
+          trx, MYLITE_OWNERLESS_INNODB_LOCK_DEADLOCK);
 
     if (cancel_err != DB_SUCCESS)
       return cancel_err;

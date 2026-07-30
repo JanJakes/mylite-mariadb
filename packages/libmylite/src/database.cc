@@ -4216,6 +4216,7 @@ void reconcile_ownerless_failed_transaction_end(mylite_db &db, const SqlPolicyTo
 void replay_ownerless_autoinc_after_failed_implicit_statement(mylite_db &db);
 int cleanup_failed_ownerless_implicit_statement(mylite_db &db);
 int rollback_active_transaction(mylite_db &db);
+int cleanup_idle_ownerless_transaction_after_transaction_end(mylite_db &db);
 void prepare_ownerless_statement_for_internal_rollback();
 void refresh_ownerless_visibility_after_rolled_back_write(mylite_db &db);
 ErrorSnapshot capture_error(const mylite_db &db);
@@ -5846,6 +5847,14 @@ int mylite_step(mylite_stmt *stmt) {
                 );
                 clear_statement_ownerless_page_visibility(*stmt);
                 return page_write_release_result;
+            }
+        }
+        if (sql_ends_explicit_transaction(policy_tokens)) {
+            const int idle_cleanup_result =
+                cleanup_idle_ownerless_transaction_after_transaction_end(*stmt->db);
+            if (idle_cleanup_result != MYLITE_OK) {
+                clear_statement_ownerless_page_visibility(*stmt);
+                return idle_cleanup_result;
             }
         }
         if (transaction_rollback_had_local_write) {
@@ -7991,6 +8000,19 @@ ownerless_query_success:
                 page_write_release_result,
                 "ownerless page-write locks could not release"
             );
+            if (page_version_reads_enabled) {
+                release_ownerless_completed_statement_page_visibility(
+                    *db,
+                    !statement_started_in_explicit_transaction
+                );
+            }
+            return copy_error_message(*db, errmsg);
+        }
+    }
+    if (sql_ends_explicit_transaction(policy_tokens)) {
+        const int idle_cleanup_result =
+            cleanup_idle_ownerless_transaction_after_transaction_end(*db);
+        if (idle_cleanup_result != MYLITE_OK) {
             if (page_version_reads_enabled) {
                 release_ownerless_completed_statement_page_visibility(
                     *db,
@@ -11663,7 +11685,10 @@ void rollback_active_transaction_after_deadlock(mylite_db &db) {
     const ErrorSnapshot snapshot = capture_error(db);
     prepare_ownerless_statement_for_internal_rollback();
     const int rollback_result = rollback_active_transaction(db);
-    if (rollback_result == MYLITE_OK) {
+    const int cleanup_result = rollback_result == MYLITE_OK
+                                   ? cleanup_idle_ownerless_transaction_after_transaction_end(db)
+                                   : rollback_result;
+    if (cleanup_result == MYLITE_OK) {
         discard_ownerless_native_file_op_redo_after_rolled_back_write(
             db,
             transaction_rollback_had_local_write
@@ -11823,6 +11848,20 @@ int rollback_active_transaction(mylite_db &db) {
         db.ownerless_transaction_snapshot_visibility_pinned = false;
     }
     return drain_result;
+}
+
+int cleanup_idle_ownerless_transaction_after_transaction_end(mylite_db &db) {
+    if (!db.ownerless_rw_open || (db.mysql.server_status & SERVER_STATUS_IN_TRANS) != 0U) {
+        return MYLITE_OK;
+    }
+    if (mylite_embedded_cleanup_idle_ownerless_transaction(static_cast<THD *>(db.mysql.thd)) == 0) {
+        return MYLITE_OK;
+    }
+
+    observe_ownerless_innodb_coordination_fault();
+    record_ownerless_runtime_fault(OwnerlessPendingRuntimeFault::SharedCoordination);
+    set_error(db, MYLITE_IOERR, "ownerless transaction-end cleanup failed");
+    return MYLITE_IOERR;
 }
 
 void prepare_ownerless_statement_for_internal_rollback() {
