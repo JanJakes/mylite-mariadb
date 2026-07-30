@@ -411,6 +411,10 @@ retries the complete statement at most once when InnoDB identifies errno
 same bounded rule applies to prepared execution. Explicit transactions,
 locking reads, DDL, and untagged MariaDB or ownerless wait-publication
 deadlocks are not retried, and their diagnostics remain visible to the caller.
+An application that requires an explicit transaction to complete must
+`ROLLBACK` and retry the complete transaction after exact MariaDB `1205` or
+`1213`, rather than replaying only the failed statement. Ambiguous commit
+errno `1180` is not a safe retry signal.
 If an explicit transaction receives an ownerless page-coordination deadlock
 before InnoDB starts its native transaction, or the native transaction returns
 to idle while unwinding the deadlock, `ROLLBACK` leaves the handle reusable.

@@ -184,6 +184,19 @@ app.mylite/
   redo visibility after wake, retries native grant, maps shared-registry
   timeout to the normal InnoDB lock-wait error, and maps cross-process wait
   cycles to the normal InnoDB deadlock error under guarded SQL coverage.
+  Because physical page ownership can add conflicts beyond the user-row lock
+  graph, even explicit transactions that update separate user tables can be
+  selected as `1205`/`1213` victims. Callers retry the complete explicit
+  transaction; MyLite never resumes an already-open B-tree operation after
+  releasing its physical reservations.
+  A plain consistent read does not retain page-write ownership, but a
+  buffer-pool miss probes a transient per-page fence across the native read and
+  page-version lookup. A conflict never waits for the peer's
+  transaction-scoped reservation; instead, only a checksum-invalid native read
+  is retried briefly. This prevents the reader from accepting a torn native
+  undo, system, or user page while preserving nonblocking consistent-read
+  semantics. A successful fence advances the local native redo horizon without
+  advancing the transaction's selected page-visibility boundary.
   Ownerless cycles found while the native transaction is still NOT_STARTED
   report that deadlock without setting InnoDB's native victim marker or
   transaction error state, because no native wait exists to cancel. When an

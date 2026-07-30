@@ -179,6 +179,7 @@ extern void mylite_ownerless_innodb_set_test_faults_enabled(int enabled);
 #define MYLITE_TEST_STRESS_READER_POLLS_MAX 20000U
 #define MYLITE_TEST_STRESS_MAX_ATTEMPTS 8U
 #define MYLITE_TEST_COMMIT_RACE_WORKER_COUNT 4U
+#define MYLITE_TEST_COMMIT_RACE_MAX_ATTEMPTS 200U
 #define MYLITE_TEST_COMMIT_RACE_READY_TIMEOUT_MS 30000U
 #define MYLITE_TEST_DDL_STRESS_WORKER_COUNT 3U
 #define MYLITE_TEST_DDL_STRESS_DML_WORKER_COUNT 2U
@@ -53960,6 +53961,7 @@ static void run_crashed_temporary_mixed_rename_dictionary_ddl_recovers_permanent
         10U,
         20U
     );
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "UPDATE app.ownerless_temp_mixed_shadow SET value = 15 WHERE id = 1");
@@ -53967,6 +53969,7 @@ static void run_crashed_temporary_mixed_rename_dictionary_ddl_recovers_permanent
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_temp_mixed_shadow") == 15U);
     assert(query_unsigned(db, "SELECT SUM(value) FROM app.ownerless_temp_mixed_perm_dst") == 30U);
     assert(mylite_close(db) == MYLITE_OK);
+    assert(read_concurrency_native_file_op_checkpoint_needed(database_path));
 
     release_ownerless_live_peer(&live_peer);
 
@@ -84516,6 +84519,12 @@ static void update_first_table_until_active_writer_visible_skip(
 }
 #endif
 
+static void commit_race_retry_pause(unsigned table_id, unsigned attempt) {
+    const unsigned delay = 1000U * (1U + ((table_id * 13U + attempt * 7U) % 30U));
+
+    sleep_microseconds(delay);
+}
+
 static void commit_race_update_row_after_signal(
     open_database_paths paths,
     unsigned table_id,
@@ -84524,6 +84533,8 @@ static void commit_race_update_row_after_signal(
 ) {
     mylite_db *db;
     char sql[160];
+    int committed = 0;
+    int passed_update_barrier = 0;
 
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_OWNERLESS_RW);
     exec_ok(db, "START TRANSACTION");
@@ -84538,10 +84549,79 @@ static void commit_race_update_row_after_signal(
             delta
         ) > 0
     );
-    exec_ok(db, sql);
-    signal_pipe(pipes.updated_ready_write_fd);
-    wait_for_pipe(pipes.commit_release_read_fd);
-    exec_ok(db, "COMMIT");
+    for (unsigned attempt = 1U; attempt <= MYLITE_TEST_COMMIT_RACE_MAX_ATTEMPTS; ++attempt) {
+        unsigned mariadb_errno = 0U;
+        int result = exec_status(db, sql, &mariadb_errno);
+
+        if (result != MYLITE_OK) {
+            if (mariadb_errno != MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO &&
+                mariadb_errno != MYLITE_TEST_DEADLOCK_ERRNO) {
+                fprintf(
+                    stderr,
+                    "ownerless commit-race update failed: table=%u attempt=%u "
+                    "errcode=%d mariadb_errno=%u message=%s\n",
+                    table_id,
+                    attempt,
+                    mylite_errcode(db),
+                    mariadb_errno,
+                    mylite_errmsg(db) != NULL ? mylite_errmsg(db) : "(null)"
+                );
+                fflush(stderr);
+                assert(0);
+            }
+            exec_ok(db, "ROLLBACK");
+            assert(query_unsigned(db, "SELECT @@in_transaction") == 0U);
+            if (attempt < MYLITE_TEST_COMMIT_RACE_MAX_ATTEMPTS) {
+                commit_race_retry_pause(table_id, attempt);
+                exec_ok(db, "START TRANSACTION");
+            }
+            continue;
+        }
+
+        if (!passed_update_barrier) {
+            signal_pipe(pipes.updated_ready_write_fd);
+            wait_for_pipe(pipes.commit_release_read_fd);
+            passed_update_barrier = 1;
+        }
+
+        mariadb_errno = 0U;
+        result = exec_status(db, "COMMIT", &mariadb_errno);
+        if (result == MYLITE_OK) {
+            committed = 1;
+            break;
+        }
+        if (mariadb_errno != MYLITE_TEST_LOCK_WAIT_TIMEOUT_ERRNO &&
+            mariadb_errno != MYLITE_TEST_DEADLOCK_ERRNO) {
+            fprintf(
+                stderr,
+                "ownerless commit-race commit failed: table=%u attempt=%u "
+                "errcode=%d mariadb_errno=%u message=%s\n",
+                table_id,
+                attempt,
+                mylite_errcode(db),
+                mariadb_errno,
+                mylite_errmsg(db) != NULL ? mylite_errmsg(db) : "(null)"
+            );
+            fflush(stderr);
+            assert(0);
+        }
+        exec_ok(db, "ROLLBACK");
+        assert(query_unsigned(db, "SELECT @@in_transaction") == 0U);
+        if (attempt < MYLITE_TEST_COMMIT_RACE_MAX_ATTEMPTS) {
+            commit_race_retry_pause(table_id, attempt);
+            exec_ok(db, "START TRANSACTION");
+        }
+    }
+    if (!committed) {
+        fprintf(
+            stderr,
+            "ownerless commit-race exhausted retries: table=%u attempts=%u\n",
+            table_id,
+            MYLITE_TEST_COMMIT_RACE_MAX_ATTEMPTS
+        );
+        fflush(stderr);
+    }
+    assert(committed);
     assert(mylite_close(db) == MYLITE_OK);
     _exit(0);
 }

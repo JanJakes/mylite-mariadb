@@ -24,7 +24,21 @@ failures cluster around successful or crash-interrupted InnoDB dictionary DDL:
 - a physical-page cycle detected while the InnoDB transaction is still
   `TRX_STATE_NOT_STARTED` can leave the native deadlock-victim marker and
   `DB_DEADLOCK` error state set,
-  causing every later InnoDB statement on that connection to return `1213`.
+  causing every later InnoDB statement on that connection to return `1213`,
+  and
+- the explicit-transaction commit-race regression assumed that four
+  independent-table workers could never be physical-page deadlock victims, so
+  it aborted on a legitimate retryable `1213` instead of retrying the complete
+  logical transaction,
+- a plain consistent reader could load a native support page without the
+  transient preread fence used by writers, observe a checksum-torn page before
+  the owning peer completed page-version publication, and fail closed even
+  though the matching WAL record became durable immediately afterward, and
+- after all peers closed and reclaimed page WAL, a checksum-valid undo page
+  could have an LSN covered by the quiescent shared written-redo frontier but
+  ahead of the older native redo checkpoint header; startup contained that
+  proof but did not activate the bounded page-LSN advance path unless a
+  separate retained-WAL or live-peer condition was also present.
 
 Several SQL failures reproduce as isolated selectors, so this is product
 lifecycle behavior rather than only weighted-shard ordering or test
@@ -97,6 +111,19 @@ Base: MariaDB 11.8 LTS import `mariadb-11.8.6`
   to NOT_STARTED before the transaction-end path observes it. Retaining either
   form of native deadlock state violates the idle transaction invariant and
   poisons connection reuse even after SQL `ROLLBACK`.
+- Explicit ownerless transactions deliberately expose exact MariaDB `1205` and
+  `1213` results rather than replaying a statement inside a transaction whose
+  earlier effects may already exist. The safe caller-side unit is the complete
+  transaction after rollback; ambiguous commit errno `1180` is not a retry
+  signal.
+- Native page reads and page-version publication are separate cross-process
+  resources. A plain consistent read needs a transient fence only across a
+  buffer-pool miss; retaining it for the transaction or advancing the read's
+  page-visibility boundary would change MariaDB snapshot semantics.
+- With no live process, zero active redo reservation/range state, and
+  `latest == written == reserved`, the shared written-redo frontier is
+  authoritative evidence for checksum-valid native page LSNs even when the
+  native checkpoint header lags and the page-version WAL is already empty.
 
 ## Design
 
@@ -145,6 +172,33 @@ the tests:
     end must prove that no native lock, wait, read view, registration, or
     reference remains, release transient ownerless registrations, and only
     then clear the native result so later statements can reuse the connection.
+13. Make the explicit commit-race oracle follow the public retry contract:
+    accept only exact `1205`/`1213`, roll back and verify the handle is outside
+    a transaction, then retry `START TRANSACTION`, the update, and `COMMIT` as
+    one bounded unit. Preserve the one-shot concurrency barrier for the first
+    successful update attempt, while allowing a commit victim to retry after
+    peers have been released.
+14. Admit plain `SELECT` S-latch buffer misses to the existing untracked
+    per-page preread fence as a nonblocking probe. On conflict, retry only an
+    actually checksum-invalid native read for a small fixed budget; never wait
+    behind the peer's transaction-scoped reservation. On successful admission,
+    observe the shared redo frontier so a valid peer page is not rejected as
+    future, and restore no writer-only wait state. Do not push raw-latest page
+    visibility over the statement's selected snapshot.
+15. Activate no-live startup page-LSN advancement when a valid current redo
+    prefix, a nonzero durable ownerless checkpoint, and a quiescent shared redo
+    snapshot prove the written frontier. Keep fail-closed behavior when any
+    active reservation/range remains or the three shared frontiers differ.
+16. Preserve a newer structural DDL marker when the final survivor predates
+    the latest process generation and its file-per-table identity snapshot has
+    changed. This deferral must not depend on user page-version WAL still being
+    present: foreground or scheduler checkpointing may compact those user
+    records before the older survivor closes, but it does not make that
+    survivor's native dictionary authoritative for the newer lifecycle. The
+    following isolated latest-generation owner must likewise recognize retained
+    native-support-only payload as the structural handoff, replay and prove the
+    surviving native tablespaces, retire only the file-operation marker, and
+    leave any independent DML/history obligation intact.
 
 The implementation must continue to fail closed when required native state is
 missing or cannot be reconciled. It must not convert corruption into a retry,
@@ -162,6 +216,11 @@ In scope:
 - recovery-anchor ordering at the native shutdown boundary,
 - transaction-boundary handling for clean pre-write reservation cycles without
   resuming an invalidated B-tree operation,
+- bounded whole-transaction retry in the concurrent commit-race compatibility
+  oracle,
+- transient plain-read coordination for native buffer-pool misses,
+- no-live startup from a quiescent shared written-redo frontier after page WAL
+  reclamation,
 - multi-page ownerless rollback terminal cleanup and connection reuse,
 - a versioned lock-registry capacity sufficient for the 5,000-row release
   transaction while preserving explicit bounded-capacity failure,
@@ -207,7 +266,14 @@ movement must be measured by the existing release gates.
   gate locally from clean temporary directories, then run their independent
   native CI jobs again on the pushed final commit.
 - Repeat the checkpoint-anchor commit race and run true row, gap-lock, and
-  independent-table deadlock coverage around the physical-cycle repair.
+  independent-table deadlock coverage around the physical-cycle repair. Repeat
+  the commit race enough times to exercise a physical-page victim and require
+  all four logical commits exactly once after ownerless/native reopen and
+  forced shared-memory rebuild.
+- Repeat the four-process mixed workload with three autocommit writers and a
+  plain reader. Every read total remains monotonic and bounded, no native page
+  checksum failure is accepted, and both ordinary native and ownerless reopens
+  observe the exact final total after all peers close.
 - Repeat the pseudo-random same-table savepoint schedule that exposed the
   pre-start victim-marker leak, and require the deterministic two-process
   deadlock victim to execute an InnoDB locking read in a fresh transaction on
@@ -240,6 +306,15 @@ movement must be measured by the existing release gates.
 - Clean pre-write cycles surface MariaDB errno `1213` at the SQL transaction
   boundary, while bounded stress callers retry the complete transaction and
   conflicting row and gap-lock transactions retain MariaDB deadlock behavior.
+- The explicit commit race accepts only `1205`/`1213` retry outcomes, proves
+  rollback leaves the same handle reusable, retries the complete logical
+  transaction through `COMMIT`, and preserves every worker delta exactly once.
+- Plain consistent buffer-miss reads never wait behind a peer transaction,
+  preserve their selected snapshot, and retry only a checksum-invalid native
+  read that raced physical page or page-version publication.
+- No-live startup accepts a checksum-valid native page ahead of the native redo
+  checkpoint only when the quiescent shared written-redo frontier and durable
+  ownerless checkpoint prove that exact upper bound.
 - A pre-start ownerless deadlock never sets a native victim marker or
   `DB_DEADLOCK` error state, and successful transaction end safely clears
   either value left by an active operation that has returned to NOT_STARTED;
@@ -251,7 +326,10 @@ movement must be measured by the existing release gates.
   version-6 record-lock registry; exhaustion beyond that bound remains an
   explicit lock-table-full error.
 - Interrupted DDL retains the native file-operation checkpoint marker while a
-  live peer still requires it, and the final no-live recovery clears it.
+  live peer still requires it. A final older survivor that observed a changed
+  file-per-table identity set retains the marker even if user page-version WAL
+  was already checkpointed; an isolated latest-generation recovery clears it
+  from either ordinary-user or native-support-only retained payload.
 - Multi-table rename rollback restores both native tablespaces and dictionary
   identities.
 - The full Linux ownerless matrix, macOS/APFS gate, and Windows/NTFS gate pass
@@ -301,7 +379,17 @@ The stabilization is complete for the admitted ownerless surface:
   `1205`/`1213` contract to its autocommit statements and read-only polls, in
   addition to pre-execution MyLite statement-lock contention, and
 - peer-page and dictionary refresh now fail closed if required page
-  materialization cannot be completed.
+  materialization cannot be completed,
+- plain consistent native page loads use a nonblocking publication fence plus
+  checksum-triggered bounded reread without widening snapshot visibility, and
+- no-live startup can use the quiescent shared written-redo frontier after page
+  WAL reclamation instead of rejecting a checksum-valid native support page
+  solely because the native checkpoint header is older, and
+- final older survivors retain newer structural DDL recovery through
+  file-per-table lifecycle changes independently of whether user page-version
+  WAL happened to remain at shutdown, and isolated latest-generation recovery
+  drains that handoff even when checkpoint scheduling has already reduced it to
+  native-support-only history.
 
 Final-source evidence passes `65/65` ordinary production tests, `2/2` PHP
 ownerless adapter tests, all `16` weighted SQL shards, all `270` hook release

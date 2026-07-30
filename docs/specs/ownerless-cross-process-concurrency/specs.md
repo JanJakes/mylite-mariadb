@@ -2154,7 +2154,15 @@ Tasks:
    InnoDB read view at statement start so a later statement can observe a new
    peer commit, and ownerless page-write hooks avoid page-write ownership for
    SQL `SELECT`, including locking reads such as `SELECT ... FOR UPDATE`, so
-   native row-lock/current-read waits remain visible. Repeatable
+   native row-lock/current-read waits remain visible. Plain consistent reads
+   take one narrower exception at a buffer-pool miss: an untracked per-page
+   fence is probed only for the synchronous native page load and page-version
+   lookup. A conflict does not wait behind the peer's transaction-scoped
+   ownership; only a checksum-invalid native read is retried briefly so a
+   concurrent physical write or page-version publication can finish. The fence
+   does not become transaction-scoped ownership and does not promote the
+   statement's selected page-visibility boundary. Locking reads retain their
+   native current-read path and do not use this plain-read fence. Repeatable
    read and serializable transactions pin that live read LSN on their first
    consistent read, and `START TRANSACTION WITH CONSISTENT SNAPSHOT` pins it at
    transaction start. Read-committed explicit transactions remain non-pinning:
@@ -5675,6 +5683,11 @@ Minimum suites before support can be claimed:
     size when the current file differs within the bounded tolerance, and
     hook-only validation that malformed saved redo-header backups do not arm
     the ordinary-open recovery bridge,
+  - no-live startup where the native redo checkpoint header lags a
+    checksum-valid native page, but the quiescent shared redo state proves one
+    contiguous `latest == written == reserved` frontier covering the durable
+    ownerless checkpoint; startup uses that written frontier as a bounded page
+    LSN advance proof even after page-version WAL has been reclaimed,
   - opener crash,
   - `.shm` creation, validation, rebuild, resize, and remap,
   - incompatible `.shm` format rejection,

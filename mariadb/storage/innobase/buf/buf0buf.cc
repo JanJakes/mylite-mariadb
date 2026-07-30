@@ -78,9 +78,12 @@ struct mylite_ownerless_buf_preread_page_write_lock_state
 {
   bool locked;
   bool visibility_pushed;
+  bool conflicted;
   dberr_t error;
   uint64_t previous_visible_lsn;
 };
+
+constexpr ulint MYLITE_OWNERLESS_PLAIN_READ_ATTEMPTS= 8;
 
 static void
 mylite_ownerless_buf_record_failure(trx_t *trx, dberr_t error,
@@ -326,23 +329,28 @@ mylite_ownerless_buf_preread_page_write_lock(trx_t *trx,
                                              const page_id_t page_id,
                                              rw_lock_type_t rw_latch) noexcept
 {
-  mylite_ownerless_buf_preread_page_write_lock_state state{false, false,
-                                                           DB_SUCCESS, 0};
+  mylite_ownerless_buf_preread_page_write_lock_state state{
+      false, false, false, DB_SUCCESS, 0};
+  const bool plain_select=
+      mylite_ownerless_trx_sql_is_plain_select(trx);
+  /*
+    A plain consistent read does not wait for transaction-scoped page-write
+    ownership.  It probes a transient fence around a buffer-pool miss and
+    retries only a checksum-invalid read that actually raced peer publication.
+  */
+  const bool coordinated_latch=
+      (rw_latch == RW_X_LATCH || rw_latch == RW_SX_LATCH) ||
+      (rw_latch == RW_S_LATCH && plain_select);
 
   if (UNIV_LIKELY(!mylite_ownerless_innodb_lock_has_hooks()) ||
       !mylite_ownerless_innodb_write_coordination_enabled() ||
       mylite_ownerless_innodb_page_write_refresh_bypass() != 0 ||
-      page_id.space() >= SRV_TMP_SPACE_ID ||
-      (rw_latch != RW_X_LATCH && rw_latch != RW_SX_LATCH) ||
+      page_id.space() >= SRV_TMP_SPACE_ID || !coordinated_latch ||
       recv_recovery_is_on() || !srv_was_started)
   {
     return state;
   }
-  if (trx != nullptr && trx->read_only)
-  {
-    return state;
-  }
-  if (mylite_ownerless_trx_sql_is_plain_select(trx))
+  if (!plain_select && trx != nullptr && trx->read_only)
   {
     return state;
   }
@@ -418,7 +426,7 @@ mylite_ownerless_buf_preread_page_write_lock(trx_t *trx,
             &acquire_flags);
     if (result == MYLITE_OWNERLESS_INNODB_LOCK_OK)
     {
-      if (trx != nullptr &&
+      if (!plain_select && trx != nullptr &&
           (acquire_flags & MYLITE_OWNERLESS_INNODB_LOCK_ACQUIRE_WAITED) != 0U)
       {
         trx->mylite_ownerless_page_write_waited_before_preread= true;
@@ -461,7 +469,8 @@ mylite_ownerless_buf_preread_page_write_lock(trx_t *trx,
         (void) release_result;
         return state;
       }
-      if (latest_lsn != 0 && !mylite_ownerless_trx_sql_is_dictionary_ddl(trx))
+      if (!plain_select && latest_lsn != 0 &&
+          !mylite_ownerless_trx_sql_is_dictionary_ddl(trx))
       {
         state.previous_visible_lsn=
             mylite_ownerless_innodb_push_external_page_visibility(latest_lsn);
@@ -481,6 +490,10 @@ mylite_ownerless_buf_preread_page_write_lock(trx_t *trx,
     }
     if (nonblocking_preread)
     {
+      if (plain_select)
+      {
+        state.conflicted= true;
+      }
       return state;
     }
     if (result == MYLITE_OWNERLESS_INNODB_LOCK_TIMEOUT &&
@@ -505,7 +518,7 @@ mylite_ownerless_buf_preread_page_write_lock(trx_t *trx,
     {
       return state;
     }
-    if (trx != nullptr)
+    if (!plain_select && trx != nullptr)
     {
       trx->mylite_ownerless_page_write_waited_before_preread= true;
     }
@@ -3358,6 +3371,13 @@ loop:
     {
       mylite_ownerless_buf_preread_page_write_unlock(
           trx, page_id, ownerless_preread_page_write);
+    }
+    if (block == nullptr && ownerless_preread_page_write.conflicted &&
+        err != nullptr && *err == DB_PAGE_CORRUPTED &&
+        ++retries < MYLITE_OWNERLESS_PLAIN_READ_ATTEMPTS)
+    {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      goto loop;
     }
 #endif
     if (!block)

@@ -40947,11 +40947,16 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
                 &native_redo_checkpoint_end_lsn
             ));
         }
+        const bool ownerless_startup_no_live_written_redo_evidence =
+            ownerless_startup_preinit_final_no_live_runtime &&
+            ownerless_startup_checkpoint_latest_lsn != 0U && redo_startup_prefix.captured &&
+            ownerless_redo_prefix_has_valid_current_checkpoint(redo_startup_prefix.prefix.data());
         const bool startup_lsn_advance_evidence_required =
             ordinary_native_page_log_reads || retained_page_log_active_recovery_proof_records ||
             retained_native_support_only_page_log_records ||
             ownerless_startup_native_purge_drain_needed ||
-            ownerless_startup_preinit_live_peer_runtime;
+            ownerless_startup_preinit_live_peer_runtime ||
+            ownerless_startup_no_live_written_redo_evidence;
         const std::uint64_t retained_startup_lsn_advance_limit =
             (ordinary_native_page_log_reads || retained_page_log_active_recovery_proof_records ||
              retained_native_support_only_page_log_records)
@@ -40963,9 +40968,7 @@ int start_runtime(mylite_db &db, unsigned flags, const mylite_open_config *confi
                   )
                 : 0U;
         std::uint64_t native_written_startup_page_lsn_limit = 0U;
-        if (startup_lsn_advance_evidence_required &&
-            ownerless_startup_preinit_final_no_live_runtime && redo_startup_prefix.captured &&
-            ownerless_redo_prefix_has_valid_current_checkpoint(redo_startup_prefix.prefix.data())) {
+        if (ownerless_startup_no_live_written_redo_evidence) {
             mylite_ownerless_redo_state_snapshot redo_snapshot = {};
             if (mylite_ownerless_redo_state_read_snapshot(
                     runtime_redo_state(g_runtime),
@@ -41899,13 +41902,14 @@ bool release_runtime(void) {
      * A final older survivor cannot safely retire a newer peer's structural
      * DDL merely because the newer process generation closed cleanly. A
      * CREATE, DROP, RENAME, or replacement ALTER changes the file-per-table
-     * identity set. Preserve its marker and user WAL for one isolated startup,
-     * where native dictionary recovery can consume the complete handoff.
+     * identity set. Preserve its marker for one isolated startup, where native
+     * dictionary recovery can consume the complete handoff. User page-version
+     * WAL may already have been checkpointed by then, so its presence is not
+     * part of the structural recovery proof.
      */
     const bool defer_final_older_tablespace_recovery =
         final_older_owner_observed_tablespace_lifecycle_change &&
-        ownerless_native_file_op_marker_needed_shutdown &&
-        retained_ownerless_user_page_log_at_release_start;
+        ownerless_native_file_op_marker_needed_shutdown;
     if (ownerless_concurrency_runtime_mapped &&
         !defer_no_live_ownerless_payload_reclaim_until_shutdown &&
         !dead_owner_recovery_pending_shutdown) {
@@ -43620,10 +43624,13 @@ bool release_runtime(void) {
      * owner lineage. Its completed workload, including a structural handoff
      * inherited from an older final survivor, can be replayed and compacted
      * after native shutdown. A missing predecessor tablespace is expected
-     * after a completed replacement DDL. Doing this here avoids re-entering
-     * pre-shutdown reclaim while the startup lock is already held.
+     * after a completed replacement DDL. The ordinary user records may already
+     * have been checkpointed while native-support history remains, so retained
+     * payload rather than retained user payload is the structural handoff
+     * boundary. Doing this here avoids re-entering pre-shutdown reclaim while
+     * the startup lock is already held.
      */
-    if (isolated_latest_owner_shutdown && retained_ownerless_user_page_log_after_shutdown &&
+    if (isolated_latest_owner_shutdown && retained_ownerless_page_log_payload_after_shutdown &&
         !retained_ownerless_recovery_proof_page_log_after_shutdown &&
         !native_recovered_transactions_before_shutdown && g_runtime.concurrency_wal_fd >= 0 &&
         g_runtime.concurrency_checkpoint_fd >= 0 &&
